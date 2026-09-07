@@ -2127,6 +2127,42 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'set_task_schedule',
+      description:
+        "Set, replace or clear the rule that says WHEN a task's work starts — the row files one occurrence per firing and the scheduler wakes its owner (docs/architecture/scheduled-tasks.md). Five rule kinds: once {kind:'once', at: <epoch ms>}; every {kind:'every', everyMs: 86400000}; calendar {kind:'calendar', times:[{hour:6, minute:47}], weekdays:[1]} (0 = Sunday; omit weekdays for every day; timezone is an IANA zone, absent reads as UTC); after-completion {kind:'after-completion', delayMs: 3600000} (the delay runs from the last instance closing); on-change {kind:'on-change', source:{kind:'doc', docId} | {kind:'task', taskId}, debounceMs?}. rule: null clears. The reply is the stored schedule read back plus nextAt, the next firing — check it says what you meant. A validation refusal is the server's own message. Read a schedule later with list_tasks fields:['schedule']; not a due date, which is when work should be finished.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description:
+              'The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to.',
+          },
+          taskId: { type: 'string', description: 'The row the rule is set on.' },
+          rule: {
+            description:
+              'The rule object (see the description for the five kinds), or null to clear. Required — an absent rule is refused rather than read as a clear.',
+          },
+          timezone: {
+            type: 'string',
+            description:
+              'IANA zone the calendar math runs in, e.g. America/Los_Angeles. Absent reads as UTC.',
+          },
+          until: {
+            type: 'number',
+            description: 'Epoch ms after which the rule fires no more — the "until Dec" clause.',
+          },
+          onMissed: {
+            type: 'string',
+            enum: ['catch-up', 'skip'],
+            description:
+              "What to do about an occurrence the server missed while down. Absent is catch-up: fire it late. 'skip' waits for the next one.",
+          },
+        },
+        required: ['workspaceId', 'taskId', 'rule'],
+      },
+    },
+    {
       name: 'import_tasks_markdown',
       description:
         'Move a hand-maintained markdown tracker (headings + status tables) onto a board. Defaults to a dry run — it returns the mapping and creates nothing, so review that with the human, then call again with apply: true. Apply stamps the source file with a banner and a link so the old tracker cannot quietly stay a second source of truth, and a stamped file refuses re-import.',
