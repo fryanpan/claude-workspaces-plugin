@@ -1,6 +1,6 @@
 /* ===== THE SETTINGS PAGE'S OWN STYLESHEET =====
    Everything /settings/* paints, and nothing any other page does. Its own
-   file for the reason hub.css is its own file: appending to the end of one
+   file for the reason board.css is its own file: appending to the end of one
    long shared stylesheet is what makes two branches conflict over a line
    neither cares about.
 
@@ -400,7 +400,7 @@ body.settings-body {
   /* 16px, not the desktop 12.5px: iOS Safari zooms the whole page in when a
      field under 16px takes focus, and a prompt is the one field on this page
      someone types a paragraph into. Same reason the composer's own input
-     carries the floor (hub.css, "so iOS Safari doesn't zoom the field"). */
+     carries the floor (board.css, "so iOS Safari doesn't zoom the field"). */
   .prompt-box {
     font-size: 16px;
   }

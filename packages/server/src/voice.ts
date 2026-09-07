@@ -34,7 +34,7 @@
  * the fast path is opt-in at the seam — `createServer` builds NO default
  * completer, so nothing that merely spins a server up can reach the network;
  * only bin.ts constructs the real one, and only the DEDICATED keychain entry
- * counts as consent for LF→Anthropic traffic.
+ * counts as consent for server→Anthropic traffic.
  */
 import { isReviewItemOpen } from '@feedback/core';
 import { readKeychainPassword } from './share/keychain.ts';
@@ -1290,7 +1290,7 @@ export class VoiceRouter {
  *
  * Consent is the SAME dedicated keychain entry the summarizer uses
  * (`claude-workspaces-summary-api-key` / CW_SUMMARY_API_KEY): adding
- * it is the act of consenting to LF→api.anthropic.com traffic, and voice
+ * it is the act of consenting to server→api.anthropic.com traffic, and voice
  * transcripts are the speaker's own words sent by their own explicit action.
  * A generic ANTHROPIC_API_KEY in the environment is deliberately not
  * honoured (see summarize.ts for the incident that rule comes from).

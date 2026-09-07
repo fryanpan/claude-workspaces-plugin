@@ -2,7 +2,7 @@
  * One prompt, open: the words, a Save, a Restore, and the default behind a
  * disclosure.
  *
- * Its own module for the same reason `hub/review-criteria.ts` is one: the
+ * Its own module for the same reason `board/review-criteria.ts` is one: the
  * behaviour worth pinning is what the field does when the read fails, when
  * the box is empty, and when the words that come back are not the words that
  * were sent — none of which is reachable from inside the page's boot.

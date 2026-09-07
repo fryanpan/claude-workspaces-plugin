@@ -35,7 +35,7 @@ const NAMED_ENTITIES: Record<string, string> = {
  * Undo an HTML escape a CALLER baked into a plain-text label.
  *
  * Titles are caller-supplied at bind/create time, and some callers hand over
- * strings they already HTML-escaped ("LF Workspace &amp; Tasks"). Every surface
+ * strings they already HTML-escaped ("Workspace &amp; Tasks"). Every surface
  * that shows a title renders it via `textContent`, which is correct — so the
  * baked entity survives to the screen as literal text. Decoding at each
  * projection door fixes every row at once, including rows whose bad title is

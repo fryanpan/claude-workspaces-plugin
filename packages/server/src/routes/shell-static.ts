@@ -240,7 +240,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
   /**
    * Whether a doc is a mockup, and so must never be sent to the doc route.
    *
-   * The editor shell renders from LF-held content, and a mockup has none —
+   * The editor shell renders from server-held content, and a mockup has none —
    * its surface is a host page. Asked for one anyway, the shell loads, finds
    * nothing to show, and paints an empty page under a 200. That is the worst
    * failure shape available: the status says it worked, so nothing upstream

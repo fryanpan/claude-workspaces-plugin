@@ -9,7 +9,7 @@ import type { ReviewPayload } from './review-item.ts';
  *    the file at the TARGET commit — immutable, so anchors never drift; the
  *    diff itself is a client-side rendering against the base text.
  *  - workspace: a board workspace's board doc (`ws:<workspaceId>`). Carries
- *    no LF-held content surface of its own — its `tasks`/`workspace` maps
+ *    no server-held content surface of its own — its `tasks`/`workspace` maps
  *    are a server-written projection of the task store (see the server's
  *    task-projection module), never edited through a content editor.
  */
@@ -21,7 +21,7 @@ export type DocType = 'markdown' | 'mockup' | 'code' | 'diff' | 'workspace';
  * instead of adding `type === '…'` checks at every call site.
  *  - prose: editable `prose` XmlFragment (Tiptap), markdown file write-back.
  *  - flat:  read-only `content` Y.Text (code viewer / diff viewer).
- *  - none:  no LF-held content — the surface is a host page (widget).
+ *  - none:  no server-held content — the surface is a host page (widget).
  */
 export type ContentKind = 'prose' | 'flat' | 'none';
 
