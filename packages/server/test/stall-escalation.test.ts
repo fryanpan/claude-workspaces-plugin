@@ -356,6 +356,36 @@ describe('a told row that has not moved escalates to the reader', () => {
     expect(openItems(a.id).map((i) => i.id)).toEqual([filed ?? '']);
   });
 
+  it('the anchor line keeps saying what the row WAS, not what our own item made it', () => {
+    // A claimed row, silent fifteen hours, is the only thing stuck. Once the
+    // item hangs on it the gate reads it as waiting on a person with our
+    // write as its newest activity — and the line degraded to "waiting on a
+    // person. Quiet 13m" on a row nobody had touched all day (2026-09-07).
+    const a = make('Take the lock off the writer');
+    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
+    escalations.onBoard(
+      board(wsId, { stalled: [row(a, 'in-progress', 15 * 60 * 60_000)] }),
+      told,
+      now,
+    );
+    const first = openItems(a.id)[0]?.review.detail ?? '';
+    expect(first).toContain('gone quiet. Quiet 15h');
+
+    // A second row joins, so the item is revised and the anchor line is
+    // rebuilt from the sidecar rather than from the gate's masked reading.
+    const b = make('Retire the second scheduler');
+    const laterTold = toldMap([
+      [a.id, now - ESCALATE_MS - 60_000],
+      [b.id, now - ESCALATE_MS - 60_000],
+    ]);
+    const later = now + 30 * 60_000;
+    escalations.onBoard(board(wsId, { stalled: [row(b, 'in-progress')] }), laterTold, later);
+    const revised = openItems(a.id)[0]?.review.detail ?? '';
+    expect(revised).toContain(`(/workspaces/${wsId}?task=${b.id})`);
+    expect(revised).toContain('gone quiet. Quiet 16h');
+    expect(revised).not.toContain('waiting on a person');
+  });
+
   it('does not re-file for rows the reader has already answered about', () => {
     const a = make('Split the parser out of the loader');
     const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
