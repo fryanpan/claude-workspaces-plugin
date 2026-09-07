@@ -101,12 +101,34 @@ interface Gathered {
   answered: boolean;
 }
 
+/**
+ * An item the reader was never shown is not a question they were asked.
+ *
+ * A withdrawn item is off the queue by definition, and a HELD one never
+ * reached it — the gate's whole job is to keep it there until it passes. Both
+ * used to be gathered anyway, so the judge was told "asked on 7 September,
+ * still unanswered" about an item that had been held and withdrawn the same
+ * hour, and held the next filing for repeating a question nobody had read
+ * (2026-09-07, twice on one row). An answered item is kept whatever its
+ * verdict: an answer is proof the reader saw it.
+ */
+function neverReached(
+  review: { withdrawnAt?: number; answeredAt?: number },
+  judge: { verdict: string } | undefined,
+  answered = review.answeredAt !== undefined,
+): boolean {
+  if (answered) return false;
+  if (review.withdrawnAt !== undefined) return true;
+  return judge?.verdict === 'held';
+}
+
 /** The ticket channel: items in `task.reviews`. */
 function fromTask(task: Task, exceptItemId: string | undefined, now: number): Gathered[] {
   const out: Gathered[] = [];
   for (const item of task.reviews ?? []) {
     if (item.id === exceptItemId) continue;
     if (now - item.createdAt > PRIOR_ASK_WINDOW_MS) continue;
+    if (neverReached(item.review, item.judge, item.answer !== undefined)) continue;
     const answer = item.answer?.text;
     out.push({
       at: item.createdAt,
@@ -139,6 +161,7 @@ function fromThreads(
       if (!review) continue;
       if (comment.id === exceptCommentId) continue;
       if (now - comment.ts > PRIOR_ASK_WINDOW_MS) continue;
+      if (neverReached(review, review.judge)) continue;
       const answer = review.answerText;
       out.push({
         at: comment.ts,
