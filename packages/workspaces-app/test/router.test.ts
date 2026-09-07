@@ -1,4 +1,4 @@
-import type { FeedbackClient } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DocMeta, MountContext } from '../src/mount-context.ts';
 import { startRouter } from '../src/router.ts';

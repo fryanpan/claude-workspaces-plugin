@@ -51,7 +51,7 @@
  * or go. `spinoff-menu.test.ts` and `doc-spinoff.test.ts` still drive them.
  */
 
-import { type User, readyToWork, spinoffBody, spinoffDocHref } from '@feedback/core';
+import { type User, readyToWork, spinoffBody, spinoffDocHref } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 
 /** Re-exported: the readiness rule now lives in core, shared with the meeting
@@ -122,7 +122,7 @@ const TITLE_MAX = 80;
  *
  * The twin of the server's `clipToWordBoundary` (task-title.ts), deliberately
  * re-spelled rather than shared: that module lives in the server package, and
- * the only place in `@feedback/core` both front-ends could reach is
+ * the only place in `@claude-workspaces/core` both front-ends could reach is
  * `ui-shared.ts`, which the injectable widget bundles and whose size is a
  * hard constraint. Ten lines of pure string work is the cheaper duplicate.
  */

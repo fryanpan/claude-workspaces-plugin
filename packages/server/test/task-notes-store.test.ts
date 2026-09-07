@@ -10,7 +10,7 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import { TASK_NOTES_STORE_CAP } from '@feedback/core/task-wire';
+import { TASK_NOTES_STORE_CAP } from '@claude-workspaces/core/task-wire';
 import { TaskNotesStore } from '../src/task-notes.ts';
 import { FakeStore, WS, makeTask } from './task-verb-harness.ts';
 

@@ -1,4 +1,4 @@
-import { prose, suggestOps } from '@feedback/core';
+import { prose, suggestOps } from '@claude-workspaces/core';
 import { Editor } from '@tiptap/core';
 import Collaboration from '@tiptap/extension-collaboration';
 import StarterKit from '@tiptap/starter-kit';

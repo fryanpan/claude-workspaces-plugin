@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type DocMeta, type Thread, listThreads, readDocMeta } from '@feedback/core';
-import { wordCount } from '@feedback/core/word-count';
+import { type DocMeta, type Thread, listThreads, readDocMeta } from '@claude-workspaces/core';
+import { wordCount } from '@claude-workspaces/core/word-count';
 import * as Y from 'yjs';
 import {
   type Event,

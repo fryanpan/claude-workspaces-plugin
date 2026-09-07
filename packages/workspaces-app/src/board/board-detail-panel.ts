@@ -31,7 +31,7 @@
  * board's verb list plus the projections the panel reads. What the list buys
  * is that the panel can no longer reach anything NOT on it.
  */
-import type { FeedbackClient, User } from '@feedback/core';
+import type { FeedbackClient, User } from '@claude-workspaces/core';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { type BoardActions, type BoardState, fetchJson, send, showToast } from './board-actions.ts';
 import type { TaskDiscussion } from './board-detail-render.ts';

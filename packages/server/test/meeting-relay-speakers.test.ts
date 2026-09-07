@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_ROOM_SPEAKERS, MAX_ROOM_SPEAKERS } from '@feedback/core';
+import { DEFAULT_ROOM_SPEAKERS, MAX_ROOM_SPEAKERS } from '@claude-workspaces/core';
 import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import { MeetingStore } from '../src/meetings.ts';
 import type {

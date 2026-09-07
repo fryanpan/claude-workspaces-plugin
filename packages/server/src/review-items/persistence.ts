@@ -1,4 +1,4 @@
-import type { Task } from '@feedback/core/task-wire';
+import type { Task } from '@claude-workspaces/core/task-wire';
 import type {
   BoardWorkspace,
   DecisionAnswerWithdrawnEvent,

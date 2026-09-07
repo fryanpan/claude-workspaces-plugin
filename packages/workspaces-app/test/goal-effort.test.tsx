@@ -18,14 +18,14 @@
  *
  * All fixtures are synthetic.
  */
-import { EFFORT_ESTIMATE_PROMPT_VERSION } from '@feedback/core/effort-estimate-prompt';
+import { EFFORT_ESTIMATE_PROMPT_VERSION } from '@claude-workspaces/core/effort-estimate-prompt';
 import {
   type EffortCalibration,
   type EffortRatio,
   computeEffortCalibration,
   neutralCalibration,
   ratioForGoal,
-} from '@feedback/core/goal-effort';
+} from '@claude-workspaces/core/goal-effort';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { effortComputationLines, effortFields } from '../src/board/board-detail-render.ts';
 import {

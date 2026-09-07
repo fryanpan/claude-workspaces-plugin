@@ -41,7 +41,7 @@
  * it still returns a `Response`, or `undefined` for an upgrade, inside the
  * wrapper below.
  */
-import type { DocType } from '@feedback/core';
+import type { DocType } from '@claude-workspaces/core';
 import {
   type AgentWatches,
   SHARED_AGENT_IDS,

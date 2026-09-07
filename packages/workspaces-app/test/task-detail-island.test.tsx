@@ -1,4 +1,4 @@
-import type { Thread, User } from '@feedback/core';
+import type { Thread, User } from '@claude-workspaces/core';
 import { options } from 'preact';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DetailHandlers, TaskDiscussion } from '../src/board/board-detail-render.ts';

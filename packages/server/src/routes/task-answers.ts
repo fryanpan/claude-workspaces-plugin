@@ -1,4 +1,4 @@
-import { answerAsksBack } from '@feedback/core';
+import { answerAsksBack } from '@claude-workspaces/core';
 /**
  * The ticket's own decision: recording an answer, undoing one, asking back.
  *

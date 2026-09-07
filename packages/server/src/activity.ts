@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import type { DocMeta } from '@feedback/core';
+import type { DocMeta } from '@claude-workspaces/core';
 import type { ActorKind } from './actor-identity.ts';
 
 /**

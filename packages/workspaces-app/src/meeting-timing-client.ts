@@ -37,7 +37,7 @@ import {
   offsetFromPong,
   summarize,
   toCsv,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 
 /** `?timing=1` — the only way any of this runs. */
 export const TIMING_PARAM = 'timing';

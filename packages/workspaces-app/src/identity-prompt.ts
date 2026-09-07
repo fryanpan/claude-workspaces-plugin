@@ -5,7 +5,7 @@ import {
   needsNamePrompt,
   resolveUser,
   storeUserName,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 
 type IdentityStorage = { get(k: string): string | null; set(k: string, v: string): void };
 

@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ElementAnchor, type User, prose } from '@feedback/core';
+import { type ElementAnchor, type User, prose } from '@claude-workspaces/core';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';

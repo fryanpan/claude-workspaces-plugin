@@ -10,7 +10,7 @@ import { type NoteKind, runHook } from './agent-notes.ts';
 
 /** The server publishes its live port here at boot; the MCP child reads
  *  the same file (newest name first). Spelled here because the installed
- *  plugin cannot import `@feedback/core`. */
+ *  plugin cannot import `@claude-workspaces/core`. */
 const DISCOVERY_DIRS = ['claude-workspaces', 'live-feedback'];
 
 function discoveryPort(): number | undefined {

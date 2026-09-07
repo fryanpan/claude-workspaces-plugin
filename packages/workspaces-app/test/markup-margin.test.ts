@@ -5,7 +5,7 @@ import {
   prose,
   setCommentReview,
   suggestOps,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import type { EditorView } from '@tiptap/pm/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';

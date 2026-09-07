@@ -18,7 +18,7 @@
  * `vitest run` and `bun test packages/server/test` are separate gates and
  * neither can see the other's suite, so neither can measure the other's
  * sources. Each package is therefore assigned to exactly ONE runner (see
- * `PACKAGES`) and read only from that runner's lcov. `@feedback/core` is
+ * `PACKAGES`) and read only from that runner's lcov. `@claude-workspaces/core` is
  * additionally exercised by the server suite, so its number here is a floor
  * rather than the whole truth — attributing it twice would mean adding two
  * different instrumenters' line sets together, which is not a percentage of

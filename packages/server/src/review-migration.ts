@@ -40,7 +40,7 @@
  * pure classifier still serves tooling, but its resolve pass is expected to
  * be a no-op against any server running the new rule.
  */
-import type { Comment, Thread } from '@feedback/core';
+import type { Comment, Thread } from '@claude-workspaces/core';
 import { asksPerson } from './ask-detection.ts';
 import { knownPeople, unansweredRun } from './review-queue.ts';
 

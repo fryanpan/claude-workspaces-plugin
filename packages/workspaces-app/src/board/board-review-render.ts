@@ -1,4 +1,4 @@
-import { reviewAnswered } from '@feedback/core';
+import { reviewAnswered } from '@claude-workspaces/core';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
 /**
  * The review surface's renderers (plan §3.9): a ticket-borne review item drawn

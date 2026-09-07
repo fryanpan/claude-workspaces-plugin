@@ -16,7 +16,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { positiveEnvDuration, readRenamedEnv } from '@feedback/core/env-names';
+import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { resolveDataDir } from './data-dir.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';

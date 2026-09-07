@@ -28,7 +28,7 @@
  *
  * DUPLICATED, ON PURPOSE. The MCP bundle imports nothing from the server —
  * `packages/mcp/scripts/build.ts` bundles a standalone file and pulling
- * `@feedback/core` in would drag yjs into it — so the encoder lives at
+ * `@claude-workspaces/core` in would drag yjs into it — so the encoder lives at
  * `packages/mcp/src/mux-cursor.ts` and this is the decoder. The two are
  * pinned together by `packages/server/test/sse-mux.test.ts`, which imports
  * the client's formatter and parses its output here; change one and that

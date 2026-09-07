@@ -16,7 +16,7 @@
  * `bootBoard` and you have read the page: nothing between them is a surprise,
  * because a region can only reach what its deps object names.
  */
-import type { FeedbackClient, User } from '@feedback/core';
+import type { FeedbackClient, User } from '@claude-workspaces/core';
 import type { BootHistory, BootLocation, BootStorage, BootWindow } from '../boot-env.ts';
 import { renderConnectionBanner, watchConnection } from '../connection-state.ts';
 import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';

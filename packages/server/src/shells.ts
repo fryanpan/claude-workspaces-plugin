@@ -25,14 +25,14 @@ import { extname, join } from 'node:path';
  *
  * Layer: HTTP. Imports services and domain, never a route.
  */
-import type { DocType } from '@feedback/core';
+import type { DocType } from '@claude-workspaces/core';
 import {
   ASSET_MANIFEST_FILE,
   type AssetManifest,
   assetHref,
   isContentHashedAsset,
   parseAssetManifest,
-} from '@feedback/core/asset-manifest';
+} from '@claude-workspaces/core/asset-manifest';
 import { type BrowserSentryConfig, sentryHeadTags } from './browser-sentry.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import type { DocStore, WorkspaceDirNode, WorkspaceFileNode } from './doc-store.ts';

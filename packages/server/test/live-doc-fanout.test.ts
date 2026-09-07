@@ -8,7 +8,7 @@
  * `.ydoc`, no HTTP.
  */
 import { describe, expect, it } from 'bun:test';
-import type { DocMeta, Thread, User, WebhookPayload } from '@feedback/core';
+import type { DocMeta, Thread, User, WebhookPayload } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { FeedbackWs, LiveDoc } from '../src/doc-store.ts';
 import {

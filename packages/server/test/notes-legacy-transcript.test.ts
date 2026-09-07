@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { applyNotesUpdate, createNotesLedger } from '../src/meeting-notes-doc.ts';
 import {

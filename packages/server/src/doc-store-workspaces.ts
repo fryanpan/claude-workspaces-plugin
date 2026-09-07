@@ -22,7 +22,7 @@ import {
   type Thread,
   attachmentIdOf,
   isAttachmentMember,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import {
   type Event,
   appendActivity,

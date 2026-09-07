@@ -32,8 +32,8 @@ import {
   reviewItemState,
   reviewPayloadMessage,
   summaryHash,
-} from '@feedback/core';
-import { needsCall } from '@feedback/core/summary-prompt';
+} from '@claude-workspaces/core';
+import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
 import { KEYCHAIN_SERVICE } from '../summarize.ts';
 import { isCategoryAuthor } from '../task-owner.ts';

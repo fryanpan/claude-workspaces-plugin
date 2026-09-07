@@ -36,7 +36,7 @@
  * itself rather than offering a stale Approve.
  */
 
-import type { LeadPresence, User } from '@feedback/core';
+import type { LeadPresence, User } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 import { floatDock } from './float-dock.ts';
 import { leadReceiptSuffix } from './lead-banner.ts';

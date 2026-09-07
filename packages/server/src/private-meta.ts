@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type DocMeta, getMeta } from '@feedback/core';
+import { type DocMeta, getMeta } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 
 /**

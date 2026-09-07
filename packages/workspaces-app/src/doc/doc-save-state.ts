@@ -13,7 +13,7 @@
  * debounce from THIS mount would otherwise rewrite it over the next document
  * — one that may have no save state at all.
  */
-import type { FeedbackClient } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { saveStateView, settlePending, watchConnection } from '../connection-state.ts';
 import type { MountScope } from '../mount-scope.ts';

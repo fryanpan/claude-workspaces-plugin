@@ -32,7 +32,7 @@ import {
   isTerminalBotState,
   meetingPlatformOf,
   parseMeetingTranscriptEvent,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 
 /** The two things the doc's stream tells this client. One subscription

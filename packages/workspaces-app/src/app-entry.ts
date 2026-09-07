@@ -11,7 +11,7 @@
  * Nothing may be added below. A step that belongs to the boot belongs in
  * `bootApp`, where it can be tested.
  */
-import { connect } from '@feedback/core';
+import { connect } from '@claude-workspaces/core';
 import { bootApp } from './app.ts';
 import { browserStorage } from './boot-env.ts';
 

@@ -9,7 +9,7 @@
  * other, and deliberately not merged: the suggestion sheet renders a card it is
  * handed, and the deletion sheet renders text it is given.
  */
-import type { suggestOps } from '@feedback/core';
+import type { suggestOps } from '@claude-workspaces/core';
 import type { MountScope } from '../mount-scope.ts';
 
 /**

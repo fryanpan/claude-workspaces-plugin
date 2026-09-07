@@ -9,8 +9,8 @@ import {
   isTerminalBotState,
   meetingSocketPath,
   parseMeetingClientMessage,
-} from '@feedback/core';
-import type { MeetingTranscriptEvent } from '@feedback/core';
+} from '@claude-workspaces/core';
+import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RoomAudioProcessing } from '../src/meeting-audio.ts';
 import type { MeetingCaptureStart } from '../src/meeting-audio.ts';

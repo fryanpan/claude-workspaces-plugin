@@ -17,7 +17,7 @@
  *
  * Fixtures are synthetic (jordan@partner.example register).
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   POINTER_PILL_ACTIONS,

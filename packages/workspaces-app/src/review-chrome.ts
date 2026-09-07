@@ -1,4 +1,4 @@
-import { type Thread, type User, readDocMeta } from '@feedback/core';
+import { type Thread, type User, readDocMeta } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import {
   applyPlacement,

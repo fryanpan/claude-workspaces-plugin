@@ -18,8 +18,8 @@
  * public.
  */
 import { describe, expect, it } from 'bun:test';
-import type { ReviewPayload } from '@feedback/core';
-import type { Task } from '@feedback/core/task-wire';
+import type { ReviewPayload } from '@claude-workspaces/core';
+import type { Task } from '@claude-workspaces/core/task-wire';
 import { TaskDecisionStore } from '../src/review-items/decisions.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../src/review-items/derive.ts';
 import { ReviewJudgementStore } from '../src/review-items/judgements.ts';

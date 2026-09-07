@@ -26,8 +26,8 @@ import {
   readDocMeta,
   setThreadSummary,
   suggestOps,
-} from '@feedback/core';
-import { wordCount } from '@feedback/core/word-count';
+} from '@claude-workspaces/core';
+import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
@@ -53,7 +53,7 @@ export { isBoardOwnedDoc } from './doc-ids.ts';
  *  under the name it was first published as. */
 export { decideReconcile } from './file-binding.ts';
 
-import { type StoredSummary, needsCall } from '@feedback/core/summary-prompt';
+import { type StoredSummary, needsCall } from '@claude-workspaces/core/summary-prompt';
 import {
   type ActivityType,
   type Event,

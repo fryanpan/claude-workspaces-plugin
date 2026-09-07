@@ -96,7 +96,7 @@ export interface QueueRow {
   ready: boolean;
   /**
    * Waiting on at least one ticket that is not finished — the board's Blocked
-   * state, `@feedback/core/task-blocked`'s reading of the same `after` edges.
+   * state, `@claude-workspaces/core/task-blocked`'s reading of the same `after` edges.
    *
    * A SECOND flag beside `ready` rather than a redefinition of it, because
    * they answer different questions and both are needed. `ready` is transition
@@ -253,7 +253,7 @@ export function buildQueue(
       // forever with a blocker nobody can clear. An ARCHIVED dep is the same
       // case one step softer: it is off the board, so nobody is going to
       // finish it, and a row held by one is held by something its reader
-      // cannot even see. Same reading as `@feedback/core/task-blocked`.
+      // cannot even see. Same reading as `@claude-workspaces/core/task-blocked`.
       if (!dep || dep.status === 'done' || isArchived(dep)) continue;
       blockedBy.push({
         taskId: dep.id,

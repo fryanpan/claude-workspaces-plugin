@@ -17,7 +17,7 @@
  *
  * Lifted verbatim out of `createServer`.
  */
-import { EFFORT_ESTIMATE_PROMPT_VERSION } from '@feedback/core/effort-estimate-prompt';
+import { EFFORT_ESTIMATE_PROMPT_VERSION } from '@claude-workspaces/core/effort-estimate-prompt';
 import {
   EFFORT_ESTIMATE_MODEL,
   type EffortEstimateVerdict,

@@ -1,4 +1,4 @@
-import { parseThreadReviewItemId } from '@feedback/core';
+import { parseThreadReviewItemId } from '@claude-workspaces/core';
 import { matchRest } from '../middleware/workspace-scope.ts';
 /**
  * The Home queue: where a review item lives, what is waiting on a person, and the instructions above it.

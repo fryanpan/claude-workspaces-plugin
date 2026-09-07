@@ -1,4 +1,4 @@
-import type { Thread } from '@feedback/core';
+import type { Thread } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   LEAVING_FRACTION,

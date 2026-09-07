@@ -23,7 +23,7 @@ import { dirname } from 'node:path';
  * Dependencies arrive in an explicit context rather than captured from the
  * `createServer` closure, following `task-routes-context.ts`.
  */
-import { MAX_SPEAKER_NAME, speakerDisplayName } from '@feedback/core';
+import { MAX_SPEAKER_NAME, speakerDisplayName } from '@claude-workspaces/core';
 import { meetingDocAlias, meetingDocFilePath, meetingDocTitle } from '../huddle.ts';
 import type { MeetingRelay } from '../meeting-protocol.ts';
 import type { MeetingStore } from '../meetings.ts';

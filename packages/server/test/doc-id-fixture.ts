@@ -10,7 +10,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { initDocMeta } from '@feedback/core';
+import { initDocMeta } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { writePrivateMeta } from '../src/private-meta.ts';
 

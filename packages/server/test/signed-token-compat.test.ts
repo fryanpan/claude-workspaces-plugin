@@ -13,7 +13,7 @@ import { describe, expect, it } from 'bun:test';
  * Keys are fixed and fake. Nothing here reads a key file.
  */
 import { createHmac } from 'node:crypto';
-import { emailIdentityId } from '@feedback/core';
+import { emailIdentityId } from '@claude-workspaces/core';
 import {
   mintSession,
   sessionKey,

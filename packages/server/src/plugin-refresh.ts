@@ -31,7 +31,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readRenamedEnv } from '@feedback/core/env-names';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { compareSemver } from './plugin-release.ts';
 
 /** The one plugin this server knows the released version of. */

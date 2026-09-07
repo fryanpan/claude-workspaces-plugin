@@ -77,7 +77,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@feedback/core';
+import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
 import { taskDeepLink } from './home-brief.ts';
 import type { StallSnapshot, ToldTime } from './stall-nudge.ts';
 import type { TaskStore } from './tasks.ts';

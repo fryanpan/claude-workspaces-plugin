@@ -4,7 +4,7 @@
  * listeners. The subscribe seam stands in for the EventSource, exactly as
  * the fetch seam stands in for the server.
  */
-import type { MeetingBotStatus, MeetingTranscriptEvent } from '@feedback/core';
+import type { MeetingBotStatus, MeetingTranscriptEvent } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import {
   type MeetingBotStreamHandlers,

@@ -11,7 +11,7 @@
  * ``` / ~~~ fenced code (literal, escaped, no marks inside), and line breaks.
  *
  * Plus one convenience: a BARE workspace URL (a pasted board / task / doc /
- * mockup address — see `parseWorkspaceLink` in @feedback/core) becomes a link
+ * mockup address — see `parseWorkspaceLink` in @claude-workspaces/core) becomes a link
  * whose text is the resource's title once `link-titles.ts` has resolved it,
  * and the raw URL until then — plus a STATUS CHIP when the target is a task
  * or goal. Display-only: the stored comment keeps the raw URL. An explicit
@@ -19,7 +19,7 @@
  * chip (`data-ws-custom` is how hydration knows not to touch the words); and
  * non-workspace URLs stay plain text.
  */
-import { parseWorkspaceLink } from '@feedback/core';
+import { parseWorkspaceLink } from '@claude-workspaces/core';
 import {
   cachedLinkStatus,
   cachedLinkTitle,

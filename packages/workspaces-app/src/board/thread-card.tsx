@@ -15,7 +15,7 @@
  * reply box. Its Reply is what creates the thread; after that the card
  * shows the thread the server returned, and Reply posts to it.
  */
-import type { Thread, User } from '@feedback/core';
+import type { Thread, User } from '@claude-workspaces/core';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { sizeThreadSlots } from '../thread-morph.ts';
 import { ThreadPanel } from '../threads.ts';

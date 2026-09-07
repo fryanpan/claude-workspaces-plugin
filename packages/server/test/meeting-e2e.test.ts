@@ -24,7 +24,7 @@ import {
   MEETING_SAMPLE_RATE,
   meetingSocketPath,
   prose,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import {
   type NotesUpdate,
   type TickScheduler,

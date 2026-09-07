@@ -47,7 +47,7 @@
  * The socket is injected because a test of this mapping must not open one.
  */
 
-import { MAX_ROOM_SPEAKERS, MIN_ROOM_SPEAKERS, type MeetingTuning } from '@feedback/core';
+import { MAX_ROOM_SPEAKERS, MIN_ROOM_SPEAKERS, type MeetingTuning } from '@claude-workspaces/core';
 import { readKeychainPassword } from './share/keychain.ts';
 import type {
   TranscriptionEngine,

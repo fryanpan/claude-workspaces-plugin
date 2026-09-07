@@ -17,7 +17,7 @@
  * 2026-08-30.)
  */
 
-import type { MeetingBotState } from '@feedback/core';
+import type { MeetingBotState } from '@claude-workspaces/core';
 
 /** Every documented status-change event name, without the `bot.` prefix. */
 const CODE_TO_STATE: Readonly<Record<string, MeetingBotState>> = {

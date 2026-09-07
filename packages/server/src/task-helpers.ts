@@ -15,7 +15,7 @@
  * already pure, already exported, and already had no reader inside the store
  * class.
  */
-import type { TaskStatus } from '@feedback/core/task-wire';
+import type { TaskStatus } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import type { GoalRow, Ref, WorkspaceGoal } from './tasks.ts';
 

@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from '@feedback/core';
+import type { ConnectionStatus } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type ConnectionView,

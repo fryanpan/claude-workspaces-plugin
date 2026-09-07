@@ -16,7 +16,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type Thread, contentKind, prose, suggestOps } from '@feedback/core';
+import { type Thread, contentKind, prose, suggestOps } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { LiveDoc } from './doc-store.ts';
 

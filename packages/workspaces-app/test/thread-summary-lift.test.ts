@@ -16,8 +16,8 @@
  * it objects that already have the field.
  */
 
-import { createThread, postReply, setThreadSummary, summaryHash } from '@feedback/core';
-import type { Thread } from '@feedback/core';
+import { createThread, postReply, setThreadSummary, summaryHash } from '@claude-workspaces/core';
+import type { Thread } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { MountScope } from '../src/mount-scope.ts';

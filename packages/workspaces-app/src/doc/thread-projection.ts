@@ -26,7 +26,7 @@ import {
   readReviewPayload,
   readStoredSummary,
   summaryPending,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import type { SeenTracker } from '../comment-seen.ts';
 import type { ReviewSurface } from '../review-surface.ts';

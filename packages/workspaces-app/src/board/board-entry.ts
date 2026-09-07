@@ -22,7 +22,7 @@
  * `globalThis.location` are spellings it cannot see; neither appears under
  * `src/board/` today, and both would be the same bug.
  */
-import { connect } from '@feedback/core';
+import { connect } from '@claude-workspaces/core';
 import { browserStorage } from '../boot-env.ts';
 import { bootBoard } from './board-app.ts';
 

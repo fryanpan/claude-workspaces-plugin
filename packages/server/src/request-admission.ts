@@ -38,8 +38,8 @@
  * built after. One module because they are one subject; two calls because
  * the identity setup genuinely sits between them.
  */
-import { normalizeEmail } from '@feedback/core';
-import type { DocMeta } from '@feedback/core';
+import { normalizeEmail } from '@claude-workspaces/core';
+import type { DocMeta } from '@claude-workspaces/core';
 import { LOOPBACK_HOSTS, type OriginPolicy, corsHeadersFor } from './middleware/browser-origin.ts';
 import type { CfAccessVerifier } from './middleware/cf-access.ts';
 import {

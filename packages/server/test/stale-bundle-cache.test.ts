@@ -31,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hashedAssetName } from '@feedback/core/asset-manifest';
+import { hashedAssetName } from '@claude-workspaces/core/asset-manifest';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
 /** Every `/app/...` url an HTML document references. */

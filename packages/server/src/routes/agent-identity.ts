@@ -14,7 +14,7 @@
  * dispatch block. Dependencies arrive in an explicit context rather than
  * captured from the closure, following `task-routes-context.ts`.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import {
   type AgentWatches,
   SHARED_AGENT_IDS,

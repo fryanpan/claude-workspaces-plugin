@@ -21,7 +21,7 @@
  * rule: nothing that merely spins a server up can reach the network.
  */
 
-import { readRenamedEnv } from '@feedback/core/env-names';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import type { NoteAskJudge } from './note-ask.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { resolveKeyFrom } from './summarize.ts';

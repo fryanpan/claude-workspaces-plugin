@@ -9,7 +9,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep } from 'node:path';
-import { type DocMeta, type DocType, attachmentIdOf } from '@feedback/core';
+import { type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
 import {
   type BindHost,
   DEFAULT_MAX_FILES,

@@ -13,7 +13,7 @@
  * that card currently lives (a balloon in the margin, the mobile inline list,
  * the modal, or the desktop drawer), and only this module knows all four.
  */
-import { suggestOps } from '@feedback/core';
+import { suggestOps } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { balloonMarginVisible } from '../card-placement.ts';
 import { mountCommentHints } from '../comment-hints.ts';

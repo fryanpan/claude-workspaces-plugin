@@ -16,7 +16,7 @@
  * `AgentStore` already use. Every row handed back is LIVE — mutated in place,
  * then handed to `scheduleSave`.
  */
-import type { DecisionOption, Task } from '@feedback/core/task-wire';
+import type { DecisionOption, Task } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import {
   type DecisionShapeGap,

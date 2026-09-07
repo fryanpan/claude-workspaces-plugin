@@ -1,5 +1,5 @@
-import { type EnvLike, readRenamedEnv } from '@feedback/core/env-names';
-import { agentIdForName, hashToColor, knownUserForName } from '@feedback/core/identity';
+import { type EnvLike, readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { agentIdForName, hashToColor, knownUserForName } from '@claude-workspaces/core/identity';
 
 export interface AgentAuthor {
   name: string;

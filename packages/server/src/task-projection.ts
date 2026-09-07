@@ -1,4 +1,4 @@
-import { listThreads, prose } from '@feedback/core';
+import { listThreads, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { DocStore } from './doc-store.ts';
 import { projectBody, projectTask, taskBodyDocId, taskIdOfBodyDoc } from './task-row.ts';

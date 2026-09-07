@@ -3,7 +3,7 @@
  * shapes, counts and timings — never doc content, titles, comment text, or
  * file paths.
  *
- * It lives in `@feedback/core` rather than beside the server's Sentry init
+ * It lives in `@claude-workspaces/core` rather than beside the server's Sentry init
  * because BOTH sides send events now. The server has sent scrubbed traces
  * since PR #487; the browser started sending them once docs, mockups and the
  * landing page were instrumented too, and a browser event

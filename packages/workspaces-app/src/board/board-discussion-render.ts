@@ -7,8 +7,8 @@
  * `board-review-render.ts` draws a ticket-borne item with the same anatomy as a
  * declaring comment's row. One spelling, so the two cannot read differently.
  */
-import { reviewAnswered, reviewWithdrawn } from '@feedback/core';
-import type { ReviewPayload, ReviewShape } from '@feedback/core';
+import { reviewAnswered, reviewWithdrawn } from '@claude-workspaces/core';
+import type { ReviewPayload, ReviewShape } from '@claude-workspaces/core';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
 import {
   type ComposerSelection,

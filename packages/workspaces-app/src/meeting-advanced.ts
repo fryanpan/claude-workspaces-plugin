@@ -1,7 +1,7 @@
 /**
  * The Advanced Options panel behind the start chooser (and, mid-meeting, the
  * speaker menu): the per-engine transcription knobs, rendered from the same
- * specs the server sanitizes against (`meeting-tuning.ts` in @feedback/core).
+ * specs the server sanitizes against (`meeting-tuning.ts` in @claude-workspaces/core).
  *
  * Layout and copy follow Bryan's approved interactive mock (audio-options
  * mock 2): a collapsed section with a chevron, an amber dot on the header
@@ -18,7 +18,7 @@
  * never get wrong.
  */
 
-import { type MeetingTuning, liveTuningKeys } from '@feedback/core';
+import { type MeetingTuning, liveTuningKeys } from '@claude-workspaces/core';
 
 /** What one control holds. `undefined` is the stepper's "uncapped". */
 export type AdvancedValue = number | string | boolean | string[] | undefined;

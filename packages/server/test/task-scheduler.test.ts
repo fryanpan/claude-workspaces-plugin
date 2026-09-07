@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TaskSchedule } from '@feedback/core/task-schedule';
+import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 import {
   SCHEDULER_TICK_DEFAULT_MS,
   TaskScheduler,

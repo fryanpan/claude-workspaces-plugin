@@ -9,8 +9,8 @@
  * `board-review-render.ts` import the shapes declared here (`TaskThread`,
  * `PanelReviewItem`), and this file imports neither of them.
  */
-import { type ReviewPayload } from '@feedback/core';
-import type { ReviewShape, Thread, User } from '@feedback/core';
+import { type ReviewPayload } from '@claude-workspaces/core';
+import type { ReviewShape, Thread, User } from '@claude-workspaces/core';
 import {
   EFFORT_MIN_SAMPLES_FOR_CALIBRATION,
   type EffortCalibration,
@@ -22,8 +22,8 @@ import {
   estimateNumbers,
   formatEffortSeconds,
   ratioForGoal,
-} from '@feedback/core/goal-effort';
-import { blockableStatus } from '@feedback/core/task-blocked';
+} from '@claude-workspaces/core/goal-effort';
+import { blockableStatus } from '@claude-workspaces/core/task-blocked';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
 import { cachedLinkTitle, fetchLinkInfos } from '../link-titles.ts';
 import {

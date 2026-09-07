@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ElementAnchor, User } from '@feedback/core';
+import type { ElementAnchor, User } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type Ref, type Task, TaskStore, taskChip } from '../src/tasks.ts';
 import { seedBoard } from './workspace-seed.ts';

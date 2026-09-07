@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { attachmentIdOf } from '@feedback/core';
+import { attachmentIdOf } from '@claude-workspaces/core';
 /**
  * Content filed onto a board: a doc attached, a tracker imported, a huddle opened.
  *

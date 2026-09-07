@@ -3,7 +3,7 @@
  * wall-clock seconds from a ticket's title, description and goal.
  *
  * The prompt and the parser are pure and live in
- * `@feedback/core/effort-estimate-prompt`; this file owns the key, the HTTP
+ * `@claude-workspaces/core/effort-estimate-prompt`; this file owns the key, the HTTP
  * call and the timeout — the same split, and largely the same rules, as
  * `review-judge.ts`:
  *
@@ -38,12 +38,12 @@ import {
   type EffortEstimateVerdict,
   buildEffortEstimatePrompt,
   parseEffortEstimateResponse,
-} from '@feedback/core/effort-estimate-prompt';
-import { readRenamedEnv } from '@feedback/core/env-names';
+} from '@claude-workspaces/core/effort-estimate-prompt';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { readKeychainPassword } from './share/keychain.ts';
 import { resolveKeyFrom } from './summarize.ts';
 
-export type { EffortEstimateVerdict } from '@feedback/core/effort-estimate-prompt';
+export type { EffortEstimateVerdict } from '@claude-workspaces/core/effort-estimate-prompt';
 
 export interface EffortEstimatorInput {
   /** The workspace's own tuning text — the owner's words, or the default. */

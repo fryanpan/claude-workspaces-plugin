@@ -1,5 +1,5 @@
-import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@feedback/core/effort-estimate-prompt';
-import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@feedback/core/review-judge-prompt';
+import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-estimate-prompt';
+import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-judge-prompt';
 /**
  * The board's own fields: its goal, its retirement, its parallelism cap, its settings, its name, its lead and its voice.
  *

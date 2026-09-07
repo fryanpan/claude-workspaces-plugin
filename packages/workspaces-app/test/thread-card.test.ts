@@ -1,4 +1,4 @@
-import type { Comment, Thread, User } from '@feedback/core';
+import type { Comment, Thread, User } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThreadPanel, type ThreadPanelOpts, sizeThreadSlots } from '../src/threads.ts';
 

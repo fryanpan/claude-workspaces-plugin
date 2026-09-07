@@ -15,7 +15,7 @@
  * the file that imports it.
  */
 
-import type { Task, TaskActor } from '@feedback/core/task-wire';
+import type { Task, TaskActor } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { cryptoId } from './task-fields.ts';
 import { AUTHOR_REQUIRED_MESSAGE, isCategoryAuthor } from './task-owner.ts';

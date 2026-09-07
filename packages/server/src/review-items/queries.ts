@@ -13,8 +13,8 @@ import {
   readTaskReviewItem,
   reviewItemState,
   reviewWithdrawn,
-} from '@feedback/core';
-import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@feedback/core/review-judge-prompt';
+} from '@claude-workspaces/core';
+import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-judge-prompt';
 import { isArchived } from '../task-fields.ts';
 import { legacyDecisionItem } from './derive.ts';
 import type { ReviewItemPersistence } from './persistence.ts';

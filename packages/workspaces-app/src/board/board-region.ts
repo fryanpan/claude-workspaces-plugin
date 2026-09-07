@@ -22,7 +22,7 @@
  * pane performs no writes of its own — it hands the island a gesture and the
  * verb decides.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import type { BoardActions, BoardState } from './board-actions.ts';
 import { type BoardHandlers, boardData } from './board-island.tsx';
 import {

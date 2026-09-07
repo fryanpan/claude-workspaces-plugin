@@ -1,4 +1,4 @@
-import type { Thread } from '@feedback/core';
+import type { Thread } from '@claude-workspaces/core';
 import type { MountScope } from './mount-scope.ts';
 import { type ThreadGlyph, type ThreadKind, threadKind } from './thread-kind.ts';
 

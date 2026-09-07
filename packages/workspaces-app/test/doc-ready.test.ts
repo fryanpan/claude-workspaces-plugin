@@ -1,4 +1,4 @@
-import type { FeedbackClient } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { wireDocReady } from '../src/doc/doc-ready.ts';

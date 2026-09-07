@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Comment, ReviewPayload, TaskReviewItem, Thread } from '@feedback/core';
+import type { Comment, ReviewPayload, TaskReviewItem, Thread } from '@claude-workspaces/core';
 import { asksPerson } from '../src/ask-detection.ts';
 import {
   awaitingPerson,

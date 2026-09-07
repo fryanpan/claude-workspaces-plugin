@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { DocMeta } from '@feedback/core';
+import type { DocMeta } from '@claude-workspaces/core';
 import {
   attachmentIdsNeedingFiling,
   backfillAttachmentFiling,

@@ -32,7 +32,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type DocMeta, type WebhookPayload, prose } from '@feedback/core';
+import { type DocMeta, type WebhookPayload, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { DOC_STORE_TIMINGS } from '../src/doc-store-timings.ts';
 import type { LiveDoc } from '../src/doc-store.ts';

@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { createNotesLedger } from '../src/meeting-notes-doc.ts';
 import { NOTES_LEDGER_CONTINUATION_MS, createNotesLedgerStore } from '../src/notes-ledger-store.ts';

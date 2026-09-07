@@ -1,4 +1,4 @@
-import { type User, readDocMeta } from '@feedback/core';
+import { type User, readDocMeta } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 /**
  * Spinning selected words off a huddle doc into work: "Create task" and

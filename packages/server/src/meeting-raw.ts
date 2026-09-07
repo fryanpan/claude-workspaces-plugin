@@ -49,7 +49,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
-import { speakerDisplayName } from '@feedback/core';
+import { speakerDisplayName } from '@claude-workspaces/core';
 import {
   type MeetingRecord,
   type TranscriptTurn,

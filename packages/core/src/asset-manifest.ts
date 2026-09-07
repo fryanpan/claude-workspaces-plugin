@@ -16,7 +16,7 @@
  * is two kilobytes.
  *
  * Node-only (`node:crypto`), and deliberately NOT re-exported from
- * `@feedback/core`'s index: the build script and the server import it, and
+ * `@claude-workspaces/core`'s index: the build script and the server import it, and
  * pulling it into the browser bundle's import graph would be a regression all
  * of its own.
  */

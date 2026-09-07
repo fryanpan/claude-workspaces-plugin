@@ -6,7 +6,7 @@
  * All fixtures are invented; the repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import { REVIEW_JUDGE_REASON_MAX } from '@feedback/core/review-judge-prompt';
+import { REVIEW_JUDGE_REASON_MAX } from '@claude-workspaces/core/review-judge-prompt';
 import { haikuReviewJudge } from '../src/review-judge.ts';
 
 /** The longest reply the parser will keep in full: both fields at the

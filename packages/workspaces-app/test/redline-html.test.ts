@@ -1,4 +1,4 @@
-import { computeRedline } from '@feedback/core';
+import { computeRedline } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import {
   annotateBlockMarkdown,

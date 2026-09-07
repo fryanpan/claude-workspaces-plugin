@@ -50,7 +50,7 @@ import {
   reattributeSpeakerTags,
   renameSpeakerTags,
   speakerDisplayName,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { appendSuggestions, resolveNoteLinks } from './notes-link-intent.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {

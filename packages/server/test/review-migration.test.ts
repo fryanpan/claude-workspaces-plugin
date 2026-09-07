@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Comment, Thread, User } from '@feedback/core';
+import type { Comment, Thread, User } from '@claude-workspaces/core';
 import {
   fetchQueueRows,
   fetchQueueThreads,

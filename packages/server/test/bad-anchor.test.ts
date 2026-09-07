@@ -31,7 +31,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Anchor, type Thread, type User, createThread } from '@feedback/core';
+import { type Anchor, type Thread, type User, createThread } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { pastReanchor, waitFor } from './wait-for.ts';

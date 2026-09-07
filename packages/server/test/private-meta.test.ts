@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getMeta } from '@feedback/core';
+import { getMeta } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import {
   PRIVATE_META_KEYS,

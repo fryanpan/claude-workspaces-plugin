@@ -29,9 +29,9 @@
  * page is shaped to avoid.
  */
 
-import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@feedback/core/effort-estimate-prompt';
-import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@feedback/core/review-judge-prompt';
-import { DEFAULT_THREAD_SUMMARY_SYSTEM } from '@feedback/core/summary-prompt';
+import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-estimate-prompt';
+import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-judge-prompt';
+import { DEFAULT_THREAD_SUMMARY_SYSTEM } from '@claude-workspaces/core/summary-prompt';
 import { DEFAULT_TASK_CAPTURE_SYSTEM } from './meeting-capture-prompt.ts';
 import { NOTE_ASK_SYSTEM } from './note-ask-judge.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';

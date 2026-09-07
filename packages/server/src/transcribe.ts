@@ -18,7 +18,7 @@
  * into "sync".
  */
 
-import type { MeetingTuning } from '@feedback/core';
+import type { MeetingTuning } from '@claude-workspaces/core';
 
 /** One live connection to a transcription engine. */
 export interface TranscriptionSession {

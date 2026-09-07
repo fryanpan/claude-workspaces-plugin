@@ -19,7 +19,7 @@
  * Dependencies arrive in an explicit context, following
  * `task-routes-context.ts`.
  */
-import { attachmentIdOf } from '@feedback/core';
+import { attachmentIdOf } from '@claude-workspaces/core';
 import type { DocStore } from '../doc-store.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { type WorkspaceScope, matchRest, restIs } from '../middleware/workspace-scope.ts';

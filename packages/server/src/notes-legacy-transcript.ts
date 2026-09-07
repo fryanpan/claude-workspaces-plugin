@@ -43,7 +43,7 @@
  */
 
 import { resolve, sep } from 'node:path';
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { LEGACY_TRANSCRIPT_HEADING, headingText } from './notes-section.ts';
 

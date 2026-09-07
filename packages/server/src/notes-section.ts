@@ -10,7 +10,7 @@
  * (`notes-ownership.ts`) or writes one (`meeting-notes-merge.ts`).
  */
 
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 
 /** One addressable thing in the notes section: a top-level block, or one

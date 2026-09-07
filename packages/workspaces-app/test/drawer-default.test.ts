@@ -1,5 +1,5 @@
-import { createThread, getContent } from '@feedback/core';
-import { TextRange } from '@feedback/core/anchor';
+import { createThread, getContent } from '@claude-workspaces/core';
+import { TextRange } from '@claude-workspaces/core/anchor';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { initialDrawerOpen } from '../src/doc/view-prefs.ts';

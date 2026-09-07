@@ -1,5 +1,5 @@
 {
-  "name": "@feedback/demo-dev-server",
+  "name": "@claude-workspaces/demo-dev-server",
   "version": "0.0.0",
   "private": true,
   "type": "module",

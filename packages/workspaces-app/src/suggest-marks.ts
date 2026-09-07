@@ -1,4 +1,4 @@
-import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK } from '@feedback/core';
+import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK } from '@claude-workspaces/core';
 import { Mark } from '@tiptap/core';
 
 /**
@@ -11,7 +11,7 @@ import { Mark } from '@tiptap/core';
  * load-bearing; the pending-proposal styling and the Suggesting input mode
  * build on top (later commits of this PR).
  *
- * Attribute shape is the shared schema in @feedback/core (`SuggestionAttrs`):
+ * Attribute shape is the shared schema in @claude-workspaces/core (`SuggestionAttrs`):
  * sid/authorId/authorName/authorColor as strings, ts as a NUMBER. Per the
  * attribute-type learnings, y-prosemirror passes Yjs attribute values through
  * verbatim — the parse rules below re-read `data-ts` as a number so an
@@ -68,7 +68,7 @@ function suggestionAttributes() {
 }
 
 /** Proposed NEW text — visible in the live doc, excluded from disk until
- *  accepted (the serializer rule in @feedback/core prose.ts). */
+ *  accepted (the serializer rule in @claude-workspaces/core prose.ts). */
 export const SuggestInsert = Mark.create({
   name: SUGGEST_INSERT_MARK,
   // Typing at the edge of a proposal must not silently extend it.

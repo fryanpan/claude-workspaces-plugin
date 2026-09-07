@@ -1,4 +1,4 @@
-import { connect } from '@feedback/core';
+import { connect } from '@claude-workspaces/core';
 import type { BootLocation } from '../boot-env.ts';
 import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connection-state.ts';
 /**

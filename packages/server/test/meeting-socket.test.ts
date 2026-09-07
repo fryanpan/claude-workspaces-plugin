@@ -19,7 +19,7 @@ import {
   MEETING_AUDIO_ENCODING,
   MEETING_SAMPLE_RATE,
   meetingSocketPath,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { listMeetings, meetingTranscriptPath } from '../src/meetings.ts';
 import { type ShareTarget, shareScopeAllows } from '../src/middleware/host-guard.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';

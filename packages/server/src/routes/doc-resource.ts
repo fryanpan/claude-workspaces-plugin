@@ -7,8 +7,8 @@
  * resolution — see that file's header for why call order across the three
  * families is not load-bearing.
  */
-import type { Thread } from '@feedback/core';
-import { type Anchor, anchors } from '@feedback/core';
+import type { Thread } from '@claude-workspaces/core';
+import { type Anchor, anchors } from '@claude-workspaces/core';
 import { showFile } from '../git-diff.ts';
 import {
   RESEARCH_TOPIC_MAX,

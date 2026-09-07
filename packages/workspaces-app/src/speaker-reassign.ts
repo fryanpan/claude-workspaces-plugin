@@ -27,7 +27,12 @@
  * tap is somebody settling it, and the flag goes.
  */
 
-import { type RosterVoice, speakerTagHref, speakerTagLabel, speakerTagText } from '@feedback/core';
+import {
+  type RosterVoice,
+  speakerTagHref,
+  speakerTagLabel,
+  speakerTagText,
+} from '@claude-workspaces/core';
 import type { Editor } from '@tiptap/core';
 import type { Mark, MarkType } from '@tiptap/pm/model';
 import type { EditorState } from '@tiptap/pm/state';

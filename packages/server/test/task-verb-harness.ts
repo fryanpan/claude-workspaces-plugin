@@ -12,7 +12,7 @@
  *
  * All fixtures are synthetic. The repo is public.
  */
-import type { Task, TaskStatus } from '@feedback/core/task-wire';
+import type { Task, TaskStatus } from '@claude-workspaces/core/task-wire';
 import { isReservedGoalId } from '../src/task-goals.ts';
 import type {
   BoardWorkspace,

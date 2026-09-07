@@ -1,4 +1,4 @@
-import { type FeedbackClient, connect, suggestOps } from '@feedback/core';
+import { type FeedbackClient, connect, suggestOps } from '@claude-workspaces/core';
 import { mountCode } from '../code/code-app.ts';
 import { isEditableRedlineMember } from '../code/editable-policy.ts';
 import { renderDiffNav, wireDiffNavRefresh } from '../diff-nav.ts';

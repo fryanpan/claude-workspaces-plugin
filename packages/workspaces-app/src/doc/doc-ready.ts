@@ -10,8 +10,8 @@
  * lands. Re-running either on every later sync would re-fetch a board that
  * has not changed and yank a reader back mid-read.
  */
-import type { FeedbackClient } from '@feedback/core';
-import { readDocMeta } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
+import { readDocMeta } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';

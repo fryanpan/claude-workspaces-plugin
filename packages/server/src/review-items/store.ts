@@ -26,8 +26,8 @@ import {
   reviewPayloadMessage,
   withdrawReview,
   withoutHoldHistory,
-} from '@feedback/core';
-import type { TaskActor } from '@feedback/core/task-wire';
+} from '@claude-workspaces/core';
+import type { TaskActor } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from '../actor-identity.ts';
 import { cryptoId } from '../task-fields.ts';
 import { TaskDecisionStore } from './decisions.ts';

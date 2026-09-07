@@ -12,7 +12,7 @@
  *
  * Fixtures are synthetic.
  */
-import { parseWorkspaceLink } from '@feedback/core';
+import { parseWorkspaceLink } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type BoardActionDeps, createBoardActions } from '../src/board/board-actions.ts';
 import type { BoardTask } from '../src/board/board-model.ts';

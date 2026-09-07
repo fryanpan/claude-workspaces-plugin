@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { emailIdentityId } from '@feedback/core';
+import { emailIdentityId } from '@claude-workspaces/core';
 import {
   SESSION_COOKIE,
   SESSION_COOKIE_MAX_AGE_SECONDS,

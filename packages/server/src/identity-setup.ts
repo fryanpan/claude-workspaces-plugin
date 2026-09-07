@@ -18,7 +18,7 @@
  *
  * Lifted verbatim out of `createServer`.
  */
-import { emailIdentityId, isEmailLike } from '@feedback/core';
+import { emailIdentityId, isEmailLike } from '@claude-workspaces/core';
 import { acquireActivityLock } from './activity-lock.ts';
 import {
   identityLinks,

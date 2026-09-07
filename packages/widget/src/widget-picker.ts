@@ -1,4 +1,4 @@
-import { type ElementAnchor, anchors, escapeHtml as escape } from '@feedback/core';
+import { type ElementAnchor, anchors, escapeHtml as escape } from '@claude-workspaces/core';
 import { composerNote, composerSignIn } from './widget-auth.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 

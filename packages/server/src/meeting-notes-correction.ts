@@ -60,7 +60,7 @@ import {
   SUGGEST_INSERT_MARK,
   prose,
   suggestOps,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import {
   NOTES_SUGGESTION_AUTHOR,

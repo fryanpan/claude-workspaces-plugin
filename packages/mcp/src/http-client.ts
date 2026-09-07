@@ -15,8 +15,8 @@
  * string `not found`, which explodes `JSON.parse` and buries the HTTP error
  * that was the actual news.
  */
-import { readRenamedEnv } from '@feedback/core/env-names';
-import { discoveryCandidates, resolveDiscoveryFile } from '@feedback/core/machine-paths';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { discoveryCandidates, resolveDiscoveryFile } from '@claude-workspaces/core/machine-paths';
 
 /** The filesystem reads discovery needs, injectable for tests. */
 export interface DiscoveryDeps {

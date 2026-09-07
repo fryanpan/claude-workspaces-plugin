@@ -14,7 +14,7 @@
  */
 
 // Types are inlined so this file can be copied into any project without
-// depending on @feedback/core. The canonical shape lives in
+// depending on @claude-workspaces/core. The canonical shape lives in
 // packages/core/src/types.ts.
 
 interface Author {

@@ -34,7 +34,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type TaskReviewItem, agentIdForName, isReviewItemOpen } from '@feedback/core';
+import { type TaskReviewItem, agentIdForName, isReviewItemOpen } from '@claude-workspaces/core';
 import { normalizeAgent } from './chat-audit.ts';
 import type { Task, TaskStore } from './tasks.ts';
 

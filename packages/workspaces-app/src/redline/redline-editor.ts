@@ -1,4 +1,4 @@
-import { computeRedline, getContent, snapOffsetsToLines } from '@feedback/core';
+import { computeRedline, getContent, snapOffsetsToLines } from '@claude-workspaces/core';
 import { Editor } from '@tiptap/core';
 import Image from '@tiptap/extension-image';
 import { Table } from '@tiptap/extension-table';

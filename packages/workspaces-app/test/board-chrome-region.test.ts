@@ -1,4 +1,4 @@
-import type { FeedbackClient } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createBoardChromeRegion } from '../src/board/board-chrome-region.ts';
 import { presenceData } from '../src/board/presence-island.tsx';

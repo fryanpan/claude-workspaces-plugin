@@ -3,7 +3,7 @@
  * on, and goes the moment that changes — from the first read or from the
  * stream, whichever says so. Unknown says nothing.
  */
-import type { LeadPresence } from '@feedback/core';
+import type { LeadPresence } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import {
   leadBannerText,

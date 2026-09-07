@@ -1,4 +1,4 @@
-import { suggestOps } from '@feedback/core';
+import { suggestOps } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { api } from '../doc-path.ts';
 import { el, showToast } from '../doc/chrome-dom.ts';

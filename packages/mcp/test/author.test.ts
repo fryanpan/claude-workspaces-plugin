@@ -1,4 +1,4 @@
-import { agentIdCandidates, agentIdForName } from '@feedback/core/identity';
+import { agentIdCandidates, agentIdForName } from '@claude-workspaces/core/identity';
 import { describe, expect, it } from 'vitest';
 import { resolveAgentAuthor } from '../src/author.ts';
 

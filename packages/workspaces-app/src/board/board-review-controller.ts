@@ -1,4 +1,4 @@
-import type { Thread, User } from '@feedback/core';
+import type { Thread, User } from '@claude-workspaces/core';
 /**
  * The review queue's controller: how a person opens an item, walks the sitting,
  * and answers or asks back — with the REST writes each of those ends in.

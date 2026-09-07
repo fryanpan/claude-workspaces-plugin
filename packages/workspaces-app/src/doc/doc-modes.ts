@@ -10,7 +10,7 @@
  * The caller gets back only the two verbs the read-only lock needs. The mode
  * variables stay in here, which is what stops a second writer appearing.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { type EditMode, initialEditMode, writeEditModePref } from '../edit-mode.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';

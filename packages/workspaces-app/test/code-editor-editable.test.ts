@@ -1,6 +1,6 @@
+import { getContent } from '@claude-workspaces/core';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { getContent } from '@feedback/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { type CreateCodeEditorOpts, createCodeEditor } from '../src/code/code-editor.ts';

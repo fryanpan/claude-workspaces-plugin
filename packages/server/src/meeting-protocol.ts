@@ -7,7 +7,7 @@
  * with no lifecycle in them. Two files, one name, in two packages: this one
  * sends what that one reads.
  *
- * The wire contract itself lives in `@feedback/core/meeting.ts`, shared with
+ * The wire contract itself lives in `@claude-workspaces/core/meeting.ts`, shared with
  * the browser that opens the microphone. What lives here is the half a server
  * has to get right: the socket IS the meeting's lifecycle, so every way this
  * connection can end has to end the meeting exactly once — a clean `stop`, a
@@ -39,7 +39,7 @@ import {
   parseMeetingClientMessage,
   pickLiveTuning,
   sanitizeTuning,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import {
   type MeetingNotesDeps,
   type MeetingNotesSession,

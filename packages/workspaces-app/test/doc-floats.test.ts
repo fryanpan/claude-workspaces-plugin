@@ -1,4 +1,4 @@
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { mountDocFloats } from '../src/doc/doc-floats.ts';

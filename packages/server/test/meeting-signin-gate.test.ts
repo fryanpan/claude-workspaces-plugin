@@ -19,7 +19,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MEETING_AUDIO_ENCODING, MEETING_SAMPLE_RATE, meetingSocketPath } from '@feedback/core';
+import {
+  MEETING_AUDIO_ENCODING,
+  MEETING_SAMPLE_RATE,
+  meetingSocketPath,
+} from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
 import { seedBoard } from './workspace-seed.ts';

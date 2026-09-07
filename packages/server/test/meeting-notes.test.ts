@@ -18,7 +18,7 @@ import {
   MEETING_SAMPLE_RATE,
   meetingSocketPath,
   prose,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import {
   DEFAULT_NOTES_CADENCE_MS,
   DEFAULT_NOTES_QUIET_MS,

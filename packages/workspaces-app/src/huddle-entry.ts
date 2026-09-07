@@ -21,7 +21,7 @@ import {
   parseCaptureMode,
   parseEngineName,
   parseRoomSpeakers,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { type RoomAudioProcessing, parseRoomAudio } from './meeting-audio.ts';
 
 /** `?huddle=1` — set by the Board, consumed by the markdown mount. */

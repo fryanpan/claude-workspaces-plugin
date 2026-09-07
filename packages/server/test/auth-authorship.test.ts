@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ElementAnchor, type User, emailIdentityId } from '@feedback/core';
+import { type ElementAnchor, type User, emailIdentityId } from '@claude-workspaces/core';
 import { activityLogPath } from '../src/activity.ts';
 import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { SESSION_COOKIE } from '../src/auth/session.ts';

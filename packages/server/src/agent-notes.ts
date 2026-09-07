@@ -25,7 +25,7 @@
  *    task, so the pane has ONE read per agent instead of a join. Lost on
  *    restart by design — the task-bound copy is the record.
  */
-import { agentIdForName } from '@feedback/core';
+import { agentIdForName } from '@claude-workspaces/core';
 import { isSharedAgentName, normalizeAgent } from './chat-audit.ts';
 import type { Task, TaskNote, TaskStore } from './tasks.ts';
 

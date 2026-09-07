@@ -19,7 +19,7 @@
  * All fixtures are synthetic. The repo is public.
  */
 
-import { type DocType, prose } from '@feedback/core';
+import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { type NotesLedger, withServerNotesSinks } from '../src/meeting-notes-doc.ts';
 import {

@@ -23,7 +23,7 @@
  */
 
 import { join } from 'node:path';
-import type { Task, TaskActor } from '@feedback/core/task-wire';
+import type { Task, TaskActor } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { AgentCommentQueue, type QueuedComment } from './agent-comment-queue.ts';
 import { AgentVoiceQueue, type QueuedVoiceRequest } from './agent-voice-queue.ts';

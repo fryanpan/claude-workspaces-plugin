@@ -1,3 +1,4 @@
+import { getContent } from '@claude-workspaces/core';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import {
@@ -19,7 +20,6 @@ import {
   keymap,
   lineNumbers,
 } from '@codemirror/view';
-import { getContent } from '@feedback/core';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import type { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';

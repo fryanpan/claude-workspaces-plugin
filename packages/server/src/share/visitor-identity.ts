@@ -1,4 +1,4 @@
-import { type User, guestNameFor } from '@feedback/core';
+import { type User, guestNameFor } from '@claude-workspaces/core';
 
 /**
  * What a share visitor is allowed to claim about who they are.

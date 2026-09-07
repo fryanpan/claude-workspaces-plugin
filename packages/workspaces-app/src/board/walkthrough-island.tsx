@@ -39,7 +39,7 @@
  * be answering about a queue several answers old. Same reasoning as the board
  * island's `knownAgentIds`: what changes per paint travels on the signal.
  */
-import { REVIEW_LIMITS, reviewItemBodyMarkdown } from '@feedback/core';
+import { REVIEW_LIMITS, reviewItemBodyMarkdown } from '@claude-workspaces/core';
 import { signal } from '@preact/signals';
 import { Fragment, render } from 'preact';
 import { type MutableRef, useLayoutEffect, useRef, useState } from 'preact/hooks';

@@ -1,4 +1,4 @@
-import { LEAD_PRESENCE_EVENT, type LeadPresence } from '@feedback/core';
+import { LEAD_PRESENCE_EVENT, type LeadPresence } from '@claude-workspaces/core';
 /**
  * The meeting doc's "nobody is listening" line.
  *

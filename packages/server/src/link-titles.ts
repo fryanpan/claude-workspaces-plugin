@@ -15,7 +15,7 @@
  * resource the address lies about. Every shape names a workspace, so this
  * holds for all of them.
  */
-import { parseWorkspaceLink } from '@feedback/core';
+import { parseWorkspaceLink } from '@claude-workspaces/core';
 import { taskIdOfBodyDoc } from './task-projection.ts';
 import type { TaskStatus } from './tasks.ts';
 

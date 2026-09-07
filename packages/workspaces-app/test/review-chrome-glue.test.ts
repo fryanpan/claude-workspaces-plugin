@@ -1,4 +1,4 @@
-import { type ReviewPayload, createThread, setCommentReview } from '@feedback/core';
+import { type ReviewPayload, createThread, setCommentReview } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { MountScope } from '../src/mount-scope.ts';

@@ -1,4 +1,4 @@
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
 import { type EditorHandle, createEditor } from '../editor.ts';

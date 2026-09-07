@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { MeetingTranscriptEvent } from '@feedback/core';
+import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
 import type { NotesComposeInput, NotesComposer, TickScheduler } from '../src/meeting-notes.ts';
 import { MeetingStore, readTranscript } from '../src/meetings.ts';
 import { BOT_ENGINE_NAME, RecallMeetingRelay } from '../src/recall-meeting.ts';

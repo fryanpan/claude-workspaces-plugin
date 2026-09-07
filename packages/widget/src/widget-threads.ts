@@ -7,7 +7,7 @@ import {
   escapeHtml as escape,
   formatTime,
   listThreads,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 

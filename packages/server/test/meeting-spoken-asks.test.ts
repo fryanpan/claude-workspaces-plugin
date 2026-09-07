@@ -17,7 +17,7 @@ import {
   MEETING_SAMPLE_RATE,
   meetingSocketPath,
   prose,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { type TickScheduler, createStubNotesComposer } from '../src/meeting-notes.ts';
 import type { CapturedItem, TaskCaptureInput } from '../src/meeting-task-capture.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';

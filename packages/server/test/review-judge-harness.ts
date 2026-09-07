@@ -14,7 +14,7 @@ import { expect } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildReviewJudgePrompt } from '@feedback/core/review-judge-prompt';
+import { buildReviewJudgePrompt } from '@claude-workspaces/core/review-judge-prompt';
 import type { ReviewJudge, ReviewJudgeInput } from '../src/review-judge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 

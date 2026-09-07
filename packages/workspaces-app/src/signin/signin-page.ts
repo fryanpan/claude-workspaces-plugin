@@ -1,4 +1,4 @@
-import { escapeHtml, storeUserName } from '@feedback/core';
+import { escapeHtml, storeUserName } from '@claude-workspaces/core';
 
 /**
  * The sign-in page: three states of one card, mounted at /signin.

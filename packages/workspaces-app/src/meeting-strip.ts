@@ -75,9 +75,9 @@ import {
   type TranscriptionEngineName,
   describeBotState,
   speakerDisplayName,
-} from '@feedback/core';
-import type { MeetingTranscriptEvent } from '@feedback/core';
-import { parseRoomSpeakers } from '@feedback/core';
+} from '@claude-workspaces/core';
+import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
+import { parseRoomSpeakers } from '@claude-workspaces/core';
 import { currentWorkspaceId } from './doc-path.ts';
 import {
   type AdvancedState,

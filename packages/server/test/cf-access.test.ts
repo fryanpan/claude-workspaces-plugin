@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ElementAnchor, type User, emailIdentityId } from '@feedback/core';
+import { type ElementAnchor, type User, emailIdentityId } from '@claude-workspaces/core';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { activityLogPath } from '../src/activity.ts';
 import { type CfAccessOptions, createCfAccessVerifier } from '../src/middleware/cf-access.ts';

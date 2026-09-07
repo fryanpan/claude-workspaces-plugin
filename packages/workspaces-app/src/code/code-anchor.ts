@@ -1,5 +1,5 @@
+import { anchors } from '@claude-workspaces/core';
 import type { EditorState } from '@codemirror/state';
-import { anchors } from '@feedback/core';
 import * as Y from 'yjs';
 
 /**

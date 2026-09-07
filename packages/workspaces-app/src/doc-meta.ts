@@ -1,4 +1,4 @@
-import type { HuddleKind } from '@feedback/core';
+import type { HuddleKind } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 import type { DocMeta } from './mount-context.ts';
 

@@ -15,7 +15,7 @@
  * that makes the choice survive a reload. Nothing in it reads board state
  * either.
  */
-import { escapeHtml } from '@feedback/core';
+import { escapeHtml } from '@claude-workspaces/core';
 import { MIC_ICON, SVG, SVG_ENDS } from '../icons.ts';
 // Defines <meeting-banner>, rendered by buildShell at the top of the board
 // column. Import for the side effect; the element manages itself.

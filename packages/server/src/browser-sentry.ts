@@ -15,7 +15,7 @@
  * Instrumenting the other three shells is only half of it. Their URLs carry
  * ids, so grouping by URL would neither compare across kinds nor be safe to
  * send — see `routePatternForSpan` and the scrub floor in
- * `@feedback/core/trace-privacy`. The `page_type` tag is what makes the
+ * `@claude-workspaces/core/trace-privacy`. The `page_type` tag is what makes the
  * comparison a GROUP BY rather than a path-prefix guess: four values, one
  * median and p95 each, side by side.
  *
@@ -37,7 +37,7 @@
  *
  * The DSN itself is box config (`CW_SENTRY_DSN`), never the repo.
  */
-import { type AssetManifest, assetHref } from '@feedback/core/asset-manifest';
+import { type AssetManifest, assetHref } from '@claude-workspaces/core/asset-manifest';
 
 /**
  * The kinds of page whose load times are compared. One value per surface a

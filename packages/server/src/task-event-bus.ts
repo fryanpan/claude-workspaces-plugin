@@ -18,7 +18,7 @@
  */
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { agentIdCandidates } from '@feedback/core';
+import { agentIdCandidates } from '@claude-workspaces/core';
 import type { AgentAttachment, TaskStoreEvent } from './tasks.ts';
 
 /** Where a workspace's append-only event audit log lives (plan §3.6: "the

@@ -28,7 +28,7 @@ import {
   readTaskReviewItem,
   reviewItemState,
   reviewPayloadVersion,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
 import type { ReviewGate, ThreadReviewGate } from './review-gate-types.ts';

@@ -22,7 +22,7 @@
  * closed panel tears the editor down. That is what lets a reader keep typing
  * through their own snapshot landing in the projection.
  */
-import type { FeedbackClient } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
 import type { AnyExtension } from '@tiptap/core';
 import type { CreateEditorOpts, EditorHandle } from '../editor.ts';
 import { BODY_LIVE_CLASS } from './board-detail-render.ts';

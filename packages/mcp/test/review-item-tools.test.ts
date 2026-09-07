@@ -26,7 +26,7 @@ import { type Server, createServer, get as httpGet } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { threadReviewItemId } from '@feedback/core/review-item-id';
+import { threadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isBackgroundRequest } from './harness/background-requests.ts';
 
