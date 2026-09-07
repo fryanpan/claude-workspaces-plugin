@@ -15212,7 +15212,7 @@ var TOOL_LIST = {
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD the row is on. Required WITH taskId — that note is addressed as /workspaces/<workspaceId>/tasks/<taskId>/notes. Without taskId the note goes to your current claim, which the server resolves, and no board is named or needed: this is the one tool where the board follows the id beside it."
+            description: "The BOARD the row is on — every note is addressed under one. With taskId it goes to /workspaces/<workspaceId>/tasks/<taskId>/notes; without, to your own notes on that board, where the server pins it to your current claim there. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board."
           },
           text: { type: "string" },
           taskId: {
@@ -17177,7 +17177,17 @@ async function handleDocsTool(name, a, ctx) {
       if (body.length > STATUS_TEXT_MAX) {
         return err2(`text is over ${STATUS_TEXT_MAX} chars — a status is a line to a few sentences; the full report is already on the Activity tab from your end-of-turn message`);
       }
-      const path = taskId !== undefined && taskId !== "" ? `${board()}/tasks/${encodeURIComponent(taskId)}/notes` : "/api/agent-notes";
+      let path;
+      if (taskId !== undefined && taskId !== "") {
+        path = `${board()}/tasks/${encodeURIComponent(taskId)}/notes`;
+      } else {
+        const given = typeof a.workspaceId === "string" ? a.workspaceId.trim() : "";
+        const ws = given !== "" ? given : (process.env.CW_WORKSPACE_ID ?? process.env.FEEDBACK_WORKSPACE_ID ?? "").trim();
+        if (ws === "") {
+          return err2("post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose row it lands on");
+        }
+        path = `/workspaces/${encodeURIComponent(ws)}/agents/${encodeURIComponent(AUTHOR.name)}/notes`;
+      }
       const res = await http("POST", path, {
         agent: AUTHOR.name,
         kind: "status",
@@ -18872,7 +18882,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.181";
+var PLUGIN_VERSION = "0.1.182";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

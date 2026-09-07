@@ -178,9 +178,12 @@ export async function handleDocsTool(
       // A status is a NOTE on the row (kind `status`, beside the hooks'
       // `turn` and `denial`), never a comment: the same body the Stop hook
       // posts, under the same agent name, to the row the caller names —
-      // or, with no taskId, to the hook route, which pins it to this
-      // agent's current claim. Empty and over-cap text are refused here,
-      // where the message can say why; the server would 400 either.
+      // or, with no taskId, to the agent's own notes route on the board,
+      // which pins it to this agent's current claim there. The board is
+      // the workspaceId argument, or the session's CW_WORKSPACE_ID — the
+      // same setting the hooks read, since a hook has no argument to
+      // carry one. Empty and over-cap text are refused here, where the
+      // message can say why; the server would 400 either.
       const { text, taskId } = a as { text?: unknown; taskId?: string };
       const body = typeof text === 'string' ? text.trim() : '';
       if (body === '') return err('text is empty — say where the work stands');
@@ -189,10 +192,22 @@ export async function handleDocsTool(
           `text is over ${STATUS_TEXT_MAX} chars — a status is a line to a few sentences; the full report is already on the Activity tab from your end-of-turn message`,
         );
       }
-      const path =
-        taskId !== undefined && taskId !== ''
-          ? `${board()}/tasks/${encodeURIComponent(taskId)}/notes`
-          : '/api/agent-notes';
+      let path: string;
+      if (taskId !== undefined && taskId !== '') {
+        path = `${board()}/tasks/${encodeURIComponent(taskId)}/notes`;
+      } else {
+        const given = typeof a.workspaceId === 'string' ? a.workspaceId.trim() : '';
+        const ws =
+          given !== ''
+            ? given
+            : (process.env.CW_WORKSPACE_ID ?? process.env.FEEDBACK_WORKSPACE_ID ?? '').trim();
+        if (ws === '') {
+          return err(
+            'post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose row it lands on',
+          );
+        }
+        path = `/workspaces/${encodeURIComponent(ws)}/agents/${encodeURIComponent(AUTHOR.name)}/notes`;
+      }
       const res = (await http('POST', path, {
         agent: AUTHOR.name,
         kind: 'status',

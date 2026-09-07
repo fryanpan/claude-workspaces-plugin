@@ -6,8 +6,10 @@
  * comment is meant to be an ask, a decision, or a reply to a person. A
  * status is a NOTE (kind `status`, beside the hooks' `turn` and `denial`):
  * with `taskId` it goes to the row the agent names
- * (`POST /api/tasks/:id/notes`); without, to the hook route
- * (`POST /api/agent-notes`), which pins it to the agent's current claim.
+ * (`POST /workspaces/:ws/tasks/:id/notes`); without, to the agent's own
+ * notes on the board (`POST /workspaces/:ws/agents/:name/notes`), which
+ * pins it to the agent's current claim there. The board for the bare form
+ * comes from `CW_WORKSPACE_ID`, the hooks' setting.
  *
  * Driven from SOURCE (`bun run src/mcp.ts`, the pattern
  * restore-notice-delivery.test.ts uses) rather than the committed bundle:
@@ -80,7 +82,7 @@ function payload(reply: Reply): Record<string, unknown> {
  * top of it.
  */
 function notePosts(): Recorded[] {
-  return seen.filter((r) => r.method === 'POST' && /\/(agent-)?notes$/.test(r.path));
+  return seen.filter((r) => r.method === 'POST' && /\/notes$/.test(r.path));
 }
 
 function last(): Recorded {
@@ -118,6 +120,7 @@ beforeAll(async () => {
       CW_BASE_URL: `http://127.0.0.1:${port}`,
       FEEDBACK_BASE_URL: `http://127.0.0.1:${port}`,
       CW_AGENT_NAME: AGENT,
+      CW_WORKSPACE_ID: 'w-home',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -175,10 +178,10 @@ describe('post_status — where the work stands, as a note', () => {
     expect(out.taskId).toBe('t-1');
   });
 
-  it('goes to the current-claim route when taskId is omitted, and says when no row took it', async () => {
+  it("goes to the agent's notes on the session's board when taskId is omitted, and says when no row took it", async () => {
     const reply = await call('post_status', { text: 'Blocked on the redirect decision.' });
     const out = payload(reply);
-    expect(last().path).toBe('/api/agent-notes');
+    expect(last().path).toBe('/workspaces/w-home/agents/Beacon%20Bot/notes');
     expect(last().body).toEqual({
       agent: AGENT,
       kind: 'status',

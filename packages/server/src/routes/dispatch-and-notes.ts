@@ -26,7 +26,7 @@ export async function handleDispatchAndNoteRoutes(
     parallelismCapView,
     proposeAllowRule,
   } = ctx;
-  const { req, pathname, scope, visitor } = rq;
+  const { req, scope, visitor } = rq;
   // --- REST: builder dispatches ---
   // The lead's statement that a builder is working a task in a private
   // worktree, so the stall loop can read worktree churn as the row
@@ -124,27 +124,73 @@ export async function handleDispatchAndNoteRoutes(
     return j(202, { ok: true, taskId: res.task.id, workspaceId: res.task.workspaceId });
   }
   // --- REST: agent turn / denial / status notes on the CURRENT row ---
-  // The plugin's Stop and PermissionDenied hooks post once per turn;
-  // the server pins it to the agent's current row ONLY when that is
-  // unambiguous — exactly one in-progress claim held. An agent holding
-  // several rows gets the note kept in its ring marked `needsFiling`
-  // rather than guessed onto the newest claim (the guess measured
-  // wrong ~3 in 4 — see agent-notes.ts). A body `taskId` is an
-  // explicit address and always wins. 202 rather than 200: the hook
-  // fires with the turn already over and never reads the answer.
-  if (pathname === '/api/agent-notes') {
+  // The plugin's Stop and PermissionDenied hooks post once per turn to
+  // `/workspaces/<ws>/agents/<name>/notes`; the server pins it to the
+  // agent's current row ON THAT BOARD, only when that is unambiguous —
+  // exactly one in-progress claim held there. An agent holding several
+  // rows on the board gets the note kept in its ring marked `needsFiling`
+  // rather than guessed onto the newest claim (the guess measured wrong
+  // ~3 in 4 — see agent-notes.ts). A body `taskId` is an explicit address
+  // and always wins. 202 rather than 200: the hook fires with the turn
+  // already over and never reads the answer.
+  //
+  // This was `POST /api/agent-notes`, the one board-owned route the
+  // canonical-routes cutover left top-level because a hook has no board
+  // in hand. The owner chose to move it anyway (2026-09-06, "Still move
+  // it"): the hook now reads the board from its launch environment, and
+  // the URL names the agent so the middleware's one guard covers it.
+  const agentNotesMatch = matchRest(scope, /^agents\/([^/]+)\/notes$/);
+  // Off `rq` rather than the destructured `scope`: `restIs` above is a type
+  // predicate, and its false branch has narrowed `scope` to undefined.
+  const boardId = rq.scope?.workspaceId;
+  if (agentNotesMatch && boardId !== undefined) {
     // Same defense-in-depth posture as the agent-watches route: no
     // share host reaches here today, and this keeps a later
     // allowlisting from letting an external reviewer write a session's
-    // words onto a board row.
+    // words onto a board row, or read them off one.
     if (visitor) return j(403, { error: 'not available to share visitors' });
+    const agent = decodeURIComponent(agentNotesMatch[1] ?? '').trim();
+    if (agent.length === 0 || agent.length > 200) return j(400, { error: 'bad agent' });
+    if (isSharedAgentName(agent)) {
+      return j(400, { error: SHARED_IDENTITY_ERROR, message: SHARED_IDENTITY_MESSAGE });
+    }
+    if (req.method === 'GET') {
+      // Display fields only — sessionId stays in the store, like the
+      // task-projection read (projectNotes) already keeps it out. The
+      // ring is per agent across boards; the address names one board, so
+      // the read is what that board can see of the agent.
+      const notes = agentNotes
+        .list(agent)
+        .filter((n) => n.workspaceId === boardId)
+        .map((n) => ({
+          at: n.at,
+          kind: n.kind,
+          text: n.text,
+          agent: n.agent,
+          ...(n.taskId !== undefined ? { taskId: n.taskId } : {}),
+          ...(n.workspaceId !== undefined ? { workspaceId: n.workspaceId } : {}),
+          ...(n.needsFiling ? { needsFiling: true } : {}),
+        }));
+      return j(200, { agent, notes });
+    }
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
-    const parsed = parseAgentNote(await safeJson(req));
+    const raw = await safeJson(req);
+    // The URL names the agent; a body `agent` is overwritten rather than
+    // compared — the hook route accepted the name in the body before the
+    // address carried it, and a stale hook must not be refused for
+    // saying the same thing twice.
+    if (raw !== null && typeof raw === 'object') {
+      (raw as Record<string, unknown>).agent = agent;
+    }
+    const parsed = parseAgentNote(raw);
     if (!parsed.ok) return j(400, { error: parsed.error, message: parsed.message });
     const { note } = parsed;
     if (note.taskId !== undefined) {
       // The caller named its row; a bad address is its error to hear,
-      // not a silent ring drop.
+      // not a silent ring drop — and a row on some other board is a bad
+      // address under this one.
+      const named = taskStore.getTask(note.taskId);
+      if (!named || named.workspaceId !== boardId) return j(404, { error: 'not found' });
       const res = taskStore.appendNote(note.taskId, {
         kind: note.kind,
         text: note.text,
@@ -157,7 +203,7 @@ export async function handleDispatchAndNoteRoutes(
       agentNotes.record({ ...note, taskId: res.task.id, workspaceId: res.task.workspaceId });
       return j(202, { ok: true, taskId: res.task.id, workspaceId: res.task.workspaceId });
     }
-    const target = resolveNoteTarget(taskStore, note.agent);
+    const target = resolveNoteTarget(taskStore, note.agent, boardId);
     const task = target.task;
     if (task) {
       const res = taskStore.appendNote(task.id, {
@@ -172,36 +218,16 @@ export async function handleDispatchAndNoteRoutes(
     }
     agentNotes.record({
       ...note,
-      ...(task ? { taskId: task.id, workspaceId: task.workspaceId } : {}),
+      workspaceId: boardId,
+      ...(task ? { taskId: task.id } : {}),
       ...(target.ambiguous ? { needsFiling: true } : {}),
     });
     return j(202, {
       ok: true,
-      ...(task ? { taskId: task.id, workspaceId: task.workspaceId } : {}),
+      workspaceId: boardId,
+      ...(task ? { taskId: task.id } : {}),
       ...(target.ambiguous ? { needsFiling: true } : {}),
     });
-  }
-  const agentNotesMatch = pathname.match(/^\/api\/agents\/([^/]+)\/notes$/);
-  if (agentNotesMatch) {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
-    if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
-    const agent = decodeURIComponent(agentNotesMatch[1] ?? '').trim();
-    if (agent.length === 0 || agent.length > 200) return j(400, { error: 'bad agent' });
-    if (isSharedAgentName(agent)) {
-      return j(400, { error: SHARED_IDENTITY_ERROR, message: SHARED_IDENTITY_MESSAGE });
-    }
-    // Display fields only — sessionId stays in the store, like the
-    // task-projection read (projectNotes) already keeps it out.
-    const notes = agentNotes.list(agent).map((n) => ({
-      at: n.at,
-      kind: n.kind,
-      text: n.text,
-      agent: n.agent,
-      ...(n.taskId !== undefined ? { taskId: n.taskId } : {}),
-      ...(n.workspaceId !== undefined ? { workspaceId: n.workspaceId } : {}),
-      ...(n.needsFiling === true ? { needsFiling: true } : {}),
-    }));
-    return j(200, { agent, notes });
   }
   return undefined;
 }

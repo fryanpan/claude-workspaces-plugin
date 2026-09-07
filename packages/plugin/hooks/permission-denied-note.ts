@@ -4,8 +4,10 @@
  *
  * When auto mode denies a tool call, posts the call's SHAPE — the first two
  * tokens of a Bash command (`git rm`), or just the tool name for anything
- * else; never a path, URL, token or argument — to `POST /api/agent-notes`,
- * so the activity pane can show what an agent kept being refused.
+ * else; never a path, URL, token or argument — to
+ * `POST /workspaces/{id}/agents/{name}/notes` (the board from
+ * `CW_WORKSPACE_ID`), so the activity pane can show what an agent kept
+ * being refused.
  *
  * The first time it fires on a machine it logs the payload's top-level key
  * NAMES (never values) to stderr, so the live shape is learned. Never blocks

@@ -1,6 +1,7 @@
 /**
  * Agent notes — the pure half of the plugin's Stop and PermissionDenied
- * hooks. Each hook posts one note to `POST /api/agent-notes` so a task's
+ * hooks. Each hook posts one note to
+ * `POST /workspaces/{id}/agents/{name}/notes` so a task's
  * Activity tab can say what an agent did lately: the closing message of
  * every turn — the WHOLE message, reduced, not its first line (the owner
  * reads and replies to these on the task, so the short form was a report
@@ -30,7 +31,7 @@ export type EnvLike = Record<string, string | undefined>;
 
 export type NoteKind = 'turn' | 'denial';
 
-/** The wire body `POST /api/agent-notes` accepts. `cwd` is accepted there
+/** The wire body the notes route accepts. `cwd` is accepted there
  *  and dropped (a host path is not workspace content); it rides along so a
  *  future reader can decide. */
 export interface NotePayload {
@@ -67,6 +68,18 @@ function readRenamed(env: EnvLike, current: string, legacy: string): string | un
 
 export function readAgentName(env: EnvLike): string | undefined {
   return readRenamed(env, 'CW_AGENT_NAME', 'FEEDBACK_AGENT_NAME')?.trim();
+}
+
+/**
+ * The board this session's notes land on. Every note route lives under
+ * `/workspaces/{id}` (the owner moved the last top-level one, 2026-09-06),
+ * and a hook has no board in hand — so it is a launch setting, read once
+ * like the agent name, and a session launched without it posts nothing
+ * until it is restarted with it set. That silence is the cost the owner
+ * accepted when choosing the move over leaving the route where it was.
+ */
+export function readWorkspaceId(env: EnvLike): string | undefined {
+  return readRenamed(env, 'CW_WORKSPACE_ID', 'FEEDBACK_WORKSPACE_ID')?.trim();
 }
 
 /**
@@ -175,12 +188,14 @@ export function payloadKeys(payload: unknown): string[] {
  *  refusal, a timeout, a thrown fetch — and never rejects. */
 export async function postNote(
   baseUrl: string,
+  workspaceId: string,
   body: NotePayload,
   fetchImpl: typeof fetch = fetch,
   timeoutMs = POST_TIMEOUT_MS,
 ): Promise<boolean> {
   try {
-    const res = await fetchImpl(`${baseUrl}/api/agent-notes`, {
+    const path = `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(body.agent)}/notes`;
+    const res = await fetchImpl(`${baseUrl}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
@@ -230,9 +245,11 @@ export async function runHook(kind: NoteKind, stdin: string, deps: HookDeps): Pr
     const decision =
       kind === 'turn' ? decideTurnNote(payload, ctx) : decideDenialNote(payload, ctx);
     if ('skip' in decision) return 0;
+    const workspaceId = readWorkspaceId(deps.env);
+    if (!workspaceId) return 0;
     const baseUrl = deps.baseUrl ? deps.baseUrl() : resolveBaseUrl(deps.env, deps.discoveryPort);
     if (!baseUrl) return 0;
-    await postNote(baseUrl, decision.post, deps.fetch ?? fetch);
+    await postNote(baseUrl, workspaceId, decision.post, deps.fetch ?? fetch);
   } catch {
     // fail open
   }

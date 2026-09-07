@@ -1,10 +1,10 @@
 /**
  * Agent turn / denial notes over REST: the plugin's Stop and PermissionDenied
- * hooks post one-liners to `POST /api/agent-notes`, the server pins each to
+ * hooks post one-liners to `POST /workspaces/:ws/agents/:name/notes`, the server pins each to
  * the agent's CURRENT task (its latest in-progress claim) and exposes it on
  * the task's projected detail, newest first; a note from an agent holding no
  * task lands only in the per-agent ring buffer behind
- * `GET /api/agents/:name/notes`.
+ * `GET /workspaces/:ws/agents/:name/notes`.
  *
  * The server stores the text VERBATIM — the hook is what reduces a message
  * to a shape. The "secret-looking value survives" case below is the positive
@@ -54,8 +54,10 @@ describe('agent notes routes', () => {
     expect(res.ok, `${res.status} ${await res.clone().text()}`).toBe(true);
     return res.json() as Promise<T>;
   };
+  const notesPath = (agent: string) =>
+    `/workspaces/${WS}/agents/${encodeURIComponent(agent)}/notes`;
   const note = (agent: string, text: string, extra: Record<string, unknown> = {}) =>
-    post('/api/agent-notes', { agent, kind: 'turn', text, at: Date.now(), ...extra });
+    post(notesPath(agent), { agent, kind: 'turn', text, at: Date.now(), ...extra });
 
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'agent-notes-routes-'));
@@ -120,28 +122,27 @@ describe('agent notes routes', () => {
   }
 
   const ring = async (agent: string) =>
-    jj<{ notes: RingNote[] }>(await fetch(`${base}/api/agents/${encodeURIComponent(agent)}/notes`));
+    jj<{ notes: RingNote[] }>(await fetch(`${base}${notesPath(agent)}`));
 
   it('refuses a request from a host the server does not recognise', async () => {
     const r = await post(
-      '/api/agent-notes',
+      notesPath(LEAD.name),
       { agent: LEAD.name, kind: 'turn', text: 'Opened the PR' },
       { host: 'notes.attacker.example' },
     );
     expect(r.status).toBe(403);
     expect(await r.json()).toEqual({ error: 'unknown_host' });
-    const g = await fetch(`${base}/api/agents/${LEAD.name}/notes`, {
+    const g = await fetch(`${base}${notesPath(LEAD.name)}`, {
       headers: { host: 'notes.attacker.example' },
     });
     expect(g.status).toBe(403);
   });
 
   it('400s a malformed body and 405s the wrong method', async () => {
+    // The URL names the agent now, so a missing or shared body `agent`
+    // is no longer the body's fault — those two live in the address below.
     const bad: Array<[string, unknown]> = [
       ['not json', '{nope'],
-      ['no agent', { kind: 'turn', text: 'x' }],
-      ['empty agent', { agent: '   ', kind: 'turn', text: 'x' }],
-      ['shared agent name', { agent: 'agent', kind: 'turn', text: 'x' }],
       ['bad kind', { agent: 'Cartographer', kind: 'shout', text: 'x' }],
       ['missing text', { agent: 'Cartographer', kind: 'turn' }],
       ['empty text', { agent: 'Cartographer', kind: 'denial', text: '  ' }],
@@ -149,14 +150,18 @@ describe('agent notes routes', () => {
       ['non-numeric at', { agent: 'Cartographer', kind: 'turn', text: 'x', at: 'now' }],
     ];
     for (const [label, body] of bad) {
-      const r = await post('/api/agent-notes', body);
+      const r = await post(notesPath('Cartographer'), body);
       expect(r.status, label).toBe(400);
     }
-    expect((await fetch(`${base}/api/agent-notes`)).status).toBe(405);
-    expect((await fetch(`${base}/api/agents/${LEAD.name}/notes`, { method: 'POST' })).status).toBe(
-      405,
-    );
-    expect((await fetch(`${base}/api/agents/agent/notes`)).status).toBe(400);
+    expect((await fetch(`${base}${notesPath(LEAD.name)}`, { method: 'PUT' })).status).toBe(405);
+    expect((await fetch(`${base}${notesPath('agent')}`)).status).toBe(400);
+    expect((await post(notesPath('agent'), { kind: 'turn', text: 'x' })).status).toBe(400);
+    // A board that does not exist is 404 from the one middleware, never a
+    // note written anywhere.
+    expect(
+      (await post('/workspaces/w-gone/agents/Cartographer/notes', { kind: 'turn', text: 'x' }))
+        .status,
+    ).toBe(404);
   });
 
   it('pins a note to the agent’s current task and projects it newest first', async () => {
@@ -166,7 +171,7 @@ describe('agent notes routes', () => {
     const first = await note(LEAD.name, 'Read the scout digest', { sessionId: 'sess-1' });
     expect(first.status).toBe(202);
     expect(await first.json()).toMatchObject({ ok: true, taskId, workspaceId: wsId });
-    const second = await post('/api/agent-notes', {
+    const second = await post(notesPath(LEAD.name), {
       agent: LEAD.name,
       kind: 'denial',
       text: 'git rm',

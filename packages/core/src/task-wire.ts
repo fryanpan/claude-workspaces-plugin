@@ -204,10 +204,11 @@ export interface TaskEvidenceAmendment {
  * What an agent's session posted about this row — the end-of-turn message
  * (`turn`), the shape of a tool call auto mode refused (`denial`), or a
  * status the agent chose to report (`status`). The first two come from the
- * plugin's Stop / PermissionDenied hooks through `POST /api/agent-notes`,
- * pinned to whichever row was the agent's current claim when they arrived;
- * a `status` names its row (`POST /api/tasks/:id/notes`, the MCP verb's
- * route). Never written by a person. Stored VERBATIM: the poster is what
+ * plugin's Stop / PermissionDenied hooks through
+ * `POST /workspaces/{id}/agents/{name}/notes`, pinned to whichever row on
+ * that board was the agent's current claim when they arrived; a `status`
+ * names its row (`POST /workspaces/{id}/tasks/{taskId}/notes`, the MCP
+ * verb's route). Never written by a person. Stored VERBATIM: the poster is what
  * keeps paths and tokens out of the text; the server does not filter.
  *
  * Notes are the row's Activity tab, not its comment thread: a comment is an
