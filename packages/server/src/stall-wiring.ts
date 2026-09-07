@@ -446,6 +446,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       transitions: t.transitions,
       ownerKind: ownerKindOf(t) as string,
       updatedAt: t.updatedAt,
+      ...(t.schedule !== undefined ? { schedule: t.schedule } : {}),
       ...(t.bodyWrittenAt !== undefined ? { bodyWrittenAt: t.bodyWrittenAt } : {}),
       ...(t.titleWrittenAt !== undefined ? { titleWrittenAt: t.titleWrittenAt } : {}),
       // A note's own clock, not just the `updatedAt` bump it causes: the

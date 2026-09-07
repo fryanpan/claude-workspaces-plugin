@@ -153,6 +153,30 @@ describe('buildQueue — a deferred row is a triage row', () => {
   });
 });
 
+describe('buildQueue — a rule row is never work', () => {
+  it('drops a row carrying a schedule, and keeps its instance and the row beside it', () => {
+    const rule = task({
+      id: 't-rule',
+      goal: 'g1',
+      schedule: { rule: { kind: 'every', everyMs: 86_400_000 }, armedAt: 1 },
+    });
+    // The instance the rule filed carries `recurrenceOf`, not `schedule`.
+    const instance = task({
+      id: 't-instance',
+      goal: 'g1',
+      recurrenceOf: { taskId: 't-rule', occurrenceAt: 2 },
+    });
+    const plain = task({ id: 't-plain', goal: 'g1' });
+    const ids = buildQueue([rule, instance, plain], GOALS).map((r) => r.id);
+    expect(ids).toEqual(['t-instance', 't-plain']);
+    // Widening to blocked rows does not let it back in: it is not blocked,
+    // it is not work.
+    expect(
+      buildQueue([rule, instance, plain], GOALS, { includeBlocked: true }).map((r) => r.id),
+    ).toEqual(['t-instance', 't-plain']);
+  });
+});
+
 describe('summarizeGoals', () => {
   it('lists the bands in priority order, with counts', () => {
     const rows = summarizeGoals(

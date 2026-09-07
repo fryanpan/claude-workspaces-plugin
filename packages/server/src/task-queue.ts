@@ -227,7 +227,19 @@ export function buildQueue(
   // share, so excluding it here excludes it from both — which is the point.
   // Every other list (the board, `list_tasks`) reads the store directly and
   // still shows triage rows in their band.
-  const open = tasks.filter((t) => t.status !== 'done' && t.status !== 'triage');
+  //
+  // A RULE ROW is excluded here too. A row carrying a `schedule` sits in
+  // `todo` for as long as the rule lives, by design — the rule's status never
+  // changes, its INSTANCES carry the work — so it is a permanent member of
+  // any status-based ready set. The ready nudge named one as "the top of the
+  // queue" to the first peer with live rules (2026-09-07), and a rule's body
+  // is a complete runbook, so a session that did as it was told would have
+  // run the day's digest off-schedule. Instances carry `recurrenceOf`, not
+  // `schedule`, and stay eligible; `scheduledRows` in the scheduler reads the
+  // store directly and never sees this filter.
+  const open = tasks.filter(
+    (t) => t.status !== 'done' && t.status !== 'triage' && t.schedule === undefined,
+  );
   const wanted = opts.assignee;
   const matches =
     opts.owner?.matches ?? (wanted === undefined ? undefined : (t: Task) => t.assignee === wanted);
