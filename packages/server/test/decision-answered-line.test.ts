@@ -50,8 +50,8 @@ describe('the decision.answered channel line only sends a reader to links that e
       body: JSON.stringify(body),
     });
 
-  /** The line an attached agent would see for the last answer recorded. */
-  const lastAnsweredLine = (): string => {
+  /** The last `decision.answered` row the server wrote to the log. */
+  const lastAnsweredRow = (): DecisionAnsweredPayload => {
     const path = eventsLogPath(dataDir, wsId);
     expect(existsSync(path), 'no events log — nothing was recorded').toBe(true);
     const rows = readFileSync(path, 'utf8')
@@ -63,8 +63,10 @@ describe('the decision.answered channel line only sends a reader to links that e
     // A row that never reached the log would render nothing, which makes
     // every assertion below vacuous.
     expect(row, 'no decision.answered row in the log').toBeDefined();
-    return decisionAnsweredLine(row as DecisionAnsweredPayload);
+    return row as DecisionAnsweredPayload;
   };
+  /** The line an attached agent would see for the last answer recorded. */
+  const lastAnsweredLine = (): string => decisionAnsweredLine(lastAnsweredRow());
 
   /** Answer a fresh decision task carrying `links`, and render its row. */
   const answerDecisionWith = async (links: unknown[]): Promise<string> => {
@@ -121,5 +123,54 @@ describe('the decision.answered channel line only sends a reader to links that e
     // …and nothing is left dangling where the clause used to sit.
     expect(line.trimEnd()).toBe(line);
     expect(line).not.toMatch(/—\s*$/);
+  });
+
+  it('names what was asked beside the answer, so a bare option label is not orphaned', async () => {
+    // The case the lead hit: a review ITEM on a row, whose headline is not
+    // the row's title, answered with an option label. The frame has to say
+    // which question "You merge it" answers without a lookup.
+    const created = await post(`/workspaces/${wsId}/tasks`, {
+      title: 'Land the search work',
+      assignee: 'human',
+      body: 'Two candidate merges are staged behind this row.',
+      author: AGENT,
+    });
+    expect(created.status).toBe(200);
+    const task = ((await created.json()) as { task: Task }).task;
+    const filed = await post(`/workspaces/${WS}/tasks/${task.id}/review-items`, {
+      review: {
+        review_type: 'decision',
+        headline: 'Which merge goes first — the index PR or the ranking PR?',
+        detail: 'Both are green. The index PR is larger; the ranking PR depends on nothing.',
+        options: [
+          { id: 'index', label: 'Index first' },
+          { id: 'ranking', label: 'You merge it' },
+        ],
+      },
+      author: AGENT,
+    });
+    expect(filed.status).toBe(200);
+    const item = ((await filed.json()) as { item: { id: string } }).item;
+    const answered = await post(
+      `/workspaces/${WS}/tasks/${task.id}/review-items/${item.id}/answer`,
+      {
+        text: 'You merge it',
+        answeredWith: 'ranking',
+        author: PERSON,
+      },
+    );
+    expect(answered.status).toBe(200);
+    const row = lastAnsweredRow();
+    // The payload itself carries the question — a consumer that never
+    // fetches the task can still say what was asked and what was chosen.
+    expect(row.headline).toBe('Which merge goes first — the index PR or the ranking PR?');
+    expect(row.answer).toBe('You merge it');
+    const line = decisionAnsweredLine(row);
+    expect(line).toContain('"You merge it"');
+    expect(line).toContain('Which merge goes first');
+    // The legacy path — a decision ROW, whose title is the question — says so too.
+    const legacy = await answerDecisionWith([]);
+    expect(legacy).toContain('Rebuild the index now or after the freeze?');
+    expect(lastAnsweredRow().headline).toBe('Rebuild the index now or after the freeze?');
   });
 });

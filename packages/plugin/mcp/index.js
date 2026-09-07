@@ -13991,8 +13991,9 @@ function truncate2(s, n) {
 }
 function decisionAnsweredLine(p) {
   const by = p.actor?.name ? ` by ${p.actor.name}` : "";
+  const asked = p.headline ? ` to "${truncate2(p.headline, 100)}"` : "";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? " — walk its links as the propagation checklist" : "";
-  return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${walk}`;
+  return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${walk}`;
 }
 
 // packages/mcp/src/nudge-line.ts
@@ -14072,7 +14073,8 @@ function readyIdleLine(p) {
 }
 function reviewAnsweredLine(p) {
   const about = namedTask(p);
-  const subject = about ? `your review item on ${about}` : "a review item you raised";
+  const item = p.headline ? `your review item "${truncate3(p.headline, 100)}"` : "your review item";
+  const subject = about ? `${item} on ${about}` : p.headline ? item : "a review item you raised";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? "; walk its links as the propagation checklist" : "";
   return `[workspace.review_answered] ${subject} has an answer — read it and act on it now${walk}.`;
 }
@@ -18899,7 +18901,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.183";
+var PLUGIN_VERSION = "0.1.184";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

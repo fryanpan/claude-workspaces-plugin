@@ -176,6 +176,9 @@ describe('the review_answered wake only sends its reader to links that exist', (
     expect(line).toContain('Rebuild the index now or after the freeze?');
     expect(line).toContain('read it and act on it now');
     expect(line).toContain(CLAUSE);
+    // The frame says what was asked, not only which row: on a decision row
+    // the question is the title, and the field carries it on its own.
+    expect(frame.data?.headline).toBe('Rebuild the index now or after the freeze?');
   });
 
   it('carries an empty list and says nothing about links when the row has none', async () => {

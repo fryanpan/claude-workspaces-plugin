@@ -880,6 +880,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         taskId: ev.taskId,
         ...(answered?.title !== undefined ? { taskTitle: answered.title } : {}),
         ...(answered?.links !== undefined ? { taskLinks: answered.links } : {}),
+        ...(ev.headline !== undefined ? { headline: ev.headline } : {}),
         actorId: ev.actor?.id,
       });
     }
