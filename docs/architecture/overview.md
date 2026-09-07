@@ -118,15 +118,20 @@ need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.
 request, and all three take an injected `now` so a test moves the clock
 instead of waiting: the two board wakes in the Keep-moving group, and
 `task-scheduler.ts`, which files an instance each time a row's schedule comes
-due ([scheduled-tasks](scheduled-tasks.md)). The scheduler joins the Board
-group under its `task-*.ts` glob rather than changing the picture — it reads
-and writes the same rows through the same store, and only its clock is new.
+due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
+`task-run-record.ts` read each rule's last run back — recording the success,
+and filing one review item when a rule has gone stale. Both join the Board
+group under its `task-*.ts` glob rather than changing the picture — they read
+and write the same rows through the same store, and only the clock is new.
 
-**A schedule rule has one spelling.** `core` holds five modules for it and no
+**A schedule rule has one spelling.** `core` holds six modules for it and no
 other package holds any: `task-schedule.ts` (the rule type and the occurrence
 arithmetic), `schedule-timezone.ts` (instant ⇄ wall clock),
 `schedule-missed.ts` (what a rule wants done about an occurrence the server
 missed — catch up, skip, or fold into the open catch-up that is the lock),
+`schedule-run-record.ts` (what the row says about its last run, and when a
+rule's last success is old enough to call it stale — one derivation the board
+and the server both read),
 `schedule-phrase.ts` (a rule written as canonical English) and
 `schedule-phrase-parse.ts` (English read back into a rule). The last two are a
 pair and are asserted to be inverses, which is what lets the editor show one

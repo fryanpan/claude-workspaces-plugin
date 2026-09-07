@@ -3240,6 +3240,26 @@ body.board-body {
 .board-next-soon {
   color: var(--accent);
 }
+/* The run record: what the last run did and how old that reading is. Not a
+   `.board-badge` either, for the same reason as `.board-next` — a phone row
+   must still say whether the job is running. Muted, because most of the time
+   it says "fine"; it takes the red only when the rule is STALE, which is also
+   when the state slot says the word. */
+.board-last {
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  align-self: center;
+  flex: none;
+}
+.board-last.is-stale {
+  color: var(--red);
+  font-weight: 600;
+}
+.board-state-stale {
+  color: var(--red);
+}
 /* The recurrence mark on a LIVE INSTANCE — a row in its own goal band that
    the scheduler created. Small, muted and icon-only: it says what kind of row
    this is, and the rule it links to says the rest. */
