@@ -24,6 +24,9 @@ export interface TaskRow {
    */
   ownerKind?: string;
   assignee?: string;
+  /** Present on a rule row (`Task.schedule`); the classifier needs only the
+   *  fact, so it is typed as loosely as the wire allows. */
+  schedule?: unknown;
   /** Row-edit timestamps — activity the /events feed has measurably missed. */
   updatedAt?: number;
   bodyWrittenAt?: number;
@@ -56,7 +59,10 @@ export type Bucket =
   | 'blocked-on-dependency'
   | 'in-progress'
   | 'ready-unpicked'
-  | 'backlog-unranked';
+  | 'backlog-unranked'
+  /** Carries a schedule rule: `todo` for life by design, its instances are
+   *  the work. Never stalled, never dispatched. */
+  | 'scheduled-rule';
 
 export interface Classified {
   id: string;
@@ -294,7 +300,11 @@ export function classifyOpenTasks(
     const askedInNoteAt =
       hasPendingAsk || boardSaysOwnerWaits ? undefined : noteAskStartedAt(t, noteAsk);
     let bucket: Bucket;
-    if (hasPendingAsk) bucket = 'blocked-on-owner';
+    // A rule row first: whatever else is true of it, it is not work anyone
+    // picks up, and reading it as ready-unpicked is how the nudge sent a
+    // session at a runbook (2026-09-07).
+    if (t.schedule !== undefined) bucket = 'scheduled-rule';
+    else if (hasPendingAsk) bucket = 'blocked-on-owner';
     else if (boardSaysOwnerWaits || askedInNoteAt !== undefined)
       bucket = 'blocked-on-owner-unfiled';
     else if (unmet.length > 0) bucket = 'blocked-on-dependency';

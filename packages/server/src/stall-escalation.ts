@@ -165,6 +165,7 @@ const BUCKET_WORDS: Record<string, string> = {
   'ready-unpicked': 'nothing blocking it and nobody on it',
   'builder-silent': 'its builder stopped reporting',
   'backlog-unranked': 'ranked under no goal',
+  'scheduled-rule': 'a schedule rule, whose instances are the work',
 };
 
 /** "3h", "45m", "2d" — a SPAN, not a moment, so it never reads as a clock

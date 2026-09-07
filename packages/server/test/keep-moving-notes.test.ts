@@ -253,3 +253,27 @@ describe('classifyOpenTasks — a note that says the agent is waiting on a perso
     expect(judged).toBe(1);
   });
 });
+
+describe('classifyOpenTasks — a rule row is never stalled', () => {
+  it('buckets a todo row carrying a schedule as scheduled-rule, however long it has sat', () => {
+    const rule = quietRow({
+      id: 't-rule',
+      status: 'todo',
+      transitions: [{ ts: now - 5000 * MIN, to: 'todo' }],
+      createdAt: now - 5000 * MIN,
+      schedule: { rule: { kind: 'every', everyMs: 86_400_000 }, armedAt: 1 },
+    });
+    // Control: the same row without the rule is ready-unpicked and stalled.
+    const plain = quietRow({
+      id: 't-plain',
+      status: 'todo',
+      transitions: [{ ts: now - 5000 * MIN, to: 'todo' }],
+      createdAt: now - 5000 * MIN,
+    });
+    const [r, p] = classifyOpenTasks([rule, plain], [], [], now, STALL, bands);
+    expect(r?.bucket).toBe('scheduled-rule');
+    expect(r?.stalled).toBe(false);
+    expect(p?.bucket).toBe('ready-unpicked');
+    expect(p?.stalled).toBe(true);
+  });
+});
