@@ -282,6 +282,39 @@ describe('what a scheduled row says', () => {
     expect(late).toMatchObject({ last: 'Running 2d', stale: true });
   });
 
+  it('reads an open instance as waiting while its wake is owed, and red once nobody answered', () => {
+    const instanceId = 't-waits';
+    const open = task({
+      id: instanceId,
+      status: 'todo',
+      recurrenceOf: { taskId: 't-rule', occurrenceAt: NOW - HOUR },
+    });
+    const byId = new Map<string, BoardTask>([[open.id, open]]);
+    const attempts = [{ at: NOW - HOUR, via: 'nobody' as const }];
+    const rule = (wake: object) =>
+      task({
+        id: 't-rule',
+        schedule: weekdays9({
+          armedAt: NOW - 5 * HOUR,
+          state: {
+            lastFiredAt: NOW - HOUR,
+            lastInstanceId: instanceId,
+            wake: { instanceId, attempts, ...wake },
+          },
+        }),
+      });
+    const waiting = rule({});
+    expect(scheduleChips(waiting, NOW, {}, lastInstanceFor(waiting, byId))).toMatchObject({
+      last: 'Waiting 1h',
+      stale: false,
+    });
+    const gaveUp = rule({ exhaustedItemId: 'r-1' });
+    expect(scheduleChips(gaveUp, NOW, {}, lastInstanceFor(gaveUp, byId))).toMatchObject({
+      last: 'Unanswered 1h',
+      stale: true,
+    });
+  });
+
   it('asks the last instance whether it finished, for an after-completion rule', () => {
     const done = task({ status: 'done', updatedAt: NOW - HOUR });
     const rule = task({

@@ -119,7 +119,8 @@ import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
 import { HTTP_IDLE_TIMEOUT_SEC, SseBus } from './sse.ts';
 import { createStallWiring } from './stall-wiring.ts';
 import { TaskProjection, taskBodyDocId } from './task-projection.ts';
-import { type FiredOccurrence, createTaskScheduler } from './task-scheduler.ts';
+import { DEFAULT_SPAWNER_AGENT_ID, observeScheduledWake } from './task-scheduled-wake.ts';
+import { type FiredOccurrence, SCHEDULER_ACTOR, createTaskScheduler } from './task-scheduler.ts';
 import {
   type BoardWorkspace,
   DEFAULT_PARALLELISM_CAP,
@@ -1017,8 +1018,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // `schedulerNow` is a seam for the same reason `stallNudgeQuietMs` is one:
   // the feature IS a comparison against a clock, so a test that could not move
   // the clock would have to burn real minutes to assert anything.
+  const spawnerAgentId =
+    opts.spawnerAgentId === null
+      ? undefined
+      : (opts.spawnerAgentId ?? process.env.CW_SPAWNER_AGENT_ID ?? DEFAULT_SPAWNER_AGENT_ID);
   const taskScheduler = createTaskScheduler(taskStore, {
     ...(opts.schedulerNow !== undefined ? { now: opts.schedulerNow } : {}),
+    observers: [
+      // The wake rides the same addressed delivery the two nudgers use, and
+      // reaches the spawner on whichever board it holds a stream.
+      observeScheduledWake(
+        taskStore,
+        {
+          canReach: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+          send: (workspaceId, agentId, frame) =>
+            sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+          ...(spawnerAgentId !== undefined ? { spawnerAgentId } : {}),
+          report: (message) => console.error(message),
+        },
+        SCHEDULER_ACTOR,
+      ),
+    ],
   });
   // The late binding `DocStore` was constructed with: the bridge needs the task
   // store and the projection, which are built after `DocStore` is.

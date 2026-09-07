@@ -118,6 +118,33 @@ describe('what the record says', () => {
     ).toBe('Archived 1h ago');
   });
 
+  it('says an open instance is waiting, or unanswered, while its wake is owed', () => {
+    const fired = { ...DAILY_9, state: { lastFiredAt: NINE, lastInstanceId: 't-run' } };
+    const open = { id: 't-run', status: 'open' as const };
+    const attempts = [{ at: NINE, via: 'nobody' as const }];
+    const waiting = {
+      ...fired,
+      state: { ...fired.state, wake: { instanceId: 't-run', attempts } },
+    };
+    expect(formatRunRecord(runRecord(waiting, open, NINE + 5 * MINUTE))).toBe('Waiting 5m');
+    const gaveUp = {
+      ...fired,
+      state: { ...fired.state, wake: { instanceId: 't-run', attempts, exhaustedItemId: 'r-1' } },
+    };
+    expect(formatRunRecord(runRecord(gaveUp, open, NINE + 2 * HOUR))).toBe('Unanswered 2h');
+    // Answered reads as running; a wake for an OLDER instance says nothing.
+    const answered = {
+      ...fired,
+      state: { ...fired.state, wake: { instanceId: 't-run', attempts, answeredAt: NINE + MINUTE } },
+    };
+    expect(formatRunRecord(runRecord(answered, open, NINE + 2 * HOUR))).toBe('Running 2h');
+    const older = {
+      ...fired,
+      state: { ...fired.state, wake: { instanceId: 't-old', attempts, exhaustedItemId: 'r-1' } },
+    };
+    expect(runRecord(older, open, NINE + 2 * HOUR).wake).toBeUndefined();
+  });
+
   it('writes an age the way a row has room for', () => {
     expect(ageWord(20_000)).toBe('just now');
     expect(ageWord(4 * MINUTE)).toBe('4m');

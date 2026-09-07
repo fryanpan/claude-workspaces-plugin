@@ -120,18 +120,25 @@ instead of waiting: the two board wakes in the Keep-moving group, and
 `task-scheduler.ts`, which files an instance each time a row's schedule comes
 due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
 `task-run-record.ts` read each rule's last run back — recording the success,
-and filing one review item when a rule has gone stale. Both join the Board
-group under its `task-*.ts` glob rather than changing the picture — they read
-and write the same rows through the same store, and only the clock is new.
+and filing one review item when a rule has gone stale — and
+`task-scheduled-wake.ts` get somebody onto the instance: an addressed frame
+to an attached owner, one spawn request to the fleet's spawner for a detached
+one, bounded retries, then a review item. All three join the Board group under
+its `task-*.ts` glob rather than changing the picture — they read and write
+the same rows through the same store, and only the clock is new. The two
+wake frames render in `mcp` through `scheduled-line.ts`, beside the other
+line modules.
 
-**A schedule rule has one spelling.** `core` holds six modules for it and no
+**A schedule rule has one spelling.** `core` holds seven modules for it and no
 other package holds any: `task-schedule.ts` (the rule type and the occurrence
 arithmetic), `schedule-timezone.ts` (instant ⇄ wall clock),
 `schedule-missed.ts` (what a rule wants done about an occurrence the server
 missed — catch up, skip, or fold into the open catch-up that is the lock),
 `schedule-run-record.ts` (what the row says about its last run, and when a
 rule's last success is old enough to call it stale — one derivation the board
-and the server both read),
+and the server both read), `schedule-wake.ts` (the wake's retry schedule and
+what one instance's wake records, which the run record reads as answered or
+not),
 `schedule-phrase.ts` (a rule written as canonical English) and
 `schedule-phrase-parse.ts` (English read back into a rule). The last two are a
 pair and are asserted to be inverses, which is what lets the editor show one

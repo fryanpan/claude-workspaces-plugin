@@ -33,6 +33,7 @@
  * failure the peers described, a run that started and never finished.
  */
 
+import { type WakeStatus, wakeStatus } from './schedule-wake.ts';
 import { type ScheduleCursor, type TaskSchedule, nextOccurrence } from './task-schedule.ts';
 
 /** How the last run ended, as the row reads it. */
@@ -72,6 +73,9 @@ export interface RunRecord {
   intervalMs?: number;
   /** The last success is older than the interval plus its slack. */
   stale: boolean;
+  /** Whether the last instance's wake was answered (`schedule-wake.ts`).
+   *  Absent when no wake was ever attempted for it. */
+  wake?: WakeStatus;
 }
 
 export const STALE_SLACK_MAX_MS = 60 * 60_000;
@@ -125,6 +129,10 @@ export function runRecord(
     startedAt ??
     schedule.armedAt;
   const intervalMs = scheduleIntervalMs(schedule);
+  const wake =
+    state.wake !== undefined && last !== undefined && state.wake.instanceId === last.id
+      ? wakeStatus(state.wake)
+      : undefined;
   const ended = schedule.until !== undefined && schedule.until <= now;
   const stale =
     intervalMs !== undefined &&
@@ -139,6 +147,7 @@ export function runRecord(
     ...(lastSuccessAt !== undefined ? { lastSuccessAt } : {}),
     ...(intervalMs !== undefined ? { intervalMs } : {}),
     stale,
+    ...(wake !== undefined ? { wake } : {}),
   };
 }
 
@@ -155,7 +164,8 @@ export function ageWord(ms: number): string {
 /**
  * The row's own words for the record — one short phrase, state first, age
  * after it, so a column of scheduled rows reads as a column of verdicts:
- * `Done 2h ago`, `Running 3d`, `Never ran`.
+ * `Done 2h ago`, `Running 3d`, `Never ran` — and `Waiting 5m` / `Unanswered 2h`
+ * while the wake of an open instance is still owed or has given up.
  */
 export function formatRunRecord(record: RunRecord): string {
   const age = ageWord(record.ageMs);
@@ -163,8 +173,16 @@ export function formatRunRecord(record: RunRecord): string {
   switch (record.status) {
     case 'never':
       return 'Never ran';
-    case 'open':
-      return age === 'just now' ? 'Running' : `Running ${age}`;
+    case 'open': {
+      // An open instance nobody has taken is not running; say which.
+      const word =
+        record.wake === 'unanswered'
+          ? 'Unanswered'
+          : record.wake === 'waiting'
+            ? 'Waiting'
+            : 'Running';
+      return age === 'just now' ? word : `${word} ${age}`;
+    }
     case 'done':
       return `Done ${ago}`;
     case 'archived':

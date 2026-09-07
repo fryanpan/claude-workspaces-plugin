@@ -379,9 +379,14 @@ export function foldNote(due: DueOccurrence, instanceId: string, missed: number)
  */
 export function createTaskScheduler(
   store: SchedulerStore,
-  opts: { now?: () => number; report?: (message: string) => void } = {},
+  opts: {
+    now?: () => number;
+    report?: (message: string) => void;
+    observers?: readonly ((row: ScheduledRow, now: number) => void)[]; // after the run record
+  } = {},
 ): TaskScheduler {
   const clock = opts.now ?? Date.now;
+  const record = observeRunRecord(store, SCHEDULER_ACTOR, opts.report ?? console.error);
   return new TaskScheduler({
     ...(opts.now !== undefined ? { now: opts.now } : {}),
     ...(opts.report !== undefined ? { report: opts.report } : {}),
@@ -432,7 +437,10 @@ export function createTaskScheduler(
       rule.schedule.state = state;
       store.scheduleSave(row.workspaceId);
     },
-    observe: observeRunRecord(store, SCHEDULER_ACTOR, opts.report ?? console.error),
+    observe: (row, now) => {
+      record(row, now);
+      for (const observe of opts.observers ?? []) observe(row, now);
+    },
     record: (row, text) => {
       store.appendNote(row.taskId, {
         kind: 'status',

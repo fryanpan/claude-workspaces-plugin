@@ -271,6 +271,12 @@ export interface ServerOptions {
   /** How often that loop looks (ms). Unset → SCHEDULER_TICK_DEFAULT_MS. */
   schedulerTickMs?: number;
   /**
+   * The agent id the scheduler asks to start a detached owner's session for
+   * one run (`task-scheduled-wake.ts`). Unset → `CW_SPAWNER_AGENT_ID`, else
+   * the fleet's Team Lead (`agent-team-lead`). `null` sends no spawn requests.
+   */
+  spawnerAgentId?: string | null;
+  /**
    * How many quiet windows a row with a WATCHING builder dispatch gets
    * before the wake calls its builder silent (default
    * `BUILDER_SILENT_MULTIPLIER_DEFAULT`, two; `CW_BUILDER_SILENT_MULTIPLIER`

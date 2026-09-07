@@ -936,7 +936,9 @@ export function scheduleChips(
     ...(at !== undefined ? { next: formatNextOccurrence(at, now, tz) } : {}),
     soon: at !== undefined && sameLocalDay(at, now, tz ?? DEFAULT_SCHEDULE_TIMEZONE),
     last: formatRunRecord(record),
-    stale: record.stale,
+    // A run nobody answered reads red like a stale rule: it is the same
+    // failure a tick earlier.
+    stale: record.stale || record.wake === 'unanswered',
     rule: scheduleRuleChipParts(
       {
         rule: schedule.rule,

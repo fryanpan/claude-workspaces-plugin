@@ -14168,6 +14168,17 @@ function reviewItemHeldLine(p) {
   return `[workspace.review_item_held] your review item ${ask}${on}${ids} was held off the queue by the quality gate${why}.${stood} ${fix}`;
 }
 
+// packages/mcp/src/scheduled-line.ts
+var quoted = (title, id) => title ? `"${title}" (${id ?? "?"})` : id ?? "a scheduled run";
+function scheduledRunLine(p) {
+  const nth = p.attempt !== undefined && p.attempt > 1 ? ` This is wake ${p.attempt}${p.attempts !== undefined ? ` of ${p.attempts}` : ""}; the board files a review item on the row after the last.` : "";
+  return `[task.scheduled_run] ${quoted(p.title, p.taskId)} is due — the board filed it from rule ${p.ruleId ?? "?"} and it is yours. Take it with task_transition(${p.taskId ?? "<taskId>"}, "in-progress"), do the work, and close it done.${nth}`;
+}
+function spawnRequestedLine(p) {
+  const who = p.agentName ?? p.agentId ?? "its owner";
+  return `[task.spawn_requested] ${who} is not attached to board ${p.workspaceId ?? "?"}, and its scheduled run ${quoted(p.title, p.taskId)} is waiting. Spawn a session for ${who} to run that one row, and spin it down when the row closes. The board asks once per run; if nobody answers it files a review item on the row instead.`;
+}
+
 // packages/mcp/src/self-authored.ts
 var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
 var STATUS_EVENTS = new Set(["thread.resolved", "thread.reopened"]);
@@ -14270,6 +14281,12 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       break;
     case "task.body_edited":
       body = p.titleFrom && p.titleTo ? `[task.body_edited] reshaped "${truncate5(p.titleFrom, 60)}" → "${truncate5(p.titleTo, 60)}"${by}${p.reason ? ` — ${truncate5(p.reason, 80)}` : ""}` : `[task.body_edited] ${p.taskId}${by}${p.reason ? ` — ${truncate5(p.reason, 80)}` : ""}`;
+      break;
+    case "task.scheduled_run":
+      body = scheduledRunLine(p);
+      break;
+    case "task.spawn_requested":
+      body = spawnRequestedLine(p);
       break;
     case "task.gate_refused":
       body = `[task.gate_refused] ${p.taskId}: ${p.riskTier}-tier ${p.reason}${by} — → ${p.to} did NOT happen`;
@@ -18882,7 +18899,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.182";
+var PLUGIN_VERSION = "0.1.183";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
