@@ -360,13 +360,26 @@ export async function handleTaskTool(
       const res = (await http(
         'GET',
         `/workspaces/${encodeURIComponent(workspaceId)}/next${query}`,
-      )) as { tasks: unknown[]; retired?: { since: number; reason?: string; notice: string } };
+      )) as {
+        tasks: unknown[];
+        capacity?: { cap: number; inUse: number; free: number; heldForCapacity?: number };
+        retired?: { since: number; reason?: string; notice: string };
+      };
       // This is the "what should I do next" call, so a retired board has to
       // say so HERE — the queue still ranks (in-flight work is finishable)
       // and would otherwise read exactly like a live board's.
+      //
+      // `capacity` rides for the same reason and was the more expensive
+      // omission. The route TRIMS the todo rows it offers to the board's free
+      // slots and says what it withheld; this tool dropped that field, so a
+      // lead saw a short list with no reason for its shortness and read it as
+      // a band with nothing ready. Measured on this board: five unblocked
+      // todo rows, two offered, `heldForCapacity: 3` computed by the server
+      // and discarded here.
       return ok({
         workspaceId,
         ...(res.retired ? { retired: res.retired } : {}),
+        ...(res.capacity ? { capacity: res.capacity } : {}),
         tasks: res.tasks,
       });
     }

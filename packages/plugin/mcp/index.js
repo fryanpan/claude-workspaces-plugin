@@ -16380,7 +16380,7 @@ var TOOL_LIST = {
     },
     {
       name: "next_tasks",
-      description: 'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not the top row. Each row carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any row whose claimedBy is an active session that is not you. Triage rows are never returned; read those with list_tasks(status:"triage").',
+      description: 'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not the top row. Each row carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any row whose claimedBy is an active session that is not you. Triage rows are never returned; read those with list_tasks(status:"triage"). The todo rows on offer are TRIMMED to the board\'s free parallelism slots, so a short list is usually the cap rather than an empty band — `capacity` names the cap, the slots in use, and how many ready rows were held back. list_tasks(status:"todo") shows every one of them.',
       inputSchema: {
         type: "object",
         properties: {
@@ -17797,6 +17797,7 @@ async function handleTaskTool(name, a, ctx) {
       return ok2({
         workspaceId,
         ...res.retired ? { retired: res.retired } : {},
+        ...res.capacity ? { capacity: res.capacity } : {},
         tasks: res.tasks
       });
     }
@@ -18871,7 +18872,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.176";
+var PLUGIN_VERSION = "0.1.177";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

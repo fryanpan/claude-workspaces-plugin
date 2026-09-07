@@ -1598,7 +1598,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'next_tasks',
       description:
-        'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not the top row. Each row carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any row whose claimedBy is an active session that is not you. Triage rows are never returned; read those with list_tasks(status:"triage").',
+        'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not the top row. Each row carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any row whose claimedBy is an active session that is not you. Triage rows are never returned; read those with list_tasks(status:"triage"). The todo rows on offer are TRIMMED to the board\'s free parallelism slots, so a short list is usually the cap rather than an empty band — `capacity` names the cap, the slots in use, and how many ready rows were held back. list_tasks(status:"todo") shows every one of them.',
       inputSchema: {
         type: 'object',
         properties: {
