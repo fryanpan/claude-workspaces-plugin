@@ -527,7 +527,15 @@ export async function handleDocThreadRoutes(
     }
     if (threadRest === '/insert_after' && req.method === 'POST') {
       const body = await safeJson(req);
-      const text = String(body?.text ?? '');
+      const text = body?.text;
+      // A body with no text used to insert nothing and answer ok — a peer's
+      // paragraph vanished twice that way. Name the field, and its sibling.
+      if (typeof text !== 'string' || text.length === 0) {
+        return j(400, {
+          error:
+            'text required — a non-empty string. A new block goes to insert_blocks_after (its field is markdown).',
+        });
+      }
       const res = docStore.insertAfterThread(docId, threadId, text);
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }

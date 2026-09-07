@@ -813,10 +813,22 @@ function collapseWhitespace(text: string): { text: string; map: number[] } {
 
 export interface AnchoredEditResult {
   ok: boolean;
-  error?: 'anchor-not-found' | 'anchor-orphaned' | 'cross-block' | 'no-host-block' | 'parse-failed';
+  error?:
+    | 'anchor-not-found'
+    | 'anchor-orphaned'
+    | 'cross-block'
+    | 'no-host-block'
+    | 'parse-failed'
+    /** Nothing to insert: the caller sent no text (a `markdown` key, say). */
+    | 'empty-text'
+    /** The transaction ran and the text is not in the node afterwards. */
+    | 'insert-lost';
   /** See `ReplaceResult.marksDropped` — same contract, same reason. */
   marksDropped?: string[];
   warning?: string;
+  /** Where an insert landed, read back from the doc AFTER the transaction —
+   *  the host node's text around the new characters. Proof, not intent. */
+  landed?: string;
 }
 
 /**
@@ -931,9 +943,26 @@ export function insertAfterRange(
 ): AnchoredEditResult {
   const end = resolveRelativePositionRaw(doc, opts.endRel);
   if (!end) return { ok: false, error: 'anchor-orphaned' };
-  if (opts.text.length === 0) return { ok: true };
+  if (opts.text.length === 0) return { ok: false, error: 'empty-text' };
   doc.transact(() => {
     end.node.insert(end.offset, opts.text);
   }, opts.transactionOrigin ?? 'agent');
-  return { ok: true };
+  // Read the node back rather than trust the call: a peer's insert reported
+  // `ok` twice while nothing reached the doc, and the only way a caller can
+  // tell an insert that landed from one that did not is to be handed what
+  // the doc holds now. The node's own text is the narrowest honest witness.
+  const after = plainTextOf(end.node);
+  if (after.slice(end.offset, end.offset + opts.text.length) !== opts.text) {
+    return { ok: false, error: 'insert-lost' };
+  }
+  return { ok: true, landed: preview(after, end.offset, opts.text.length, true) };
+}
+
+/** A Y.XmlText's characters with no mark syntax, embeds skipped. */
+function plainTextOf(node: Y.XmlText): string {
+  let out = '';
+  for (const op of node.toDelta() as Array<{ insert?: unknown }>) {
+    if (typeof op.insert === 'string') out += op.insert;
+  }
+  return out;
 }

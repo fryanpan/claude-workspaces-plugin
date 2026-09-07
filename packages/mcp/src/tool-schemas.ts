@@ -966,7 +966,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'insert_after_thread',
       description:
-        "Insert text at the END of a thread's anchored range (INLINE — stays in the same paragraph/heading). For 'add a note right after this sentence.' If you want to add a whole new block after the anchor's block, use insert_blocks_after_thread instead.",
+        "Insert text at the END of a thread's anchored range (INLINE — stays in the same paragraph/heading, mid-sentence if the anchor ends there). For 'add a note right after this sentence.' A whole new paragraph or section goes to insert_blocks_after_thread. The result's `landed` is the doc text around the insert, read back after the write — if it is missing, nothing landed.",
       inputSchema: {
         type: 'object',
         properties: {

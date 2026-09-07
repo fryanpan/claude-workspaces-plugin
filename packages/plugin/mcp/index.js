@@ -15844,7 +15844,7 @@ var TOOL_LIST = {
     },
     {
       name: "insert_after_thread",
-      description: "Insert text at the END of a thread's anchored range (INLINE — stays in the same paragraph/heading). For 'add a note right after this sentence.' If you want to add a whole new block after the anchor's block, use insert_blocks_after_thread instead.",
+      description: "Insert text at the END of a thread's anchored range (INLINE — stays in the same paragraph/heading, mid-sentence if the anchor ends there). For 'add a note right after this sentence.' A whole new paragraph or section goes to insert_blocks_after_thread. The result's `landed` is the doc text around the insert, read back after the write — if it is missing, nothing landed.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17471,7 +17471,10 @@ async function handleDocsTool(name, a, ctx) {
       return ok2(res);
     }
     case "insert_after_thread": {
-      const { docId, threadId, text } = a;
+      const { docId, threadId, text, markdown } = a;
+      if (typeof text !== "string" || text.length === 0) {
+        return err2(markdown !== undefined ? "insert_after_thread takes `text`, not `markdown` — nothing was inserted. For a new paragraph or section use insert_blocks_after_thread, whose field is `markdown`." : "insert_after_thread needs a non-empty `text` — nothing was inserted.");
+      }
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_after`, { text });
       return ok2(res);
     }
@@ -18901,7 +18904,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.184";
+var PLUGIN_VERSION = "0.1.185";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
