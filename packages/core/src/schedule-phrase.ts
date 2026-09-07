@@ -26,6 +26,8 @@
  *   every (interval)  `every 20 minutes`  `every 2 hours`  `every week`
  *   after-completion  `3 days after it's done`
  *   end               ` until Dec`  ` until Dec 15`
+ *   missed-run policy `, skip if missed`         (the default, catch up, is
+ *                                                 never written)
  *
  * **An interval rule never says "day".** `every` is a fixed number of
  * milliseconds and `calendar` is a wall clock, and "every day" has to mean
@@ -35,6 +37,7 @@
  * an interval rule really does drift an hour across a daylight-saving change.
  */
 
+import { DEFAULT_MISSED_RUN_POLICY, type MissedRunPolicy } from './schedule-missed.ts';
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
   type ScheduleCalendar,
@@ -85,6 +88,26 @@ export interface SchedulePhrase {
   rule: ScheduleRule;
   /** Exclusive end, epoch ms — no occurrence at or after it. */
   until?: number;
+  /** The missed-run policy, when it is not the default: the "skip if missed"
+   *  clause. `catch-up` is what an absent clause means, so the writer never
+   *  spells it — a phrase that said the default out loud would be a phrase
+   *  the parser accepts but the writer cannot reproduce. */
+  onMissed?: MissedRunPolicy;
+}
+
+/** The one spelling of the skip clause, shared by the sentence and the chip. */
+export const SKIP_IF_MISSED = 'skip if missed';
+/** The chip label for the default, which the sentence leaves unsaid. */
+export const CATCH_UP_IF_MISSED = 'catch up if missed';
+
+/** The policy a phrase carries, with the default made explicit. */
+export function missedPolicyOf(phrase: Pick<SchedulePhrase, 'onMissed'>): MissedRunPolicy {
+  return phrase.onMissed ?? DEFAULT_MISSED_RUN_POLICY;
+}
+
+/** The policy chip's label. */
+export function missedPolicyLabel(policy: MissedRunPolicy): string {
+  return policy === 'skip' ? SKIP_IF_MISSED : CATCH_UP_IF_MISSED;
 }
 
 /** What reading and writing a phrase need beyond the rule itself: which year
@@ -263,8 +286,18 @@ export function writeSchedulePhrase(phrase: SchedulePhrase, ctx: SchedulePhraseC
   }
   // A one-off is already bounded by its own instant, so an end clause on it
   // would be a second answer to a question already settled.
-  if (phrase.until === undefined || rule.kind === 'once') return head;
-  return `${head} until ${formatUntil(phrase.until, ctx)}`;
+  const ended =
+    phrase.until === undefined || rule.kind === 'once'
+      ? head
+      : `${head} until ${formatUntil(phrase.until, ctx)}`;
+  // The policy is the last clause, and only the non-default is said: "every
+  // weekday at 9am, skip if missed". An after-completion rule has no slot to
+  // miss (`schedule-missed.ts`), so the clause is dropped from it the way the
+  // end is dropped from a one-off.
+  if (missedPolicyOf(phrase) === DEFAULT_MISSED_RUN_POLICY || rule.kind === 'after-completion') {
+    return ended;
+  }
+  return `${ended}, ${SKIP_IF_MISSED}`;
 }
 
 /**
@@ -309,6 +342,11 @@ export function scheduleRuleChipParts(
   // — a chip strip that showed the cadence and swallowed the end would read
   // as a rule that runs forever.
   if (phrase.until !== undefined) parts.push(`until ${formatUntil(phrase.until, ctx)}`);
+  // Likewise the skip policy: a rule that leaves missed work alone must say
+  // so on the row, or a reader would take a quiet week for a working one.
+  if (missedPolicyOf(phrase) === 'skip' && rule.kind !== 'after-completion') {
+    parts.push(SKIP_IF_MISSED);
+  }
   return parts;
 }
 

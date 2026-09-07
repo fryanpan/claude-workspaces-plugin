@@ -411,6 +411,23 @@ describe('the recurrence mark on a live instance', () => {
     expect(mark?.querySelector('svg')).not.toBeNull();
   });
 
+  it('draws a catch-up in the accent and says what it stands in for, with no word on the row', () => {
+    const { rule, run } = withRun();
+    run.recurrenceOf = { taskId: rule.id, occurrenceAt: NOW, missed: 3, catchUp: true };
+    paint([rule, run]);
+    const mark = rowOf(run.id).querySelector<HTMLElement>('.board-recur');
+    expect(mark?.classList.contains('is-catchup')).toBe(true);
+    expect(mark?.getAttribute('title')).toContain('Catch-up run of');
+    expect(mark?.getAttribute('title')).toContain('standing in for 3 missed');
+    expect(mark?.textContent?.trim()).toBe('');
+    // An ordinary run is not in the accent, so the colour means something.
+    const { rule: r2, run: plain } = withRun();
+    paint([r2, plain]);
+    expect(rowOf(plain.id).querySelector('.board-recur')?.classList.contains('is-catchup')).toBe(
+      false,
+    );
+  });
+
   it('does not open the row it sits on', () => {
     const { rule, run } = withRun();
     const h = paint([rule, run]);

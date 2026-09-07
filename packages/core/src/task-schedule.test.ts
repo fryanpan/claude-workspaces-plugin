@@ -299,3 +299,27 @@ describe('parseSchedule', () => {
     });
   });
 });
+
+describe('parseSchedule — the missed-run policy', () => {
+  it('accepts either policy and carries it out', () => {
+    const skip = parseSchedule({ rule: { kind: 'every', everyMs: 60_000 }, onMissed: 'skip' });
+    expect(skip).toEqual({ ok: true, rule: { kind: 'every', everyMs: 60_000 }, onMissed: 'skip' });
+    const catchUp = parseSchedule({
+      rule: { kind: 'every', everyMs: 60_000 },
+      onMissed: 'catch-up',
+    });
+    expect(catchUp.ok && catchUp.onMissed).toBe('catch-up');
+  });
+
+  it('leaves the policy absent when none is sent — the default is read at fire time, not stored', () => {
+    const res = parseSchedule({ rule: { kind: 'every', everyMs: 60_000 } });
+    expect(res.ok && 'onMissed' in res).toBe(false);
+  });
+
+  it('refuses a policy it does not know rather than reading it as the default', () => {
+    expect(parseSchedule({ rule: { kind: 'every', everyMs: 60_000 }, onMissed: 'retry' }).ok).toBe(
+      false,
+    );
+    expect(parseSchedule({ rule: { kind: 'every', everyMs: 60_000 }, onMissed: 1 }).ok).toBe(false);
+  });
+});

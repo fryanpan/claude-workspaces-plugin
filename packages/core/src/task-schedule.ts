@@ -27,6 +27,7 @@
  * `once` is neither: a one-off fires at its instant and is then spent.
  */
 
+import { MISSED_RUN_POLICIES, type MissedRunPolicy } from './schedule-missed.ts';
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
   instantForLocal,
@@ -132,10 +133,13 @@ export interface ScheduleState {
   lastInstanceId?: string;
   /** How many occurrences have fired. */
   fireCount?: number;
-  /** How many occurrences have been COLLAPSED into a catch-up rather than
-   *  given an instance of their own — the plan's "missed runs do not pile
-   *  up", counted so the missed-run policy row has the number to act on. */
+  /** How many occurrences never got an instance of their own: collapsed into
+   *  a catch-up, folded into one still open, or skipped outright — the plan's
+   *  "missed runs do not pile up", counted rather than reconstructed. */
   missedTotal?: number;
+  /** The subset of `missedTotal` the `skip` policy passed over, so a rule
+   *  can say how much work its policy has declined. */
+  skippedTotal?: number;
 }
 
 /**
@@ -151,6 +155,9 @@ export interface TaskSchedule {
   timezone?: string;
   /** No occurrence at or after this instant — the "until Dec" chip. */
   until?: number;
+  /** What to do about an occurrence the server missed (`schedule-missed.ts`).
+   *  Absent is `catch-up`; the "skip if missed" clause. */
+  onMissed?: MissedRunPolicy;
   /** When the rule was set, epoch ms. */
   armedAt: number;
   /** Display name of whoever set it. */
@@ -184,6 +191,11 @@ export interface ScheduleCursor {
   /** When the instance created by the last occurrence reached done. Absent
    *  means "no instance, or it is still open". */
   lastCompletedAt?: number;
+  /** The last instance, when it is a CATCH-UP and still open. The lock the
+   *  missed-run policy holds: while it is set, a fixed-cadence occurrence
+   *  that comes due folds into that row instead of filing a second one
+   *  (`schedule-missed.ts`). `nextOccurrence` ignores it. */
+  openCatchUpInstanceId?: string;
 }
 
 function timezoneOf(schedule: TaskSchedule): string {
@@ -369,7 +381,13 @@ export function dueOccurrence(
 // ── Validation ────────────────────────────────────────────────────────────
 
 export type ScheduleParse =
-  | { ok: true; rule: ScheduleRule; timezone?: string; until?: number }
+  | {
+      ok: true;
+      rule: ScheduleRule;
+      timezone?: string;
+      until?: number;
+      onMissed?: MissedRunPolicy;
+    }
   | { ok: false; error: string };
 
 function parseTimes(raw: unknown): TimeOfDay[] | undefined {
@@ -402,7 +420,10 @@ function parseWeekdays(raw: unknown): { ok: true; weekdays?: Weekday[] } | { ok:
  * their validation from here so a rule that reaches disk always computes.
  */
 export function parseSchedule(raw: unknown): ScheduleParse {
-  const body = raw as { rule?: unknown; timezone?: unknown; until?: unknown } | null | undefined;
+  const body = raw as
+    | { rule?: unknown; timezone?: unknown; until?: unknown; onMissed?: unknown }
+    | null
+    | undefined;
   const input = body?.rule as Record<string, unknown> | undefined;
   const kind = input?.kind;
   if (typeof kind !== 'string' || !(SCHEDULE_RULE_KINDS as readonly string[]).includes(kind)) {
@@ -422,9 +443,14 @@ export function parseSchedule(raw: unknown): ScheduleParse {
     }
     until = body.until;
   }
+  const onMissed = body?.onMissed as MissedRunPolicy | undefined;
+  if (onMissed !== undefined && !(MISSED_RUN_POLICIES as readonly unknown[]).includes(onMissed)) {
+    return { ok: false, error: `onMissed must be one of ${MISSED_RUN_POLICIES.join(' | ')}` };
+  }
   const tail = {
     ...(timezone !== undefined ? { timezone } : {}),
     ...(until !== undefined ? { until } : {}),
+    ...(onMissed !== undefined ? { onMissed } : {}),
   };
   switch (kind) {
     case 'once': {

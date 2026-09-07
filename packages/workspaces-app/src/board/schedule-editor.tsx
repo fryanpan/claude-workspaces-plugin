@@ -28,6 +28,7 @@
  * that would set a different one — so it is shown and not offered.
  */
 import {
+  type MissedRunPolicy,
   SCHEDULE_PHRASE_EXAMPLES,
   type SchedulePhrase,
   type ScheduleRule,
@@ -43,6 +44,8 @@ import {
   formatTimeOfDay,
   formatUntil,
   instantForLocal,
+  missedPolicyLabel,
+  missedPolicyOf,
   nextOccurrence,
   parseSchedulePhrase,
   scheduleModeOf,
@@ -80,7 +83,11 @@ function phraseOf(phrase: SchedulePhrase, now: number, timezone: string): string
 function scheduleOf(task: BoardTask): SchedulePhrase | undefined {
   const s = task.schedule;
   if (s === undefined) return undefined;
-  return { rule: s.rule, ...(s.until !== undefined ? { until: s.until } : {}) };
+  return {
+    rule: s.rule,
+    ...(s.until !== undefined ? { until: s.until } : {}),
+    ...(s.onMissed !== undefined ? { onMissed: s.onMissed } : {}),
+  };
 }
 
 /** The next instant this rule is owed, worded for the reader. */
@@ -163,9 +170,20 @@ export function ScheduleEditor({ task, now, timezone, onSet }: ScheduleEditorPro
     setOpen(stored !== undefined);
   }, [incoming, dirty, stored, now, tz]);
 
-  /** One rule edit: the rule changes, and the sentence is rewritten from it. */
-  const apply = (rule: ScheduleRule, until?: number): void => {
-    const next: SchedulePhrase = { rule, ...(until !== undefined ? { until } : {}) };
+  /** One rule edit: the rule changes, and the sentence is rewritten from it.
+   *  The policy rides along unless the edit is about it — only the skip is
+   *  kept on the phrase, the way the parser keeps it, so the sentence and the
+   *  chip agree on what "no clause" means. */
+  const apply = (
+    rule: ScheduleRule,
+    until?: number,
+    onMissed: MissedRunPolicy | undefined = phrase?.onMissed,
+  ): void => {
+    const next: SchedulePhrase = {
+      rule,
+      ...(until !== undefined ? { until } : {}),
+      ...(onMissed === 'skip' ? { onMissed } : {}),
+    };
     setPhrase(next);
     setText(phraseOf(next, now, tz));
     setBad(false);
@@ -208,6 +226,7 @@ export function ScheduleEditor({ task, now, timezone, onSet }: ScheduleEditorPro
       rule: phrase.rule,
       timezone: tz,
       ...(phrase.until !== undefined ? { until: phrase.until } : {}),
+      ...(phrase.onMissed !== undefined ? { onMissed: phrase.onMissed } : {}),
     });
     setBusy(false);
     if (ok === false) return;
@@ -357,7 +376,7 @@ function ScheduleChips(props: {
   phrase: SchedulePhrase;
   now: number;
   timezone: string;
-  apply: (rule: ScheduleRule, until?: number) => void;
+  apply: (rule: ScheduleRule, until?: number, onMissed?: MissedRunPolicy) => void;
 }) {
   const { phrase, now, timezone, apply } = props;
   const rule = phrase.rule;
@@ -510,6 +529,25 @@ function ScheduleChips(props: {
           }}
         />
       </label>,
+    );
+  }
+
+  // The missed-run policy: one chip, one gesture, two states. It is the
+  // sentence's last clause ("…, skip if missed") and the chip toggles it the
+  // way the cadence chip cycles — an after-completion rule has no slot to
+  // miss, so it gets no chip, matching the writer dropping the clause.
+  if (rule.kind !== 'after-completion') {
+    const policy = missedPolicyOf(phrase);
+    chips.push(
+      <button
+        type="button"
+        class="board-sched-chip board-sched-missed"
+        key="missed"
+        aria-label={`If a run is missed: ${missedPolicyLabel(policy)} — change`}
+        onClick={() => apply(rule, phrase.until, policy === 'skip' ? 'catch-up' : 'skip')}
+      >
+        {missedPolicyLabel(policy).replace(/^./, (c) => c.toUpperCase())}
+      </button>,
     );
   }
 

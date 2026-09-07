@@ -17,6 +17,7 @@ import {
   formatGoalEffortSeconds,
   summarizeGoalEffort,
 } from '@claude-workspaces/core/goal-effort';
+import type { MissedRunPolicy } from '@claude-workspaces/core/schedule-missed';
 import {
   MONTH_SHORT,
   WEEKDAY_LONG,
@@ -45,9 +46,15 @@ import {
 } from '@claude-workspaces/core/task-wire';
 
 /** What arming a row's schedule sends: the rule, the zone its clock times
- *  mean, and the optional end. `null` clears the rule, which the route reads
- *  as the explicit clear it is rather than as a value it could not parse. */
-export type ScheduleWrite = { rule: ScheduleRule; timezone?: string; until?: number } | null;
+ *  mean, the optional end and the missed-run policy when it is not the
+ *  default. `null` clears the rule, which the route reads as the explicit
+ *  clear it is rather than as a value it could not parse. */
+export type ScheduleWrite = {
+  rule: ScheduleRule;
+  timezone?: string;
+  until?: number;
+  onMissed?: MissedRunPolicy;
+} | null;
 
 /** The status vocabulary is the server's, spelled once in core; re-exported
  *  so the board's own modules keep their one import. */
@@ -169,7 +176,7 @@ export interface BoardTask {
    * recurring yet": a rule that has never fired has no instances at all, so
    * there is nothing here to be absent from.
    */
-  recurrenceOf?: { taskId: string; occurrenceAt: number; missed?: number };
+  recurrenceOf?: { taskId: string; occurrenceAt: number; missed?: number; catchUp?: true };
   /** Soft-deleted at this instant — off every lane, one tap from coming back.
    *  The row is still PROJECTED while archived (that is what lets the Undo
    *  toast and the restore list draw without a fetch); `taskVisible` is what
@@ -892,7 +899,11 @@ export function scheduleChips(
     ...(at !== undefined ? { next: formatNextOccurrence(at, now, tz) } : {}),
     soon: at !== undefined && sameLocalDay(at, now, tz ?? DEFAULT_SCHEDULE_TIMEZONE),
     rule: scheduleRuleChipParts(
-      { rule: schedule.rule, ...(schedule.until !== undefined ? { until: schedule.until } : {}) },
+      {
+        rule: schedule.rule,
+        ...(schedule.until !== undefined ? { until: schedule.until } : {}),
+        ...(schedule.onMissed !== undefined ? { onMissed: schedule.onMissed } : {}),
+      },
       { now, ...(tz !== undefined ? { timezone: tz } : {}) },
     ),
   };
