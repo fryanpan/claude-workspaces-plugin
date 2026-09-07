@@ -39,6 +39,7 @@ import {
   dropIndexFor,
   dropTarget,
   goalEffortLabel,
+  lastInstanceFor,
   ownerInitials,
   ownerKindSuffix,
   ownerMarkKind,
@@ -489,7 +490,23 @@ function TaskBadges(props: {
   // Plain muted text, NOT a `.board-badge` pill, matching the word a goal band
   // already puts in its own meta slot (decision 6: "explicitly not a chip,
   // and no chip may return beside it").
-  const state = props.blocked ? 'blocked' : task.status === 'triage' ? 'triage' : '';
+  // A STALE rule — its last success older than its cadence allows — takes
+  // the same slot when nothing else does: it is the one reading of a
+  // scheduled row that changes what the reader does next, and blocked or
+  // triage still outrank it because they say the row cannot run at all.
+  const chips = scheduleChips(
+    task,
+    Date.now(),
+    scheduleCursorFor(task, props.tasksById),
+    lastInstanceFor(task, props.tasksById),
+  );
+  const state = props.blocked
+    ? 'blocked'
+    : task.status === 'triage'
+      ? 'triage'
+      : chips?.stale
+        ? 'stale'
+        : '';
   if (state !== '') {
     badges.push(
       <span key="state" class={`board-state-note board-state-${state}`}>
@@ -505,7 +522,6 @@ function TaskBadges(props: {
   // things on any row that change what the reader does next, and a rule row
   // can be either; putting a cadence in front of them would bury the one
   // mark the strip exists for behind the one it was extended for.
-  const chips = scheduleChips(task, Date.now(), scheduleCursorFor(task, props.tasksById));
   if (chips) {
     if (chips.rule.length > 0) {
       badges.push(
@@ -527,6 +543,15 @@ function TaskBadges(props: {
         </span>,
       );
     }
+    // The run record, after the next run: what the last run did and how long
+    // ago. Present on every rule row, including one that has never fired —
+    // the peers' whole finding was that a schedule that is not running looks
+    // exactly like one that is, and "Never ran" is what stops that.
+    badges.push(
+      <span key="last" class={chips.stale ? 'board-last is-stale' : 'board-last'}>
+        {chips.last}
+      </span>,
+    );
   }
   if (task.dueAt !== undefined) {
     const due = new Date(task.dueAt);

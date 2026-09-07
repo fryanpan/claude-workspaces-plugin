@@ -140,6 +140,13 @@ export interface ScheduleState {
   /** The subset of `missedTotal` the `skip` policy passed over, so a rule
    *  can say how much work its policy has declined. */
   skippedTotal?: number;
+  /** When an instance of this rule last closed `done` — the run record's
+   *  "last success" (`schedule-run-record.ts`), kept here because the instance
+   *  that set it may since be reopened, archived or gone. */
+  lastSuccessAt?: number;
+  /** The stale review item the server filed, and the success it was filed
+   *  against, so one stretch of staleness is one item and never one per tick. */
+  staleItem?: { id: string; forSuccessAt?: number };
 }
 
 /**
@@ -171,15 +178,10 @@ export interface TaskSchedule {
  *  all. Bounded so a malformed weekday list cannot spin. */
 const MAX_CALENDAR_DAYS = 400;
 
-/**
- * How many spent CALENDAR occurrences one catch-up pass will walk past.
- *
- * Only the calendar walk is bounded by it: the other three kinds settle in
- * closed form (`dueOccurrence`), so no amount of downtime makes them iterate.
- * Five thousand is a thousand days of a five-a-day rule — far past any outage
- * this board will survive, which is what lets the cap be a guard against a
- * pathological rule rather than a policy about downtime.
- */
+/** How many spent CALENDAR occurrences one catch-up pass will walk past. Only
+ *  the calendar walk iterates (the other kinds settle in closed form); five
+ *  thousand is a thousand days of a five-a-day rule, so this guards against a
+ *  pathological rule rather than being a policy about downtime. */
 export const MAX_CATCHUP_STEPS = 5_000;
 
 // ── Occurrence arithmetic ─────────────────────────────────────────────────

@@ -102,6 +102,48 @@ stands in for missed work refuses company. The decision is
 `missedRunOutcome` in `packages/core/src/schedule-missed.ts`, pure like the
 rest of the arithmetic.
 
+## The run record — prove the run happened, not that it was scheduled
+
+Every peer interviewed for this subsystem had a scheduled job fail silently
+for weeks, and all three asked for the same three facts on the row: the last
+run, how it ended, and how old that reading is. A schedule that is not firing
+looks exactly like one that is until the row carries them.
+
+`packages/core/src/schedule-run-record.ts` derives them, pure, from the
+rule's own state and its last instance; the board and the server both call
+it, so the row on screen and the item the server files can never disagree.
+On the Scheduled row it is one phrase after the next run — `Done 2h ago`,
+`Running 3d`, `Never ran`, `Ran 2d ago` for an instance the board no longer
+holds — and the rule's activity gets one line per success naming the
+instance the work landed in (`Run finished — t-… done, 2h after it
+started`), so "where did the output go" is answered by the row's own trail.
+
+**A success is written onto the rule** (`state.lastSuccessAt`) by
+`packages/server/src/task-run-record.ts` on the scheduler's pass, the first
+tick after the instance closes `done`. The instance is not a durable
+witness — it can be reopened, archived, or age off a board — and a record
+that forgot a success every time somebody touched the row would be worse
+than none.
+
+**Stale.** The last success is older than one interval plus a slack, the
+slack being the smaller of one interval and one hour: a daily rule is stale
+twenty-five hours after its last success, an hourly one after two hours. A
+rule that has never succeeded counts from its arming. A one-off has no
+interval and is never stale; a rule past its end limit is finished, not
+stale; an after-completion rule's interval is its delay, so an instance
+nobody closes goes stale like any other — the failure the peers described.
+On the row the word `stale` takes the state slot (blocked and triage outrank
+it) and the record turns red.
+
+**Stale files ONE review item, never one per tick.** The server files it on
+the rule row as the scheduler's own actor, through the same door the stall
+escalation uses, and remembers it on the rule (`state.staleItem`). While
+that item is open nothing more is filed. A success withdraws it. Answering
+it closes it too, and an answered item is not filed again until the rule
+has succeeded and gone stale AGAIN — an item re-filed against the silence
+the reader just acknowledged is the log nobody reads, wearing a queue's
+clothes.
+
 ## Restart safety
 
 The guarantee is that a rule **neither loses an occurrence nor fires one
@@ -171,6 +213,5 @@ Deliberately, and each is a row of its own:
 
 - **the Scheduled board section** — rule rows have no home of their own on the
   board yet, and Scheduled is separate from Blocked;
-- **the run record** — the activity note is the run history today;
 - **the wake path** — an instance is filed and its owner is named on it, but
   the scheduler does not wake anybody. It never starts sessions itself.

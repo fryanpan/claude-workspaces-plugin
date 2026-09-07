@@ -25,6 +25,11 @@ import {
   scheduleRuleChipParts,
 } from '@claude-workspaces/core/schedule-phrase';
 import {
+  type LastInstance,
+  formatRunRecord,
+  runRecord,
+} from '@claude-workspaces/core/schedule-run-record';
+import {
   blockableStatus,
   blockerLookup,
   openBlockerIds,
@@ -878,6 +883,36 @@ export interface ScheduleChips {
   /** The rule itself, as chip parts (`scheduleRuleChipParts`). Empty for a
    *  one-off, whose rule is the instant already printed above. */
   rule: string[];
+  /** The run record, written: `Done 2h ago`, `Running 3d`, `Never ran`
+   *  (`formatRunRecord`). Always present — a rule that has never fired says
+   *  so, because a schedule that is not firing must not look like one that
+   *  is. */
+  last: string;
+  /** The last success is older than the rule's cadence allows
+   *  (`schedule-run-record.ts`): the one reading that means "look at this". */
+  stale: boolean;
+}
+
+/**
+ * The rule's last instance as the run record reads it, from the rows this
+ * board can see. Mirrors `lastInstanceOf` on the server — an instance this
+ * projection has aged out reads as `gone`, which is the same word the server
+ * uses for one it cannot find, and the record still stands on the rule's own
+ * `lastFiredAt` and `lastSuccessAt`.
+ */
+export function lastInstanceFor(
+  task: BoardTask,
+  byId: ReadonlyMap<string, BoardTask>,
+): LastInstance | undefined {
+  const id = task.schedule?.state?.lastInstanceId;
+  if (id === undefined) return undefined;
+  const instance = byId.get(id);
+  if (!instance) return { id, status: 'gone' };
+  if (instance.archivedAt !== undefined) {
+    return { id, status: 'archived', closedAt: instance.archivedAt };
+  }
+  if (instance.status !== 'done') return { id, status: 'open' };
+  return { id, status: 'done', closedAt: doneAt(instance) };
 }
 
 /**
@@ -890,14 +925,18 @@ export function scheduleChips(
   task: BoardTask,
   now: number,
   cursor: ScheduleCursor = {},
+  last?: LastInstance,
 ): ScheduleChips | null {
   const schedule = task.schedule;
   if (schedule === undefined) return null;
   const at = nextOccurrence(schedule, cursor);
   const tz = schedule.timezone;
+  const record = runRecord(schedule, last, now);
   return {
     ...(at !== undefined ? { next: formatNextOccurrence(at, now, tz) } : {}),
     soon: at !== undefined && sameLocalDay(at, now, tz ?? DEFAULT_SCHEDULE_TIMEZONE),
+    last: formatRunRecord(record),
+    stale: record.stale,
     rule: scheduleRuleChipParts(
       {
         rule: schedule.rule,

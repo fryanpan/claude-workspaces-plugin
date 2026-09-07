@@ -27,6 +27,7 @@ import {
   boardSections,
   dropTarget,
   formatNextOccurrence,
+  lastInstanceFor,
   scheduleChips,
   scheduleCursorFor,
   scheduleRules,
@@ -239,6 +240,48 @@ describe('what a scheduled row says', () => {
     expect(scheduleChips(task(), NOW)).toBeNull();
   });
 
+  it('carries the run record: never ran, running, done — and stale when the success is old', () => {
+    expect(scheduleChips(task({ schedule: weekdays9() }), NOW)).toMatchObject({
+      last: 'Never ran',
+      stale: false,
+    });
+    const open = task({ status: 'in-progress' });
+    const done = task({
+      status: 'done',
+      transitions: [
+        {
+          from: 'in-progress',
+          to: 'done',
+          ts: NOW - 2 * HOUR,
+          by: { name: 'Wren', kind: 'person' },
+        },
+      ],
+    });
+    const rule = (instanceId: string): BoardTask =>
+      task({
+        schedule: weekdays9({
+          armedAt: NOW - 5 * HOUR,
+          state: { lastFiredAt: NOW - 3 * HOUR, lastInstanceId: instanceId },
+        }),
+      });
+    const byId = new Map<string, BoardTask>([open, done].map((t) => [t.id, t]));
+    expect(
+      scheduleChips(rule(open.id), NOW, {}, lastInstanceFor(rule(open.id), byId)),
+    ).toMatchObject({ last: 'Running 3h', stale: false });
+    expect(
+      scheduleChips(rule(done.id), NOW, {}, lastInstanceFor(rule(done.id), byId)),
+    ).toMatchObject({ last: 'Done 2h ago', stale: false });
+    // The same open instance, read two days on: the rule was owed a success
+    // it never got, and the row says so.
+    const late = scheduleChips(
+      rule(open.id),
+      NOW + 2 * DAY,
+      {},
+      lastInstanceFor(rule(open.id), byId),
+    );
+    expect(late).toMatchObject({ last: 'Running 2d', stale: true });
+  });
+
   it('asks the last instance whether it finished, for an after-completion rule', () => {
     const done = task({ status: 'done', updatedAt: NOW - HOUR });
     const rule = task({
@@ -326,11 +369,46 @@ describe('a scheduled row on screen', () => {
     const badges = rowOf(rule.id).querySelector('.board-task-badges');
     expect(badges?.querySelector('.board-badge-rule')?.textContent).toBe('Every weekday·9am');
     expect(badges?.querySelector('.board-next')?.textContent).toBe('Wed 15 Nov, 9am');
-    // The row that is not scheduled carries neither — so the two marks above
-    // are the schedule and not something every row gets.
+    expect(badges?.querySelector('.board-last')?.textContent).toBe('Never ran');
+    // The row that is not scheduled carries none — so the marks above are
+    // the schedule and not something every row gets.
     const plain = root.querySelector('[data-goal-id="g-ship"] .board-task-row');
     expect(plain?.querySelector('.board-next')).toBeNull();
     expect(plain?.querySelector('.board-badge-rule')).toBeNull();
+    expect(plain?.querySelector('.board-last')).toBeNull();
+  });
+
+  it('says stale, in the state slot and in red, when the last success is older than the cadence', () => {
+    setViewport(IPAD);
+    const run = task({ status: 'in-progress', goal: 'g-quiet' });
+    const stuck = task({
+      title: 'Post the evening digest',
+      schedule: weekdays9({
+        armedAt: NOW - 10 * DAY,
+        state: { lastFiredAt: NOW - 2 * DAY, lastInstanceId: run.id },
+      }),
+    });
+    const fine = task({
+      title: 'Sweep the inbox',
+      schedule: weekdays9({
+        armedAt: NOW - 10 * DAY,
+        state: { lastFiredAt: NOW - HOUR, lastInstanceId: run.id, lastSuccessAt: NOW - HOUR },
+      }),
+    });
+    paint([run, stuck, fine]);
+    const word = rowOf(stuck.id).querySelector<HTMLElement>('.board-state-note');
+    const last = rowOf(stuck.id).querySelector<HTMLElement>('.board-last');
+    if (!word || !last) throw new Error('the stale row lost its marks');
+    expect(word.textContent).toBe('stale');
+    expect(last.textContent).toBe('Running 2d');
+    expect(last.classList.contains('is-stale')).toBe(true);
+    // The control: the healthy rule beside it has no state word and a muted
+    // record, so the red is the verdict and not the row's default.
+    expect(rowOf(fine.id).querySelector('.board-state-note')).toBeNull();
+    const fineLast = rowOf(fine.id).querySelector<HTMLElement>('.board-last');
+    if (!fineLast) throw new Error('the healthy row lost its record');
+    expect(styleOf(last).color).not.toBe(styleOf(fineLast).color);
+    expect(styleOf(word).color).toBe(styleOf(last).color);
   });
 
   it('says nothing else — no caption, no kind chip, no helper text', () => {
@@ -578,6 +656,12 @@ describe('the two viewports this project verifies', () => {
     const next = rowOf(r.id).querySelector<HTMLElement>('.board-next');
     if (!next) throw new Error('the next run is gone at 430px');
     expect(styleOf(next).display).not.toBe('none');
+    // The run record stays too: a phone row that could not say whether the
+    // job is running would be the silence the record exists to end.
+    const last = rowOf(r.id).querySelector<HTMLElement>('.board-last');
+    if (!last) throw new Error('the run record is gone at 430px');
+    expect(styleOf(last).display).not.toBe('none');
+    expect(styleOf(last).flexShrink).toBe('0');
     // The strip cannot win the row against the title at this width — the
     // ceiling the ≤900px block sets, resolved against THIS viewport (30vw of
     // 430). happy-dom resolves the viewport unit, so the number is the

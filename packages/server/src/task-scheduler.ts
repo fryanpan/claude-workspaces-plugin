@@ -58,6 +58,7 @@ import {
   dueOccurrence,
 } from '@claude-workspaces/core/task-schedule';
 import type { Task } from '@claude-workspaces/core/task-wire';
+import { type RunRecordStore, observeRunRecord } from './task-run-record.ts';
 import type { BoardWorkspace, CreateTaskOpts, CreateTaskResult } from './tasks.ts';
 import { isRetired } from './workspace-store.ts';
 
@@ -118,6 +119,8 @@ export interface TaskSchedulerOptions {
   commit: (row: ScheduledRow, state: ScheduleState) => void;
   /** Put one line in the rule row's activity. */
   record: (row: ScheduledRow, text: string) => void;
+  /** Read the rule's last run back after the fire (`task-run-record.ts`). */
+  observe?: (row: ScheduledRow, now: number) => void;
   /** The injected clock. The whole subsystem is driven by it — a test moves
    *  the number, never the wall clock. */
   now?: () => number;
@@ -158,6 +161,7 @@ export class TaskScheduler {
       try {
         const fire = this.fire(row, now);
         if (fire) out.push(fire);
+        this.opts.observe?.(row, now);
       } catch (err) {
         // One bad rule must not stop the rules after it. The cursor is
         // untouched by a throw before the commit, so the occurrence is still
@@ -266,7 +270,7 @@ export class TaskScheduler {
 // keeps its signatures and a test can drive the real thing.
 
 /** What the wiring reaches in the store. `TaskStore` satisfies it. */
-export interface SchedulerStore {
+export interface SchedulerStore extends RunRecordStore {
   listWorkspaces(): BoardWorkspace[];
   listTasks(workspaceId: string): Task[];
   getTask(taskId: string): Task | undefined;
@@ -428,6 +432,7 @@ export function createTaskScheduler(
       rule.schedule.state = state;
       store.scheduleSave(row.workspaceId);
     },
+    observe: observeRunRecord(store, SCHEDULER_ACTOR, opts.report ?? console.error),
     record: (row, text) => {
       store.appendNote(row.taskId, {
         kind: 'status',
