@@ -22,12 +22,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
+import { scheduleCursorFor, scheduledRows } from '../src/task-scheduler-rows.ts';
 import {
   SCHEDULER_TICK_DEFAULT_MS,
   TaskScheduler,
   createTaskScheduler,
-  scheduleCursorFor,
-  scheduledRows,
   setTaskSchedule,
 } from '../src/task-scheduler.ts';
 import { TaskStore } from '../src/tasks.ts';

@@ -1716,6 +1716,11 @@ export class TaskStore {
    */
   private docRevisionFor: ((docId: string) => number | undefined) | undefined;
 
+  /** When a doc last changed, wired from the doc store the same way. Read by
+   *  an on-change schedule rule (`task-scheduler-rows.ts`); unwired, a rule
+   *  watching a doc is owed nothing, which is what a store-only test wants. */
+  private docActivityFor: ((docId: string) => number | undefined) | undefined;
+
   /**
    * How many asks are open on a ticket's own doc threads, wired by server.ts
    * from the doc store. Same shape and the same reason as `docRevisionFor`
@@ -1826,6 +1831,15 @@ export class TaskStore {
 
   setDocRevisionReader(reader: ((docId: string) => number | undefined) | undefined): void {
     this.docRevisionFor = reader;
+  }
+
+  setDocActivityReader(reader: ((docId: string) => number | undefined) | undefined): void {
+    this.docActivityFor = reader;
+  }
+
+  /** See `docActivityFor`. */
+  docActivityAt(docId: string): number | undefined {
+    return this.docActivityFor?.(docId);
   }
 
   /** Wire the doc-thread ask count (server.ts). See `threadAsksFor`. */

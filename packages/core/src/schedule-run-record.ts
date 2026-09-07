@@ -98,7 +98,8 @@ export function scheduleIntervalMs(
   const rule = schedule.rule;
   if (rule.kind === 'every') return rule.everyMs;
   if (rule.kind === 'after-completion') return rule.delayMs;
-  if (rule.kind === 'once') return undefined;
+  // A one-off has no next; an on-change rule has no cadence to be late against.
+  if (rule.kind === 'once' || rule.kind === 'on-change') return undefined;
   const first = nextOccurrence({ ...schedule, until: undefined }, cursor);
   if (first === undefined) return undefined;
   const second = nextOccurrence(

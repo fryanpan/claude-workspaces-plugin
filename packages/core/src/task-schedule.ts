@@ -27,13 +27,9 @@
  * `once` is neither: a one-off fires at its instant and is then spent.
  */
 
-import { MISSED_RUN_POLICIES, type MissedRunPolicy } from './schedule-missed.ts';
-import {
-  DEFAULT_SCHEDULE_TIMEZONE,
-  instantForLocal,
-  isKnownTimezone,
-  zonedParts,
-} from './schedule-timezone.ts';
+import type { MissedRunPolicy } from './schedule-missed.ts';
+import { DEFAULT_SCHEDULE_TIMEZONE, instantForLocal, zonedParts } from './schedule-timezone.ts';
+import { type ScheduleOnChange, nextChangeOccurrence } from './schedule-trigger.ts';
 import type { ScheduleWake } from './schedule-wake.ts';
 
 // The timezone half lives next door (`schedule-timezone.ts`) but is part of
@@ -108,10 +104,18 @@ export type ScheduleRule =
   | ScheduleOnce
   | ScheduleEvery
   | ScheduleCalendar
-  | ScheduleAfterCompletion;
+  | ScheduleAfterCompletion
+  /** Owed a debounce after the watched doc or task last changed (`schedule-trigger.ts`). */
+  | ScheduleOnChange;
 
 /** Every rule kind, for error messages and for a caller enumerating them. */
-export const SCHEDULE_RULE_KINDS = ['once', 'every', 'calendar', 'after-completion'] as const;
+export const SCHEDULE_RULE_KINDS = [
+  'once',
+  'every',
+  'calendar',
+  'after-completion',
+  'on-change',
+] as const;
 
 /**
  * What the SCHEDULER has already done with this rule — its own bookkeeping,
@@ -202,6 +206,9 @@ export interface ScheduleCursor {
    *  that comes due folds into that row instead of filing a second one
    *  (`schedule-missed.ts`). `nextOccurrence` ignores it. */
   openCatchUpInstanceId?: string;
+  /** When the doc or task an on-change rule watches last changed. Absent
+   *  means the runner could not read it, which reads as "no change". */
+  changedAt?: number;
 }
 
 function timezoneOf(schedule: TaskSchedule): string {
@@ -303,6 +310,9 @@ export function nextOccurrence(
       if (next <= after) next = after + rule.delayMs;
       break;
     }
+    case 'on-change':
+      next = nextChangeOccurrence(rule, schedule.armedAt, after, cursor.changedAt);
+      break;
   }
   if (next === undefined) return undefined;
   if (schedule.until !== undefined && next >= schedule.until) return undefined;
@@ -348,7 +358,11 @@ export function dueOccurrence(
   // the SAME `lastCompletedAt` after every step and manufactures an occurrence
   // per delay out of one finished run, handing back an instant hours past the
   // one the rule was actually owed.
-  if (rule.kind === 'after-completion') return { at: first, missed: 0 };
+  // An on-change rule is owed one occurrence per settled change, so there is
+  // nothing behind `first` either.
+  if (rule.kind === 'after-completion' || rule.kind === 'on-change') {
+    return { at: first, missed: 0 };
+  }
 
   // An interval rule is arithmetic, so the catch-up is arithmetic too: a
   // one-minute rule down for a weekend is 2,880 occurrences, and a bounded
@@ -382,118 +396,4 @@ export function dueOccurrence(
     walked = { ...walked, state: { ...walked.state, lastOccurrenceAt: next } };
   }
   return { at: latest, missed: seen - 1 };
-}
-
-// ── Validation ────────────────────────────────────────────────────────────
-
-export type ScheduleParse =
-  | {
-      ok: true;
-      rule: ScheduleRule;
-      timezone?: string;
-      until?: number;
-      onMissed?: MissedRunPolicy;
-    }
-  | { ok: false; error: string };
-
-function parseTimes(raw: unknown): TimeOfDay[] | undefined {
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const out: TimeOfDay[] = [];
-  for (const entry of raw) {
-    const hour = (entry as TimeOfDay | undefined)?.hour;
-    const minute = (entry as TimeOfDay | undefined)?.minute;
-    if (!Number.isInteger(hour) || (hour as number) < 0 || (hour as number) > 23) return undefined;
-    if (!Number.isInteger(minute) || (minute as number) < 0 || (minute as number) > 59) {
-      return undefined;
-    }
-    out.push({ hour: hour as number, minute: minute as number });
-  }
-  return out;
-}
-
-function parseWeekdays(raw: unknown): { ok: true; weekdays?: Weekday[] } | { ok: false } {
-  if (raw === undefined) return { ok: true };
-  if (!Array.isArray(raw) || raw.length === 0) return { ok: false };
-  for (const day of raw) {
-    if (!Number.isInteger(day) || (day as number) < 0 || (day as number) > 6) return { ok: false };
-  }
-  return { ok: true, weekdays: [...new Set(raw as Weekday[])].sort() };
-}
-
-/**
- * Read a caller's JSON into a rule, or say why not. The one door: the REST
- * route, and every later door (the MCP verb, the phrase editor's writer), get
- * their validation from here so a rule that reaches disk always computes.
- */
-export function parseSchedule(raw: unknown): ScheduleParse {
-  const body = raw as
-    | { rule?: unknown; timezone?: unknown; until?: unknown; onMissed?: unknown }
-    | null
-    | undefined;
-  const input = body?.rule as Record<string, unknown> | undefined;
-  const kind = input?.kind;
-  if (typeof kind !== 'string' || !(SCHEDULE_RULE_KINDS as readonly string[]).includes(kind)) {
-    return { ok: false, error: `rule.kind must be one of ${SCHEDULE_RULE_KINDS.join(' | ')}` };
-  }
-  let timezone: string | undefined;
-  if (body?.timezone !== undefined) {
-    if (typeof body.timezone !== 'string' || !isKnownTimezone(body.timezone)) {
-      return { ok: false, error: 'timezone must be a known IANA zone' };
-    }
-    timezone = body.timezone;
-  }
-  let until: number | undefined;
-  if (body?.until !== undefined) {
-    if (typeof body.until !== 'number' || !Number.isFinite(body.until)) {
-      return { ok: false, error: 'until must be an epoch-ms number' };
-    }
-    until = body.until;
-  }
-  const onMissed = body?.onMissed as MissedRunPolicy | undefined;
-  if (onMissed !== undefined && !(MISSED_RUN_POLICIES as readonly unknown[]).includes(onMissed)) {
-    return { ok: false, error: `onMissed must be one of ${MISSED_RUN_POLICIES.join(' | ')}` };
-  }
-  const tail = {
-    ...(timezone !== undefined ? { timezone } : {}),
-    ...(until !== undefined ? { until } : {}),
-    ...(onMissed !== undefined ? { onMissed } : {}),
-  };
-  switch (kind) {
-    case 'once': {
-      const at = input?.at;
-      if (typeof at !== 'number' || !Number.isFinite(at)) {
-        return { ok: false, error: 'once needs at (epoch ms)' };
-      }
-      return { ok: true, rule: { kind: 'once', at }, ...tail };
-    }
-    case 'every': {
-      const everyMs = input?.everyMs;
-      if (typeof everyMs !== 'number' || !Number.isFinite(everyMs) || everyMs <= 0) {
-        return { ok: false, error: 'every needs a positive everyMs' };
-      }
-      return { ok: true, rule: { kind: 'every', everyMs }, ...tail };
-    }
-    case 'calendar': {
-      const times = parseTimes(input?.times);
-      if (!times) return { ok: false, error: 'calendar needs times: [{hour: 0-23, minute: 0-59}]' };
-      const weekdays = parseWeekdays(input?.weekdays);
-      if (!weekdays.ok) return { ok: false, error: 'weekdays must be a non-empty array of 0-6' };
-      return {
-        ok: true,
-        rule: {
-          kind: 'calendar',
-          times,
-          ...(weekdays.weekdays !== undefined ? { weekdays: weekdays.weekdays } : {}),
-        },
-        ...tail,
-      };
-    }
-    default: {
-      const delayMs = input?.delayMs;
-      if (typeof delayMs !== 'number' || !Number.isFinite(delayMs) || delayMs <= 0) {
-        return { ok: false, error: 'after-completion needs a positive delayMs' };
-      }
-      return { ok: true, rule: { kind: 'after-completion', delayMs }, ...tail };
-    }
-  }
 }

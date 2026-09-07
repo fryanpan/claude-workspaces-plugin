@@ -59,8 +59,8 @@ import {
 } from '@claude-workspaces/core/task-schedule';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { type RunRecordStore, observeRunRecord } from './task-run-record.ts';
+import { scheduledRows } from './task-scheduler-rows.ts';
 import type { BoardWorkspace, CreateTaskOpts, CreateTaskResult } from './tasks.ts';
-import { isRetired } from './workspace-store.ts';
 
 /**
  * How often the loop looks. Thirty seconds: the finest rule anybody writes in
@@ -274,72 +274,14 @@ export interface SchedulerStore extends RunRecordStore {
   listWorkspaces(): BoardWorkspace[];
   listTasks(workspaceId: string): Task[];
   getTask(taskId: string): Task | undefined;
+  /** When a doc last changed, for an on-change rule. Absent → owed nothing. */
+  docActivityAt?(docId: string): number | undefined;
   createTask(workspaceId: string, opts: CreateTaskOpts): CreateTaskResult;
   appendNote(
     taskId: string,
     input: { kind: 'turn' | 'denial' | 'status'; text: string; agent: string; ts: number },
   ): unknown;
   scheduleSave(workspaceId: string): void;
-}
-
-/**
- * When the instance created by the last occurrence finished, for the one mode
- * that needs it. Three readings, and the third is the one worth stating:
- *
- *  - **done** — the timestamp of the transition INTO done, which is when the
- *    work actually finished, not when the row was last touched afterwards;
- *  - **archived** — a soft delete takes the row out of the open set as
- *    finally as closing it does, so a rule whose instance was archived is not
- *    blocked forever behind it;
- *  - **gone** — an instance the store cannot find is not open either. Dated
- *    from the fire that created it, the only honest timestamp left; without
- *    this an after-completion rule whose instance was purged would never come
- *    due again, silently.
- */
-export function scheduleCursorFor(store: SchedulerStore, schedule: TaskSchedule): ScheduleCursor {
-  const instanceId = schedule.state?.lastInstanceId;
-  if (instanceId === undefined) return {};
-  const instance = store.getTask(instanceId);
-  if (!instance) {
-    const firedAt = schedule.state?.lastFiredAt;
-    return firedAt !== undefined ? { lastCompletedAt: firedAt } : {};
-  }
-  if (instance.archivedAt !== undefined) return { lastCompletedAt: instance.archivedAt };
-  // Open. If it is a CATCH-UP it is also the lock: the next fixed-cadence
-  // occurrence folds into it rather than filing beside it (schedule-missed.ts).
-  if (instance.status !== 'done') {
-    return instance.recurrenceOf?.catchUp === true ? { openCatchUpInstanceId: instance.id } : {};
-  }
-  let closedAt: number | undefined;
-  for (const t of instance.transitions ?? []) {
-    if (t.to === 'done') closedAt = t.ts;
-  }
-  return { lastCompletedAt: closedAt ?? instance.updatedAt };
-}
-
-/** Every rule row on every live board, with its cursor resolved. */
-export function scheduledRows(store: SchedulerStore): ScheduledRow[] {
-  const out: ScheduledRow[] = [];
-  for (const workspace of store.listWorkspaces()) {
-    // A retired board fires nothing. Its rows keep their rules, so an
-    // unretire resumes them — but `createTask` refuses every filing to a
-    // stood-down board, and asking it once per rule per tick would fill the
-    // log with refusals nobody can act on.
-    if (isRetired(workspace)) continue;
-    for (const task of store.listTasks(workspace.id)) {
-      const schedule = task.schedule;
-      // `listTasks` already drops archived rows: archiving the rule is how a
-      // person turns a schedule off without destroying its history.
-      if (!schedule) continue;
-      out.push({
-        taskId: task.id,
-        workspaceId: workspace.id,
-        schedule,
-        cursor: scheduleCursorFor(store, schedule),
-      });
-    }
-  }
-  return out;
 }
 
 /** How an occurrence reads in the rule row's activity. One line, naming the

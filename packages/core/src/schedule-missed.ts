@@ -79,7 +79,8 @@ export type MissedRunOutcome =
 
 /** Whether this occurrence, fired at `now`, would be a missed one. */
 export function isMissed(schedule: TaskSchedule, due: DueOccurrence, now: number): boolean {
-  if (schedule.rule.kind === 'after-completion') return false;
+  // Neither has a slot on a clock to have missed: a late fire is the run.
+  if (schedule.rule.kind === 'after-completion' || schedule.rule.kind === 'on-change') return false;
   return due.missed > 0 || now - due.at > missedGraceFor(schedule.rule);
 }
 

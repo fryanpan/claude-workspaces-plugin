@@ -43,6 +43,7 @@ import {
   formatInterval,
   formatTimeOfDay,
   formatUntil,
+  hasMissedSlot,
   instantForLocal,
   missedPolicyLabel,
   missedPolicyOf,
@@ -50,6 +51,8 @@ import {
   parseSchedulePhrase,
   scheduleModeOf,
   sortedUniqueTimes,
+  triggerDebounceMs,
+  triggerSourceWords,
   writeSchedulePhrase,
   zonedParts,
 } from '@claude-workspaces/core';
@@ -102,6 +105,7 @@ function nextLine(phrase: SchedulePhrase, now: number, timezone: string): string
     // An after-completion rule whose instance is open is owed nothing until
     // that instance closes, which is the mode's whole point rather than a
     // missing answer.
+    if (phrase.rule.kind === 'on-change') return 'when it changes';
     return phrase.rule.kind === 'after-completion' ? 'when this one closes' : 'never';
   }
   const today = zonedParts(now, timezone);
@@ -408,6 +412,16 @@ function ScheduleChips(props: {
         {`${formatInterval(rule.delayMs, { allowDays: true, bareSingular: false })} after`}
       </span>,
     );
+  } else if (rule.kind === 'on-change') {
+    // Read-only, like the interval: the phrase is where the id is typed.
+    chips.push(
+      <span class="board-sched-chip is-read" key="trigger">
+        {`When ${triggerSourceWords(rule.source)} changes`}
+      </span>,
+      <span class="board-sched-chip is-read" key="quiet">
+        {`${formatInterval(triggerDebounceMs(rule), { allowDays: false, bareSingular: false })} quiet`}
+      </span>,
+    );
   } else {
     const words = cadenceWords(rule);
     chips.push(
@@ -536,7 +550,7 @@ function ScheduleChips(props: {
   // sentence's last clause ("…, skip if missed") and the chip toggles it the
   // way the cadence chip cycles — an after-completion rule has no slot to
   // miss, so it gets no chip, matching the writer dropping the clause.
-  if (rule.kind !== 'after-completion') {
+  if (hasMissedSlot(rule)) {
     const policy = missedPolicyOf(phrase);
     chips.push(
       <button
@@ -551,11 +565,14 @@ function ScheduleChips(props: {
     );
   }
 
-  chips.push(
-    <span class="board-sched-chip board-sched-tz is-read" key="tz">
-      {timezone.split('/').pop()?.replace(/_/g, ' ') ?? timezone}
-    </span>,
-  );
+  // A trigger has no wall clock to be read in.
+  if (rule.kind !== 'on-change') {
+    chips.push(
+      <span class="board-sched-chip board-sched-tz is-read" key="tz">
+        {timezone.split('/').pop()?.replace(/_/g, ' ') ?? timezone}
+      </span>,
+    );
+  }
 
   return <div class="board-sched-chips">{chips}</div>;
 }

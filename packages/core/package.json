@@ -27,6 +27,8 @@
     "./schedule-missed": "./src/schedule-missed.ts",
     "./schedule-run-record": "./src/schedule-run-record.ts",
     "./schedule-wake": "./src/schedule-wake.ts",
+    "./schedule-parse": "./src/schedule-parse.ts",
+    "./schedule-trigger": "./src/schedule-trigger.ts",
     "./schedule-phrase": "./src/schedule-phrase.ts",
     "./schedule-phrase-parse": "./src/schedule-phrase-parse.ts",
     "./schedule-timezone": "./src/schedule-timezone.ts",

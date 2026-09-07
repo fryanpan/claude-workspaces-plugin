@@ -329,6 +329,17 @@ describe('saving and clearing', () => {
     expect($('.board-sched-missed').textContent).toBe('Skip if missed');
   });
 
+  it('reads a change trigger into one read-only chip and no policy chip', () => {
+    mount();
+    click(host?.querySelector('.board-sched-arm'));
+    type('when doc d-LampDoc changes, after 5 minutes quiet');
+    expect(chipText()).toEqual(['When doc d-LampDoc changes', '5 minutes quiet', 'No end']);
+    expect(host?.querySelector('.board-sched-missed')).toBeNull();
+    expect($('.board-sched-next-v').textContent).toBe('when it changes');
+    // The chip is read: the id is typed in the phrase, not cycled.
+    expect(host?.querySelector('.board-sched-chip')?.tagName).toBe('SPAN');
+  });
+
   it('opens an armed row on its own rule, spelled canonically', () => {
     mount({
       schedule: {
