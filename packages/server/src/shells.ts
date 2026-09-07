@@ -44,6 +44,7 @@ import type {
 } from './landing.ts';
 import { isWithinRoot } from './safe-path.ts';
 import { type BoardWorkspace, type TaskStore, isRetired } from './tasks.ts';
+import { boardManifestPath } from './workspace-path.ts';
 
 /** The content type a static file is served with, by extension. */
 const CT: Record<string, string> = {
@@ -262,6 +263,7 @@ export function renderBoardShell(
   const safeName = escape(name);
   const safeId = escape(workspaceId);
   const sentryTags = sentryHeadTags(opts.sentry ?? null, 'board', assets);
+  const manifestHref = opts.visitor ? boardManifestPath(workspaceId) : '/manifest.webmanifest';
   const sentryMeta = sentryTags ? `\n    ${sentryTags}` : '';
   // Deliberately NOT rendered for a share visitor. Every peer on a Yjs doc
   // syncs the whole doc, so one shared feedback doc would hand every board
@@ -283,8 +285,12 @@ export function renderBoardShell(
     <!-- Two shells, two copies. Kept in step with packages/workspaces-app/index.html
          on purpose: an install started from the board and one started from
          an attachment have to produce the same web app, and on iOS the Home
-         Screen install is what makes push available at all. -->
-    <link rel="manifest" href="/manifest.webmanifest" />
+         Screen install is what makes push available at all.
+         A VISITOR's shell links the board's own manifest instead
+         (routes/workspace-manifest.ts): on a share hostname the root
+         manifest's start page is out of scope, so the app they installed
+         would open on a refusal. -->
+    <link rel="manifest" href="${manifestHref}" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#2e7dd7" />${sentryMeta}
     <!-- The board's own rules load FIRST, and the order is load-bearing. The

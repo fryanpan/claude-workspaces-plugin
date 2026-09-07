@@ -22,6 +22,7 @@ import { handleWorkspaceContent } from './workspace-content.ts';
 import { handleWorkspaceDelete } from './workspace-delete.ts';
 import { handleWorkspaceGoals } from './workspace-goals.ts';
 import { handleWorkspaceHome } from './workspace-home.ts';
+import { handleWorkspaceManifest } from './workspace-manifest.ts';
 import { handleWorkspaceNext } from './workspace-next.ts';
 import { handleWorkspaceRelated } from './workspace-related.ts';
 import type {
@@ -49,6 +50,9 @@ export async function handleWorkspaceRoutes(
   return (
     (await handleWorkspaceCreateRead(ctx, rq)) ??
     (await handleWorkspaceHome(ctx, rq)) ??
+    // The board's own web-app manifest. Anchored on its one filename, so
+    // its position carries no behaviour.
+    handleWorkspaceManifest(ctx, rq) ??
     (await handleWorkspaceNext(ctx, rq)) ??
     // Reads the board's goals and plan docs to answer "is somebody already
     // planning this". Above the settings block only because that is where it

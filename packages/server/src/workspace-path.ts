@@ -165,3 +165,12 @@ export function isBoardPageRequest(method: string, rest: string, url: URL): bool
 export function wantsJson(url: URL): boolean {
   return url.searchParams.get('format') === 'json';
 }
+
+/**
+ * A board's own web-app manifest, `/workspaces/<id>/manifest.webmanifest`.
+ * Here rather than beside the route that answers it because the board shell
+ * (`shells.ts`) links it and a shell may not import out of `routes/`.
+ */
+export function boardManifestPath(workspaceId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/manifest.webmanifest`;
+}
