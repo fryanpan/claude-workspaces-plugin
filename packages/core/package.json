@@ -26,6 +26,7 @@
     "./review-item-id": "./src/review-item-id.ts",
     "./schedule-missed": "./src/schedule-missed.ts",
     "./schedule-run-record": "./src/schedule-run-record.ts",
+    "./schedule-wake": "./src/schedule-wake.ts",
     "./schedule-phrase": "./src/schedule-phrase.ts",
     "./schedule-phrase-parse": "./src/schedule-phrase-parse.ts",
     "./schedule-timezone": "./src/schedule-timezone.ts",

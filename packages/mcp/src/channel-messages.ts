@@ -22,6 +22,7 @@ import {
   reviewItemHeldLine,
   stalledLine,
 } from './nudge-line.ts';
+import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
 import { voiceRequestLine } from './voice-line.ts';
 
@@ -141,6 +142,12 @@ export interface BoardEventPayload {
   titleFrom?: string;
   titleTo?: string;
   title?: string;
+  /** `task.scheduled_run` / `task.spawn_requested`: the rule the instance
+   *  came from, which wake this is, and the detached owner's name. */
+  ruleId?: string;
+  attempt?: number;
+  attempts?: number;
+  agentName?: string;
   /** `workspace.ready_idle` only: how much was ready and how long the board
    *  had stood still when the wake fired. See ready-nudge.ts. */
   readyCount?: number;
@@ -228,6 +235,14 @@ async function emitBoardChannelMessage(
               p.reason ? ` — ${truncate(p.reason, 80)}` : ''
             }`
           : `[task.body_edited] ${p.taskId}${by}${p.reason ? ` — ${truncate(p.reason, 80)}` : ''}`;
+      break;
+    // The scheduled-run wakes: an owner's, and a spawner's for a detached
+    // owner. Wording in scheduled-line.ts.
+    case 'task.scheduled_run':
+      body = scheduledRunLine(p);
+      break;
+    case 'task.spawn_requested':
+      body = spawnRequestedLine(p);
       break;
     // Nothing emits this since the risk gate was removed (2026-08-18). Kept
     // so a replayed or historical row still relays as a sentence rather than

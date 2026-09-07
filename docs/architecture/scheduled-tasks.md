@@ -144,6 +144,41 @@ has succeeded and gone stale AGAIN — an item re-filed against the silence
 the reader just acknowledged is the log nobody reads, wearing a queue's
 clothes.
 
+## The wake path — a filed row is not a started one
+
+Every scheduled row's owner is an agent, and an agent's session is not
+always running. So filing the instance is the first half of a run; the
+second is getting a session onto it, and that is `task-scheduled-wake.ts`,
+on the same pass as the run record. The pure half — the retry schedule,
+what one wake records — is `schedule-wake.ts` in `core`, so the board can
+read the wake off the rule exactly as the server wrote it.
+
+While the instance sits in `todo`, each pass asks one question: can the
+owner be reached? An owner holding a stream on the board gets one addressed
+frame, `task.scheduled_run`, carrying the instance id — `sendToAgent`, the
+delivery the stall and ready wakes ride, never a broadcast. An owner with no
+stream gets nothing it could read; instead the SPAWNER — the one session on
+this server that starts others, named by `spawnerAgentId` on
+`ServerOptions` (`CW_SPAWNER_AGENT_ID`, default the fleet's Team Lead) and
+reached on whichever board it is attached to — gets one
+`task.spawn_requested` naming the owner and the row. One per instance: the
+spawned session claiming the row is the answer both are waiting for, and a
+second ask before the first is acted on is noise. Bryan's words for it
+(2026-09-04): *"alert Team Lead to spawn the session just to run one task.
+Then spin down."*
+
+**Attempts are bounded, with backoff.** Four: at the fire, then five,
+fifteen and forty-five minutes after the previous one. An attempt that
+reaches nobody is still an attempt — that is what bounds the run. One more
+window after the last, the board stops and files ONE review item on the
+instance, the owner's own row, so a person can start the session, hand the
+row over, or say it can wait. Every attempt is written on the rule
+(`state.wake`, replaced when the next instance is filed), with who it
+reached, and the moment the instance leaves `todo` the wake records who
+took it. The run record reads that back: an open instance says `Waiting 5m`
+while a wake is owed, `Unanswered 2h` in red once the board has given up,
+and `Running` only when somebody has it.
+
 ## Restart safety
 
 The guarantee is that a rule **neither loses an occurrence nor fires one
@@ -212,6 +247,7 @@ ghost affordance; everything else appears once there is a rule to show.
 Deliberately, and each is a row of its own:
 
 - **the Scheduled board section** — rule rows have no home of their own on the
-  board yet, and Scheduled is separate from Blocked;
-- **the wake path** — an instance is filed and its owner is named on it, but
-  the scheduler does not wake anybody. It never starts sessions itself.
+  board yet, and Scheduled is separate from Blocked.
+
+The scheduler still never starts a session itself: the wake path asks the
+spawner to, and asks a person when nobody answers.

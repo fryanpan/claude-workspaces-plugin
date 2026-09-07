@@ -28,6 +28,7 @@ export * from './schedule-phrase.ts';
 export * from './schedule-phrase-parse.ts';
 export * from './schedule-missed.ts';
 export * from './schedule-run-record.ts';
+export * from './schedule-wake.ts';
 export * from './task-schedule.ts';
 export * from './task-wire.ts';
 export * from './word-count.ts';

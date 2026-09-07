@@ -34,6 +34,7 @@ import {
   isKnownTimezone,
   zonedParts,
 } from './schedule-timezone.ts';
+import type { ScheduleWake } from './schedule-wake.ts';
 
 // The timezone half lives next door (`schedule-timezone.ts`) but is part of
 // one vocabulary: a caller reasoning about a calendar rule needs both, and
@@ -147,6 +148,9 @@ export interface ScheduleState {
   /** The stale review item the server filed, and the success it was filed
    *  against, so one stretch of staleness is one item and never one per tick. */
   staleItem?: { id: string; forSuccessAt?: number };
+  /** The last instance's wake — attempts, and whether anybody answered
+   *  (`schedule-wake.ts`). Replaced when the next instance is filed. */
+  wake?: ScheduleWake;
 }
 
 /**
