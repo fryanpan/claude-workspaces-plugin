@@ -110,6 +110,7 @@ import {
   handleWorkspaceGoalRoutes,
   handleWorkspaceRoutes,
 } from './routes/workspaces.ts';
+import { handleWrongPrefix } from './routes/wrong-prefix.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { Shares } from './share/shares.ts';
@@ -2486,6 +2487,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         // the run did in place, and it lands on the 404 below.
         const shell = serveShellRoutes({ req, url, pathname, visitor });
         if (shell) return shell;
+
+        // ── Wrong-prefix 404 ── see routes/wrong-prefix.ts. Below everything
+        // that exists, so it shadows nothing: a guess at a board route with
+        // `/api` in front is told the address without it.
+        const wrongPrefix = handleWrongPrefix(pathname);
+        if (wrongPrefix) return wrongPrefix;
 
         return new Response('not found', { status: 404 });
       }
