@@ -40,7 +40,12 @@ export function buildBoardManifest(workspaceId: string, name: string): Record<st
     short_name: title.length > 12 ? `${title.slice(0, 11).trimEnd()}…` : title,
     description: 'Review docs, diffs and tasks with the people and agents doing the work.',
     start_url: boardPath,
-    scope: `${boardPath}/`,
+    // The scope must contain the start URL, and a trailing slash would put
+    // `/workspaces/<id>` one character outside `/workspaces/<id>/` — a
+    // manifest a browser may then treat as no manifest at all. Scope
+    // matching is a string prefix, so this also covers the board's tabs
+    // and its docs, which is the app.
+    scope: boardPath,
     display: 'standalone',
     background_color: '#ffffff',
     theme_color: '#2e7dd7',

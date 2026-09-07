@@ -65,12 +65,16 @@ describe('the share allowlist and a Home Screen install', () => {
 describe('what one board’s manifest says', () => {
   it('starts on the board, is scoped to it, and is named after it', () => {
     const m = buildBoardManifest('w-1', 'Harbour plan');
+    // The spec's own test for a usable manifest: the start URL sits inside
+    // the scope. The first cut had `/workspaces/w-1/` as the scope, which
+    // excludes the start URL by one character.
+    expect((m.start_url as string).startsWith(m.scope as string)).toBe(true);
     expect(m).toMatchObject({
       id: '/workspaces/w-1',
       name: 'Harbour plan',
       short_name: 'Harbour plan',
       start_url: '/workspaces/w-1',
-      scope: '/workspaces/w-1/',
+      scope: '/workspaces/w-1',
       display: 'standalone',
     });
   });
