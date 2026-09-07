@@ -32,6 +32,8 @@ import {
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
 import type { ReviewGate, ThreadReviewGate } from './review-gate-types.ts';
+import { linkHoldReason } from './review-items/link-check.ts';
+import { type PriorAskRow, priorAsksFor } from './review-items/prior-asks.ts';
 import type { ReviewJudge, ReviewJudgeVerdict } from './review-judge.ts';
 import type { SseBus } from './sse.ts';
 import { REVIEW_ITEM_HELD_EVENT, type ReviewItemHeldFrame } from './stall-nudge.ts';
@@ -379,6 +381,32 @@ export function createReviewGate(ctx: ReviewGateContext) {
     | { held: false; row: T }
     | { held: true; row: T; reason: string; message: string };
 
+  /** Whether the ids a relative link names actually exist here. */
+  const linkTargets = {
+    boardExists: (id: string) => taskStore.getWorkspace(id) !== undefined,
+    taskExists: (id: string) => taskStore.getTask(id) !== undefined,
+    docExists: (id: string) => docStore.docExists(id),
+  };
+
+  /**
+   * The row an address hangs on, for the prior-ask gather.
+   *
+   * A thread on a ticket's BODY DOC is a question on that ticket, not on some
+   * separate document — `task:<id>` is the ticket's own doc id — so it
+   * resolves to the same row the ticket channel does. That equivalence is the
+   * whole point: it is what lets one channel see what the other asked.
+   */
+  function priorAskRowFor(address: ReviewGateAddress): PriorAskRow {
+    if (address.kind === 'task') {
+      return { kind: 'task', taskId: address.taskId, exceptItemId: address.reviewItemId };
+    }
+    if (address.kind === 'decision') return { kind: 'task', taskId: address.taskId };
+    const taskId = address.docId.startsWith('task:') ? address.docId.slice('task:'.length) : '';
+    return taskId === ''
+      ? { kind: 'doc', docId: address.docId, exceptCommentId: address.commentId }
+      : { kind: 'task', taskId, exceptCommentId: address.commentId };
+  }
+
   /**
    * Put a filed or revised review item through the quality gate — the ONE
    * implementation, whichever surface the item was filed on.
@@ -442,26 +470,56 @@ export function createReviewGate(ctx: ReviewGateContext) {
       { forVersion },
     );
     const words = target.words(row);
+    // What the reader has already been asked on this row, down BOTH channels.
+    // Read at judging time rather than at filing time so a revision is judged
+    // against the answers that exist now — including one given while the
+    // first version of this item sat held.
+    const priorAsks = priorAsksFor(
+      priorAskRowFor(target.address),
+      {
+        getTask: (id) => taskStore.getTask(id),
+        listThreads: (id) => docStore.listThreads(id),
+      },
+      Date.now(),
+    );
+    /**
+     * The deterministic half, and it runs FIRST — a link that goes nowhere is
+     * a fact, and spending a model call to have it described back is both
+     * slower and less certain than checking it. When it fires the judge is
+     * not called at all: the item has one gap, it is named, and naming a
+     * second one in the same breath is what the single-biggest-gap rule
+     * exists to stop.
+     *
+     * Only while the gate is ON. The branch above releases held items when
+     * the judge is off, so a hold placed here in that state would be a hold
+     * with nothing left that could lift it.
+     */
+    const linkReason = linkHoldReason(words.detail, linkTargets);
     let verdict: ReviewJudgeVerdict | null = null;
-    try {
-      verdict = await judge({
-        criteria: criteria.value,
-        item: {
-          headline: words.headline,
-          ...(words.detail !== undefined ? { detail: words.detail } : {}),
-          ...(words.options !== undefined ? { options: words.options } : {}),
-          ...(heldFor.length > 0 ? { priorHolds: heldFor } : {}),
-        },
-      });
-    } catch (err) {
-      if (!warnedJudgeThrew) {
-        warnedJudgeThrew = true;
-        console.error(
-          '[review-gate] judge threw; items pass through:',
-          err instanceof Error ? err.message : err,
-        );
+    if (linkReason !== undefined) {
+      verdict = { ok: false, reason: linkReason };
+    } else {
+      try {
+        verdict = await judge({
+          criteria: criteria.value,
+          item: {
+            headline: words.headline,
+            ...(words.detail !== undefined ? { detail: words.detail } : {}),
+            ...(words.options !== undefined ? { options: words.options } : {}),
+            ...(heldFor.length > 0 ? { priorHolds: heldFor } : {}),
+            ...(priorAsks.length > 0 ? { priorAsks } : {}),
+          },
+        });
+      } catch (err) {
+        if (!warnedJudgeThrew) {
+          warnedJudgeThrew = true;
+          console.error(
+            '[review-gate] judge threw; items pass through:',
+            err instanceof Error ? err.message : err,
+          );
+        }
+        verdict = null;
       }
-      verdict = null;
     }
     const at = Date.now();
     const carried = heldFor.length > 0 ? { heldFor } : {};
