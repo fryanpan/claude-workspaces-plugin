@@ -102,6 +102,7 @@ function fake() {
       events.push(event);
     },
     now: () => clock,
+    openThreadAsks: () => 0,
     noteBodyEdited: () => true,
     renameTask: (taskId) => {
       const found = rows.get(taskId);

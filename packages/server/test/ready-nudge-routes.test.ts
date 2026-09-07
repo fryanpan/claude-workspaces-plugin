@@ -241,7 +241,13 @@ describe('the board wakes its lead over the wire', () => {
     ): Promise<Frame> {
       handle.nudgeReadyWork();
       await settle(400);
-      expect(nudges(ctx.lead.frames, READY_IDLE_EVENT)).toHaveLength(0);
+      // Named, not counted: a bare length says "1 !== 0" and leaves the next
+      // reader to work out WHICH row the gate let through, which is the only
+      // fact the failure is about.
+      expect(
+        nudges(ctx.lead.frames, READY_IDLE_EVENT).map((f) => f.data?.taskId),
+        'a held row was named as ready work',
+      ).toEqual([]);
 
       const freeId = await addReadyRow(ctx.workspaceId, 'Cache the facet counts');
       await settle();
@@ -295,6 +301,42 @@ describe('the board wakes its lead over the wire', () => {
             ],
           },
         }),
+      );
+      await settle();
+
+      await expectHeldThenReady({ workspaceId, lead }, { 'awaiting-answer': 1 });
+
+      await lead.stop();
+      await tab.stop();
+    });
+
+    it('leaves a row alone when its only ask is a comment on the ticket', async () => {
+      // The SAME hold, through the other supported door. There are two ways
+      // to ask a person on a ticket — the review item above, and a comment on
+      // the ticket's own body doc carrying a review payload, which is what
+      // `create_thread(docId: 'task:<id>', review)` writes. The gate read only
+      // the first, so four rows on the real board sat with an open question on
+      // them and produced an idle nudge every pass: the wake said "nobody has
+      // picked this up" about work that was waiting on Bryan.
+      const { workspaceId, taskId, lead, tab } = await boardWithReadyWork();
+      await jj(
+        await post(
+          `/workspaces/${workspaceId}/docs/${encodeURIComponent(`task:${taskId}`)}/threads`,
+          {
+            author: LEAD,
+            workspaceId,
+            text: 'Which way should the ranking go?',
+            anchor: { kind: 'subject' },
+            review: {
+              shape: 'decision',
+              headline: 'Rank by recency or by dwell time?',
+              options: [
+                { id: 'o-recency', label: 'Recency' },
+                { id: 'o-dwell', label: 'Dwell time' },
+              ],
+            },
+          },
+        ),
       );
       await settle();
 

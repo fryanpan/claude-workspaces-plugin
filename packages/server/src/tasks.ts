@@ -1717,6 +1717,18 @@ export class TaskStore {
   private docRevisionFor: ((docId: string) => number | undefined) | undefined;
 
   /**
+   * How many asks are open on a ticket's own doc threads, wired by server.ts
+   * from the doc store. Same shape and the same reason as `docRevisionFor`
+   * above: the store cannot read docs, and the readers that need this
+   * (`ready-gate.ts`, the stall monitor) reach it through `reviewState`
+   * rather than each growing a doc dependency of its own.
+   *
+   * Left unwired it answers zero, which is what every store-only test wants
+   * and is exactly the behaviour before it existed.
+   */
+  private threadAsksFor: ((taskId: string) => number) | undefined;
+
+  /**
    * The review-item verbs, over this store's own state.
    *
    * It holds no `TaskStore` — only the nine-member `ReviewItemPersistence`
@@ -1814,6 +1826,16 @@ export class TaskStore {
 
   setDocRevisionReader(reader: ((docId: string) => number | undefined) | undefined): void {
     this.docRevisionFor = reader;
+  }
+
+  /** Wire the doc-thread ask count (server.ts). See `threadAsksFor`. */
+  setThreadAskReader(reader: ((taskId: string) => number) | undefined): void {
+    this.threadAsksFor = reader;
+  }
+
+  /** Open asks on this ticket's own doc threads; zero when nothing is wired. */
+  openThreadAsks(taskId: string): number {
+    return this.threadAsksFor?.(taskId) ?? 0;
   }
 
   constructor(opts: {

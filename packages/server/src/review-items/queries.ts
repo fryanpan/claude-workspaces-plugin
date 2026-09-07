@@ -132,7 +132,11 @@ export class ReviewItemQueries {
     // reader was never shown.
     const items = this.listReviewItems(taskId);
     const held = items.filter(isReviewItemHeld).length;
-    const open = items.filter(isCountedOpen).length;
+    // Both spellings of "a question is outstanding", added rather than
+    // chosen between. A ticket item lives in `task.reviews`; a doc-thread
+    // item lives on a comment in `task:<id>` and is counted through the
+    // persistence reader. Either one means somebody is waiting.
+    const open = items.filter(isCountedOpen).length + this.p.openThreadAsks(taskId);
     let unreadable = 0;
     for (const raw of task.reviews ?? []) {
       if (!readTaskReviewItem(raw)) unreadable++;
