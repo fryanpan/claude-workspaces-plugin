@@ -227,10 +227,19 @@ export async function handleWorkspaceTool(
       });
     }
     case 'attach_doc': {
+      // `docs:attach`, not `docs`. Attaching is a custom method on the
+      // collection — `docs` is the CREATE, and a create handed nothing but a
+      // `docId` either refuses (400 `sourceUrl required`) or, on a board with
+      // a notes home, derives a path and makes a NEW empty doc under the name
+      // of the one the caller meant to file. See attach-doc-route.test.ts.
       const { workspaceId, docId } = a as { workspaceId: string; docId: string };
-      const res = (await http('POST', `/workspaces/${encodeURIComponent(workspaceId)}/docs`, {
-        docId,
-      })) as { workspace?: { docIds?: string[] } };
+      const res = (await http(
+        'POST',
+        `/workspaces/${encodeURIComponent(workspaceId)}/docs:attach`,
+        {
+          docId,
+        },
+      )) as { workspace?: { docIds?: string[] } };
       return ok({ ok: true, workspaceId, docIds: res.workspace?.docIds ?? [] });
     }
     case 'get_workspace': {
