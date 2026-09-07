@@ -2159,6 +2159,18 @@ body.has-set .doc-switcher-caret {
   --lz-fade-ms: 260ms;
   --lz-collapse-ms: 440ms;
   --lz-ease-settle: cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* NOT `--fg-muted`, and this is the one place in the zone that departs from
+     it. `--fg-muted` (#6e7781) measures 4.55:1 on white: it clears AA by 0.05
+     and is the right weight for a readout somebody glances at. The transcript
+     is not a readout — it is the text being READ, continuously, off an iPad
+     held at arm's length in a room with glare, and it had been #4b535c at
+     7.80:1 until the settle mock's restyle folded it into the muted token.
+     This is that value back, as the zone's own, so the two cannot drift
+     again: 7.80:1 on --bg and 7.40:1 on --bg-panel. Same argument the strip
+     makes for `.meeting-note-dismiss`, and the same answer.
+     It is one step darker and nothing else — the transcript stays secondary
+     to the notes by TYPE, which is the whole of how the mock marks it. */
+  --lz-fg: #4b535c;
   margin: 0;
   padding: 2px 0 8px;
   background: transparent;
@@ -2206,7 +2218,7 @@ body.is-reading-width #editor > .live-zone {
 .lz-chunk-lines {
   font-size: 15px;
   line-height: 1.55;
-  color: var(--fg-muted);
+  color: var(--lz-fg);
   margin: 0;
   overflow-wrap: anywhere;
 }
@@ -2236,7 +2248,7 @@ body.is-reading-width #editor > .live-zone {
   margin-right: 0.35em;
   border-radius: var(--radius-pill);
   background: rgba(127, 127, 127, 0.12);
-  color: var(--fg-muted);
+  color: var(--lz-fg);
   white-space: nowrap;
 }
 .lz-partial::after {
