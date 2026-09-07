@@ -1,4 +1,10 @@
-import { type DocMeta, attachmentIdOf, isAttachmentMember } from '@claude-workspaces/core';
+import {
+  type DocMeta,
+  attachmentIdOf,
+  contentKind,
+  isAttachmentMember,
+} from '@claude-workspaces/core';
+import { isBoardOwnedDoc } from './doc-ids.ts';
 
 /**
  * Every attachment set belongs to a workspace — including the ones made before that
@@ -48,6 +54,48 @@ export function attachmentIdsNeedingFiling(
   return Array.from(seen).sort();
 }
 
+/**
+ * Would this doc get a `reviewUrl` if a board held it? The same rule
+ * `withReviewUrl` applies once it HAS a board: server-held content (markdown,
+ * code, diff) or a mockup bound to a source. A mockup with no source has no
+ * page to open, so filing it would add a row that leads nowhere.
+ */
+export function holdsContent(meta: Pick<DocMeta, 'type' | 'sourceUrl'>): boolean {
+  return contentKind(meta.type) !== 'none' || (meta.type === 'mockup' && !!meta.sourceUrl);
+}
+
+/**
+ * The docs that hold content and sit on no board — the standalone half of the
+ * invariant, filed by their OWN id.
+ *
+ * Measured in the live data dir on 2026-09-06, after the set pass above had
+ * been running for a fortnight: 30 markdown docs still had no address. None
+ * was an attachment member, so the set pass never saw them — 16 were created
+ * before `fileUnderBoardWorkspace` existed or through the store directly, and
+ * 14 were batch-registered under a `setId` that names no attachment set and
+ * that no board holds. A doc whose `setId` IS held is addressed through it
+ * (`shareWorkspacesOf` reads the same field), so it is not named here.
+ *
+ * `ws:` and `task:` docs are a board's own furniture and are addressed by the
+ * row they belong to; a body whose row is gone is a store repair, not a filing.
+ */
+export function docIdsNeedingFiling(
+  docs: readonly DocMeta[],
+  isFiled: (attachmentId: string) => boolean,
+): string[] {
+  const out: string[] = [];
+  for (const meta of docs) {
+    if (isBoardOwnedDoc(meta.docId)) continue;
+    if (isAttachmentMember(meta)) continue;
+    if (!holdsContent(meta)) continue;
+    if (isFiled(meta.docId)) continue;
+    const setId = attachmentIdOf(meta);
+    if (setId !== undefined && setId !== meta.docId && isFiled(setId)) continue;
+    out.push(meta.docId);
+  }
+  return out.sort();
+}
+
 export interface AttachmentBackfillDeps {
   docs: () => readonly DocMeta[];
   /** Whether this attachment set is already attached to some workspace. */
@@ -64,11 +112,16 @@ export interface AttachmentBackfillResult {
 export function backfillAttachmentFiling(deps: AttachmentBackfillDeps): AttachmentBackfillResult {
   const filed: AttachmentBackfillResult['filed'] = [];
   const failed: string[] = [];
-  for (const attachmentId of attachmentIdsNeedingFiling(deps.docs(), deps.isFiled)) {
+  const docs = deps.docs();
+  const needing = [
+    ...attachmentIdsNeedingFiling(docs, deps.isFiled),
+    ...docIdsNeedingFiling(docs, deps.isFiled),
+  ];
+  for (const attachmentId of needing) {
     try {
       filed.push({ attachmentId, workspaceId: deps.file(attachmentId) });
     } catch {
-      // One set that cannot be filed must not strand the rest, and must
+      // One set or doc that cannot be filed must not strand the rest, and must
       // not take the boot down with it — the server is useful either way, and
       // the next start tries again.
       failed.push(attachmentId);

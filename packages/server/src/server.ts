@@ -1478,7 +1478,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     });
     if (res.filed.length > 0) {
       console.log(
-        `[attachments] filed ${res.filed.length} previously unfiled attachment set(s) onto a workspace:`,
+        `[attachments] filed ${res.filed.length} previously unfiled attachment set(s) or doc(s) onto a workspace:`,
         res.filed.map((r) => `${r.attachmentId}→${r.workspaceId}`).join(', '),
       );
     }
