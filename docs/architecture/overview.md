@@ -202,7 +202,11 @@ transport — and its models are DOM-free, which is what lets `board/board-model
 document. `suggestions/` sits in the editor tier rather than inside `redline/`,
 because Redline is the change view and a suggestion is the proposal: the chip
 and the doc-level pending badge render on the plain markdown surface and on the
-board's task-body editor, neither of which mounts a redline module. `notes-link-affordance.ts` joins the editor tier beside
+board's task-body editor, neither of which mounts a redline module. `meeting-live-hold.ts` joins the meeting family in that same view tier and
+changes none of the picture: it is one screenful of geometry that
+`meeting-live-zone.ts` owned until the zone crossed 500 lines, holding the
+live transcript still across the frame a settled chunk splits off on. Nothing
+but the zone imports it. `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing
 a link edits the stored doc and calls the board. `core` is three tiers: wire types, the document model (`prose-*.ts`,
