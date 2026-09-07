@@ -291,6 +291,18 @@ interface Filed {
   wroteAt: number;
   /** Every row the item currently names, anchor included. */
   rowIds: string[];
+  /**
+   * What the anchor row WAS when the item was hung on it: its bucket, and
+   * when its stretch of silence began. Our own filing masks the row from the
+   * gate on every later tick — the item is a pending ask, so the row reads
+   * `blocked-on-owner` with our write as its newest activity — and without
+   * this the anchor line degraded to "waiting on a person. Quiet 13m" on a
+   * row that had been claimed and silent for fifteen hours (2026-09-07),
+   * which is the item describing itself rather than the row. Absent on a
+   * sidecar written before this field existed; the line then falls back to
+   * the masked reading.
+   */
+  anchor?: { bucket: string; stuckSince: number };
 }
 
 /** A board with no live item, and when its last one ended — the re-file
@@ -377,7 +389,7 @@ export class StallEscalations {
       // Answered, or withdrawn by a person. They have seen this set; only a
       // row they were NOT shown is worth asking about again.
       const unseen = fresh.filter((row) => !prior.rowIds.includes(row.id));
-      if (unseen.length > 0) this.file(key, fresh);
+      if (unseen.length > 0) this.file(key, fresh, now);
       else if (fresh.length === 0) this.clear(key, now);
       else this.save();
       return;
@@ -397,7 +409,7 @@ export class StallEscalations {
       this.save();
       return;
     }
-    this.file(key, fresh);
+    this.file(key, fresh, now);
   }
 
   /** How many boards hold a live item. Test surface for the pruning that
@@ -576,7 +588,7 @@ export class StallEscalations {
         return;
       }
       this.withdrawItem(key, prior, 'moved to a row that is still stuck');
-      this.file(key, fresh);
+      this.file(key, fresh, now);
       return;
     }
     const named = fresh.filter((row) => row.id !== prior.taskId);
@@ -617,8 +629,8 @@ export class StallEscalations {
     return {
       id: task.id,
       title: task.title,
-      bucket: 'blocked-on-owner',
-      quietMs: Math.max(0, now - task.updatedAt),
+      bucket: prior.anchor?.bucket ?? 'blocked-on-owner',
+      quietMs: Math.max(0, now - (prior.anchor?.stuckSince ?? task.updatedAt)),
       toldMs: Math.max(0, now - prior.wroteAt),
       // Somebody is looking at it: this item is the ask, and it is on their
       // queue. Whatever the row's history, it is not unreachable now.
@@ -626,7 +638,7 @@ export class StallEscalations {
     };
   }
 
-  private file(key: string, rows: EscalatedRow[]): void {
+  private file(key: string, rows: EscalatedRow[], now: number): void {
     const anchor = rows[0];
     if (!anchor) return;
     const res = this.store.addReviewItem(
@@ -645,6 +657,7 @@ export class StallEscalations {
         itemId: res.item.id,
         wroteAt: res.task.updatedAt,
         rowIds: rows.map((r) => r.id),
+        anchor: { bucket: anchor.bucket, stuckSince: now - anchor.quietMs },
       },
     };
     this.save();
