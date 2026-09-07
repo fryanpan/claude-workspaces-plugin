@@ -203,12 +203,24 @@ export function buildStallEscalationReview(input: {
       : `${n} rows have not moved since the lead was told`;
   const lines = rows.map((row) => {
     const why = BUCKET_WORDS[row.bucket] ?? row.bucket;
-    const heard = row.delivered
-      ? `the lead was told ${span(row.toldMs)} ago`
-      : `nobody could be reached on this board for ${span(row.toldMs)}`;
-    return `- [${label(row.title)}](${taskDeepLink(workspaceId, row.id)}) — ${why}. Quiet ${span(
+    const link = `- [${label(row.title)}](${taskDeepLink(workspaceId, row.id)}) — ${why}. Quiet ${span(
       row.quietMs,
-    )}; ${heard}.`;
+    )}`;
+    // A DELIVERED wake's age is deliberately not printed. `ToldRow.toldAt` is
+    // stamped once per remembered stretch and a row that is worked, goes quiet
+    // and comes back inside the memory's window keeps the old stamp, so the
+    // number measures a stretch that has since ended. Rendered beside the
+    // quiet time it produced sentences of the form "Quiet 1h; the lead was
+    // told 2d ago" — on rows whose lead had been writing to them all along.
+    // The quiet time is measured on THIS stretch and is the number a reader
+    // can act on; the opening sentence already states the window the row
+    // crossed.
+    //
+    // The UNDELIVERED span stays, because there it is the whole finding: how
+    // long this board has had nobody to tell, which no other line carries.
+    return row.delivered
+      ? `${link}.`
+      : `${link}; nobody could be reached on this board for ${span(row.toldMs)}.`;
   });
   const opening = dark
     ? `Nothing on this board could be told to anybody for over ${span(escalateMs)} — its lead seat is held by a session that is not answering, and no other session is attached.`
@@ -418,6 +430,27 @@ export class StallEscalations {
     told: ReadonlyMap<string, ToldTime>,
     now: number,
   ): EscalatedRow[] {
+    // A board with a PULSE escalates nothing, whatever its rows look like.
+    //
+    // Every word this module writes rests on one premise — "the lead is the
+    // only addressee the stall wake has, and a lead that has stopped cannot
+    // act on being woken" — and a session that reported on this board inside
+    // the window has not stopped. Going over its head then is not a second
+    // addressee, it is a duplicate one: the reader is handed a row the lead
+    // is already reachable about, and the only reply available is to hand it
+    // back. Measured on a live board: four items on one row in a day, and in
+    // the hour before the last of them the lead had written on that board six
+    // times across four other rows. Every reply to them was a redirect back
+    // to the lead.
+    //
+    // The wake is untouched — the lead is still told every window, which is
+    // the right addressee for a board that has somebody on it. What stops is
+    // the escalation PAST them.
+    //
+    // Absent `agentActiveAt` means a caller that does not measure it, and
+    // that must not read as a dead board: the check is skipped and the
+    // module behaves exactly as it did before this existed.
+    if (board.agentActiveAt !== undefined && now - board.agentActiveAt < this.escalateMs) return [];
     const rows: EscalatedRow[] = [];
     for (const row of [...board.unfiled, ...board.stalled]) {
       const stamp = told.get(row.id);

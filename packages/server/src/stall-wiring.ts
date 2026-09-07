@@ -774,9 +774,24 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       Date.now(),
       heldReviewItemMs,
     );
+    // The board's PULSE: when a session last reported here. Notes are written
+    // by sessions and by nothing else — the Stop hook posts one per turn — so
+    // the newest note across the board is the cheapest honest answer to "is
+    // anybody working this board", and an agent transition covers a session
+    // that moves rows without narrating. A person's edit is deliberately NOT
+    // counted: the escalation is addressed TO the person, and letting their
+    // own writing suppress it would make the item disappear exactly when they
+    // touched the board. Read only by the escalation (`stall-escalation.ts`).
+    let agentActiveAt = 0;
+    for (const task of taskStore.listTasks(workspace.id)) {
+      for (const note of task.notes ?? []) if (note.ts > agentActiveAt) agentActiveAt = note.ts;
+      for (const tr of task.transitions ?? [])
+        if (tr.by?.kind === 'agent' && tr.ts > agentActiveAt) agentActiveAt = tr.ts;
+    }
     return {
       workspaceId: workspace.id,
       ...(workspace.leadAgentId !== undefined ? { leadAgentId: workspace.leadAgentId } : {}),
+      ...(agentActiveAt > 0 ? { agentActiveAt } : {}),
       retired: workspace.retiredAt !== undefined,
       stalled: verdict.stalled,
       unfiled: verdict.unfiled,

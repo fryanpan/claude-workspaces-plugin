@@ -115,6 +115,51 @@ describe('a told row that has not moved escalates to the reader', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it('files nothing while a session is still reporting on the board', () => {
+    // The premise this module is built on is that the lead cannot act. A
+    // board somebody reported on five minutes ago refutes it, and going over
+    // that lead's head hands the reader a row they can only hand back.
+    const a = make('Cut the export path over to the new writer');
+    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
+    escalations.onBoard(
+      board(wsId, {
+        stalled: [row(a, 'in-progress')],
+        agentActiveAt: now - 5 * 60_000,
+      }),
+      told,
+      now,
+    );
+    expect(queued()).toHaveLength(0);
+    expect(openItems(a.id)).toHaveLength(0);
+  });
+
+  it('files on the very same board once the reporting stops', () => {
+    // The control for the test above. Without it, "files nothing while a
+    // session is reporting" is satisfied by a module that files nothing ever.
+    const a = make('Cut the export path over to the new writer');
+    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
+    escalations.onBoard(
+      board(wsId, {
+        stalled: [row(a, 'in-progress')],
+        agentActiveAt: now - ESCALATE_MS - 60_000,
+      }),
+      told,
+      now,
+    );
+    expect(queued()).toHaveLength(1);
+  });
+
+  it('a snapshot that does not measure the pulse escalates exactly as before', () => {
+    // The second control. `agentActiveAt` is optional, and an absent one must
+    // read as "not measured", never as "a dead board" — otherwise every
+    // caller that has not been taught to compute it silently changes
+    // behaviour.
+    const a = make('Cut the export path over to the new writer');
+    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
+    escalations.onBoard(board(wsId, { stalled: [row(a, 'in-progress')] }), told, now);
+    expect(queued()).toHaveLength(1);
+  });
+
   it('files ONE item, on the unfiled row, naming every stuck row with a relative link', () => {
     const a = make('Cut the export path over to the new writer');
     const b = make('Retire the second scheduler');
@@ -640,7 +685,7 @@ describe('the words a reader sees', () => {
     },
   ];
 
-  it('names the row once, in plain words, with a relative link and both spans', () => {
+  it('names the row once, in plain words, with a relative link and the quiet span', () => {
     const review = buildStallEscalationReview({
       workspaceId: 'w-abc',
       rows,
@@ -654,7 +699,26 @@ describe('the words a reader sees', () => {
     expect(review.headline.includes('\n')).toBe(false);
     expect(review.detail).toContain('[Cut the export path over](/workspaces/w-abc?task=t-1)');
     expect(review.detail).toContain('Quiet 3h');
-    expect(review.detail).toContain('told 2h ago');
+    // The told-time is NOT printed on a delivered line. It is stamped once per
+    // remembered stretch, so on a row that was worked and went quiet again it
+    // names a stretch that has ended — which is how an item came to read
+    // "Quiet 1h; the lead was told 2d ago" about a row its lead had been
+    // writing to all along.
+    expect(review.detail).not.toContain('told 2h ago');
+    expect(review.detail).not.toMatch(/the lead was told \d/);
+  });
+
+  it('still says how long nobody could be reached, which no other line carries', () => {
+    // The control for the assertion above: the span is dropped because a
+    // DELIVERED wake's age cannot be trusted, not because spans are noise. On
+    // an undelivered finding the age IS the finding, and dropping it here
+    // would leave the reader with nothing to act on.
+    const review = buildStallEscalationReview({
+      workspaceId: 'w-abc',
+      rows: [{ ...rows[0], delivered: false } as (typeof rows)[0]],
+      escalateMs: ESCALATE_MS,
+    }) as { detail: string };
+    expect(review.detail).toContain('nobody could be reached on this board for 2h');
   });
 
   it('counts the rows in the headline when there is more than one', () => {

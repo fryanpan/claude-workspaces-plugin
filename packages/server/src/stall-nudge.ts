@@ -146,6 +146,21 @@ export interface StallSnapshot {
    *  exist on a ticket and on nobody's queue. Absent on a snapshot from a
    *  caller that does not read them, which is the same as none. */
   held?: readonly HeldItemRow[];
+  /**
+   * When a session last REPORTED on this board — the newest agent-written
+   * note or agent transition on any row. Only the escalation reads it, and
+   * only to answer the one question its whole premise rests on: can anybody
+   * here still act? Absent from a caller that does not compute it, which
+   * leaves the escalation exactly as it behaved before.
+   *
+   * Deliberately not per-row, and deliberately not the lead alone. Per-row
+   * silence is what the gate already measures, and it says nothing about
+   * whether the board has anyone on it: the item that prompted this read
+   * "nothing has moved" about a row whose lead had written on four OTHER
+   * rows in the preceding hour and was merging that row's child PRs at that
+   * minute. Notes are written by sessions, so this is the board's pulse.
+   */
+  agentActiveAt?: number;
 }
 
 /** What the filer's own wake carries. Flat, like every other frame. */
