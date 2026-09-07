@@ -22,6 +22,7 @@ The purpose of a workspace is to provide a significantly better agent and human 
          2. Use the `review` payload on `create_thread` or `post_reply`
          3. A `create_tasks` row that is itself the decision (`needs: "decision"`) is the ask, so it is judged as one — revise it with `revise_review_item(taskId)`, no item id
          4. Every one of these is judged by the board's quality gate, whichever verb filed it. `held: true` in the result means the item is off the reviewer's queue until you close the gap the reason names — the result and the `workspace.review_item_held` wake both carry the exact `revise_review_item(…)` call for that item, and every revision is judged again.
+         5. The gate holds a question the reader has already answered on that row. A retest after you shipped a fix is NOT that — but only if the item says what shipped since their answer (the PR or deploy) and asks them to try again on it. A retest that names nothing shipped is held as a repeat; a plain reply is not a filed ask.
       2. Payload Types
          1. `review_type: "decision"` offers 2–6 options to pick between
          2. `review_type: "question"` asks for a look and an answer in their own words
