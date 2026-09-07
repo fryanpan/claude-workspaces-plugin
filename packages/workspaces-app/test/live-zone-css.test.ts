@@ -63,9 +63,12 @@ describe('the transcript starts on the next line down from the doc', () => {
     for (const cls of ['lz-lines', 'lz-chunk-lines']) {
       const el = attach(cls, { parent: zone });
       expect(size(el), cls).toBeLessThan(Number.parseFloat(notes.fontSize));
-      // Greyer: --fg-muted, not the notes' --fg.
+      // Greyer: the zone's own `--lz-fg`, not the notes' `--fg`. It used to
+      // pin `--fg-muted`'s hex here; the transcript left that token when it
+      // had to clear 7:1 in a bright room, and the ratio that replaced the
+      // hex is asserted below, against the ground rather than on its own.
       expect(colour(el), cls).not.toBe(colour(prose));
-      expect(colour(el), cls).toBe('#6e7781');
+      expect(colour(el), cls).toBe('#4b535c');
     }
   });
 
@@ -223,5 +226,90 @@ describe('the stream is held over the break a split makes in its line', () => {
     expect(releasing.transition).toContain('text-indent');
     // The same number the slot's own height collapses over — one motion.
     expect(releasing.transition).toContain(`${COLLAPSE_MS}ms`);
+  });
+});
+
+/**
+ * Contrast (owner, 2026-09-06: the transcript has to be readable on an iPad
+ * in a bright room). The words being read are not a readout glanced at: they
+ * carry their own colour, one step darker than `--fg-muted`, and they are
+ * still marked secondary by TYPE alone — no frame comes back for it.
+ *
+ * The ratio is computed here rather than asserted as a hex, because a hex
+ * says nothing about what it sits on: repointing the ground would leave a
+ * colour assertion green and the text unreadable.
+ */
+describe('the transcript is readable in a bright room', () => {
+  /** A computed colour as channels. happy-dom answers `#rrggbb` where a
+   *  browser answers `rgb(r, g, b)`; both shapes turn up, so both parse. */
+  const toRgb = (css: string): [number, number, number] => {
+    const hex = css.trim().match(/^#([0-9a-f]{6})$/i);
+    if (hex?.[1]) {
+      const n = Number.parseInt(hex[1], 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    const parts = (css.match(/\d+(?:\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+    if (parts.length < 3) throw new Error(`not a colour: ${css}`);
+    return parts as [number, number, number];
+  };
+
+  /** WCAG relative luminance. */
+  const luminance = (css: string): number => {
+    const [r, g, b] = toRgb(css);
+    const lin = (c: number): number => {
+      const v = c / 255;
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  };
+  const contrast = (fg: string, bg: string): number => {
+    const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a) as [number, number];
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  /** The transcript's colour and the ground the page paints behind it. */
+  const measure = (): { text: string; ground: string; prose: string } => {
+    const editor = attach('', { attrs: { id: 'editor' } });
+    const prose = attach('ProseMirror', { parent: editor });
+    const note = attach('', { tag: 'p', parent: prose });
+    const lines = attach('lz-lines', { parent: attach('live-zone', { parent: editor }) });
+    return {
+      text: styleOf(lines).color,
+      ground: styleOf(document.body).backgroundColor,
+      prose: styleOf(note).color,
+    };
+  };
+
+  for (const [name, viewport] of [
+    ['tablet', IPAD],
+    ['phone', PHONE],
+  ] as const) {
+    it(`clears 7:1 against the ground the page paints, at ${name} width`, () => {
+      setViewport(viewport);
+      const { text, ground, prose } = measure();
+      // Control: the sheets are installed and the ground is the real one, so
+      // the ratio below is a measurement rather than two unset strings.
+      expect(toRgb(ground)).toEqual([255, 255, 255]);
+      expect(contrast(text, ground)).toBeGreaterThanOrEqual(7);
+      // …and still plainly secondary to the notes it feeds: darker would be
+      // an improvement on the number and a regression on the design.
+      expect(contrast(prose, ground)).toBeGreaterThan(contrast(text, ground));
+    });
+  }
+
+  it('the speaker pill is read with the words, so it carries their colour', () => {
+    setViewport(IPAD);
+    const zone = attach('live-zone');
+    const lines = attach('lz-lines', { parent: zone });
+    const pill = attach('lz-speaker', { tag: 'span', parent: lines });
+    expect(styleOf(pill).color).toBe(styleOf(lines).color);
+  });
+
+  it('nothing framed came back for the contrast', () => {
+    setViewport(IPAD);
+    const zone = styleOf(attach('live-zone'));
+    expect(zone.background).toBe('transparent');
+    expect(zone.borderStyle === 'none' || zone.borderStyle === '').toBe(true);
+    expect(zone.boxShadow === 'none' || zone.boxShadow === '').toBe(true);
   });
 });
