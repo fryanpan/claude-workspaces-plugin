@@ -3,7 +3,7 @@
  * meets the workspace's criteria.
  *
  * The prompt and the parser are pure and live in
- * `@feedback/core/review-judge-prompt`; this file owns the key, the HTTP call
+ * `@claude-workspaces/core/review-judge-prompt`; this file owns the key, the HTTP call
  * and the timeout — the same split, and the same rules, as `summarize.ts`:
  *
  *  - **The key is the dedicated summary key**, read through `resolveKeyFrom`
@@ -28,17 +28,17 @@
  * every embedded use) can reach the network. `bin.ts` constructs the real one.
  */
 
-import { readRenamedEnv } from '@feedback/core/env-names';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import {
   type ReviewJudgeItem,
   type ReviewJudgeVerdict,
   buildReviewJudgePrompt,
   parseReviewJudgeResponse,
-} from '@feedback/core/review-judge-prompt';
+} from '@claude-workspaces/core/review-judge-prompt';
 import { readKeychainPassword } from './share/keychain.ts';
 import { resolveKeyFrom } from './summarize.ts';
 
-export type { ReviewJudgeVerdict } from '@feedback/core/review-judge-prompt';
+export type { ReviewJudgeVerdict } from '@claude-workspaces/core/review-judge-prompt';
 
 export interface ReviewJudgeInput {
   /** The workspace's criteria — the owner's text or the default. */

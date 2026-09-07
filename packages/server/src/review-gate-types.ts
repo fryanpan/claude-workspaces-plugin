@@ -12,7 +12,7 @@
  * its vocabulary off the context module it already imports and nothing under
  * `routes/` has to know where the gate keeps its types.
  */
-import type { ReviewPayload, TaskReviewItem } from '@feedback/core';
+import type { ReviewPayload, TaskReviewItem } from '@claude-workspaces/core';
 
 /**
  * The gate's verdict on one review ITEM — held, or through.

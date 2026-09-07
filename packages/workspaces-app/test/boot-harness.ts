@@ -11,7 +11,7 @@
  * boot asked for and hands back what a server would have. The behaviour under
  * test is the boot's own.
  */
-import type { ConnectionStatus, FeedbackClient } from '@feedback/core';
+import type { ConnectionStatus, FeedbackClient } from '@claude-workspaces/core';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import type { BootHistory, BootLocation, BootStorage } from '../src/boot-env.ts';

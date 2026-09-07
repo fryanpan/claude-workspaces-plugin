@@ -17,7 +17,7 @@
  *     pane at each width, the declarations that keep every line to one line
  *     and every row to 44px.
  */
-import type { Thread, User } from '@feedback/core';
+import type { Thread, User } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACTIVITY_GROUP_CAP, ACTIVITY_NOTE_CAP } from '../src/board/activity-model.ts';
 import {

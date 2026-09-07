@@ -62,7 +62,7 @@
  * to edit a sentence a person has taken over.
  */
 
-import { type DocType, contentKind } from '@feedback/core';
+import { type DocType, contentKind } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { docLookupUrl } from './meeting-lookup.ts';
 import { correctNotesSection } from './meeting-notes-correction.ts';

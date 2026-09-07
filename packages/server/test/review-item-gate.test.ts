@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@feedback/core/review-judge-prompt';
+import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-judge-prompt';
 import type { ReviewJudgeInput, ReviewJudgeVerdict } from '../src/review-judge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { REVIEW_ITEM_HELD_EVENT, STALL_EVENT } from '../src/stall-nudge.ts';

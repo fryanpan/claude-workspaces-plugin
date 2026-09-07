@@ -20,7 +20,7 @@
  *
  * Lifted verbatim out of the top of `createServer`.
  */
-import { normalizeEmail } from '@feedback/core';
+import { normalizeEmail } from '@claude-workspaces/core';
 import { type CfAccessOptions, createCfAccessVerifier } from './middleware/cf-access.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
 import { CfApi } from './share/cf-api.ts';

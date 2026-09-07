@@ -14,7 +14,7 @@
  * version was exactly that: finding existing tasks did not work well.
  *
  * So an ASK is scored differently from a MENTION, by the board's own
- * related-work index (`@feedback/core/related-work`) rather than by title
+ * related-work index (`@claude-workspaces/core/related-work`) rather than by title
  * runs. That scorer already answers "is somebody already working on this?"
  * from a sentence, which is the same question in a different room, and
  * reusing it means the notes and the planning flow agree about what "related"
@@ -47,17 +47,22 @@ import {
   scoreRelatedWork,
   suggestionHref,
   suggestionLabel,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import type { NoteReference } from './notes-references.ts';
 
 /**
  * The marker and the words a suggestion is written with live in
- * `@feedback/core/note-suggestion`, because the CLIENT reads back what this
+ * `@claude-workspaces/core/note-suggestion`, because the CLIENT reads back what this
  * module writes and two spellings of that contract would drift into a
  * question nobody can accept. Re-exported here so callers on the server keep
  * one import.
  */
-export { SUGGEST_PARAM, acceptedHref, suggestionHref, suggestionLabel } from '@feedback/core';
+export {
+  SUGGEST_PARAM,
+  acceptedHref,
+  suggestionHref,
+  suggestionLabel,
+} from '@claude-workspaces/core';
 
 /**
  * Enough score to LINK a row when somebody asked for one, deliberately below

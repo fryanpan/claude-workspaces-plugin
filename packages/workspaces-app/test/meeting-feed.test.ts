@@ -1,5 +1,5 @@
-import { RECORDING_CONSENT_NOTE } from '@feedback/core';
-import type { CaptureMode, MeetingBotStatus } from '@feedback/core';
+import { RECORDING_CONSENT_NOTE } from '@claude-workspaces/core';
+import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import { type MeetingFeed, createMeetingFeed } from '../src/meeting-feed.ts';
 import type { MeetingLiveZone } from '../src/meeting-live-zone.ts';

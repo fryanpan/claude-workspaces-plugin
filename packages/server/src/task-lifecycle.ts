@@ -14,8 +14,13 @@ Split out of `tasks.ts` with the other four verb families. `transition`
  * frees have to be told by the same derivation the gate uses. A second
  * implementation over there is precisely the drift this shape prevents.
  */
-import type { Task, TaskActor, TaskStatus, TaskTransition } from '@feedback/core/task-wire';
-import { isTaskStatus } from '@feedback/core/task-wire';
+import type {
+  Task,
+  TaskActor,
+  TaskStatus,
+  TaskTransition,
+} from '@claude-workspaces/core/task-wire';
+import { isTaskStatus } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { isArchived } from './task-fields.ts';
 import { isGoalRow } from './task-helpers.ts';
@@ -82,7 +87,7 @@ export function openBlockers(p: BlockerReader, task: Task): TransitionBlocker[] 
     // archived arm joined the other two when Blocked became a state the
     // board DRAWS: a row held by a ticket that is off the board is held by
     // something its reader cannot see, and nobody is going to finish it.
-    // One reading, shared with `@feedback/core/task-blocked` and the queue.
+    // One reading, shared with `@claude-workspaces/core/task-blocked` and the queue.
     if (!dep || dep.status === 'done' || isArchived(dep)) continue;
     const noun = dep.needs === 'decision' ? 'decision' : 'task';
     out.push({

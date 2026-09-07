@@ -1,4 +1,4 @@
-import { parseSchedule } from '@feedback/core/task-schedule';
+import { parseSchedule } from '@claude-workspaces/core/task-schedule';
 /**
  * The fields of a row that are edited one at a time, plus its soft delete.
  *
@@ -273,7 +273,7 @@ export async function handleTaskFields(
   // this route's primary arm takes `blockedBy` — task ids — and ADDS
   // them to the row's `after` edges. Nothing else happens: the row keeps
   // its status, and Blocked is derived from those edges
-  // (`@feedback/core/task-blocked`), so setting a blocker IS what makes
+  // (`@claude-workspaces/core/task-blocked`), so setting a blocker IS what makes
   // the ticket blocked and there is no second state to keep in step.
   //
   // Additive, not a replace, unlike `POST .../after`: "block this on

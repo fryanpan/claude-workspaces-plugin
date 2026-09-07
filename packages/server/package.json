@@ -1,11 +1,11 @@
 {
-  "name": "@feedback/server",
+  "name": "@claude-workspaces/server",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
   "dependencies": {
-    "@feedback/core": "workspace:*",
+    "@claude-workspaces/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@sentry/bun": "^10.71.0",
     "jose": "^5.9.6",

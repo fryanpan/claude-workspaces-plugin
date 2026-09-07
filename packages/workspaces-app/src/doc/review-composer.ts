@@ -1,4 +1,4 @@
-import { type Thread, type User, authorLabel, formatTime } from '@feedback/core';
+import { type Thread, type User, authorLabel, formatTime } from '@claude-workspaces/core';
 /**
  * The two places a person writes on an attachment: the comment composer
  * that opens off a selection, and the full-screen thread view with its reply

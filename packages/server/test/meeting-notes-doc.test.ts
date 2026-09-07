@@ -7,7 +7,7 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import { type DocType, prose } from '@feedback/core';
+import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import {
   MEETING_NOTES_HEADING,

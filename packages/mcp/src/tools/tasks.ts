@@ -25,7 +25,7 @@
  * the code that stood in the switch, moved with its comments and dedented one
  * level; no tool's arguments, behaviour or reply changed here.
  */
-import { parseThreadReviewItemId } from '@feedback/core/review-item-id';
+import { parseThreadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardPathOf } from '../board-path.ts';

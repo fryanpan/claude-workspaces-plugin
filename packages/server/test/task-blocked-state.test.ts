@@ -2,7 +2,7 @@
  * Blocked, in the store: what an open `after` edge does to the dispatch reads,
  * and the one thing that has to be WRITTEN when a row comes free.
  *
- * Blocked is derived (`@feedback/core/task-blocked`), so there is no state to
+ * Blocked is derived (`@claude-workspaces/core/task-blocked`), so there is no state to
  * assert having been set — the tests here drive the transitions and read what
  * the surfaces downstream of them say.
  *
@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { blockerLookup, isBlocked } from '@feedback/core/task-blocked';
+import { blockerLookup, isBlocked } from '@claude-workspaces/core/task-blocked';
 import { classifyOpenTasks } from '../src/keep-moving.ts';
 import { evaluateReadyWork } from '../src/ready-gate.ts';
 import { buildQueue } from '../src/task-queue.ts';

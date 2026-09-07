@@ -11,7 +11,7 @@
  * Real cascade reads against the injected sheet; happy-dom does no layout
  * but resolves `display` and `position`, which is all this needs.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mountReviewFloat } from '../src/review-float.ts';
 import { installSheets } from './css-harness.ts';

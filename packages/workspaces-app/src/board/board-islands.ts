@@ -1,4 +1,4 @@
-import type { Thread, User } from '@feedback/core';
+import type { Thread, User } from '@claude-workspaces/core';
 import type { BootLocation } from '../boot-env.ts';
 /**
  * The Preact islands this page mounts ONCE, and the stable handlers they keep.

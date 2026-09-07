@@ -28,7 +28,7 @@ import {
   type User,
   summaryHash,
   threadLines,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ThreadSummarizer } from '../src/summarize.ts';
 import { seedBoard } from './workspace-seed.ts';

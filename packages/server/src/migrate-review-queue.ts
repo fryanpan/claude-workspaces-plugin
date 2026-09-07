@@ -12,7 +12,7 @@
  * everything that talks to the server, because a CLI module runs its own
  * `main` on import and therefore cannot be driven by a test.
  */
-import { readRenamedEnv } from '@feedback/core/env-names';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import {
   type MigrationPlan,
   fetchQueueRows,

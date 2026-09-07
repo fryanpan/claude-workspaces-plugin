@@ -41,7 +41,7 @@
  * The socket is injected because a test of this mapping must not open one.
  */
 
-import type { MeetingTuning } from '@feedback/core';
+import type { MeetingTuning } from '@claude-workspaces/core';
 import { readKeychainPassword } from './share/keychain.ts';
 import type {
   EngineSocket,

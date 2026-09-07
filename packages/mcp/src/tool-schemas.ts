@@ -25,7 +25,7 @@
  * labels in `tools/`, so a tool declared here and dispatched nowhere fails a
  * gate rather than shipping visible, callable, and answering "unknown tool".
  */
-import { TASK_STATUSES } from '@feedback/core/task-wire';
+import { TASK_STATUSES } from '@claude-workspaces/core/task-wire';
 import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
 
 /**

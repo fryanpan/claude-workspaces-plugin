@@ -21,7 +21,7 @@ import {
   readReviewPayload,
   reviewGapAdvice,
   reviewPayloadMessage,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { BATCH_REF_SIGIL } from './task-batch-refs.ts';
 import {
   ASSIGNEE_REQUIRED_ERROR,

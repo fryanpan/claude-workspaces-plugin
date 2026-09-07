@@ -71,7 +71,7 @@ export function isRoute(repoRelPath: string): boolean {
  * Every relative import specifier in a source file.
  *
  * Static `import`/`export … from`, plus dynamic `import(...)`. Bare
- * specifiers (`@feedback/core`, `node:fs`) are skipped: they cannot name a
+ * specifiers (`@claude-workspaces/core`, `node:fs`) are skipped: they cannot name a
  * file inside this package, so they cannot be either edge.
  */
 export function relativeSpecifiers(source: string): string[] {

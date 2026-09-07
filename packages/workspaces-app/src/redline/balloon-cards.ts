@@ -8,7 +8,7 @@
  * balloon column, or the margin's own state — which is what lets the same
  * builder render a card into the phone's bottom sheet.
  */
-import { formatTime, suggestOps } from '@feedback/core';
+import { formatTime, suggestOps } from '@claude-workspaces/core';
 import type { DeletionGroup } from './live-markup.ts';
 
 /** How much text is long enough to clamp. Text-based so the decision is

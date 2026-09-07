@@ -10,7 +10,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { attachmentIdOf } from '@feedback/core';
+import { attachmentIdOf } from '@claude-workspaces/core';
 import { bindDiff } from './bind-diff.ts';
 import {
   type BindHost,

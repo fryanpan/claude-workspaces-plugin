@@ -1,4 +1,4 @@
-import type { FeedbackClient, User } from '@feedback/core';
+import type { FeedbackClient, User } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardActions } from '../src/board/board-actions.ts';
 import { createBoardDetailPanel } from '../src/board/board-detail-panel.ts';

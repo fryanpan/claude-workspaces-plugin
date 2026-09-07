@@ -23,7 +23,7 @@
  * nothing is recoverable stay unlinked.
  */
 
-import { extractWorkspaceLinks, parseWorkspaceLink } from '@feedback/core';
+import { extractWorkspaceLinks, parseWorkspaceLink } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import { taskIdOfBodyDoc } from './task-projection.ts';
 import type { GoalRow, Ref, Task, TaskStore } from './tasks.ts';

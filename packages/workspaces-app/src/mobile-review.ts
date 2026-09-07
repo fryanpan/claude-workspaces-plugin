@@ -1,4 +1,4 @@
-import { type Thread, threadRenderKey } from '@feedback/core';
+import { type Thread, threadRenderKey } from '@claude-workspaces/core';
 import type { InlineThreadCard, ReviewSurface } from './review-surface.ts';
 import { prefersReducedMotion, sizeThreadSlots } from './thread-morph.ts';
 

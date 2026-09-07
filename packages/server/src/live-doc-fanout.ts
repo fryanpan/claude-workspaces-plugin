@@ -35,7 +35,7 @@ import {
   prose,
   setThreadSummary,
   suggestOps,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';

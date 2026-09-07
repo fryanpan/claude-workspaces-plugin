@@ -2,7 +2,7 @@
  * Generated thread summaries: the half that talks to the network.
  *
  * The prompt, the parsing and the "is this worth a call" rule live in
- * `@feedback/core/summary-prompt` and are pure. This file owns everything that
+ * `@claude-workspaces/core/summary-prompt` and are pure. This file owns everything that
  * is not: the API key, the HTTP call, the debounce, and the promise that stops
  * three browsers on one doc from paying for the same summary three times.
  *
@@ -23,8 +23,8 @@
  *    never a dependency of one.
  */
 
-import { summaryHash } from '@feedback/core';
-import { readRenamedEnv } from '@feedback/core/env-names';
+import { summaryHash } from '@claude-workspaces/core';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import {
   SUMMARY_PROMPT_VERSION,
   type StoredSummary,
@@ -33,8 +33,8 @@ import {
   findDeliveryClaim,
   needsCall,
   parseSummaryResponse,
-} from '@feedback/core/summary-prompt';
-import type { Thread } from '@feedback/core/types';
+} from '@claude-workspaces/core/summary-prompt';
+import type { Thread } from '@claude-workspaces/core/types';
 import { readKeychainPassword } from './share/keychain.ts';
 
 /** Keychain service holding the key. Env override: CW_SUMMARY_API_KEY. */

@@ -16,8 +16,8 @@
  * DECLARED (`declaredAssigneeKind`) and read back with the workspace's own
  * agent roster as the standing evidence (`resolveOwnerKind`).
  */
-import { agentIdCandidates } from '@feedback/core';
-import type { DeclaredOwnerKind } from '@feedback/core/task-wire';
+import { agentIdCandidates } from '@claude-workspaces/core';
+import type { DeclaredOwnerKind } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { SHARED_AGENT_IDS } from './agent-watches.ts';
 

@@ -30,8 +30,8 @@
  * matching row, full meta, `{ docs }`), because REST callers exist that this
  * change cannot restart. The filters below apply in both modes.
  */
-import type { DocMeta } from '@feedback/core';
-import { attachmentIdOf } from '@feedback/core';
+import type { DocMeta } from '@claude-workspaces/core';
+import { attachmentIdOf } from '@claude-workspaces/core';
 
 /** The page size when a paged caller names none. */
 export const DEFAULT_PAGE_LIMIT = 50;

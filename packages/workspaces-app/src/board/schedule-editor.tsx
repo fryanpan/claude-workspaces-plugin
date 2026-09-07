@@ -49,7 +49,7 @@ import {
   sortedUniqueTimes,
   writeSchedulePhrase,
   zonedParts,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import type { VNode } from 'preact';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { BoardTask, ScheduleWrite } from './board-model.ts';

@@ -17,7 +17,7 @@
  * larger gestures are deliberately absent.
  */
 
-import type { RosterVoice } from '@feedback/core';
+import type { RosterVoice } from '@claude-workspaces/core';
 import type { Editor } from '@tiptap/core';
 import { type SpeakerTagRange, applyReassign, findSpeakerTagAt } from './speaker-reassign.ts';
 

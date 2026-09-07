@@ -44,8 +44,8 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readRenamedEnv } from '@feedback/core/env-names';
-import { STATE_ROOT_DIR } from '@feedback/core/machine-paths';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { STATE_ROOT_DIR } from '@claude-workspaces/core/machine-paths';
 
 /** Built bundle directories, as they come out of the package build scripts. */
 export interface ClientSources {

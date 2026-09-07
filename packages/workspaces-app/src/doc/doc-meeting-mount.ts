@@ -13,7 +13,7 @@
  * zone the wash extension asks about, and the lead-presence watch the floats
  * quote in their receipts. Both are absent on a doc that holds no meeting.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import type { Awareness } from 'y-protocols/awareness';
 import type { EditorHandle } from '../editor.ts';
 import {

@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from '@feedback/core';
+import type { ConnectionStatus } from '@claude-workspaces/core';
 import { describe, expect, it, vi } from 'vitest';
 import { parseBuildId, showStaleNotice, watchForStaleClient } from '../src/stale-client.ts';
 

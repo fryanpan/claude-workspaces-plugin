@@ -1,4 +1,4 @@
-import type { ReviewPayload } from '@feedback/core';
+import type { ReviewPayload } from '@claude-workspaces/core';
 /**
  * The review queue and the walkthrough that walks it: everything waiting on a
  * person, in one list, plus the wording each row and card wears (plan §3.9).

@@ -1,4 +1,4 @@
-import { type User, createThread, prose, suggestOps } from '@feedback/core';
+import { type User, createThread, prose, suggestOps } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';

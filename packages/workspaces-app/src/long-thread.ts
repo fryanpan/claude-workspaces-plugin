@@ -4,7 +4,7 @@ import {
   type Thread,
   pendingDeclaration,
   wordCount,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 
 /**
  * Which comment threads have outgrown the balloon column.

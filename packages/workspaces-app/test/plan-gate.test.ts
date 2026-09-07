@@ -11,7 +11,7 @@
  * receipt's timer is injected too so nothing here sleeps. Fixtures are
  * synthetic (jordan@partner.example register).
  */
-import type { LeadPresence, User } from '@feedback/core';
+import type { LeadPresence, User } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountPlanGate } from '../src/plan-gate.ts';
 

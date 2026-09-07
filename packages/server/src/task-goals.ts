@@ -16,8 +16,8 @@
  * import a VALUE from the file that imports it. `tasks.ts` imports them back
  * and re-exports them.
  */
-import type { GoalListEntry, Task, TaskActor, TaskStatus } from '@feedback/core/task-wire';
-import { byBoardOrder } from '@feedback/core/task-wire';
+import type { GoalListEntry, Task, TaskActor, TaskStatus } from '@claude-workspaces/core/task-wire';
+import { byBoardOrder } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { bumpWordsRevision, cryptoId } from './task-fields.ts';
 import type {

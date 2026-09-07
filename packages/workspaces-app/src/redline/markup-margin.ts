@@ -1,4 +1,4 @@
-import { type Thread, suggestOps, threadRenderKey } from '@feedback/core';
+import { type Thread, suggestOps, threadRenderKey } from '@claude-workspaces/core';
 import type { EditorView } from '@tiptap/pm/view';
 import { balloonMarginVisible } from '../card-placement.ts';
 import { keptComposerFocus, restoreComposerFocus } from '../composer-keep.ts';

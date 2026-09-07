@@ -1,7 +1,7 @@
 /**
  * Helpers for reading and editing the prosemirror content stored as a
  * `Y.XmlFragment` under the `prose` key in every markdown doc. Kept in
- * @feedback/core so the server, the MCP, and future headless tooling
+ * @claude-workspaces/core so the server, the MCP, and future headless tooling
  * can share one implementation.
  *
  * The implementation is four files and this is the surface over them, in

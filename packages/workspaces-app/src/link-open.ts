@@ -8,7 +8,7 @@
  * mailto/tel) should all open — EXCEPT script-bearing schemes, which must
  * never be handed to window.open.
  */
-import { SPEAKER_TAG_SCHEME } from '@feedback/core';
+import { SPEAKER_TAG_SCHEME } from '@claude-workspaces/core';
 import { docHref } from './doc-path.ts';
 
 const UNSAFE_SCHEME = /^(?:javascript|data|vbscript):/i;

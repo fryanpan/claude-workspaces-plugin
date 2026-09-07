@@ -37,7 +37,7 @@ import {
   isReviewPayloadGated,
   isReviewPayloadHeld,
   pendingDeclaration,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';

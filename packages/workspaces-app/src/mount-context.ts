@@ -1,4 +1,4 @@
-import type { FeedbackClient, HuddleKind, User } from '@feedback/core';
+import type { FeedbackClient, HuddleKind, User } from '@claude-workspaces/core';
 import type { BackTarget } from './back-link.ts';
 import type { MountScope } from './mount-scope.ts';
 

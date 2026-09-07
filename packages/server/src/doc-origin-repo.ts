@@ -8,7 +8,7 @@ import {
   resolve as resolvePath,
   sep,
 } from 'node:path';
-import type { DocOriginRepo } from '@feedback/core';
+import type { DocOriginRepo } from '@claude-workspaces/core';
 
 /**
  * A doc's ORIGIN REPO: the repo+branch+path where its on-disk copy belongs.

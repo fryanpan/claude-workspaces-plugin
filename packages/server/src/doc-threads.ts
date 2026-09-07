@@ -21,7 +21,7 @@ import {
   storedJudgement,
   withRevision,
   withdrawReview,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 /**
  * Comment threads on a doc: opening one, replying, resolving and reopening,
  * re-anchoring when the text under a thread moved, and the review payload a

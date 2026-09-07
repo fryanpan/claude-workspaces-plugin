@@ -14,15 +14,15 @@
  * clock and the ready-nudger's idle clock. Keeping them together is what
  * makes that rule one reading instead of four comments.
  */
-import { agentIdForName } from '@feedback/core';
+import { agentIdForName } from '@claude-workspaces/core';
 import type {
   ArtifactCheck,
   Task,
   TaskEffortEstimate,
   TaskNote,
   TaskReadingTime,
-} from '@feedback/core/task-wire';
-import { TASK_NOTES_STORE_CAP } from '@feedback/core/task-wire';
+} from '@claude-workspaces/core/task-wire';
+import { TASK_NOTES_STORE_CAP } from '@claude-workspaces/core/task-wire';
 import { wordsRevisionOf } from './task-fields.ts';
 import type { TaskNotedEvent } from './tasks.ts';
 

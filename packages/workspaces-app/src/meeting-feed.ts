@@ -25,8 +25,12 @@
  * tag, is handed straight to the strip's `nameSpeaker`.
  */
 
-import type { CaptureMode, MeetingBotStatus } from '@feedback/core';
-import { RECORDING_CONSENT_NOTE, describeBotState, speakerDisplayName } from '@feedback/core';
+import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
+import {
+  RECORDING_CONSENT_NOTE,
+  describeBotState,
+  speakerDisplayName,
+} from '@claude-workspaces/core';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import { type TranscriptTurn, diffTurnWords } from './meeting-protocol.ts';
 import type { StripState } from './meeting-strip.ts';

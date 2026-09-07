@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import { MEETING_NOTES_HEADING, findNotesSection } from '../src/notes-section.ts';

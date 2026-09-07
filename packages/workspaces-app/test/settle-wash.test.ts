@@ -1,4 +1,4 @@
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import { Fragment, Slice } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 import { ySyncPluginKey } from '@tiptap/y-tiptap';

@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ElementAnchor, Thread, User } from '@feedback/core';
+import type { ElementAnchor, Thread, User } from '@claude-workspaces/core';
 
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { workspaceDocId } from '../src/task-projection.ts';

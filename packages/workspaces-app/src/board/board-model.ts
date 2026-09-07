@@ -16,14 +16,18 @@ import {
   formatEffortDate,
   formatGoalEffortSeconds,
   summarizeGoalEffort,
-} from '@feedback/core/goal-effort';
+} from '@claude-workspaces/core/goal-effort';
 import {
   MONTH_SHORT,
   WEEKDAY_LONG,
   formatTimeOfDay,
   scheduleRuleChipParts,
-} from '@feedback/core/schedule-phrase';
-import { blockableStatus, blockerLookup, openBlockerIds } from '@feedback/core/task-blocked';
+} from '@claude-workspaces/core/schedule-phrase';
+import {
+  blockableStatus,
+  blockerLookup,
+  openBlockerIds,
+} from '@claude-workspaces/core/task-blocked';
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
   type ScheduleCursor,
@@ -31,14 +35,14 @@ import {
   type TaskSchedule,
   nextOccurrence,
   zonedParts,
-} from '@feedback/core/task-schedule';
+} from '@claude-workspaces/core/task-schedule';
 import {
   type DecisionOption,
   TASK_STATUSES,
   type TaskReadingTime,
   type TaskStatus,
   byBoardOrder,
-} from '@feedback/core/task-wire';
+} from '@claude-workspaces/core/task-wire';
 
 /** What arming a row's schedule sends: the rule, the zone its clock times
  *  mean, and the optional end. `null` clears the rule, which the route reads
@@ -256,7 +260,7 @@ export interface BoardTask {
    * states, and the board draws all three: `{ status: 'ok', … }` carries
    * numbers, `{ status: 'failed', reason }` means an attempt ran and came
    * back with nothing usable, and ABSENT means never scored. Absence is not
-   * a zero and a failure is not a number — see `@feedback/core/goal-effort`,
+   * a zero and a failure is not a number — see `@claude-workspaces/core/goal-effort`,
    * which is the only reader that turns these into arithmetic.
    */
   effortEstimate?: {

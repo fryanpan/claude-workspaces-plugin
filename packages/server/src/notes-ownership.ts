@@ -16,7 +16,7 @@
  * with the answer is `meeting-notes-merge.ts`.
  */
 
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { type NoteItem, findNotesSection, itemsInSection, sectionItems } from './notes-section.ts';
 

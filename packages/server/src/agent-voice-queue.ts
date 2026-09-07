@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TaskActor } from '@feedback/core/task-wire';
+import type { TaskActor } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import type { AgentStorePersistence } from './task-agents.ts';
 import { cryptoId } from './task-fields.ts';

@@ -1,4 +1,4 @@
-import type { MarkdownBlockType, RedlineBlock, RedlineSegment } from '@feedback/core';
+import type { MarkdownBlockType, RedlineBlock, RedlineSegment } from '@claude-workspaces/core';
 
 /**
  * Render redline blocks to HTML for the read-only Tiptap surface.

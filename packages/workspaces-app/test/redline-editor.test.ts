@@ -1,4 +1,4 @@
-import { getContent } from '@feedback/core';
+import { getContent } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { type RedlineSurface, createRedlineEditor } from '../src/redline/redline-editor.ts';

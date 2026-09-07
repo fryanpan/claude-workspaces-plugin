@@ -17,7 +17,7 @@
  * the injected fetch seam, so the assertion sees the element the code
  * produces, not a hand-built stand-in. Nothing here greps the CSS source.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mountPlanGate } from '../src/plan-gate.ts';
 import { installSheets } from './css-harness.ts';

@@ -10,7 +10,7 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import type { Ref } from '@feedback/core/task-wire';
+import type { Ref } from '@claude-workspaces/core/task-wire';
 import { TaskLinksStore } from '../src/task-links.ts';
 import { AGENT, FakeStore, PERSON, WS, makeGoalRow, makeTask } from './task-verb-harness.ts';
 

@@ -282,7 +282,7 @@ describe('each load REPLACES the registry rather than accumulating', () => {
 describe('boot seeds the owner identity with its legacy ids', () => {
   test('known-bryan and every linked id whose target is the owner resolve to the owner row', async () => {
     const { createServer } = await import('../src/server');
-    const { emailIdentityId } = await import('@feedback/core');
+    const { emailIdentityId } = await import('@claude-workspaces/core');
     const dir = scratchDir();
     writeFileSync(
       identityLinksPath(dir),

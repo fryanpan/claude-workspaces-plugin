@@ -3,7 +3,7 @@
  * a request, before anybody writes a plan for it.
  *
  * The route's whole job is to assemble candidates out of board state and hand
- * them to the scorer in `@feedback/core/related-work`, which is pure and
+ * them to the scorer in `@claude-workspaces/core/related-work`, which is pure and
  * unit-tested on its own. Nothing is decided here and nothing is written: a
  * caller reads the answer, and a person decides whether the new plan extends
  * what came back, replaces it, or stands on its own.
@@ -39,7 +39,7 @@
  * Reading is free — no author, no write — so the route sits behind the same
  * gate as the rest of the board's reads and takes no body.
  */
-import { type RelatedWorkCandidate, readsAsPlan, scoreRelatedWork } from '@feedback/core';
+import { type RelatedWorkCandidate, readsAsPlan, scoreRelatedWork } from '@claude-workspaces/core';
 import { isReservedGoalId } from '../task-goals.ts';
 import { isArchived } from '../tasks.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';

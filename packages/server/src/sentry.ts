@@ -20,11 +20,11 @@
  * DSN is configured — not by reading this file.
  */
 
-import { routePatternForSpan, scrubEventForPrivacy } from '@feedback/core/trace-privacy';
+import { routePatternForSpan, scrubEventForPrivacy } from '@claude-workspaces/core/trace-privacy';
 
 /**
  * The privacy floor is shared with the browser build, so it lives in
- * `@feedback/core/trace-privacy` — see that file's header. Re-exported here
+ * `@claude-workspaces/core/trace-privacy` — see that file's header. Re-exported here
  * because this module is still the one place server code (and
  * sentry-server.test.ts) asks for it.
  */

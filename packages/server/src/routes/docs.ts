@@ -1,4 +1,4 @@
-import { type Anchor, type DocMeta, type DocType, attachmentIdOf } from '@feedback/core';
+import { type Anchor, type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
 import { RESERVED_DOC_PREFIXES } from '../doc-ids.ts';
 import { compactDocRow, matchesDocFilters, pageDocs, parseListDocsQuery } from '../doc-listing.ts';

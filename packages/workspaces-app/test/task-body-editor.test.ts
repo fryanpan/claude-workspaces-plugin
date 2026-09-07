@@ -8,7 +8,7 @@
  * under test here is the LIFECYCLE: which doc gets opened, when a mount is
  * kept, when it is torn down, and what a failed chunk fetch leaves behind.
  */
-import type { FeedbackClient } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { BODY_LIVE_CLASS } from '../src/board/board-detail-render.ts';

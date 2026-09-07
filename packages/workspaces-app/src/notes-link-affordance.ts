@@ -3,7 +3,7 @@ import {
   isSuggestionHref,
   parseWorkspaceLink,
   titleFromSuggestionLabel,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { Extension } from '@tiptap/core';
 import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';

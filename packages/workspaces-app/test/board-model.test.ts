@@ -1,4 +1,4 @@
-import { reviewItemBodyMarkdown } from '@feedback/core';
+import { reviewItemBodyMarkdown } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   type BoardFilters,

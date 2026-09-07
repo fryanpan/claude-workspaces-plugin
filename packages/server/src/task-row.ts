@@ -13,8 +13,8 @@ import {
   latestThreadedQuestion,
   readTaskReviewItem,
   reviewItemState,
-} from '@feedback/core';
-import type { TaskReviewItem } from '@feedback/core';
+} from '@claude-workspaces/core';
+import type { TaskReviewItem } from '@claude-workspaces/core';
 import { TASK_NOTES_READ_CAP } from './agent-notes.ts';
 import { type OwnerKind } from './task-owner.ts';
 import { type Task, legacyDecisionItem, taskAskedBy } from './tasks.ts';
@@ -298,7 +298,7 @@ export function projectTask(
     ...(taskAskedBy(task) !== '' ? { createdBy: taskAskedBy(task) } : {}),
     // The effort model's two numbers, and the measured attention behind one
     // of them. Projected because the GOAL BAR is computed in the browser
-    // (`@feedback/core/goal-effort`): the board already holds every row and
+    // (`@claude-workspaces/core/goal-effort`): the board already holds every row and
     // its trail over this ydoc, so the bar and the finish date recompute the
     // instant an estimate lands, with no fetch and no second implementation
     // of the arithmetic to keep in step with this one.

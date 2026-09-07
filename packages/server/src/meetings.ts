@@ -22,7 +22,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type CaptureMode, parseCaptureMode } from '@feedback/core';
+import { type CaptureMode, parseCaptureMode } from '@claude-workspaces/core';
 import {
   AudioSink,
   type DocInfoResolver,

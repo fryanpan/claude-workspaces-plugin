@@ -18,7 +18,7 @@
  * through the ordinary transition gate and therefore emits whatever that
  * gate emits.
  */
-import type { Ref, Task } from '@feedback/core/task-wire';
+import type { Ref, Task } from '@claude-workspaces/core/task-wire';
 import { isArchived } from './task-fields.ts';
 import { isValidRef, refKey } from './task-helpers.ts';
 import type {

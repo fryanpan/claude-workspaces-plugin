@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import type { WebhookPayload } from '@feedback/core';
+import type { WebhookPayload } from '@claude-workspaces/core';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
 
 const samplePayload: WebhookPayload = {

@@ -545,7 +545,7 @@ frames use, with the platform's display name (`speakerName`) filling the tag
 a person would otherwise tap to fill. The tag is a fixed label on a bot turn
 rather than the rename button: the platform named the voice, and the rename
 route refuses a meeting still recording. The contract is
-`MEETING_TRANSCRIPT_EVENT` / `MeetingTranscriptEvent` in `@feedback/core`;
+`MEETING_TRANSCRIPT_EVENT` / `MeetingTranscriptEvent` in `@claude-workspaces/core`;
 `recall-transcript-stream.test.ts` drives it through the real server. It adds
 no vendor or LLM spend: the frames already existed for the notes composer, and
 this only forwards them.

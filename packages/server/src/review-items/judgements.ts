@@ -7,7 +7,11 @@
  * a newer verdict (`forPendingAt`), which is what stops a judge returning
  * late from re-holding an item a reader has just released.
  */
-import { type ReviewItemJudgement, readTaskReviewItem, storedJudgement } from '@feedback/core';
+import {
+  type ReviewItemJudgement,
+  readTaskReviewItem,
+  storedJudgement,
+} from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
 import { wordsRevisionOf } from '../task-fields.ts';
 import { LEGACY_REVIEW_ITEM_ID, legacyDecisionItem, reviewItemVersion } from './derive.ts';

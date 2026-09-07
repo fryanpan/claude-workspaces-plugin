@@ -1,4 +1,9 @@
-import { type CaptureMode, type HuddleKind, type User, parseWorkspaceLink } from '@feedback/core';
+import {
+  type CaptureMode,
+  type HuddleKind,
+  type User,
+  parseWorkspaceLink,
+} from '@claude-workspaces/core';
 import type { BootLocation } from '../boot-env.ts';
 /**
  * Every REST write the board performs, and the working state they mutate.

@@ -1,4 +1,4 @@
-import { escapeHtml, storeUserName } from '@feedback/core';
+import { escapeHtml, storeUserName } from '@claude-workspaces/core';
 import { hasSignInPage, signInHref } from '../signin/write-gate.ts';
 
 /**

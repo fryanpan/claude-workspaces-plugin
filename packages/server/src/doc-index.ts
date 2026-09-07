@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DocMeta } from '@feedback/core';
+import type { DocMeta } from '@claude-workspaces/core';
 
 /**
  * A doc's listing row, on disk, next to its `.ydoc`.

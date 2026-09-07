@@ -20,7 +20,7 @@
  * `fetchJson` and `showToast` are not on it: they are the module-level
  * primitives every board write ends in, as `board-actions.ts` exports them.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { asksOf } from './activity-model.ts';
 import { type BoardState, fetchJson, send, showToast } from './board-actions.ts';
 import type { BoardTask } from './board-model.ts';

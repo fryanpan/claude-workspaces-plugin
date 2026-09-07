@@ -1,4 +1,4 @@
-import type { TaskSchedule } from '@feedback/core/task-schedule';
+import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 /**
  * The Scheduled section, and the mark on a live instance.
  *

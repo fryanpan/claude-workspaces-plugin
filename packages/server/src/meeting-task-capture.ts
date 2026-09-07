@@ -70,8 +70,8 @@
  * can finish the job: the notes are in the doc, not here.
  */
 
-import { readyToWork, spinoffBody, spinoffDocHref } from '@feedback/core';
-import { readRenamedEnv } from '@feedback/core/env-names';
+import { readyToWork, spinoffBody, spinoffDocHref } from '@claude-workspaces/core';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import {
   type SpentCues,
   captureWindow,

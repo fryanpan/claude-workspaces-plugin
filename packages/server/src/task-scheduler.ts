@@ -9,7 +9,7 @@
  * and a rule that read as `in-progress` would be a row nobody could ever
  * close.
  *
- * The arithmetic is not here. `@feedback/core/task-schedule` holds every
+ * The arithmetic is not here. `@claude-workspaces/core/task-schedule` holds every
  * question about WHEN — the rule shapes, the timezone math, the collapse of a
  * missed run — as pure functions of an injected `now`. This file holds the
  * three things that arithmetic cannot be pure about: reading the board,
@@ -55,8 +55,8 @@ import {
   type ScheduleState,
   type TaskSchedule,
   dueOccurrence,
-} from '@feedback/core/task-schedule';
-import type { Task } from '@feedback/core/task-wire';
+} from '@claude-workspaces/core/task-schedule';
+import type { Task } from '@claude-workspaces/core/task-wire';
 import type { BoardWorkspace, CreateTaskOpts, CreateTaskResult } from './tasks.ts';
 import { isRetired } from './workspace-store.ts';
 

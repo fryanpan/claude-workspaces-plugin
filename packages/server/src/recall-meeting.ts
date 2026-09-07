@@ -34,7 +34,7 @@ import {
   type MeetingTranscriptEvent,
   isTerminalBotState,
   meetingPlatformOf,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import {
   type MeetingNotesDeps,
   type MeetingNotesSession,

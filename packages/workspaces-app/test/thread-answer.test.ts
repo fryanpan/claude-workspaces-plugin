@@ -1,4 +1,4 @@
-import type { Comment, ReviewPayload, Thread, User } from '@feedback/core';
+import type { Comment, ReviewPayload, Thread, User } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { refreshMarkdownComposer } from '../src/md-composer.ts';
 import { ThreadPanel, type ThreadPanelOpts } from '../src/threads.ts';

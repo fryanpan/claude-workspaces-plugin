@@ -19,7 +19,11 @@
  * "the mic needs https or localhost" would be a second thing to keep true.
  */
 
-import { type CaptureMode, DEFAULT_CAPTURE_MODE, MEETING_SAMPLE_RATE } from '@feedback/core';
+import {
+  type CaptureMode,
+  DEFAULT_CAPTURE_MODE,
+  MEETING_SAMPLE_RATE,
+} from '@claude-workspaces/core';
 import {
   type OriginFacts,
   defaultOriginFacts,

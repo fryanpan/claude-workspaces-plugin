@@ -52,7 +52,7 @@ import {
   hashToColor,
   isEmailLike,
   normalizeEmail,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { ownerDisplayNames } from './actor-identity.ts';
 import { SHARED_AGENT_IDS } from './agent-watches.ts';
 

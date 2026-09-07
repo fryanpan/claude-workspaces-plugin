@@ -20,7 +20,7 @@
  * Recovery needs no reload: 'open' clears the timer and, if a banner is up,
  * takes it down.
  */
-import type { ConnectionStatus } from '@feedback/core';
+import type { ConnectionStatus } from '@claude-workspaces/core';
 
 export type ConnectionView = 'online' | 'reconnecting';
 

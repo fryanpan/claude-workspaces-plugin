@@ -1,4 +1,4 @@
-import type { DocMeta, TaskReviewItem, User } from '@feedback/core';
+import type { DocMeta, TaskReviewItem, User } from '@claude-workspaces/core';
 import type { AgentNoteRing } from '../agent-notes.ts';
 import type { DispatchRegistry } from '../dispatch-registry.ts';
 import type { DocStore } from '../doc-store.ts';

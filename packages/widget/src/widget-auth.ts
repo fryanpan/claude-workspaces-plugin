@@ -1,4 +1,4 @@
-import { type User, cssColor, escapeHtml as escape } from '@feedback/core';
+import { type User, cssColor, escapeHtml as escape } from '@claude-workspaces/core';
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**

@@ -12,7 +12,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { type HuddleKind, docKindLabel } from '@feedback/core';
+import { type HuddleKind, docKindLabel } from '@claude-workspaces/core';
 
 export type { HuddleKind };
 

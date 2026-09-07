@@ -1,4 +1,4 @@
-import { type Thread, type User, threadRenderKey } from '@feedback/core';
+import { type Thread, type User, threadRenderKey } from '@claude-workspaces/core';
 import {
   keptComposerFocus,
   keptScrollTops,

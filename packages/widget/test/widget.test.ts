@@ -319,7 +319,7 @@ describe('widget', () => {
    */
   it('lists a thread that is about the page itself', async () => {
     const mod = await importWidget();
-    const core = await import('@feedback/core');
+    const core = await import('@claude-workspaces/core');
     const el = mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 't-subject', user: 'bryan' });
     const inner = el as unknown as {
       client: { ydoc: import('yjs').Doc } | null;

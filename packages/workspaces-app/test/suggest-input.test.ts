@@ -3,7 +3,7 @@ import {
   SUGGEST_INSERT_MARK,
   type SuggestionAttrs,
   prose,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { Fragment, Slice } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';

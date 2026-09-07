@@ -25,7 +25,7 @@
  * because that is how he finds what he broke last week.
  */
 
-import { escapeHtml } from '@feedback/core';
+import { escapeHtml } from '@claude-workspaces/core';
 import { mountPromptEditor } from './prompt-editor.ts';
 import { type PromptRow, type PromptsApi } from './prompts-api.ts';
 

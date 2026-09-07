@@ -14,7 +14,14 @@
  * produces it is `review-gate.ts`, a service, and a service may not import a
  * type out of `routes/`.
  */
-import type { DocMeta, DocType, ReviewPayload, Thread, User, suggestOps } from '@feedback/core';
+import type {
+  DocMeta,
+  DocType,
+  ReviewPayload,
+  Thread,
+  User,
+  suggestOps,
+} from '@claude-workspaces/core';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
 import type { createLeadPresenceMonitor } from '../lead-presence.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';

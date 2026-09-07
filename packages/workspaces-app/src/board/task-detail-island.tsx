@@ -1,6 +1,6 @@
-import { reviewItemBodyMarkdown } from '@feedback/core';
-import { judgeReasonClause } from '@feedback/core';
-import type { EffortCalibration } from '@feedback/core/goal-effort';
+import { reviewItemBodyMarkdown } from '@claude-workspaces/core';
+import { judgeReasonClause } from '@claude-workspaces/core';
+import type { EffortCalibration } from '@claude-workspaces/core/goal-effort';
 import { signal } from '@preact/signals';
 import { type ComponentChildren, Fragment, type RefObject, render } from 'preact';
 import { type MutableRef, useLayoutEffect, useRef, useState } from 'preact/hooks';

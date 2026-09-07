@@ -15,7 +15,7 @@ import {
   type MeetingTimingMark,
   meetingSocketPath,
   parseCaptureMode,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 
 /**
  * How many turns stay on the strip. Three is what the flowing line holds

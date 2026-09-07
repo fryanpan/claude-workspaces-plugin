@@ -13,7 +13,7 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import { type DocType, prose, suggestOps } from '@feedback/core';
+import { type DocType, prose, suggestOps } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import {
   correctNotesSection,

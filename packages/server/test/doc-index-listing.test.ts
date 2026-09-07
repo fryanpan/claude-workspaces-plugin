@@ -25,7 +25,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type DocMeta, createThread, setStatus } from '@feedback/core';
+import { type DocMeta, createThread, setStatus } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { moveDocIndex } from '../src/doc-index.ts';
 import { DocStore } from '../src/doc-store.ts';

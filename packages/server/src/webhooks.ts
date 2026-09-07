@@ -1,4 +1,4 @@
-import type { WebhookPayload } from '@feedback/core';
+import type { WebhookPayload } from '@claude-workspaces/core';
 
 export interface WebhookDispatcher {
   send(url: string, payload: WebhookPayload): Promise<void>;

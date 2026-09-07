@@ -3,8 +3,8 @@ import type {
   ReviewItemRange,
   ReviewPayload,
   TaskReviewItem,
-} from '@feedback/core';
-import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@feedback/core/effort-estimate-prompt';
+} from '@claude-workspaces/core';
+import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-estimate-prompt';
 import type {
   ArtifactCheck,
   GoalListEntry,
@@ -16,7 +16,7 @@ import type {
   TaskReadingTime,
   TaskStatus,
   TaskTransition,
-} from '@feedback/core/task-wire';
+} from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import type { DecisionShapeGap } from './decision-shape.ts';
 import { TaskDecisionStore } from './review-items/decisions.ts';
@@ -99,7 +99,7 @@ import {
  * slice, and one thin forwarder per verb so no caller had to change.
  */
 
-/* The wire contract lives in @feedback/core/task-wire; re-exported here so
+/* The wire contract lives in @claude-workspaces/core/task-wire; re-exported here so
    the server-side call sites keep their one import. */
 export type {
   ArtifactCheck,
@@ -122,13 +122,13 @@ export type {
   TaskReadingTime,
   TaskStatus,
   TaskTransition,
-} from '@feedback/core/task-wire';
+} from '@claude-workspaces/core/task-wire';
 export {
   REF_KINDS,
   TASK_NOTES_STORE_CAP,
   TASK_STATUSES,
   byBoardOrder,
-} from '@feedback/core/task-wire';
+} from '@claude-workspaces/core/task-wire';
 
 /* The review-item store owns these now. Re-exported so every call site that
    already imports them from here — routes, server.ts, the projection, the
@@ -1042,7 +1042,7 @@ export interface TaskRegroupedEvent {
 /**
  * A row came free: the last ticket it was waiting on closed.
  *
- * Blocked is DERIVED (`@feedback/core/task-blocked`), so nothing about the row
+ * Blocked is DERIVED (`@claude-workspaces/core/task-blocked`), so nothing about the row
  * changes here — it was `todo` while it was blocked and it is `todo` now, and
  * the board simply stops drawing the barred ring. What is NOT free is the
  * record that it happened: without this event, a ticket that spent four days

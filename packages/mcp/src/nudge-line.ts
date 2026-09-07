@@ -482,7 +482,7 @@ export function stalledLine(p: StallPayload): string {
  * and 2 more" (UX review, 2026-08-29).
  *
  * Spelled here rather than imported: this package publishes standalone and
- * does not depend on `@feedback/core`, whose `judgeReasonClause` is the same
+ * does not depend on `@claude-workspaces/core`, whose `judgeReasonClause` is the same
  * rule for the server and the board.
  */
 function judgeReasonClauseLocal(reason: string): string {

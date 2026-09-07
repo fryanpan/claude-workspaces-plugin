@@ -24,7 +24,7 @@ import {
   reviewItemBodyMarkdown,
   reviewWithdrawn,
   threadSummary,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { askedMetaLine, decidedMetaLine } from '../board/board-review-model.ts';
 import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-markdown.ts';
 import { threadDecision } from '../long-thread.ts';

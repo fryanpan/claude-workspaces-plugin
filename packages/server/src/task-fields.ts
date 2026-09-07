@@ -7,7 +7,7 @@
  * Nothing here touches the disk, the clock or a workspace.
  */
 import { randomBytes } from 'node:crypto';
-import type { Task } from '@feedback/core/task-wire';
+import type { Task } from '@claude-workspaces/core/task-wire';
 
 /**
  * Is this row archived — soft-deleted, off every lane and every queue, and one

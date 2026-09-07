@@ -6,7 +6,7 @@ import {
   type User,
   connect,
   resolveUser,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { widgetStyles } from './styles.ts';
 import {
   askIfSignInRequired,

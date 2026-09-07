@@ -1,4 +1,4 @@
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';

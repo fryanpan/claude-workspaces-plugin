@@ -1,4 +1,4 @@
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 import { asBackgroundWrite } from './signin/write-gate.ts';
 

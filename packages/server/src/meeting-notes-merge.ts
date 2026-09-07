@@ -55,7 +55,7 @@ import {
   prose,
   speakerLabelsIn,
   suggestOps,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { type NotesOwnership, classifyOwnership, itemKey, mdOfKey } from './notes-ownership.ts';
 import {

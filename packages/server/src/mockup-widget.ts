@@ -38,7 +38,7 @@ const escapeAttr = (v: string): string =>
 /**
  * The embed itself. No `user` attribute on purpose — the widget resolves the
  * reviewer from the browser it is running in (`resolveUser` in
- * `@feedback/core/identity`), so a name baked into markup does not identify
+ * `@claude-workspaces/core/identity`), so a name baked into markup does not identify
  * the reader, it RE-BRANDS them: whoever opens the page is seeded as that
  * person in a fresh browser. A shared review URL makes that everyone.
  *

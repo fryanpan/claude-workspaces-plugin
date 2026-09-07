@@ -5,7 +5,7 @@
  *
  * Duplicated rather than shared because the MCP bundle imports nothing
  * outside `packages/mcp/src` (the build produces one standalone file, and
- * reaching into `@feedback/core` would drag yjs into it). The two halves are
+ * reaching into `@claude-workspaces/core` would drag yjs into it). The two halves are
  * pinned together by `packages/server/test/sse-mux.test.ts`, which imports
  * THIS formatter and parses its output with the server's decoder.
  */

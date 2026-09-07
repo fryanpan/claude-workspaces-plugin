@@ -12,7 +12,7 @@
  * reconnects asks one question — "what build are you serving now?" — and only
  * speaks up if the answer differs from the build it is running.
  */
-import type { ConnectionStatus } from '@feedback/core';
+import type { ConnectionStatus } from '@claude-workspaces/core';
 
 /**
  * Stamped into the bundle at build time (see packages/workspaces-app/scripts/

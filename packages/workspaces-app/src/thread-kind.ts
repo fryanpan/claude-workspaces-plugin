@@ -1,4 +1,9 @@
-import { type Comment, type Thread, pendingDeclaration, reviewWithdrawn } from '@feedback/core';
+import {
+  type Comment,
+  type Thread,
+  pendingDeclaration,
+  reviewWithdrawn,
+} from '@claude-workspaces/core';
 
 /**
  * What a thread IS to the reader, in one word — the term every surface keys

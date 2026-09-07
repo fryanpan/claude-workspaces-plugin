@@ -18,8 +18,8 @@ import {
   type TaskReviewItem,
   changedRange,
   latestThreadedQuestion,
-} from '@feedback/core';
-import type { DecisionOption, Task, TaskActor } from '@feedback/core/task-wire';
+} from '@claude-workspaces/core';
+import type { DecisionOption, Task, TaskActor } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from '../actor-identity.ts';
 import { checkDecisionShape, decisionShapeMessage } from '../decision-shape.ts';
 import { bumpWordsRevision, cryptoId } from '../task-fields.ts';

@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import {
   type ActivityEvent,
   describeEvent,

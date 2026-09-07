@@ -48,7 +48,7 @@ describe('relativeSpecifiers', () => {
   });
 
   it('skips bare specifiers, which cannot name a file in this package', () => {
-    const src = "import { x } from '@feedback/core';\nimport { y } from 'node:fs';";
+    const src = "import { x } from '@claude-workspaces/core';\nimport { y } from 'node:fs';";
     expect(relativeSpecifiers(src)).toEqual([]);
   });
 });

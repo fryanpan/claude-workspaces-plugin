@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { meetingPlatformOf } from '@feedback/core';
+import { meetingPlatformOf } from '@claude-workspaces/core';
 import {
   type FetchLike,
   type RecallRegion,

@@ -30,8 +30,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { storedJudgement } from '@feedback/core';
-import type { Task, TaskStatus } from '@feedback/core/task-wire';
+import { storedJudgement } from '@claude-workspaces/core';
+import type { Task, TaskStatus } from '@claude-workspaces/core/task-wire';
 import type { ReviewItemPersistence } from './review-items/persistence.ts';
 import {
   type AgentStorePersistence,

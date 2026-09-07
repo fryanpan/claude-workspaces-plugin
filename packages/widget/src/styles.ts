@@ -1,4 +1,4 @@
-import { STATUS_COLORS } from '@feedback/core';
+import { STATUS_COLORS } from '@claude-workspaces/core';
 
 /**
  * Styles for the shadow-DOM portion of the widget.

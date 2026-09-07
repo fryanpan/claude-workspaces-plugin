@@ -1,4 +1,4 @@
-import { type DocMeta, attachmentIdOf, isAttachmentMember } from '@feedback/core';
+import { type DocMeta, attachmentIdOf, isAttachmentMember } from '@claude-workspaces/core';
 
 /**
  * Every attachment set belongs to a workspace — including the ones made before that

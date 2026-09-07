@@ -21,7 +21,7 @@
  *    with the default's own text to put in the box.
  */
 
-import { escapeHtml } from '@feedback/core';
+import { escapeHtml } from '@claude-workspaces/core';
 import type { PromptDetail, PromptsApi } from './prompts-api.ts';
 
 /**

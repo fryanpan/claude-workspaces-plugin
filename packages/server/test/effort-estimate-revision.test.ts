@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EFFORT_ESTIMATE_PROMPT_VERSION } from '@feedback/core/effort-estimate-prompt';
+import { EFFORT_ESTIMATE_PROMPT_VERSION } from '@claude-workspaces/core/effort-estimate-prompt';
 import { EFFORT_ESTIMATE_MODEL } from '../src/effort-estimator.ts';
 import {
   type Task,

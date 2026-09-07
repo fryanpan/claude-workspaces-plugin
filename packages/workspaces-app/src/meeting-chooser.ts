@@ -18,8 +18,8 @@
  * than as a captured closure, which is why they could leave the mount at all.
  */
 
-import type { CaptureMode } from '@feedback/core';
-import { liveTuningKeys } from '@feedback/core';
+import type { CaptureMode } from '@claude-workspaces/core';
+import { liveTuningKeys } from '@claude-workspaces/core';
 import { advancedControls, buildAdvancedSection } from './meeting-advanced.ts';
 import type { AdvancedState } from './meeting-advanced.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';

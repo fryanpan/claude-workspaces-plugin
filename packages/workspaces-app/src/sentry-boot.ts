@@ -1,4 +1,4 @@
-import { scrubBrowserEvent } from '@feedback/core/trace-privacy';
+import { scrubBrowserEvent } from '@claude-workspaces/core/trace-privacy';
 /**
  * The browser's Sentry init — one entry, every page type.
  *

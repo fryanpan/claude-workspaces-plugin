@@ -1,4 +1,4 @@
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 /**
  * The five writes a comment card can make, and what the reader is told when
  * one fails.

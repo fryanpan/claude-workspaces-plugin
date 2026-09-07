@@ -1,4 +1,8 @@
-import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK, type SuggestionAttrs } from '@feedback/core';
+import {
+  SUGGEST_DELETE_MARK,
+  SUGGEST_INSERT_MARK,
+  type SuggestionAttrs,
+} from '@claude-workspaces/core';
 import { Extension } from '@tiptap/core';
 import type { MarkType, Node as PMNode, Slice } from '@tiptap/pm/model';
 import {

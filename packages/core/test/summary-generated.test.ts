@@ -17,7 +17,7 @@ import {
   findDeliveryClaim,
   needsCall,
   parseSummaryResponse,
-} from '@feedback/core/summary-prompt';
+} from '@claude-workspaces/core/summary-prompt';
 import { describe, expect, it } from 'vitest';
 import {
   NO_REPLIES_TEXT,

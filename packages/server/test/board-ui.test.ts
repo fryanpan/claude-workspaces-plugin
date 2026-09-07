@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import { BOARD_FEEDBACK_DOC_ID, type ServerHandle, createServer } from '../src/server.ts';
 import { workspaceDocId } from '../src/task-projection.ts';
 import type { Task } from '../src/tasks.ts';

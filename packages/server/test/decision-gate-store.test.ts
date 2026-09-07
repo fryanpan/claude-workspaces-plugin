@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isReviewItemGated, isReviewItemHeld } from '@feedback/core';
+import { isReviewItemGated, isReviewItemHeld } from '@claude-workspaces/core';
 import { LEGACY_REVIEW_ITEM_ID, type Task, TaskStore, wordsRevisionOf } from '../src/tasks.ts';
 
 const FILER = { id: 'agent-index-keeper', name: 'Index Keeper', kind: 'agent' };

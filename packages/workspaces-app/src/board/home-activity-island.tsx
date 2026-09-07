@@ -21,7 +21,7 @@
  * Groups are keyed on the task id, so a signal write that changes one task's
  * lines leaves every other group's DOM node IDENTICAL.
  */
-import type { Thread, User } from '@feedback/core';
+import type { Thread, User } from '@claude-workspaces/core';
 import { signal } from '@preact/signals';
 import { render } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';

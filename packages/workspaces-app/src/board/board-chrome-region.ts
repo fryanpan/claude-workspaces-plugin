@@ -20,7 +20,7 @@
  * see the board's rows at all — presence is a fact about connections, not
  * about tasks.
  */
-import type { FeedbackClient, User } from '@feedback/core';
+import type { FeedbackClient, User } from '@claude-workspaces/core';
 import type { BootLocation } from '../boot-env.ts';
 import type { BoardState } from './board-actions.ts';
 import {

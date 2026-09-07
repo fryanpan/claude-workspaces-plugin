@@ -4,7 +4,7 @@
  * values leave it, and the section's states — collapsed, modified, resetting,
  * mid-recording — read the way the approved mock says they should.
  */
-import { tuningSpecsFor } from '@feedback/core';
+import { tuningSpecsFor } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type AdvancedSectionOpts,

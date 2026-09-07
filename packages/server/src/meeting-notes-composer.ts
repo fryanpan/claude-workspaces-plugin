@@ -20,7 +20,7 @@
  * the key.
  */
 
-import { readRenamedEnv } from '@feedback/core/env-names';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-notes.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
 import { readKeychainPassword } from './share/keychain.ts';

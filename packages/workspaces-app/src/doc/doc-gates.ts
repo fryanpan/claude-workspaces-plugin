@@ -14,7 +14,7 @@
  * surface: `canWrite` arrived on the MountContext, so nothing here waits on a
  * network answer and nothing is editable in the meantime.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { lockDocToReading } from '../signin/write-gate.ts';

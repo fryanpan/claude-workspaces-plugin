@@ -1,5 +1,5 @@
 {
-  "name": "@feedback/workspaces-app",
+  "name": "@claude-workspaces/workspaces-app",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,7 @@
     "@codemirror/merge": "^6.12.2",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.34.2",
-    "@feedback/core": "workspace:*",
+    "@claude-workspaces/core": "workspace:*",
     "@preact/signals": "2.11.1",
     "@sentry/browser": "^10.71.0",
     "@tiptap/core": "^3.22.3",

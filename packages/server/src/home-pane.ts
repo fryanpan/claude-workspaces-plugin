@@ -23,7 +23,7 @@
  * internal: nothing outside this module reached them inside `createServer`
  * either, and the in-flight set is only correct if exactly one thing owns it.
  */
-import { reviewItemState } from '@feedback/core';
+import { reviewItemState } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import {
   type BriefCoverage,

@@ -28,7 +28,7 @@
  * The owner and every agent are unaffected: `visitor` is null for a request
  * from the box, and this answers true without asking anything.
  */
-import type { Ref } from '@feedback/core';
+import type { Ref } from '@claude-workspaces/core';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 
 /** The refusal a ref outside the caller's board earns — the same body every

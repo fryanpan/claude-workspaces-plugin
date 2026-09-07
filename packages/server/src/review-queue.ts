@@ -26,7 +26,7 @@ import type {
   ReviewPayload,
   TaskReviewItem,
   Thread,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import {
   decodeEntities,
   isReviewItemGated,
@@ -37,7 +37,7 @@ import {
   reviewPayloadRevision,
   reviewWithdrawn,
   threadReviewItemId,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { classifyActor } from './actor-identity.ts';
 import { asksPerson, extractAsk } from './ask-detection.ts';
 
@@ -46,7 +46,7 @@ import { asksPerson, extractAsk } from './ask-detection.ts';
  * deliberately untouched, being comment prose where a literal `&amp;` (say,
  * inside a code span) is the author's content.
  *
- * The decoder itself lives in `@feedback/core` because this is not the only
+ * The decoder itself lives in `@claude-workspaces/core` because this is not the only
  * door a title leaves by: the BOARD's titles reach the browser through
  * `projectTask`, and the browser assembles its own review rows for decision
  * tasks straight off those. One implementation, applied at each door exactly
@@ -309,7 +309,7 @@ export function unansweredRun(thread: Thread): Comment[] {
 
 /**
  * "Which declaration is pending" — `pendingDeclaration` — now lives in
- * `@feedback/core` (re-exported below), because the doc panel needs the SAME
+ * `@claude-workspaces/core` (re-exported below), because the doc panel needs the SAME
  * answer this queue gives: for one release the browser kept its own copy of
  * the rule (raw array order, buried asks resurrected, thread status ignored)
  * and could offer an Answer composer for an item this queue had retired.

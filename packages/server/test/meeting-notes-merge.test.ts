@@ -9,7 +9,7 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import { SUGGEST_INSERT_MARK, prose, suggestOps } from '@feedback/core';
+import { SUGGEST_INSERT_MARK, prose, suggestOps } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import {
   type IncomingItem,

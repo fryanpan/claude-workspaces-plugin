@@ -21,7 +21,7 @@ import {
   MEETING_SAMPLE_RATE,
   type MeetingTimingMark,
   meetingSocketPath,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { audioEndMsFromTurn } from '../src/transcribe-assemblyai.ts';
 import type { TranscriptionEngine } from '../src/transcribe.ts';

@@ -1,4 +1,4 @@
-import { escapeHtml } from '@feedback/core';
+import { escapeHtml } from '@claude-workspaces/core';
 import { api, docIdFromPathOrNull } from './doc-path.ts';
 import {
   beginSidebarRender,

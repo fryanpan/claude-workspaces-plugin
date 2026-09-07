@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { emailIdentityId } from '@feedback/core';
+import { emailIdentityId } from '@claude-workspaces/core';
 import { MAX_ATTEMPTS, MAX_STARTS_PER_EMAIL } from '../src/auth/email-code.ts';
 import { SESSION_COOKIE } from '../src/auth/session.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';

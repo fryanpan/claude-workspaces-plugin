@@ -1,4 +1,4 @@
-import type { FeedbackClient, User } from '@feedback/core';
+import type { FeedbackClient, User } from '@claude-workspaces/core';
 import { applyBackLink, returnItemFrom } from './back-link.ts';
 import { setActiveFile } from './diff-nav.ts';
 import { docIdFromPath, docIdFromPathOrNull } from './doc-path.ts';

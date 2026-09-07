@@ -4,7 +4,7 @@ import {
   isReviewItemGated,
   isReviewItemHeld,
   latestThreadedQuestion,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
 /**
  * A ticket's review items — 0..n, several possibly open at once.

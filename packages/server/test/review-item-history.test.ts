@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ReviewPayload } from '@feedback/core';
+import type { ReviewPayload } from '@claude-workspaces/core';
 import { TaskStore, type TaskStoreEvent } from '../src/tasks.ts';
 
 const PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'known' };

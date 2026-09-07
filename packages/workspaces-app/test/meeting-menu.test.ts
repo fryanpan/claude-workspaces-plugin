@@ -1,4 +1,4 @@
-import type { CaptureMode, MeetingBotStatus } from '@feedback/core';
+import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import type { MeetingBotClient } from '../src/meeting-bot-client.ts';
 import { type MeetingMenu, createMeetingMenu } from '../src/meeting-menu.ts';

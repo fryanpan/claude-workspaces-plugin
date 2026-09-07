@@ -1,4 +1,4 @@
-import type { FeedbackClient, User } from '@feedback/core';
+import type { FeedbackClient, User } from '@claude-workspaces/core';
 import type { BootLocation, BootStorage, BootWindow } from './boot-env.ts';
 import { mountCode } from './code/code-app.ts';
 import { fetchDocMeta } from './doc-meta.ts';

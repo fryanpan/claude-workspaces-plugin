@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import type { DocMeta } from '@feedback/core';
+import type { DocMeta } from '@claude-workspaces/core';
 
 /**
  * Strip a doc's metadata down to what a share visitor needs.

@@ -38,7 +38,7 @@ import {
   contentKind,
   prose,
   suggestOps,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { isBoardOwnedDoc } from './doc-ids.ts';
 import {

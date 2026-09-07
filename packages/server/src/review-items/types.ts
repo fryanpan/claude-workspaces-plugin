@@ -2,8 +2,8 @@
  * What the review-item verbs answer with. Their own module so the store, the
  * routes and `TaskStore`'s delegating methods all name one shape.
  */
-import type { TaskReviewItem } from '@feedback/core';
-import type { Task } from '@feedback/core/task-wire';
+import type { TaskReviewItem } from '@claude-workspaces/core';
+import type { Task } from '@claude-workspaces/core/task-wire';
 import type { BoardWorkspace } from '../tasks.ts';
 
 export type AnswerDecisionResult =

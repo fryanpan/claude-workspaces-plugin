@@ -26,8 +26,8 @@
  * close are the strip's verbs, handed in.
  */
 
-import type { CaptureMode, MeetingBotStatus } from '@feedback/core';
-import { describeBotState, speakerDisplayName } from '@feedback/core';
+import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
+import { describeBotState, speakerDisplayName } from '@claude-workspaces/core';
 import { advancedControls } from './meeting-advanced.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
 import { formatElapsed } from './meeting-protocol.ts';

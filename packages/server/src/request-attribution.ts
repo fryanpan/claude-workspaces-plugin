@@ -38,7 +38,7 @@
  * than naming authors. It still runs in its old position, below this call
  * and above every route, for the reason its own comment gives.
  */
-import { type User, isEmailLike } from '@feedback/core';
+import { type User, isEmailLike } from '@claude-workspaces/core';
 import { Identities, type IdentityRecord, userForIdentity } from './identities.ts';
 import { isBrowserRequest } from './middleware/write-gate.ts';
 import type { Admission } from './request-admission.ts';

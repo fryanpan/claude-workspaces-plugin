@@ -1,4 +1,4 @@
-import { computeRedline, prose } from '@feedback/core';
+import { computeRedline, prose } from '@claude-workspaces/core';
 import { Extension } from '@tiptap/core';
 import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
@@ -22,7 +22,7 @@ import * as Y from 'yjs';
  * only doc.css shows — hidden ≥1100px, where the balloon carries the same
  * content; visible ≤1100px, where the balloon column collapses.
  *
- * Reuses `computeRedline` from @feedback/core: the live doc is serialized
+ * Reuses `computeRedline` from @claude-workspaces/core: the live doc is serialized
  * per-block (prose.serializeBlockToMarkdown — the same serializer the disk
  * write-back uses), diffed against `baseText`, and the resulting markdown
  * offsets are mapped back to ProseMirror positions.

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getMeta } from '@feedback/core';
+import { getMeta } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { boardTabTitle } from '../src/board/board-presence-model.ts';

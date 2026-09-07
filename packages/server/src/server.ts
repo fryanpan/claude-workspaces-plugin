@@ -9,7 +9,7 @@ import {
   contentKind,
   parseThreadReviewItemId,
   pendingDeclaration,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
 import { AgentNoteRing } from './agent-notes.ts';

@@ -1,4 +1,4 @@
-import type { ReviewPayload, User } from '@feedback/core';
+import type { ReviewPayload, User } from '@claude-workspaces/core';
 /**
  * A row's comments: where they live, how they are read, and how one is posted.
  *

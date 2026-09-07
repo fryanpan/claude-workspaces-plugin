@@ -21,7 +21,7 @@ import {
   reattributeSpeakerTags,
   speakerTagHref,
   speakerTagText,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { findNotesSection } from './meeting-notes-merge.ts';
 import { type NotesReattribution, extendsWord } from './meeting-notes.ts';

@@ -1,5 +1,5 @@
 import { resolve as resolvePath } from 'node:path';
-import type { DocType } from '@feedback/core';
+import type { DocType } from '@claude-workspaces/core';
 import { bindDiff } from './bind-diff.ts';
 import { type BindHost, deriveWorkspaceId } from './bind-meta.ts';
 

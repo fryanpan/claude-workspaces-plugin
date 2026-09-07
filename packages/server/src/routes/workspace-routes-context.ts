@@ -1,4 +1,4 @@
-import type { DocType, User } from '@feedback/core';
+import type { DocType, User } from '@claude-workspaces/core';
 import type { AgentWatches } from '../agent-watches.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';

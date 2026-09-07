@@ -9,7 +9,7 @@ import {
   SHELL_ASSETS,
   hashedAssetName,
   rewriteAssetRefs,
-} from '@feedback/core/asset-manifest';
+} from '@claude-workspaces/core/asset-manifest';
 import { computeBuildId } from '../src/build-id.ts';
 import { OPEN_PROPS_FILES } from '../src/tokens-manifest.ts';
 

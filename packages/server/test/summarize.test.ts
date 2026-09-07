@@ -11,13 +11,13 @@
 // so this file is only ever run by `bun test`. Importing vitest here worked by
 // accident and made the file read as if the vitest run covered it.
 import { afterEach, describe, expect, it } from 'bun:test';
-import { summaryHash } from '@feedback/core';
+import { summaryHash } from '@claude-workspaces/core';
 import {
   SUMMARY_PROMPT_VERSION,
   type StoredSummary,
   needsCall,
-} from '@feedback/core/summary-prompt';
-import type { Thread, User } from '@feedback/core/types';
+} from '@claude-workspaces/core/summary-prompt';
+import type { Thread, User } from '@claude-workspaces/core/types';
 import {
   KEYCHAIN_SERVICE,
   KEYCHAIN_SERVICE_LEGACY,

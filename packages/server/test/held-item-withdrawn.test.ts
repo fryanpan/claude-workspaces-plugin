@@ -25,8 +25,8 @@
  * public.
  */
 import { describe, expect, it } from 'bun:test';
-import type { ReviewPayload } from '@feedback/core';
-import type { Task } from '@feedback/core/task-wire';
+import type { ReviewPayload } from '@claude-workspaces/core';
+import type { Task } from '@claude-workspaces/core/task-wire';
 import { ReviewJudgementStore } from '../src/review-items/judgements.ts';
 import type {
   ReviewItemPersistence,

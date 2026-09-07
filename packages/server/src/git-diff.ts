@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import type { DiffFileStatus } from '@feedback/core';
+import type { DiffFileStatus } from '@claude-workspaces/core';
 
 /**
  * Git plumbing for diff reviews. Every call shells out with an argv array

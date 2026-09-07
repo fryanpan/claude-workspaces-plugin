@@ -24,7 +24,7 @@
  * window closes silently — nothing fires when a heartbeat simply stops.
  */
 
-import { LEAD_PRESENCE_EVENT, type LeadPresence } from '@feedback/core';
+import { LEAD_PRESENCE_EVENT, type LeadPresence } from '@claude-workspaces/core';
 
 export { LEAD_PRESENCE_EVENT, type LeadPresence };
 

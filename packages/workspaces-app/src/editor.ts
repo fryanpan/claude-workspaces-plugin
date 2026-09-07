@@ -1,5 +1,5 @@
-import { anchors } from '@feedback/core';
-import { SPEAKER_TAG_SCHEME } from '@feedback/core';
+import { anchors } from '@claude-workspaces/core';
+import { SPEAKER_TAG_SCHEME } from '@claude-workspaces/core';
 import { type AnyExtension, Editor } from '@tiptap/core';
 import Collaboration from '@tiptap/extension-collaboration';
 import { Image } from '@tiptap/extension-image';

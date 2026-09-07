@@ -33,8 +33,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
-import { attachmentIdOf } from '@feedback/core';
-import type { DocType } from '@feedback/core';
+import { attachmentIdOf } from '@claude-workspaces/core';
+import type { DocType } from '@claude-workspaces/core';
 import type { BrowserSentryConfig, PageType } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
 import type { DocStore } from '../doc-store.ts';

@@ -20,7 +20,7 @@ import { join } from 'node:path';
  * Fixtures are synthetic (the jordan@partner.example register — the repo is
  * public); negative assertions keep positive controls beside them.
  */
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Ref } from '../src/tasks.ts';
 

@@ -13,7 +13,7 @@
  * the one thing an archive shares with a close: whatever the row was gating
  * comes free and has to say so.
  */
-import type { Task, TaskActor } from '@feedback/core/task-wire';
+import type { Task, TaskActor } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { cryptoId, isArchived } from './task-fields.ts';
 import { announceUnblocked } from './task-lifecycle.ts';

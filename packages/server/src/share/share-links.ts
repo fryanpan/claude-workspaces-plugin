@@ -46,7 +46,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { normalizeEmail } from '@feedback/core';
+import { normalizeEmail } from '@claude-workspaces/core';
 
 const SECRET_MODE = 0o600;
 const REGISTRY_FILENAME = 'share-links.json';

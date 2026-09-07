@@ -13,7 +13,7 @@ import {
   DEFAULT_CAPTURE_MODE,
   MEETING_AUDIO_ENCODING,
   type MeetingTimingMark,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseTimingMark } from '../src/meeting-protocol.ts';
 import { type MeetingSocket, mountMeetingStrip } from '../src/meeting-strip.ts';

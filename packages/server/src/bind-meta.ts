@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
-import { type DocMeta, type DocType, attachmentIdOf } from '@feedback/core';
+import { type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
 import type { BindDiffOpts } from './bind-diff.ts';
 import type { LiveDoc } from './doc-store.ts';
 import type { DiffFileEntry } from './git-diff.ts';

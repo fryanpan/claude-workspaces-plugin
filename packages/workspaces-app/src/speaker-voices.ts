@@ -13,7 +13,7 @@
  * meeting three weeks ago is not the correction anybody is reaching for.
  */
 
-import { type RosterVoice, speakerRoster } from '@feedback/core';
+import { type RosterVoice, speakerRoster } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 
 interface MeetingSummary {

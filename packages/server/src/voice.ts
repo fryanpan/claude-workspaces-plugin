@@ -36,7 +36,7 @@
  * only bin.ts constructs the real one, and only the DEDICATED keychain entry
  * counts as consent for server→Anthropic traffic.
  */
-import { isReviewItemOpen } from '@feedback/core';
+import { isReviewItemOpen } from '@claude-workspaces/core';
 import { readKeychainPassword } from './share/keychain.ts';
 import { resolveKeyFrom } from './summarize.ts';
 import { resolveAssignee } from './task-owner.ts';

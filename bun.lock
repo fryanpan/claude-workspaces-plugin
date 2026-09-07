@@ -15,18 +15,18 @@
       },
     },
     "demos/dev-server": {
-      "name": "@feedback/demo-dev-server",
+      "name": "@claude-workspaces/demo-dev-server",
       "version": "0.0.0",
       "devDependencies": {
         "vite": "^6.0.3",
       },
     },
     "demos/mockup": {
-      "name": "@feedback/demo-mockup",
+      "name": "@claude-workspaces/demo-mockup",
       "version": "0.0.0",
     },
     "packages/core": {
-      "name": "@feedback/core",
+      "name": "@claude-workspaces/core",
       "version": "0.0.0",
       "dependencies": {
         "lib0": "^0.2.117",
@@ -44,14 +44,14 @@
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
       "devDependencies": {
-        "@feedback/core": "workspace:*",
+        "@claude-workspaces/core": "workspace:*",
       },
     },
     "packages/server": {
-      "name": "@feedback/server",
+      "name": "@claude-workspaces/server",
       "version": "0.0.0",
       "dependencies": {
-        "@feedback/core": "workspace:*",
+        "@claude-workspaces/core": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@sentry/bun": "^10.71.0",
         "jose": "^5.9.6",
@@ -61,19 +61,20 @@
       },
     },
     "packages/widget": {
-      "name": "@feedback/widget",
+      "name": "@claude-workspaces/widget",
       "version": "0.0.0",
       "dependencies": {
-        "@feedback/core": "workspace:*",
+        "@claude-workspaces/core": "workspace:*",
         "lib0": "^0.2.117",
         "y-protocols": "^1.0.6",
         "yjs": "^13.6.20",
       },
     },
     "packages/workspaces-app": {
-      "name": "@feedback/workspaces-app",
+      "name": "@claude-workspaces/workspaces-app",
       "version": "0.0.0",
       "dependencies": {
+        "@claude-workspaces/core": "workspace:*",
         "@codemirror/commands": "^6.7.1",
         "@codemirror/lang-css": "^6.3.1",
         "@codemirror/lang-html": "^6.4.11",
@@ -89,7 +90,6 @@
         "@codemirror/merge": "^6.12.2",
         "@codemirror/state": "^6.4.1",
         "@codemirror/view": "^6.34.2",
-        "@feedback/core": "workspace:*",
         "@preact/signals": "2.11.1",
         "@sentry/browser": "^10.71.0",
         "@tiptap/core": "^3.22.3",
@@ -170,6 +170,18 @@
     "@chevrotain/types": ["@chevrotain/types@12.0.0", "", {}, "sha512-S+04vjFQKeuYw0/eW3U52LkAHQsB1ASxsPGsLPUyQgrZ2iNNibQrsidruDzjEX2JYfespXMG0eZmXlhA6z7nWA=="],
 
     "@chevrotain/utils": ["@chevrotain/utils@12.0.0", "", {}, "sha512-lB59uJoaGIfOOL9knQqQRfhl9g7x8/wqFkp13zTdkRu1huG9kg6IJs1O8hqj9rs6h7orGxHJUKb+mX3rPbWGhA=="],
+
+    "@claude-workspaces/core": ["@claude-workspaces/core@workspace:packages/core"],
+
+    "@claude-workspaces/demo-dev-server": ["@claude-workspaces/demo-dev-server@workspace:demos/dev-server"],
+
+    "@claude-workspaces/demo-mockup": ["@claude-workspaces/demo-mockup@workspace:demos/mockup"],
+
+    "@claude-workspaces/server": ["@claude-workspaces/server@workspace:packages/server"],
+
+    "@claude-workspaces/widget": ["@claude-workspaces/widget@workspace:packages/widget"],
+
+    "@claude-workspaces/workspaces-app": ["@claude-workspaces/workspaces-app@workspace:packages/workspaces-app"],
 
     "@codemirror/autocomplete": ["@codemirror/autocomplete@6.20.1", "", { "dependencies": { "@codemirror/language": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.17.0", "@lezer/common": "^1.0.0" } }, "sha512-1cvg3Vz1dSSToCNlJfRA2WSI4ht3K+WplO0UMOgmUYPivCyy2oueZY6Lx7M9wThm7SDUBViRmuT+OG/i8+ON9A=="],
 
@@ -256,18 +268,6 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.25.12", "", { "os": "win32", "cpu": "ia32" }, "sha512-HkqnmmBoCbCwxUKKNPBixiWDGCpQGVsrQfJoVGYLPT41XWF8lHuE5N6WhVia2n4o5QK5M4tYr21827fNhi4byQ=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.25.12", "", { "os": "win32", "cpu": "x64" }, "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA=="],
-
-    "@feedback/core": ["@feedback/core@workspace:packages/core"],
-
-    "@feedback/demo-dev-server": ["@feedback/demo-dev-server@workspace:demos/dev-server"],
-
-    "@feedback/demo-mockup": ["@feedback/demo-mockup@workspace:demos/mockup"],
-
-    "@feedback/server": ["@feedback/server@workspace:packages/server"],
-
-    "@feedback/widget": ["@feedback/widget@workspace:packages/widget"],
-
-    "@feedback/workspaces-app": ["@feedback/workspaces-app@workspace:packages/workspaces-app"],
 
     "@fryanpan/claude-workspaces-mcp": ["@fryanpan/claude-workspaces-mcp@workspace:packages/mcp"],
 

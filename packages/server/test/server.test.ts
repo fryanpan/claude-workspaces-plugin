@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ElementAnchor, User } from '@feedback/core';
+import type { ElementAnchor, User } from '@claude-workspaces/core';
 import { decideReconcile } from '../src/doc-store.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor, waitForFile } from './wait-for.ts';

@@ -3,8 +3,12 @@
  * shared by the review-item store, the board projection and the REST queue
  * so no two of them can disagree about whether a decision is still waiting.
  */
-import { type ReviewPayload, type TaskReviewItem, reviewFromDecisionTask } from '@feedback/core';
-import type { Task } from '@feedback/core/task-wire';
+import {
+  type ReviewPayload,
+  type TaskReviewItem,
+  reviewFromDecisionTask,
+} from '@claude-workspaces/core';
+import type { Task } from '@claude-workspaces/core/task-wire';
 import { taskAskedBy } from '../task-fields.ts';
 
 /**

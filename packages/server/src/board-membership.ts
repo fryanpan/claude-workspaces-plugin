@@ -36,7 +36,7 @@
  * `defaultBoardWorkspaceId` stay internal: nothing outside this module reached
  * them before the move, and a wider surface is a wider thing to keep true.
  */
-import { type DocMeta, attachmentIdOf, normalizeEmail } from '@feedback/core';
+import { type DocMeta, attachmentIdOf, normalizeEmail } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
 import { renderShareLinkUnavailable } from './share/share-link-page.ts';
@@ -144,7 +144,7 @@ export interface WatchCoverage {
  * the wire keeps its old spelling) is the tag binding the member docs of one
  * folder bind or diff review together. It is content, not a container of
  * tasks: it has no live doc of its own, and it is read through
- * `/workspaces/<ws>/reviews/<setId>/tree|threads`. `attachmentIdOf` in `@feedback/core`
+ * `/workspaces/<ws>/reviews/<setId>/tree|threads`. `attachmentIdOf` in `@claude-workspaces/core`
  * is the one place a member's set id is derived.
  *
  * Note the board page no longer LISTS attachments: the Docs and

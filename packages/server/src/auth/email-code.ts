@@ -38,7 +38,7 @@
  * cost is asking for another code.
  */
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { isEmailLike, normalizeEmail } from '@feedback/core';
+import { isEmailLike, normalizeEmail } from '@claude-workspaces/core';
 
 /** How long a code stays usable. */
 export const CODE_TTL_MS = 10 * 60 * 1000;

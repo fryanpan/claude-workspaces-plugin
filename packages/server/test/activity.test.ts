@@ -8,7 +8,7 @@ import {
   type User,
   createThread,
   initDocMeta,
-} from '@feedback/core';
+} from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { eventsForDoc, runBackfill } from '../src/activity-backfill.ts';
 import { activityLogPath } from '../src/activity.ts';

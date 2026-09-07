@@ -1,4 +1,4 @@
-import { type TaskReviewItem, type User } from '@feedback/core';
+import { type TaskReviewItem, type User } from '@claude-workspaces/core';
 /**
  * Batch capture: a burst of rows in one call, each landing owned and placed.
  *

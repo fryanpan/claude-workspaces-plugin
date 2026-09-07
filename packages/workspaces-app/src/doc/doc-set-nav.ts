@@ -8,7 +8,7 @@
  * signature while navigation wrote `diff:`, so the shared signature never
  * matched. Keeping the choice in one place is what stops that recurring.
  */
-import { escapeHtml, readDocMeta } from '@feedback/core';
+import { escapeHtml, readDocMeta } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { renderDiffNav, setActiveFile } from '../diff-nav.ts';
 import { docHref, workspaceIdFromPath } from '../doc-path.ts';

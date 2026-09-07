@@ -1,4 +1,4 @@
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 /**
  * The operator block: metrics, plugin refresh, push subscriptions and
  * deploy, in the order it is matched.

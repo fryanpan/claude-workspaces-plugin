@@ -1,4 +1,4 @@
-import { prose } from '@feedback/core';
+import { prose } from '@claude-workspaces/core';
 import type { EditorView } from '@tiptap/pm/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';

@@ -1,4 +1,4 @@
-import { type ReviewPayload, createThread, postReply } from '@feedback/core';
+import { type ReviewPayload, createThread, postReply } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { LONG_THREAD_WORDS } from '../src/long-thread.ts';

@@ -8,7 +8,7 @@
  * order they mount in IS the order they read in: plan, then review. Splitting
  * them would leave that ordering as an accident of two call sites.
  */
-import type { User } from '@feedback/core';
+import type { User } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import type { LeadBanner } from '../lead-banner.ts';
 import type { MountScope } from '../mount-scope.ts';

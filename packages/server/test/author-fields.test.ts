@@ -11,7 +11,7 @@
  * weekly review reads.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { emailIdentityId } from '@feedback/core';
+import { emailIdentityId } from '@claude-workspaces/core';
 import { eventsForDoc } from '../src/activity-backfill';
 import {
   authorFields,

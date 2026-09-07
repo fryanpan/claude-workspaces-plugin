@@ -7,7 +7,7 @@
  *
  * Driven through the injected seams: no server, no Yjs. Fixtures synthetic.
  */
-import type { LeadPresence, User } from '@feedback/core';
+import type { LeadPresence, User } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mountPlanGate } from '../src/plan-gate.ts';
 import { mountReviewFloat } from '../src/review-float.ts';

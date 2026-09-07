@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import {
   DEFAULT_EFFORT_ESTIMATE_PROMPT,
   EFFORT_ESTIMATE_PROMPT_VERSION,
-} from '@feedback/core/effort-estimate-prompt';
+} from '@claude-workspaces/core/effort-estimate-prompt';
 import {
   EFFORT_ESTIMATE_MODEL,
   type EffortEstimateVerdict,

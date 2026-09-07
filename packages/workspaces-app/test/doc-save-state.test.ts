@@ -1,4 +1,4 @@
-import type { FeedbackClient } from '@feedback/core';
+import type { FeedbackClient } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { mountDocSaveState } from '../src/doc/doc-save-state.ts';
