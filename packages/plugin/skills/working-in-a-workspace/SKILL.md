@@ -108,7 +108,11 @@ Your session needs an agent name before it can do anything on the board: a
 create whose owner resolves to the bare word `agent`, a comment or reply
 signed by the shared "agent" identity, and a lead-seat claim from it are all
 refused with `author-required`, and that refusal means the session was
-launched without `CW_AGENT_NAME` (set it, restart the session). Old comments
+launched without `CW_AGENT_NAME` (set it, restart the session). The same
+launch environment names the board your end-of-turn notes land on:
+`CW_WORKSPACE_ID`. Without it the Stop hook posts nothing and the Activity
+tab stays empty for your turns, and `post_status` without a `taskId` needs
+`workspaceId` passed by hand. Old comments
 that were signed that way stay and show as "Unnamed agent". When you hand a row to somebody
 else by name, pass `assigneeKind` — nothing can tell a person from an agent of
 the same name, and an unclassified owner shows as "not recorded".

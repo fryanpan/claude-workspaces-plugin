@@ -1,6 +1,6 @@
 /**
  * The plugin's Stop and PermissionDenied hooks post notes to
- * `POST /api/agent-notes` so a task's Activity tab can say what each agent
+ * `POST /workspaces/{id}/agents/{name}/notes` so a task's Activity tab can say what each agent
  * did lately — the Stop hook the whole closing message (reduced, never
  * clipped to a line), the PermissionDenied hook the denied call's shape.
  * Everything that decides WHAT to post is a pure function
@@ -22,6 +22,7 @@ import {
   payloadKeys,
   postNote,
   readAgentName,
+  readWorkspaceId,
   resolveBaseUrl,
   runHook,
 } from '../hooks/lib/agent-notes.ts';
@@ -42,7 +43,11 @@ const DENIED = {
   permission_mode: 'auto',
   hook_event_name: 'PermissionDenied',
 };
-const ENV = { CW_AGENT_NAME: 'Cartographer', CW_BASE_URL: 'http://localhost:1' };
+const ENV = {
+  CW_AGENT_NAME: 'Cartographer',
+  CW_WORKSPACE_ID: 'w-board',
+  CW_BASE_URL: 'http://localhost:1',
+};
 
 type Call = { url: string; init: RequestInit };
 function fakeFetch(calls: Call[], impl?: () => Promise<Response>): typeof fetch {
@@ -54,6 +59,11 @@ function fakeFetch(calls: Call[], impl?: () => Promise<Response>): typeof fetch 
 const sentBody = (c: Call) => JSON.parse(String(c.init.body)) as Record<string, unknown>;
 
 describe('env resolution', () => {
+  it('reads the board from CW_WORKSPACE_ID, falling back to FEEDBACK_WORKSPACE_ID', () => {
+    expect(readWorkspaceId({ CW_WORKSPACE_ID: ' w-board ' })).toBe('w-board');
+    expect(readWorkspaceId({ FEEDBACK_WORKSPACE_ID: 'w-old' })).toBe('w-old');
+    expect(readWorkspaceId({})).toBeUndefined();
+  });
   it('reads the agent name from CW_AGENT_NAME, falling back to FEEDBACK_AGENT_NAME', () => {
     expect(readAgentName({ CW_AGENT_NAME: ' Cartographer ' })).toBe('Cartographer');
     expect(readAgentName({ FEEDBACK_AGENT_NAME: 'Legacy' })).toBe('Legacy');
@@ -203,11 +213,11 @@ describe('payloadKeys — the live shape, names only', () => {
 
 describe('postNote — fail-open transport', () => {
   const note = { agent: 'Cartographer', kind: 'turn' as const, text: 'hi', at: NOW };
-  it('POSTs JSON to /api/agent-notes with a timeout signal', async () => {
+  it("POSTs JSON to the agent's notes route on the board, with a timeout signal", async () => {
     const calls: Call[] = [];
-    expect(await postNote('http://localhost:1', note, fakeFetch(calls))).toBe(true);
+    expect(await postNote('http://localhost:1', 'w-board', note, fakeFetch(calls))).toBe(true);
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('http://localhost:1/api/agent-notes');
+    expect(calls[0].url).toBe('http://localhost:1/workspaces/w-board/agents/Cartographer/notes');
     expect(calls[0].init.method).toBe('POST');
     expect((calls[0].init.headers as Record<string, string>)['content-type']).toBe(
       'application/json',
@@ -218,15 +228,15 @@ describe('postNote — fail-open transport', () => {
   });
   it('resolves false — never throws — when fetch throws or the server refuses', async () => {
     const throwing = fakeFetch([], () => Promise.reject(new Error('ECONNREFUSED')));
-    await expect(postNote('http://localhost:1', note, throwing)).resolves.toBe(false);
+    await expect(postNote('http://localhost:1', 'w-board', note, throwing)).resolves.toBe(false);
     const refusing = fakeFetch([], () =>
       Promise.resolve(new Response('{"error":"bad-kind"}', { status: 400 })),
     );
-    await expect(postNote('http://localhost:1', note, refusing)).resolves.toBe(false);
+    await expect(postNote('http://localhost:1', 'w-board', note, refusing)).resolves.toBe(false);
     const syncThrow = (() => {
       throw new TypeError('not a function');
     }) as unknown as typeof fetch;
-    await expect(postNote('http://localhost:1', note, syncThrow)).resolves.toBe(false);
+    await expect(postNote('http://localhost:1', 'w-board', note, syncThrow)).resolves.toBe(false);
   });
 });
 
@@ -257,7 +267,12 @@ describe('runHook — the thin main, end to end', () => {
     const cases: Array<[string, Record<string, string | undefined>, string]> = [
       [
         'no agent',
-        { CW_BASE_URL: 'http://localhost:1' },
+        { CW_BASE_URL: 'http://localhost:1', CW_WORKSPACE_ID: 'w-board' },
+        JSON.stringify({ ...STOP, last_assistant_message: 'x' }),
+      ],
+      [
+        'no board',
+        { CW_BASE_URL: 'http://localhost:1', CW_AGENT_NAME: 'Cartographer' },
         JSON.stringify({ ...STOP, last_assistant_message: 'x' }),
       ],
       ['empty message', ENV, JSON.stringify({ ...STOP, last_assistant_message: '' })],
@@ -279,7 +294,7 @@ describe('runHook — the thin main, end to end', () => {
   it('exits 0 with no fetch when no base URL resolves', async () => {
     const calls: Call[] = [];
     const code = await runHook('turn', JSON.stringify({ ...STOP, last_assistant_message: 'x' }), {
-      env: { CW_AGENT_NAME: 'Cartographer' },
+      env: { CW_AGENT_NAME: 'Cartographer', CW_WORKSPACE_ID: 'w-board' },
       fetch: fakeFetch(calls),
       now: () => NOW,
       baseUrl: () => undefined,

@@ -333,7 +333,7 @@ cache path contains the version number, and a running session resolved
 loading the old commands, skills, and MCP bundle no matter what lands on disk.
 An MCP reconnect re-execs that same old path: it can pick up new tool schemas
 from the bundle it already points at, but it cannot cross a version boundary.
-Same constraint as `FEEDBACK_AGENT_NAME` and `FEEDBACK_BASE_URL`, which are
+Same constraint as `CW_AGENT_NAME`, `CW_WORKSPACE_ID` and `CW_BASE_URL`, which are
 read once from the launch environment.
 
 So the full path for a plugin change is: merge → bump landed → the cache

@@ -275,7 +275,7 @@ export const TOOL_LIST: ListToolsResult = {
           workspaceId: {
             type: 'string',
             description:
-              'The BOARD the row is on. Required WITH taskId — that note is addressed as /workspaces/<workspaceId>/tasks/<taskId>/notes. Without taskId the note goes to your current claim, which the server resolves, and no board is named or needed: this is the one tool where the board follows the id beside it.',
+              'The BOARD the row is on — every note is addressed under one. With taskId it goes to /workspaces/<workspaceId>/tasks/<taskId>/notes; without, to your own notes on that board, where the server pins it to your current claim there. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board.',
           },
           text: { type: 'string' },
           taskId: {
