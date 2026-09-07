@@ -2171,6 +2171,12 @@ body.has-set .doc-switcher-caret {
      It is one step darker and nothing else — the transcript stays secondary
      to the notes by TYPE, which is the whole of how the mock marks it. */
   --lz-fg: #4b535c;
+  /* The words a tick has already LIFTED into a note (Bryan, 2026-09-06:
+     "Recede"). One tone lighter than the stream and nothing else — no size,
+     no weight, no box — so the split moves not one word. `--fg-muted`'s
+     value, 4.55:1 on white: the mock's shade sat at 3.45:1, and these words
+     are still being read for the few seconds before the chunk fades. */
+  --lz-fg-kept: #6e7781;
   margin: 0;
   padding: 2px 0 8px;
   background: transparent;
@@ -2280,6 +2286,10 @@ body.is-reading-width #editor > .live-zone {
   padding: 0;
   border: 0;
   background: transparent;
+  /* Colour is the ONE thing the split changes: the lifted words step back
+     to `--lz-fg-kept` the moment they leave the stream, so a glance says
+     which words are already safe in the notes and which are still live. */
+  color: var(--lz-fg-kept);
   opacity: 1;
   transition: opacity var(--lz-fade-ms) ease-out;
 }

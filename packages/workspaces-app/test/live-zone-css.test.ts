@@ -297,6 +297,38 @@ describe('the transcript is readable in a bright room', () => {
     });
   }
 
+  it('the lifted words step one tone back, and clear AA for the seconds they are read', () => {
+    setViewport(IPAD);
+    const editor = attach('', { attrs: { id: 'editor' } });
+    const zone = attach('live-zone', { parent: editor });
+    const stream = styleOf(attach('lz-lines', { parent: zone }));
+    const kept = styleOf(attach('lz-chunk lz-chunk-lines', { parent: zone }));
+    const ground = styleOf(document.body).backgroundColor;
+    // Lighter than the stream — the one glance that says which words are
+    // already safe in the notes — and still readable: the chunk holds text
+    // that is being read until the fade takes it.
+    expect(contrast(kept.color, ground)).toBeLessThan(contrast(stream.color, ground));
+    expect(contrast(kept.color, ground)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the step is colour only: nothing that could move a word', () => {
+    setViewport(IPAD);
+    const zone = attach('live-zone');
+    const stream = styleOf(attach('lz-lines', { parent: zone }));
+    const kept = styleOf(attach('lz-chunk lz-chunk-lines', { parent: zone }));
+    expect(kept.color).not.toBe(stream.color); // control: the rule is live
+    for (const metric of [
+      'fontSize',
+      'lineHeight',
+      'fontWeight',
+      'fontFamily',
+      'letterSpacing',
+      'wordSpacing',
+    ] as const) {
+      expect(kept[metric], metric).toBe(stream[metric]);
+    }
+  });
+
   it('the speaker pill is read with the words, so it carries their colour', () => {
     setViewport(IPAD);
     const zone = attach('live-zone');

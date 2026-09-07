@@ -305,8 +305,8 @@ export function createMeetingLiveZone(opts: {
     slot.className = 'lz-slot';
     const body = document.createElement('div');
     // The chunk and the stream are typographically the SAME text: `lz-chunk`
-    // adds the fade and nothing else — no size, no colour, no box — or
-    // splitting one off would move the words it holds.
+    // adds the fade and one tone of colour, nothing else — no size, no
+    // weight, no box — or splitting one off would move the words it holds.
     body.className = 'lz-chunk lz-chunk-lines';
     slot.append(body);
     chunkHost.append(slot);
