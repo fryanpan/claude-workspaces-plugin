@@ -213,6 +213,16 @@ export function createMeetingLiveZone(opts: {
   };
   scroller.addEventListener('scroll', onScroll, { passive: true });
 
+  /**
+   * LOAD-BEARING, and not designed: while following, the pane sits at its
+   * foot, and a pane at its foot cannot keep its offset when its content
+   * shrinks — the browser clamps scrollTop by exactly the loss. That clamp is
+   * what holds the reader's line still through the collapse; nothing here
+   * scrolls up on purpose. Anything that keeps the pane off its foot (a
+   * bottom spacer, following that stops short of the end) loses the guarantee
+   * with no test going red. meeting-live-hold.ts THE RESERVE is the other
+   * half: a shrink BELOW the reader's line turns the same clamp into a step.
+   */
   function keepInView(): void {
     if (!follow) return;
     const over = overflowBelow();
@@ -360,7 +370,7 @@ export function createMeetingLiveZone(opts: {
   /** Drop every chunk on the floor, mid-settle or not: the meeting is over,
    *  restarting, or the zone is going away. */
   function clearChunks(): void {
-    streamHold.release(0);
+    streamHold.clear();
     for (const c of [...settling]) discard(c);
     if (openChunk) {
       openChunk.slot.remove();
@@ -385,11 +395,12 @@ export function createMeetingLiveZone(opts: {
       // A failed tick returns its words to the stream, so the block they
       // were lifted into goes with no animation — nothing settled. The line
       // it broke is whole again, so the hold goes with it, uncompensated.
-      streamHold.release(0);
+      streamHold.drop();
       openChunk.slot.remove();
       openChunk = null;
     }
     lines.replaceChildren(...runOf(streaming));
+    streamHold.trim();
     matchProseWidth();
     // Before keepInView, not after: following mode scrolls to whatever the
     // zone's height is when it is asked, and the hold is about to take a

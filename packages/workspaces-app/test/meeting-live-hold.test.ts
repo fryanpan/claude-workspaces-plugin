@@ -118,6 +118,67 @@ describe('a split leaves the words still being spoken where they were', () => {
     expect(lines.classList.contains('is-releasing')).toBe(false);
   });
 
+  /** happy-dom lays nothing out, so the stream's box is GIVEN a height: the
+   *  two lines the indent made of it at 430px, 42px in Chrome. */
+  const boxOf = (lines: HTMLElement, height: number): void => {
+    lines.getBoundingClientRect = () => ({ height }) as DOMRect;
+    Object.defineProperty(lines, 'scrollHeight', { value: height, configurable: true });
+  };
+
+  it('the collapse keeps the box as tall as it was, so a re-wrap cannot take a line', () => {
+    const { zone, lines } = split();
+    boxOf(lines, 42);
+    zone.onProgress({ tick: 1, phase: 'written', turns: [0] });
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS);
+    expect(lines.style.minHeight).toBe('42px');
+    // …and keeps it once the release has eased out: the space is the next
+    // words' to fill, not the layout's to take.
+    vi.advanceTimersByTime(COLLAPSE_MS);
+    expect(lines.style.minHeight).toBe('42px');
+  });
+
+  it('gives the reserve back only once the words have outgrown it', () => {
+    const { zone, lines } = split();
+    boxOf(lines, 42);
+    zone.onProgress({ tick: 1, phase: 'written', turns: [0] });
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS + COLLAPSE_MS);
+    // A turn that leaves the stream at the reserved height: nothing to give.
+    zone.onTurn({ turn: 2, text: 'a few more words', final: false });
+    expect(lines.style.minHeight).toBe('42px');
+    // The stream grows past it — three lines now — and the reserve goes,
+    // which moves nothing because the words already fill the space.
+    boxOf(lines, 63);
+    zone.onTurn({ turn: 3, text: 'and a third line of them', final: false });
+    expect(lines.style.minHeight).toBe('');
+  });
+
+  it('a new split on a reserved stream keeps the reserve — taking it back would step the line', () => {
+    const { zone, lines } = split();
+    boxOf(lines, 42);
+    zone.onProgress({ tick: 1, phase: 'written', turns: [0] });
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS + COLLAPSE_MS);
+    zone.onTurn({ turn: 2, text: LIVE, final: false });
+    zone.onProgress({ tick: 2, phase: 'composing', turns: [1] });
+    expect(lines.style.minHeight).toBe('42px');
+  });
+
+  it('a failed tick keeps no height: its words come back and the box grows anyway', () => {
+    const { zone, lines } = split();
+    boxOf(lines, 42);
+    zone.onProgress({ tick: 1, phase: 'failed', turns: [0] });
+    expect(lines.style.minHeight).toBe('');
+  });
+
+  it('the meeting ending drops the reserve with the hold', () => {
+    const { zone, lines } = split();
+    boxOf(lines, 42);
+    zone.onProgress({ tick: 1, phase: 'written', turns: [0] });
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS);
+    expect(lines.style.minHeight).toBe('42px');
+    zone.end();
+    expect(lines.style.minHeight).toBe('');
+  });
+
   it('a failed tick puts the words back, so there is nothing left to hold', () => {
     const { zone, lines } = split();
     zone.onProgress({ tick: 1, phase: 'failed', turns: [0] });
