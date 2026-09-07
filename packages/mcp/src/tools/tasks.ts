@@ -26,6 +26,7 @@
  * level; no tool's arguments, behaviour or reply changed here.
  */
 import { parseThreadReviewItemId } from '@claude-workspaces/core/review-item-id';
+import { type TaskSchedule, nextOccurrence } from '@claude-workspaces/core/task-schedule';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardPathOf } from '../board-path.ts';
@@ -1040,6 +1041,42 @@ export async function handleTaskTool(
         changed: res.changed,
         after: res.task.after ?? [],
         afterEnforce: res.task.afterEnforce ?? [],
+      });
+    }
+    case 'set_task_schedule': {
+      // The one MCP door onto `POST .../tasks/:id/schedule`. The rule is
+      // sent as the route reads it — `parseSchedule` in core is the single
+      // validator, so nothing is re-checked here and a refusal comes back in
+      // the route's own words. `rule: null` clears; an absent rule is an
+      // error rather than a clear, for the reason the route gives: a rule
+      // the caller mistyped must not silently delete the one that was there.
+      const { taskId, rule, timezone, until, onMissed } = a as {
+        taskId: string;
+        rule?: unknown;
+        timezone?: string;
+        until?: number;
+        onMissed?: string;
+      };
+      if (rule === undefined) {
+        return err('rule required — a rule object to set, or null to clear the schedule.');
+      }
+      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/schedule`, {
+        rule,
+        ...(timezone !== undefined ? { timezone } : {}),
+        ...(until !== undefined ? { until } : {}),
+        ...(onMissed !== undefined ? { onMissed } : {}),
+        author: AUTHOR,
+      })) as { task: TaskPayload & { schedule?: TaskSchedule } };
+      const schedule = res.task.schedule ?? null;
+      // What was armed, read back from the store, plus when it next fires —
+      // so the caller can see the rule it meant rather than trusting a 200.
+      const nextAt = schedule ? nextOccurrence(schedule) : undefined;
+      return ok({
+        taskId,
+        schedule,
+        ...(nextAt !== undefined
+          ? { nextAt, nextAtIso: new Date(nextAt).toISOString() }
+          : { nextAt: null }),
       });
     }
     case 'import_tasks_markdown': {

@@ -16858,6 +16858,37 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "set_task_schedule",
+      description: "Set, replace or clear the rule that says WHEN a task's work starts — the row files one occurrence per firing and the scheduler wakes its owner (docs/architecture/scheduled-tasks.md). Five rule kinds: once {kind:'once', at: <epoch ms>}; every {kind:'every', everyMs: 86400000}; calendar {kind:'calendar', times:[{hour:6, minute:47}], weekdays:[1]} (0 = Sunday; omit weekdays for every day; timezone is an IANA zone, absent reads as UTC); after-completion {kind:'after-completion', delayMs: 3600000} (the delay runs from the last instance closing); on-change {kind:'on-change', source:{kind:'doc', docId} | {kind:'task', taskId}, debounceMs?}. rule: null clears. The reply is the stored schedule read back plus nextAt, the next firing — check it says what you meant. A validation refusal is the server's own message. Read a schedule later with list_tasks fields:['schedule']; not a due date, which is when work should be finished.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+          },
+          taskId: { type: "string", description: "The row the rule is set on." },
+          rule: {
+            description: "The rule object (see the description for the five kinds), or null to clear. Required — an absent rule is refused rather than read as a clear."
+          },
+          timezone: {
+            type: "string",
+            description: "IANA zone the calendar math runs in, e.g. America/Los_Angeles. Absent reads as UTC."
+          },
+          until: {
+            type: "number",
+            description: 'Epoch ms after which the rule fires no more — the "until Dec" clause.'
+          },
+          onMissed: {
+            type: "string",
+            enum: ["catch-up", "skip"],
+            description: "What to do about an occurrence the server missed while down. Absent is catch-up: fire it late. 'skip' waits for the next one."
+          }
+        },
+        required: ["workspaceId", "taskId", "rule"]
+      }
+    },
+    {
       name: "import_tasks_markdown",
       description: "Move a hand-maintained markdown tracker (headings + status tables) onto a board. Defaults to a dry run — it returns the mapping and creates nothing, so review that with the human, then call again with apply: true. Apply stamps the source file with a banner and a link so the old tracker cannot quietly stay a second source of truth, and a stamped file refuses re-import.",
       inputSchema: {
@@ -17678,6 +17709,139 @@ function parseThreadReviewItemId(id) {
   return { docId, threadId, commentId };
 }
 
+// packages/core/src/schedule-timezone.ts
+var DEFAULT_SCHEDULE_TIMEZONE = "UTC";
+var formatters = new Map;
+function formatterFor(timeZone) {
+  const cached2 = formatters.get(timeZone);
+  if (cached2)
+    return cached2;
+  const made = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+  formatters.set(timeZone, made);
+  return made;
+}
+function zonedParts(instant, timeZone) {
+  const parts = formatterFor(timeZone).formatToParts(new Date(instant));
+  const read = (type) => {
+    const found = parts.find((p) => p.type === type)?.value ?? "0";
+    return Number.parseInt(found, 10);
+  };
+  const hour = read("hour");
+  return {
+    year: read("year"),
+    month: read("month"),
+    day: read("day"),
+    hour: hour === 24 ? 0 : hour,
+    minute: read("minute"),
+    second: read("second")
+  };
+}
+function offsetMsAt(instant, timeZone) {
+  const p = zonedParts(instant, timeZone);
+  const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return asUtc - Math.floor(instant / 1000) * 1000;
+}
+function instantForLocal(timeZone, year, month, day, hour, minute) {
+  const naive = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  const firstPass = naive - offsetMsAt(naive, timeZone);
+  return naive - offsetMsAt(firstPass, timeZone);
+}
+
+// packages/core/src/schedule-trigger.ts
+var TRIGGER_DEFAULT_DEBOUNCE_MS = 60000;
+function triggerDebounceMs(rule) {
+  return rule.debounceMs ?? TRIGGER_DEFAULT_DEBOUNCE_MS;
+}
+function nextChangeOccurrence(rule, armedAt, after, changedAt) {
+  if (changedAt === undefined || changedAt <= armedAt)
+    return;
+  const next = changedAt + triggerDebounceMs(rule);
+  return next > after ? next : undefined;
+}
+
+// packages/core/src/task-schedule.ts
+var MAX_CALENDAR_DAYS = 400;
+function timezoneOf(schedule) {
+  return schedule.timezone ?? DEFAULT_SCHEDULE_TIMEZONE;
+}
+function floorFor(schedule) {
+  return schedule.state?.lastOccurrenceAt ?? schedule.armedAt;
+}
+function sortedTimes(times) {
+  return [...times].sort((a, b) => a.hour - b.hour || a.minute - b.minute);
+}
+function nextCalendarAfter(rule, timeZone, after) {
+  const times = sortedTimes(rule.times);
+  if (times.length === 0)
+    return;
+  const allowed = rule.weekdays;
+  if (allowed !== undefined && allowed.length === 0)
+    return;
+  const start = zonedParts(after, timeZone);
+  for (let dayOffset = 0;dayOffset < MAX_CALENDAR_DAYS; dayOffset++) {
+    const date4 = new Date(Date.UTC(start.year, start.month - 1, start.day));
+    date4.setUTCDate(date4.getUTCDate() + dayOffset);
+    if (allowed !== undefined && !allowed.includes(date4.getUTCDay()))
+      continue;
+    for (const time3 of times) {
+      const at = instantForLocal(timeZone, date4.getUTCFullYear(), date4.getUTCMonth() + 1, date4.getUTCDate(), time3.hour, time3.minute);
+      if (at > after)
+        return at;
+    }
+  }
+  return;
+}
+function nextOccurrence(schedule, cursor = {}) {
+  const rule = schedule.rule;
+  const after = floorFor(schedule);
+  let next;
+  switch (rule.kind) {
+    case "once":
+      next = rule.at > after ? rule.at : undefined;
+      break;
+    case "every": {
+      if (!(rule.everyMs > 0))
+        return;
+      const elapsed = after - schedule.armedAt;
+      const steps = Math.floor(elapsed / rule.everyMs) + 1;
+      next = schedule.armedAt + steps * rule.everyMs;
+      break;
+    }
+    case "calendar":
+      next = nextCalendarAfter(rule, timezoneOf(schedule), after);
+      break;
+    case "after-completion": {
+      if (schedule.state?.lastOccurrenceAt === undefined) {
+        next = schedule.armedAt + rule.delayMs;
+        break;
+      }
+      if (cursor.lastCompletedAt === undefined)
+        return;
+      next = cursor.lastCompletedAt + rule.delayMs;
+      if (next <= after)
+        next = after + rule.delayMs;
+      break;
+    }
+    case "on-change":
+      next = nextChangeOccurrence(rule, schedule.armedAt, after, cursor.changedAt);
+      break;
+  }
+  if (next === undefined)
+    return;
+  if (schedule.until !== undefined && next >= schedule.until)
+    return;
+  return next;
+}
+
 // packages/mcp/src/task-projection.ts
 function projectTaskRows(tasks, fields) {
   const rows = tasks;
@@ -18194,6 +18358,26 @@ async function handleTaskTool(name, a, ctx) {
         changed: res.changed,
         after: res.task.after ?? [],
         afterEnforce: res.task.afterEnforce ?? []
+      });
+    }
+    case "set_task_schedule": {
+      const { taskId, rule, timezone, until, onMissed } = a;
+      if (rule === undefined) {
+        return err2("rule required — a rule object to set, or null to clear the schedule.");
+      }
+      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/schedule`, {
+        rule,
+        ...timezone !== undefined ? { timezone } : {},
+        ...until !== undefined ? { until } : {},
+        ...onMissed !== undefined ? { onMissed } : {},
+        author: AUTHOR
+      });
+      const schedule = res.task.schedule ?? null;
+      const nextAt = schedule ? nextOccurrence(schedule) : undefined;
+      return ok2({
+        taskId,
+        schedule,
+        ...nextAt !== undefined ? { nextAt, nextAtIso: new Date(nextAt).toISOString() } : { nextAt: null }
       });
     }
     case "import_tasks_markdown": {
@@ -18904,7 +19088,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.185";
+var PLUGIN_VERSION = "0.1.186";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

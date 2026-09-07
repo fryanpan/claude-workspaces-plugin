@@ -10,7 +10,7 @@
  * It lives in `core` rather than beside the runner because three other
  * surfaces are going to need the same shapes: the phrase editor that writes a
  * rule as chips, the board section that renders the next occurrence, and the
- * MCP verbs that will eventually set one. A second spelling of "every weekday
+ * `set_task_schedule` MCP verb that sets one. A second spelling of "every weekday
  * at 9" in the browser would be a second answer to when the row is owed.
  *
  * ── The two recurrence modes ────────────────────────────────────────────
