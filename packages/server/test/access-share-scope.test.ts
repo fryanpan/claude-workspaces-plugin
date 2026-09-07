@@ -508,7 +508,7 @@ describe('Access-mode shares over HTTP', () => {
       expect(
         (
           await pub(
-            `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/tree`,
+            `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/tree`,
             cookie,
           )
         ).status,
@@ -517,7 +517,7 @@ describe('Access-mode shares over HTTP', () => {
 
     it('opens a sibling lazily and can then read it', async () => {
       const opened = await pub(
-        `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/editable-file`,
+        `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/editable-file`,
         cookie,
         {
           method: 'POST',
@@ -594,7 +594,7 @@ describe('Access-mode shares over HTTP', () => {
       expect(
         (
           await pub(
-            `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/tree`,
+            `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/tree`,
             wsCookie,
           )
         ).status,
@@ -607,7 +607,7 @@ describe('Access-mode shares over HTTP', () => {
       expect(
         (
           await pub(
-            `/workspaces/${WS}/reviews/${encodeURIComponent(soloWorkspaceId)}/tree`,
+            `/workspaces/${WS}/attachments/${encodeURIComponent(soloWorkspaceId)}/tree`,
             wsCookie,
           )
         ).status,

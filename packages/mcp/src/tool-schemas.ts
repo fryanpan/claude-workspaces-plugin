@@ -1296,7 +1296,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'create_workspace',
       description:
-        'Create a board: goals, tasks, and the docs and reviews filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals — write them with set_goal_list. A folder bind or diff review is content to file on a board, not another board.',
+        'Create a board: goals, tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals — write them with set_goal_list. A folder bind or diff review is content to file on a board, not another board.',
       inputSchema: {
         type: 'object',
         properties: {

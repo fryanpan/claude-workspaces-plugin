@@ -144,7 +144,7 @@ export interface WatchCoverage {
  * the wire keeps its old spelling) is the tag binding the member docs of one
  * folder bind or diff review together. It is content, not a container of
  * tasks: it has no live doc of its own, and it is read through
- * `/workspaces/<ws>/reviews/<setId>/tree|threads`. `attachmentIdOf` in `@claude-workspaces/core`
+ * `/workspaces/<ws>/attachments/<setId>/tree|threads`. `attachmentIdOf` in `@claude-workspaces/core`
  * is the one place a member's set id is derived.
  *
  * Note the board page no longer LISTS attachments: the Docs and

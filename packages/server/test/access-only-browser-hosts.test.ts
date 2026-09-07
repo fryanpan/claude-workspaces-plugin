@@ -216,7 +216,7 @@ describe('access-only browser hosts', () => {
     expect(bind.status).toBe(200);
     treeId = ((await bind.json()) as { workspaceId: string }).workspaceId;
 
-    const diff = await local(`/workspaces/${WS}/reviews`, {
+    const diff = await local(`/workspaces/${WS}/attachments`, {
       method: 'POST',
       body: JSON.stringify({ repo, base: 'main', hubWorkspaceId: boardId }),
     });
@@ -241,7 +241,7 @@ describe('access-only browser hosts', () => {
     ['a doc', `/workspaces/${WS}/docs/${docId}?format=json`],
     ['its comment threads', `/workspaces/${WS}/docs/${docId}/threads`],
     ['the board attachments', `/workspaces/${boardId}/agents`],
-    ['a bound folder tree', `/workspaces/${WS}/reviews/${treeId}/tree`],
+    ['a bound folder tree', `/workspaces/${WS}/attachments/${treeId}/tree`],
     [
       'a diff review file',
       `/workspaces/${WS}/docs/${encodeURIComponent(diffMemberDocId)}?format=json`,

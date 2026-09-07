@@ -129,12 +129,12 @@ describe('file-binding routes refuse browser callers', () => {
     });
   });
 
-  describe(`POST /workspaces/${WS}/reviews`, () => {
+  describe(`POST /workspaces/${WS}/attachments`, () => {
     // `repo` is the same kind of value as `folderPath`, and WIDER when
     // `base` is omitted: browse mode scans the whole folder and makes
     // every file in it lazily openable through `context-file`.
     it('positive control: an agent browses a folder', async () => {
-      const r = await post(`/workspaces/${WS}/reviews`, {
+      const r = await post(`/workspaces/${WS}/attachments`, {
         repo: scratch,
         reviewId: 'agent-browse',
       });
@@ -144,7 +144,7 @@ describe('file-binding routes refuse browser callers', () => {
     it('a page on another local port cannot name a repo path', async () => {
       await expectRefused(
         await post(
-          `/workspaces/${WS}/reviews`,
+          `/workspaces/${WS}/attachments`,
           { repo: scratch, reviewId: 'dev-browse' },
           devServerPage(),
         ),
@@ -154,7 +154,7 @@ describe('file-binding routes refuse browser callers', () => {
     it('nor can a same-origin page — no browser client calls this route', async () => {
       await expectRefused(
         await post(
-          `/workspaces/${WS}/reviews`,
+          `/workspaces/${WS}/attachments`,
           { repo: scratch, reviewId: 'same-browse' },
           samePage(),
         ),

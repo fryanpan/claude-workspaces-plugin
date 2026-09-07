@@ -106,7 +106,9 @@ describe('archiving a review unlinks the rows that point into it', () => {
   it('takes the member row off the other board, not just the set row off this one', async () => {
     const { setId, memberId, boardA, boardB } = await reviewOnTwoBoards();
 
-    await jj(await post(`/workspaces/${boardA}/reviews/${setId}/archive`, { reason: 'shipped' }));
+    await jj(
+      await post(`/workspaces/${boardA}/attachments/${setId}/archive`, { reason: 'shipped' }),
+    );
 
     expect(docIdsOn(boardA)).not.toContain(setId);
     expect(docIdsOn(boardB)).not.toContain(memberId);
@@ -117,12 +119,14 @@ describe('archiving a review unlinks the rows that point into it', () => {
     // clean up rows that unarchiving could never restore, which is a worse
     // failure than the one it replaces.
     const { setId, memberId, boardA, boardB } = await reviewOnTwoBoards();
-    await jj(await post(`/workspaces/${boardA}/reviews/${setId}/archive`, { reason: 'shipped' }));
+    await jj(
+      await post(`/workspaces/${boardA}/attachments/${setId}/archive`, { reason: 'shipped' }),
+    );
     // Stated, so this test cannot pass by the row having never left. Without
     // it the whole assertion below is satisfied by the bug itself.
     expect(docIdsOn(boardB)).not.toContain(memberId);
 
-    await jj(await post(`/workspaces/${boardA}/reviews/${setId}/unarchive`, {}));
+    await jj(await post(`/workspaces/${boardA}/attachments/${setId}/unarchive`, {}));
 
     expect(docIdsOn(boardA)).toContain(setId);
     expect(docIdsOn(boardB)).toContain(memberId);

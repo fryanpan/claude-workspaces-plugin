@@ -184,7 +184,7 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
   };
 
   const newDiffOn = async (board: string, reviewId: string): Promise<DiffResponse> => {
-    const r = await post(`/workspaces/${board}/reviews`, {
+    const r = await post(`/workspaces/${board}/attachments`, {
       repo,
       base: repoBase,
       reviewId,
@@ -275,7 +275,7 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
   describe('the review row on the shared board opens', () => {
     it('serves the grouping’s navigation endpoints', async () => {
       for (const sub of ['tree', 'grouped', 'threads', 'files']) {
-        const r = await pub(`/workspaces/${boardA}/reviews/${groupingA}/${sub}`, visitorA);
+        const r = await pub(`/workspaces/${boardA}/attachments/${groupingA}/${sub}`, visitorA);
         expect(r.status, `GET ${sub}`).toBe(200);
       }
     });
@@ -294,14 +294,14 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
 
     it('lets a visitor open a lazily-bound member of a folder bind', async () => {
       expect(
-        (await pub(`/workspaces/${boardA}/reviews/${folderGroupingA}/tree`, visitorA)).status,
+        (await pub(`/workspaces/${boardA}/attachments/${folderGroupingA}/tree`, visitorA)).status,
       ).toBe(200);
       await sameAsOwner(`/workspaces/${boardA}/docs/${folderEntryA}`, visitorA);
       expect(
         (await pub(`/workspaces/${boardA}/docs/${folderEntryA}?format=json`, visitorA)).status,
       ).toBe(200);
       const r = await pub(
-        `/workspaces/${boardA}/reviews/${folderGroupingA}/context-file`,
+        `/workspaces/${boardA}/attachments/${folderGroupingA}/context-file`,
         visitorA,
         {
           method: 'POST',
@@ -321,14 +321,14 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
   describe('a review filed on a DIFFERENT board stays shut', () => {
     it('refuses the other grouping’s navigation endpoints', async () => {
       for (const sub of ['tree', 'grouped', 'threads', 'files']) {
-        const r = await pub(`/workspaces/${boardB}/reviews/${groupingB}/${sub}`, visitorA);
+        const r = await pub(`/workspaces/${boardB}/attachments/${groupingB}/${sub}`, visitorA);
         expect(r.status, `GET ${sub}`).toBe(403);
       }
     });
 
     it('refuses the other grouping’s lazy-open verbs', async () => {
       for (const sub of ['context-file', 'editable-file']) {
-        const r = await pub(`/workspaces/${boardB}/reviews/${groupingB}/${sub}`, visitorA, {
+        const r = await pub(`/workspaces/${boardB}/attachments/${groupingB}/${sub}`, visitorA, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ relPath: 'src/a.ts' }),
@@ -516,7 +516,7 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
       // Positive control: its own board, its own review's tree, its own member.
       expect((await pub(`/workspaces/${narrowBoard}?format=json`, narrowCookie)).status).toBe(200);
       expect(
-        (await pub(`/workspaces/${narrowBoard}/reviews/${narrow.reviewId}/tree`, narrowCookie))
+        (await pub(`/workspaces/${narrowBoard}/attachments/${narrow.reviewId}/tree`, narrowCookie))
           .status,
       ).toBe(200);
       expect(
@@ -529,13 +529,14 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
       // …nor either review filed on it, which is the widening a narrow invite
       // must never pick up from a board it is not on.
       expect(
-        (await pub(`/workspaces/${boardA}/reviews/${groupingA}/tree`, narrowCookie)).status,
+        (await pub(`/workspaces/${boardA}/attachments/${groupingA}/tree`, narrowCookie)).status,
       ).toBe(403);
       expect(
         (await pub(`/workspaces/${boardA}/docs/${memberA}?format=json`, narrowCookie)).status,
       ).toBe(403);
       expect(
-        (await pub(`/workspaces/${boardA}/reviews/${folderGroupingA}/tree`, narrowCookie)).status,
+        (await pub(`/workspaces/${boardA}/attachments/${folderGroupingA}/tree`, narrowCookie))
+          .status,
       ).toBe(403);
       expect(
         (await pub(`/workspaces/${boardA}/docs/${folderEntryA}?format=json`, narrowCookie)).status,
@@ -584,7 +585,7 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
         [boardA, visitorA],
         [secondBoard, gammaCookie],
       ] as const) {
-        expect((await pub(`/workspaces/${board}/reviews/rev-shared/tree`, cookie)).status).toBe(
+        expect((await pub(`/workspaces/${board}/attachments/rev-shared/tree`, cookie)).status).toBe(
           200,
         );
         expect(
@@ -595,9 +596,9 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
       // …and a third board that was never linked still gets nothing.
       const betaCookie = await visitorFor(boardB);
       expect((await pub(`/workspaces/${boardB}?format=json`, betaCookie)).status).toBe(200); // control
-      expect((await pub(`/workspaces/${boardA}/reviews/rev-shared/tree`, betaCookie)).status).toBe(
-        403,
-      );
+      expect(
+        (await pub(`/workspaces/${boardA}/attachments/rev-shared/tree`, betaCookie)).status,
+      ).toBe(403);
       expect(
         (await pub(`/workspaces/${boardA}/docs/${sharedMember}?format=json`, betaCookie)).status,
       ).toBe(403);

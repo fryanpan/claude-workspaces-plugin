@@ -127,7 +127,7 @@ describe('a group bind lands on a board, as one unit', () => {
     // board IS supplied, that specific one comes back and holds the link — so
     // a non-empty hubWorkspaceId elsewhere means something.
     const boardId = await newBoard('named-diff-board');
-    const r = await post(`/workspaces/${boardId}/reviews`, {
+    const r = await post(`/workspaces/${boardId}/attachments`, {
       repo,
       base: repoBase,
       reviewId: 'rev-named',
@@ -140,7 +140,7 @@ describe('a group bind lands on a board, as one unit', () => {
   });
 
   it('files a diff review with no board named, and says where it went', async () => {
-    const r = await post(`/workspaces/${WS}/reviews`, {
+    const r = await post(`/workspaces/${WS}/attachments`, {
       repo,
       base: repoBase,
       reviewId: 'rev-unfiled',
@@ -166,7 +166,7 @@ describe('a group bind lands on a board, as one unit', () => {
   it('links the GROUPING, never its member docs', async () => {
     // The whole modelling decision in one assertion. Attaching each member
     // would put one row per changed file on a board nobody asked for.
-    const r = await post(`/workspaces/${WS}/reviews`, {
+    const r = await post(`/workspaces/${WS}/attachments`, {
       repo,
       base: repoBase,
       reviewId: 'rev-members',
@@ -219,13 +219,13 @@ describe('a group bind lands on a board, as one unit', () => {
     // that re-runs it without repeating hubWorkspaceId must not have the
     // review swept back into the holding pen behind the reviewer's back.
     const boardId = await newBoard('sticky-board');
-    await post(`/workspaces/${boardId}/reviews`, {
+    await post(`/workspaces/${boardId}/attachments`, {
       repo,
       base: repoBase,
       reviewId: 'rev-sticky',
       hubWorkspaceId: boardId,
     });
-    const again = await post(`/workspaces/${boardId}/reviews`, {
+    const again = await post(`/workspaces/${boardId}/attachments`, {
       repo,
       base: repoBase,
       reviewId: 'rev-sticky',
@@ -238,7 +238,7 @@ describe('a group bind lands on a board, as one unit', () => {
     // The ordinary flow for the one route that can still arrive with no board
     // named: a folder bind is top-level, so nothing in the path says where it
     // goes and it lands in the pen. (A DIFF review reaches the server through
-    // `/workspaces/<id>/reviews`, so the path always names a board and the pen
+    // `/workspaces/<id>/attachments`, so the path always names a board and the pen
     // is not on its path at all.) Then attach_doc moves it. Left in both,
     // `workspaceOfDoc` answers with whichever the store iterates first — and
     // that is what share scoping resolves against.
@@ -265,7 +265,7 @@ describe('a group bind lands on a board, as one unit', () => {
     // Filing every review means a board would otherwise collect one dangling
     // id per finished review — invisible in the UI and permanent in the store.
     // This is the group-bind twin of the doc-delete unlink in PR #127.
-    const r = await post(`/workspaces/${WS}/reviews`, {
+    const r = await post(`/workspaces/${WS}/attachments`, {
       repo,
       base: repoBase,
       reviewId: 'rev-deleted',
@@ -273,7 +273,7 @@ describe('a group bind lands on a board, as one unit', () => {
     const boardId = ((await r.json()) as DiffResponse).hubWorkspaceId as string;
     expect(handle.tasks.getWorkspace(boardId)?.docIds).toContain('rev-deleted');
 
-    const del = await local(`/workspaces/${boardId}/reviews/rev-deleted?force=true`, {
+    const del = await local(`/workspaces/${boardId}/attachments/rev-deleted?force=true`, {
       method: 'DELETE',
     });
     expect(del.status).toBe(200);

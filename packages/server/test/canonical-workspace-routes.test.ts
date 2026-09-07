@@ -176,19 +176,31 @@ describe('the board collections that moved under /workspaces/<id>', () => {
     // No redirect and no alias: the cutover's rule is that a caller on the
     // old spelling learns it immediately rather than working for another
     // release on a name that is going away.
+    //
+    // The roster's old address can no longer be asserted as empty: the
+    // attachment sets moved INTO `attachments` on 2026-09-07, which is why
+    // the roster was moved out of it in the first place. What is still
+    // provable, and is the part that mattered, is that the roster's own
+    // SHAPE is gone from there — no verb of the roster answers under an
+    // attachment id, whatever else the collection now holds.
     const ws = await makeWorkspace('canonical-old-paths');
-    expect((await local(`/workspaces/${ws}/attachments`)).status).toBe(404);
+    expect((await post(`/workspaces/${ws}/attachments/agent-ghost/heartbeat`, {})).status).toBe(
+      404,
+    );
+    expect(
+      (await local(`/workspaces/${ws}/attachments/agent-ghost`, { method: 'DELETE' })).status,
+    ).toBe(404);
+    // Positive control: the roster answers at the address it moved TO, so
+    // the 404s above are the old shape being gone rather than the roster
+    // being broken everywhere.
     expect(
       (
-        await post(`/workspaces/${ws}/attachments`, {
+        await post(`/workspaces/${ws}/agents`, {
           agentId: 'agent-ghost',
           runtime: 'claude-code-local',
         })
       ).status,
-    ).toBe(404);
-    expect((await post(`/workspaces/${ws}/attachments/agent-ghost/heartbeat`, {})).status).toBe(
-      404,
-    );
+    ).toBe(200);
     // The `/events/` prefix is gone with the rest of the pre-cutover paths —
     // a doc's stream is `/workspaces/<ws>/docs/<id>/events:stream` — so the
     // board's old address reaches nothing at all now rather than reaching the

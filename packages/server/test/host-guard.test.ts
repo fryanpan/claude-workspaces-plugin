@@ -377,10 +377,10 @@ describe('shareScopeAllows — a target with no workspace grants nothing', () =>
     expect(shareScopeAllows('/workspaces/ws-1/docs/auth-rfc', 'GET', NO_WS, workspaceOf)).toBe(
       false,
     );
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/tree', 'GET', NO_WS, workspaceOf)).toBe(
-      false,
-    );
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/tree', 'GET', WS, workspaceOf)).toBe(
+    expect(
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/tree', 'GET', NO_WS, workspaceOf),
+    ).toBe(false);
+    expect(shareScopeAllows('/workspaces/ws-1/attachments/ws-1/tree', 'GET', WS, workspaceOf)).toBe(
       true,
     );
   });
@@ -415,7 +415,7 @@ describe('shareScopeAllows — what stays closed to every share', () => {
     expect(shareScopeAllowsDoc('/workspaces/ws-1/docs', 'GET')).toBe(false);
     expect(shareScopeAllowsDoc('/workspaces/ws-1/docs', 'POST')).toBe(false);
     expect(shareScopeAllowsDoc('/workspaces', 'POST')).toBe(false);
-    expect(shareScopeAllowsDoc('/workspaces/ws-1/reviews', 'POST')).toBe(false);
+    expect(shareScopeAllowsDoc('/workspaces/ws-1/attachments', 'POST')).toBe(false);
   });
 
   it('BLOCKS the share admin surface — a visitor must not mint or revoke shares', () => {
@@ -470,63 +470,68 @@ describe('shareScopeAllows (workspace share)', () => {
   });
 
   it('allows the navigation endpoints the sidebar needs', () => {
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/tree', 'GET', WS, workspaceOf)).toBe(
+    expect(shareScopeAllows('/workspaces/ws-1/attachments/ws-1/tree', 'GET', WS, workspaceOf)).toBe(
       true,
     );
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/grouped', 'GET', WS, workspaceOf)).toBe(
-      true,
-    );
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/threads', 'GET', WS, workspaceOf)).toBe(
-      true,
-    );
+    expect(
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/grouped', 'GET', WS, workspaceOf),
+    ).toBe(true);
+    expect(
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/threads', 'GET', WS, workspaceOf),
+    ).toBe(true);
   });
 
   it('allows the LAZY-OPEN endpoints — without them a shared folder shows one file', () => {
     // bind_folder binds only the entry doc; every other member comes into
     // being through these calls. Bounded by the workspace root (the doc store
     // rejects an escaping relPath with 'bad-path').
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/files', 'GET', WS, workspaceOf)).toBe(
-      true,
-    );
     expect(
-      shareScopeAllows('/workspaces/ws-1/reviews/ws-1/context-file', 'POST', WS, workspaceOf),
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/files', 'GET', WS, workspaceOf),
     ).toBe(true);
     expect(
-      shareScopeAllows('/workspaces/ws-1/reviews/ws-1/editable-file', 'POST', WS, workspaceOf),
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/context-file', 'POST', WS, workspaceOf),
+    ).toBe(true);
+    expect(
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/editable-file', 'POST', WS, workspaceOf),
     ).toBe(true);
   });
 
-  describe('the same rule judges /workspaces/ws-1/reviews/<setId>/…', () => {
+  describe('the same rule judges /workspaces/ws-1/attachments/<setId>/…', () => {
     // The endpoints are called this now. The alias exists for callers that
     // cannot restart, so a visitor must be able to reach EITHER spelling —
     // and must be refused on either one for the same reasons.
     it('allows the navigation and lazy-open endpoints', () => {
-      expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/tree', 'GET', WS, workspaceOf)).toBe(
-        true,
-      );
       expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-1/grouped', 'GET', WS, workspaceOf),
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/tree', 'GET', WS, workspaceOf),
       ).toBe(true);
       expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-1/threads', 'GET', WS, workspaceOf),
-      ).toBe(true);
-      expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/files', 'GET', WS, workspaceOf)).toBe(
-        true,
-      );
-      expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-1/context-file', 'POST', WS, workspaceOf),
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/grouped', 'GET', WS, workspaceOf),
       ).toBe(true);
       expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-1/editable-file', 'POST', WS, workspaceOf),
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/threads', 'GET', WS, workspaceOf),
+      ).toBe(true);
+      expect(
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/files', 'GET', WS, workspaceOf),
+      ).toBe(true);
+      expect(
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/context-file', 'POST', WS, workspaceOf),
+      ).toBe(true);
+      expect(
+        shareScopeAllows(
+          '/workspaces/ws-1/attachments/ws-1/editable-file',
+          'POST',
+          WS,
+          workspaceOf,
+        ),
       ).toBe(true);
     });
 
     it('BLOCKS a review the share does not cover', () => {
-      expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-2/tree', 'GET', WS, workspaceOf)).toBe(
-        false,
-      );
       expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-2/context-file', 'POST', WS, workspaceOf),
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-2/tree', 'GET', WS, workspaceOf),
+      ).toBe(false);
+      expect(
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-2/context-file', 'POST', WS, workspaceOf),
       ).toBe(false);
     });
 
@@ -534,43 +539,43 @@ describe('shareScopeAllows (workspace share)', () => {
       // refresh and groups rewrite the review; delete destroys it. A visitor
       // is a reviewer, and none of the three is a review action.
       expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-1/refresh', 'POST', WS, workspaceOf),
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/refresh', 'POST', WS, workspaceOf),
       ).toBe(false);
       expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-1/groups', 'POST', WS, workspaceOf),
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/groups', 'POST', WS, workspaceOf),
       ).toBe(false);
-      expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1', 'DELETE', WS, workspaceOf)).toBe(
+      expect(shareScopeAllows('/workspaces/ws-1/attachments/ws-1', 'DELETE', WS, workspaceOf)).toBe(
         false,
       );
       expect(
-        shareScopeAllows('/workspaces/ws-1/reviews/ws-1/anything-new', 'GET', WS, workspaceOf),
+        shareScopeAllows('/workspaces/ws-1/attachments/ws-1/anything-new', 'GET', WS, workspaceOf),
       ).toBe(false);
     });
   });
 
   it('BLOCKS a method the endpoint does not offer', () => {
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/tree', 'POST', WS, workspaceOf)).toBe(
-      false,
-    );
     expect(
-      shareScopeAllows('/workspaces/ws-1/reviews/ws-1/context-file', 'GET', WS, workspaceOf),
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/tree', 'POST', WS, workspaceOf),
+    ).toBe(false);
+    expect(
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/context-file', 'GET', WS, workspaceOf),
     ).toBe(false);
     expect(shareScopeAllows('/workspaces/ws-1/anything-new', 'GET', WS, workspaceOf)).toBe(false);
   });
 
   it('BLOCKS destroying the workspace', () => {
     expect(shareScopeAllows('/workspaces/ws-1', 'DELETE', WS, workspaceOf)).toBe(false);
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-1/tree', 'DELETE', WS, workspaceOf)).toBe(
-      false,
-    );
+    expect(
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/tree', 'DELETE', WS, workspaceOf),
+    ).toBe(false);
   });
 
   it('BLOCKS another workspace and its docs', () => {
-    expect(shareScopeAllows('/workspaces/ws-1/reviews/ws-2/tree', 'GET', WS, workspaceOf)).toBe(
+    expect(shareScopeAllows('/workspaces/ws-1/attachments/ws-2/tree', 'GET', WS, workspaceOf)).toBe(
       false,
     );
     expect(
-      shareScopeAllows('/workspaces/ws-1/reviews/ws-2/context-file', 'POST', WS, workspaceOf),
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-2/context-file', 'POST', WS, workspaceOf),
     ).toBe(false);
     expect(
       shareScopeAllows('/workspaces/ws-1/docs/ws-2%3Asecrets.md', 'GET', WS, workspaceOf),
@@ -596,7 +601,7 @@ describe('shareScopeAllows (workspace share)', () => {
       shareScopeAllows('/workspaces/ws-1/docs/ws-1%3Adocs~design.md', 'GET', docShare, workspaceOf),
     ).toBe(false);
     expect(
-      shareScopeAllows('/workspaces/ws-1/reviews/ws-1/tree', 'GET', docShare, workspaceOf),
+      shareScopeAllows('/workspaces/ws-1/attachments/ws-1/tree', 'GET', docShare, workspaceOf),
     ).toBe(false);
     // Not even the doc it used to name, which is the half that was granted.
     expect(
@@ -1205,7 +1210,12 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
   it('opens the grouping’s navigation endpoints from the board share', () => {
     for (const sub of ['tree', 'grouped', 'threads', 'files']) {
       expect(
-        shareScopeAllows(`/workspaces/board-1/reviews/rev-a/${sub}`, 'GET', BOARD, workspacesOf),
+        shareScopeAllows(
+          `/workspaces/board-1/attachments/rev-a/${sub}`,
+          'GET',
+          BOARD,
+          workspacesOf,
+        ),
         sub,
       ).toBe(true);
     }
@@ -1220,7 +1230,7 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
     }
     expect(
       shareScopeAllows(
-        '/workspaces/board-1/reviews/rev-a/context-file',
+        '/workspaces/board-1/attachments/rev-a/context-file',
         'POST',
         BOARD,
         workspacesOf,
@@ -1228,7 +1238,7 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
     ).toBe(true);
     expect(
       shareScopeAllows(
-        '/workspaces/board-1/reviews/rev-a/editable-file',
+        '/workspaces/board-1/attachments/rev-a/editable-file',
         'POST',
         BOARD,
         workspacesOf,
@@ -1256,7 +1266,7 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
     }
     expect(
       shareScopeAllows(
-        '/workspaces/board-1/reviews/rev-b/context-file',
+        '/workspaces/board-1/attachments/rev-b/context-file',
         'POST',
         BOARD,
         workspacesOf,
@@ -1271,7 +1281,12 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
     }
     // Mirrored, so neither board is special.
     expect(
-      shareScopeAllows('/workspaces/board-2/reviews/rev-a/tree', 'GET', OTHER_BOARD, workspacesOf),
+      shareScopeAllows(
+        '/workspaces/board-2/attachments/rev-a/tree',
+        'GET',
+        OTHER_BOARD,
+        workspacesOf,
+      ),
     ).toBe(false);
     expect(
       shareScopeAllows(
@@ -1286,7 +1301,7 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
   it('BLOCKS deleting the grouping, and the workspace list', () => {
     expect(shareScopeAllows('/workspaces/rev-a', 'DELETE', BOARD, workspacesOf)).toBe(false);
     expect(
-      shareScopeAllows('/workspaces/board-1/reviews/rev-a/tree', 'DELETE', BOARD, workspacesOf),
+      shareScopeAllows('/workspaces/board-1/attachments/rev-a/tree', 'DELETE', BOARD, workspacesOf),
     ).toBe(false);
     expect(shareScopeAllows('/workspaces', 'GET', BOARD, workspacesOf)).toBe(false);
   });
@@ -1344,7 +1359,7 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
       ),
     ).toBe(false);
     expect(
-      shareScopeAllows('/workspaces/board-1/reviews/rev-a/tree', 'GET', docShare, workspacesOf),
+      shareScopeAllows('/workspaces/board-1/attachments/rev-a/tree', 'GET', docShare, workspacesOf),
     ).toBe(false);
     expect(
       shareScopeAllows('/workspaces/board-1/docs/board-1%3Aplan.md', 'GET', docShare, workspacesOf),
@@ -1361,7 +1376,7 @@ describe('shareScopeAllows — a grouping filed on a shared board', () => {
     const legacy = (id: string) => (id.startsWith('rev-a') ? 'board-1' : null);
     expect(
       shareScopeAllows(
-        '/workspaces/board-1/reviews/rev-a/tree',
+        '/workspaces/board-1/attachments/rev-a/tree',
         'GET',
         BOARD,
         legacy as unknown as (id: string) => string[],
@@ -1443,12 +1458,12 @@ describe('shareScopeAllows — resources under the workspace path', () => {
   });
 
   it('serves a review filed on the shared workspace, and refuses one that is not', () => {
-    expect(shareScopeAllows('/workspaces/w-1/reviews/rev-1', 'GET', BOARD, workspacesOf)).toBe(
+    expect(shareScopeAllows('/workspaces/w-1/attachments/rev-1', 'GET', BOARD, workspacesOf)).toBe(
       true,
     );
-    expect(shareScopeAllows('/workspaces/w-1/reviews/rev-out', 'GET', BOARD, workspacesOf)).toBe(
-      false,
-    );
+    expect(
+      shareScopeAllows('/workspaces/w-1/attachments/rev-out', 'GET', BOARD, workspacesOf),
+    ).toBe(false);
   });
 
   it('serves a mockup on the shared workspace, and refuses one that is not', () => {
@@ -1474,20 +1489,25 @@ describe('shareScopeAllows — resources under the workspace path', () => {
     );
     // A review's `files` IS one of the named ones. It read `false` here until
     // the cutover, and that was an artifact of the address rather than a
-    // decision: the same call lived at `/api/reviews/<id>/files`, which this
+    // decision: the same call lived at `/api/attachments/<id>/files`, which this
     // same share has always been allowed to make. Moving the review under its
     // board merged the two paths, so the allowlist has to say so out loud.
     expect(
-      shareScopeAllows('/workspaces/w-1/reviews/rev-1/files', 'GET', BOARD, workspacesOf),
+      shareScopeAllows('/workspaces/w-1/attachments/rev-1/files', 'GET', BOARD, workspacesOf),
     ).toBe(true);
     // NEGATIVE CONTROL for that grant: it is the review's membership of this
     // board doing the work, not the route name.
     expect(
-      shareScopeAllows('/workspaces/w-1/reviews/rev-out/files', 'GET', BOARD, workspacesOf),
+      shareScopeAllows('/workspaces/w-1/attachments/rev-out/files', 'GET', BOARD, workspacesOf),
     ).toBe(false);
     // And still nothing unnamed under a review either.
     expect(
-      shareScopeAllows('/workspaces/w-1/reviews/rev-1/anything-new', 'GET', BOARD, workspacesOf),
+      shareScopeAllows(
+        '/workspaces/w-1/attachments/rev-1/anything-new',
+        'GET',
+        BOARD,
+        workspacesOf,
+      ),
     ).toBe(false);
   });
 
@@ -1775,7 +1795,7 @@ describe('collabScope', () => {
     if (id === 'board-1:plan.md') return ['ws-a'];
     // A diff review filed on ws-a. It used to be spelled `ws-a` here too —
     // a legacy grouping id that happened to equal a board name — which made
-    // `/api/reviews/ws-a/tree` read as if the review WERE the board. Under
+    // `/api/attachments/ws-a/tree` read as if the review WERE the board. Under
     // the canonical shape the two ids sit in two different segments, so the
     // fixture has to say which is which.
     if (id === 'rev-a') return ['ws-a'];
@@ -1795,7 +1815,7 @@ describe('collabScope', () => {
       '/workspaces/ws-a/docs/design-doc',
       '/workspaces/ws-a',
       '/workspaces/ws-a/agents',
-      '/workspaces/ws-a/reviews/rev-a/tree',
+      '/workspaces/ws-a/attachments/rev-a/tree',
       '/workspaces/ws-a/docs/design-doc',
       '/workspaces/ws-a/docs/design-doc/threads',
       '/workspaces/ws-a/docs/design-doc/y',
@@ -1805,7 +1825,7 @@ describe('collabScope', () => {
     ]) {
       expect(allows(p), p).toBe(true);
     }
-    expect(allows('/workspaces/ws-a/reviews/rev-a/editable-file', 'POST')).toBe(true);
+    expect(allows('/workspaces/ws-a/attachments/rev-a/editable-file', 'POST')).toBe(true);
   });
 
   it('reaches the app shell, which names no workspace at all', () => {
@@ -1908,10 +1928,10 @@ describe('collabScope', () => {
     // same act by a shorter route (Bryan, 2026-09-03).
     expect(allows('/workspaces/ws-a/docs/design-doc/threads/t-1/promote', 'POST')).toBe(true);
     expect(allows('/workspaces/ws-a', 'DELETE')).toBe(false);
-    expect(allows('/workspaces/ws-a/reviews/rev-a/refresh', 'POST')).toBe(false);
-    expect(allows('/workspaces/ws-a/reviews/rev-a/groups', 'POST')).toBe(false);
+    expect(allows('/workspaces/ws-a/attachments/rev-a/refresh', 'POST')).toBe(false);
+    expect(allows('/workspaces/ws-a/attachments/rev-a/groups', 'POST')).toBe(false);
     expect(allows('/workspaces', 'POST')).toBe(false); // bind a folder
-    expect(allows('/workspaces/ws-a/reviews', 'POST')).toBe(false);
+    expect(allows('/workspaces/ws-a/attachments', 'POST')).toBe(false);
   });
 
   it('refuses a doc reached through a workspace it does not belong to', () => {
@@ -1947,7 +1967,7 @@ describe('collabScope', () => {
       '/workspaces/ws-a',
       '/workspaces/ws-a/tasks',
       '/workspaces/ws-a',
-      '/workspaces/ws-a/reviews/rev-a/tree',
+      '/workspaces/ws-a/attachments/rev-a/tree',
       '/workspaces/ws-a/docs/design-doc',
       '/workspaces/ws-a/docs/design-doc/threads',
       '/workspaces/ws-a/docs/design-doc/y',

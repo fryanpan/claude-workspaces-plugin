@@ -462,7 +462,7 @@ describe('with the gate ON', () => {
     expect(setId).not.toBe('');
 
     const opened = await fetch(
-      `${b.base}/workspaces/${b.ws}/reviews/${encodeURIComponent(setId)}/editable-file`,
+      `${b.base}/workspaces/${b.ws}/attachments/${encodeURIComponent(setId)}/editable-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...browserHeaders(b.base) },
@@ -475,12 +475,12 @@ describe('with the gate ON', () => {
     expect(((await opened.json()) as { docId?: string }).docId).toBeTruthy();
 
     // The control, in the same test on the same server: a sibling write under
-    // the SAME `/api/reviews/<id>/` prefix from the SAME unsigned browser is
+    // the SAME `/api/attachments/<id>/` prefix from the SAME unsigned browser is
     // still refused. Without it the 200 above is equally consistent with a
     // gate that had stopped working, or with an exemption written wide enough
     // to open the whole prefix.
     const gated = await fetch(
-      `${b.base}/workspaces/${b.ws}/reviews/${encodeURIComponent(setId)}/refresh`,
+      `${b.base}/workspaces/${b.ws}/attachments/${encodeURIComponent(setId)}/refresh`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...browserHeaders(b.base) },

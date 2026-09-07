@@ -34,7 +34,7 @@ import type { BoardWorkspace } from '../tasks.ts';
  * a `/workspaces/<id>/…` alias meaning something else entirely — the review's
  * own id in the board's slot, from when a review WAS called a workspace. Both
  * spellings are gone. What is left is the canonical one:
- * `/workspaces/<workspaceId>/reviews/<setId>/<sub>`, where the first segment
+ * `/workspaces/<workspaceId>/attachments/<setId>/<sub>`, where the first segment
  * is the BOARD the review is filed on and the second is the review.
  *
  * That is the whole of what the cutover buys here. `/api/reviews/<setId>` named
@@ -47,11 +47,11 @@ import type { BoardWorkspace } from '../tasks.ts';
  * Matched against the SCOPE's remainder rather than the pathname, so a route
  * here is unreachable until that middleware has run — see `matchRest`.
  *
- * The bare `DELETE …/reviews/<setId>` is deliberately NOT in here: it is the
+ * The bare `DELETE …/attachments/<setId>` is deliberately NOT in here: it is the
  * destroy verb and lives with the archive family, next to the soft-delete it
  * must not be confused with.
  */
-const reviewRest = (sub: string): RegExp => new RegExp(`^reviews/([^/]+)/${sub}$`);
+const reviewRest = (sub: string): RegExp => new RegExp(`^attachments/([^/]+)/${sub}$`);
 const REVIEW_REST = {
   refresh: reviewRest('refresh'),
   groups: reviewRest('groups'),

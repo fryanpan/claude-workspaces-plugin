@@ -160,7 +160,7 @@ describe('the group-bind MCP tools file the review on a board, through the real 
 
   it('create_diff_review with NO board is refused, and says which argument', async () => {
     // It used to land on a default board. The review is CREATED at
-    // `POST /workspaces/<ws>/reviews` now, so a call naming no board names
+    // `POST /workspaces/<ws>/attachments` now, so a call naming no board names
     // no place to create it, and the refusal says so before any git ran.
     const refused = await callToolRaw('create_diff_review', {
       repo,

@@ -407,7 +407,7 @@ export async function handleDocsTool(
         subscribe?: boolean;
         producedBy?: { agentId?: string; sessionId?: string };
       };
-      const res = (await http('POST', `${board()}/reviews`, {
+      const res = (await http('POST', `${board()}/attachments`, {
         repo,
         base,
         ...(target ? { target } : {}),
@@ -432,24 +432,32 @@ export async function handleDocsTool(
       const { setId, force, purge } = a as { setId: string; force?: boolean; purge?: boolean };
       const params = [force ? 'force=true' : '', purge ? 'purge=true' : ''].filter(Boolean);
       const qs = params.length > 0 ? `?${params.join('&')}` : '';
-      const res = await http('DELETE', `${board()}/reviews/${encodeURIComponent(setId)}${qs}`);
+      const res = await http('DELETE', `${board()}/attachments/${encodeURIComponent(setId)}${qs}`);
       return ok(res);
     }
     case 'archive_review':
     case 'archive_attachment_set': {
       const { setId, reason } = a as { setId: string; reason?: string };
-      const res = await http('POST', `${board()}/reviews/${encodeURIComponent(setId)}/archive`, {
-        author: AUTHOR,
-        ...(reason !== undefined ? { reason } : {}),
-      });
+      const res = await http(
+        'POST',
+        `${board()}/attachments/${encodeURIComponent(setId)}/archive`,
+        {
+          author: AUTHOR,
+          ...(reason !== undefined ? { reason } : {}),
+        },
+      );
       return ok(res);
     }
     case 'unarchive_review':
     case 'unarchive_attachment_set': {
       const { setId } = a as { setId: string };
-      const res = await http('POST', `${board()}/reviews/${encodeURIComponent(setId)}/unarchive`, {
-        author: AUTHOR,
-      });
+      const res = await http(
+        'POST',
+        `${board()}/attachments/${encodeURIComponent(setId)}/unarchive`,
+        {
+          author: AUTHOR,
+        },
+      );
       return ok(res);
     }
     case 'archive_doc': {
@@ -469,7 +477,7 @@ export async function handleDocsTool(
     }
     case 'list_archived_reviews':
     case 'list_archived_attachments': {
-      const res = await http('GET', `${board()}/reviews?archived=true`);
+      const res = await http('GET', `${board()}/attachments?archived=true`);
       return ok(res);
     }
     case 'delete_workspace': {
@@ -499,7 +507,11 @@ export async function handleDocsTool(
     case 'refresh_attachment_set': {
       const { setId, workspaceId } = a as { setId?: string; workspaceId?: string };
       const id = setId ?? workspaceId ?? '';
-      const res = await http('POST', `${board()}/reviews/${encodeURIComponent(id)}/refresh`, {});
+      const res = await http(
+        'POST',
+        `${board()}/attachments/${encodeURIComponent(id)}/refresh`,
+        {},
+      );
       return ok(res);
     }
     case 'set_workspace_groups':
@@ -511,7 +523,7 @@ export async function handleDocsTool(
         groups: Array<{ title: string; paths: string[]; details?: string }>;
       };
       const id = setId ?? workspaceId ?? '';
-      const res = await http('POST', `${board()}/reviews/${encodeURIComponent(id)}/groups`, {
+      const res = await http('POST', `${board()}/attachments/${encodeURIComponent(id)}/groups`, {
         groups,
       });
       return ok(res);

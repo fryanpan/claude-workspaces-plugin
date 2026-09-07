@@ -57,7 +57,7 @@ describe('deletedSnippet anchor hint (HTTP)', () => {
 
     // The bind is lazy — open the code file the way the all-files tree does.
     const cr = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(bind.workspaceId)}/context-file`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(bind.workspaceId)}/context-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

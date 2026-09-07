@@ -49,7 +49,7 @@
  * indistinguishable.
  *
  * HTML PAGES ARE NOT ITS BUSINESS. `/workspaces/<id>` and its tabs, and
- * `docs|mockups|reviews/<id>`, are browser addresses served at the tail of the
+ * `docs|mockups|attachments/<id>`, are browser addresses served at the tail of the
  * chain by `routes/shell-static.ts`, which renders its own HTML not-found for
  * an unknown board. Claiming those here would answer a browser with a JSON
  * body. `isBoardPageRequest` is the single list both sides read — see
@@ -194,7 +194,7 @@ export const SCOPED_COLLECTIONS: Readonly<Record<string, readonly string[]>> = {
    *  here before it can work. */
   docs: [],
   mockups: [],
-  reviews: [],
+  attachments: [],
   /** One filed ask, read by its own id. */
   'review-items': [],
   /** One builder dispatch, closed by its own id. */

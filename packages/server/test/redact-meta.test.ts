@@ -186,8 +186,8 @@ describe('a visitor’s review URL names the workspace they are actually in', ()
     expect(relativeReviewUrl('http://h/workspaces/w-other/mockups/m1', SHARED)).toBe(
       '/workspaces/w-shared/mockups/m1',
     );
-    expect(relativeReviewUrl('http://h/workspaces/w-other/reviews/r1', SHARED)).toBe(
-      '/workspaces/w-shared/reviews/r1',
+    expect(relativeReviewUrl('http://h/workspaces/w-other/attachments/r1', SHARED)).toBe(
+      '/workspaces/w-shared/attachments/r1',
     );
   });
 

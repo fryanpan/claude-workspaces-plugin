@@ -1,5 +1,5 @@
 /**
- * A review's API answers under `/api/reviews/<setId>/…`, and ONLY there.
+ * A review's API answers under `/api/attachments/<setId>/…`, and ONLY there.
  *
  * The endpoints once existed under `/api/workspaces/<id>/…` too, because a
  * diff review and a bound folder used to BE a second kind of workspace. That
@@ -87,7 +87,9 @@ describe('the review API', () => {
   describe('answers at the review spelling, and only there', () => {
     for (const sub of ['tree', 'files', 'threads'] as const) {
       it(`GET /${sub}`, async () => {
-        const now = await local(`/workspaces/${WS}/reviews/${encodeURIComponent(setId)}/${sub}`);
+        const now = await local(
+          `/workspaces/${WS}/attachments/${encodeURIComponent(setId)}/${sub}`,
+        );
         expect(now.status, `review /${sub}`).toBe(200);
         // The retired alias. A review id is not a board id, so the board
         // family refuses it before any handler runs.
@@ -98,15 +100,19 @@ describe('the review API', () => {
 
     it('POST /refresh', async () => {
       expect(
-        (await post(`/workspaces/${WS}/reviews/${encodeURIComponent(setId)}/refresh`, {})).status,
+        (await post(`/workspaces/${WS}/attachments/${encodeURIComponent(setId)}/refresh`, {}))
+          .status,
       ).toBe(200);
       expect((await post(`/workspaces/${encodeURIComponent(setId)}/refresh`, {})).status).toBe(404);
     });
 
     it('POST /context-file opens a member lazily', async () => {
-      const r = await post(`/workspaces/${WS}/reviews/${encodeURIComponent(setId)}/context-file`, {
-        relPath: 'sub/two.md',
-      });
+      const r = await post(
+        `/workspaces/${WS}/attachments/${encodeURIComponent(setId)}/context-file`,
+        {
+          relPath: 'sub/two.md',
+        },
+      );
       expect(r.status).toBe(200);
       expect(((await r.json()) as { docId: string }).docId).toContain('two.md');
     });
@@ -115,7 +121,7 @@ describe('the review API', () => {
       // A 400 rather than a 404 is what proves the request reached the
       // review's own handler; the retired spelling gets the 404 instead,
       // which is what proves it reached nothing.
-      expect((await post(`/workspaces/${WS}/reviews/${setId}/groups`, {})).status).toBe(400);
+      expect((await post(`/workspaces/${WS}/attachments/${setId}/groups`, {})).status).toBe(400);
       expect((await post(`/workspaces/${setId}/groups`, {})).status).toBe(404);
     });
   });
@@ -127,16 +133,19 @@ describe('the review API', () => {
     // reply echoed the id back; one refusal shape is what replaces it, and a
     // refusal that varied by collection was a way to tell a real foreign id
     // from an invented one.
-    const r = await local(`/workspaces/${WS}/reviews/no-such-review/tree`);
+    const r = await local(`/workspaces/${WS}/attachments/no-such-review/tree`);
     expect(r.status).toBe(404);
     expect((await r.json()) as { error?: string }).toEqual({ error: 'not-found' });
   });
 
   describe('delete is two verbs because it deletes two things', () => {
-    it('DELETE /workspaces/<ws>/reviews/<setId> drops the review and its board row', async () => {
-      const r = await local(`/workspaces/${WS}/reviews/${encodeURIComponent(setId)}?force=true`, {
-        method: 'DELETE',
-      });
+    it('DELETE /workspaces/<ws>/attachments/<setId> drops the review and its board row', async () => {
+      const r = await local(
+        `/workspaces/${WS}/attachments/${encodeURIComponent(setId)}?force=true`,
+        {
+          method: 'DELETE',
+        },
+      );
       expect(r.status).toBe(200);
       expect(((await r.json()) as { ok: boolean }).ok).toBe(true);
       // The review was ONE row on the board; deleting it takes the row.
@@ -145,10 +154,13 @@ describe('the review API', () => {
       expect(docIds).not.toContain(setId);
     });
 
-    it('DELETE /workspaces/<ws>/reviews/<boardId> cannot touch a board', async () => {
-      const r = await local(`/workspaces/${WS}/reviews/${encodeURIComponent(boardId)}?force=true`, {
-        method: 'DELETE',
-      });
+    it('DELETE /workspaces/<ws>/attachments/<boardId> cannot touch a board', async () => {
+      const r = await local(
+        `/workspaces/${WS}/attachments/${encodeURIComponent(boardId)}?force=true`,
+        {
+          method: 'DELETE',
+        },
+      );
       expect(r.status).toBe(404);
       // Positive control on the same id, same pass: the board really is there,
       // so the 404 above is a refusal rather than a board that never existed.
@@ -170,7 +182,8 @@ describe('the review API', () => {
       // Positive control in the same pass: the set really is still there, so
       // the 404 is the address being wrong rather than the review being gone.
       expect(
-        (await local(`/workspaces/${boardId}/reviews/${encodeURIComponent(setId)}/tree`)).status,
+        (await local(`/workspaces/${boardId}/attachments/${encodeURIComponent(setId)}/tree`))
+          .status,
       ).toBe(200);
       // …and the board verb itself still works on a board.
       expect(

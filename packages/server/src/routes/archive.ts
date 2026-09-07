@@ -28,7 +28,7 @@ import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
 
 /** Review-only delete. `DELETE /workspaces/<id>` still fronts both. */
-const REVIEW_DELETE = /^reviews\/([^/]+)$/;
+const REVIEW_DELETE = /^attachments\/([^/]+)$/;
 
 /** The long-lived collaborators these routes need. */
 export interface ArchiveRoutesContext {
@@ -186,8 +186,8 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
     // and a `root`; a doc is one id) and a caller almost always wants one
     // kind or the other.
     //
-    // `GET /workspaces/<ws>/reviews?archived=true`, and the query string is
-    // load-bearing rather than decoration: `reviews` is a collection, and
+    // `GET /workspaces/<ws>/attachments?archived=true`, and the query string is
+    // load-bearing rather than decoration: `attachments` is a collection, and
     // `archived` was a WORD standing where a review id goes. Left as a path
     // segment it would have been the one member of that collection nothing
     // could tell from an id — the exact ambiguity the collection table's verb
@@ -198,7 +198,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
     // was on; answering the unfiltered list under one board's path would name
     // every other board's finished work to whoever opened this one.
     if (
-      restIs(scope, 'reviews') &&
+      restIs(scope, 'attachments') &&
       req.method === 'GET' &&
       url.searchParams.get('archived') === 'true'
     ) {
@@ -211,7 +211,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
         docs: listArchivedDocs(dataDir).filter(onThisBoard),
       });
     }
-    const reviewArchiveMatch = matchRest(scope, /^reviews\/([^/]+)\/archive$/);
+    const reviewArchiveMatch = matchRest(scope, /^attachments\/([^/]+)\/archive$/);
     if (reviewArchiveMatch && req.method === 'POST') {
       if (visitor) return j(403, { error: 'not available to share visitors' });
       const setId = decodeURIComponent(reviewArchiveMatch[1] ?? '');
@@ -220,7 +220,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       const reason = typeof body?.reason === 'string' ? (body.reason as string) : undefined;
       return archiveReview(setId, author?.name ?? 'unknown', reason);
     }
-    const reviewUnarchiveMatch = matchRest(scope, /^reviews\/([^/]+)\/unarchive$/);
+    const reviewUnarchiveMatch = matchRest(scope, /^attachments\/([^/]+)\/unarchive$/);
     if (reviewUnarchiveMatch && req.method === 'POST') {
       if (visitor) return j(403, { error: 'not available to share visitors' });
       const setId = decodeURIComponent(reviewUnarchiveMatch[1] ?? '');

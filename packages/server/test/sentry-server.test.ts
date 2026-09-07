@@ -145,8 +145,8 @@ describe('routePatternForSpan: default-deny redaction', () => {
       'context-file',
       'editable-file',
     ]) {
-      expect(routePatternForSpan(`/workspaces/${WS}/reviews/r-abc123/${sub}`)).toBe(
-        `/workspaces/:id/reviews/:id/${sub}`,
+      expect(routePatternForSpan(`/workspaces/${WS}/attachments/r-abc123/${sub}`)).toBe(
+        `/workspaces/:id/attachments/:id/${sub}`,
       );
       expect(routePatternForSpan(`/workspaces/w-abc123/${sub}`)).toBe('/:id/:id/:id');
     }

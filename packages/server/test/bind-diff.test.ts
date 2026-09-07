@@ -602,7 +602,7 @@ describe('DocStore.bindDiff', () => {
     const handle = createServer({ port: 0, dataDir: httpDataDir });
     WS = await seedBoard(`http://localhost:${handle.port}`);
     try {
-      const res = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/reviews`, {
+      const res = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -614,13 +614,15 @@ describe('DocStore.bindDiff', () => {
       });
       expect(res.ok).toBe(true);
       const grouped = (await (
-        await fetch(`http://localhost:${handle.port}/workspaces/${WS}/reviews/http-groups/grouped`)
+        await fetch(
+          `http://localhost:${handle.port}/workspaces/${WS}/attachments/http-groups/grouped`,
+        )
       ).json()) as { groups: Array<{ title: string; details?: string }> };
       expect(grouped.groups.map((g) => g.title)).toEqual(['Via HTTP']);
 
       // Per-group details must survive the route too (same class of bug as
       // the dropped-groups param — the route casts body.groups).
-      const dRes = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/reviews`, {
+      const dRes = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -632,13 +634,15 @@ describe('DocStore.bindDiff', () => {
       });
       expect(dRes.ok).toBe(true);
       const withDetails = (await (
-        await fetch(`http://localhost:${handle.port}/workspaces/${WS}/reviews/http-details/grouped`)
+        await fetch(
+          `http://localhost:${handle.port}/workspaces/${WS}/attachments/http-details/grouped`,
+        )
       ).json()) as { groups: Array<{ title: string; details?: string }> };
       expect(withDetails.groups[0]?.details).toBe('Chapter one.');
 
       // Over-long details are rejected at the route with 400 (caller's fault),
       // not silently truncated.
-      const tooLong = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/reviews`, {
+      const tooLong = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

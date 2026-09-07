@@ -38,7 +38,7 @@ export async function handleWorkspaceCreateRead(
   // (the review), `name` creates a board Workspace —
   // a NEW first-class entity with a crypto-random id that tasks and
   // goals hang off (plan §3.12 commit 1). Nothing is migrated between
-  // the two; attach_doc LINKS existing docs/reviews to a board workspace.
+  // the two; attach_doc LINKS existing docs/attachments to a board workspace.
   if (pathname === '/workspaces' && req.method === 'POST') {
     const body = await safeJson(req);
     const folderPath = body?.folderPath as string | undefined;
@@ -126,7 +126,7 @@ export async function handleWorkspaceCreateRead(
       })),
     });
   }
-  // --- REST: diff reviews — POST /workspaces/<ws>/reviews ---
+  // --- REST: diff attachments — POST /workspaces/<ws>/attachments ---
   // One doc per changed file, grouped as a review (= the review id), FILED ON
   // THE BOARD IN THE PATH. It was `POST /api/diffs` with an optional
   // `hubWorkspaceId` in the body, which meant the board a review landed on
@@ -139,7 +139,7 @@ export async function handleWorkspaceCreateRead(
   // files on disk and re-render as the agent edits); pass `target` for a
   // review pinned to a commit. Returns per-file reviewUrls plus an
   // entryUrl (first changed file) the agent can hand to a human.
-  if (restIs(scope, 'reviews') && req.method === 'POST') {
+  if (restIs(scope, 'attachments') && req.method === 'POST') {
     // `repo` is a host path this server will read and serve — the same
     // class as the folder bind above, and refused on the same terms.
     // See browserCannotBindBody. Omitting `base` scans the WHOLE folder

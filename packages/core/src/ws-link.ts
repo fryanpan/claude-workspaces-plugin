@@ -15,7 +15,7 @@
  * back to its raw text, so the permissiveness costs nothing.
  *
  * Path shapes mirror `doc-path.ts` (client) and the canonical block in
- * `server.ts`: `/workspaces/<ws>[/docs|mockups|reviews/<id>]` and the board's
+ * `server.ts`: `/workspaces/<ws>[/docs|mockups|attachments/<id>]` and the board's
  * `?task=<id>` deep link. Every shape names a workspace, which is what lets
  * the resolver refuse an address that lies about where a resource lives —
  * `/review/<id>` and `/mockup/<id>` named none, and are gone with the rest of
@@ -34,7 +34,7 @@ export type WorkspaceLink =
 // panel params on every nav page, so a link copied from `/home` addresses
 // the same task a link copied from the bare path does.
 const WS_PATH = /^\/workspaces\/([^/?#]+)(?:\/(?:home|tasks|mine|activity))?\/?$/;
-const WS_CHILD_PATH = /^\/workspaces\/([^/?#]+)\/(docs|mockups|reviews)\/([^/?#]+)\/?$/;
+const WS_CHILD_PATH = /^\/workspaces\/([^/?#]+)\/(docs|mockups|attachments)\/([^/?#]+)\/?$/;
 
 function decode(part: string): string {
   try {

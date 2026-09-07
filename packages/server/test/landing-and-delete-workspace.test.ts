@@ -13,7 +13,7 @@ import { seedBoard } from './workspace-seed.ts';
  *   - GET /projects/<owner> renders that project's artifacts, folder members
  *     nested under one expandable row
  *   - GET /workspaces lists the rolled-up summary
- *   - DELETE /workspaces/:ws/reviews/:id enforces the all-or-nothing open-thread
+ *   - DELETE /workspaces/:ws/attachments/:id enforces the all-or-nothing open-thread
  *     guardrail and force-retires the whole folder as a unit — ARCHIVING it
  *     by default, and purging only when ?purge=true asks for it
  */
@@ -79,13 +79,13 @@ describe('landing + delete_workspace e2e (HTTP)', () => {
     files = new Map(body.files.map((f) => [f.relPath, f]));
     // bind is lazy now (entry only) — open the rest like a reviewer would.
     const allR = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/files`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/files`,
     );
     const all = await j<{ files: Array<{ relPath: string }> }>(allR);
     for (const f of all.files) {
       if (files.has(f.relPath)) continue;
       const cr = await fetch(
-        `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/context-file`,
+        `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/context-file`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -182,7 +182,7 @@ describe('landing + delete_workspace e2e (HTTP)', () => {
     expect(w.owner).toBe('/proj/alpha');
   });
 
-  it('DELETE /workspaces/:ws/reviews/:id is blocked all-or-nothing when a member has open threads', async () => {
+  it('DELETE /workspaces/:ws/attachments/:id is blocked all-or-nothing when a member has open threads', async () => {
     // Open a thread on the markdown member.
     const mdDocId = files.get('README.md')!.docId;
     const tr = await fetch(
@@ -199,9 +199,12 @@ describe('landing + delete_workspace e2e (HTTP)', () => {
     );
     await j(tr);
 
-    const r = await fetch(`${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}`, {
-      method: 'DELETE',
-    });
+    const r = await fetch(
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}`,
+      {
+        method: 'DELETE',
+      },
+    );
     expect(r.status).toBe(409);
     const body = (await r.json()) as {
       ok: boolean;
@@ -216,13 +219,13 @@ describe('landing + delete_workspace e2e (HTTP)', () => {
     expect(handle.docStore.get(files.get('src/index.ts')!.docId)).toBeTruthy();
   });
 
-  it('DELETE /workspaces/:ws/reviews/:id?force=true ARCHIVES the whole folder', async () => {
+  it('DELETE /workspaces/:ws/attachments/:id?force=true ARCHIVES the whole folder', async () => {
     // The old payload still means "retire this review" and still takes every
     // member out of the live server — what changed is that the persisted
     // state is parked in `_archive` instead of destroyed, so this is
     // recoverable. `deleted` is gone from the response because nothing was.
     const r = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}?force=true`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}?force=true`,
       {
         method: 'DELETE',
       },
@@ -242,14 +245,14 @@ describe('landing + delete_workspace e2e (HTTP)', () => {
     // Bring back what the previous test archived, which is the round trip
     // that makes archiving safe to be the default.
     const restored = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/unarchive`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/unarchive`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
     );
     expect((await j<{ ok: true; restored: number }>(restored)).restored).toBe(2);
     for (const f of files.values()) expect(handle.docStore.get(f.docId)).toBeTruthy();
 
     const r = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}?force=true&purge=true`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}?force=true&purge=true`,
       { method: 'DELETE' },
     );
     const body = await j<{ ok: true; deleted: number }>(r);

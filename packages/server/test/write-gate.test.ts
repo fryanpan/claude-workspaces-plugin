@@ -126,7 +126,7 @@ describe('which requests the gate governs', () => {
 
   it('lets a reader OPEN a doc it is allowed to read', () => {
     // The ship-blocker this closes: the redline surface opens its companion
-    // doc with `POST /api/reviews/<id>/editable-file` at mount. Gated, it got
+    // doc with `POST /api/attachments/<id>/editable-file` at mount. Gated, it got
     // a 401, fell back to the derived redline over the MEMBER doc, and the
     // chrome then read a different set of comment threads — so a signed-out
     // reader saw comments nobody else saw and missed the ones everybody else
@@ -134,12 +134,12 @@ describe('which requests the gate governs', () => {
     // reason, and the refusal also raised a blocking sign-in modal on plain
     // page load.
     for (const p of [
-      `/workspaces/${WS}/reviews/rev-1/editable-file`,
-      `/workspaces/${WS}/reviews/rev-1/context-file`,
+      `/workspaces/${WS}/attachments/rev-1/editable-file`,
+      `/workspaces/${WS}/attachments/rev-1/context-file`,
       // Both prefixes: `/workspaces/<id>/…` is the live alias every open
       // browser tab and un-restartable plugin bundle still calls.
-      `/workspaces/${WS}/reviews/rev-1/editable-file`,
-      `/workspaces/${WS}/reviews/rev-1/context-file`,
+      `/workspaces/${WS}/attachments/rev-1/editable-file`,
+      `/workspaces/${WS}/attachments/rev-1/context-file`,
     ]) {
       expect(isReadShapedPost(p)).toBe(true);
       expect(isGatedWrite('POST', p)).toBe(false);
@@ -150,12 +150,12 @@ describe('which requests the gate governs', () => {
     // The control. These are real writes on the very same prefix, and an
     // exemption that took them too would be a hole rather than a fix.
     for (const p of [
-      `/workspaces/${WS}/reviews/rev-1/refresh`,
-      `/workspaces/${WS}/reviews/rev-1/groups`,
-      `/workspaces/${WS}/reviews/rev-1/editable-file/extra`,
-      `/workspaces/${WS}/reviews/rev-1/editable-fileX`,
-      `/workspaces/${WS}/reviews/editable-file?format=json`,
-      `/workspaces/${WS}/reviews/rev-1/sub/context-file`,
+      `/workspaces/${WS}/attachments/rev-1/refresh`,
+      `/workspaces/${WS}/attachments/rev-1/groups`,
+      `/workspaces/${WS}/attachments/rev-1/editable-file/extra`,
+      `/workspaces/${WS}/attachments/rev-1/editable-fileX`,
+      `/workspaces/${WS}/attachments/editable-file?format=json`,
+      `/workspaces/${WS}/attachments/rev-1/sub/context-file`,
     ]) {
       expect(isReadShapedPost(p)).toBe(false);
       expect(isGatedWrite('POST', p)).toBe(true);

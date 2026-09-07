@@ -49,7 +49,7 @@ describe(`POST /workspaces/${WS}/docs/:id/archive`, () => {
     return ((await r.json()) as { workspace: { docIds?: string[] } }).workspace.docIds ?? [];
   };
   const archivedListing = async (): Promise<ArchivedListing> => {
-    const r = await local(`/workspaces/${WS}/reviews?archived=true`);
+    const r = await local(`/workspaces/${WS}/attachments?archived=true`);
     expect(r.status).toBe(200);
     return (await r.json()) as ArchivedListing;
   };
@@ -137,7 +137,7 @@ describe(`POST /workspaces/${WS}/docs/:id/archive`, () => {
     writeFileSync(join(folder, 'README.md'), '# Fixture\n\nbody\n');
     mkdirSync(join(folder, 'src'));
     writeFileSync(join(folder, 'src', 'util.ts'), 'export const y = 2;\n');
-    const bound = await post(`/workspaces/${WS}/reviews`, { repo: folder });
+    const bound = await post(`/workspaces/${WS}/attachments`, { repo: folder });
     expect(bound.status).toBe(200);
     const res = (await bound.json()) as { reviewId: string; files: Array<{ docId: string }> };
     const memberDocId = res.files[0]?.docId as string;

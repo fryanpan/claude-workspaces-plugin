@@ -311,7 +311,7 @@ describe('per-doc sharing is removed', () => {
       writeFileSync(join(dir, 'note.md'), '# Note\n\nFiled, therefore shareable.\n');
 
       const opened = await local(
-        `/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/context-file`,
+        `/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/context-file`,
         {
           relPath: 'nested/note.md',
         },
