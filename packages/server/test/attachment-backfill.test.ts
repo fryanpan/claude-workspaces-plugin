@@ -3,6 +3,7 @@ import type { DocMeta } from '@claude-workspaces/core';
 import {
   attachmentIdsNeedingFiling,
   backfillAttachmentFiling,
+  docIdsNeedingFiling,
 } from '../src/attachment-backfill.ts';
 
 const doc = (over: Partial<DocMeta>): DocMeta => ({
@@ -56,7 +57,59 @@ describe('attachmentIdsNeedingFiling', () => {
   });
 });
 
+describe('docIdsNeedingFiling — a doc that holds content has a board', () => {
+  it('names a standalone markdown doc no board holds', () => {
+    expect(docIdsNeedingFiling([doc({ docId: 'plain' })], () => false)).toEqual(['plain']);
+  });
+
+  it('names a batch-registered member whose setId no board holds either', () => {
+    // The 14 live cases: `setId` without `relPath` is not an attachment set,
+    // so the set pass skips it, and nothing held the set — no address at all.
+    const docs = [doc({ docId: 'n1', setId: 'notes' }), doc({ docId: 'n2', setId: 'notes' })];
+    expect(docIdsNeedingFiling(docs, () => false)).toEqual(['n1', 'n2']);
+  });
+
+  it('leaves a batch member alone when a board holds its setId', () => {
+    // `shareWorkspacesOf` reads the same field, so the doc IS addressed.
+    const docs = [doc({ docId: 'n1', setId: 'notes' })];
+    expect(docIdsNeedingFiling(docs, (id) => id === 'notes')).toEqual([]);
+  });
+
+  it('leaves an attachment member to the set pass', () => {
+    const docs = [doc({ docId: 'r:a', setId: 'r', relPath: 'a.ts' })];
+    expect(docIdsNeedingFiling(docs, () => false)).toEqual([]);
+  });
+
+  it('skips a mockup with no source — it has no page whichever board held it', () => {
+    expect(docIdsNeedingFiling([doc({ docId: 'm', type: 'mockup' })], () => false)).toEqual([]);
+    expect(
+      docIdsNeedingFiling([doc({ docId: 'm', type: 'mockup', sourceUrl: '/x.html' })], () => false),
+    ).toEqual(['m']);
+  });
+
+  it("skips a board's own docs — they are addressed by their row", () => {
+    const docs = [doc({ docId: 'ws:w-1', type: 'workspace' }), doc({ docId: 'task:t-1' })];
+    expect(docIdsNeedingFiling(docs, () => false)).toEqual([]);
+  });
+
+  it('skips a doc already filed', () => {
+    expect(docIdsNeedingFiling([doc({ docId: 'plain' })], (id) => id === 'plain')).toEqual([]);
+  });
+});
+
 describe('backfillAttachmentFiling', () => {
+  it('files a standalone doc by its own id, after the sets', () => {
+    const res = backfillAttachmentFiling({
+      docs: () => [doc({ docId: 'plain' }), doc({ docId: 'r:a', setId: 'r', relPath: 'a.ts' })],
+      isFiled: () => false,
+      file: () => 'w-default',
+    });
+    expect(res.filed).toEqual([
+      { attachmentId: 'r', workspaceId: 'w-default' },
+      { attachmentId: 'plain', workspaceId: 'w-default' },
+    ]);
+  });
+
   it('files an orphan attachment set and reports where it went', () => {
     const filed: Array<[string, string]> = [];
     const res = backfillAttachmentFiling({
