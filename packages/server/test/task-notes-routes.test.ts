@@ -1,6 +1,6 @@
 /**
  * Status notes with an EXPLICIT task: `POST /api/tasks/:id/notes`. The hooks
- * post to `/api/agent-notes` and let the server find the agent's current row;
+ * post to `/workspaces/{id}/agents/{name}/notes` and let the server find the agent's current row;
  * an MCP verb knows which row it is reporting on and names it. Same body
  * validation as the hook route (`parseAgentNote` — a shared agent name is
  * refused the same way), same store append, same projection; the only new
@@ -112,7 +112,7 @@ describe('task status notes route', () => {
 
     // And the per-agent ring saw it too, tagged with the row.
     const ring = await jj<{ notes: Array<{ kind: string; taskId?: string }> }>(
-      await fetch(`${base}/api/agents/${encodeURIComponent(AGENT.name)}/notes`),
+      await fetch(`${base}/workspaces/${wsId}/agents/${encodeURIComponent(AGENT.name)}/notes`),
     );
     expect(ring.notes.map((n) => [n.kind, n.taskId])).toEqual([['status', taskId]]);
   });
@@ -161,7 +161,7 @@ describe('task status notes route', () => {
         workspaceId: wsId,
       }),
     );
-    const r = await post('/api/agent-notes', {
+    const r = await post(`/workspaces/${wsId}/agents/${encodeURIComponent(AGENT.name)}/notes`, {
       agent: AGENT.name,
       kind: 'status',
       text: 'Branch pushed.',

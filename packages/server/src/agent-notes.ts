@@ -171,7 +171,11 @@ export type NoteTarget = { task: Task; ambiguous: false } | { task: undefined; a
  * worker's row. When a person moved it (or nothing records who did), the
  * assignee, by any spelling the roster folds.
  */
-export function resolveNoteTarget(store: TaskStore, agentName: string): NoteTarget {
+export function resolveNoteTarget(
+  store: TaskStore,
+  agentName: string,
+  workspaceId?: string,
+): NoteTarget {
   const owned = store.ownerMatcher(agentName);
   const wantedIds = new Set([agentIdForName(agentName), normalizeAgent(agentName)]);
   const claimedBy = (task: Task): boolean => {
@@ -184,7 +188,12 @@ export function resolveNoteTarget(store: TaskStore, agentName: string): NoteTarg
     );
   };
   let only: Task | undefined;
-  for (const ws of store.listWorkspaces()) {
+  // Under a board address the search is that board's rows only (2026-09-06,
+  // the note routes moved under `/workspaces/{id}`): a session holding one
+  // row on each of two boards is unambiguous on either, where the old
+  // machine-wide scan called it a coin flip and filed nothing.
+  const boards = workspaceId !== undefined ? [{ id: workspaceId }] : store.listWorkspaces();
+  for (const ws of boards) {
     for (const task of store.listTasks(ws.id, { status: 'in-progress' })) {
       const claim = latestClaim(task);
       const mine = claim?.by.kind === 'agent' ? claimedBy(task) : owned(task);

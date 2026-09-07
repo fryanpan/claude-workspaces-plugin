@@ -124,7 +124,6 @@ export function scrubEventForPrivacy(value: unknown, depth = 0): unknown {
  */
 const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // top-level static (no dynamic segment at all)
-  ['api', 'agent-notes'],
   ['api', 'auth', 'logout'],
   ['api', 'auth', 'profile'],
   ['api', 'auth', 'session'],
@@ -207,7 +206,6 @@ const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // /api/agents/:id/...
   ['api', 'agents', ':id', 'watches'],
   ['api', 'agents', ':id', 'merge'],
-  ['api', 'agents', ':id', 'notes'],
   // /workspaces/:id/docs/:id and its ~30 subroutes (canonicalized once in
   // server.ts, then dispatched on the literal 'rest' of the path)
   ['workspaces', ':id', 'docs', ':id'],
@@ -301,6 +299,7 @@ const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'agents'],
   ['workspaces', ':id', 'agents', ':id'],
   ['workspaces', ':id', 'agents', ':id', 'heartbeat'],
+  ['workspaces', ':id', 'agents', ':id', 'notes'],
 ];
 
 function matchesRouteTemplate(segments: readonly string[], template: readonly string[]): boolean {

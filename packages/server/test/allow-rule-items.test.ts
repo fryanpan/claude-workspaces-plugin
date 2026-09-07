@@ -87,7 +87,7 @@ describe('allow-rule review items', () => {
     return res.json() as Promise<T>;
   };
   const deny = async (shape: string, agent = LEAD.name, at?: number) => {
-    const r = await post('/api/agent-notes', {
+    const r = await post(`/workspaces/${WS}/agents/${encodeURIComponent(agent)}/notes`, {
       agent,
       kind: 'denial',
       text: shape,
@@ -328,7 +328,10 @@ describe('allow-rule review items', () => {
     await Bun.write(sidecarPath, JSON.stringify(sidecar));
     handle = createServer({ port: 0, dataDir });
     base = `http://localhost:${handle.port}`;
-    WS = await seedBoard(base);
+    await seedBoard(base);
+    // The denials are addressed under the lead's board now, not the seed
+    // board: a note route names its board, and the row is on this one.
+    WS = wsId;
 
     await deny('git push');
     await settle();
