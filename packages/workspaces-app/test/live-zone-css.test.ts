@@ -187,3 +187,41 @@ describe('the transcript starts on the next line down from the doc', () => {
     }
   });
 });
+
+/**
+ * The hold that keeps the stream still across a split (meeting-live-zone.ts,
+ * `holdStreamAt`). Lifting the composing turns into a block ends the line
+ * they shared with the words still being spoken, and the stream would drop to
+ * the next line and jump back to the margin — 23.25px and 112.88px, measured
+ * in Chrome at 1180x820. The zone measures that displacement and hands it
+ * back as these two custom properties; what is guarded here is that they
+ * reach the stream at all, and that letting go of them is a transition rather
+ * than a snap.
+ */
+describe('the stream is held over the break a split makes in its line', () => {
+  it('the two offsets reach the stream as a margin and a first-line indent', () => {
+    const lines = attach('lz-lines', { parent: attach('live-zone') });
+    // Unset they are nothing, and this rule reads exactly as the `margin: 0`
+    // above it — a zone that never splits is not paying for the hold.
+    expect(styleOf(lines).marginTop).toBe('0px');
+    expect(styleOf(lines).textIndent).toBe('0px');
+
+    lines.style.setProperty('--lz-hold-y', '-23.25px');
+    lines.style.setProperty('--lz-hold-x', '112.88px');
+    expect(styleOf(lines).marginTop).toBe('-23.25px');
+    expect(styleOf(lines).textIndent).toBe('112.88px');
+  });
+
+  it('letting go runs on the collapse’s own duration, so the stream travels once', () => {
+    const zone = attach('live-zone');
+    // Held, nothing transitions: the settle pins the slot's height precisely
+    // so that nothing moves between the split and the collapse.
+    expect(styleOf(attach('lz-lines', { parent: zone })).transition).toBe('');
+
+    const releasing = styleOf(attach('lz-lines is-releasing', { parent: zone }));
+    expect(releasing.transition).toContain('margin-top');
+    expect(releasing.transition).toContain('text-indent');
+    // The same number the slot's own height collapses over — one motion.
+    expect(releasing.transition).toContain(`${COLLAPSE_MS}ms`);
+  });
+});

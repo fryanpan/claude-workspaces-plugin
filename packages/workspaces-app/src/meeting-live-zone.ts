@@ -42,6 +42,8 @@
  * 2026-08-31).
  */
 
+import { createStreamHold } from './meeting-live-hold.ts';
+
 /** One transcript turn as the zone tracks it. */
 export interface LiveZoneTurn {
   turn: number;
@@ -273,8 +275,30 @@ export function createMeetingLiveZone(opts: {
   }
   /** The chunk a tick is composing, if one is. */
   let openChunk: Chunk | null = null;
+  /** Set for the length of the render a split runs through — see
+   *  meeting-live-hold.ts for what it is for. */
+  let splitAnchor: DOMRect | null = null;
   /** Chunks whose note has landed and that are fading / collapsing out. */
   const settling = new Set<Chunk>();
+
+  /** Holds the stream still across a split — meeting-live-hold.ts. */
+  const streamHold = createStreamHold(lines);
+
+  /**
+   * Where the words that will STILL be streaming after this split sit now.
+   *
+   * Not the stream's first turn: that is usually one of the ones leaving, and
+   * anchoring on it holds the stream to a position its own words are about to
+   * vacate. The turn to hold is the first survivor — `leaving` names who is
+   * going, and everything already composing left on an earlier tick.
+   */
+  function survivorAnchor(leaving: readonly number[]): DOMRect | null {
+    const going = new Set(leaving);
+    const i = ordered()
+      .filter((t) => !t.composing)
+      .findIndex((t) => !going.has(t.turn));
+    return i < 0 ? null : streamHold.rectAt(i);
+  }
 
   function mountChunk(): Chunk {
     const slot = document.createElement('div');
@@ -320,6 +344,11 @@ export function createMeetingLiveZone(opts: {
         c.slot.classList.add('is-collapsing');
         void c.slot.offsetHeight; // flush, so the height below transitions
         c.slot.style.height = '0px';
+        // The hold goes with the space it was compensating for, in the same
+        // beat and on the same curve. Only from the LAST chunk: a newer one
+        // opened behind this one owns the boundary now, and its own collapse
+        // is what should let the stream go.
+        if (chunkHost.lastElementChild === c.slot) streamHold.release(reduced ? 0 : COLLAPSE_MS);
         step(c, reduced ? 0 : COLLAPSE_MS, () => {
           discard(c);
           render();
@@ -331,6 +360,7 @@ export function createMeetingLiveZone(opts: {
   /** Drop every chunk on the floor, mid-settle or not: the meeting is over,
    *  restarting, or the zone is going away. */
   function clearChunks(): void {
+    streamHold.release(0);
     for (const c of [...settling]) discard(c);
     if (openChunk) {
       openChunk.slot.remove();
@@ -353,12 +383,18 @@ export function createMeetingLiveZone(opts: {
       openChunk.body.replaceChildren(...runOf(splitting));
     } else if (openChunk) {
       // A failed tick returns its words to the stream, so the block they
-      // were lifted into goes with no animation — nothing settled.
+      // were lifted into goes with no animation — nothing settled. The line
+      // it broke is whole again, so the hold goes with it, uncompensated.
+      streamHold.release(0);
       openChunk.slot.remove();
       openChunk = null;
     }
     lines.replaceChildren(...runOf(streaming));
     matchProseWidth();
+    // Before keepInView, not after: following mode scrolls to whatever the
+    // zone's height is when it is asked, and the hold is about to take a
+    // line of that height back.
+    if (splitAnchor) streamHold.hold(splitAnchor);
     keepInView();
   }
 
@@ -387,11 +423,19 @@ export function createMeetingLiveZone(opts: {
     onProgress(e) {
       if (!live) return;
       if (e.phase === 'composing') {
+        // Where the surviving stream sits BEFORE the split, for the hold to
+        // restore. Read before the turns are flagged: `composing` is what
+        // tells `render` who is leaving.
+        splitAnchor = survivorAnchor(e.turns);
         for (const id of e.turns) {
           const t = turns.get(id);
           if (t) t.composing = true;
         }
-      } else if (e.phase === 'written') {
+        render();
+        splitAnchor = null; // consumed, or dropped if render bailed
+        return;
+      }
+      if (e.phase === 'written') {
         // The note is in the doc; the settle wash up there takes over. The
         // words do NOT leave with their turns — the block holding them is
         // handed to the settle, which fades them where they sit and only
@@ -403,13 +447,12 @@ export function createMeetingLiveZone(opts: {
         render();
         if (done) settle(done);
         return;
-      } else {
-        // Failed: the tick's words are carried into the next tick — they are
-        // still provisional, so they return to the stream.
-        for (const id of e.turns) {
-          const t = turns.get(id);
-          if (t) t.composing = false;
-        }
+      }
+      // Failed: the tick's words are carried into the next tick — they are
+      // still provisional, so they return to the stream.
+      for (const id of e.turns) {
+        const t = turns.get(id);
+        if (t) t.composing = false;
       }
       render();
     },

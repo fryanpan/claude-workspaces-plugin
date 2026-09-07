@@ -2289,6 +2289,20 @@ body.is-reading-width #editor > .live-zone {
   overflow: hidden;
   transition: height var(--lz-collapse-ms) var(--lz-ease-settle);
 }
+/* The stream is held over the break the split just made in its line —
+   meeting-live-zone.ts `holdStreamAt` sets the two offsets, in pixels it
+   measured. Unset they are 0 and this rule is the `margin: 0` above.
+   The properties are custom so the release can be one class rather than a
+   second pair of inline styles, and so the release runs on the collapse's
+   own duration and curve: the stream travels once, with the space. */
+.lz-lines {
+  margin-top: var(--lz-hold-y, 0px);
+  text-indent: var(--lz-hold-x, 0px);
+}
+.lz-lines.is-releasing {
+  transition: margin-top var(--lz-collapse-ms) var(--lz-ease-settle), text-indent
+    var(--lz-collapse-ms) var(--lz-ease-settle);
+}
 /* The settle wash: the note a chunk just became, highlighted where it landed
    (settle-wash.ts decorates the block). ~1.5s held at full wash, then a
    1.3s fade. No provenance label — the highlight IS the provenance. */
