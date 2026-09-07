@@ -28,6 +28,26 @@ const ASKS: ReadonlyArray<[label: string, text: string]> = [
     'Waiting on Bryan: the four factual corrections sit in the doc as accept/reject suggestions, and the voice items above are his to make. Nothing for the agent to do.',
   ],
   ['handed over for a read, with no name at all', 'Review pack is bound and ready for your read.'],
+  // The two below are the 2026-09-07 escalation: both rows were waiting on
+  // the owner's walk, both notes said so, and both read as ordinary work —
+  // the first because an install is not in the act list, the second because
+  // it has no waiting vocabulary at all, only the person who has not acted.
+  [
+    'a possessive hands-on step is a person acting, not a possession',
+    'Posted them as a plain reply. Waiting on his iPad install from the share address.',
+  ],
+  [
+    'a named person who has not yet acted, with no waiting phrase anywhere',
+    'Re-read the walk thread: Bryan has not yet opened the pre-cutover link. Nothing an agent can do — the sign-in needs a one-time code. Stays in-progress.',
+  ],
+  [
+    'the contracted form of the same',
+    "Bryan hasn't answered the walk item; nothing for me until he does.",
+  ],
+  [
+    'a second-person subject who has not acted',
+    'You have not run the retest on the new build yet.',
+  ],
 ];
 
 /** Notes that report work, or explicitly deny waiting. */
@@ -89,6 +109,24 @@ const NOT_ASKS: ReadonlyArray<[label: string, text: string]> = [
   [
     'a first-person-plural act is still the writer, not a person to ask',
     'Waiting on our review of the importer before this can land.',
+  ],
+  // Controls for the two 2026-09-07 shapes: the same words with the person
+  // taken out, and the same person with the negation taken out.
+  [
+    'an install with nobody’s hand on it is work',
+    'Waiting on the install to finish on the staging box.',
+  ],
+  [
+    'a machine that has not finished is work, not a person',
+    'The build has not yet finished; CI is slow today.',
+  ],
+  [
+    'a named person who HAS acted is a report',
+    'Bryan has opened the link; on to the doc check next.',
+  ],
+  [
+    'a denial still wins over a person who has not acted',
+    'Not waiting: Bryan has not yet answered, but the fix ships regardless.',
   ],
 ];
 

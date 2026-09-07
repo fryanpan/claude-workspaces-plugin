@@ -100,7 +100,13 @@ const SELF_SUFFICIENT =
  * That distinction is the second half of the review finding above.
  */
 const ACT_NOUN =
-  'read|reads|review|reviews|call|calls|decision|decisions|answer|answers|reply|replies|response|sign-?off|approval|input|go-?ahead|eyes|verdict|take|thoughts|steer|ok|okay|blessing|feedback|direction|guidance|word|say|nod|yes|no';
+  'read|reads|review|reviews|call|calls|decision|decisions|answer|answers|reply|replies|response|sign-?off|approval|input|go-?ahead|eyes|verdict|take|thoughts|steer|ok|okay|blessing|feedback|direction|guidance|word|say|nod|yes|no' +
+  // A person's hands-on step, which is the act this fleet most often waits
+  // on: a walk through a share link, a retest on a new build, an install on
+  // the phone. Measured 2026-09-07: "Waiting on his iPad install from the
+  // share address" read as ordinary work and the row escalated as "gone
+  // quiet" while it was waiting on exactly that.
+  '|walk|walkthrough|walk-through|retest|re-test|install|look|try|check';
 
 /**
  * Who the waiting is ON, as the head of the phrase's object.
@@ -154,6 +160,33 @@ function askPatternFor(personNames: readonly string[]): RegExp {
 }
 
 /**
+ * The other way a note names a person it is waiting on: by saying what they
+ * have NOT done. "Bryan has not yet opened the link" carries no waiting
+ * vocabulary at all, and the 2026-09-07 escalation read a row saying exactly
+ * that as its agent having gone quiet. The subject has to be a person — a
+ * third-person pronoun, `you`, or a name the board supplied — and the verb
+ * has to be a negated perfect, so "the build has not finished" stays work and
+ * "Bryan has opened it" stays a report. `answered` after such a negation is
+ * already excluded from the release vocabulary by lookbehind.
+ */
+const notYetPatterns = new Map<string, RegExp>();
+
+function notYetPatternFor(personNames: readonly string[]): RegExp {
+  const names = personNames.map((n) => n.trim()).filter((n) => n.length >= 3);
+  const key = names.join('\u0000');
+  const cached = notYetPatterns.get(key);
+  if (cached) return cached;
+  if (notYetPatterns.size >= 64) notYetPatterns.clear();
+  const subject = ['you', 'he', 'she', 'they', ...names.map(escapeForRegex)].join('|');
+  const built = new RegExp(
+    `\\b(?:${subject})\\s+(?:(?:has|have)\\s+not|(?:hasn|haven)['\u2019]t)\\b`,
+    'i',
+  );
+  notYetPatterns.set(key, built);
+  return built;
+}
+
+/**
  * A note that OPENS by denying the state. The whole vocabulary above appears
  * inside such a note by construction — "Not waiting on a person: Bryan
  * answered" contains "waiting on a person" — so the opening is checked first,
@@ -190,7 +223,8 @@ export function noteReadsAsWaitingOnPerson(
   if (RELEASE_OPENING.test(raw)) return false;
   if (RELEASE_PHRASES.test(raw)) return false;
   if (SELF_SUFFICIENT.test(raw)) return true;
-  return askPatternFor(personNames).test(raw);
+  if (askPatternFor(personNames).test(raw)) return true;
+  return notYetPatternFor(personNames).test(raw);
 }
 
 /**
