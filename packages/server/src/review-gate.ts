@@ -470,18 +470,6 @@ export function createReviewGate(ctx: ReviewGateContext) {
       { forVersion },
     );
     const words = target.words(row);
-    // What the reader has already been asked on this row, down BOTH channels.
-    // Read at judging time rather than at filing time so a revision is judged
-    // against the answers that exist now — including one given while the
-    // first version of this item sat held.
-    const priorAsks = priorAsksFor(
-      priorAskRowFor(target.address),
-      {
-        getTask: (id) => taskStore.getTask(id),
-        listThreads: (id) => docStore.listThreads(id),
-      },
-      Date.now(),
-    );
     /**
      * The deterministic half, and it runs FIRST — a link that goes nowhere is
      * a fact, and spending a model call to have it described back is both
@@ -499,6 +487,19 @@ export function createReviewGate(ctx: ReviewGateContext) {
     if (linkReason !== undefined) {
       verdict = { ok: false, reason: linkReason };
     } else {
+      // What the reader has already been asked on this row, down BOTH
+      // channels. Gathered at judging time rather than at filing time, so a
+      // revision is judged against the answers that exist now — including one
+      // given while the first version of this item sat held. Inside this
+      // branch because a held link means no judge call, so no prompt to fill.
+      const priorAsks = priorAsksFor(
+        priorAskRowFor(target.address),
+        {
+          getTask: (id) => taskStore.getTask(id),
+          listThreads: (id) => docStore.listThreads(id),
+        },
+        Date.now(),
+      );
       try {
         verdict = await judge({
           criteria: criteria.value,
