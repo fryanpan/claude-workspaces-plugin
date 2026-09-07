@@ -105,16 +105,31 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
    * threads it still shows have stopped mattering.
    */
   const archiveReview = (setId: string, by: string, reason: string | undefined): Response => {
+    // Read the member links BEFORE the archive: the members leave
+    // `docStore.list()` the moment it commits, and after that there is
+    // nothing left to ask which boards were pointing at them.
+    const memberWorkspaces: Record<string, string[]> = {};
+    for (const meta of docStore.list()) {
+      if (attachmentIdOf(meta) !== setId || meta.docId === setId) continue;
+      const boards = boardsLinking(meta.docId);
+      if (boards.length > 0) memberWorkspaces[meta.docId] = boards;
+    }
     const res = docStore.archiveReview(setId, {
       archivedBy: by,
       ...(reason !== undefined ? { reason } : {}),
       linkedWorkspaces: boardsLinking(setId),
+      ...(Object.keys(memberWorkspaces).length > 0 ? { memberWorkspaces } : {}),
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
     // A board row pointing at a review that no longer loads is a dead
     // end, so archiving takes the row too — and the manifest remembers
     // which boards, so unarchiving puts it back rather than orphaning it.
     unlinkFromEveryBoardWorkspace(setId);
+    // The same reasoning one level down. A MEMBER filed onto a board on its
+    // own is not covered by the set's row, and its `.ydoc` went to `_archive`
+    // with the rest — so the row it left behind addressed a doc the server
+    // would not serve. See review-archive-member-links.test.ts.
+    for (const docId of Object.keys(memberWorkspaces)) unlinkFromEveryBoardWorkspace(docId);
     return j(200, res);
   };
   // Delete a REVIEW as one unit (all-or-nothing open-thread guardrail;
@@ -213,9 +228,19 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       const author = body?.author as { name?: string } | undefined;
       const res = docStore.unarchiveReview(setId, { archivedBy: author?.name ?? 'unknown' });
       if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
-      // Put the review back on every board it was on when it was archived.
+      // Put the review back on every board it was on when it was archived,
+      // and each individually-filed member back on the boards that had it —
+      // which is the whole reason the manifest carries them per member rather
+      // than pooled: pooling would file every member onto every board.
       for (const workspaceId of res.manifest.linkedWorkspaces) {
         if (taskStore.attachDoc(workspaceId, setId).ok) taskProjection.ensureWorkspace(workspaceId);
+      }
+      for (const [docId, boards] of Object.entries(res.manifest.memberWorkspaces ?? {})) {
+        for (const workspaceId of boards) {
+          if (taskStore.attachDoc(workspaceId, docId).ok) {
+            taskProjection.ensureWorkspace(workspaceId);
+          }
+        }
       }
       return j(200, res);
     }
