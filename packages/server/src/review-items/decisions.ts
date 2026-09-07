@@ -145,6 +145,8 @@ export class TaskDecisionStore {
       taskId: task.id,
       answer: text,
       ...(opts.optionId !== undefined ? { optionId: opts.optionId } : {}),
+      // A legacy decision row IS its question: the title asks it.
+      headline: task.title,
       actor,
       links: task.links,
       ts,

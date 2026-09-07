@@ -222,6 +222,8 @@ export interface NudgeFrame {
    *  it `reviewAnsweredLine` sent every reader off to walk a checklist it
    *  could not check for. */
   links?: readonly unknown[];
+  /** What was asked — the answered item's headline. Answer nudges only. */
+  headline?: string;
   ts: number;
 }
 
@@ -428,6 +430,8 @@ export class ReadyWorkNudger {
      *  empty included: "no links" and "no row" are different frames and the
      *  line reads differently for each. */
     taskLinks?: readonly unknown[];
+    /** The answered item's headline, off the event — what was asked. */
+    headline?: string;
     actorId?: string;
   }): void {
     const ts = this.now();
@@ -454,6 +458,7 @@ export class ReadyWorkNudger {
       ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
       ...(input.taskTitle !== undefined ? { title: input.taskTitle } : {}),
       ...(input.taskLinks !== undefined ? { links: input.taskLinks } : {}),
+      ...(input.headline !== undefined ? { headline: input.headline } : {}),
       ts,
     });
   }

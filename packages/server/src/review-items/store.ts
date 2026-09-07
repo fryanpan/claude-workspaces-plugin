@@ -190,6 +190,7 @@ export class ReviewItemStore {
       answer: text,
       ...(opts.answeredWith !== undefined ? { optionId: opts.answeredWith } : {}),
       reviewItemId,
+      headline: item.review.headline,
       actor,
       links: task.links,
       ts,

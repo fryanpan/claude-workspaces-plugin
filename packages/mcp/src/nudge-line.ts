@@ -72,6 +72,9 @@ export interface NudgePayload {
   /** The row's title, which the server stamps onto both frames. Absent from a
    *  server older than that; the id is then all there is to name it by. */
   title?: string;
+  /** What was asked — the answered item's headline. Answer frames only, and
+   *  absent from a server older than the field. */
+  headline?: string;
   /** How many rows were ready when the wake fired. Idle nudges only. */
   readyCount?: number;
   /**
@@ -318,7 +321,10 @@ export function readyIdleLine(p: NudgePayload): string {
  */
 export function reviewAnsweredLine(p: NudgePayload): string {
   const about = namedTask(p);
-  const subject = about ? `your review item on ${about}` : 'a review item you raised';
+  // The headline names WHICH ask on the row — a row can carry several, and
+  // "You merge it" against two candidate merges is not an answer.
+  const item = p.headline ? `your review item "${truncate(p.headline, 100)}"` : 'your review item';
+  const subject = about ? `${item} on ${about}` : p.headline ? item : 'a review item you raised';
   const walk =
     Array.isArray(p.links) && p.links.length > 0
       ? '; walk its links as the propagation checklist'

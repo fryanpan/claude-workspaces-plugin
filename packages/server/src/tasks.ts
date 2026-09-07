@@ -1105,6 +1105,15 @@ export interface DecisionAnsweredEvent {
    * without having to guess when a ticket holds several.
    */
   reviewItemId?: string;
+  /**
+   * WHAT WAS ASKED — the review item's headline, or the decision task's
+   * title on the legacy path. Carried so a consumer that never fetches the
+   * task can still say what the answer answers: the lead once received
+   * "You merge it" against a row with two candidate merges and could not
+   * tell which was meant, and with the read path down had no way to find
+   * out. A bare option label is not a decision.
+   */
+  headline?: string;
   actor: TaskActor;
   /** The decision task's links — a ready-made propagation checklist. */
   links: Ref[];
