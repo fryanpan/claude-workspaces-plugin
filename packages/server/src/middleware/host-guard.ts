@@ -527,7 +527,20 @@ export function classifyHost(
  * every other scope question uses — as
  * `task:<id>`, which is the id a board holds a task's body under.
  */
+/** The static files an "Add to Home Screen" install fetches. */
+const INSTALL_ASSETS: ReadonlySet<string> = new Set([
+  '/manifest.webmanifest',
+  '/apple-touch-icon.png',
+  '/icon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+]);
+
 const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
+  // The board's own web-app manifest — its title and its address, which the
+  // page linking it already showed the reader. What makes a Home Screen
+  // install from a share open on the board instead of on a refused `/`.
+  'manifest.webmanifest': ['GET'],
   // Reads that predate membership — the workspace record, the presence strip,
   // and the review-item queue the strip's thread half arrives on.
   '': ['GET'],
@@ -765,6 +778,19 @@ export function shareScopeAllows(
   if (pathname === '/widget.js' || pathname === '/widget.iife.js') return true;
   if (pathname === '/widget.esm.js' || pathname.startsWith('/widget/')) return true;
   if (pathname === '/favicon.ico') return true;
+  /**
+   * The install assets — the icons a phone's Home Screen shows, and the
+   * product's root manifest. Without these a member who taps "Add to Home
+   * Screen" on a shared board gets a bookmark with no icon: the browser
+   * asked for them and was refused. They are the same static files the app
+   * bundle ships, and they name nothing about any board. The root manifest
+   * is in the set because an attachment page still links it; the board
+   * shell a visitor sees links the board's own (`manifest.webmanifest` in
+   * the table below), which is what makes the install open on their board.
+   * The service worker is NOT here: push subscriptions are not a member
+   * route, so a worker on the share origin would have nothing to do.
+   */
+  if (INSTALL_ASSETS.has(pathname)) return true;
   /**
    * Who am I, and may I write? — `GET /api/auth/session`.
    *
