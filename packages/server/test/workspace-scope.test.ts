@@ -76,7 +76,7 @@ describe('resolveWorkspaceScope', () => {
         method: 'GET',
         url: new URL(`http://x${pathname}`),
       });
-    for (const p of ['/home', '/tasks', '/docs/d-1', '/reviews/r-1']) {
+    for (const p of ['/home', '/tasks', '/docs/d-1', '/attachments/r-1']) {
       const r = askPage(`/workspaces/w-nope${p}`);
       expect(r.kind, p).toBe('refused');
       if (r.kind !== 'refused') throw new Error('unreachable');
@@ -388,7 +388,7 @@ describe('the canonical routes, over HTTP', () => {
       method: 'GET',
       sub: 'mockups/{id}',
     },
-    reviews: {
+    attachments: {
       // An attachment SET, filed on the board that bound the folder.
       mint: async (ws) => {
         const folder = join(dataDir, `folder-${ws}`);
@@ -398,11 +398,11 @@ describe('the canonical routes, over HTTP', () => {
         expect(r.status).toBe(200);
         return ((await r.json()) as { workspaceId: string }).workspaceId;
       },
-      // The set's own READ, not its archive verb: `reviews/<id>/archive`
+      // The set's own READ, not its archive verb: `attachments/<id>/archive`
       // refuses a set it cannot find on its own, so it would answer 404 with
       // this middleware deleted and prove nothing about the board boundary.
       method: 'GET',
-      sub: 'reviews/{id}?format=json',
+      sub: 'attachments/{id}?format=json',
     },
     'review-items': {
       mint: async (ws) => {

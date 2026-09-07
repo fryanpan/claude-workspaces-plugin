@@ -76,7 +76,7 @@ describe('symlink escape from a shared workspace', () => {
     });
 
   const openContext = (relPath: string) =>
-    visitor(`/workspaces/${boardId}/reviews/${workspaceId}/context-file`, {
+    visitor(`/workspaces/${boardId}/attachments/${workspaceId}/context-file`, {
       method: 'POST',
       body: JSON.stringify({ relPath }),
     });
@@ -211,7 +211,7 @@ describe('symlink escape from a shared workspace', () => {
     // miss-rescan window (250ms) or the tree gate answers not-listed first.
     symlinkSync(join(outside, 'id_rsa'), join(repo, 'escape.md'));
     await new Promise((r) => setTimeout(r, 400));
-    const res = await visitor(`/workspaces/${boardId}/reviews/${workspaceId}/editable-file`, {
+    const res = await visitor(`/workspaces/${boardId}/attachments/${workspaceId}/editable-file`, {
       method: 'POST',
       body: JSON.stringify({ relPath: 'escape.md' }),
     });

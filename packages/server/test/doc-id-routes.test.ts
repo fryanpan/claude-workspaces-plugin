@@ -174,7 +174,9 @@ describe('a doc answers to its readable alias everywhere it answers at all', () 
       // resolve against. The listing is where a caller gets the id that
       // works — asserted so the asymmetry is on the record rather than a
       // surprise someone rediscovers.
-      const listing = (await (await local(`/workspaces/${WS}/reviews?archived=true`)).json()) as {
+      const listing = (await (
+        await local(`/workspaces/${WS}/attachments?archived=true`)
+      ).json()) as {
         docs: Array<{ docId: string }>;
       };
       expect(listing.docs.map((d) => d.docId)).toContain(mintedId);

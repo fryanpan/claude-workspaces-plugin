@@ -644,7 +644,7 @@ const GOAL_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
- * The per-review verbs, under `/workspaces/<id>/reviews/<setId>/`.
+ * The per-attachment verbs, under `/workspaces/<id>/attachments/<setId>/`.
  *
  * This is the table the `/api/reviews/` branch used to be — five lines of
  * `if (method === 'GET') return sub === 'tree' || …`, which said the same
@@ -813,7 +813,7 @@ export function shareScopeAllows(
   };
 
   /**
-   * Does this `/api/reviews/<seg>/…` segment name a workspace the share
+   * Does this `/workspaces/<id>/attachments/<seg>/…` segment name a workspace the share
    * covers — the shared workspace itself, or a review filed on it?
    *
    * Deliberately NOT `inScope`: a workspace id and a doc id come from the
@@ -953,7 +953,7 @@ export function shareScopeAllows(
            * in the table and stays refused: a visitor was given a review to
            * read, not to destroy.
            */
-          case 'reviews':
+          case 'attachments':
             return (
               inWorkspaceScope(memberId) &&
               (verb === ''

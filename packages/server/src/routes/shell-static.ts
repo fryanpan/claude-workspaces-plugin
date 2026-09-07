@@ -419,7 +419,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
      *
      * `/workspaces/<workspaceId>/docs/<docId>`,
      * `/workspaces/<workspaceId>/mockups/<docId>`,
-     * `/workspaces/<workspaceId>/reviews/<reviewId>`.
+     * `/workspaces/<workspaceId>/attachments/<setId>`.
      *
      * The workspace segment is CONTEXT, not authorization. It tells the
      * page (and the reader) which workspace they are in, and it is what
@@ -440,7 +440,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       // exists to remove. The suffixed form now names a doc that does not
       // exist, and answers the ordinary not-found page.
       const id = decodeURIComponent(wsResourceMatch[3] ?? '');
-      if (kind === 'reviews') {
+      if (kind === 'attachments') {
         // A review is a set of docs, not a page. Send the reader to the
         // member worth opening first — the same entry `create_diff_review`
         // picks, so the URL and the tool agree on where a review starts.

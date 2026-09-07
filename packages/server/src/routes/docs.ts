@@ -189,8 +189,8 @@ export async function handleDocCreateListRoutes(
     // range and seeds content from git — a bare create can't do that.
     if (type === 'diff') {
       return j(400, {
-        error: 'use POST /workspaces/{workspaceId}/reviews',
-        hint: 'Diff attachments are created per changed file by POST /workspaces/{workspaceId}/reviews {repo, base, target}.',
+        error: 'use POST /workspaces/{workspaceId}/attachments',
+        hint: 'Diff attachments are created per changed file by POST /workspaces/{workspaceId}/attachments {repo, base, target}.',
       });
     }
     if ((type === 'markdown' || type === 'code') && !sourceUrl) {

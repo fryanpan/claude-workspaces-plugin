@@ -169,8 +169,8 @@ describe('the editor boots against the doc the address names', () => {
  * `{}` and throws inside a render nothing awaits.
  */
 function reviewOf(workspaceId: string, relPath: string): void {
-  server.on(`/workspaces/${WS}/reviews/${workspaceId}/grouped`, { groups: [] });
-  server.on(`/workspaces/${WS}/reviews/${workspaceId}/files`, {
+  server.on(`/workspaces/${WS}/attachments/${workspaceId}/grouped`, { groups: [] });
+  server.on(`/workspaces/${WS}/attachments/${workspaceId}/files`, {
     files: [{ docId: `${workspaceId}:${relPath}`, relPath, status: 'modified' }],
   });
 }

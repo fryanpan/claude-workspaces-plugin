@@ -16123,7 +16123,7 @@ var TOOL_LIST = {
     },
     {
       name: "create_workspace",
-      description: "Create a board: goals, tasks, and the docs and reviews filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals — write them with set_goal_list. A folder bind or diff review is content to file on a board, not another board.",
+      description: "Create a board: goals, tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals — write them with set_goal_list. A folder bind or diff review is content to file on a board, not another board.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17301,7 +17301,7 @@ async function handleDocsTool(name, a, ctx) {
         subscribe,
         producedBy
       } = a;
-      const res = await http("POST", `${board()}/reviews`, {
+      const res = await http("POST", `${board()}/attachments`, {
         repo,
         base,
         ...target ? { target } : {},
@@ -17323,13 +17323,13 @@ async function handleDocsTool(name, a, ctx) {
       const { setId, force, purge } = a;
       const params = [force ? "force=true" : "", purge ? "purge=true" : ""].filter(Boolean);
       const qs = params.length > 0 ? `?${params.join("&")}` : "";
-      const res = await http("DELETE", `${board()}/reviews/${encodeURIComponent(setId)}${qs}`);
+      const res = await http("DELETE", `${board()}/attachments/${encodeURIComponent(setId)}${qs}`);
       return ok2(res);
     }
     case "archive_review":
     case "archive_attachment_set": {
       const { setId, reason } = a;
-      const res = await http("POST", `${board()}/reviews/${encodeURIComponent(setId)}/archive`, {
+      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(setId)}/archive`, {
         author: AUTHOR,
         ...reason !== undefined ? { reason } : {}
       });
@@ -17338,7 +17338,7 @@ async function handleDocsTool(name, a, ctx) {
     case "unarchive_review":
     case "unarchive_attachment_set": {
       const { setId } = a;
-      const res = await http("POST", `${board()}/reviews/${encodeURIComponent(setId)}/unarchive`, {
+      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(setId)}/unarchive`, {
         author: AUTHOR
       });
       return ok2(res);
@@ -17360,7 +17360,7 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "list_archived_reviews":
     case "list_archived_attachments": {
-      const res = await http("GET", `${board()}/reviews?archived=true`);
+      const res = await http("GET", `${board()}/attachments?archived=true`);
       return ok2(res);
     }
     case "delete_workspace": {
@@ -17375,7 +17375,7 @@ async function handleDocsTool(name, a, ctx) {
     case "refresh_attachment_set": {
       const { setId, workspaceId } = a;
       const id = setId ?? workspaceId ?? "";
-      const res = await http("POST", `${board()}/reviews/${encodeURIComponent(id)}/refresh`, {});
+      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(id)}/refresh`, {});
       return ok2(res);
     }
     case "set_workspace_groups":
@@ -17383,7 +17383,7 @@ async function handleDocsTool(name, a, ctx) {
     case "set_attachment_groups": {
       const { setId, workspaceId, groups } = a;
       const id = setId ?? workspaceId ?? "";
-      const res = await http("POST", `${board()}/reviews/${encodeURIComponent(id)}/groups`, {
+      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(id)}/groups`, {
         groups
       });
       return ok2(res);
@@ -18872,7 +18872,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.180";
+var PLUGIN_VERSION = "0.1.181";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
@@ -18967,7 +18967,7 @@ var server = new Server({
     "matching the path, route through the MCP. If not, normal file edits are fine.",
     "",
     "WORKSPACE BOARD: a board workspace is a goal + a task board + linked docs.",
-    "create_workspace mints one; attach_doc links existing docs/reviews to it;",
+    "create_workspace mints one; attach_doc links existing docs/attachments to it;",
     "create_tasks (ALWAYS a list — one idea is a one-row list) and",
     "spin_off_task add work (omit `goal` and the task lands UNPLACED in",
     "Backlog awaiting triage — the create says so and hands you the goal",

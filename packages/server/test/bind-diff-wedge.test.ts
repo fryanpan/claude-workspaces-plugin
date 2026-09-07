@@ -111,7 +111,7 @@ describe('binding a diff over a tree that has stopped answering', () => {
     // Caught, not bare: if the assertion below fails, `afterEach` stops the
     // server while this is still in flight, and a bare rejection would be
     // reported against whichever test runs next.
-    const bind = fetch(`${base}/workspaces/${WS}/reviews`, {
+    const bind = fetch(`${base}/workspaces/${WS}/attachments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ repo, base: 'HEAD' }),
@@ -151,7 +151,7 @@ describe('binding a diff over a tree that has stopped answering', () => {
     const base = `http://localhost:${handle.port}`;
     WS = await seedBoard(base);
 
-    const res = await fetch(`${base}/workspaces/${WS}/reviews`, {
+    const res = await fetch(`${base}/workspaces/${WS}/attachments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ repo, base: 'HEAD' }),

@@ -105,7 +105,7 @@ describe('parseWorkspaceLink', () => {
   });
 
   it('parses a review URL', () => {
-    expect(parseWorkspaceLink(`${HOST}/workspaces/w-abc123/reviews/set-9`)).toEqual({
+    expect(parseWorkspaceLink(`${HOST}/workspaces/w-abc123/attachments/set-9`)).toEqual({
       kind: 'review',
       workspaceId: 'w-abc123',
       reviewId: 'set-9',

@@ -187,7 +187,10 @@ describe('resources under the workspace path', () => {
 
     beforeAll(async () => {
       writeFileSync(join(folder, 'README.md'), '# Fixture\n\nbody\n');
-      const bound = await post(`/workspaces/${WS}/reviews`, { repo: folder, hubWorkspaceId: wsId });
+      const bound = await post(`/workspaces/${WS}/attachments`, {
+        repo: folder,
+        hubWorkspaceId: wsId,
+      });
       expect(bound.status).toBe(200);
       const res = (await bound.json()) as {
         reviewId: string;
@@ -199,15 +202,15 @@ describe('resources under the workspace path', () => {
       expect(entryDocId).not.toBe('');
     });
 
-    it('redirects /workspaces/<id>/reviews/<reviewId> to a member doc', async () => {
-      const r = await local(`/workspaces/${wsId}/reviews/${encodeURIComponent(reviewId)}`);
+    it('redirects /workspaces/<id>/attachments/<reviewId> to a member doc', async () => {
+      const r = await local(`/workspaces/${wsId}/attachments/${encodeURIComponent(reviewId)}`);
       expect(r.status).toBe(302);
       const loc = r.headers.get('location') ?? '';
       expect(loc).toStartWith(`/workspaces/${wsId}/docs/`);
     });
 
     it('404s a review id with no members', async () => {
-      const r = await local(`/workspaces/${wsId}/reviews/not-a-review`);
+      const r = await local(`/workspaces/${wsId}/attachments/not-a-review`);
       expect(r.status).toBe(404);
     });
 

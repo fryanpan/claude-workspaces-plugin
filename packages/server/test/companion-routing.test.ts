@@ -138,7 +138,7 @@ describe('companion (:edit) doc comments route to the member watchers', () => {
     memberId: string;
     companionId: string;
   }> {
-    const bind = await post(`/workspaces/${WS}/reviews`, { repo, base: baseSha });
+    const bind = await post(`/workspaces/${WS}/attachments`, { repo, base: baseSha });
     expect(bind.status).toBe(200);
     const bound = (await bind.json()) as {
       reviewId: string;
@@ -147,7 +147,7 @@ describe('companion (:edit) doc comments route to the member watchers', () => {
     const memberId = bound.files.find((f) => f.relPath === 'README.md')?.docId ?? '';
     expect(memberId).not.toBe('');
     const open = await post(
-      `/workspaces/${WS}/reviews/${encodeURIComponent(bound.reviewId)}/editable-file`,
+      `/workspaces/${WS}/attachments/${encodeURIComponent(bound.reviewId)}/editable-file`,
       {
         relPath: 'README.md',
       },

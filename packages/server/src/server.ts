@@ -1234,7 +1234,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    *   /workspaces/<workspaceId>                     the board
    *   /workspaces/<workspaceId>/docs/<docId>        a doc, of any content kind
    *   /workspaces/<workspaceId>/mockups/<docId>     a mockup's own HTML
-   *   /workspaces/<workspaceId>/reviews/<reviewId>  a review, → its entry doc
+   *   /workspaces/<workspaceId>/attachments/<setId>  a set, → its entry doc
    *
    * `/review/<docId>` and `/mockup/<docId>` are the addresses these used to
    * have. They still answer, and they always will: those URLs sit in comment
@@ -1331,7 +1331,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       }
       case 'docs':
       case 'mockups':
-      case 'reviews': {
+      case 'attachments': {
         // The board-feedback doc belongs to EVERY board, and that is what it
         // is for: one place feedback about the product lands, reachable from
         // whichever board the person is looking at. It is filed on none of
@@ -2371,7 +2371,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         }
         // --- REST: the board delete --- see ./routes/workspace-delete.ts.
         // It stays BELOW the archive family, which serves `DELETE
-        // /workspaces/<ws>/reviews/<setId>`. The order used to be load-bearing
+        // /workspaces/<ws>/attachments/<setId>`. The order used to be load-bearing
         // because one path meant either store; now the two verbs have two
         // addresses and cannot be confused, and the order is kept because
         // nothing is gained by moving it.

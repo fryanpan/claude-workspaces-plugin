@@ -294,7 +294,7 @@ export interface BoardWorkspace {
   /** Ordered by priority — board sections ARE the goals. `chores` is a
    *  reserved out-of-band id, never present here (§3.2 edit contract). */
   goals: WorkspaceGoal[];
-  /** Docs/reviews linked via attachDoc. Links, not membership — the docs'
+  /** Docs/attachments linked via attachDoc. Links, not membership — the docs'
    *  own metadata is untouched. */
   docIds: string[];
   /**

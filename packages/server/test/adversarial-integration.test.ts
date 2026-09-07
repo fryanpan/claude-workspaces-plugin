@@ -282,13 +282,13 @@ describe('ADVERSARIAL: landing project->artifacts + delete_workspace guardrail',
     files = new Map(body.files.map((f) => [f.relPath, f]));
     // bind is lazy now (entry only) — open the rest like a reviewer would.
     const allR = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/files`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/files`,
     );
     const all = await j<{ files: Array<{ relPath: string }> }>(allR);
     for (const f of all.files) {
       if (files.has(f.relPath)) continue;
       const cr = await fetch(
-        `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/context-file`,
+        `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/context-file`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -321,7 +321,7 @@ describe('ADVERSARIAL: landing project->artifacts + delete_workspace guardrail',
     expect(proj).toContain('1 artifact');
   });
 
-  it('DELETE /workspaces/:ws/reviews/:id without force is refused all-or-nothing with an open thread', async () => {
+  it('DELETE /workspaces/:ws/attachments/:id without force is refused all-or-nothing with an open thread', async () => {
     const mdDocId = files.get('README.md')!.docId;
     await j(
       await fetch(`${base}/workspaces/${WS}/docs/${encodeURIComponent(mdDocId)}/threads/by_find`, {
@@ -335,9 +335,12 @@ describe('ADVERSARIAL: landing project->artifacts + delete_workspace guardrail',
       }),
     );
 
-    const r = await fetch(`${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}`, {
-      method: 'DELETE',
-    });
+    const r = await fetch(
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}`,
+      {
+        method: 'DELETE',
+      },
+    );
     expect(r.status).toBe(409);
     const body = (await r.json()) as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
@@ -347,12 +350,12 @@ describe('ADVERSARIAL: landing project->artifacts + delete_workspace guardrail',
     expect(handle.docStore.get(files.get('src/index.ts')!.docId)).toBeTruthy();
   });
 
-  it('DELETE /workspaces/:ws/reviews/:id?force=true retires ALL members', async () => {
+  it('DELETE /workspaces/:ws/attachments/:id?force=true retires ALL members', async () => {
     // Soft since 0.1.92: the whole review leaves the live server as one unit,
     // which is what this test has always been about, but the persisted state
     // is archived rather than destroyed.
     const r = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}?force=true`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}?force=true`,
       { method: 'DELETE' },
     );
     const body = await j<{ ok: true; archived: number }>(r);

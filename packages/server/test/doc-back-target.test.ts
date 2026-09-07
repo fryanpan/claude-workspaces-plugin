@@ -120,7 +120,7 @@ describe('a doc knows which board to go back to', () => {
     const boardId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
     WS = boardId;
 
-    const bound = await post(`/workspaces/${boardId}/reviews`, {
+    const bound = await post(`/workspaces/${boardId}/attachments`, {
       repo: folder,
       hubWorkspaceId: boardId,
     });

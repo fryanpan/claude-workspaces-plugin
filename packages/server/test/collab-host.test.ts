@@ -383,7 +383,7 @@ describe('the collaboration hostname over HTTP', () => {
         body: JSON.stringify({ folderPath: '/etc' }),
       });
       expect(bind.status).toBe(403);
-      const diff = await asCollaborator(`/workspaces/${board}/reviews`, {
+      const diff = await asCollaborator(`/workspaces/${board}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ repo: '/', base: 'HEAD' }),
@@ -431,7 +431,7 @@ describe('the collaboration hostname over HTTP', () => {
           .status,
       ).toBe(403);
       const regroup = await asCollaborator(
-        `/workspaces/${board}/reviews/${encodeURIComponent(board)}/groups`,
+        `/workspaces/${board}/attachments/${encodeURIComponent(board)}/groups`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

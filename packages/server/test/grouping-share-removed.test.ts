@@ -130,7 +130,7 @@ describe('a grouping cannot be shared on its own', () => {
     expect(bindGroupingId).not.toBe(boardId);
 
     // A diff review — also a GROUPING, filed on the same board.
-    const diff = await local(`/workspaces/${boardId}/reviews`, {
+    const diff = await local(`/workspaces/${boardId}/attachments`, {
       repo,
       base: 'main',
     });
@@ -431,7 +431,7 @@ describe('a grouping cannot be shared on its own', () => {
         (
           await withCookie(
             'legacy02',
-            `/workspaces/${WS}/reviews/${encodeURIComponent(diffGroupingId)}/tree`,
+            `/workspaces/${WS}/attachments/${encodeURIComponent(diffGroupingId)}/tree`,
           )
         ).status,
       ).toBe(401);
@@ -552,8 +552,11 @@ describe('a grouping cannot be shared on its own', () => {
       ).toBe(200);
       // And the review's own tree, through the grouping→board hop.
       expect(
-        (await asVisitor(`/workspaces/${WS}/reviews/${encodeURIComponent(diffGroupingId)}/tree`))
-          .status,
+        (
+          await asVisitor(
+            `/workspaces/${WS}/attachments/${encodeURIComponent(diffGroupingId)}/tree`,
+          )
+        ).status,
       ).toBe(200);
     });
 

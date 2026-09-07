@@ -19,7 +19,7 @@ import { seedBoard } from './workspace-seed.ts';
  * HTTP surface: a board declares where its planning notes get checked in,
  * `POST /api/docs` derives a pinned file from it, and `/api/docs/<id>/home`
  * pins/reads/unpins an explicit home. Docs bound the classic way (an
- * explicit path — the `<repo>/.claude/reviews/` convention) must be
+ * explicit path — the `<repo>/.claude/attachments/` convention) must be
  * untouched by all of it. All fixtures are synthetic.
  */
 

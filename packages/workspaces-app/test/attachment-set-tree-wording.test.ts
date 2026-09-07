@@ -22,7 +22,7 @@ function mountSidebar(): HTMLElement {
   return document.getElementById('set-pane-list') as HTMLElement;
 }
 
-/** One stale file and one live file, as `/api/reviews/:id/tree` returns them. */
+/** One stale file and one live file, as `/api/attachments/:id/tree` returns them. */
 function treeResponse() {
   const file = (name: string, stale: boolean) => ({
     type: 'file',

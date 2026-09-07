@@ -129,7 +129,7 @@ describe('over the real routes: context-file refuses the un-ignored .env', () =>
     });
 
   const open = (relPath: string) =>
-    local(`/workspaces/${WS}/reviews/${reviewId}/context-file`, {
+    local(`/workspaces/${WS}/attachments/${reviewId}/context-file`, {
       method: 'POST',
       body: JSON.stringify({ relPath }),
     });
@@ -174,7 +174,9 @@ describe('over the real routes: context-file refuses the un-ignored .env', () =>
   });
 
   it('nor does it appear in the tree the visitor browses', async () => {
-    const raw = await local(`/workspaces/${WS}/reviews/${reviewId}/files`).then((r) => r.text());
+    const raw = await local(`/workspaces/${WS}/attachments/${reviewId}/files`).then((r) =>
+      r.text(),
+    );
     expect(raw).toContain('note.md'); // control: the tree is not empty
     expect(raw).not.toContain('.env');
   });

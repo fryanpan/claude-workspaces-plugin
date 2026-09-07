@@ -92,7 +92,7 @@ export function redactMetaForVisitor(
 }
 
 /** `/workspaces/<id>/<kind>/<rest>` — the addressable-resource shape. */
-const WORKSPACE_RESOURCE = /^\/workspaces\/[^/]+\/(docs|mockups|reviews)\/(.+)$/;
+const WORKSPACE_RESOURCE = /^\/workspaces\/[^/]+\/(docs|mockups|attachments)\/(.+)$/;
 
 /**
  * A review URL a visitor can actually use: same path, but rooted at the
@@ -136,7 +136,7 @@ export function relativeReviewUrl(
 /**
  * Strip a workspace TREE down to what a share visitor may see.
  *
- * `GET /api/reviews/<setId>/tree` and `/files` are in a workspace visitor's
+ * `GET /workspaces/<ws>/attachments/<setId>/tree` and `/files` are in a workspace visitor's
  * scope — they're what makes the set browsable — but unlike `/api/docs/<id>`
  * they never passed through any redaction, because they build their payload
  * themselves rather than returning a DocMeta. Two things leaked to anyone
@@ -195,7 +195,7 @@ function redactNode(node: unknown, scopeWorkspaceId?: string): unknown {
 }
 
 /**
- * Same treatment for `GET /api/reviews/<setId>/grouped`, the diff review's
+ * Same treatment for `GET /workspaces/<ws>/attachments/<setId>/grouped`, the diff review's
  * sidebar model, whose payload nests the file nodes one level down inside
  * `groups`.
  *
@@ -221,7 +221,7 @@ export function redactWorkspaceGroupedForVisitor<
 }
 
 /**
- * Same treatment for `GET /api/reviews/<setId>/files`, whose payload is a
+ * Same treatment for `GET /workspaces/<ws>/attachments/<setId>/files`, whose payload is a
  * flat `files` array rather than a tree.
  */
 export function redactWorkspaceFilesForVisitor<T extends { root?: string; files?: unknown[] }>(

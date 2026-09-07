@@ -441,7 +441,7 @@ describe('host gate + share scoping over HTTP', () => {
         body: JSON.stringify({ folderPath: '/etc' }),
       });
       expect(ws.status).toBe(403);
-      const diff = await asVisitor(`/workspaces/${boardShared}/reviews`, {
+      const diff = await asVisitor(`/workspaces/${boardShared}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ repo: '/', base: 'HEAD' }),
@@ -488,20 +488,20 @@ describe('host gate + share scoping over HTTP', () => {
       // workspace share reaches its OWN workspace and stops at the edge of it.
       // Positive control first, or the refusals below would pass on a visitor
       // who can reach no workspace at all.
-      expect((await asVisitor(`/workspaces/${boardShared}/reviews/${WS_SHARED}/tree`)).status).toBe(
-        200,
-      );
+      expect(
+        (await asVisitor(`/workspaces/${boardShared}/attachments/${WS_SHARED}/tree`)).status,
+      ).toBe(200);
       // `grouped` and `files` answer 404 on a one-doc grouping (no diff groups,
       // no repo root) — asserting 200 would be asserting the fixture. What is
       // under test is the GATE, so: past it for its own workspace, refused for
       // the other one.
       for (const sub of ['tree', 'grouped', 'files']) {
         expect(
-          (await asVisitor(`/workspaces/${boardShared}/reviews/${WS_SHARED}/${sub}`)).status,
+          (await asVisitor(`/workspaces/${boardShared}/attachments/${WS_SHARED}/${sub}`)).status,
           sub,
         ).not.toBe(403);
         expect(
-          (await asVisitor(`/workspaces/${boardShared}/reviews/${WS_OTHER}/${sub}`)).status,
+          (await asVisitor(`/workspaces/${boardShared}/attachments/${WS_OTHER}/${sub}`)).status,
           sub,
         ).toBe(403);
       }
@@ -787,7 +787,7 @@ describe('workspace share over HTTP', () => {
         .status,
     ).toBe(200);
     const tree = await asVisitor(
-      `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/tree`,
+      `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/tree`,
     );
     expect(tree.status).toBe(200);
   });
@@ -795,7 +795,7 @@ describe('workspace share over HTTP', () => {
   it('can open a sibling lazily and then read it — the whole point', async () => {
     // bind_folder binds only the entry; this is how the rest come into being.
     const opened = await asVisitor(
-      `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/editable-file`,
+      `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/editable-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -817,7 +817,7 @@ describe('workspace share over HTTP', () => {
 
   it('cannot escape the workspace root via relPath', async () => {
     const r = await asVisitor(
-      `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/context-file`,
+      `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/context-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -886,7 +886,7 @@ describe('workspace share over HTTP', () => {
     // entry doc — because the survivor is the positive control: the share is
     // demonstrably still live and still reaching its members.
     const opened = await asVisitor(
-      `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/editable-file`,
+      `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/editable-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -931,7 +931,7 @@ describe('workspace share over HTTP', () => {
     // GET /api/docs/<id> is IN a visitor's scope — they need it to render —
     // but the full DocMeta describes Bryan's machine, not the document.
     const opened = await asVisitor(
-      `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/editable-file`,
+      `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/editable-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -972,7 +972,7 @@ describe('workspace share over HTTP', () => {
     // feedback as the person who asked for it.
     // Its own doc, not the shared entry — a sibling test deletes that one.
     const opened = await asVisitor(
-      `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/editable-file`,
+      `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/editable-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1017,7 +1017,7 @@ describe('workspace share over HTTP', () => {
   it('CANNOT record reading activity as Bryan by omitting the author', async () => {
     // /activity used to DEFAULT to Bryan when no author was sent.
     const opened = await asVisitor(
-      `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/editable-file`,
+      `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/editable-file`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1050,7 +1050,7 @@ describe('workspace share over HTTP', () => {
     // and how the sidebar organizes them, stays with whoever shared it.
     for (const sub of ['refresh', 'groups']) {
       const r = await asVisitor(
-        `/workspaces/${boardId}/reviews/${encodeURIComponent(workspaceId)}/${sub}`,
+        `/workspaces/${boardId}/attachments/${encodeURIComponent(workspaceId)}/${sub}`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

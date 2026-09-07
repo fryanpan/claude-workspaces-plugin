@@ -75,7 +75,7 @@ describe('context-file opens only what git ls-files shows', () => {
     handle = createServer({ port: 0, dataDir });
     WS = await seedBoard(`http://localhost:${handle.port}`);
     ({ repo, base } = makeRepo());
-    const bind = await post(`/workspaces/${WS}/reviews`, { repo, base });
+    const bind = await post(`/workspaces/${WS}/attachments`, { repo, base });
     expect(bind.status).toBe(200);
     reviewId = ((await bind.json()) as { reviewId: string }).reviewId;
   });
@@ -87,7 +87,7 @@ describe('context-file opens only what git ls-files shows', () => {
   });
 
   const open = (relPath: string, verb: 'context-file' | 'editable-file' = 'context-file') =>
-    post(`/workspaces/${WS}/reviews/${encodeURIComponent(reviewId)}/${verb}`, { relPath });
+    post(`/workspaces/${WS}/attachments/${encodeURIComponent(reviewId)}/${verb}`, { relPath });
 
   it('positive control: a tracked, unchanged file opens', async () => {
     const r = await open('note.md');
@@ -198,7 +198,9 @@ describe('the non-git listing carries its own floor', () => {
   });
 
   const open = (relPath: string) =>
-    post(`/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/context-file`, { relPath });
+    post(`/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/context-file`, {
+      relPath,
+    });
 
   it('positive control: an ordinary file in the same folder opens', async () => {
     // Without this, every refusal below could be a bind that never happened.
@@ -217,7 +219,7 @@ describe('the non-git listing carries its own floor', () => {
     // The refusal above and the listing are the same rule; a tree that still
     // advertised `.env` would be telling a visitor a path worth guessing.
     const res = await fetch(
-      `http://localhost:${handle.port}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/files`,
+      `http://localhost:${handle.port}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/files`,
       { headers: { host: `localhost:${handle.port}` } },
     );
     expect(res.status).toBe(200);

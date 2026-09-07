@@ -79,7 +79,7 @@ describe('workspace folder-review e2e (HTTP)', () => {
     // Open the remaining files like a reviewer clicking the all-files tree.
     for (const relPath of ['src/index.ts', 'src/data.json']) {
       const cr = await fetch(
-        `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/context-file`,
+        `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/context-file`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -99,9 +99,9 @@ describe('workspace folder-review e2e (HTTP)', () => {
     expect([...files.keys()].sort()).toEqual(['README.md', 'src/data.json', 'src/index.ts']);
   });
 
-  it(`(b) GET /workspaces/${WS}/reviews/:id/tree returns the nested tree with zero open counts`, async () => {
+  it(`(b) GET /workspaces/${WS}/attachments/:id/tree returns the nested tree with zero open counts`, async () => {
     const r = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/tree`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/tree`,
     );
     type FileNode = { type: 'file'; relPath: string; openCount: number; fileType: string };
     type DirNode = { type: 'dir'; name: string; openCount: number; children: Node[] };
@@ -173,7 +173,7 @@ describe('workspace folder-review e2e (HTTP)', () => {
     // Re-fetch the tree: the code file's openCount is 1, and it rolls up
     // through the `src` folder and the workspace total.
     const r2 = await fetch(
-      `${base}/workspaces/${WS}/reviews/${encodeURIComponent(workspaceId)}/tree`,
+      `${base}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/tree`,
     );
     type FileNode = { type: 'file'; relPath: string; openCount: number };
     type DirNode = { type: 'dir'; name: string; openCount: number; children: Node[] };

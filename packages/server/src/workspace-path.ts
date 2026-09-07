@@ -114,9 +114,9 @@ export const BOARD_PAGE_PATH = new RegExp(
 
 /**
  * The three resources a board addresses a PAGE for: `docs/<id>`,
- * `mockups/<id>` and `reviews/<id>`.
+ * `mockups/<id>` and `attachments/<id>`.
  */
-const BOARD_PAGE_RESOURCES: readonly string[] = ['docs', 'mockups', 'reviews'];
+const BOARD_PAGE_RESOURCES: readonly string[] = ['docs', 'mockups', 'attachments'];
 
 /**
  * `/workspaces/<id>/<kind>/<resourceId>`, as the matcher that serves it.

@@ -411,7 +411,7 @@ export async function openCompanionDoc(ctx: MountContext): Promise<CompanionDoc 
     // that braces: a 401 arriving for any other reason must still not
     // interrupt somebody who is only reading.
     const res = await asBackgroundWrite(() =>
-      fetch(api(`reviews/${encodeURIComponent(ctx.workspaceId)}/editable-file`), {
+      fetch(api(`attachments/${encodeURIComponent(ctx.workspaceId)}/editable-file`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ relPath: ctx.relPath }),

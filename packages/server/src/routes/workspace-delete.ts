@@ -9,7 +9,7 @@
  * It is gone with the canonical cutover (owner's call), and the reason is the
  * cutover's own shape rather than tidiness. A review is not a board and never
  * was; it is a resource a board holds, so it is addressed under the board that
- * holds it — `DELETE /workspaces/<ws>/reviews/<setId>`, which the archive
+ * holds it — `DELETE /workspaces/<ws>/attachments/<setId>`, which the archive
  * family serves and which the scope middleware checks the pair of ids on. One
  * id in the board's slot could only ever mean one of the two things, and the
  * store that happened to know it was what decided which: an id that both

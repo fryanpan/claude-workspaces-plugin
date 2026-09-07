@@ -515,7 +515,7 @@ describe('share links over HTTP', () => {
     });
 
     it('gets nothing useful from root or any path naming no workspace', async () => {
-      for (const path of ['/', '/workspaces', `/workspaces/${board}/reviews`, '/demos']) {
+      for (const path of ['/', '/workspaces', `/workspaces/${board}/attachments`, '/demos']) {
         const r = await onShareHost(path, member);
         expect(r.status, path).toBe(403);
         expect(await r.json(), path).toEqual({ error: 'out_of_share_scope' });
@@ -1008,7 +1008,7 @@ describe('share links over HTTP', () => {
         // Anything that names a path on the owner's machine.
         ['/workspaces', { method: 'POST' }],
         [`/workspaces/${board}/docs`, { method: 'POST' }],
-        [`/workspaces/${board}/reviews`, { method: 'POST' }],
+        [`/workspaces/${board}/attachments`, { method: 'POST' }],
         // This board's own lifecycle: it was given to work on, not to retire.
         [`/workspaces/${encodeURIComponent(board)}/retired`, { method: 'PUT' }],
         [`/workspaces/${encodeURIComponent(board)}`, { method: 'DELETE' }],

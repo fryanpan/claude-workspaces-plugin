@@ -134,7 +134,7 @@ const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'auth', 'widget-token'],
   ['workspaces', ':id', 'chat-audit'],
   ['api', 'deploy'],
-  ['workspaces', ':id', 'reviews'],
+  ['workspaces', ':id', 'attachments'],
   ['workspaces', ':id', 'dispatches'],
   ['workspaces', ':id', 'docs'],
   ['workspaces', ':id', 'docs:attach'],
@@ -158,20 +158,20 @@ const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['widget.iife.js'],
   ['widget.js'],
   // one id, top level
-  ['workspaces', ':id', 'reviews', ':id'],
-  ['workspaces', ':id', 'reviews', ':id', 'archive'],
-  ['workspaces', ':id', 'reviews', ':id', 'unarchive'],
-  // A review's eight subroutes, under the board that holds it. A review is
-  // not a board — it is a member of one — so it sits in the `reviews`
-  // collection rather than answering at the board's own address.
-  ['workspaces', ':id', 'reviews', ':id', 'refresh'],
-  ['workspaces', ':id', 'reviews', ':id', 'groups'],
-  ['workspaces', ':id', 'reviews', ':id', 'grouped'],
-  ['workspaces', ':id', 'reviews', ':id', 'threads'],
-  ['workspaces', ':id', 'reviews', ':id', 'files'],
-  ['workspaces', ':id', 'reviews', ':id', 'tree'],
-  ['workspaces', ':id', 'reviews', ':id', 'context-file'],
-  ['workspaces', ':id', 'reviews', ':id', 'editable-file'],
+  ['workspaces', ':id', 'attachments', ':id'],
+  ['workspaces', ':id', 'attachments', ':id', 'archive'],
+  ['workspaces', ':id', 'attachments', ':id', 'unarchive'],
+  // An attachment set's eight subroutes, under the board that holds it. A
+  // set is not a board — it is a member of one — so it sits in the
+  // `attachments` collection, not at the board's own address.
+  ['workspaces', ':id', 'attachments', ':id', 'refresh'],
+  ['workspaces', ':id', 'attachments', ':id', 'groups'],
+  ['workspaces', ':id', 'attachments', ':id', 'grouped'],
+  ['workspaces', ':id', 'attachments', ':id', 'threads'],
+  ['workspaces', ':id', 'attachments', ':id', 'files'],
+  ['workspaces', ':id', 'attachments', ':id', 'tree'],
+  ['workspaces', ':id', 'attachments', ':id', 'context-file'],
+  ['workspaces', ':id', 'attachments', ':id', 'editable-file'],
   ['share', ':id'],
   ['s', ':id'],
   ['api', 'share', ':id'],
