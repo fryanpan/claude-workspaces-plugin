@@ -2315,30 +2315,84 @@ body.is-reading-width #editor > .live-zone {
   transition: margin-top var(--lz-collapse-ms) var(--lz-ease-settle), text-indent
     var(--lz-collapse-ms) var(--lz-ease-settle);
 }
-/* The settle wash: the note a chunk just became, highlighted where it landed
-   (settle-wash.ts decorates the block). ~1.5s held at full wash, then a
-   1.3s fade. No provenance label — the highlight IS the provenance. */
-#editor > .ProseMirror .settle-wash {
-  animation: settle-wash 2800ms ease-out;
+/* The recent-note tint: the lines the notetaker just wrote, tinted where
+   they landed (settle-wash.ts decorates each block with `data-age` 0–3, one
+   step per thirty seconds, gone at two minutes). Approved mock
+   recent-notes-round1, variant A: the whole line is tinted and a thin rule
+   sits at its left edge; step 0 — the last thirty seconds — is the loud one
+   (owner, 2026-09-06). Four steps rather than a smooth fade, so a document
+   somebody is reading is repainted four times, not every frame. No
+   provenance label — the tint IS the provenance. */
+#editor > .ProseMirror .recent-note {
+  position: relative;
+  border-radius: var(--radius-sm, 4px);
+  background: color-mix(in srgb, var(--accent) calc(var(--recent-w) * 16%), transparent);
+  box-shadow: -8px 0 0 color-mix(in srgb, var(--accent) calc(var(--recent-w) * 16%), transparent);
+  transition: background 400ms ease-out, box-shadow 400ms ease-out;
 }
-@keyframes settle-wash {
-  0% {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-    box-shadow: -20px 0 0 color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-  55% {
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-    box-shadow: -20px 0 0 color-mix(in srgb, var(--accent) 16%, transparent);
-  }
-  100% {
-    background: transparent;
-    box-shadow: -20px 0 0 transparent;
+#editor > .ProseMirror .recent-note::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) calc(var(--recent-w) * 90%), transparent);
+}
+#editor > .ProseMirror .recent-note[data-age="0"] {
+  --recent-w: 1;
+}
+#editor > .ProseMirror .recent-note[data-age="1"] {
+  --recent-w: 0.6;
+}
+#editor > .ProseMirror .recent-note[data-age="2"] {
+  --recent-w: 0.38;
+}
+#editor > .ProseMirror .recent-note[data-age="3"] {
+  --recent-w: 0.18;
+}
+/* The edge markers (recent-note-markers.ts): a pill at the top or bottom of
+   the editor pane naming how many tinted notes sit past that edge; a tap
+   scrolls to the nearest. Pinned to #editor-pane, so it never scrolls away
+   with the prose; the top offset is set by the module to clear the format
+   bar. Counts and disappears — never dismissed. */
+#editor-pane > .recent-edge {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: 600 12px / 1.4 var(--sans, system-ui, sans-serif);
+  cursor: pointer;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.22);
+}
+#editor-pane > .recent-edge.bottom {
+  bottom: calc(var(--safe-bottom, 0px) + 12px);
+}
+#editor-pane > .recent-edge:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+/* A finger, not a cursor: the pill grows to a 40px target on touch. */
+@media (pointer: coarse) {
+  #editor-pane > .recent-edge {
+    padding: 11px 16px;
+    font-size: 13px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lz-partial::after,
-  #editor > .ProseMirror .settle-wash {
+  .lz-partial::after {
     animation: none;
+  }
+  #editor > .ProseMirror .recent-note {
+    transition: none;
   }
 }
 

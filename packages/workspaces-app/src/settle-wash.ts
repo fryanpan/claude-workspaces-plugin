@@ -1,18 +1,29 @@
 import { Extension } from '@tiptap/core';
 import type { Node as ProseNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { type EditorState, Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 // Same key instance Collaboration registers under — see editor.ts's import
 // note; y-prosemirror's own export is a different key and never matches.
 import { ySyncPluginKey } from '@tiptap/y-tiptap';
 
 /**
- * The settle wash: when the notetaker's freshly composed note arrives in the
- * doc mid-meeting, the lines it wrote are highlighted and the highlight
- * lingers (~2.8s: hold, then fade — the approved mock's `settle-wash`), so
- * the eye can follow a chunk of provisional transcript "up" into the note it
- * became. No label, no chip — the wash IS the whole announcement (owner's
- * call: the settled note gets no "from live text" marker).
+ * The recent-note tint: when the notetaker's freshly composed note arrives in
+ * the doc mid-meeting, the lines it wrote are tinted, and the tint fades out
+ * in steps over about two minutes — loudest inside the first thirty seconds
+ * (owner, 2026-09-06: "Keep things tinted for about two minutes, with more
+ * visible highlight for recent items within the last 30s"; approved mock
+ * `recent-notes-round1`, variant A). No label, no chip — the tint IS the
+ * whole announcement.
+ *
+ * It replaced a 2.8s wash: during a live meeting several notes land in a
+ * row, and by the time the reader looked up from one, the wash on the one
+ * before it had already gone. Two minutes is long enough that everything
+ * written since the reader last looked is still marked when they do.
+ *
+ * FOUR STEPS, NOT A SMOOTH FADE. Each line carries `data-age` 0–3, one step
+ * per thirty seconds, and the stylesheet maps the step to a tint. A value
+ * that changed every frame would repaint a document somebody is reading,
+ * and nobody can see 92% against 88%.
  *
  * WHAT COUNTS AS THE NOTETAKER WRITING. The client cannot see who authored a
  * remote Yjs update, so the gate is the conjunction that is true for notes
@@ -21,21 +32,24 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap';
  * surface (`isLive`), and the "Meeting notes" section holds lines it did
  * not hold before (`newNoteLines` — a content diff, see there for why the
  * step map cannot be used). A collaborator typing into the notes section during a
- * recording gets washed too; that is acceptable noise, where washing every
+ * recording gets tinted too; that is acceptable noise, where tinting every
  * remote edit anywhere would not be.
  *
- * Decorations, never content: the wash must survive nothing and sync
- * nowhere. Each decoration carries its expiry; a sweep transaction dispatched
- * shortly after expiry drops it (the CSS animation has already finished —
- * the sweep only cleans the class off the DOM).
+ * Decorations, never content: the tint must survive nothing and sync
+ * nowhere. Each decoration remembers when its line arrived; a re-band
+ * transaction every thirty seconds rebuilds the set with the new steps and
+ * drops what has aged out.
  */
 
-export const SETTLE_WASH_MS = 2_800;
-/** Wash classes are swept a beat after the animation ends. */
-const SWEEP_LAG_MS = 200;
+/** How long a freshly written line stays tinted. */
+export const RECENT_NOTE_MS = 120_000;
+/** One step of the fade; `data-age` is the number of these elapsed. */
+export const RECENT_NOTE_STEP_MS = 30_000;
+/** The last `data-age` a tinted line carries. */
+export const RECENT_NOTE_LAST_STEP = RECENT_NOTE_MS / RECENT_NOTE_STEP_MS - 1;
 
 const key = new PluginKey<DecorationSet>('settleWash');
-const SWEEP = 'settleWashSweep';
+const REBAND = 'settleWashReband';
 
 export interface SettleWashOptions {
   /** Whether a meeting is live on this surface right now. */
@@ -45,6 +59,8 @@ export interface SettleWashOptions {
    * zone's bot fallback uses to drop its settled lines.
    */
   onNotesInsert?: () => void;
+  /** The clock; injected by tests. */
+  now?: () => number;
 }
 
 /** Doc position where the notes section starts, or null. LAST heading named
@@ -88,10 +104,10 @@ export function noteLines(doc: ProseNode): NoteLine[] {
  * lines this write added or changed. A content diff rather than the
  * transaction's step map, because the collaboration binding applies every
  * remote update as ONE replace of the whole document (y-tiptap's
- * `_typeChanged`): the map says "everything was inserted", and washing what
+ * `_typeChanged`): the map says "everything was inserted", and tinting what
  * it says would light the entire section on every tick — which it did.
  * A line that appears twice consumes one match per copy, so a duplicated
- * line washes once, at its second copy.
+ * line tints once, at its second copy.
  */
 export function newNoteLines(before: ProseNode, after: ProseNode): NoteLine[] {
   const had = new Map<string, number>();
@@ -106,6 +122,46 @@ export function newNoteLines(before: ProseNode, after: ProseNode): NoteLine[] {
   });
 }
 
+/** Which fade step a line that arrived at `at` is on at `now`; null once it
+ *  has aged out. */
+export function recentStep(at: number, now: number): number | null {
+  const age = now - at;
+  if (age >= RECENT_NOTE_MS) return null;
+  return Math.min(RECENT_NOTE_LAST_STEP, Math.max(0, Math.floor(age / RECENT_NOTE_STEP_MS)));
+}
+
+/**
+ * Whether the set of tinted lines differs between two editor states —
+ * arrived, stepped or aged out. The edge markers (recent-note-markers.ts)
+ * re-count on it, from the editor's transaction event, so the wiring lives
+ * with the meeting surface rather than at editor construction.
+ */
+export function recentTintChanged(prev: EditorState, next: EditorState): boolean {
+  return key.getState(prev) !== key.getState(next);
+}
+
+interface Spec {
+  at: number;
+}
+
+function tint(from: number, to: number, at: number, now: number): Decoration | null {
+  const step = recentStep(at, now);
+  if (step === null) return null;
+  return Decoration.node(from, to, { class: 'recent-note', 'data-age': String(step) }, {
+    at,
+  } satisfies Spec);
+}
+
+/** The same lines, re-stepped for `now`; aged-out ones dropped. */
+function reband(doc: ProseNode, set: DecorationSet, now: number): DecorationSet {
+  const decos: Decoration[] = [];
+  for (const d of set.find()) {
+    const next = tint(d.from, d.to, (d.spec as Spec).at, now);
+    if (next) decos.push(next);
+  }
+  return DecorationSet.create(doc, decos);
+}
+
 export const SettleWash = Extension.create<SettleWashOptions>({
   name: 'settleWash',
 
@@ -115,6 +171,7 @@ export const SettleWash = Extension.create<SettleWashOptions>({
 
   addProseMirrorPlugins() {
     const options = this.options;
+    const now = () => (options.now ?? Date.now)();
     return [
       new Plugin<DecorationSet>({
         key,
@@ -122,25 +179,20 @@ export const SettleWash = Extension.create<SettleWashOptions>({
           init: () => DecorationSet.empty,
           apply(tr, set) {
             let next = set.map(tr.mapping, tr.doc);
-            const sweepBefore = tr.getMeta(SWEEP) as number | undefined;
-            if (sweepBefore !== undefined) {
-              next = DecorationSet.create(
-                tr.doc,
-                next
-                  .find()
-                  .filter((d) => ((d.spec as { until?: number }).until ?? 0) > sweepBefore),
-              );
-            }
+            const rebandAt = tr.getMeta(REBAND) as number | undefined;
+            if (rebandAt !== undefined) next = reband(tr.doc, next, rebandAt);
             if (!tr.docChanged || !tr.getMeta(ySyncPluginKey) || !options.isLive()) return next;
             // Hydration is a remote transaction too — the binding applies the
             // whole existing doc over an empty one when the surface mounts.
-            // Opening a doc mid-meeting must not wash its entire notes
-            // section, so a write over an empty doc never washes.
+            // Opening a doc mid-meeting must not tint its entire notes
+            // section, so a write over an empty doc never tints.
             if (tr.before.textContent === '') return next;
-            const until = Date.now() + SETTLE_WASH_MS;
-            const decos = newNoteLines(tr.before, tr.doc).map((line) =>
-              Decoration.node(line.from, line.to, { class: 'settle-wash' }, { until }),
-            );
+            const at = now();
+            const decos: Decoration[] = [];
+            for (const line of newNoteLines(tr.before, tr.doc)) {
+              const d = tint(line.from, line.to, at, at);
+              if (d) decos.push(d);
+            }
             return decos.length > 0 ? next.add(tr.doc, decos) : next;
           },
         },
@@ -151,19 +203,24 @@ export const SettleWash = Extension.create<SettleWashOptions>({
         },
         view(view) {
           let timer: ReturnType<typeof setTimeout> | null = null;
+          const arm = () => {
+            if (timer !== null) return;
+            timer = setTimeout(() => {
+              timer = null;
+              view.dispatch(view.state.tr.setMeta(REBAND, now()));
+            }, RECENT_NOTE_STEP_MS);
+          };
           return {
             update(v, prev) {
-              const before = key.getState(prev)?.find().length ?? 0;
-              const after = key.getState(v.state)?.find().length ?? 0;
-              if (after > before) {
-                options.onNotesInsert?.();
-                // One sweep per batch of arrivals; a fresh batch re-arms it.
-                if (timer !== null) clearTimeout(timer);
-                timer = setTimeout(() => {
-                  timer = null;
-                  view.dispatch(view.state.tr.setMeta(SWEEP, Date.now()));
-                }, SETTLE_WASH_MS + SWEEP_LAG_MS);
-              }
+              const was = key.getState(prev);
+              const is = key.getState(v.state);
+              if (was === is) return;
+              const before = was?.find().length ?? 0;
+              const after = is?.find().length ?? 0;
+              if (after > before) options.onNotesInsert?.();
+              // While anything is tinted, the next step is thirty seconds
+              // out; the last re-band finds nothing left and arms nothing.
+              if (after > 0) arm();
             },
             destroy() {
               if (timer !== null) clearTimeout(timer);

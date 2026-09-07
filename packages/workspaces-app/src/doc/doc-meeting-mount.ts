@@ -31,6 +31,8 @@ import { othersOnDoc } from '../meeting-solo.ts';
 import { mountMeetingStrip } from '../meeting-strip.ts';
 import { wantsLatencyTiming } from '../meeting-timing-client.ts';
 import type { MountScope } from '../mount-scope.ts';
+import { type RecentNoteMarkers, mountRecentNoteMarkers } from '../recent-note-markers.ts';
+import { recentTintChanged } from '../settle-wash.ts';
 import { loadDocSpeakers, postSpeakerName } from '../speaker-voices.ts';
 
 export interface DocMeetingOptions {
@@ -51,6 +53,8 @@ export interface DocMeetingOptions {
 
 export interface DocMeetingMount {
   liveZone?: MeetingLiveZone;
+  /** The ↑/↓ "N new" pills for tinted notes off screen. */
+  recentMarkers?: RecentNoteMarkers;
   watchLeadPresence?: LeadBanner['watch'];
 }
 
@@ -95,6 +99,25 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
   const liveZone = createMeetingLiveZone({ parent: editorMount, prose: editor.editor.view.dom });
   const zone = liveZone;
   scope.onCleanup(() => zone.destroy());
+  // The edge markers for tinted notes that sit off screen. The pane is the
+  // scroller's positioned parent (#editor-pane); the pills pin to it so they
+  // never scroll away with the prose.
+  const recentMarkers = mountRecentNoteMarkers({
+    pane: editorMount.parentElement ?? editorMount,
+    scroller: editorMount,
+    prose: editor.editor.view.dom,
+  });
+  scope.onCleanup(() => recentMarkers.destroy());
+  // Re-count when the tint set changes — a note arrived, stepped down or
+  // aged out. Compared state to state, so a keystroke re-counts nothing.
+  let tintState = editor.editor.state;
+  const onTransaction = () => {
+    const next = editor.editor.state;
+    if (recentTintChanged(tintState, next)) recentMarkers.sync();
+    tintState = next;
+  };
+  editor.editor.on('transaction', onTransaction);
+  scope.onCleanup(() => editor.editor.off('transaction', onTransaction));
   // Built outside the call: a source-shape test reads the mount up to its
   // first `})`, and an inline conditional spread would end it early.
   const participant = user.name ? { participantName: user.name } : {};
@@ -150,5 +173,5 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     watchLeadPresence = (onChange) => banner.watch(onChange);
     scope.onCleanup(() => banner.destroy());
   }
-  return { liveZone, ...(watchLeadPresence ? { watchLeadPresence } : {}) };
+  return { liveZone, recentMarkers, ...(watchLeadPresence ? { watchLeadPresence } : {}) };
 }

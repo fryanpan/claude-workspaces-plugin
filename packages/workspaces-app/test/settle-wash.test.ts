@@ -2,15 +2,21 @@ import { prose } from '@claude-workspaces/core';
 import { Fragment, Slice } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 import { ySyncPluginKey } from '@tiptap/y-tiptap';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
+import {
+  RECENT_NOTE_MS,
+  RECENT_NOTE_STEP_MS,
+  recentStep,
+  recentTintChanged,
+} from '../src/settle-wash.ts';
 
 /**
- * The settle wash (settle-wash.ts): a REMOTE insert into the "Meeting notes"
- * section, while a meeting is live, decorates the arrived block with
- * `.settle-wash` — and nothing else does: not a local edit, not an insert
+ * The recent-note tint (settle-wash.ts): a REMOTE insert into the "Meeting
+ * notes" section, while a meeting is live, decorates the arrived block with
+ * `.recent-note` at step 0 — and nothing else does: not a local edit, not an insert
  * outside the section, not a doc with no meeting. Runs through the REAL
  * createEditor so the gate is tested against the same y-sync meta key the
  * Collaboration extension registers (the import-source trap editor.ts's
@@ -25,7 +31,12 @@ afterEach(() => {
   }
 });
 
-function mountEditor(md: string, live: { on: boolean }, onNotesInsert?: () => void) {
+function mountEditor(
+  md: string,
+  live: { on: boolean },
+  onNotesInsert?: () => void,
+  clock?: { now: number },
+) {
   const ydoc = new Y.Doc();
   const fragment = prose.getProseFragment(ydoc);
   if (md !== '') fragment.push(prose.parseMarkdownBlocks(md));
@@ -38,6 +49,7 @@ function mountEditor(md: string, live: { on: boolean }, onNotesInsert?: () => vo
     settleWash: {
       isLive: () => live.on,
       ...(onNotesInsert ? { onNotesInsert } : {}),
+      ...(clock ? { now: () => clock.now } : {}),
     },
   });
   open.push({ handle, parent });
@@ -90,7 +102,62 @@ function lastListIndex(doc: EditorView['state']['doc']): number {
 }
 
 const washed = (parent: HTMLElement): string[] =>
-  [...parent.querySelectorAll<HTMLElement>('.settle-wash')].map((el) => el.textContent ?? '');
+  [...parent.querySelectorAll<HTMLElement>('.recent-note')].map((el) => el.textContent ?? '');
+const ages = (parent: HTMLElement): string[] =>
+  [...parent.querySelectorAll<HTMLElement>('.recent-note')].map(
+    (el) => el.getAttribute('data-age') ?? '',
+  );
+
+describe('the fade steps', () => {
+  it('is loudest for thirty seconds, then steps down, and is gone at two minutes', () => {
+    expect(recentStep(0, 0)).toBe(0);
+    expect(recentStep(0, RECENT_NOTE_STEP_MS - 1)).toBe(0);
+    expect(recentStep(0, RECENT_NOTE_STEP_MS)).toBe(1);
+    expect(recentStep(0, 3 * RECENT_NOTE_STEP_MS)).toBe(3);
+    expect(recentStep(0, RECENT_NOTE_MS - 1)).toBe(3);
+    expect(recentStep(0, RECENT_NOTE_MS)).toBeNull();
+  });
+
+  it('a line that just arrived carries step 0, and the re-band moves it on', () => {
+    vi.useFakeTimers();
+    try {
+      const clock = { now: 1_000_000 };
+      const { view, parent } = mountEditor(DOC, { on: true }, undefined, clock);
+      appendNote(view, 'the freshly composed note', true);
+      expect(ages(parent)).toEqual(['0']);
+      // Thirty seconds on: the timer the arrival armed re-bands the set.
+      clock.now += RECENT_NOTE_STEP_MS;
+      vi.advanceTimersByTime(RECENT_NOTE_STEP_MS);
+      expect(ages(parent)).toEqual(['1']);
+      // A second note arrives: each line keeps its own age.
+      appendNote(view, 'a newer note', true);
+      expect(ages(parent)).toEqual(['1', '0']);
+      // Two minutes after the first: it is gone, the second is on step 3.
+      clock.now += RECENT_NOTE_MS - RECENT_NOTE_STEP_MS;
+      vi.advanceTimersByTime(RECENT_NOTE_MS - RECENT_NOTE_STEP_MS);
+      expect(washed(parent)).toEqual(['a newer note']);
+      expect(ages(parent)).toEqual(['3']);
+      // …and once nothing is left, nothing is tinted.
+      clock.now += RECENT_NOTE_MS;
+      vi.advanceTimersByTime(RECENT_NOTE_MS);
+      expect(washed(parent)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('what the edge markers re-count on', () => {
+  it('a remote note changes the tint set; a keystroke does not', () => {
+    const { view } = mountEditor(DOC, { on: true });
+    const before = view.state;
+    appendNote(view, 'typed by a person', false);
+    expect(recentTintChanged(before, view.state)).toBe(false);
+    const mid = view.state;
+    appendNote(view, 'the freshly composed note', true);
+    expect(recentTintChanged(mid, view.state)).toBe(true);
+  });
+});
 
 describe('the settle wash', () => {
   it('washes a remote insert into the notes section while the meeting is live', () => {
