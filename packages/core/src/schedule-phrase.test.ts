@@ -206,6 +206,10 @@ describe('the parser and the writer round-trip', () => {
     'Sep 10 at 3pm',
     '2027-01-04 at 8am',
     'every weekday at 9am until Dec 15',
+    'every 5 minutes',
+    'when doc d-LampDoc changes',
+    'when task t-lamp changes, after 5 minutes quiet',
+    'when doc d-lamp changes until Dec 15',
   ];
 
   it.each(cases)('%s survives write(parse(x)) and parses back the same', (phrase) => {
@@ -230,6 +234,11 @@ describe('the parser and the writer round-trip', () => {
         ...(until !== undefined ? { until } : {}),
       });
       if (rule.kind === 'once' && (rule as { at: number }).at <= NOW) continue;
+      // An on-change rule is owed nothing until the watched thing changes.
+      if (rule.kind === 'on-change') {
+        expect(next, phrase).toBeUndefined();
+        continue;
+      }
       expect(next, phrase).toBeGreaterThan(NOW);
     }
   });
@@ -332,6 +341,36 @@ describe('the rule as chips', () => {
         expect(sentence).toContain(part.charAt(0).toLowerCase() + part.slice(1));
       }
     }
+  });
+});
+
+describe('a rule that watches a doc or a task', () => {
+  it('reads "when doc … changes" with the id\'s case kept, and a quiet window', () => {
+    expect(parse('When doc d-LampDoc changes').rule).toEqual({
+      kind: 'on-change',
+      source: { kind: 'doc', docId: 'd-LampDoc' },
+    });
+    expect(parse('when task t-lamp changes, after 5 minutes quiet').rule).toEqual({
+      kind: 'on-change',
+      source: { kind: 'task', taskId: 't-lamp' },
+      debounceMs: 5 * 60_000,
+    });
+    expect(parseSchedulePhrase('when doc d-lamp changes, after soon quiet', CTX).ok).toBe(false);
+  });
+
+  it('reads a five-minute interval, which the scheduler accepts as it is', () => {
+    expect(parse('every 5 minutes').rule).toEqual({ kind: 'every', everyMs: 5 * 60_000 });
+  });
+
+  it('writes the default quiet window as nothing, and drops the missed clause it has no slot for', () => {
+    const rule = { kind: 'on-change' as const, source: { kind: 'doc' as const, docId: 'd-lamp' } };
+    expect(writeSchedulePhrase({ rule, onMissed: 'skip' }, CTX)).toBe('when doc d-lamp changes');
+    expect(writeSchedulePhrase({ rule: { ...rule, debounceMs: 60_000 } }, CTX)).toBe(
+      'when doc d-lamp changes',
+    );
+    expect(
+      scheduleRuleChipParts({ rule: { ...rule, debounceMs: 5 * 60_000 }, onMissed: 'skip' }, CTX),
+    ).toEqual(['When doc d-lamp changes', '5 minutes quiet']);
   });
 });
 

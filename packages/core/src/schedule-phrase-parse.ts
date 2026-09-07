@@ -315,6 +315,9 @@ function splitPolicy(s: string): { rest: string; onMissed?: MissedRunPolicy } {
  */
 export function parseSchedulePhrase(raw: string, ctx: SchedulePhraseContext): SchedulePhraseParse {
   const tz = ctx.timezone ?? DEFAULT_SCHEDULE_TIMEZONE;
+  // The watched id, read off the RAW phrase: ids are case-sensitive and the
+  // lowercasing below would silently rename the doc.
+  const watched = raw.trim().match(/^when\s+(doc|task)\s+(\S+)\s+changes\b/i);
   let s = raw
     .toLowerCase()
     .replace(/[.!]+$/, '')
@@ -341,6 +344,34 @@ export function parseSchedulePhrase(raw: string, ctx: SchedulePhraseContext): Sc
     s = s.slice(0, untilMatch.index).trim();
   }
   const tail = { ...(until === undefined ? {} : { until }), ...missed };
+
+  // 1½. a change to a doc or task (`schedule-trigger.ts`): "when doc d-x
+  //    changes", with an optional quiet window. Before after-completion,
+  //    whose "when … done" would otherwise read the word. No slot to miss, so
+  //    the policy clause is accepted and dropped as it is for a delay.
+  const change = s.match(/^when (?:doc|task) \S+ changes(?:,? after (.+?) quiet)?$/);
+  if (change !== null && watched !== null) {
+    const id = watched[2] ?? '';
+    const source =
+      watched[1]?.toLowerCase() === 'doc'
+        ? { kind: 'doc' as const, docId: id }
+        : { kind: 'task' as const, taskId: id };
+    let debounce: { debounceMs: number } | Record<string, never> = {};
+    if (change[1] !== undefined) {
+      const quiet = parseDuration(change[1]);
+      if (quiet === undefined) {
+        return { ok: false, error: 'say how long the quiet is, like "after 5 minutes quiet"' };
+      }
+      debounce = { debounceMs: quiet.ms };
+    }
+    return {
+      ok: true,
+      phrase: {
+        rule: { kind: 'on-change', source, ...debounce },
+        ...(until === undefined ? {} : { until }),
+      },
+    };
+  }
 
   // 2. after completion. The whole phrase, because the delay is its subject.
   const done = s.match(

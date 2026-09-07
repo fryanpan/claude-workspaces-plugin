@@ -10,13 +10,13 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'vitest';
+import { parseSchedule } from './schedule-parse.ts';
 import {
   type TaskSchedule,
   dueOccurrence,
   instantForLocal,
   isKnownTimezone,
   nextOccurrence,
-  parseSchedule,
   zonedParts,
 } from './task-schedule.ts';
 

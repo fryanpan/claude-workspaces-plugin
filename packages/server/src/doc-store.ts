@@ -1088,6 +1088,19 @@ export class DocStore {
   }
 
   /**
+   * When a doc last changed — the same `.ydoc` mtime `withActivity` reports —
+   * or undefined for a doc this store does not know. Read by the scheduler
+   * for an on-change rule (`task-scheduler-rows.ts`), so it never hydrates:
+   * a rule watching a cold doc must not be what pulls it into memory every
+   * thirty seconds.
+   */
+  activityAt(docId: string): number | undefined {
+    const target = this.aliases.get(docId) ?? docId;
+    const meta = this.docs.get(target)?.meta ?? this.docIndex.get(target)?.meta;
+    return meta === undefined ? undefined : this.lastActivityFor(target, meta.createdAt);
+  }
+
+  /**
    * The `.ydoc` mtime for a doc, stat'd at most once per write.
    *
    * Same number `withActivity` always reported — this only stops asking the

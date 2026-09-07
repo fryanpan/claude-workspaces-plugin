@@ -1,4 +1,4 @@
-import { parseSchedule } from '@claude-workspaces/core/task-schedule';
+import { parseSchedule } from '@claude-workspaces/core/schedule-parse';
 /**
  * The fields of a row that are edited one at a time, plus its soft delete.
  *
@@ -257,6 +257,9 @@ export async function handleTaskFields(
       rule: parsed.rule,
       ...(parsed.timezone !== undefined ? { timezone: parsed.timezone } : {}),
       ...(parsed.until !== undefined ? { until: parsed.until } : {}),
+      // The policy clause was parsed and then dropped here for a release —
+      // "skip if missed" saved as catch-up. It is a field like the other two.
+      ...(parsed.onMissed !== undefined ? { onMissed: parsed.onMissed } : {}),
       armedAt: Date.now(),
       armedBy: author.name,
     });

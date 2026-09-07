@@ -37,7 +37,7 @@ flowchart LR
 
 ## The rule shapes
 
-Four kinds, and the split between the first three and the fourth is the one
+Five kinds, and the split between the first three and the fourth is the one
 design decision worth knowing.
 
 | Kind | Means | Next occurrence comes from |
@@ -46,6 +46,7 @@ design decision worth knowing.
 | `every` | a fixed interval | the arming, plus whole steps |
 | `calendar` | times of day, optionally on named weekdays | the local calendar |
 | `after-completion` | a delay after the last run finished | the completion |
+| `on-change` | a doc or task changed | the change, plus a quiet window |
 
 `every` and `calendar` are **fixed cadence**: the next occurrence comes from
 the schedule whether or not the last one was ever done. `after-completion`
@@ -212,6 +213,33 @@ not move the clock would have to wait until tomorrow to assert that a daily
 rule fires tomorrow. `schedulerNow` on `ServerOptions` is where a caller
 supplies one.
 
+## A rule that runs when something changes
+
+The fifth kind has no clock of its own. `on-change` names a doc or a task
+(`schedule-trigger.ts` in `core`), and its next occurrence is the source's
+last change plus a quiet window — a minute unless the rule says otherwise —
+so a burst of edits files ONE instance, after the burst, rather than one per
+keystroke. The server reads the change off what it already keeps: a task's
+`updatedAt`, which every store edit moves, and a doc's `.ydoc` mtime, which
+the doc store reports without hydrating the doc (`activityAt`; a rule
+watching a cold doc must not be what pulls it into memory every thirty
+seconds). `task-scheduler-rows.ts` resolves that into the cursor the loop
+reads. A change before the arming is not a change, and a source the store
+cannot see — a doc it never had, a task that is gone — is owed nothing
+rather than fired on a guess.
+
+Three things follow from having no cadence. An on-change rule is never
+**missed**: an occurrence is a change that happened, so it fires when the
+loop next runs, however late, and there is no policy to choose. It is never
+**stale**: nothing says how often a doc ought to change. And it stacks like
+the fixed-cadence kinds — a second change files a second instance whether or
+not the first was closed, because the change is the fact the rule exists to
+report.
+
+Intervals run down to five minutes. `every` never had a floor; what the
+five-minute test asserts is that the loop fires at each tick and never
+between them, which is the property a sub-hour rule leans on.
+
 ## A rule is written as a sentence
 
 A rule is set by typing English — "every weekday at 9am" — and read back as
@@ -238,6 +266,11 @@ have, not gaps in the parser:
 - **An interval and a time of day cannot both be set.** `calendar` has no
   interval field, so "every 3 days at 9am" is refused rather than silently
   becoming "every day at 9am" and throwing away what was typed.
+- **A trigger is typed, not clicked.** "when doc d-x changes" or "when task
+  t-x changes, after 5 minutes quiet" reads into one chip and a quiet-window
+  chip, both read-only: the id is the whole rule, and a chip has nowhere to
+  cycle it to. The next-owed line says "when it changes", and the
+  missed-run chip is absent because the rule has no slot to miss.
 
 The editor is the task panel's Schedule section. An unscheduled row shows one
 ghost affordance; everything else appears once there is a rule to show.

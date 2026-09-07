@@ -849,6 +849,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // origin names a doc records the doc's settled content revision, whichever
   // route (or the meeting capture) filed it.
   taskStore.setDocRevisionReader((docId) => docStore.settledContentRevision(docId));
+  // When a doc last changed, for a rule that runs on that (scheduled-tasks.md).
+  taskStore.setDocActivityReader((docId) => docStore.activityAt(docId));
   // The OTHER way to ask a person, made visible to the readiness gate.
   //
   // `add_review_item` writes into `task.reviews`, which the store reads

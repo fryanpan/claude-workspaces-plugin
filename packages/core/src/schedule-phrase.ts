@@ -39,6 +39,12 @@
 
 import { DEFAULT_MISSED_RUN_POLICY, type MissedRunPolicy } from './schedule-missed.ts';
 import {
+  type ScheduleOnChange,
+  TRIGGER_DEFAULT_DEBOUNCE_MS,
+  triggerDebounceMs,
+  triggerSourceWords,
+} from './schedule-trigger.ts';
+import {
   DEFAULT_SCHEDULE_TIMEZONE,
   type ScheduleCalendar,
   type ScheduleRule,
@@ -262,6 +268,20 @@ export function formatUntil(until: number, ctx: SchedulePhraseContext): string {
   return `${MONTH_SHORT[p.month - 1]} ${p.day}${year}`;
 }
 
+/** Whether a rule has a slot on a clock it can miss (`schedule-missed.ts`).
+ *  The two that do not drop the policy clause from the phrase and the chips. */
+export function hasMissedSlot(rule: ScheduleRule): boolean {
+  return rule.kind !== 'after-completion' && rule.kind !== 'on-change';
+}
+
+/** `when doc d-x changes`, plus the quiet window when it is not the default:
+ *  `when doc d-x changes, after 5 minutes quiet`. The id keeps its case. */
+function onChangeWords(rule: ScheduleOnChange): string {
+  const head = `when ${triggerSourceWords(rule.source)} changes`;
+  if (rule.debounceMs === undefined || rule.debounceMs === TRIGGER_DEFAULT_DEBOUNCE_MS) return head;
+  return `${head}, after ${formatInterval(rule.debounceMs, { allowDays: false, bareSingular: false })} quiet`;
+}
+
 /** The rule as canonical English. The inverse of `parseSchedulePhrase`, and
  *  asserted to be so: parsing what this writes gives the rule back. */
 export function writeSchedulePhrase(phrase: SchedulePhrase, ctx: SchedulePhraseContext): string {
@@ -283,6 +303,9 @@ export function writeSchedulePhrase(phrase: SchedulePhrase, ctx: SchedulePhraseC
     case 'after-completion':
       head = `${formatInterval(rule.delayMs, { allowDays: true, bareSingular: false })} after it's done`;
       break;
+    case 'on-change':
+      head = onChangeWords(rule);
+      break;
   }
   // A one-off is already bounded by its own instant, so an end clause on it
   // would be a second answer to a question already settled.
@@ -294,7 +317,7 @@ export function writeSchedulePhrase(phrase: SchedulePhrase, ctx: SchedulePhraseC
   // weekday at 9am, skip if missed". An after-completion rule has no slot to
   // miss (`schedule-missed.ts`), so the clause is dropped from it the way the
   // end is dropped from a one-off.
-  if (missedPolicyOf(phrase) === DEFAULT_MISSED_RUN_POLICY || rule.kind === 'after-completion') {
+  if (missedPolicyOf(phrase) === DEFAULT_MISSED_RUN_POLICY || !hasMissedSlot(rule)) {
     return ended;
   }
   return `${ended}, ${SKIP_IF_MISSED}`;
@@ -337,6 +360,14 @@ export function scheduleRuleChipParts(
         `${formatInterval(rule.delayMs, { allowDays: true, bareSingular: false })} after it's done`,
       );
       break;
+    case 'on-change':
+      parts.push(`When ${triggerSourceWords(rule.source)} changes`);
+      if (rule.debounceMs !== undefined && rule.debounceMs !== TRIGGER_DEFAULT_DEBOUNCE_MS) {
+        parts.push(
+          `${formatInterval(triggerDebounceMs(rule), { allowDays: false, bareSingular: false })} quiet`,
+        );
+      }
+      break;
   }
   // The end is part of the rule, so a rule that stops in December must say so
   // — a chip strip that showed the cadence and swallowed the end would read
@@ -344,7 +375,7 @@ export function scheduleRuleChipParts(
   if (phrase.until !== undefined) parts.push(`until ${formatUntil(phrase.until, ctx)}`);
   // Likewise the skip policy: a rule that leaves missed work alone must say
   // so on the row, or a reader would take a quiet week for a working one.
-  if (missedPolicyOf(phrase) === 'skip' && rule.kind !== 'after-completion') {
+  if (missedPolicyOf(phrase) === 'skip' && hasMissedSlot(rule)) {
     parts.push(SKIP_IF_MISSED);
   }
   return parts;
