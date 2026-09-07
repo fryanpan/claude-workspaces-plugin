@@ -268,6 +268,7 @@ export class MeetingRelay {
           msg.engine,
           msg.tuning,
           msg.participant,
+          msg.source,
         ),
       );
       return;
@@ -404,6 +405,7 @@ export class MeetingRelay {
     engineName?: string,
     rawTuning?: Record<string, unknown>,
     participant?: string,
+    source?: 'mic' | 'system',
   ): Promise<void> {
     if (conn.state !== 'idle') return;
     const docId = ws.data.docId;
@@ -446,7 +448,7 @@ export class MeetingRelay {
       engine: engine.name,
       sampleRate,
       mode,
-      source: 'mic',
+      source: source ?? 'mic',
       ...(participant !== undefined ? { participant } : {}),
     });
     if (!meeting) {

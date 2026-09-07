@@ -25,6 +25,13 @@ import {
   MEETING_SAMPLE_RATE,
 } from '@claude-workspaces/core';
 import {
+  type MediaDeviceSeam,
+  type MeetingAudioSource,
+  isSourceRefusal,
+  mediaErrorCode,
+  openMeetingSource,
+} from './meeting-source.ts';
+import {
   type OriginFacts,
   defaultOriginFacts,
   insecureOriginMessage,
@@ -365,21 +372,13 @@ export async function createAudioPump(stream: MediaStream): Promise<AudioPump> {
   }
 }
 
-/**
- * A getUserMedia rejection, as one of the codes `recognitionErrorMessage`
- * already has words for. Anything it does not recognise keeps its own name, so
- * the message names something a search will find rather than "unknown error".
- */
-export function mediaErrorCode(err: unknown): string {
-  const name = (err as { name?: unknown } | null)?.name;
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'not-allowed';
-  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'audio-capture';
-  return typeof name === 'string' && name.length > 0 ? name : 'unknown';
-}
+export { mediaErrorCode } from './meeting-source.ts';
 
 export interface MeetingCaptureDeps {
   readOrigin?: () => OriginFacts;
   getMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
+  /** The browser's devices, for the source-aware path (`meeting-source.ts`). */
+  devices?: MediaDeviceSeam;
   createPump?: AudioPumpFactory;
 }
 
@@ -418,15 +417,9 @@ export interface MeetingCaptureOpts {
   mode?: CaptureMode;
   /** Room processing for a `conversation`; ignored by a solo capture. */
   room?: RoomAudioProcessing;
+  /** The microphone unless said otherwise — see `meeting-source.ts`. */
+  source?: MeetingAudioSource;
   deps?: MeetingCaptureDeps;
-}
-
-function defaultGetMedia(constraints: MediaStreamConstraints): Promise<MediaStream> {
-  const devices = navigator.mediaDevices;
-  if (!devices?.getUserMedia) {
-    return Promise.reject(Object.assign(new Error('no mediaDevices'), { name: 'NotFoundError' }));
-  }
-  return devices.getUserMedia(constraints);
 }
 
 /**
@@ -444,11 +437,18 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
 
   let stream: MediaStream;
   try {
-    stream = await (deps.getMedia ?? defaultGetMedia)(
-      captureConstraints(opts.mode ?? DEFAULT_CAPTURE_MODE, opts.room),
-    );
+    const constraints = captureConstraints(opts.mode ?? DEFAULT_CAPTURE_MODE, opts.room);
+    const source = opts.source ?? 'mic';
+    stream =
+      source === 'mic' && deps.getMedia
+        ? await deps.getMedia(constraints)
+        : await openMeetingSource(source, constraints, deps.devices);
   } catch (err) {
-    return { ok: false, kind: 'denied', message: recognitionErrorMessage(mediaErrorCode(err)) };
+    // A source refusal already says, in the strip's words, what to do next.
+    const message = isSourceRefusal(err)
+      ? err.message
+      : recognitionErrorMessage(mediaErrorCode(err));
+    return { ok: false, kind: 'denied', message };
   }
 
   const releaseStream = () => {

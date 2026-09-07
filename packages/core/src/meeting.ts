@@ -191,6 +191,13 @@ export type MeetingClientMessage =
        */
       speakers?: number;
       /**
+       * Where the audio on this socket comes from. Absent is the
+       * microphone — every client built before the choice existed. `system`
+       * is the Mac's own output, handed to the page by Chrome's share
+       * picker; it rides the same pipeline and differs only in the record.
+       */
+      source?: 'mic' | 'system';
+      /**
        * Which transcription engine to open, when the person chose one.
        * Absent means the server's default — AssemblyAI wherever both are
        * configured — so a client built before the choice existed, and a
@@ -400,6 +407,9 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       // asking for it.
       ...(m.timing === true ? { timing: true } : {}),
       ...(participant ? { participant } : {}),
+      // Only the one other value the client can mean; anything else is the
+      // microphone, which is what absent has always meant.
+      ...(m.source === 'system' ? { source: 'system' as const } : {}),
     };
   }
   return null;

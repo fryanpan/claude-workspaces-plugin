@@ -67,8 +67,12 @@ export interface DocInfo {
 
 export type DocInfoResolver = (docId: string) => DocInfo | undefined;
 
-/** Where the audio came from. A bot's audio never reaches this server. */
-export type MeetingSource = 'mic' | 'bot';
+/**
+ * Where the audio came from. A bot's audio never reaches this server;
+ * `system` is the Mac's own output through Chrome's share picker, on the
+ * same socket as a microphone and told apart only here.
+ */
+export type MeetingSource = 'mic' | 'bot' | 'system';
 
 export interface MeetingJsonAudio {
   /** `mic` for the microphone; a per-participant id when a source has several. */

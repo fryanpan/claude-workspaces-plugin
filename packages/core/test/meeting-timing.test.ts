@@ -201,6 +201,22 @@ describe('the CSV cannot carry content', () => {
   });
 });
 
+describe('the start frame names where its audio comes from', () => {
+  it('reads system, and nothing else, off the source field', () => {
+    const base = { type: 'start', sampleRate: 16_000, encoding: 'pcm_s16le' };
+    expect(parseMeetingClientMessage(JSON.stringify(base))).not.toHaveProperty('source');
+    expect(parseMeetingClientMessage(JSON.stringify({ ...base, source: 'system' }))).toMatchObject({
+      source: 'system',
+    });
+    // A bot never speaks on this socket, and a typo is the microphone.
+    for (const source of ['bot', 'speaker', 1]) {
+      expect(parseMeetingClientMessage(JSON.stringify({ ...base, source }))).not.toHaveProperty(
+        'source',
+      );
+    }
+  });
+});
+
 describe('the wire contract carries the opt-in and the clock exchange', () => {
   it('reads the timing flag off start, and only the literal true', () => {
     const base = { type: 'start', sampleRate: 16_000, encoding: 'pcm_s16le' };

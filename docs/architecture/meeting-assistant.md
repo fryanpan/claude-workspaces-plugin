@@ -107,6 +107,18 @@ vendor's raw audio into these same engines (see below), so the preference
 applies there too; it was never the vendor's transcript. Advanced Options
 stays, keyed on whichever engine will open.
 
+**The Mac's own audio comes through Chrome** (Bryan, 2026-09-07: "through
+Chrome", not a helper app). The chooser's third source, "This Mac's audio",
+is `getDisplayMedia` with `systemAudio: 'include'` — Chrome 141+ on macOS
+14.2+ puts an audio box in its share picker and hands the page an audio
+track beside the screen it insists on; the screen is stopped at once
+(`meeting-source.ts`). From there it is the microphone path unchanged: the
+same pump, frames and socket, and the `start` frame carries `source:
+'system'` only so the raw record can say where the sound came from
+(`MeetingSource` gains the value beside `mic` and `bot`). A browser with no
+picker is not offered the card; a picker closed with the box unticked is
+refused in the strip's words. Chrome-only by nature, so never the iPad.
+
 **Endpointing: one measured default, on the default engine** (2026-09-05).
 The adapters otherwise send no turn-detection tuning at all, on the principle
 that a default we never send is a default we can never get wrong. The single

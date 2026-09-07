@@ -31,7 +31,7 @@ import type { MeetingBotClient } from './meeting-bot-client.ts';
  */
 export interface ChooserState {
   /** The chooser's source choice. Mic unless the last press said otherwise. */
-  chooseSource: 'mic' | 'bot';
+  chooseSource: 'mic' | 'bot' | 'system';
   /**
    * The chooser's speaker choice. Multiple by default — this product's
    * ordinary meeting has other people in it, and the approved mock preselects
@@ -73,6 +73,8 @@ export interface MeetingChooserDeps {
   staleKeys: Set<string>;
   /** The bot client, or undefined where the strip was mounted without one. */
   bot: MeetingBotClient | undefined;
+  /** Whether this browser has a share picker to ask the Mac's audio from. */
+  systemAudioOffered(): boolean;
   /** Advanced Options for one engine, created on first look. */
   advFor(engineId: string): AdvancedState;
   /** The speakers the last recording named, still nameable after it ended. */
@@ -153,6 +155,7 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     isChooserView,
     socketOpen,
     sendSocket,
+    systemAudioOffered,
   } = deps;
   /**
    * One change to the LIVE meeting's knobs. Sent only for a key the running
@@ -280,6 +283,22 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     });
     micChoice.el.classList.add('meeting-choice-mic');
     source.add(micChoice.el);
+    // Only where the browser has a picker to ask through: Safari and the
+    // iPad have none, and a card that always fails is worse than no card.
+    if (systemAudioOffered()) {
+      const systemChoice = choice({
+        group: 'meeting-source',
+        title: "This Mac's audio",
+        detail: 'Hear any call or video playing here — Chrome asks what to share',
+        checked: choose.chooseSource === 'system',
+        onPick: () => {
+          choose.chooseSource = 'system';
+          renderChoiceSelection();
+        },
+      });
+      systemChoice.el.classList.add('meeting-choice-system');
+      source.add(systemChoice.el);
+    }
     // Only where the server can actually field one: no key means no bot
     // source at all rather than a card that always fails.
     if (bot?.configured()) {

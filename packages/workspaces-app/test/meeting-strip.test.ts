@@ -301,6 +301,7 @@ function mount(
     bot?: MeetingBotClient;
     botNamePrefill?: string;
     toolbar?: HTMLElement | null;
+    systemAudioOffered?: () => boolean;
   } = {},
 ): Harness {
   const root = document.createElement('div');
@@ -485,6 +486,30 @@ describe('the start chooser decides who it is listening for', () => {
       mode: 'solo',
     });
     expect(h.strip.mode()).toBe('solo');
+  });
+
+  it('offers the Mac’s audio only where the browser has a picker, and never preselects it', () => {
+    const none = mount(undefined, { systemAudioOffered: () => false });
+    none.record().click();
+    expect(none.pop().querySelector('.meeting-choice-system')).toBeNull();
+    none.strip.destroy();
+    const some = mount(undefined, { systemAudioOffered: () => true });
+    some.record().click();
+    expect(some.pop().querySelector('.meeting-choice-system')).not.toBeNull();
+    const selected = some.pop().querySelector('.meeting-choice.is-selected .meeting-choice-title');
+    expect(selected?.textContent).toBe('Use microphone');
+  });
+
+  it('a press on the Mac’s audio opens that source and tells the server so', async () => {
+    const capture = vi.fn(() => Promise.resolve({ ok: true as const, capture: fakeCapture() }));
+    const h = mount(capture, { systemAudioOffered: () => true });
+    h.pressStart({ pick: "This Mac's audio" });
+    await settle();
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ source: 'system' }));
+    h.sockets[0]?.onopen?.();
+    expect(startFrame(h).source).toBe('system');
+    // The microphone press above is the control: its frame carries no
+    // `source` key, so an older server reads exactly what it always did.
   });
 
   it('an address that says solo presets the chooser the other way', async () => {

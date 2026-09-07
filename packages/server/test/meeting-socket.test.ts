@@ -61,7 +61,12 @@ class AudioClient {
   }
 
   /** Solo by default — the mode a client that never heard of modes gets. */
-  start(sampleRate = MEETING_SAMPLE_RATE, mode: CaptureMode = 'solo', engine?: string): void {
+  start(
+    sampleRate = MEETING_SAMPLE_RATE,
+    mode: CaptureMode = 'solo',
+    engine?: string,
+    extra: Record<string, unknown> = {},
+  ): void {
     this.ws.send(
       JSON.stringify({
         type: 'start',
@@ -69,6 +74,7 @@ class AudioClient {
         encoding: MEETING_AUDIO_ENCODING,
         mode,
         ...(engine !== undefined ? { engine } : {}),
+        ...extra,
       }),
     );
   }
@@ -405,6 +411,25 @@ describe('meeting audio socket', () => {
       },
     });
     expect(missing.status).toBe(404);
+  });
+
+  it('records the Mac’s audio as its own source, and the microphone as before', async () => {
+    const system = await createDoc('from-the-mac');
+    const client = await AudioClient.open(wsBase, 'from-the-mac');
+    client.start(MEETING_SAMPLE_RATE, 'conversation', undefined, { source: 'system' });
+    await client.waitFor('ready');
+    client.stop();
+    await client.waitFor('stopped');
+    expect(listMeetings(dataDir, system)[0]?.source).toBe('system');
+
+    // The control: a frame that never heard of the field is the microphone.
+    const mic = await createDoc('from-the-mic');
+    const old = await AudioClient.open(wsBase, 'from-the-mic');
+    old.start(MEETING_SAMPLE_RATE, 'conversation');
+    await old.waitFor('ready');
+    old.stop();
+    await old.waitFor('stopped');
+    expect(listMeetings(dataDir, mic)[0]?.source).toBe('mic');
   });
 });
 

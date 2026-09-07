@@ -225,7 +225,7 @@ board's task-body editor, neither of which mounts a redline module. `recent-note
 changes none of the picture: it is one screenful of geometry that
 `meeting-live-zone.ts` owned until the zone crossed 500 lines, holding the
 live transcript still across the frame a settled chunk splits off on. Nothing
-but the zone imports it. `notes-link-affordance.ts` joins the editor tier beside
+but the zone imports it. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing
 a link edits the stored doc and calls the board. `core` is three tiers: wire types, the document model (`prose-*.ts`,
