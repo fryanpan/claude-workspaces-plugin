@@ -340,6 +340,35 @@ describe('what the reader has already been asked on this row', () => {
     expect(system).toContain('BUILDS on an earlier answer is not a repeat');
   });
 
+  it('tells it a retest on code shipped since the answer is new, and one naming nothing shipped is not', () => {
+    // The held case from the live board (2026-09-07): the reader answered a
+    // Home Screen walk, the answer led to a fix, the fix deployed, and the
+    // retest on the new build was held twice as the same ask.
+    const { system, user } = buildReviewJudgePrompt(DEFAULT_REVIEW_ITEM_CRITERIA, {
+      headline:
+        'Retest on the new build: add the shared board to the Home Screen from the share address',
+      detail:
+        'The earlier install came from the owner address. New code is live (PR 792). Open the share link, add to Home Screen, open it cold.',
+      priorAsks: [
+        {
+          headline: 'On the iPad, add the shared board to the Home Screen: does it open there?',
+          askedAt: '7 September',
+          answer: 'Opened on list of workspaces. Has W icon and product name',
+        },
+      ],
+    });
+    expect(system).toContain(
+      'A retest is new when the item says what shipped since the earlier answer',
+    );
+    expect(system).toContain('Hold a retest that names nothing shipped since');
+    // The rule sits with the repeat rule it qualifies, after it.
+    expect(system.indexOf('A retest is new')).toBeGreaterThan(
+      system.indexOf('If this item asks the same question as one of them, hold it'),
+    );
+    // And the item the judge reads names what shipped, on its own line.
+    expect(user).toContain('New code is live (PR 792)');
+  });
+
   it('says none of that when the row has no history — the control', () => {
     const { system, user } = buildReviewJudgePrompt(DEFAULT_REVIEW_ITEM_CRITERIA, {
       headline: 'Which cache size?',

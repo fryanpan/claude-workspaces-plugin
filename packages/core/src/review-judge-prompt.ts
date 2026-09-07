@@ -17,7 +17,7 @@ import type { ReviewOption } from './review-item.ts';
 
 /** Bumped when the frame around the criteria changes, so a stored verdict
  *  can be told from one made under an older ask. */
-export const REVIEW_JUDGE_PROMPT_VERSION = 4;
+export const REVIEW_JUDGE_PROMPT_VERSION = 5;
 
 /**
  * What a workspace judges its review items against until somebody edits it.
@@ -225,6 +225,12 @@ export function buildReviewJudgePrompt(
       // has settled it already and re-asking reads as not having listened.
       'If this item asks the same question as one of them, hold it — however differently it is worded, and however well written it is. Say in the reason that it was asked on that date and what the answer was, so the filer can act on the answer instead of re-filing.',
       'A question that BUILDS on an earlier answer is not a repeat: asking what to do next, or about a case the answer did not cover, is new. Only hold when answering this item again would mean giving the same answer.',
+      // The case the rule above kept holding (2026-09-07, twice on each of two
+      // rows): the reader answered, the answer led to a fix, and the fix
+      // shipped — so the agent asked for the same walk on the new code. The
+      // earlier answer was about the old code and cannot answer this; holding
+      // it left the ask alive only as a plain reply the reader had to notice.
+      'A retest is new when the item says what shipped since the earlier answer — a fix, a PR, a deploy — and asks the reader to try again on it: the earlier answer was about the old code. Hold a retest that names nothing shipped since.',
     );
   }
   if (item.priorHolds && item.priorHolds.length > 0) {
