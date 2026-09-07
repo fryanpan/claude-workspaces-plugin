@@ -192,6 +192,117 @@ describe('which history is worth the prompt tokens', () => {
   });
 });
 
+describe('an item the reader was never shown is not a question they were asked', () => {
+  // Measured 2026-09-07: a retest was held, withdrawn the same hour, and the
+  // next filing on the row was held for repeating "the question asked on 7
+  // September, still unanswered" — an item nobody had read.
+  const held = { verdict: 'held', at: NOW - HOUR, reason: 'no stakes' };
+
+  it('leaves out a WITHDRAWN ticket item', () => {
+    const asks = priorAsksFor(
+      { kind: 'task', taskId: 't-1' },
+      source({
+        getTask: () =>
+          taskWith([
+            {
+              id: 'r-w',
+              createdAt: NOW - HOUR,
+              review: { headline: 'retracted', withdrawnAt: NOW - HOUR + 60_000 },
+            },
+          ]),
+      }),
+      NOW,
+    );
+    expect(asks).toEqual([]);
+  });
+
+  it('leaves out a HELD ticket item, which never reached the queue', () => {
+    const asks = priorAsksFor(
+      { kind: 'task', taskId: 't-1' },
+      source({
+        getTask: () =>
+          taskWith([
+            { id: 'r-h', createdAt: NOW - HOUR, review: { headline: 'held' }, judge: held },
+          ]),
+      }),
+      NOW,
+    );
+    expect(asks).toEqual([]);
+  });
+
+  it('leaves out a withdrawn or held comment item too', () => {
+    const asks = priorAsksFor(
+      { kind: 'task', taskId: 't-1' },
+      source({
+        listThreads: () => [
+          threadWith([
+            { id: 'c-w', ts: NOW - HOUR, review: { headline: 'retracted', withdrawnAt: NOW } },
+            { id: 'c-h', ts: NOW - HOUR, review: { headline: 'held', judge: held } },
+          ]),
+        ],
+      }),
+      NOW,
+    );
+    expect(asks).toEqual([]);
+  });
+
+  it('keeps one the reader ANSWERED, whatever its verdict — the control', () => {
+    const asks = priorAsksFor(
+      { kind: 'task', taskId: 't-1' },
+      source({
+        getTask: () =>
+          taskWith([
+            {
+              id: 'r-a',
+              createdAt: NOW - HOUR,
+              review: { headline: 'answered then retracted', withdrawnAt: NOW },
+              answer: { text: 'Do it', by: 'Reader', ts: NOW - 30 * 60_000 },
+              judge: held,
+            },
+          ]),
+        listThreads: () => [
+          threadWith([
+            {
+              id: 'c-a',
+              ts: NOW - HOUR,
+              review: {
+                headline: 'answered on the thread',
+                answeredAt: NOW - 1000,
+                answerText: 'Yes',
+                judge: held,
+              },
+            },
+          ]),
+        ],
+      }),
+      NOW,
+    );
+    expect(asks.map((a) => a.headline).sort()).toEqual([
+      'answered on the thread',
+      'answered then retracted',
+    ]);
+  });
+
+  it('still hands over an open item the gate passed — the other control', () => {
+    const asks = priorAsksFor(
+      { kind: 'task', taskId: 't-1' },
+      source({
+        getTask: () =>
+          taskWith([
+            {
+              id: 'r-ok',
+              createdAt: NOW - HOUR,
+              review: { headline: 'live question' },
+              judge: { verdict: 'ok', at: NOW - HOUR },
+            },
+          ]),
+      }),
+      NOW,
+    );
+    expect(asks.map((a) => a.headline)).toEqual(['live question']);
+  });
+});
+
 describe('the date is written the way the reader would say it', () => {
   it('gives day and month inside the current year', () => {
     expect(formatAskedAt(Date.UTC(2026, 8, 6, 12), NOW)).toBe('6 September');
