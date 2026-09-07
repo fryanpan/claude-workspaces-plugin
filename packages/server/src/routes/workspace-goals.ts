@@ -307,7 +307,8 @@ export async function handleWorkspaceGoals(
                 // id means re-read, a reserved one means drop it.
                 `reserved (never ordered — leave these out): [${res.reservedIds.join(', ')}]; ` +
                 `missing: [${res.missingIds.join(', ')}]; ` +
-                `duplicated: [${res.duplicateIds.join(', ')}]. ` +
+                `duplicated: [${res.duplicateIds.join(', ')}]; ` +
+                `archived (retired bands keep their place — leave these out): [${res.archivedIds.join(', ')}]. ` +
                 `Re-read the list with GET /workspaces/${workspaceId} and send back every ` +
                 'row at this scope whose `reorderable` is true.',
             }
