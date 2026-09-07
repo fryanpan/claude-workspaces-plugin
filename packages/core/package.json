@@ -24,6 +24,7 @@
     "./note-suggestion": "./src/note-suggestion.ts",
     "./related-work": "./src/related-work.ts",
     "./review-item-id": "./src/review-item-id.ts",
+    "./schedule-missed": "./src/schedule-missed.ts",
     "./schedule-phrase": "./src/schedule-phrase.ts",
     "./schedule-phrase-parse": "./src/schedule-phrase-parse.ts",
     "./schedule-timezone": "./src/schedule-timezone.ts",

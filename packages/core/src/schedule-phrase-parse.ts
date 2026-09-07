@@ -14,6 +14,8 @@
  *
  * ── The grammar, in the order it is peeled off ──────────────────────────
  *
+ *  0. a trailing `skip if missed` / `catch up if missed`  → the missed-run
+ *     policy, taken off first because it is the LAST clause of the sentence
  *  1. `until <date>` / `till` / `through` / `ending`      → the end limit
  *  2. `<duration> after it's done`                        → after-completion
  *  3. `every <duration>`                                  → a fixed interval
@@ -31,6 +33,7 @@
  * with minutes ("9:00") or a meridiem ("9am") is taken literally.
  */
 
+import type { MissedRunPolicy } from './schedule-missed.ts';
 import {
   type SchedulePhrase,
   type SchedulePhraseContext,
@@ -282,6 +285,27 @@ function unreadWords(scope: string): string {
 }
 
 /**
+ * The missed-run clause, at the end of the sentence: a verb — `skip`,
+ * `catch up`, `run once` — followed by any of the filler a person puts after
+ * it ("if missed", "when it's missed", "missed runs", "on recovery"). The verb
+ * decides; the filler is only allowed, never read.
+ */
+const POLICY_CLAUSE =
+  /(?:^|,|\s)\s*(?:and\s+|or\s+)?(skip(?:ping)?|catch[\s-]?up|run\s+once)(?:\s+(?:it|it'?s|its|is|any|missed|runs?|if|when|on|recovery))*\s*$/;
+
+function splitPolicy(s: string): { rest: string; onMissed?: MissedRunPolicy } {
+  const m = s.match(POLICY_CLAUSE);
+  if (m?.index === undefined) return { rest: s };
+  const rest = s
+    .slice(0, m.index)
+    .replace(/[,\s]+$/, '')
+    .trim();
+  // "skip" on its own is not a schedule; the clause needs a sentence in front.
+  if (rest === '') return { rest: s };
+  return { rest, onMissed: (m[1] ?? '').startsWith('skip') ? 'skip' : 'catch-up' };
+}
+
+/**
  * Read a phrase, or say why it could not be read.
  *
  * The error is short on purpose: the editor shows a bad phrase by outlining
@@ -298,6 +322,14 @@ export function parseSchedulePhrase(raw: string, ctx: SchedulePhraseContext): Sc
     .trim();
   if (s === '') return { ok: false, error: 'say when this should run' };
 
+  // 0. the missed-run policy, the sentence's last clause. Only `skip` is kept
+  //    on the phrase: catch-up is the default, and an explicit "catch up if
+  //    missed" reads as the same rule as no clause at all — which is what
+  //    keeps the writer's spelling a fixed point.
+  const policy = splitPolicy(s);
+  s = policy.rest;
+  const missed = policy.onMissed === 'skip' ? { onMissed: 'skip' as const } : {};
+
   // 1. the end limit, taken off first so nothing downstream sees its date.
   let until: number | undefined;
   const untilMatch = s.match(/\b(?:until|till|til|through|thru|ending)\s+(.+)$/);
@@ -308,7 +340,7 @@ export function parseSchedulePhrase(raw: string, ctx: SchedulePhraseContext): Sc
     until = instantFor(hit, endTimes?.[0] ?? { hour: 0, minute: 0 }, ctx, tz);
     s = s.slice(0, untilMatch.index).trim();
   }
-  const tail = until === undefined ? {} : { until };
+  const tail = { ...(until === undefined ? {} : { until }), ...missed };
 
   // 2. after completion. The whole phrase, because the delay is its subject.
   const done = s.match(
@@ -320,7 +352,15 @@ export function parseSchedulePhrase(raw: string, ctx: SchedulePhraseContext): Sc
     if (delay === undefined) {
       return { ok: false, error: 'say how long after, like "3 days after it\'s done"' };
     }
-    return { ok: true, phrase: { rule: { kind: 'after-completion', delayMs: delay.ms }, ...tail } };
+    // No slot to miss (schedule-missed.ts): the policy clause is accepted and
+    // dropped, so the end limit is the only tail an after-completion rule keeps.
+    return {
+      ok: true,
+      phrase: {
+        rule: { kind: 'after-completion', delayMs: delay.ms },
+        ...(until === undefined ? {} : { until }),
+      },
+    };
   }
 
   // 3. a fixed interval. Before the calendar branch, so "every 20 minutes" is
@@ -365,7 +405,7 @@ export function parseSchedulePhrase(raw: string, ctx: SchedulePhraseContext): Sc
     // `until` belongs to a repeat. A one-off is already bounded by its own
     // instant, and carrying one here would survive into a phrase the writer
     // never prints.
-    return { ok: true, phrase: { rule: { kind: 'once', at } } };
+    return { ok: true, phrase: { rule: { kind: 'once', at }, ...missed } };
   }
   if (recurring) {
     // An interval and a time of day cannot both be expressed: `calendar` has
@@ -409,7 +449,10 @@ export function parseSchedulePhrase(raw: string, ctx: SchedulePhraseContext): Sc
     const today = dayOf(0);
     return {
       ok: true,
-      phrase: { rule: { kind: 'once', at: today > ctx.now ? today : dayOf(86_400_000) } },
+      phrase: {
+        rule: { kind: 'once', at: today > ctx.now ? today : dayOf(86_400_000) },
+        ...missed,
+      },
     };
   }
   return { ok: false, error: 'try "every weekday at 9am" or "Sep 10 at 3pm"' };

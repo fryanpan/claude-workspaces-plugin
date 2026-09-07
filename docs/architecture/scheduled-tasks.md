@@ -65,17 +65,42 @@ owed nothing more, and `armedAt`, which is set when somebody writes the rule
 and is the floor for its first occurrence. A rule can never fire for a moment
 before it existed.
 
-## Missed runs do not pile up
+## Missed runs do not pile up — and the rule says what happens instead
 
-When the server has been down, several occurrences may have come due. It
-files **one** instance, for the latest of them, carrying a count of the
-occurrences it stands in for. A weekday rule that missed a week produces one
-row somebody can act on, not five, and the cursor still advances past all
-five so none of them fires again tomorrow.
+When the server has been down, several occurrences may have come due. The
+arithmetic collapses them into **one** occurrence, the latest, carrying a
+count of the ones behind it; the cursor advances past all of them so none
+fires again tomorrow. What is done with that one occurrence is the rule's
+own choice, written as the last clause of its phrase and shown as a chip:
 
-The count is kept in two places on purpose: on the instance, so the row can
-say what it stands for, and totalled on the rule, so a later policy about
-missed runs has a number to act on rather than a history to reconstruct.
+| Policy | Phrase | After an outage |
+| --- | --- | --- |
+| catch up (default) | *nothing written* | one instance, **flagged as a catch-up** |
+| skip | `…, skip if missed` | no instance; the skip is recorded |
+
+An occurrence is *missed* when something later has also come due, or when the
+fire would land more than five minutes past its instant — never more than
+half an interval for an interval rule. An on-time occurrence is the ordinary
+fire whatever the policy says; the policy is about missed work only. An
+after-completion rule has no slot to miss, so it takes no clause and no chip.
+
+The catch-up instance is an ordinary row with `catchUp` on its recurrence
+mark: the board draws the mark in the accent and its title says how many
+occurrences it stands in for. A skip leaves no row, so the record is the rule
+row's activity ("Skipped missed occurrence …") and two counters on the rule:
+`missedTotal`, every occurrence that got no row of its own, and
+`skippedTotal`, the part of that the policy declined.
+
+**The open catch-up row is a lock.** While a catch-up instance is still open,
+the next occurrence of a fixed-cadence rule *folds into it* — the cursor
+advances, the catch-up's own count grows, the activity says where the
+occurrence went, and no second row is filed. The lock is held on the board,
+in the row's status, not in any process: closing or archiving the catch-up
+releases it, and the next occurrence files as normal. An ordinary open run is
+not a lock — fixed cadence stacks by design, and only the row that already
+stands in for missed work refuses company. The decision is
+`missedRunOutcome` in `packages/core/src/schedule-missed.ts`, pure like the
+rest of the arithmetic.
 
 ## Restart safety
 
@@ -146,8 +171,6 @@ Deliberately, and each is a row of its own:
 
 - **the Scheduled board section** — rule rows have no home of their own on the
   board yet, and Scheduled is separate from Blocked;
-- **the missed-run policy** — the count is recorded, but nothing yet lets a
-  rule say what it wants done about a run it missed;
 - **the run record** — the activity note is the run history today;
 - **the wake path** — an instance is filed and its owner is named on it, but
   the scheduler does not wake anybody. It never starts sessions itself.

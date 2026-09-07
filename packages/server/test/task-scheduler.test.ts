@@ -31,42 +31,7 @@ import {
   setTaskSchedule,
 } from '../src/task-scheduler.ts';
 import { TaskStore } from '../src/tasks.ts';
-
-const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
-/** 2026-03-02T00:00:00Z, a Monday. */
-const MON = Date.UTC(2026, 2, 2);
-
-const OWNER = { id: 'agent-lamplighter', name: 'Lamplighter', kind: 'agent' } as const;
-
-/** A board with one goal band and one row carrying a rule. */
-function seed(store: TaskStore, schedule: TaskSchedule) {
-  const ws = store.createWorkspace('Harbour Lights');
-  const goals = store.setGoalList(ws.id, [{ title: 'Keep the lamps lit' }], { actor: OWNER });
-  if (!goals.ok) throw new Error('goal list refused');
-  const goalId = goals.created[0]?.id;
-  if (goalId === undefined) throw new Error('no goal id');
-  const created = store.createTask(ws.id, {
-    title: 'Sweep the lamp doc',
-    body: 'Agent can sweep the lamp doc so that the beam stays clean.',
-    assignee: OWNER.name,
-    assigneeKind: 'agent',
-    goal: goalId,
-    actor: OWNER,
-  });
-  if (!created.ok) throw new Error(`create refused: ${created.error}`);
-  const armed = setTaskSchedule(store, created.task.id, schedule);
-  if (!armed.ok) throw new Error('arm refused');
-  return { workspaceId: ws.id, goalId, ruleId: created.task.id };
-}
-
-/** Every instance the rule has produced, oldest first. */
-function instancesOf(store: TaskStore, workspaceId: string, ruleId: string) {
-  return store
-    .listTasks(workspaceId)
-    .filter((t) => t.recurrenceOf?.taskId === ruleId)
-    .sort((a, b) => a.createdAt - b.createdAt);
-}
+import { DAY, HOUR, MON, OWNER, instancesOf, seed } from './task-scheduler-seed.ts';
 
 describe('an occurrence creates the live instance, once', () => {
   let dataDir: string;
@@ -97,7 +62,13 @@ describe('an occurrence creates the live instance, once', () => {
     now = MON + HOUR + 1;
     const fired = scheduler.tick();
     expect(fired).toEqual([
-      { taskId: ruleId, instanceId: fired[0]?.instanceId ?? '', at: MON + HOUR, missed: 0 },
+      {
+        taskId: ruleId,
+        instanceId: fired[0]?.instanceId ?? '',
+        at: MON + HOUR,
+        missed: 0,
+        outcome: 'run',
+      },
     ]);
 
     const instances = instancesOf(store, workspaceId, ruleId);
@@ -167,6 +138,7 @@ describe('an occurrence creates the live instance, once', () => {
       now: () => now,
       rows: () => scheduledRows(store),
       createInstance: () => undefined,
+      fold: () => {},
       commit: () => {
         throw new Error('the cursor must not move on a refused create');
       },
@@ -279,6 +251,11 @@ describe('a rule survives a restart', () => {
       const instances = instancesOf(after, workspaceId, ruleId);
       expect(instances).toHaveLength(1);
       expect(instances[0]?.recurrenceOf?.missed).toBe(4);
+      // FLAGGED: the board draws a catch-up differently, and the cursor reads
+      // the flag back as the lock (below).
+      expect(instances[0]?.recurrenceOf?.catchUp).toBe(true);
+      expect(fired[0]?.outcome).toBe('catch-up');
+      expect(after.getTask(ruleId)?.notes?.at(-1)?.text).toContain('Catch-up');
       // Counted on the rule too, so the missed-run policy has the number.
       expect(after.getTask(ruleId)?.schedule?.state?.missedTotal).toBe(4);
     } finally {
@@ -430,6 +407,7 @@ describe('the loop itself', () => {
     const scheduler = new TaskScheduler({
       rows: () => [],
       createInstance: () => undefined,
+      fold: () => {},
       commit: () => {},
       record: () => {},
     });
@@ -462,6 +440,7 @@ describe('the loop itself', () => {
         if (r.taskId === 't-bad') throw new Error('the board moved under us');
         return 't-instance';
       },
+      fold: () => {},
       commit: () => {
         commits++;
       },

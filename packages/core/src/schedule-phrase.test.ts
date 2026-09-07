@@ -334,3 +334,74 @@ describe('the rule as chips', () => {
     }
   });
 });
+
+describe('the missed-run clause', () => {
+  it('reads "skip if missed" and its everyday spellings as the skip policy', () => {
+    for (const tail of [
+      ', skip if missed',
+      ' skip if missed',
+      ', skip when missed',
+      ', skip missed runs',
+      " or skip if it's missed",
+      ', skipping missed',
+    ]) {
+      expect(parse(`every weekday at 9am${tail}`), tail).toEqual({
+        rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [1, 2, 3, 4, 5] },
+        onMissed: 'skip',
+      });
+    }
+  });
+
+  it('reads an explicit catch-up as the default, which is no clause at all', () => {
+    const plain = parse('every weekday at 9am');
+    expect(parse('every weekday at 9am, catch up if missed')).toEqual(plain);
+    expect(parse('every weekday at 9am, run once on recovery')).toEqual(plain);
+    expect(parse('every weekday at 9am catch-up')).toEqual(plain);
+    expect(plain.onMissed).toBeUndefined();
+  });
+
+  it('keeps the clause on a one-off, and behind an end clause', () => {
+    expect(parse('Sep 10 at 3pm, skip if missed').onMissed).toBe('skip');
+    const ended = parse('every Monday 9:00 until Dec, skip if missed');
+    expect(ended.onMissed).toBe('skip');
+    expect(ended.until).toBeDefined();
+  });
+
+  it('drops the clause from an after-completion rule, which has no slot to miss', () => {
+    expect(parse("3 days after it's done, skip if missed")).toEqual(
+      parse("3 days after it's done"),
+    );
+  });
+
+  it('is not a schedule on its own', () => {
+    expect(parseSchedulePhrase('skip if missed', CTX).ok).toBe(false);
+  });
+
+  it('writes only the skip, as the last clause, and the chips say it too', () => {
+    const skip = { ...parse('every weekday at 9am until Dec'), onMissed: 'skip' as const };
+    expect(writeSchedulePhrase(skip, CTX)).toBe('every weekday at 9am until Dec, skip if missed');
+    expect(scheduleRuleChipParts(skip, CTX)).toEqual([
+      'Every weekday',
+      '9am',
+      'until Dec',
+      'skip if missed',
+    ]);
+    const caught = { ...skip, onMissed: 'catch-up' as const };
+    expect(writeSchedulePhrase(caught, CTX)).toBe('every weekday at 9am until Dec');
+    expect(scheduleRuleChipParts(caught, CTX)).not.toContain('skip if missed');
+  });
+
+  it.each([
+    'every weekday at 9am, skip if missed',
+    'every 20 minutes, skip if missed',
+    'Sep 10 at 3pm, skip if missed',
+    'every Monday at 9am until Dec, skip if missed',
+  ])('%s survives write(parse(x)) and is a fixed point', (phrase) => {
+    const first = parse(phrase);
+    expect(first.onMissed).toBe('skip');
+    const written = writeSchedulePhrase(first, CTX);
+    expect(written).toBe(phrase);
+    const second = parseSchedulePhrase(written, CTX);
+    expect(second.ok && second.phrase).toEqual(first);
+  });
+});

@@ -441,7 +441,7 @@ export interface Task {
    * `missed` counts the earlier occurrences this one stands in for, absent
    * when it stands only for itself.
    */
-  recurrenceOf?: { taskId: string; occurrenceAt: number; missed?: number };
+  recurrenceOf?: { taskId: string; occurrenceAt: number; missed?: number; catchUp?: true };
   /**
    * When this row was archived — the board's ONLY removal, and a soft one.
    *

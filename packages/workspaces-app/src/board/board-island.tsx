@@ -436,17 +436,29 @@ function TaskBadges(props: {
   // the mark drawn and UNLINKED rather than dropping it: the row is still a
   // recurrence, and silently hiding that because the rule is off-screen would
   // make the mark mean "recurring AND visible".
+  //
+  // A CATCH-UP — the one row filed for work the server missed — is the same
+  // mark in the accent, with the count it stands in for in its title. Still
+  // no word on the row: what a reader needs to know is that this run is
+  // different, and the colour says that; how different is one hover away.
   const ruleId = task.recurrenceOf?.taskId;
   if (ruleId !== undefined) {
     const rule = props.tasksById.get(ruleId);
+    const catchUp = task.recurrenceOf?.catchUp === true;
+    const stands = task.recurrenceOf?.missed ?? 0;
+    const kindOf = (title: string): string =>
+      catchUp
+        ? `Catch-up run of ${title}${stands > 0 ? `, standing in for ${stands} missed` : ''}`
+        : `One run of ${title}`;
+    const cls = catchUp ? ' is-catchup' : '';
     badges.push(
       rule ? (
         <button
           key="recur"
           type="button"
-          class="board-recur board-recur-link"
-          title={`One run of “${rule.title}” — open the schedule`}
-          aria-label={`One run of ${rule.title} — open the schedule`}
+          class={`board-recur board-recur-link${cls}`}
+          title={`${kindOf(`“${rule.title}”`)} — open the schedule`}
+          aria-label={`${kindOf(rule.title)} — open the schedule`}
           onClick={(ev) => {
             ev.stopPropagation();
             props.onOpenTask(rule);
@@ -462,7 +474,7 @@ function TaskBadges(props: {
           <span class="board-recur-target" aria-hidden="true" />
         </button>
       ) : (
-        <span key="recur" class="board-recur" title="One run of a scheduled task">
+        <span key="recur" class={`board-recur${cls}`} title={kindOf('a scheduled task')}>
           <RepeatMark />
         </span>
       ),

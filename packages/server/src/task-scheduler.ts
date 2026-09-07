@@ -49,6 +49,7 @@
  * `instance.assignee`. None of them needs a second reading of when a row is
  * owed, which is the whole reason the arithmetic sits in `core`.
  */
+import { type MissedRunOutcome, missedRunOutcome } from '@claude-workspaces/core/schedule-missed';
 import {
   type DueOccurrence,
   type ScheduleCursor,
@@ -93,24 +94,30 @@ export interface ScheduledRow {
 export interface FiredOccurrence {
   /** The RULE row. */
   taskId: string;
-  /** The live instance the occurrence created. */
-  instanceId: string;
+  /** The live instance: the one this occurrence created, or the open
+   *  catch-up it folded into. Absent when the occurrence was skipped. */
+  instanceId?: string;
   /** The occurrence's own instant — not when it fired. */
   at: number;
-  /** Earlier occurrences this one stands in for. */
+  /** Occurrences that got no row of their own out of this pass. */
   missed: number;
+  /** What the missed-run policy made of it (`schedule-missed.ts`). */
+  outcome: MissedRunOutcome['kind'];
 }
 
 export interface TaskSchedulerOptions {
   /** Every live rule row, rebuilt each tick. */
   rows: () => readonly ScheduledRow[];
-  /** Create the live instance. Returns its task id, or `undefined` when the
-   *  create was refused — which leaves the occurrence owed. */
-  createInstance: (row: ScheduledRow, due: DueOccurrence) => string | undefined;
+  /** Create the live instance, flagged as a catch-up when it stands in for
+   *  missed work. Returns its task id, or `undefined` when the create was
+   *  refused — which leaves the occurrence owed. */
+  createInstance: (row: ScheduledRow, due: DueOccurrence, catchUp: boolean) => string | undefined;
+  /** Add `missed` more occurrences to the open catch-up row's count. */
+  fold: (row: ScheduledRow, instanceId: string, missed: number) => void;
   /** Write the advanced cursor back onto the rule row. */
   commit: (row: ScheduledRow, state: ScheduleState) => void;
-  /** Put the occurrence in the rule row's activity. */
-  record: (row: ScheduledRow, due: DueOccurrence, instanceId: string) => void;
+  /** Put one line in the rule row's activity. */
+  record: (row: ScheduledRow, text: string) => void;
   /** The injected clock. The whole subsystem is driven by it — a test moves
    *  the number, never the wall clock. */
   now?: () => number;
@@ -169,27 +176,63 @@ export class TaskScheduler {
   private fire(row: ScheduledRow, now: number): FiredOccurrence | undefined {
     const due = dueOccurrence(row.schedule, now, row.cursor);
     if (!due) return undefined;
-    const instanceId = this.opts.createInstance(row, due);
+    const outcome = missedRunOutcome(row.schedule, due, now, row.cursor);
+    const prev = row.schedule.state ?? {};
+    const fired: FiredOccurrence = {
+      taskId: row.taskId,
+      at: due.at,
+      missed: 0,
+      outcome: outcome.kind,
+    };
+
+    // The two outcomes that file nothing. The cursor still advances — that is
+    // what makes a skipped or folded occurrence spent rather than owed — and
+    // the note is what a reader has instead of a row.
+    if (outcome.kind === 'skip' || outcome.kind === 'fold') {
+      if (outcome.kind === 'fold') {
+        this.opts.fold(row, outcome.into, outcome.missed);
+        fired.instanceId = outcome.into;
+      }
+      this.opts.commit(row, {
+        ...prev,
+        lastOccurrenceAt: due.at,
+        missedTotal: (prev.missedTotal ?? 0) + outcome.missed,
+        ...(outcome.kind === 'skip'
+          ? { skippedTotal: (prev.skippedTotal ?? 0) + outcome.missed }
+          : {}),
+      });
+      this.opts.record(
+        row,
+        outcome.kind === 'skip' ? skipNote(due) : foldNote(due, outcome.into, outcome.missed),
+      );
+      fired.missed = outcome.missed;
+      return fired;
+    }
+
+    const catchUp = outcome.kind === 'catch-up';
+    const instanceId = this.opts.createInstance(row, due, catchUp);
     if (instanceId === undefined) {
       this.report(
         `[scheduler] ${row.taskId} is owed ${new Date(due.at).toISOString()} but the instance was refused`,
       );
       return undefined;
     }
-    const prev = row.schedule.state;
     // Committed BEFORE the activity note: an exception writing the note must
     // not leave a fired occurrence uncommitted, which is the one ordering
     // that could fire it twice.
     this.opts.commit(row, {
+      ...prev,
       lastOccurrenceAt: due.at,
       lastFiredAt: now,
       lastInstanceId: instanceId,
-      fireCount: (prev?.fireCount ?? 0) + 1,
-      missedTotal: (prev?.missedTotal ?? 0) + due.missed,
+      fireCount: (prev.fireCount ?? 0) + 1,
+      missedTotal: (prev.missedTotal ?? 0) + due.missed,
     });
-    this.opts.record(row, due, instanceId);
+    this.opts.record(row, occurrenceNote(due, instanceId, catchUp));
     this.fired++;
-    return { taskId: row.taskId, instanceId, at: due.at, missed: due.missed };
+    fired.instanceId = instanceId;
+    fired.missed = due.missed;
+    return fired;
   }
 
   start(tickMs: number = SCHEDULER_TICK_DEFAULT_MS): void {
@@ -258,7 +301,11 @@ export function scheduleCursorFor(store: SchedulerStore, schedule: TaskSchedule)
     return firedAt !== undefined ? { lastCompletedAt: firedAt } : {};
   }
   if (instance.archivedAt !== undefined) return { lastCompletedAt: instance.archivedAt };
-  if (instance.status !== 'done') return {};
+  // Open. If it is a CATCH-UP it is also the lock: the next fixed-cadence
+  // occurrence folds into it rather than filing beside it (schedule-missed.ts).
+  if (instance.status !== 'done') {
+    return instance.recurrenceOf?.catchUp === true ? { openCatchUpInstanceId: instance.id } : {};
+  }
   let closedAt: number | undefined;
   for (const t of instance.transitions ?? []) {
     if (t.to === 'done') closedAt = t.ts;
@@ -295,10 +342,25 @@ export function scheduledRows(store: SchedulerStore): ScheduledRow[] {
  *  occurrence it was for and the instance it produced, because a catch-up
  *  fires long after the instant it stands for and a reader has to be able to
  *  tell those two apart. */
-export function occurrenceNote(due: DueOccurrence, instanceId: string): string {
+export function occurrenceNote(due: DueOccurrence, instanceId: string, catchUp = false): string {
   const when = new Date(due.at).toISOString();
   const stood = due.missed > 0 ? `, standing in for ${due.missed} missed` : '';
-  return `Scheduled occurrence ${when}${stood} — started ${instanceId}`;
+  const head = catchUp ? 'Catch-up for missed occurrence' : 'Scheduled occurrence';
+  return `${head} ${when}${stood} — started ${instanceId}`;
+}
+
+/** The skip policy declined the work: which occurrence, how many with it. */
+export function skipNote(due: DueOccurrence): string {
+  const when = new Date(due.at).toISOString();
+  const more = due.missed > 0 ? ` and ${due.missed} before it` : '';
+  return `Skipped missed occurrence ${when}${more} — the rule skips if missed`;
+}
+
+/** An open catch-up row took this occurrence too. */
+export function foldNote(due: DueOccurrence, instanceId: string, missed: number): string {
+  const when = new Date(due.at).toISOString();
+  const more = missed > 1 ? ` and ${missed - 1} before it` : '';
+  return `Occurrence ${when}${more} folded into open catch-up ${instanceId}`;
 }
 
 /**
@@ -320,7 +382,7 @@ export function createTaskScheduler(
     ...(opts.now !== undefined ? { now: opts.now } : {}),
     ...(opts.report !== undefined ? { report: opts.report } : {}),
     rows: () => scheduledRows(store),
-    createInstance: (row, due) => {
+    createInstance: (row, due, catchUp) => {
       const rule = store.getTask(row.taskId);
       if (!rule) return undefined;
       const res = store.createTask(row.workspaceId, {
@@ -341,9 +403,21 @@ export function createTaskScheduler(
           taskId: row.taskId,
           occurrenceAt: due.at,
           ...(due.missed > 0 ? { missed: due.missed } : {}),
+          // The FLAG: the board draws a catch-up differently from an
+          // ordinary run, and the cursor reads it back as the lock.
+          ...(catchUp ? { catchUp: true as const } : {}),
         },
       });
       return res.ok ? res.task.id : undefined;
+    },
+    fold: (row, instanceId, missed) => {
+      // The open catch-up's own count grows, so the row keeps saying how
+      // much it stands in for. Same debounced save as the cursor commit.
+      const instance = store.getTask(instanceId);
+      if (!instance?.recurrenceOf) return;
+      instance.recurrenceOf.missed = (instance.recurrenceOf.missed ?? 0) + missed;
+      instance.updatedAt = clock();
+      store.scheduleSave(row.workspaceId);
     },
     commit: (row, state) => {
       // The LIVE row, mutated in place and handed to `scheduleSave` — the
@@ -354,10 +428,10 @@ export function createTaskScheduler(
       rule.schedule.state = state;
       store.scheduleSave(row.workspaceId);
     },
-    record: (row, due, instanceId) => {
+    record: (row, text) => {
       store.appendNote(row.taskId, {
         kind: 'status',
-        text: occurrenceNote(due, instanceId),
+        text,
         agent: SCHEDULER_ACTOR.name,
         ts: clock(),
       });

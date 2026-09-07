@@ -612,7 +612,7 @@ export interface CreateTaskOpts {
    *    an occurrence that had to be re-triaged every time would make a
    *    recurring row worse than no recurrence at all.
    */
-  recurrenceOf?: { taskId: string; occurrenceAt: number; missed?: number };
+  recurrenceOf?: { taskId: string; occurrenceAt: number; missed?: number; catchUp?: true };
   /** Who is creating it, when the caller knows — attributed on the event
    *  and in the audit log. Optional: the create routes predate it and a
    *  missing author must not become an anonymous 400. */

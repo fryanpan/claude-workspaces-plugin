@@ -3265,6 +3265,11 @@ body.board-body {
 .board-recur-link:hover {
   color: var(--accent);
 }
+/* A catch-up: the run filed for work the server missed. The accent is the
+   whole signal — no word, no chip — and the count is in the title. */
+.board-recur.is-catchup {
+  color: var(--accent);
+}
 /* The tap target, which is not the glyph.
 
    A 13px mark is a 13px target, and the floor in

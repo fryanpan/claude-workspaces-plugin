@@ -261,6 +261,74 @@ describe('saving and clearing', () => {
     } satisfies ScheduleWrite);
   });
 
+  it('shows the missed-run policy as a chip that reads catch up by default', () => {
+    mount();
+    click(host?.querySelector('.board-sched-arm'));
+    type('every weekday at 9am');
+    expect($('.board-sched-missed').textContent).toBe('Catch up if missed');
+    expect($('.board-sched-missed').tagName).toBe('BUTTON');
+  });
+
+  it('toggling the policy chip rewrites the sentence, and back again', () => {
+    mount();
+    click(host?.querySelector('.board-sched-arm'));
+    type('every weekday at 9am');
+    click(host?.querySelector('.board-sched-missed'));
+    expect(input().value).toBe('every weekday at 9am, skip if missed');
+    expect($('.board-sched-missed').textContent).toBe('Skip if missed');
+    click(host?.querySelector('.board-sched-missed'));
+    // The default is unsaid: the clause leaves the sentence rather than
+    // turning into "catch up if missed".
+    expect(input().value).toBe('every weekday at 9am');
+    expect($('.board-sched-missed').textContent).toBe('Catch up if missed');
+  });
+
+  it('typing the clause lights the chip, and it survives a chip edit elsewhere', () => {
+    mount();
+    click(host?.querySelector('.board-sched-arm'));
+    type('every weekday at 9am, skip if missed');
+    expect($('.board-sched-missed').textContent).toBe('Skip if missed');
+    // Turn a weekday off: the policy is not the edit, so it stays.
+    click([...(host?.querySelectorAll('.board-sched-day') ?? [])][5]);
+    expect(input().value).toBe(
+      'every Monday, Tuesday, Wednesday and Thursday at 9am, skip if missed',
+    );
+  });
+
+  it('gives an after-completion rule no policy chip — it has no slot to miss', () => {
+    mount();
+    click(host?.querySelector('.board-sched-arm'));
+    type("3 days after it's done");
+    expect(host?.querySelector('.board-sched-missed')).toBeNull();
+  });
+
+  it('sends the policy only when it is the skip', async () => {
+    const onSet = vi.fn(async () => true);
+    mount({}, onSet);
+    click(host?.querySelector('.board-sched-arm'));
+    type('every weekday at 9am, skip if missed');
+    click(host?.querySelector('.board-sched-save'));
+    await Promise.resolve();
+    expect(onSet).toHaveBeenCalledWith({
+      rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [1, 2, 3, 4, 5] },
+      timezone: TZ,
+      onMissed: 'skip',
+    } satisfies ScheduleWrite);
+  });
+
+  it('opens an armed row with the skip policy on its clause and its chip', () => {
+    mount({
+      schedule: {
+        rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [1] },
+        timezone: TZ,
+        armedAt: NOW,
+        onMissed: 'skip',
+      },
+    });
+    expect(input().value).toBe('every Monday at 9am, skip if missed');
+    expect($('.board-sched-missed').textContent).toBe('Skip if missed');
+  });
+
   it('opens an armed row on its own rule, spelled canonically', () => {
     mount({
       schedule: {

@@ -122,9 +122,11 @@ due ([scheduled-tasks](scheduled-tasks.md)). The scheduler joins the Board
 group under its `task-*.ts` glob rather than changing the picture — it reads
 and writes the same rows through the same store, and only its clock is new.
 
-**A schedule rule has one spelling.** `core` holds four modules for it and no
+**A schedule rule has one spelling.** `core` holds five modules for it and no
 other package holds any: `task-schedule.ts` (the rule type and the occurrence
 arithmetic), `schedule-timezone.ts` (instant ⇄ wall clock),
+`schedule-missed.ts` (what a rule wants done about an occurrence the server
+missed — catch up, skip, or fold into the open catch-up that is the lock),
 `schedule-phrase.ts` (a rule written as canonical English) and
 `schedule-phrase-parse.ts` (English read back into a rule). The last two are a
 pair and are asserted to be inverses, which is what lets the editor show one
