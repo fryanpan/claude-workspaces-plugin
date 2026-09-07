@@ -103,6 +103,7 @@ import {
   parseMeetingServerMessage,
   rollTranscript,
 } from './meeting-protocol.ts';
+import { type MeetingAudioSource, systemAudioOffered } from './meeting-source.ts';
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
 import type { DocSpeakers } from './speaker-voices.ts';
 
@@ -179,7 +180,10 @@ export interface MeetingStripOpts {
     onFrame: (pcm: Int16Array) => void;
     mode: CaptureMode;
     room?: RoomAudioProcessing;
+    source?: MeetingAudioSource;
   }) => Promise<MeetingCaptureStart>;
+  /** Whether to offer "This Mac's audio". Defaults to asking the browser. */
+  systemAudioOffered?: () => boolean;
   /**
    * Ask for the mic on mount, without a press — the Board's "Start a planning
    * huddle" button was the press, on a page that is gone by the time this
@@ -468,6 +472,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * session nobody chose it for.
    */
   let mode: CaptureMode = opts.mode ?? DEFAULT_CAPTURE_MODE;
+  /** What the next capture opens; the chooser's pick, read at the press. */
+  let source: MeetingAudioSource = 'mic';
   /** The auto-start was refused in the way a missing gesture is: the note in
    *  the strip is the tap that supplies one, and says so. Cleared by any
    *  press. */
@@ -612,6 +618,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     speakerRow: (label) => menu.speakerRow(label),
     renderPop,
     onStartPressed,
+    systemAudioOffered: opts.systemAudioOffered ?? (() => systemAudioOffered()),
     isChooserView: () => view === 'chooser',
     socketOpen: () => socketOpen,
     sendSocket: (data) => socket?.send(data),
@@ -728,6 +735,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       return;
     }
     mode = choose.chooseMode;
+    source = choose.chooseSource === 'system' ? 'system' : 'mic';
     closePop();
     void start(false);
   }
@@ -977,6 +985,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // about to open.
       mode,
       ...(opts.room ? { room: opts.room } : {}),
+      ...(source === 'system' ? { source } : {}),
     });
     if (disposed || attempt !== generation) {
       if (started.ok) started.capture.stop();
@@ -1006,6 +1015,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
           sampleRate: MEETING_SAMPLE_RATE,
           encoding: MEETING_AUDIO_ENCODING,
           mode,
+          // Absent for the microphone, so an older server's frame is what it
+          // was; the record is the only thing the source changes.
+          ...(source === 'system' ? { source } : {}),
           // Absent unless somebody said, so the server's default stays the
           // one place the room size is guessed.
           ...(opts.speakers !== undefined ? { speakers: opts.speakers } : {}),

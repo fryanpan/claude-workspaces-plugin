@@ -158,7 +158,9 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
         // whether to trust one.
         mode: parseCaptureMode(row.mode),
         ...(typeof row.segment === 'number' ? { segment: row.segment } : {}),
-        ...(row.source === 'mic' || row.source === 'bot' ? { source: row.source } : {}),
+        ...(row.source === 'mic' || row.source === 'bot' || row.source === 'system'
+          ? { source: row.source }
+          : {}),
         ...(typeof row.participant === 'string' ? { participant: row.participant } : {}),
       });
       continue;
