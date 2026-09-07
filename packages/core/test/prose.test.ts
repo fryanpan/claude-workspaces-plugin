@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import {
   autoReanchorDoc,
@@ -576,13 +576,30 @@ describe('rewriteRange', () => {
 });
 
 describe('insertAfterRange', () => {
-  it('inserts text at the anchor end', () => {
+  it('inserts text at the anchor end and hands back what the doc now holds', () => {
     const doc = new Y.Doc();
     seedDoc(doc, [{ tag: 'paragraph', text: 'Hello world.' }]);
     const a = anchorIn(doc, 0, 5); // "Hello"
     const res = insertAfterRange(doc, { endRel: a.endRel, text: ' there,' });
     expect(res.ok).toBe(true);
+    expect(res.landed).toBe('Hello there, world.');
     expect(walkProse(getProseFragment(doc)).plainText).toBe('Hello there, world.');
+  });
+
+  it('refuses to report ok when the write did not reach the doc', () => {
+    // The write stubbed out: whatever swallows an insert in the field, the
+    // verb must notice the doc did not change rather than trust its call.
+    const doc = new Y.Doc();
+    seedDoc(doc, [{ tag: 'paragraph', text: 'Hello world.' }]);
+    const a = anchorIn(doc, 0, 5);
+    const insert = vi.spyOn(Y.XmlText.prototype, 'insert').mockImplementation(() => {});
+    try {
+      const res = insertAfterRange(doc, { endRel: a.endRel, text: ' there,' });
+      expect(res).toEqual({ ok: false, error: 'insert-lost' });
+    } finally {
+      insert.mockRestore();
+    }
+    expect(walkProse(getProseFragment(doc)).plainText).toBe('Hello world.');
   });
 });
 

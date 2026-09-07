@@ -635,11 +635,19 @@ export async function handleDocsTool(
       return ok(res);
     }
     case 'insert_after_thread': {
-      const { docId, threadId, text } = a as {
+      const { docId, threadId, text, markdown } = a as {
         docId: string;
         threadId: string;
-        text: string;
+        text?: unknown;
+        markdown?: unknown;
       };
+      if (typeof text !== 'string' || text.length === 0) {
+        return err(
+          markdown !== undefined
+            ? 'insert_after_thread takes `text`, not `markdown` — nothing was inserted. For a new paragraph or section use insert_blocks_after_thread, whose field is `markdown`.'
+            : 'insert_after_thread needs a non-empty `text` — nothing was inserted.',
+        );
+      }
       const res = await http(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_after`,
