@@ -531,9 +531,26 @@ export interface GoalStatusMeta {
   status: TaskStatus;
   doneAt?: number;
   doneBy?: { name: string; kind: 'person' | 'agent' };
+  /** The band is archived — the same three fields a task carries, so a
+   *  reader that already knows how to tell a retired row from a live one
+   *  needs no second rule for goals. Absent on a live band. */
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: string;
 }
 
 export function goalStatusMeta(row: GoalRow): GoalStatusMeta {
+  // Archived outranks the rest: a retired band's status is what it was when
+  // somebody put it away, and reporting that alone is how one came back from
+  // `get_workspace` reading as a live `todo` band (a peer's report, 2026-09-05).
+  if (isArchived(row)) {
+    return {
+      status: row.status,
+      archivedAt: row.archivedAt as number,
+      ...(row.archivedBy !== undefined ? { archivedBy: row.archivedBy } : {}),
+      ...(row.archiveReason !== undefined ? { archiveReason: row.archiveReason } : {}),
+    };
+  }
   if (row.status !== 'done') return { status: row.status };
   for (let i = row.transitions.length - 1; i >= 0; i--) {
     const t = row.transitions[i];
@@ -1626,6 +1643,11 @@ export type ReorderGoalsResult =
       missingIds: string[];
       /** Ids repeated within `order`. */
       duplicateIds: string[];
+      /** Archived bands the caller tried to position. They keep their slot
+       *  in the stored list so a restore is exact, but they are not part of
+       *  the order a caller sets: `get_workspace` marks them
+       *  `reorderable: false`, and a permutation is of the live bands only. */
+      archivedIds: string[];
     };
 
 export interface ListTasksFilter {

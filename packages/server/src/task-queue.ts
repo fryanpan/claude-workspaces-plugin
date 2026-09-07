@@ -326,6 +326,11 @@ export interface GoalSummaryRow {
   doneAt?: number;
   /** Who declared it, display name and kind only. */
   doneBy?: { name: string; kind: 'person' | 'agent' };
+  /** The band is archived: retired, still listed so a reader can see where
+   *  a row went, and never reorderable. Same fields a task carries. */
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: string;
   /**
    * The goal's live description doc — `task:<goalId>`, the same address a
    * task's `bodyDocId` names and reachable with the same `get_doc` /
@@ -428,9 +433,13 @@ export function summarizeGoals(
   const out: GoalSummaryRow[] = [];
   const placed = new Set<string>();
   // Everything in `goals` IS the ordered list — so these are exactly the ids
-  // `reorderGoals` will accept.
+  // `reorderGoals` will accept, minus the archived bands: those keep their
+  // slot in the stored list so a restore is exact, and are listed here so a
+  // reader sees where a row went, but the order a caller sets is of the live
+  // bands only.
   for (const g of goals) {
-    out.push(row(g.id, g.title, true, g.dueAt));
+    const archived = meta.get(g.id)?.archivedAt !== undefined;
+    out.push(row(g.id, g.title, !archived, g.dueAt));
     placed.add(g.id);
   }
   // Backlog, then anything sitting under a goal id the list no longer has —

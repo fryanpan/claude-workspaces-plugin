@@ -19,7 +19,7 @@
 import type { GoalListEntry, Task, TaskActor, TaskStatus } from '@claude-workspaces/core/task-wire';
 import { byBoardOrder } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
-import { bumpWordsRevision, cryptoId } from './task-fields.ts';
+import { bumpWordsRevision, cryptoId, isArchived } from './task-fields.ts';
 import type {
   AddGoalResult,
   BoardWorkspace,
@@ -740,12 +740,21 @@ export class GoalStore {
     if (opts.parent !== undefined) return { ok: false, error: 'parent-not-found' };
     const current: WorkspaceGoal[] = workspace.goals;
 
-    const currentIds = current.map((g) => g.id);
+    // An archived band stays in the stored list — that is what makes its
+    // restore exact — but it is not in the order a caller sets. It is refused
+    // the way `chores` is, by name, because the caller saw it in the read
+    // (`get_workspace` lists it, `reorderable: false`) and the fix is to
+    // leave it out, not to hunt for a typo.
+    const archivedSet = new Set(
+      current.filter((g) => isArchived(state.goalRows.get(g.id) ?? {})).map((g) => g.id),
+    );
+    const currentIds = current.map((g) => g.id).filter((id) => !archivedSet.has(id));
     const currentSet = new Set(currentIds);
     const seen = new Set<string>();
     const unknownIds: string[] = [];
     const reservedIds: string[] = [];
     const duplicateIds: string[] = [];
+    const archivedIds: string[] = [];
     for (const id of order) {
       // 'chores' is never in goals[], so it is refused — but it is refused as
       // RESERVED, not unknown. It is a row the caller genuinely saw in the
@@ -753,7 +762,11 @@ export class GoalStore {
       // be obeyed and a caller who put it last must not be silently trimmed:
       // accepting either would be a position nobody honours.
       if (!currentSet.has(id)) {
-        const bucket = isReservedGoalId(id) ? reservedIds : unknownIds;
+        const bucket = archivedSet.has(id)
+          ? archivedIds
+          : isReservedGoalId(id)
+            ? reservedIds
+            : unknownIds;
         if (!bucket.includes(id)) bucket.push(id);
       }
       if (seen.has(id) && !duplicateIds.includes(id)) duplicateIds.push(id);
@@ -764,7 +777,8 @@ export class GoalStore {
       unknownIds.length > 0 ||
       reservedIds.length > 0 ||
       duplicateIds.length > 0 ||
-      missingIds.length > 0
+      missingIds.length > 0 ||
+      archivedIds.length > 0
     ) {
       return {
         ok: false,
@@ -773,6 +787,7 @@ export class GoalStore {
         reservedIds,
         missingIds,
         duplicateIds,
+        archivedIds,
       };
     }
 
@@ -783,9 +798,14 @@ export class GoalStore {
     // Build a NEW top-level array either way. `oldGoals` on the event aliases
     // the array we are replacing, so mutating in place would make the event
     // report the new order on both sides and the audit row would say nothing.
+    // An archived band keeps the slot it had; the live bands fill the rest in
+    // the order given.
     const oldGoals = workspace.goals;
     const byId = new Map(oldGoals.map((g) => [g.id, g]));
-    const newGoals: WorkspaceGoal[] = order.map((id) => byId.get(id) as WorkspaceGoal);
+    const live = order[Symbol.iterator]();
+    const newGoals: WorkspaceGoal[] = oldGoals.map((g) =>
+      archivedSet.has(g.id) ? g : (byId.get(live.next().value as string) as WorkspaceGoal),
+    );
     workspace.goals = newGoals;
     // A reorder never adds an id, so nothing mints here — see `syncGoalRows`.
     this.p.syncGoalRows(state, 'todo');
