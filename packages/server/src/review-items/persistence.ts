@@ -47,6 +47,21 @@ export interface ReviewItemPersistence {
   listTasksIn(workspaceId: string): Iterable<Task>;
   /** Every board id, for the lookup that addresses an item by bare id. */
   listWorkspaceIds(): Iterable<string>;
+  /**
+   * How many asks are open on this ticket's own DOC THREADS — the second
+   * supported way to ask a person, `create_thread(docId: 'task:<id>', review)`.
+   *
+   * It is here rather than derived from `task.reviews` because a doc-thread
+   * item never lands there: it is a payload on a comment in the ticket's body
+   * doc, which this store cannot see. The ready gate and the stall monitor
+   * both read `reviewState`, so a row whose only question was filed that way
+   * was counted as having none — nudged as idle, and reported as stalled
+   * against the agent that correctly filed and correctly stopped.
+   *
+   * Zero when nothing reads the docs (store-only tests), which is the old
+   * behaviour exactly.
+   */
+  openThreadAsks(taskId: string): number;
   /** The board's own record — read AND written for the judging criteria,
    *  which is a workspace setting rather than a task field. */
   getWorkspaceRecord(workspaceId: string): BoardWorkspace | undefined;

@@ -99,6 +99,9 @@ export interface TaskPersistenceHost {
   /** The store's clock — `Date.now` unless a test injected one. See
    *  `AgentStorePersistence.now`. */
   now(): number;
+  /** Open asks on a ticket's own doc threads — see
+   *  `ReviewItemPersistence.openThreadAsks`. */
+  openThreadAsks(taskId: string): number;
   voiceAckGraceMs: number;
   commentAckGraceMs: number;
   roster: AgentRoster | undefined;
@@ -140,6 +143,7 @@ export function reviewItemPersistenceFor(store: TaskPersistenceHost): ReviewItem
     save: (workspaceId) => store.scheduleSave(workspaceId),
     emit: (event) => store.emit(event),
     now: () => Date.now(),
+    openThreadAsks: (taskId) => store.openThreadAsks(taskId),
     noteBodyEdited: (taskId, opts) => store.noteBodyEdited(taskId, opts),
     renameTask: (taskId, title, opts) => store.renameTask(taskId, title, opts),
   };

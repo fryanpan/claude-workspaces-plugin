@@ -8,6 +8,7 @@ import {
   attachmentIdOf,
   contentKind,
   parseThreadReviewItemId,
+  pendingDeclaration,
 } from '@feedback/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
@@ -847,6 +848,28 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // origin names a doc records the doc's settled content revision, whichever
   // route (or the meeting capture) filed it.
   taskStore.setDocRevisionReader((docId) => docStore.settledContentRevision(docId));
+  // The OTHER way to ask a person, made visible to the readiness gate.
+  //
+  // `add_review_item` writes into `task.reviews`, which the store reads
+  // itself. `create_thread(docId: 'task:<id>', review)` writes a payload onto
+  // a comment in the ticket's body doc, which the store cannot see — so a row
+  // whose only open question was filed that way counted as having none, and
+  // was nudged as idle and reported as stalled against the agent that
+  // correctly filed and correctly stopped. Both tools are documented as ways
+  // to ask, so the gate learns to read both rather than one being retired.
+  //
+  // `pendingDeclaration` is the house predicate, not a second rule written
+  // here: an OPEN thread, its newest un-withdrawn review payload, unanswered.
+  // A HELD payload is skipped for the same reason a held ticket item is left
+  // out of `open` — nobody was shown it, so it cannot excuse the row.
+  taskStore.setThreadAskReader((taskId) => {
+    let open = 0;
+    for (const thread of docStore.listThreads(`task:${taskId}`, { status: 'open' })) {
+      const pending = pendingDeclaration(thread);
+      if (pending && pending.review?.judge?.verdict !== 'held') open += 1;
+    }
+    return open;
+  });
   // …and the return half: a settled edit burst on a doc flags the open rows
   // derived from an earlier revision of it. Flagging emits no store event
   // (§3.6's table is exhaustive), so the projection refresh happens here,

@@ -88,6 +88,7 @@ function fakeHost(dataDir: string): TaskPersistenceHost & {
   } = {
     dataDir,
     now: () => Date.now(),
+    openThreadAsks: () => 0,
     workspaces: new Map<string, WorkspaceState>(),
     taskIndex: new Map(),
     goalIndex: new Map(),

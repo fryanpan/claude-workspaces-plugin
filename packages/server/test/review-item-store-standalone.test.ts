@@ -98,6 +98,7 @@ function fake(tasks: Task[] = [task()]) {
       events.push(event);
     },
     now: () => clock,
+    openThreadAsks: () => 0,
     noteBodyEdited: (taskId, opts) => {
       const row = rows.get(taskId);
       if (!row) return false;
