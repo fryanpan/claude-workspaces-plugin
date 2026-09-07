@@ -38,6 +38,22 @@ export interface ArchivedReview {
    * trip lands the review back where it was rather than orphaned.
    */
   linkedWorkspaces: string[];
+  /**
+   * Boards that linked a MEMBER of this review on its own, keyed by that
+   * member's docId — `attach_doc` with a member id, which is what somebody
+   * does when one changed file matters to a second board.
+   *
+   * Those rows are not covered by `linkedWorkspaces`, which is about the set
+   * id. They were left behind by the archive: the member's `.ydoc` moved to
+   * `_archive` and the other board kept a row addressing a doc the server
+   * would no longer serve. Archiving now takes them too, and this is what
+   * lets unarchive put each one back on the board it was actually on rather
+   * than on all of them.
+   *
+   * Absent on every manifest written before this existed, which reads
+   * correctly as "no member was individually linked".
+   */
+  memberWorkspaces?: Record<string, string[]>;
 }
 
 /**
@@ -68,6 +84,22 @@ export interface ArchivedDoc {
   title?: string;
   /** Boards the doc was on when it was archived; unarchive re-attaches these. */
   linkedWorkspaces: string[];
+}
+
+/**
+ * `memberWorkspaces` as it comes off disk, with anything that is not a list of
+ * strings dropped. A manifest is a file a human can edit and an older build
+ * can have written, so the round trip must not hand a board id that is a
+ * number to `attachDoc`.
+ */
+function readMemberWorkspaces(raw: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [docId, boards] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(boards)) continue;
+    const ids = boards.filter((b): b is string => typeof b === 'string');
+    if (ids.length > 0) out[docId] = ids;
+  }
+  return out;
 }
 
 export const ARCHIVE_DIR = '_archive';
@@ -109,6 +141,9 @@ export function readArchiveManifest(dataDir: string, setId: string): ArchivedRev
       linkedWorkspaces: Array.isArray(parsed.linkedWorkspaces)
         ? parsed.linkedWorkspaces.filter((d): d is string => typeof d === 'string')
         : [],
+      ...(parsed.memberWorkspaces && typeof parsed.memberWorkspaces === 'object'
+        ? { memberWorkspaces: readMemberWorkspaces(parsed.memberWorkspaces) }
+        : {}),
     };
   } catch (err) {
     console.error(`[archive] unreadable manifest for ${setId}:`, err);

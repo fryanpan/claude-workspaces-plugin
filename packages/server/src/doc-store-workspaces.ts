@@ -712,7 +712,13 @@ export class DocStoreWorkspaces {
    */
   archiveReview(
     setId: string,
-    opts: { archivedBy: string; reason?: string; linkedWorkspaces?: string[] },
+    opts: {
+      archivedBy: string;
+      reason?: string;
+      linkedWorkspaces?: string[];
+      /** Boards linking a member on its own — see `ArchivedReview`. */
+      memberWorkspaces?: Record<string, string[]>;
+    },
   ):
     | { ok: true; archived: number; docIds: string[]; manifest: ArchivedReview }
     | { ok: false; error: 'not-found' }
@@ -769,6 +775,9 @@ export class DocStoreWorkspaces {
       ...(entry?.workspaceRoot !== undefined ? { root: entry.workspaceRoot } : {}),
       docIds: moved,
       linkedWorkspaces: opts.linkedWorkspaces ?? [],
+      ...(opts.memberWorkspaces && Object.keys(opts.memberWorkspaces).length > 0
+        ? { memberWorkspaces: opts.memberWorkspaces }
+        : {}),
     };
     writeArchiveManifest(this.p.dataDir(), manifest);
     this.recordReviewLifecycle('archive', setId, moved, opts);
