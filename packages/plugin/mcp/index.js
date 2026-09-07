@@ -18872,7 +18872,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.178";
+var PLUGIN_VERSION = "0.1.179";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
@@ -18883,7 +18883,7 @@ var server = new Server({
     experimental: { "claude/channel": {} }
   },
   instructions: [
-    "Every markdown review doc is backed by a .md file on disk. The file is the",
+    "Every markdown attachment is backed by a .md file on disk. The file is the",
     "source of truth at rest; the live editor is the source of truth at runtime;",
     "the plugin keeps them in sync bidirectionally (~1s debounced).",
     "",
@@ -18893,7 +18893,7 @@ var server = new Server({
     "",
     "EDIT: never use Write/Edit/str_replace on the .md while it is under review",
     "— direct filesystem edits race against the live doc’s own ~1s flush, and if",
-    "LF has any pending state your edit can be silently overwritten by the next",
+    "the server has pending state your edit can be silently overwritten by the next",
     "write-back. Route edits through the MCP tools below: find_and_replace for",
     "prose changes, rewrite_thread_region / insert_after_thread / insert_blocks_after_thread",
     "for comment-anchored edits, and set_doc_content(docId, markdown) for a",
@@ -18908,15 +18908,15 @@ var server = new Server({
     "get_doc, re-apply your change onto the CURRENT content, and only retry",
     "with confirmOverwriteHumanEdits: true if a full rewrite is truly needed.",
     "External edits (VS Code, git pull)",
-    "flow back into the live doc via the file poll when LF is idle; if you wrote",
-    "to a bound file externally and need to be sure it landed, call",
+    "flow back into the live doc via the file poll when the server is idle; if you",
+    "wrote to a bound file externally and need to be sure it landed, call",
     "reparse_from_disk(docId) to force-pull from disk. If an edit response or",
     "get_doc carries a `syncError`, read it — it names the conflict and where",
     "the overwritten version was backed up.",
     "",
     "DIFF REVIEW / FOLDER BROWSE: when the human wants to review your code",
     'changes ("review this diff", a branch, work in progress), call',
-    "create_diff_review(repo, base) — one review doc per changed file,",
+    "create_diff_review(repo, base) — one attachment per changed file,",
     "PR-style unified diff with line comments. Omit base to BROWSE a folder",
     "instead (no diff): everything is navigable from the all-files sidebar,",
     "files open lazily, markdown editable — works on plain folders and",
@@ -18956,7 +18956,7 @@ var server = new Server({
     "and re-wired when the session respawns; list_watched_docs says whether the",
     "current set was restored from the server or is session-only.",
     "",
-    "CLEANUP: review docs are usually short-lived — bound for a ~30-minute",
+    "CLEANUP: attachments are usually short-lived — bound for a ~30-minute",
     "feedback pass, then obsolete. When you no longer need one, call",
     "delete_doc(docId) to remove it (the bound source .md is left on disk; only",
     "the review session goes away). It refuses if the doc still has open threads",
