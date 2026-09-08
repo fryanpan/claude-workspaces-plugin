@@ -55,6 +55,31 @@ export function resolveBaseUrl(deps: DiscoveryDeps): string {
 export type Http = (method: string, path: string, body?: unknown) => Promise<unknown>;
 
 /**
+ * The server's own sentence, when a failure body says this client is behind.
+ *
+ * The server answers a pre-cutover address with 410 and a body carrying
+ * `reason: 'stale-client'` (see `routes/stale-client.ts`). Pasting that JSON
+ * into a tool error would bury the one sentence that stops the failure being
+ * read as a deleted board, so the sentence is lifted out and everything else
+ * dropped. `reason` is the discriminator rather than the status, so a body
+ * that grows fields keeps working and a 410 from anything else does not get
+ * this treatment.
+ *
+ * Returns undefined for every other failure, whose raw text is the news.
+ */
+export function staleClientMessage(text: string): string | undefined {
+  try {
+    const body = JSON.parse(text) as { reason?: unknown; message?: unknown };
+    if (body.reason !== 'stale-client') return undefined;
+    return typeof body.message === 'string' && body.message.trim() !== ''
+      ? body.message
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The REST call every tool goes through; throws on a non-2xx.
  *
  * `authHeaders` is asked PER PATH, and answers `{}` for all but the one route
@@ -82,7 +107,12 @@ export function createHttp(
     });
     const text = await res.text();
     // Check status before parsing — see the header.
-    if (!res.ok) throw new Error(`${method} ${path} → ${res.status}: ${text}`);
+    if (!res.ok) {
+      // The stale-client verdict replaces the body it came in, and keeps the
+      // method, path and status in front of it: the caller still needs to
+      // know WHICH call failed, and the sentence is what says why.
+      throw new Error(`${method} ${path} → ${res.status}: ${staleClientMessage(text) ?? text}`);
+    }
     return text ? JSON.parse(text) : {};
   };
 }

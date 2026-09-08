@@ -100,6 +100,7 @@ import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/r
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
 import { createShellStatic } from './routes/shell-static.ts';
+import { handleStaleClient } from './routes/stale-client.ts';
 import {
   type TaskRoutesContext,
   handleDispatchAndNoteRoutes,
@@ -2490,6 +2491,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // the run did in place, and it lands on the 404 below.
       const shell = serveShellRoutes({ req, url, pathname, visitor });
       if (shell) return shell;
+
+      // ── Stale-client 410 ── see routes/stale-client.ts. Above the
+      // wrong-prefix hint and below everything that exists: an address the
+      // pre-cutover client used is told the client is behind, rather than
+      // getting the bare 404 a deleted board also answers.
+      const stale = handleStaleClient(pathname);
+      if (stale) return stale;
 
       // ── Wrong-prefix 404 ── see routes/wrong-prefix.ts. Below everything
       // that exists, so it shadows nothing: a guess at a board route with

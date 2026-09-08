@@ -14,9 +14,12 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `*` | GET, HEAD, POST, PUT, DELETE | `server.ts` | open | A path segment that is not valid percent-encoding is answered 400 `bad-path` at the top of the front door, above every gate. The answer depends only on the caller’s own typo — see `path-params.ts`. |
 | `*` | OPTIONS | `server.ts` | open | CORS preflight, answered with a bare 204 before the guard runs. It carries no body, and no `Access-Control-Allow-*` unless the origin is allowed, so it discloses only that a server is here. |
 | `/` | GET | `routes/shell-static.ts` | trusted-local |  |
+| `/api/agent-notes` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/agent-notes/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/agents/:agentId/merge` | POST | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/agents/:agentId/token` | GET | `routes/agent-identity.ts` | trusted-local |  |
 | `/api/agents/:agentId/watches` | GET, POST | `routes/agent-identity.ts` | trusted-local |  |
+| `/api/attachments` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/attachments/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/auth/logout` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/profile` | POST | `routes/auth-share.ts` | trusted-local |  |
@@ -30,17 +33,32 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/calendar/google` | DELETE | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/api/calendar/google/callback` | GET | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/api/calendar/google/connect` | GET | `routes/meetings-calendar.ts` | trusted-local |  |
+| `/api/chat-audit` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/chat-audit/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/deploy` | GET, POST | `routes/ops.ts` | trusted-local |  |
-| `/api/docs/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
-| `/api/goals/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
+| `/api/diffs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/diffs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/dispatches` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/dispatches/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/docs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/docs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/goals` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/goals/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/api/metrics` | GET | `routes/ops.ts` | trusted-local |  |
+| `/api/next` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/next/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/plugin/refresh` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/prompts` | GET | `routes/prompts.ts` | trusted-local |  |
 | `/api/prompts/:id` | GET, PUT | `routes/prompts.ts` | trusted-local |  |
 | `/api/push/key` | GET | `routes/ops.ts` | loopback-only |  |
 | `/api/push/subscriptions` | POST, DELETE | `routes/ops.ts` | trusted-local |  |
+| `/api/refs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/refs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/review-items` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/review-items/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/reviews` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/reviews/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/sentry` | GET, POST | `routes/ops.ts` | loopback-only |  |
 | `/api/share` | GET | `routes/auth-share.ts` | trusted-local |  |
 | `/api/share/:shareId` | DELETE | `routes/auth-share.ts` | trusted-local |  |
@@ -51,10 +69,13 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/share/member/remove` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/share/workspace` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/summaries/backfill` | POST | `routes/ops.ts` | trusted-local |  |
-| `/api/tasks/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
+| `/api/tasks` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/tasks/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/threads` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/threads/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/webhooks/log` | GET, POST | `routes/ops.ts` | trusted-local |  |
-| `/api/workspaces/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
+| `/api/workspaces` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/workspaces/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/app/*` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/apple-touch-icon.png` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/demos/*` | GET | `routes/shell-static.ts` | trusted-local |  |

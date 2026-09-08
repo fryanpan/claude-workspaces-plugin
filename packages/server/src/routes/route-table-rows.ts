@@ -40,6 +40,34 @@ function family(module: string, rows: readonly Row[]): RouteEntry[] {
   );
 }
 
+const ANY_METHOD = 'GET POST PUT DELETE';
+
+/**
+ * The `/api/<family>` words a pre-cutover client still calls, answered 410 by
+ * `routes/stale-client.ts` — the same set that module holds, spelled here
+ * because the table is about addresses and that one is about a verdict.
+ */
+const PRE_CUTOVER_FAMILIES = [
+  'workspaces',
+  'docs',
+  'tasks',
+  'goals',
+  'refs',
+  'reviews',
+  'review-items',
+  'dispatches',
+  'diffs',
+  'agent-notes',
+  'chat-audit',
+] as const;
+
+/**
+ * The wrong-prefix families the stale-client answer does NOT already claim.
+ * These reach `routes/wrong-prefix.ts` and are told the address without the
+ * prefix; the four it shares with the set above never get that far.
+ */
+const WRONG_PREFIX_ONLY_FAMILIES = ['threads', 'attachments', 'next'] as const;
+
 /** Every front-door path pattern this server answers. */
 export const ROUTE_TABLE: readonly RouteEntry[] = [
   // Answered ABOVE the host guard, so both rows have to say why that is safe.
@@ -363,13 +391,22 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/projects/:owner', 'GET'],
   ]),
 
-  ...family('routes/wrong-prefix.ts', [
-    ['trusted-local', '/api/workspaces/*', 'GET POST PUT DELETE'],
-    ['trusted-local', '/api/tasks/*', 'GET POST PUT DELETE'],
-    ['trusted-local', '/api/docs/*', 'GET POST PUT DELETE'],
-    ['trusted-local', '/api/goals/*', 'GET POST PUT DELETE'],
-    ['trusted-local', '/api/threads/*', 'GET POST PUT DELETE'],
-    ['trusted-local', '/api/attachments/*', 'GET POST PUT DELETE'],
-    ['trusted-local', '/api/next/*', 'GET POST PUT DELETE'],
-  ]),
+  // The two tail answers for an address that no longer exists, in the order
+  // they run. `stale-client.ts` is above `wrong-prefix.ts`, so a family named
+  // by both is answered 410 and belongs to the first — which is why four of
+  // wrong-prefix's seven families are not listed under it here.
+  ...family(
+    'routes/stale-client.ts',
+    PRE_CUTOVER_FAMILIES.flatMap((f): Row[] => [
+      ['trusted-local', `/api/${f}`, ANY_METHOD],
+      ['trusted-local', `/api/${f}/*`, ANY_METHOD],
+    ]),
+  ),
+  ...family(
+    'routes/wrong-prefix.ts',
+    WRONG_PREFIX_ONLY_FAMILIES.flatMap((f): Row[] => [
+      ['trusted-local', `/api/${f}`, ANY_METHOD],
+      ['trusted-local', `/api/${f}/*`, ANY_METHOD],
+    ]),
+  ),
 ];
