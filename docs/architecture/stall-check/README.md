@@ -46,7 +46,7 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    persisted, read from `GET /workspaces/<id>/keep-moving` and the log.
    Appears on no board. The box cron it replaced posted 404s for nine days
    before anyone noticed.
-2. **"Waiting on a person" is declared, not inferred** (this PR). A row
+2. **"Waiting on a person" is declared, not inferred** (PR 802). A row
    waiting on a person carries the address of every filed item excusing it —
    a ticket item, or a comment-borne item on the ticket's thread or a doc
    the row links — and whether an item still excuses the row is the Home
@@ -56,10 +56,19 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    lead. The note reader (`note-ask.ts`), its Haiku confirmation and the
    `waiting-on-you` prompt are gone; the snapshot and the verdict carry a
    `waiting` list so every excused wait is traceable to its item.
-3. **Escalation is on liveness only.** The board files past the lead when no
-   session on the board is alive — no board write and no heartbeat in the
-   window — to Team Lead first. The anchor mask, settle and cooldown go with
-   the trigger.
+3. **Escalation is on liveness only** (this PR). A board is dead when no
+   session on it is deliverable — no stream open, nobody observed inside the
+   delivery window — and none has written to it or heartbeated on it for the
+   escalation window (an hour). Only then does it go past its lead: its own
+   stall frame to Team Lead, on whichever board Team Lead holds a stream,
+   once per window while it stays dead; and a review item on the reader's
+   queue only when Team Lead is unreachable too. A live lead's rows never
+   escalate, however stuck — the wake is their addressee. A row waiting on a
+   person with the ask filed is not a finding, so it is never in the item.
+   The told clock, the undeliverable clock, the anchor mask, the settle
+   window and the re-file cooldown are gone with the trigger: the item is
+   withdrawn the tick a session is on the board again, and the board's own
+   writes on its anchor row do not count as the row moving.
 4. **A hold cannot become a silent ask.** A held item past the window is a
    finding for the lead and a line in the verdict.
 

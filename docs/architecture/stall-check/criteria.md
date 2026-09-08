@@ -76,11 +76,17 @@ today's code fails is flagged.
 - **Must never:** file about a row that is waiting on the owner with an item
   filed, file while any session on the board is alive, hide its own anchor
   row from the check, or keep an item open on a settle or cooldown after the
-  board has come back. *Fails today on all four* — the trigger is "told and
-  quiet an hour", which is true of a live lead's rows waiting on the owner
-  22 times out of 27 on the measured board.
+  board has come back. *Passes since step 3* — the trigger is liveness alone
+  (`boardDeadFor`), a waiting row is not on the lists it reads, the wiring
+  skips the board's own item and its own writes when it reads the anchor,
+  and the item withdraws on the first tick a session is alive. Before it:
+  the trigger was "told and quiet an hour", true of a live lead's rows
+  waiting on the owner 22 times out of 27 on the measured board.
 - **Measured by:** the verdict's `escalated` line at zero on every board for
-  a week, plus one dead-lead drill per release that reaches Team Lead.
+  a week, plus one dead-lead drill per release that reaches Team Lead
+  (`dead-board-escalation.test.ts` is the drill in CI: a board with no
+  session and a Team Lead on another board gets the frame there and files
+  nothing; with nobody reachable it files one item as the server).
 
 ## `note-ask.ts` + `note-ask-judge.ts` — *removed in step 2*
 
