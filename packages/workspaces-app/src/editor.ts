@@ -21,6 +21,7 @@ import {
 import { Markdown } from 'tiptap-markdown';
 import type { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { BlockIdentity } from './block-identity.ts';
 import { workspaceIdFromPath } from './doc-path.ts';
 import { resolveDocLink, safeLinkHref } from './link-open.ts';
 import { ListBehavior } from './list-behavior.ts';
@@ -126,6 +127,13 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
           HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' },
         },
       }),
+      // Block identity (`cwId` / `cwAuthor`) declared on every block type, so
+      // y-prosemirror neither strips the server's attributes on the next local
+      // edit nor counts them as a difference and re-creates the block. In the
+      // BASE list because every prose surface binds to a doc the server also
+      // writes; deleting it silently un-does the server-side identity work
+      // (packages/core/src/prose-outline.ts).
+      BlockIdentity,
       MermaidCodeBlock,
       // Block-level images. The server-side markdown round-trip (packages/core
       // prose.ts) emits/consumes `image` nodes for `![alt](src)` lines; without
