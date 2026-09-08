@@ -114,6 +114,34 @@ run for a request whatever path it named. `server-options.ts` holds
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
 
+**And every one of those paths is written down once.** `routes/route-table.ts`
+holds the vocabulary — a gate is `trusted-local`, `loopback-only`,
+`share-scope`, `owner-in-handler`, `collab-scope`, `recall-callback` or `open`
+— and `routes/route-table-rows.ts` holds the rows, one per path pattern.
+`Bun.serve` mounts them as its `routes` object, so the table is a value the
+process holds rather than a document that rots, and
+[routes.md](routes.md) is the rendered copy (`bun run routes:table`). Both
+files sit under `routes/` and change none of the picture above: they name URL
+paths, which is what that directory is for.
+
+The gate column is a CHECKED claim, not a comment.
+`shareScopeAllows` is a pure function of the path, the method and the share, so
+`test/route-table.test.ts` drives it with each row's own example address and
+fails when the guard disagrees. That is what makes a route added above its
+gate a CI failure: a new address under an already-allowed prefix either
+declares `share-scope`, or declares `owner-in-handler` and names where the
+in-route refusal lives. It cannot be filed as `trusted-local`, because the
+guard would say otherwise. What the table still cannot see is whether an
+`owner-in-handler` route really carries its refusal — that one is the
+reviewer's, and the routes that have it carry their own tests.
+
+Dispatch stays with the ordered chain in `server.ts` on purpose. Bun matches
+by specificity; this router's order is behaviour in eight documented places,
+among them the Recall status webhook immediately above the `/recall/` upgrade
+and every `…/docs/:docId/meetings…` pattern above the doc resource catch-all.
+So every mounted entry's handler is the same front door an unmatched address
+reaches through `fetch`, and the table is the registry rather than the router.
+
 **What runs on a clock.** Three loops in the server tick rather than answer a
 request, and all three take an injected `now` so a test moves the clock
 instead of waiting: the two board wakes in the Keep-moving group (the
@@ -294,6 +322,7 @@ exactly once, and nothing word-rate enters the SSE buffer.
 - [stall-check/](stall-check/README.md) — the stall check's design, what "working" means, and per-module criteria; [stall-detection.md](stall-detection.md) is the mechanics as they run today and why each layer exists.
 - [goal-projection.md](goal-projection.md) — the goal bar, the remainder, and when a goal lands.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
+- [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.
 
 ## Adding a file

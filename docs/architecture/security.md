@@ -129,6 +129,21 @@ Please do not open a public issue. Report privately through GitHub's [private vu
 
 Run the checklist in [`.claude/rules/security-review.md`](../../.claude/rules/security-review.md) before a pull request that adds or changes a route, a token, a share surface, a webhook, or a sign-in default. The `ship-it` skill runs it when the changed files touch those areas.
 
+## Every route and its gate, in one table
+
+[routes.md](routes.md) lists every front-door path pattern this server answers
+with the gate it sits behind. It is generated from
+`packages/server/src/routes/route-table-rows.ts`, which `Bun.serve` mounts as
+its `routes` object, and the gate column is checked rather than asserted:
+`packages/server/test/route-table.test.ts` drives `shareScopeAllows` with each
+row's own example address and fails when the guard disagrees with the row. So
+a route added under an already-allowed prefix cannot be filed as owner-only —
+it declares `share-scope`, or it declares `owner-in-handler` and names where
+its own visitor refusal lives.
+
+Answer heading 1 of the security-review checklist from that table, and add the
+row in the same pull request as the route.
+
 ## Where to look
 
 Every hostname below is a placeholder; the real ones live in the launchd configuration, not in this repository.
@@ -140,6 +155,7 @@ Every hostname below is a placeholder; the real ones live in the launchd configu
 | Collaboration hostname `collab.<domain>` | `collabScope`                                                | `CF_ACCESS_TUNNEL_HOSTS`, same Access application as the owner's |
 | Share hostname `share.<domain>`          | `isShareLinkHost`, `shareScopeAllows`                        | `CW_SHARE_LINK_HOSTS`, `CF_ACCESS_SHARE_AUD` (its own audience) |
 | Member route tables                      | `memberRouteAllows`, `host-guard.ts`                         | none                                                         |
+| Every route and its gate                 | `routes/route-table-rows.ts`, rendered to [routes.md](routes.md) | none                                                     |
 | Master switch                            | `share/sharing-gate.ts`                                      | set from an agent, not from a browser                        |
 | Meeting-bot hostname `recall.<domain>`   | `middleware/recall-callback-gate.ts`                         | `CW_RECALL_CALLBACK_HOST`, `RECALL_WEBHOOK_SECRET`           |
 | Browser write gate                       | `isGatedWrite`, `middleware/write-gate.ts`                   | `CW_REQUIRE_SIGNIN_TO_WRITE` (on by default)                 |
