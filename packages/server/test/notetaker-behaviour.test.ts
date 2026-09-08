@@ -97,6 +97,24 @@ describe('the notetaking instructions', () => {
     expect(system).toMatch(/every idea/i);
   });
 
+  it('put no ceiling on how many edits one tick may write', () => {
+    // The rule this replaced said "two or three edits is a normal tick",
+    // which is a cap on how much a tick may RECORD and so a licence to drop
+    // whatever a busy minute raised past the third idea. Lifting it moved the
+    // longest AMI meeting from 57.3% of ideas in no note to 46.8%.
+    expect(system).toContain('WRITE ONE EDIT PER IDEA');
+    expect(system).toMatch(/no ceiling/i);
+    expect(system).not.toMatch(/edits is a normal tick/i);
+  });
+
+  it('open a heading as soon as a subject has nowhere to go', () => {
+    // Headings used to wait until the discussion had "genuinely moved to a
+    // different topic", which leaves an idea about a new subject with no
+    // heading to sit under — and an idea with nowhere to go is dropped.
+    expect(system).toMatch(/heading is cheap/i);
+    expect(system).not.toMatch(/genuinely moved to a different topic/i);
+  });
+
   it('give open questions one fixed heading rather than a good place', () => {
     // Both halves, and they are different rules: the FLOOR says a topic is
     // not finished until what is open is written down, and HOW TO ORGANISE

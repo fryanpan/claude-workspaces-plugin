@@ -900,7 +900,22 @@ rather than re-derived, which is what makes it a gate rather than a reading.
 The corpus is two halves: AMI excerpts, committed; and this machine's own
 meetings, which `scripts/notes-eval-prod-corpus.ts` writes OUTSIDE the repo
 and refuses to write inside it (`--corpus <dir>` reads them). Only counts and
-rates ever come back from that half.
+rates ever come back from that half: an example line is a line of somebody's
+meeting restated, so the harness withholds every example — lost ideas and
+failed bullets alike — whenever the corpus resolves outside this repo.
+
+**The bar is not met today, and the reason is arithmetic.** Measured
+2026-09-08 on `claude-haiku-4-5`, the rate is 40.7% over the eight AMI
+meetings (852 ideas) and 44.3% over three of this machine's own (300 ideas).
+Removing the prompt's per-tick edit ceiling moved the worst meeting from 57.3%
+to 46.8% and its notes from 51 bullets to 61, so wording is worth about a
+tenth of the gap and no more. The rest is a collision between two things this
+document asks for at once: that meeting contains 171 distinct propositions,
+and a doc that stays glanceable holds a few dozen bullets. Either the notes
+grow a layer that holds detail without showing it, or the ground truth stops
+counting propositions a good note-taker is right to compress away. The gate
+stays at 5% and stays red until one of those is decided; a bar moved to fit
+the measurement would measure nothing.
 
 **What holds all of this is a coverage audit, not more unit tests.** The ways
 a meeting loses words are spread across the ticker's delta, the compose
