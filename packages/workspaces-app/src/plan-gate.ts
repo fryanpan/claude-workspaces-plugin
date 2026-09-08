@@ -37,7 +37,7 @@
  */
 
 import type { LeadPresence, User } from '@claude-workspaces/core';
-import { api } from './doc-path.ts';
+import { api, docJsonUrl } from './doc-path.ts';
 import { floatDock } from './float-dock.ts';
 import { leadReceiptSuffix } from './lead-banner.ts';
 
@@ -151,6 +151,9 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
   const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms) as unknown as number);
   const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h));
   const docUrl = api(`docs/${encodeURIComponent(docId)}`);
+  // The RECORD, not the page: the same path serves the editor's HTML shell
+  // without this query. See `docJsonUrl`.
+  const docReadUrl = docJsonUrl(docId);
 
   const float = document.createElement('button');
   float.type = 'button';
@@ -274,7 +277,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
 
   async function load(): Promise<void> {
     try {
-      const body = (await fetchJson(docUrl)) as DocAnswer;
+      const body = (await fetchJson(docReadUrl)) as DocAnswer;
       if (disposed) return;
       state = body.meta?.planState;
       kind = body.meta?.huddleKind;

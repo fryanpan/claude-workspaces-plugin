@@ -135,6 +135,31 @@ export function api(sub: string, workspaceId?: string | null): string {
 }
 
 /**
+ * The address a doc's JSON RECORD is read at — `/workspaces/<ws>/docs/<id>?format=json`.
+ *
+ * The page and the record share one path. `GET /workspaces/<ws>/docs/<id>`
+ * answers the editor's HTML shell, because a person typing that address wants
+ * a page; `?format=json` is what asks for the data instead
+ * (`workspace-path.ts`, `isBoardPageRequest`). A read without it gets HTML,
+ * `res.json()` throws, and a caller that treats a failed read as "leave it as
+ * it was" shows nothing and reports nothing.
+ *
+ * That is not hypothetical: it is what the address cutover did to the doc
+ * surface. `/api/docs/<id>` (data) and `/review/<id>` (page) were two paths
+ * and could not collide; the four callers that read the record were moved onto
+ * the merged path and none of them gained the query. The Make Plan float, the
+ * Review float, the ticket's two asks and the doc crumb all went quiet at
+ * once, each swallowing its own HTML.
+ *
+ * So it is ONE builder, for the reason `api` is one builder: a caller that
+ * spells the path by hand is a caller that can forget the half that makes it
+ * answer data.
+ */
+export function docJsonUrl(docId: string, workspaceId?: string | null): string {
+  return `${api(`docs/${encodeURIComponent(docId)}`, workspaceId)}?format=json`;
+}
+
+/**
  * The live-editing socket for a doc — `/workspaces/<ws>/docs/<id>/y`.
  *
  * It was `/y/<docId>`: a doc id in the first segment of a path that named no

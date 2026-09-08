@@ -21,7 +21,7 @@
  * write.
  */
 
-import { api } from '../doc-path.ts';
+import { api, docJsonUrl } from '../doc-path.ts';
 import { timeAgo } from './board-presence-model.ts';
 
 export type TaskAskKind = 'plan' | 'review';
@@ -115,5 +115,5 @@ export function taskAskRequestPath(taskId: string, kind: TaskAskKind): string {
 
 /** Where the panel reads the two stamps back from after a press or a reopen. */
 export function taskAskStatePath(taskId: string): string {
-  return api(`docs/${encodeURIComponent(`task:${taskId}`)}`);
+  return docJsonUrl(`task:${taskId}`);
 }
