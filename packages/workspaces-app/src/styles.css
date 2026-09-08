@@ -670,7 +670,19 @@ body.is-reading-width #editor > .ProseMirror {
   border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
 }
-#editor > .ProseMirror h1:first-child {
+/* A heading that OPENS the document keeps no leading margin, whatever its
+   level: the margin above a heading separates it from the block before it,
+   and the first block has none, so on the first block it is blank page.
+   `h1` carried this arm alone for a long time, which was fine while every
+   doc opened with a title — but a meeting doc opens under
+   `## Meeting notes` (`packages/server/src/notes-section.ts`), so its first
+   line sat 37px down an empty page on the iPad, where height is the scarce
+   axis (Bryan, 2026-09-06: wasted space at the top of a doc). Read off the
+   cascade by `doc-first-line-css.test.ts`, whose control is that a heading
+   further down keeps its full margin. */
+#editor > .ProseMirror h1:first-child,
+#editor > .ProseMirror h2:first-child,
+#editor > .ProseMirror h3:first-child {
   margin-top: 0.2em;
 }
 #editor > .ProseMirror h2 {
