@@ -85,3 +85,38 @@ export type {
   DeleteBlocksInRangeResult,
   DeleteSectionResult,
 } from './prose-blocks.ts';
+export {
+  BLOCK_ID_ATTR,
+  BLOCK_AUTHOR_ATTR,
+  BLOCK_IDENTITY_ATTRS,
+  AUTHOR_CLEAR_ORIGIN,
+  readBlockId,
+  readBlockAuthor,
+  setBlockAuthor,
+  addressableBlocks,
+  ensureBlockIds,
+  newBlockId,
+  claimSubtree,
+  parentOf,
+  findBlockById,
+  outlineTextOf,
+  readOutline,
+  isPersonOrigin,
+  clearAuthorshipOnPersonEdit,
+  plainTextOf,
+} from './prose-outline.ts';
+export type { OutlineEntry, OutlineKind, OutlineOptions } from './prose-outline.ts';
+export {
+  applyBlockEdits,
+  splitLeadingListItems,
+  blocksAuthoredBy,
+  releaseAuthorship,
+} from './prose-batch.ts';
+export type {
+  BlockEdit,
+  BlockEditOp,
+  BlockEditError,
+  BlockEditOutcome,
+  ApplyBlockEditsResult,
+  ApplyBlockEditsOptions,
+} from './prose-batch.ts';

@@ -599,9 +599,8 @@ bot is scheduled.
 
 ## Persistence
 
-Append-only under `<dataDir>/meetings/<safeDocId>/` — with one deliberate
-exception, `notes-ledger.json`, which is rewritten whole (the table below
-says why): one
+Append-only under `<dataDir>/meetings/<safeDocId>/`, with nothing rewritten in
+place — every file here is a record of what happened: one
 `<meetingId>.jsonl` of settled turns (`{turn, text, ts, speaker?}`; a later
 `{turn, speaker, ts}` line with no text relabels a turn already written, and
 `speaker: null` there un-labels it; a later line WITH text revises the words
@@ -640,7 +639,6 @@ note back to what was said, in the same folder as the JSONL —
 | `segment-<N>-<stream>.pcm` | the audio exactly as it reached the server: 16 kHz PCM16LE, no container, no transcode | frame by frame while live |
 | `meeting.json` | the tie back to the doc — doc id, bound path and title as of the last meeting, per-segment engine/mode/audio | at start (the tie) and stop (the segment) |
 | `<docname>-raw-transcript-replay-<stamp>.md` | a re-run of the audio through a chosen engine, same grammar | by `bun run meeting:replay` |
-| `notes-ledger.json` | which "Meeting notes" section is the note-taker's: the markdown of the body items it wrote, its meeting id, and when. **The one file here that is not a record of what happened**, so the one rewritten whole rather than appended — it is a snapshot of what the notes currently SAY, and only the latest reading is ever wanted. Temp-file-and-rename, because a tick can land while a restarting server is reading. Headings are excluded on purpose (`notes-ownership.ts`); a claim has to be evidence, and every meeting's `### Decisions` reads alike | on each tick that writes a line the ledger has not seen before |
 
 `<docname>` is the bound file's own name (`q3-plan.md` → `q3-plan-raw-transcript.md`),
 else a slug of the title, else the doc id; `meeting.json` is what makes the
@@ -701,11 +699,15 @@ find "$CW_DATA_DIR/meetings" -name 'segment-*.pcm' -mtime +90 -print   # then -d
 
 ## Notes composition
 
-A tick triggers the composer, which sees the transcript so far plus doc title
-and board task titles for context, and writes into the doc's "Meeting notes"
-section via the Yjs fragment. The composer is an LLM call (Haiku) and
-follows the same no-default seam as the engine: nothing that merely spins a
-server up can reach an LLM.
+A tick triggers the composer, which sees the doc's OUTLINE — every block with
+the id an edit comes back with — plus the new speech, the doc title and board
+task titles for context, and answers with a handful of edits addressed to
+those ids. They reach the doc through `DocStore.applyBlockEdits`, the same
+verb the MCP block tools and the HTTP edit routes call: the note-taker is an
+agent editing a doc with the operations every other agent uses, and it has no
+private pathway. The composer is an LLM call (Haiku) and follows the same
+no-default seam as the engine: nothing that merely spins a server up can
+reach an LLM.
 
 **What the note-taker is asked to write** is a settings file rather than a
 code path (`notes-prompt-store.ts`), and the words in it are the behaviour.
@@ -736,17 +738,16 @@ with headings"*):
   flat bullets under one heading, and with the example added, five. Stated
   again at the end it holds — and the closing clause "get under the number by
   GROUPING, never by dropping a point" is there because the revision without
-  it passed by deleting a note instead. The
-  shape asked for is sub-bullets, which was once the only shape that survived
-  the merge and is now the cheaper of the two: a heading inside an existing
-  run of bullets used to arrive BELOW them as soon as one line in the section
-  was a person's, and the merge now makes room for it instead — see the
-  re-layout gate below. Nesting still re-creates no element a reader may have
-  commented on, so it stays what the instructions ask for. They also tell it
-  to leave a person's lines at the top level, and THAT one is a guarantee now
-  rather than a request: the ledger only stops it REWRITING their line, a copy
-  nested inside a group is new writing of its own, and `withoutPersonCopies`
-  takes such a copy back out before anything is written.
+  it passed by deleting a note instead. The shape asked for is sub-bullets
+  because nesting is the cheap edit: one `replace_block` rewrites a lead
+  bullet with its points nested under it, and every block a reader may have
+  commented on keeps its id. Re-cutting a section re-creates all of them,
+  which is why the old whole-section write needed a gate deciding when that
+  was safe and this one needs no gate at all. The instructions also tell it
+  to leave a person's lines at the top level; what the doc guarantees
+  underneath is narrower and matters more — their line is never rewritten or
+  deleted, because an edit naming a block that is not the note-taker's own
+  arrives as a suggestion instead.
 - **Mark a guess.** Where the point rests on a garbled word, write the note
   and end it `(unconfirmed)`. A marked guess beats a confident wrong note and
   beats no note.
@@ -755,25 +756,27 @@ with headings"*):
 - **Link what it names**: a board row or doc the tick's speech named arrives
   in the prompt with its URL (below), and the note cites it inline.
 
-A person's line is protected by the MERGE rather than by any of this — the
-prompt asks the model to reproduce one verbatim and to propose rather than
-replace, and the ownership ledger makes it true whatever the model returns.
+A person's line is protected by the DOC rather than by any of this. The
+outline tells the model which blocks are its own and which are not, and the
+instructions ask it to leave the rest alone — but the guarantee sits
+underneath the prompt: an edit naming a block the note-taker does not still
+own lands as a redline suggestion on their words rather than a rewrite of
+them, whatever the model returns.
 
 **Notes always land at the end of the doc** (owner, 2026-09-01: *"note always
-at the end of doc for now"*). `mergeNotesSection` treats the last "Meeting
-notes" heading as this meeting's section and keeps it as the ONE section for
-the meeting even when something lands below it: a Research placeholder pressed
-or spoken between two ticks appends after the notes, and the next tick grows
-the same section rather than opening a second one
-(`notes-one-section.test.ts` asserts this across a sequence of ticks). An
-earlier rule started a fresh section whenever the notes stopped being the
-doc's tail, which left two presses of Research with three sections and the
-meeting's points scattered across them; the transcript-section change that
-followed it (PR 643, transcript moved to the sister file) settled on one
-section. The composer's `previous` is only the newest section, so entries
-it re-lists that an earlier section already holds are dropped rather than
-said twice. An earlier rule kept a section the ledger still claimed items in
-as the target "once chosen", which put live notes above text typed below them.
+at the end of doc for now"*). A meeting opens its section with one
+`insert_at_end` carrying `## Meeting notes`, and from then on writes under
+that heading's BLOCK ID. So anything that lands below the section — a
+Research placeholder pressed or spoken between two ticks, a heading somebody
+typed — grows no second one; the next tick still addresses the same heading.
+The id is remembered per doc and cleared when a new recording starts
+(`NotesHeadingMemory`, below), which is the owner's 2026-08-31 rule that a
+stop-and-restart writes its own section rather than resuming the last one's.
+Every earlier answer to "which section is mine" was a guess a person could
+invalidate — the doc's tail, the last heading whose text read "Meeting
+notes", the last section a ledger still claimed items in — and each produced
+its own twinning bug in turn. An id produces none, so that family is closed
+rather than fixed again.
 
 **The live transcript is one run of text at the end of the doc.** The
 markdown app appends a "Live transcript" zone after the editor's content
@@ -861,8 +864,8 @@ carries a sentence that by definition never settled.
 
 **What holds all of this is a coverage audit, not more unit tests.** The ways
 a meeting loses words are spread across the ticker's delta, the compose
-chain's carry, the composer's own reply, the ownership merge and the section
-finder, and each has tests that pass while the meeting as a whole drops a
+chain's carry, the composer's own reply and the batch that applies it, and
+each has tests that pass while the meeting as a whole drops a
 stretch of conversation. So `notes-turn-coverage.test.ts` runs a scripted
 three-minute meeting through the tick harness and asks of every settled turn
 whether the notes say anything about it: the script declares, per line, either
@@ -871,152 +874,105 @@ is a failure that names the sentence. The script ends mid-sentence, which is
 how a person stops a recording — so the audit reports the interrupted turn by
 name when the final pass regresses.
 
-**The write is a MERGE, and a person can type in the section while it runs**
-(owner, 2026-08-30: *"destroyed my notes"*). The old write deleted the whole
-section and re-inserted the composed string, so every tick ate what he had
-typed since the last one. Now (`meeting-notes-merge.ts`):
+**The write is a batch of block edits, and a person can type in the section
+while it runs** (owner, 2026-08-30: *"destroyed my notes"*). The write he said
+that about deleted the whole section and re-inserted the composed string, so
+every tick ate what he had typed since the last one. What replaced it was a
+merge: the composer returned the whole notes every tick, and a planner beside
+the doc worked out which items were the agent's and diffed the rest in. That
+is gone too — a real meeting broke it, in the way described at the end of this
+section — and the doc itself now answers the question the merge existed to
+answer.
 
-- The unit is an **item** — a top-level block, or one item of a list, because
-  a bullet list is a single block and block granularity would hand the
-  agent's whole list to the person who fixed one bullet.
-- Ownership is a **ledger keyed by the Yjs element**, holding the markdown
-  the agent left in it, held per doc in memory (the section claim alone is
-  also written down — see below). An item is the agent's only
-  if the agent wrote that element AND it still reads exactly as the agent
-  left it. Both halves matter: text alone hands a person's element to the
-  agent the moment they type a line matching one of its own, and element
-  alone keeps calling a line the agent's after they rewrote it. Only agent
-  items are ever deleted, and a person's item is never re-created — the same
-  element stays in place, so its marks and anchors survive.
-- **`previous` is the live section**, not the composer's own last reply, so
-  the composer sees what the person wrote. The first tick of a session still
-  composes from scratch — otherwise every meeting would continue the last
-  one's notes. Human items are listed in the prompt as theirs to reproduce
-  verbatim, and are gated on the same first-tick condition: on tick one they
-  are the LAST meeting's lines, and "reproduce verbatim" would copy them in.
-- **A changed version of a person's line becomes a suggestion**, not a
-  rewrite: the redline marks in `suggest-ops.ts`, authored as "Meeting
-  Assistant". The accepted state — what serializes to disk — stays his words
-  until he accepts. One pending proposal per item; the marks are the
-  registry, so the doc is where the duplicate check asks.
-- **The stale-compose race** is caught with `basedOn`, the item list the
-  compose read. An item missing from it arrived DURING the compose, so a
-  collision with it is dropped rather than proposed; an item in it that has
-  since left the doc is one he edited mid-compose, so anything the compose
-  says that reads like it is dropped rather than inserted. `basedOn` holds
-  KEYS — kind plus text — so turning a paragraph into a bullet without
-  retyping it still counts as the edit it is. Nothing is lost — the composer
-  returns the whole notes every tick.
-- **A line the composer moved is not a new line.** Before an unmatched
-  incoming entry is inserted, it is matched against the person's items that
-  the diff did not line up with; an exact hit is the composer re-emitting
-  their note somewhere else, and inserting it would leave two of it.
-- **A ledger that claims nothing means "everything here is somebody
-  else's"**, so a restarted server adds and stops replacing rather than
-  claiming prose it has never seen.
-- **The ledger answers two questions and only one of them is written down.**
-  "May I replace this item?" is element AND text, so it cannot survive a
-  process and must not: a restarted server that claimed items it has never
-  seen would delete a person's writing on its first from-scratch compose.
-  "Is this section the note-taker's?" — the question that decides whether a
-  tick extends the "Meeting notes" it finds or opens a second one — is
-  answered by TEXT alone, and that half is persisted
-  (`notes-ledger-store.ts`, `<dataDir>/meetings/<docId>/notes-ledger.json`,
-  a whole-file snapshot written via temp-and-rename). Without it a deploy
-  mid-meeting emptied the ledger, the position test below took over, and any
-  heading appended under the notes — a Research placeholder, a heading a
-  person typed — twinned the section on the very next tick, which is the
-  twinning PR 637 had already fixed. Recognising a section by text grants
-  nothing INSIDE it: every replace and delete still goes through `claims`,
-  so the restarted server adds and suggests there and rewrites nothing.
-  **A heading is not evidence, so headings are not persisted.** A sub-heading
-  is an ordinary item to the merge and the agent goes on owning the ones it
-  wrote, but the composer emits the same small vocabulary every meeting and a
-  person organising their own notes reaches for the same words; one
-  `### Decisions` in common would hand the note-taker a section it never
-  wrote a word of. Length is not the test — structure is, and the node says
-  so.
-  The record names its meeting and is adopted only while the sitting that
-  wrote it is still going on (`NOTES_LEDGER_CONTINUATION_MS`, 30 min), which
-  is what keeps a genuinely new meeting starting its own section at the end.
-  **The window is a sitting, not a process**, and that is deliberate: a boot
-  id would make it restart-only and leave a stop-and-start falling back to
-  the position test — which twins only when something happens to sit below
-  the notes, an arbitrary rule rather than a safe one.
-  Per DOC rather than per meeting id, because a restart mid-meeting does not
-  resume the meeting — the browser reports the connection lost and the next
-  recording is minted a new id. Nothing in the store throws: a missing file,
-  a torn one, a folder that cannot be made all read as no claim, which is
-  the behaviour it replaces. `notes-ledger-persist.test.ts` drives the
-  restart end to end; `notes-ledger-store.test.ts` drives the file.
-- **An in-place agent edit has to tell the ledger.** The speaker rename below
-  rewrites characters inside the agent's own lines rather than replacing
-  them, so the ledger would stop recognising them and hand each one to the
-  person. `reclaimAfterInPlaceEdit` snapshots what the ledger claimed before
-  the edit and re-records exactly those elements after it — never a line the
-  person had already made theirs.
-- **A topic heading landing INSIDE a run of bullets re-lays the section.**
-  This is the one thing the item-level merge cannot express: Yjs will not
-  re-parent an existing element, so there is no way to split a bullet list
-  around a new heading without re-creating the items below it. Left alone,
-  the tick that first grouped a meeting into topics put every heading BELOW
-  every bullet — a run of bullets followed by a stack of empty headings,
-  worse than the flat list it was organising. So the case is detected
-  (`planNeedsRelayout`) and the body is rebuilt from the composer's markdown
-  instead. It is allowed only when every item in the section is the agent's
-  own and no proposal is pending on one, which is the same invariant as
-  everywhere else here. It costs element identity — a comment anchored to one
-  of the agent's bullets orphans into the outdated-comment flow — which is
-  why it fires on the tick that MOVES the furniture and never on a tick that
-  merely adds a bullet under a heading that already exists.
-- **A section somebody has typed in is regrouped WITHOUT rebuilding it.** The
-  rule above says relayout needs a section that is entirely the agent's, and
-  for a while that was the end of it: one line of a person's turned the whole
-  thing off and every heading the composer wrote landed below the bullets it
-  was meant to group — in exactly the meetings people write in. The fix
-  rebuilds nothing. A heading can only land between two bullets of one list,
-  so the agent's OWN bullets are cleared out of that list first and the merge
-  is planned again against what is left; the composer returns the whole notes
-  every tick, so they come straight back around the headings. A person's items
-  are never deleted, keep their elements, their marks and their comment
-  anchors, and are anchored by the diff as usual. It costs exactly what
-  relayout costs and no more — a comment on one of the AGENT's bullets
-  orphans — and it is paid only on the tick that moves the furniture. The one
-  trap worth naming: the second plan's `basedOn` must lose the lines the clear
-  just took out, or it reads them as items a person deleted mid-compose and
-  withholds the composer's copy of every one of them, dropping the notes
-  instead of regrouping them.
-- **A person's line is theirs ONCE, and the ledger cannot say that on its
-  own.** The ledger stops the note-taker rewriting a line somebody typed: an
-  incoming entry that reads like one of theirs lands as a suggestion on it.
-  A regroup walks around that completely — a lead bullet with their line
-  nested underneath is not an item, it is part of the enclosing item's
-  markdown, so nothing in the plan ever compares it to anything, and it is
-  accepted as new writing of the agent's own. The reader is left with their
-  line and a copy of it saying one thing twice. `withoutPersonCopies` unwraps
-  it before the plan is made, on every path: a nested copy is removed with
-  whatever was nested under it, and a group whose LEAD is their line is SPLIT
-  instead — the head becomes an item of its own, which the merge already
-  recognises as theirs, and the group's points become items beside it. So no
-  point the composer wrote is lost on either shape. What counts as a copy is
-  `NOTES_REWRITE_SIMILARITY`, the module's own bar for "reads as the same
-  note", because a restatement of their point inside a group is the same
-  duplicate as a verbatim one and reads worse.
-- **"No proposal is pending" is a question for the DOC, not for the plan.**
-  The first version of that gate asked `plan.suggestions.length === 0`, which
-  counts only what THIS tick proposes. A proposal already sitting in the
-  section was invisible to it — and can be invisible to everything else here
-  too: a list item whose every character is a pending insert serializes to the
-  empty string, so it never becomes a `NoteItem` and never reaches the
-  ownership check. Relayout would delete the span and the proposal with it,
-  reporting `suggested: 0` and leaving no trace. `spanHasPendingSuggestion`
-  now walks the span for either suggestion mark, and any pending mark anywhere
-  in the section refuses the relayout.
-- **Relayout obeys the plan's drop list.** It writes the composer's items
-  wholesale, which bypassed the filter that withholds an item whose person's
-  line is newer than the compose that produced it — so a bullet somebody
-  deleted while the compose was in flight came back. The same filter now
-  applies on both paths, and both report the same `dropped` count.
+**A tick reads an outline and answers with edits.** `prose.readOutline` walks
+the doc and returns one entry per addressable block: its id, its kind, its
+text, the heading above it, and the agent that wrote it. The composer is handed
+that table rather than the section as prose — deliberately, because a model
+handed prose answers with prose — together with the new speech, and returns a
+short JSON list of edits addressed to those ids: `insert_under_heading`,
+`insert_at_end`, `replace_block`, `delete_block`. `prose.applyBlockEdits`
+applies the whole list in ONE Yjs transaction, so a reader watching the doc
+never sees half a tick and a failure halfway leaves no half-batch behind. An
+edit naming a block somebody deleted mid-compose reports `unknown-block` and
+the rest still lands. The reply now grows with the TICK rather than with the
+meeting, which is what took late ticks out of the composer's token ceiling.
+
+**Ownership is an attribute on the block, and the doc maintains it.** Every
+block the note-taker writes carries `cwAuthor: meeting-notes`
+(`prose-identity.ts`), alongside the `cwId` that addresses it.
+`clearAuthorshipOnPersonEdit`, installed by the doc store on every live doc,
+removes that attribute the instant a person-origin transaction touches the
+block. So "is this still mine?" and "has a person touched it?" are one
+question with one answer, held on the block itself, and it is the answer
+`applyBlockEdits` consults: a `replace_block` or `delete_block` naming a block
+still marked the note-taker's applies directly, and anything else becomes a
+redline suggestion through the same `suggest-ops.ts` path the assistant uses
+everywhere else, authored as "Meeting Assistant". Accepting it is the person's
+move; what serializes to disk until then is their words. Nothing on this path
+can destroy words the note-taker did not write — not as a rule the model is
+asked to follow, but as the only thing the write verb can do.
+
+**The section is remembered by BLOCK ID.** The session stores the id of the
+heading its meeting opened — learned from the outline as the level-2 heading
+its first batch added — and re-checks each tick that the block is still there
+(`NotesHeadingMemory` in `meeting-notes-doc.ts`). Only a heading that has been
+DELETED makes it open a new one, and `beginMeeting` clears the memory so a new
+recording opens its own section below whatever the last one wrote. A person
+RENAMING the heading is a non-event, which is exactly what authorship alone
+could not deliver: renaming is a person edit, so it clears `cwAuthor` on the
+very heading the meeting is still writing under. The memory is in process
+only. A restarted server remembers no heading, opens a new section on its next
+tick, and can only suggest on the previous one's bullets — which is the safe
+direction to fall.
+
+**A person and a tick may write in the same second.** There is ONE live Yjs
+document per file. The browser reaches it over the collaboration socket and the
+server-side edit verbs reach the same in-process object; both produce Yjs
+transactions on it, and the CRDT merges them. So a keystroke and a tick landing
+together both apply, and neither waits for the other. The tick does not depend
+on the document standing still while the model thinks, either: it reads the
+outline at its start and addresses blocks by id, so a block that has moved is
+still that block, a heading renamed above it still holds the same id, and a
+block the person has since typed in is no longer the note-taker's to rewrite —
+the edit that names it arrives as a proposal on what they now have. The
+stale-compose race that the merge needed a `basedOn` snapshot of the section to
+catch has no way to occur here, and there is no such snapshot any more.
+
+**What the real meeting did, and why none of it can recur.** The merge kept its
+ownership in a ledger keyed by the Yjs element, persisted to
+`<dataDir>/meetings/<docId>/notes-ledger.json`. The browser's list-join plugin
+merged adjacent lists on server-originated changes as well as local ones, so as
+soon as a tick wrote bullets beside an existing list the note-taker's own
+bullets were re-created under fresh identity. The ledger no longer recognised
+them, the next tick wrote the topic again, and one real meeting came out with
+fourteen bullets repeated up to three times, a heading that landed as a
+paragraph, and about a minute of lag. The same meeting grew a second "Meeting
+notes" section under the first, which came from the other half of the old
+design — the section was found by its heading TEXT — and is what the remembered
+heading id above closes. Three changes close the identity half.
+`list-behavior.ts` leaves remote transactions
+alone, so the plugin re-creates nothing the server wrote. `applyBlockEdits`
+GROWS an adjacent list of the same type instead of splicing a second one in
+beside it, so there is nothing left for a joiner to join. And identity no
+longer depends on an element surviving at all: an id travels inside the
+`.ydoc`, and a block that really has gone reports `unknown-block` rather than
+being quietly written a second time. The ledger's file is neither written nor
+read now; folders from before the rebuild still hold one, and nothing removes
+it.
+
+**The browser has to declare the two attributes, or none of this holds.**
+y-prosemirror's `updateYFragment` strips every Yjs attribute the ProseMirror
+node does not carry, and counts an attribute it has never heard of as a
+difference worth rewriting the block over.
+`packages/workspaces-app/src/block-identity.ts` is a Tiptap extension whose
+only job is to declare `cwId` and `cwAuthor` as global attributes; deleting it
+silently undoes the whole design from the editor's side.
+
+**Neither attribute survives a round trip through markdown, and that is the
+right answer.** The `.md` on disk has nowhere to put them, so a
+reparse-from-disk re-mints ids and drops authorship. A doc that came back off
+disk is one nobody can prove the agent wrote, and an agent that cannot prove it
+wrote something does not get to rewrite it.
 
 ### What a note may link: the board, searched per tick
 
@@ -1106,27 +1062,29 @@ would take a clause of somebody's meeting record with it.
 
 Naming a voice mid-meeting fixes the notes ALREADY in the doc, not just the
 ones still to come — a transcript where the same person is "Speaker B" above
-the rename and by name below it was the thing to avoid. Three moving parts:
+the rename and by name below it was the thing to avoid. Two moving parts:
 
-- `nameSpeaker` rewrites the session's `previous` — the composer's memory of
-  what it wrote — so no later tick reintroduces the placeholder.
 - A `NotesRelabel` goes to the sink, which calls `relabelNotesSection` on the
   doc. That is a **targeted in-place replacement**, not a section rewrite: it
-  changes the exact token ("Speaker B") on word boundaries, only inside the
-  notes section, carrying each site's marks. A rename is a two-word
-  correction and costs two words.
-- Both are queued on the **compose chain**, behind anything in flight. A
-  compose that started before the rename read `previous` the old way and will
-  return notes written the old way; the rewrite has to land after it.
+  changes the exact token ("Speaker B") on word boundaries, only in blocks the
+  note-taker wrote and no person has since touched
+  (`prose.blocksAuthoredBy`), carrying each site's marks. A rename is a
+  two-word correction and costs two words.
+- It is queued on the **compose chain**, behind anything in flight. A compose
+  that started before the rename read an outline still saying the old name and
+  will return edits written the old way; the rewrite has to land after it.
+  Nothing has to be rewritten in the session's own memory, because it keeps
+  none — every later tick reads the renamed outline back from the doc.
 
-**Why not `replaceNotesSection`.** It replaces the whole section from a
-string the server composed, which would discard whatever the person had typed
-inside the section since the last tick. Since the merge above, no tick
-rewrites the section wholesale either — a rename must not become the one
-remaining way for the note-taker to overwrite someone's writing. Everything
-OUTSIDE the section is unreachable from this path however it is worded: the
-tests fix a doc whose body says "Speaker B" three times and assert all three
-survive.
+**Why not a section rewrite.** Replacing the section from a string the server
+composed would discard whatever the person had typed inside it since the last
+tick. No tick writes a section wholesale any more, so a rename must not become
+the one remaining way for the note-taker to overwrite somebody's writing. Two
+things put it out of reach: the scope is the blocks the agent still owns, and
+the sweep narrows to those as well — it used to rewrite the words "Speaker B"
+anywhere in the section, a person's own sentence included, and a person's
+sentence is theirs. The tests fix a doc whose body says "Speaker B" three
+times and assert all three survive.
 
 Renaming an already-given name works the same way, because the rewrite reads
 the OLD DISPLAY NAME (what the composer actually wrote), not the raw label —
@@ -1179,10 +1137,11 @@ invented for this would have been lost on the first flush.
   name map rather than trusted to spell it. Same law the task capture's
   `requester` is held to — a model-claimed attribution must name something
   the tick's own transcript contained. Lines a PERSON wrote are passed
-  through byte for byte, because the merge recognises them by exact text.
+  through byte for byte: the outline says which blocks carry no author, and
+  those lines ride into the check as its `protect` list.
 - **A rename is keyed on the label, never the spelling.**
-  `retagSpeakerInNotes` walks the notes section's `Y.XmlText` nodes and
-  rewrites the text of every run whose link href is `speaker:<label>`,
+  `retagSpeakerInNotes` walks the `Y.XmlText` nodes of the blocks the
+  note-taker owns and rewrites every run whose link href is `speaker:<label>`,
   in place, marks preserved — which is what makes two voices called Alex
   separable where the display-text sweep could not tell them apart. It runs
   AFTER the untagged sweep, and that order is load-bearing: an extension
@@ -1251,9 +1210,9 @@ turn, and `speaker:B` cannot say which of B's sentences a mention came from.
 composer: the model's job is to say which voice, and everything a later
 correction has to trust is supplied by code. A tag arriving WITHOUT
 provenance is stamped with the tick's turns for that voice; one that already
-has some keeps them, because the composer returns the whole notes every tick
-and restamping would move a mention's provenance forward to words it was
-never written from. Past `MAX_SPEAKER_TAG_TURNS` (12) nothing is stamped: a
+has some keeps them: a mention the composer re-emits inside a `replace_block`
+was not written from THIS tick's words, and restamping would move its
+provenance forward to words it never came from. Past `MAX_SPEAKER_TAG_TURNS` (12) nothing is stamped: a
 mention that could have come from thirty turns is not one a revision can
 place, and saying so is cheaper than pretending.
 
@@ -1290,12 +1249,16 @@ Three things the plumbing has to get right, each tested:
   the batch and takes the new label into its retry. Correcting words nobody
   has read is nothing.
 
-**In the doc the walk is scoped to the items the LEDGER still claims**, which
-a rename is not. What a voice is called is true wherever it is written; a
-machine's second thoughts about who spoke do not get to edit a sentence a
-person has taken over. The same boundary keeps this off an EARLIER meeting's
-leftovers in the same doc, whose turn numbers start again from the beginning
-and could otherwise collide with this meeting's.
+**In the doc the walk is scoped to the blocks the note-taker still owns**
+(`prose.blocksAuthoredBy`), which a rename is not. What a voice is called is
+true wherever it is written; a machine's second thoughts about who spoke do
+not get to edit a sentence a person has taken over. That boundary used to fall
+around an EARLIER meeting's leftovers in the same doc as well, whose turn
+numbers start again from the beginning and could otherwise collide with this
+meeting's. It no longer does: nothing releases authorship when a meeting ends,
+so a previous sitting's bullets are still marked the note-taker's and still in
+scope. What separates them now is the provenance each mention carries rather
+than the scope, and that is worth checking rather than assuming.
 
 What this still cannot do: a turn the revision gives a label to for the FIRST
 time (a `PENDING` placeholder resolving) composed as untagged prose, and there
@@ -1595,13 +1558,13 @@ and explicitly NOT to summarize what is inside — it has not read them.
 Correcting the note-taker out loud is how a person naturally fixes a note.
 Before this, it added a second note and the doc held both, disagreeing.
 
-**Why it is not left to the composer.** The composer already revises — it
-receives the whole notes and returns the whole notes, and its prompt tells it
-to "correct earlier notes the new speech overturns". What it cannot be is
-*relied on*: the output is a section rewritten from a model's reading, so the
-same ask lands as a fix on one tick and as an extra bullet on the next, and
-either way the merge reconciles a section that changed everywhere. A person
-saying two words wants two words changed. So a correction is a **targeted,
+**Why it is not left to the composer.** The composer already revises — it can
+`replace_block` a bullet the new speech overturns, and its prompt tells it to.
+What it cannot be is *relied on*: whether the ask lands as a fix or as a second
+bullet disagreeing with the first is a model's reading, and it comes out the
+other way on the next tick. A person saying two words wants two words changed,
+and a `replace_block` rewrites the whole bullet — taking the marks and anchors
+on the words nobody corrected with it. So a correction is a **targeted,
 in-place replacement** — the same mechanic as the speaker rename above, for
 the same reason.
 
@@ -1623,17 +1586,22 @@ and two stale ones remain and the choice looks arbitrary; fix all three and
 the edit is wider than the words asked for. Ambiguity drops, the way every
 other reading in this pipeline drops what it cannot prove.
 
-**Whose note it is decides the verb.** Ownership is the merge ledger's: the
-agent may revise only an item it wrote *that still reads as it left it*.
+**Whose note it is decides the verb.** Ownership is the block's own
+`cwAuthor`: the agent may revise only a block it wrote *that no person has
+touched since*, which the doc keeps true for it.
 
-- **an agent note** → rewritten in place, under `reclaimAfterInPlaceEdit`, so
-  the ledger learns the line's new wording and the note-taker keeps owning it.
-  Without the wrapper the correction would hand every line it fixed to the
-  person and the notes would freeze at the correction.
+- **an agent note** → rewritten in place, so the block keeps its id, its marks
+  and its comment anchors. It also keeps being the agent's with no bookkeeping
+  at all: the doc clears authorship for a PERSON's edit, and this is not one.
+  The old ledger recognised its own lines by their exact text, so an in-place
+  fix handed each corrected line to the person and the notes froze at the
+  correction until a wrapper re-claimed them; there is nothing left to
+  re-claim.
 - **a person's note** — one they wrote, or one the agent wrote and they have
-  since edited — → a **redline suggestion** on the phrase, the same
-  `suggestOps` path the composer uses when it wants different words in
-  somebody's line. Accepting it is their move. One pending proposal per item:
+  since edited, which the doc treats as the same thing — → a **redline
+  suggestion** on the phrase, the same `suggestOps` path any edit naming
+  somebody else's block takes. Accepting it is their move. One pending
+  proposal per item:
   somebody who has not answered the last one does not collect a fresh copy
   every tick.
 - **both carry the phrase** → the agent's own note wins, and theirs is left
@@ -1656,11 +1624,11 @@ reads to decide which mentions move, so a correction that truncated it would
 leave the mention looking untouched and quietly unmovable.
 
 **Ordering inside the tick is load-bearing.** The correction reaches the doc
-**after the capture pass and before the section is read** for the compose. The
+**after the capture pass and before the outline is read** for the compose. The
 note it fixes was written on an earlier tick and is already in the doc, so
-correcting first means this tick's compose reads the corrected words as
-`previous` — and the merge never has to reconcile a note the composer echoed
-back in its old wording.
+correcting first means this tick's compose sees the corrected words in its
+outline — and no edit comes back proposing the note in the wording that was
+just fixed.
 
 **A correction and a self-correction are different things.** Somebody who
 changes their mind ("actually, let's do Thursday") is speaking, and the
@@ -1757,7 +1725,11 @@ tick — ES2002d lost 13 of 52 ticks and ended with fewer bullets than meetings
 half its length. Nothing said is lost, since a failed compose carries its
 turns to the next tick, but the notes stop keeping up. Raising the constant
 only moves the wall a meeting further out; the shape of the fix is a compose
-that returns a CHANGE rather than the whole notes.
+that returns a CHANGE rather than the whole notes, and that is what the
+edit-list compose is. A reply is a handful of edits whatever hour of the
+meeting it is, so the reply can no longer grow into the ceiling. The constant
+is left where it was measured rather than raised, so the eval goes on
+reporting any refusal instead of hiding one behind a bigger number.
 
 **On demand only.** It spends money and reaches the network, so nothing runs
 it on a push except a `--smoke` slice — one meeting, three ticks, one judged —
@@ -2145,13 +2117,22 @@ the browser, and what runs when one is refused) ·
 transcript, audio tee and `meeting.json`) + `scripts/replay-meeting-audio.ts`
 (replaying that audio) ·
 `packages/server/src/meeting-lookup.ts` (what a "pull that in" ask points
-at) · `packages/server/src/meeting-notes.ts` + `meeting-notes-doc.ts` (composer +
-doc sink) + `pause-ticker.ts` (the two clocks, in `createPauseTicker`) +
-`notes-section-write.ts` (every write into a live section) ·
-`packages/server/src/meeting-notes-merge.ts` (the merge that
-keeps a person's writing) + `notes-ownership.ts` (the ownership ledger
-everything else asks) + `notes-ledger-store.ts` (the half of that ledger that
-survives a restart) + `notes-section.ts` (what a section decomposes into) ·
+at) · `packages/server/src/meeting-notes.ts` + `meeting-notes-doc.ts` (composer seam
++ doc sink, and the heading id each meeting writes under) + `pause-ticker.ts`
+(the two clocks, in `createPauseTicker`) ·
+`packages/server/src/meeting-notes-composer.ts` (the Haiku call and the
+outline it puts in the prompt) + `notes-edit-parse.ts` (a reply read as edits,
+strictly) + `notes-doc-access.ts` (who the note-taker is, and the one
+doc-store slice every notes writer goes through) + `notes-speaker-tags.ts`
+(the in-place renaming passes) + `notes-research-placeholder.ts` (the section
+a spoken "can you research X" leaves behind) ·
+`packages/core/src/prose-identity.ts` + `prose-outline.ts` (the two block
+attributes, the outline read, and what clears authorship) + `prose-batch.ts`
+(a batch of block-addressed edits in one transaction) ·
+`packages/server/src/doc-outline-ops.ts` (the store's two block verbs, which
+the `read_doc_outline` / `apply_block_edits` MCP tools and their routes call
+too) · `packages/workspaces-app/src/block-identity.ts` (the Tiptap extension
+without which the editor strips both attributes) ·
 `packages/server/src/meeting-notes-correction.ts` (which note a spoken
 correction lands on, and whether it may) ·
 `packages/server/src/meeting-ask-cues.ts` (now, later or neither — the two

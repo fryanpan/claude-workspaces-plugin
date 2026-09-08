@@ -377,12 +377,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ? withServerNotesSinks(opts.meetingNotes, {
           docStore: () => docStore,
           tasks: () => taskStore,
-          // Two readers. The legacy-transcript removal, which must not take a
+          // One reader: the legacy-transcript removal, which must not take a
           // `Raw transcript` heading out of a doc bound into somebody's
-          // working tree, where the old note-taker never wrote one. And the
-          // notes ledger's durable half (`notes-ledger-store.ts`), which is
-          // what keeps a deploy mid-meeting from opening a second notes
-          // section — without a data dir the ledger is memory alone.
+          // working tree, where the old note-taker never wrote one.
           dataDir,
           // The capture pipeline's board writes, and the "go do it" wake —
           // the same immediate addressed delivery an answered review item

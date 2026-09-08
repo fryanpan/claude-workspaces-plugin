@@ -45,7 +45,21 @@
 import { resolve, sep } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import { LEGACY_TRANSCRIPT_HEADING, headingText } from './notes-section.ts';
+/**
+ * The heading one release wrote the meeting's own words under, before the
+ * owner's call on 2026-09-03 sent the transcript back to its
+ * `-raw-transcript.md` sister file for good. Nothing writes it any more; it
+ * lives here, with its only reader, so a doc that already carries such a
+ * section can be recognised — and removed — rather than written around
+ * forever.
+ */
+export const LEGACY_TRANSCRIPT_HEADING = 'Raw transcript';
+
+/** A heading's text, read the same way the serializer would render it. */
+export function headingText(el: Y.XmlElement): string {
+  const line = prose.serializeBlockToMarkdown(el).split('\n', 1)[0] ?? '';
+  return line.replace(/^#{1,6}\s+/, '').trim();
+}
 
 /** The level the old writer's heading was written at, and the only one this
  *  will remove. */

@@ -113,6 +113,17 @@ const SERVER_META_KEYS = [
   'contentRevision',
 ] as const;
 
+/**
+ * Did this update come from somebody authoring, rather than from the server's
+ * own housekeeping? What decides whether the doc's revision moves.
+ *
+ * THE SAME QUESTION `prose.isPersonOrigin` ASKS, ANSWERED FROM THE OTHER
+ * SIDE. That one calls anything with a non-string origin a person; this one
+ * names its two positive cases — an origin string starting `agent`, or a
+ * connection this doc actually holds — and calls everything else
+ * housekeeping. Both are right today, and they part company on an origin
+ * neither has met, so a change to either belongs in both.
+ */
 function isAuthoringOrigin(doc: LiveDoc, origin: unknown): boolean {
   if (typeof origin === 'string') return origin.startsWith('agent') && origin !== REANCHOR_ORIGIN;
   if (typeof origin !== 'object' || origin === null) return false;

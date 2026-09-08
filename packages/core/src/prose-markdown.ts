@@ -19,6 +19,7 @@
 import * as Y from 'yjs';
 import { LCS_CELL_BUDGET, lcsKept } from './lcs.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
+import { BLOCK_IDENTITY_ATTRS } from './prose-identity.ts';
 import { SUGGEST_INSERT_MARK } from './suggest.ts';
 
 /**
@@ -306,7 +307,12 @@ export function applyMarkdownToFragment(fragment: Y.XmlFragment, markdown: strin
     const s = serializeBlock(node);
     if (s != null) return s;
     if (!(node instanceof Y.XmlElement)) return `__empty_text_${i}__`;
-    return `__empty_${node.nodeName}_${JSON.stringify(node.getAttributes())}__`;
+    // Identity attributes are excluded: a block id is minted per element, so
+    // including it would give every empty block a key of its own and make the
+    // LCS delete-and-reinsert it on a reparse that never touched it.
+    const attrs = { ...node.getAttributes() } as Record<string, unknown>;
+    for (const name of BLOCK_IDENTITY_ATTRS) delete attrs[name];
+    return `__empty_${node.nodeName}_${JSON.stringify(attrs)}__`;
   };
   // Blocks whose entire text is a pending insert-suggestion serialize to
   // NOTHING, so they have no key in disk space — an LCS over them would

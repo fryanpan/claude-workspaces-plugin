@@ -211,11 +211,10 @@ export class MeetingRelay {
    * The notes pipeline this relay was built with, so the BOT relay can share
    * it rather than build a second one from the same options.
    *
-   * Sharing is the requirement, not a convenience: `meeting-notes-merge`'s
-   * ownership ledger is held per doc inside these deps' sink, and it is what
-   * decides whether an item in the notes section is the agent's to replace or
-   * a person's to leave alone. Two ledgers over one doc would each see the
-   * other's writes as a person's and stop replacing their own notes.
+   * Sharing is the requirement, not a convenience: the memory of which
+   * heading each doc's notes are under is held per doc inside these deps'
+   * sink (`NotesHeadingMemory`). Two of them over one doc would each miss the
+   * other's section and open one of their own.
    */
   get notesDeps(): MeetingNotesDeps | null {
     return this.deps.notes;

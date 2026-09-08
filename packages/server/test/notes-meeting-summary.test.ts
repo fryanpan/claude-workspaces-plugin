@@ -18,13 +18,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { createNotesTickHarness } from './notes-tick-harness.ts';
+import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 describe('what the meeting says about its own coverage', () => {
   it('a healthy meeting reports every settled turn in the notes, and none lost', async () => {
     const h = createNotesTickHarness({
-      compose: (input) =>
-        `## Meeting notes\n\n${input.tick.turns.map((t) => `- ${t.text}`).join('\n')}\n`,
+      compose: (input) => addNotes(input, input.tick.turns.map((t) => `- ${t.text}`).join('\n')),
     });
 
     await h.speak('One.');
@@ -67,7 +66,7 @@ describe('what the meeting says about its own coverage', () => {
       compose: (input) => {
         attempt++;
         if (attempt === 1) throw new Error('one bad tick');
-        return `## Meeting notes\n\n${input.tick.turns.map((t) => `- ${t.text}`).join('\n')}\n`;
+        return addNotes(input, input.tick.turns.map((t) => `- ${t.text}`).join('\n'));
       },
     });
 

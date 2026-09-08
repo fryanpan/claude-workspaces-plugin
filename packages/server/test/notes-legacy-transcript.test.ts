@@ -15,14 +15,16 @@
 import { describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import { applyNotesUpdate, createNotesLedger } from '../src/meeting-notes-doc.ts';
+import { applyNotesUpdate, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
+import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
 import {
+  LEGACY_TRANSCRIPT_HEADING,
   allowedIn,
   dropLegacyTranscriptSection,
   legacyTranscriptSpan,
 } from '../src/notes-legacy-transcript.ts';
-import { LEGACY_TRANSCRIPT_HEADING, MEETING_NOTES_HEADING } from '../src/notes-section.ts';
-import { createNotesTickHarness } from './notes-tick-harness.ts';
+import { asPerson, oneDocStore } from './notes-doc-helpers.ts';
+import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 const DATA_DIR = '/srv/claude-workspaces/data';
 
@@ -253,10 +255,8 @@ describe('across a scripted meeting', () => {
   it('writes the notes and never the words', async () => {
     const h = createNotesTickHarness({
       doc: '# Agenda\n\nSome intro.\n',
-      compose: (_input, tick) =>
-        `## ${MEETING_NOTES_HEADING}\n\n${['- measure first', '- ship on Friday']
-          .slice(0, tick)
-          .join('\n')}\n`,
+      compose: (input, tick) =>
+        addNotes(input, ['- measure first', '- ship on Friday'][tick - 1] ?? ''),
     });
 
     for (const line of ['We should measure first.', 'Ship on Friday.']) {
@@ -272,14 +272,16 @@ describe('across a scripted meeting', () => {
   it('the next tick takes out a section the old release wrote', async () => {
     const h = createNotesTickHarness({
       doc: AS_THE_OLD_WRITER_LEFT_IT,
-      compose: () => `## ${MEETING_NOTES_HEADING}\n\n- ship on Friday\n`,
+      compose: (input) => addNotes(input, '- ship on Friday'),
     });
     const shot = await h.speak('Ship on Friday.');
     expect(shot.markdown).not.toContain(LEGACY_TRANSCRIPT_HEADING);
     expect(shot.markdown).not.toContain('Sam: agreed');
-    // The notes it was written under are untouched, old points and new.
-    expect(shot.notes).toContain('ask about latency');
+    // This meeting opens its OWN section — the doc's existing "Meeting notes"
+    // was written by somebody else and is not this recording's — and the
+    // points already in the doc are left exactly where they were.
     expect(shot.notes).toContain('ship on Friday');
+    expect(shot.markdown).toContain('- ask about latency');
     expect(h.errors).toEqual([]);
     await h.end();
   });
@@ -289,7 +291,7 @@ describe('across a scripted meeting', () => {
       doc: A_PERSON_PASTED_IT,
       boundPath: '/Users/someone/dev/project/interview-prep.md',
       dataDir: DATA_DIR,
-      compose: () => `## ${MEETING_NOTES_HEADING}\n\n- ship on Friday\n`,
+      compose: (input) => addNotes(input, '- ship on Friday'),
     });
     const shot = await h.speak('Ship on Friday.');
     expect(shot.markdown).toContain(LEGACY_TRANSCRIPT_HEADING);
@@ -301,7 +303,7 @@ describe('across a scripted meeting', () => {
   it('a json fence under that heading survives the tick in a huddle doc', async () => {
     const h = createNotesTickHarness({
       doc: A_PERSON_PASTED_IT.replace('```text', '```json'),
-      compose: () => `## ${MEETING_NOTES_HEADING}\n\n- ship on Friday\n`,
+      compose: (input) => addNotes(input, '- ship on Friday'),
     });
     const shot = await h.speak('Ship on Friday.');
     expect(shot.markdown).toContain(LEGACY_TRANSCRIPT_HEADING);
@@ -315,7 +317,7 @@ describe('across a scripted meeting', () => {
       doc: AS_THE_OLD_WRITER_LEFT_IT,
       boundPath: '/Users/someone/dev/project/interview-prep.md',
       dataDir: DATA_DIR,
-      compose: () => `## ${MEETING_NOTES_HEADING}\n\n- ship on Friday\n`,
+      compose: (input) => addNotes(input, '- ship on Friday'),
     });
     const shot = await h.speak('Ship on Friday.');
     expect(shot.markdown).toContain('Sam: agreed');
@@ -327,14 +329,11 @@ describe('across a scripted meeting', () => {
 describe('the kept section is reported once per doc', () => {
   it('says so on the first tick and stays quiet on every tick after', () => {
     const ydoc = docFrom(A_PERSON_PASTED_IT.replace('```text', '```json'));
-    const docStore = {
-      get: (id: string) =>
-        id === 'd-quiet' ? { ydoc, meta: { type: 'markdown' as const } } : undefined,
-    };
+    const docStore = oneDocStore('d-quiet', { ydoc, meta: { type: 'markdown' as const } });
     const update = {
       docId: 'd-quiet',
       meetingId: 'm1',
-      notes: `## ${MEETING_NOTES_HEADING}\n\n- a point\n`,
+      edits: [{ op: 'insert_at_end' as const, markdown: '## Notes\n\n- a point' }],
       tick: { tick: 1, reason: 'pause' as const, turns: [] },
     };
     const said: string[] = [];
@@ -343,8 +342,8 @@ describe('the kept section is reported once per doc', () => {
       said.push(args.map(String).join(' '));
     };
     try {
-      const ledger = createNotesLedger();
-      for (let i = 0; i < 3; i++) applyNotesUpdate(docStore, update as never, ledger);
+      const heading = createNotesHeadingMemory();
+      for (let i = 0; i < 3; i++) applyNotesUpdate(docStore, update, heading);
     } finally {
       console.log = real;
     }
@@ -358,8 +357,7 @@ describe("a person's own writing below the notes", () => {
   it('an unheaded paragraph typed at the doc tail is neither moved nor deleted', async () => {
     const h = createNotesTickHarness({
       doc: '# Agenda\n',
-      compose: (_i, tick) =>
-        `## ${MEETING_NOTES_HEADING}\n\n- point one\n${tick > 1 ? '- point two\n' : ''}`,
+      compose: (input, tick) => addNotes(input, tick === 1 ? '- point one' : '- point two'),
     });
     await h.speak('Point one.');
 
@@ -367,7 +365,9 @@ describe("a person's own writing below the notes", () => {
     // their own, just a paragraph at the end of the doc.
     const mine = 'I disagree with this one and here is why.';
     const fragment = prose.getProseFragment(h.ydoc);
-    fragment.insert(fragment.length, prose.parseMarkdownBlocks(mine));
+    asPerson(h.ydoc, () => {
+      fragment.insert(fragment.length, prose.parseMarkdownBlocks(mine));
+    });
 
     const second = await h.speak('Point two.');
     // Present once, unchanged, and in the place they put it: still under the
@@ -377,8 +377,8 @@ describe("a person's own writing below the notes", () => {
     expect(second.markdown.indexOf(mine)).toBeGreaterThan(second.markdown.indexOf('- point one'));
     expect(second.notes).toContain('point two');
 
-    // And a third tick does not reclaim it either: the ledger never claimed
-    // it, so the merge has no licence to replace or drop it.
+    // And a third tick does not reclaim it either: no edit ever names their
+    // block, and one that did would reach them as a suggestion.
     const third = await h.speak('Point three.');
     expect(third.markdown.split(mine)).toHaveLength(2);
     expect(h.errors).toEqual([]);

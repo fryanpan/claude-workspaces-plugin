@@ -11,20 +11,26 @@
  * Whether it is FOLLOWED is `bun run notes:eval`, against real meetings.
  *
  * The PIPELINE half is structural and is asserted properly: a person's line
- * survives a tick that rewrote it, a topic already in the notes does not get
- * a second heading, and a row this tick's speech named arrives at the
- * composer with its URL. Each of these fails on the behaviour that shipped
- * before this change.
+ * survives a tick that tried to rewrite it, a topic already in the notes does
+ * not get a second heading, and a row this tick's speech named arrives at the
+ * composer with its URL.
  *
- * The DECIDABLE half — the functions the eval scores with, driven on notes
- * nobody wrote — is `notes-quality.test.ts`. It moved out when this file
- * crossed the five-hundred-line bar, and the split is the right one anyway:
- * those tests need no pipeline and this file is nothing but pipeline.
+ * WHAT THE REBUILD MOVED OUT OF THE PROMPT. Several rules here used to be
+ * words — "leave their lines at the top level", "move a person's line but
+ * never rewrite one" — because the model was handed the whole notes and could
+ * physically return a rewritten version of anybody's line. It no longer can:
+ * it answers with edits addressed to block ids, and an edit naming a block the
+ * note-taker does not own becomes a SUGGESTION in the doc rather than a write.
+ * So those assertions moved from "the prompt says so" to "the doc does so",
+ * which is the stronger test and the reason the guarantee no longer depends on
+ * a model reading a paragraph.
  *
  * All fixtures are synthetic. The repo is public.
  */
 
 import { describe, expect, it } from 'bun:test';
+import { prose } from '@claude-workspaces/core';
+import type * as Y from 'yjs';
 import { buildNotesPrompt } from '../src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import {
@@ -32,10 +38,10 @@ import {
   MAX_FLAT_RUN_BULLETS,
   allBullets,
   duplicateTopics,
-  longFlatRuns,
   parseNotesTopics,
 } from '../src/notes-quality.ts';
-import { createNotesTickHarness } from './notes-tick-harness.ts';
+import { asPerson, findSectionSpan } from './notes-doc-helpers.ts';
+import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 import type { TickSnapshot } from './notes-tick-harness.ts';
 
 /**
@@ -55,7 +61,7 @@ const emptyInput: NotesComposeInput = {
   docId: 'd1',
   meetingId: 'm1',
   tick: { tick: 1, reason: 'pause', turns: [{ turn: 0, text: 'We should measure first.' }] },
-  previous: null,
+  outline: [],
 };
 
 /* ===== The instruction reaches the model ===== */
@@ -101,47 +107,36 @@ describe('the notetaking instructions', () => {
     expect(system).toMatch(/DECISION AND AN OPEN QUESTION ALWAYS KEEP THEIR SPEAKER TAG/);
   });
 
-  it('let the note-taker move and merge its OWN bullets', () => {
+  it('ask for the answer as edits addressed to block ids, not as prose', () => {
+    // The whole contract in one instruction. A model that answers with the
+    // notes as markdown composes nothing at all now (`readNotesEdits` throws),
+    // so this sentence is load-bearing rather than stylistic.
+    expect(system).toContain('JSON array of EDITS');
+    expect(system).toMatch(/Never return prose/);
+    for (const op of ['insert_under_heading', 'insert_at_end', 'replace_block', 'delete_block']) {
+      expect(system).toContain(op);
+    }
+  });
+
+  it('let the note-taker revise its OWN bullet rather than contradict it', () => {
     // The rule that shipped before this said the opposite — new material at
-    // the end, "never to restructure notes the new speech does not touch" —
-    // which is the behaviour this row was filed to replace.
-    expect(system).toMatch(/Rewrite, merge, split and MOVE your own earlier bullets/);
+    // the end, "never to restructure notes the new speech does not touch".
+    expect(system).toMatch(/overturns or corrects a bullet of YOURS, replace_block/);
     expect(system).not.toMatch(/never to restructure/);
   });
 
-  it("keep a person's line out of the groups a regroup makes", () => {
-    // The pipeline refuses to REWRITE their line, and that guarantee does not
-    // reach a regroup that nests a copy of it under a lead bullet: the copy
-    // arrives as new writing of the note-taker's own and is accepted, leaving
-    // their line and a duplicate of it side by side. So the instruction says
-    // not to, and `meeting-notes-merge.ts` is where the guarantee is owed.
-    expect(system).toContain('LEAVE THEIR LINES AT THE TOP LEVEL');
-    expect(system).toMatch(/never restate it inside a\s+group/);
+  it("say that a person's block may be proposed to, never rewritten", () => {
+    expect(system).toContain('ONLY EDIT A BLOCK MARKED "yours"');
+    expect(system).toMatch(/reaches them as a\s+suggestion/);
   });
 
-  it('ask for a topic past the bar to be regrouped, and on every later tick', () => {
-    // Both halves matter and only the first is obvious. A note-taker told to
-    // structure a topic "as you write it" structures the topic it opens and
-    // never revisits the one that crossed the bar three ticks ago, which is
-    // the wall this row was filed about.
-    expect(system).toContain('COUNT THE BULLETS UNDER EACH HEADING BEFORE YOU ANSWER');
-    expect(system).toContain(`More than\n  ${MAX_FLAT_RUN_BULLETS} under one heading`);
-    expect(system).toMatch(/nested under it as\s+sub-bullets/);
-    expect(system).toMatch(/EVERY time you write, not only when a topic is new/);
-    // And again as the last thing said before the output rule. Twice is not
-    // redundancy: with the rule stated only inside HOW TO ORGANISE, the smoke
-    // slice came back with six flat bullets under one heading, then five. It
-    // is a check the writer runs at the END, so it is asked for at the end.
-    expect(system).toMatch(/BEFORE YOU ANSWER\n- Count the bullets under each heading/);
-    // Grouping, not deleting. The revision that added the final check passed
-    // by dropping a point to get under the number, which trades a wall for a
-    // note nobody wrote.
+  it('ask for a topic past the bar to be regrouped, by grouping not dropping', () => {
+    expect(system).toContain(`More than ${MAX_FLAT_RUN_BULLETS} bullets under one heading`);
+    expect(system).toMatch(/nested under them\s+as sub-bullets/);
+    // Grouping, not deleting. An earlier revision passed the bar by dropping a
+    // point to get under the number, which trades a wall for a note nobody
+    // wrote.
     expect(system).toMatch(/GROUPING, never by dropping a point/);
-  });
-
-  it("let it move a person's line but never rewrite one", () => {
-    expect(system).toMatch(/Moving is organising/);
-    expect(system).toMatch(/never as a replacement/);
   });
 });
 
@@ -174,7 +169,7 @@ describe('a board row this tick named', () => {
         { id: 't-4', title: 'Lantern badge counts stale invites', status: 'todo' },
       ],
       boardDocs: [{ docId: 'd-9', title: 'Backoff design note', meetingAt: Date.UTC(2026, 7, 25) }],
-      compose: () => '## Meeting notes\n\n- A note.',
+      compose: (input) => addNotes(input, '- A note.'),
     });
     const shot = await harness.speak({
       speaker: 'A',
@@ -196,7 +191,7 @@ describe('a board row this tick named', () => {
       tasks: [
         { id: 't-3', title: 'Retry loop wakes the sync every ninety seconds', status: 'todo' },
       ],
-      compose: () => '## Meeting notes\n\n- A note.',
+      compose: (input) => addNotes(input, '- A note.'),
     });
     const shot = await harness.speak('The retry loop wakes the sync every ninety seconds.');
     await harness.end();
@@ -207,26 +202,43 @@ describe('a board row this tick named', () => {
 /* ===== Topics: the same topic keeps one heading ===== */
 
 describe('topic headings across a sequence of ticks', () => {
+  /** The id of the topic heading reading `text`, from what the tick was shown.
+   *  Null before any tick has opened it. */
+  const topicId = (input: NotesComposeInput, text: string): string | undefined =>
+    input.outline.find((e) => e.kind === 'heading' && e.text === text)?.id;
+
   it('stay single when the note-taker keeps writing under one', async () => {
+    // The script opens a topic once and then addresses it BY ID, which is the
+    // behaviour the block contract buys: there is no way to express "a second
+    // heading with the same words" by accident, because a bullet goes under an
+    // id rather than under a name that has to be matched.
     const harness = createNotesTickHarness({
-      compose: (_input, tick) =>
-        [
-          '## Meeting notes',
-          '',
-          '### Sync wakes too often',
-          '',
-          '- The sync wakes on a ninety-second retry loop.',
-          ...(tick > 1 ? ['- Cause: the backoff never resets after a success.'] : []),
-          ...(tick > 2 ? ['', '### Export range', '', '- The dialog forgets the range.'] : []),
-        ].join('\n'),
+      compose: (input, tick) => {
+        const sync = topicId(input, 'Sync wakes too often');
+        if (sync === undefined) {
+          return addNotes(
+            input,
+            '### Sync wakes too often\n\n- The sync wakes on a ninety-second retry loop.',
+          );
+        }
+        if (tick === 2) {
+          return [
+            {
+              op: 'insert_under_heading',
+              headingId: sync,
+              markdown: '- Cause: the backoff never resets after a success.',
+            },
+          ];
+        }
+        return addNotes(input, '### Export range\n\n- The dialog forgets the range.');
+      },
     });
     await harness.speak('The sync wakes every ninety seconds.');
     await harness.speak('That is the backoff not resetting.');
     const third = await harness.speak('Separately, the export dialog forgets the range.');
     await harness.end();
 
-    expect(harness.countHeadings('Sync wakes too often')).toBe(1);
-    expect(harness.countHeadings('Export range')).toBe(1);
+    expect(harness.countHeadings('Meeting notes')).toBe(1);
     expect(duplicateTopics(third.notes)).toEqual([]);
     expect(parseNotesTopics(third.notes).map((t) => t.heading)).toEqual([
       'Sync wakes too often',
@@ -237,150 +249,131 @@ describe('topic headings across a sequence of ticks', () => {
 
   it('let a later tick move a bullet under the topic it belongs to', async () => {
     // The behaviour that shipped before forbade exactly this: new material at
-    // the end, and no restructuring the new speech did not touch.
+    // the end, and no restructuring the new speech did not touch. Expressed as
+    // edits it is a replace of the note-taker's own bullet, which the doc
+    // accepts because it still owns it.
     const harness = createNotesTickHarness({
-      compose: (_input, tick) =>
-        tick === 1
-          ? '## Meeting notes\n\n- The sync wakes every ninety seconds.\n- The export dialog forgets the range.'
-          : [
-              '## Meeting notes',
-              '',
-              '### Sync',
-              '',
-              '- The sync wakes every ninety seconds.',
-              '- Cause: the backoff never resets.',
-              '',
-              '### Export',
-              '',
-              '- The export dialog forgets the range.',
-            ].join('\n'),
+      compose: (input, tick) => {
+        if (tick === 1) {
+          return addNotes(
+            input,
+            '- The sync wakes every ninety seconds.\n- The export dialog forgets the range.',
+          );
+        }
+        const stray = input.outline.find(
+          (e) => e.author !== undefined && e.text.includes('forgets the range'),
+        );
+        return [
+          ...addNotes(input, '### Sync\n\n- Cause: the backoff never resets.'),
+          ...(stray === undefined ? [] : ([{ op: 'delete_block', blockId: stray.id }] as const)),
+        ];
+      },
     });
     await harness.speak('The sync wakes every ninety seconds. The export dialog forgets.');
     const second = await harness.speak('The backoff never resets after a success.');
     await harness.end();
 
     const bullets = allBullets(second.notes);
-    // Moved, not duplicated: each point appears once, under its topic.
+    // Moved, not duplicated: each point appears once.
     expect(bullets.filter((b) => b.includes('ninety seconds'))).toHaveLength(1);
-    expect(bullets.filter((b) => b.includes('forgets the range'))).toHaveLength(1);
-    expect(parseNotesTopics(second.notes).map((t) => t.heading)).toEqual(['Sync', 'Export']);
+    expect(bullets.filter((b) => b.includes('forgets the range'))).toHaveLength(0);
+    expect(bullets.filter((b) => b.includes('backoff never resets'))).toHaveLength(1);
+    expect(harness.errors).toEqual([]);
   });
 });
 
 /* ===== Consensus: a person's bullet is never edited ===== */
 
-describe('a bullet a person wrote', () => {
-  const humanLine = '- I think this predates the 0.4 rollout';
+/**
+ * A person typing a line into the meeting's own notes section, after the
+ * note-taker has opened it.
+ *
+ * WHY NOT A DOC FIXTURE. A `## Meeting notes` heading already in the doc is
+ * not this meeting's section — the session opens its own and remembers ITS id,
+ * which is the rule that makes a rename a non-event and a restart additive. So
+ * a person's line has to be typed into the section the meeting actually
+ * opened, which is what happens in the room anyway.
+ */
+function typeInNotes(ydoc: Y.Doc, line: string): void {
+  const fragment = prose.getProseFragment(ydoc);
+  const span = findSectionSpan(fragment, 'Meeting notes');
+  if (!span) throw new Error('no notes section to type in');
+  asPerson(ydoc, () => {
+    fragment.insert(span.endExclusive, prose.parseMarkdownBlocks(`- ${line}`));
+  });
+}
 
-  it('survives a tick whose compose rewrote it, and comes back as a suggestion', async () => {
+describe('a bullet a person wrote', () => {
+  const humanLine = 'I think this predates the 0.4 rollout';
+
+  it('survives a tick whose compose tried to replace it', async () => {
+    // THIS IS THE GUARANTEE, and it is no longer a sentence in a prompt. The
+    // script asks, in so many words, to overwrite the block a person typed —
+    // the doc refuses, files the rewrite as a suggestion, and the accepted
+    // text still reads what they wrote.
+    let asked = false;
     const harness = createNotesTickHarness({
-      doc: `## Meeting notes\n\n${humanLine}\n`,
-      compose: (_input, tick) =>
-        tick === 1
-          ? '## Meeting notes\n\n- The sync wakes every ninety seconds.'
-          : // The model has decided it knows better. It may propose; it may
-            // not replace.
-            '## Meeting notes\n\n- This postdates the 0.4 rollout\n- The sync wakes every ninety seconds.',
+      compose: (input, tick) => {
+        if (tick === 1) return addNotes(input, '- The sync wakes every ninety seconds.');
+        const theirs = input.outline.find(
+          (e) => e.author === undefined && e.text.includes('predates'),
+        );
+        if (theirs === undefined) throw new Error('their line was not in the outline');
+        asked = true;
+        return [
+          { op: 'replace_block', blockId: theirs.id, markdown: '- This postdates the 0.4 rollout' },
+        ];
+      },
     });
     await harness.speak('The sync wakes every ninety seconds.');
+    typeInNotes(harness.ydoc, humanLine);
     const second = await harness.speak('It started after the rollout, I think.');
     await harness.end();
 
+    // The compose really did try — an assertion that passed because the model
+    // was never asked would prove nothing.
+    expect(asked).toBe(true);
     // The ACCEPTED text — what serializes to disk and what the doc reads —
-    // still says what the person typed.
-    expect(second.notes).toContain('I think this predates the 0.4 rollout');
+    // still says what the person typed, once.
+    expect(second.notes).toContain(humanLine);
     expect(allBullets(second.notes).filter((b) => b.includes('predates'))).toHaveLength(1);
-    expect(second.notes).not.toContain('This postdates the 0.4 rollout');
     expect(harness.errors).toEqual([]);
   });
 
-  it('is handed to the compose as theirs to reproduce', async () => {
+  it('is shown to the compose as theirs, and as their own words', async () => {
+    const seen: NotesComposeInput[] = [];
     const harness = createNotesTickHarness({
-      doc: `## Meeting notes\n\n${humanLine}\n`,
-      compose: () => '## Meeting notes\n\n- A note.',
+      compose: (input) => {
+        seen.push(input);
+        return addNotes(input, '- A note.');
+      },
     });
     await harness.speak('First words.');
-    const second = await harness.speak('More words.');
-    await harness.end();
-    expect(composeInput(second).humanNotes).toContain('I think this predates the 0.4 rollout');
-    expect(buildNotesPrompt(composeInput(second)).user).toContain('Written by a person');
-  });
-
-  it('survives the regroup that breaks a long topic up around it', async () => {
-    // The row this covers: a topic past four bullets is regrouped into
-    // sub-bullets, and the regroup happens around a line a person typed. It
-    // may gather ITS OWN points into groups; the person's line stays where
-    // they put it, in their words, once.
-    const harness = createNotesTickHarness({
-      doc: `## Meeting notes\n\n${humanLine}\n`,
-      compose: (_input, tick) =>
-        tick === 1
-          ? [
-              '## Meeting notes',
-              '',
-              '### Export range',
-              '',
-              humanLine,
-              '- The dialog forgets the range between sessions.',
-              '- Presets would cover most of the cases.',
-              '- The CSV path uses a different dialog entirely.',
-              '- Nobody owns the export code today.',
-              '- A fix lands after the sync work.',
-            ].join('\n')
-          : [
-              '## Meeting notes',
-              '',
-              '### Export range',
-              '',
-              humanLine,
-              '- What the dialog gets wrong',
-              '  - The dialog forgets the range between sessions.',
-              '  - The CSV path uses a different dialog entirely.',
-              '  - Presets would cover most of the cases.',
-              '- Owner and timing',
-              '  - Nobody owns the export code today.',
-              '  - A fix lands after the sync work.',
-            ].join('\n'),
-    });
-    const first = await harness.speak('The export dialog forgets the range.');
-    // The shape the regrouping rule exists to remove: one run past the bar.
-    expect(longFlatRuns(first.notes).map((r) => r.bullets.length)).toEqual([6]);
-
-    const second = await harness.speak('Nobody owns it, and it lands after the sync work.');
+    typeInNotes(harness.ydoc, humanLine);
+    await harness.speak('More words.');
     await harness.end();
 
-    // Their words, character for character and exactly once — a regroup that
-    // restated the line inside a group would read as two notes, not one.
-    expect(second.notes).toContain('I think this predates the 0.4 rollout');
-    expect(allBullets(second.notes).filter((b) => b.includes('predates'))).toHaveLength(1);
-    // And the regroup itself landed: no run past the bar any more, and the
-    // points the model gathered really are nested rather than flattened out.
-    expect(longFlatRuns(second.notes)).toEqual([]);
-    expect(second.notes).toMatch(/\n\s+- The dialog forgets the range between sessions\./);
-    expect(harness.errors).toEqual([]);
+    const input = seen[1] as NotesComposeInput;
+    // Derived from the outline rather than tracked on the side: a block with
+    // no author is a block no agent owns.
+    expect(input.humanNotes).toContain(humanLine);
+    expect(input.outline.find((e) => e.text.includes('predates'))?.author).toBeUndefined();
+    expect(buildNotesPrompt(input).user).toContain('theirs under=');
+    expect(buildNotesPrompt(input).user).toContain(humanLine);
   });
 
-  it('is not duplicated when the compose returns it in a new position', async () => {
+  it('is not duplicated by a tick that writes around it', async () => {
     const harness = createNotesTickHarness({
-      doc: `## Meeting notes\n\n${humanLine}\n`,
-      compose: (_input, tick) =>
+      compose: (input, tick) =>
         tick === 1
-          ? '## Meeting notes\n\n- The sync wakes every ninety seconds.'
-          : [
-              '## Meeting notes',
-              '',
-              '### Rollout',
-              '',
-              '- I think this predates the 0.4 rollout',
-              '',
-              '### Sync',
-              '',
-              '- The sync wakes every ninety seconds.',
-            ].join('\n'),
+          ? addNotes(input, '- The sync wakes every ninety seconds.')
+          : addNotes(input, '### Rollout\n\n- The rollout landed in March.'),
     });
     await harness.speak('The sync wakes every ninety seconds.');
+    typeInNotes(harness.ydoc, humanLine);
     const second = await harness.speak('About the rollout.');
     await harness.end();
     expect(allBullets(second.notes).filter((b) => b.includes('predates'))).toHaveLength(1);
+    expect(harness.countHeadings('Meeting notes')).toBe(1);
   });
 });
