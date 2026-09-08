@@ -44,224 +44,35 @@
  *     LAYOUT width (clientWidth 415 at a 430 viewport). iOS uses overlay
  *     scrollbars that take none, so hiding it is what models the device.
  *
- * Cleanup is unconditional: the Chrome process is killed and the profile
- * removed on success, on error, and on SIGINT/SIGTERM/SIGHUP. Two things make
- * that true rather than merely intended, both learned from profiles found
- * stale on a shared machine:
- *   - the profile and the process are registered the instant they exist, not
- *     when the launch finishes. A signal arriving while Chrome was still
- *     starting used to find nothing to clean and left a full profile plus a
- *     headless Chrome running forever (reproduced 6 times out of 6).
- *   - the removal waits for Chrome to actually die. `kill()` returns long
- *     before the process does, and a starting Chrome rebuilds every file it
- *     owns moments after `rmSync` takes the directory away.
- * The directory carries a run id (CW_UI_SHOT_RUN_ID, else the pid), so a
- * leftover profile names the run that leaked it.
+ * Cleanup is unconditional — killed process, removed profile, on success, on
+ * error and on SIGINT/SIGTERM/SIGHUP. The mechanics, and the stale profiles
+ * that taught them, are in `scripts/headless-chrome.ts`, which also holds the
+ * CDP client so `scripts/client-boot-check.ts` drives the same browser rather
+ * than a second copy of it. The profile directory carries a run id
+ * (CW_UI_SHOT_RUN_ID, else the pid), so a leftover names the run that leaked it.
  */
-import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import {
+  type Browser,
+  Cdp,
+  killAndRemove,
+  launchChrome,
+  pageSocketUrl,
+  sleep,
+  withTimeout,
+} from './headless-chrome.ts';
 import {
   type ShotOptions,
   USAGE,
   UsageError,
   chromeLaunchArgs,
   parseArgs,
-  profilePrefix,
   resolveChromeBin,
   resolveRunId,
 } from './ui-shot-lib.ts';
 
 const log = (msg: string) => process.stderr.write(`ui-shot: ${msg}\n`);
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-type CdpResult = Record<string, unknown>;
-
-/** Minimal CDP client over the page target's WebSocket. */
-class Cdp {
-  private id = 0;
-  private pending = new Map<
-    number,
-    { resolve: (v: CdpResult) => void; reject: (e: Error) => void }
-  >();
-  private listeners = new Map<string, Array<(params: CdpResult) => void>>();
-  private constructor(private ws: WebSocket) {
-    ws.onmessage = (e) => {
-      const m = JSON.parse(String(e.data));
-      if (typeof m.id === 'number') {
-        const p = this.pending.get(m.id);
-        if (!p) return;
-        this.pending.delete(m.id);
-        if (m.error) p.reject(new Error(`${m.error.message} (code ${m.error.code})`));
-        else p.resolve(m.result);
-      } else if (m.method) {
-        for (const fn of this.listeners.get(m.method) ?? []) fn(m.params);
-      }
-    };
-  }
-
-  static async connect(url: string): Promise<Cdp> {
-    const ws = new WebSocket(url);
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error(`could not open CDP socket ${url}`));
-    });
-    return new Cdp(ws);
-  }
-
-  send(method: string, params: Record<string, unknown> = {}): Promise<CdpResult> {
-    const id = ++this.id;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-  }
-
-  once(method: string): Promise<CdpResult> {
-    return new Promise((resolve) => {
-      const list = this.listeners.get(method) ?? [];
-      list.push(resolve);
-      this.listeners.set(method, list);
-    });
-  }
-
-  /** Evaluate in the page; throws on a page-side exception. */
-  async evaluate(expression: string): Promise<unknown> {
-    const r = (await this.send('Runtime.evaluate', {
-      expression,
-      returnByValue: true,
-      awaitPromise: true,
-    })) as {
-      result?: { value?: unknown };
-      exceptionDetails?: { text?: string; exception?: { description?: string } };
-    };
-    if (r.exceptionDetails) {
-      const d = r.exceptionDetails;
-      throw new Error(`page threw: ${d.exception?.description ?? d.text}`);
-    }
-    return r.result?.value;
-  }
-
-  close() {
-    this.ws.close();
-  }
-}
-
-interface Browser {
-  proc: ChildProcess;
-  profile: string;
-  port: number;
-}
-
-/** Block this thread. The `exit` handler is synchronous: no promise settles there. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** How long to wait for a killed Chrome to actually go before removing its profile. */
-const KILL_WAIT_MS = 3000;
-
-/**
- * Kill Chrome, then remove the profile — synchronously, because this also runs
- * from the `exit` handler, and in that handler an awaited cleanup never
- * happens at all.
- *
- * The order is the fix. `kill()` returns while the process is still alive, and
- * a Chrome that is mid-startup writes its whole profile back out milliseconds
- * after the directory is deleted. So: wait for the pid to go, remove, then
- * look once more and remove again if anything reappeared.
- */
-function killAndRemove(proc: ChildProcess | undefined, profile: string): void {
-  if (proc && proc.exitCode === null) proc.kill('SIGKILL');
-  const pid = proc?.pid;
-  if (pid !== undefined) {
-    const deadline = Date.now() + KILL_WAIT_MS;
-    while (Date.now() < deadline && isAlive(pid)) sleepSync(20);
-  }
-  rmSync(profile, { recursive: true, force: true });
-  if (!existsSync(profile)) return;
-  sleepSync(200);
-  rmSync(profile, { recursive: true, force: true });
-}
-
-/**
- * Port 0 lets Chrome pick a free port and announce it in
- * `<profile>/DevToolsActivePort`; deriving a port from the pid collided once
- * (two widths, same modulus) and two runs attached to each other's browser.
- *
- * `onSpawn` fires before the first `await`, so a signal during startup finds a
- * browser to clean up. Nothing here removes the profile on failure: the caller
- * has it registered and its cleanup is the one that waits for Chrome to die.
- */
-async function launchChrome(
-  bin: string,
-  o: ShotOptions,
-  timeoutMs: number,
-  runId: string,
-  onSpawn: (b: Browser) => void,
-): Promise<Browser> {
-  const profile = mkdtempSync(join(tmpdir(), profilePrefix(runId)));
-  const proc = spawn(bin, chromeLaunchArgs(o, profile), { stdio: ['ignore', 'ignore', 'pipe'] });
-  const browser: Browser = { proc, profile, port: 0 };
-  onSpawn(browser);
-  let stderr = '';
-  proc.stderr?.on('data', (d) => {
-    stderr += String(d);
-  });
-  const portFile = join(profile, 'DevToolsActivePort');
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (proc.exitCode !== null) {
-      throw new Error(`Chrome exited with ${proc.exitCode} before CDP came up:\n${stderr.trim()}`);
-    }
-    if (existsSync(portFile)) {
-      const port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
-      if (Number.isInteger(port) && port > 0) {
-        browser.port = port;
-        return browser;
-      }
-    }
-    await sleep(50);
-  }
-  throw new Error(`CDP never came up within ${timeoutMs}ms:\n${stderr.trim()}`);
-}
-
-async function pageSocketUrl(port: number, timeoutMs: number): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  let lastErr = 'no page target listed';
-  while (Date.now() < deadline) {
-    try {
-      const r = await fetch(`http://127.0.0.1:${port}/json/list`);
-      const targets = (await r.json()) as Array<{ type: string; webSocketDebuggerUrl?: string }>;
-      const page = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
-      if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
-    } catch (e) {
-      lastErr = String(e);
-    }
-    await sleep(50);
-  }
-  throw new Error(`no CDP page target on :${port}: ${lastErr}`);
-}
-
-async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} did not finish within ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([p, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 async function shoot(o: ShotOptions, cdp: Cdp): Promise<Record<string, unknown>> {
   await cdp.send('Page.enable');
@@ -352,9 +163,15 @@ async function main(argv: string[]): Promise<number> {
   process.on('exit', cleanup);
 
   try {
-    browser = await launchChrome(bin, o, o.timeoutMs, runId, (b) => {
-      browser = b;
-    });
+    browser = await launchChrome(
+      bin,
+      (profile) => chromeLaunchArgs(o, profile),
+      o.timeoutMs,
+      runId,
+      (b) => {
+        browser = b;
+      },
+    );
     cdp = await Cdp.connect(await pageSocketUrl(browser.port, o.timeoutMs));
     const summary = await shoot(o, cdp);
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);

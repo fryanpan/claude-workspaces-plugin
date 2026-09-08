@@ -1,4 +1,7 @@
-import { prose } from '@claude-workspaces/core';
+// Named, not off the `prose` namespace object — see block-identity.ts: a
+// namespace property read is invisible to the tree-shaker, and the binding
+// it leaves behind can be one the bundle never declares.
+import { getProseFragment } from '@claude-workspaces/core/prose';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
 import { type EditorHandle, createEditor } from '../editor.ts';
@@ -89,7 +92,7 @@ export function createLiveRedlineEditor(opts: CreateLiveRedlineEditorOpts): Live
       const { state, view } = handle.editor;
       const result = opts.isAdded
         ? { insRanges: [], deletions: [] }
-        : computeLiveMarkup(opts.baseText, state.doc, prose.getProseFragment(opts.ydoc));
+        : computeLiveMarkup(opts.baseText, state.doc, getProseFragment(opts.ydoc));
       view.dispatch(state.tr.setMeta(liveMarkupKey, result));
     },
     destroy: () => handle.destroy(),

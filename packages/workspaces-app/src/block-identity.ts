@@ -1,4 +1,11 @@
-import { prose } from '@claude-workspaces/core';
+// A NAMED import, not `prose.BLOCK_IDENTITY_ATTRS` off the namespace object.
+// A property read on a namespace is invisible to the bundler's tree-shaker:
+// it dropped prose-identity.ts as unreachable and left the namespace holding
+// a getter for a binding that no longer existed, so this line threw
+// `ReferenceError` the moment tiptap called addGlobalAttributes — every doc
+// page in production, chrome and no body (PR 817, reverted as PR 819).
+// `bun run check:client-boot` is the gate that now loads the built bundle.
+import { BLOCK_IDENTITY_ATTRS } from '@claude-workspaces/core/prose';
 import { type Attribute, Extension } from '@tiptap/core';
 
 /**
@@ -47,7 +54,7 @@ const BLOCK_TYPES = [
  *  a rename in core cannot drift out of the browser's schema. */
 function identityAttributes(): Record<string, Partial<Attribute>> {
   const attrs: Record<string, Partial<Attribute>> = {};
-  for (const name of prose.BLOCK_IDENTITY_ATTRS) {
+  for (const name of BLOCK_IDENTITY_ATTRS) {
     attrs[name] = { default: null, rendered: false };
   }
   return attrs;

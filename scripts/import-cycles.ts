@@ -2,29 +2,31 @@
 /**
  * The import-cycle gate for the packages a BROWSER loads.
  *
- * WHY THIS EXISTS. PR 817 shipped a client that rendered chrome and no body
- * on every doc page in prod. The bundle threw `ReferenceError: kO8 is not
- * defined` while tiptap was constructing the editor, and the cause was a
- * three-module loop in `packages/core/src`:
+ * WHY THIS EXISTS, and what it is NOT. PR 817 shipped a client that rendered
+ * chrome and no body on every doc page in prod, and the revert named a
+ * three-module loop in `packages/core/src` as the cause:
  *
  *   prose.ts → prose-batch.ts → suggest-ops.ts → prose.ts
  *
- * `suggest-ops.ts` only wanted eight leaf symbols, and reached them through
- * the `prose.ts` barrel because the barrel re-exports everything. That closed
- * a loop, and a loop is not an error in ESM: the module graph is evaluated in
- * some order, and one participant necessarily runs while another's bindings
- * are still in their temporal dead zone. Whether that matters depends on
- * WHEN each binding is read. Unbundled — vitest, `bun test`, the server — the
- * reads happened late enough to be fine, so all sixteen `verify` members and
- * all eight CI checks stayed green. In the browser bundle, Bun's module
- * ordering put the read first, and the whole editor died on it.
+ * That loop was real and it is gone. It was NOT the cause: the client still
+ * threw with the cycle broken, and the actual fault was a namespace property
+ * read the tree-shaker could not see (`scripts/client-boot-check.ts` has that
+ * story, and is the gate that found it). Believing the first diagnosis is the
+ * mistake this paragraph exists to stop somebody repeating.
  *
- * So the lesson is not "that one edge was bad". It is that a cycle makes
- * correctness depend on evaluation order, and evaluation order differs
- * between the runner that tests the code and the bundler that ships it. This
- * gate removes the class: no cycles at all in the two source trees a browser
- * loads. `scripts/client-boot-check.ts` is the other half — it boots the real
- * bundle, and catches an ordering fault whatever its shape.
+ * The loop is still worth forbidding, on its own merits. A cycle is not an
+ * error in ESM: the graph is evaluated in some order, and one participant
+ * necessarily runs while another's bindings are still in their temporal dead
+ * zone. Whether that matters depends on WHEN each binding is read — so a
+ * cycle makes correctness depend on evaluation order, and evaluation order
+ * differs between the runner that tests the code and the bundler that ships
+ * it. That is a latent fault nothing else in this repo can see, and this gate
+ * removes the class from the two source trees a browser loads.
+ *
+ * It is one of two halves and the weaker one. `check:client-boot` catches an
+ * ordering fault whatever its shape, including the shapes nobody predicted;
+ * this catches the shape early, cheaply, and with a message that names the
+ * edge to delete.
  *
  * WHY TEXTUAL. Same reason as `scripts/import-direction.ts`, whose specifier
  * scanner and directory walk this reuses: there is no build step to keep in
@@ -206,10 +208,11 @@ function main(): number {
   }
   console.error(
     'A cycle makes correctness depend on module evaluation order, and the bundler\n' +
-      'orders differently from vitest and bun — PR 817 shipped a client that threw\n' +
-      'ReferenceError at editor construction for exactly this reason, with every\n' +
-      'other gate green. Import from the leaf module that defines the symbol, not\n' +
-      'from a barrel that re-exports the module you are imported by.',
+      'orders differently from vitest and from bun — so a loop can be harmless in\n' +
+      'every test and fatal in the shipped client. Import from the leaf module that\n' +
+      'defines the symbol, not from a barrel that re-exports the module you are\n' +
+      'imported by. `bun run check:client-boot` is the check that loads the real\n' +
+      'bundle, if you need to know whether this one is already biting.',
   );
   return 1;
 }

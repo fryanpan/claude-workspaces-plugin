@@ -10,6 +10,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./anchor": "./src/anchor/index.ts",
+    "./prose": "./src/prose.ts",
     "./asset-manifest": "./src/asset-manifest.ts",
     "./env-names": "./src/env-names.ts",
     "./machine-paths": "./src/machine-paths.ts",

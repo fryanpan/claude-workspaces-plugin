@@ -1,4 +1,6 @@
-import { computeRedline, prose } from '@claude-workspaces/core';
+import { computeRedline } from '@claude-workspaces/core';
+// Named, not off the `prose` namespace object — see block-identity.ts.
+import { getProseFragment, serializeBlockToMarkdown } from '@claude-workspaces/core/prose';
 import { Extension } from '@tiptap/core';
 import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
@@ -172,7 +174,7 @@ export function computeLiveMarkup(
   let newMd = '';
   doc.forEach((node, pmFrom, i) => {
     const child = children[i];
-    const md = child instanceof Y.XmlElement ? prose.serializeBlockToMarkdown(child) : '';
+    const md = child instanceof Y.XmlElement ? serializeBlockToMarkdown(child) : '';
     if (md === '') {
       entries.push({
         pmFrom,
@@ -336,7 +338,7 @@ export const LiveMarkup = Extension.create<LiveMarkupOptions>({
     const opts = this.options;
     const compute = (doc: ProseNode): LiveMarkupResult => {
       if (!opts.ydoc || opts.isAdded) return EMPTY_RESULT;
-      return computeLiveMarkup(opts.baseText, doc, prose.getProseFragment(opts.ydoc));
+      return computeLiveMarkup(opts.baseText, doc, getProseFragment(opts.ydoc));
     };
     let timer: ReturnType<typeof setTimeout> | null = null;
 
