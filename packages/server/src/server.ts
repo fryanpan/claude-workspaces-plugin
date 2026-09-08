@@ -992,6 +992,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // `boardsForDoc` and `backTargetFor` used to be thunks for the same
   // reason and are now values: the membership map they come from is composed
   // above this line, so there is nothing left to defer.
+  // Team Lead — the fleet's spawner — is the first addressee past a dead
+  // board's lead (`stall-escalation.ts`) and the scheduled wake's addressee
+  // below. One id, computed once, so the two cannot name different sessions.
+  const spawnerAgentId =
+    opts.spawnerAgentId === null
+      ? undefined
+      : (opts.spawnerAgentId ?? process.env.CW_SPAWNER_AGENT_ID ?? DEFAULT_SPAWNER_AGENT_ID);
   const stallWiring = createStallWiring({
     taskStore,
     taskProjection,
@@ -1014,6 +1021,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ? { stallNudgeRepeatMs: opts.stallNudgeRepeatMs }
       : {}),
     ...(opts.stallEscalateMs !== undefined ? { stallEscalateMs: opts.stallEscalateMs } : {}),
+    ...(spawnerAgentId !== undefined ? { spawnerAgentId } : {}),
     ...(opts.heldReviewItemMs !== undefined ? { heldReviewItemMs: opts.heldReviewItemMs } : {}),
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
@@ -1027,10 +1035,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // `schedulerNow` is a seam for the same reason `stallNudgeQuietMs` is one:
   // the feature IS a comparison against a clock, so a test that could not move
   // the clock would have to burn real minutes to assert anything.
-  const spawnerAgentId =
-    opts.spawnerAgentId === null
-      ? undefined
-      : (opts.spawnerAgentId ?? process.env.CW_SPAWNER_AGENT_ID ?? DEFAULT_SPAWNER_AGENT_ID);
   const taskScheduler = createTaskScheduler(taskStore, {
     ...(opts.schedulerNow !== undefined ? { now: opts.schedulerNow } : {}),
     observers: [

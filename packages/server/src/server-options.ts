@@ -338,10 +338,11 @@ export interface ServerOptions {
    */
   stallNudgeRepeatMs?: number;
   /**
-   * How long a row the lead was already told about may stay a finding before
-   * the board files a review item over the lead's head (default
-   * `STALL_ESCALATE_DEFAULT_MS`, one hour; `CW_STALL_ESCALATE_MINUTES` sets it
-   * on the box).
+   * How long a board must be without any live session — no stream open, no
+   * heartbeat, no agent write — before it files past its lead: to Team Lead
+   * first, and to the reader only if Team Lead cannot be reached either
+   * (default `STALL_ESCALATE_DEFAULT_MS`, one hour; `CW_STALL_ESCALATE_MINUTES`
+   * sets it on the box).
    *
    * Deployment-tunable for the same reason `stallNudgeRepeatMs` is, one step
    * more expensive: what this number spends is a PERSON's attention, and the

@@ -1,59 +1,59 @@
 /**
- * The board going over its lead's head.
+ * The board going past its lead — on liveness, and on nothing else.
  *
- * The gap: `stall-nudge.ts` wakes the lead and stops, so a board whose lead
- * has died, run out of quota, or is itself waiting on somebody keeps being
- * told about rows nobody can act on, and no person ever hears. This suite
- * drives `StallEscalations` directly against a real `TaskStore`, because the
- * thing under test is what lands on a reader's queue — one item, revised as
- * the set moves, withdrawn when it empties, and never a second one.
+ * The ticket's criterion, verbatim: "a live lead with a row waiting on Bryan
+ * produces no item; a dead lead produces one addressed to Team Lead." So the
+ * two facts this suite pins are the trigger (no live session on the board,
+ * for the whole window) and the addressee order (Team Lead first, the reader
+ * only when Team Lead is unreachable too). It drives `StallEscalations`
+ * directly against a real `TaskStore`, because the thing under test is what
+ * lands on a reader's queue — one item, revised as the set moves, withdrawn
+ * the tick anybody is back, and never a second one.
  *
  * Every clock is passed in (`now`) rather than waited for: the module takes
  * the tick's time as an argument, so an hour is a number here and no test
- * sleeps. The one clock that is real is the STORE's — `addReviewItem` stamps
- * `updatedAt` itself — which is exactly why the record keeps the write's own
- * timestamp rather than the tick's.
+ * sleeps.
  *
  * All fixtures are synthetic — invented names. The repo is public.
  */
-import { afterEach, beforeEach, describe, expect, it, setSystemTime } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { taskReviewItems } from '../src/review-queue.ts';
 import {
   STALL_ESCALATION_FILENAME,
-  STALL_ESCALATION_SETTLE_DEFAULT_MS,
   StallEscalations,
+  type TeamLeadReach,
+  boardDeadFor,
   buildStallEscalationReview,
 } from '../src/stall-escalation.ts';
 import type { StalledRow } from '../src/stall-gate.ts';
-import { StallNudger, type StallSnapshot, type ToldTime } from '../src/stall-nudge.ts';
+import {
+  STALL_EVENT,
+  type StallNudgeFrame,
+  StallNudger,
+  type StallSnapshot,
+} from '../src/stall-nudge.ts';
 import { type Task, TaskStore } from '../src/tasks.ts';
 
 const PERSON = { id: 'known-robin', name: 'Robin Vale', kind: 'person' };
 const AGENT = { id: 'agent-tide-runner', name: 'Tide Runner', kind: 'agent' };
-/** Short enough to be a number in a test, long enough to be a real window. */
+const TEAM_LEAD = 'agent-harbour-master';
 const ESCALATE_MS = 60 * 60_000;
-/** The default minimum life of a filed item, which every test here runs
- *  against — the constructor takes `min(settleMs, escalateMs)` and no test
- *  sets `settleMs`. */
-const SETTLE_MS = STALL_ESCALATION_SETTLE_DEFAULT_MS;
 
 function row(task: Task, bucket: string, quietMs = 90 * 60_000): StalledRow {
   return { id: task.id, title: task.title, bucket, quietMs };
 }
 
-/** Told times, delivered unless a test says otherwise. */
-function toldMap(entries: ReadonlyArray<[string, number]>): Map<string, ToldTime> {
-  return new Map(entries.map(([id, at]) => [id, { at, delivered: true }]));
-}
-
+/** A board nobody has been on for longer than the window, unless a test says
+ *  otherwise: no live session, no heartbeat, no agent write. */
 function board(workspaceId: string, parts: Partial<StallSnapshot> = {}): StallSnapshot {
   return {
     workspaceId,
     leadAgentId: AGENT.id,
     retired: false,
+    sessionLive: false,
     stalled: [],
     unfiled: [],
     considered: 4,
@@ -62,12 +62,64 @@ function board(workspaceId: string, parts: Partial<StallSnapshot> = {}): StallSn
   };
 }
 
-describe('a told row that has not moved escalates to the reader', () => {
+describe('when a board is dead', () => {
+  it('a live session is alive whatever the clocks say', () => {
+    const now = 10_000_000;
+    expect(boardDeadFor({ sessionLive: true }, now, ESCALATE_MS)).toBeUndefined();
+    expect(
+      boardDeadFor({ sessionLive: true, agentActiveAt: now - 5 * ESCALATE_MS }, now, ESCALATE_MS),
+    ).toBeUndefined();
+  });
+
+  it('a write or a heartbeat inside the window is alive; outside it is dead', () => {
+    const now = 10_000_000;
+    expect(
+      boardDeadFor({ sessionLive: false, agentActiveAt: now - ESCALATE_MS + 1 }, now, ESCALATE_MS),
+    ).toBeUndefined();
+    expect(
+      boardDeadFor(
+        { sessionLive: false, sessionObservedAt: now - ESCALATE_MS + 1 },
+        now,
+        ESCALATE_MS,
+      ),
+    ).toBeUndefined();
+    expect(
+      boardDeadFor({ sessionLive: false, agentActiveAt: now - ESCALATE_MS }, now, ESCALATE_MS),
+    ).toBe(ESCALATE_MS);
+  });
+
+  it('a board nobody has ever been on is dead from its first tick', () => {
+    expect(boardDeadFor({ sessionLive: false }, 10_000_000, ESCALATE_MS)).toBe(ESCALATE_MS);
+  });
+});
+
+describe('a dead board escalates; a live one never does', () => {
   let dataDir: string;
   let store: TaskStore;
-  let escalations: StallEscalations;
   let wsId: string;
   let now: number;
+  /** What Team Lead was sent, per board it was reached on. */
+  let sent: Array<{ on: string; to: string; frame: StallNudgeFrame }>;
+  /** Boards Team Lead can be reached on. */
+  let reachOn: Set<string>;
+
+  const teamLead = (): TeamLeadReach => ({
+    agentId: TEAM_LEAD,
+    boards: () => store.listWorkspaces().map((w) => w.id),
+    canReach: (ws, id) => id === TEAM_LEAD && reachOn.has(ws),
+    send: (on, to, frame) => {
+      sent.push({ on, to, frame });
+      return 1;
+    },
+  });
+  const build = (opts: { withTeamLead?: boolean } = {}) =>
+    new StallEscalations({
+      store,
+      dataDir,
+      escalateMs: ESCALATE_MS,
+      report: () => {},
+      ...(opts.withTeamLead === false ? {} : { teamLead: teamLead() }),
+    });
 
   const make = (title: string): Task => {
     const created = store.createTask(wsId, { title, assignee: AGENT.name });
@@ -80,8 +132,8 @@ describe('a told row that has not moved escalates to the reader', () => {
   /**
    * What the READER's queue actually shows, through the same function Home
    * builds it with. Open is not the same as visible: `taskReviewItems` drops
-   * a done ticket's rows, a withdrawn item and one whose state is `waiting`,
-   * so an item can be open forever and reach nobody.
+   * a done ticket's rows and a withdrawn item, so an item can be open
+   * forever and reach nobody.
    */
   const queued = () =>
     taskReviewItems(
@@ -98,587 +150,313 @@ describe('a told row that has not moved escalates to the reader', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'stall-escalation-'));
     store = new TaskStore({ dataDir, debounceMs: 5 });
     wsId = store.createWorkspace('Tide board').id;
-    escalations = new StallEscalations({
-      store,
-      dataDir,
-      escalateMs: ESCALATE_MS,
-      report: () => {},
-    });
     now = Date.now() + 10 * 60_000;
+    sent = [];
+    reachOn = new Set();
   });
 
   afterEach(() => {
-    // Back to the real clock whatever the test did with it, so a pinned one
-    // can never leak into the test that runs next.
-    setSystemTime();
     store.stop();
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('files nothing while a session is still reporting on the board', () => {
-    // The premise this module is built on is that the lead cannot act. A
-    // board somebody reported on five minutes ago refutes it, and going over
-    // that lead's head hands the reader a row they can only hand back.
-    const a = make('Cut the export path over to the new writer');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(
-      board(wsId, {
-        stalled: [row(a, 'in-progress')],
-        agentActiveAt: now - 5 * 60_000,
-      }),
-      told,
-      now,
-    );
-    expect(queued()).toHaveLength(0);
-    expect(openItems(a.id)).toHaveLength(0);
-  });
-
-  it('files on the very same board once the reporting stops', () => {
-    // The control for the test above. Without it, "files nothing while a
-    // session is reporting" is satisfied by a module that files nothing ever.
-    const a = make('Cut the export path over to the new writer');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(
-      board(wsId, {
-        stalled: [row(a, 'in-progress')],
-        agentActiveAt: now - ESCALATE_MS - 60_000,
-      }),
-      told,
-      now,
-    );
-    expect(queued()).toHaveLength(1);
-  });
-
-  it('a snapshot that does not measure the pulse escalates exactly as before', () => {
-    // The second control. `agentActiveAt` is optional, and an absent one must
-    // read as "not measured", never as "a dead board" — otherwise every
-    // caller that has not been taught to compute it silently changes
-    // behaviour.
-    const a = make('Cut the export path over to the new writer');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { stalled: [row(a, 'in-progress')] }), told, now);
-    expect(queued()).toHaveLength(1);
-  });
-
-  it('files ONE item, on the unfiled row, naming every stuck row with a relative link', () => {
-    const a = make('Cut the export path over to the new writer');
-    const b = make('Retire the second scheduler');
-    const told = toldMap([
-      [a.id, now - ESCALATE_MS - 60_000],
-      [b.id, now - ESCALATE_MS - 30 * 60_000],
-    ]);
-    escalations.onBoard(
-      board(wsId, {
-        unfiled: [row(a, 'blocked-on-owner-unfiled')],
-        stalled: [row(b, 'in-progress')],
-      }),
-      told,
-      now,
-    );
-
-    // The anchor is the UNFILED row even though the stalled one was told
-    // longer ago: hanging the ask there costs no stall visibility.
-    expect(openItems(a.id)).toHaveLength(1);
-    expect(items(b.id)).toHaveLength(0);
-    const detail = openItems(a.id)[0]?.review.detail ?? '';
-    expect(detail).toContain(`(/workspaces/${wsId}?task=${a.id})`);
-    expect(detail).toContain(`(/workspaces/${wsId}?task=${b.id})`);
-    expect(detail).toContain('no question filed');
-    expect(escalations.filedCount()).toBe(1);
-    // Never judged. The store door is what the allow-rule proposals use and
-    // what this uses; the quality gate lives on the ROUTE, so an item filed
-    // here carries no verdict and cannot be held off the reader's queue.
-    expect(openItems(a.id)[0]?.judge).toBeUndefined();
-  });
-
-  it('does not file a minute before the window, and does at it', () => {
-    const a = make('Fold the retry budget into the client');
-    const early = toldMap([[a.id, now - ESCALATE_MS + 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), early, now);
-    expect(items(a.id)).toHaveLength(0);
-
-    const due = toldMap([[a.id, now - ESCALATE_MS]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), due, now);
-    expect(openItems(a.id)).toHaveLength(1);
-  });
-
-  it('a row the lead was never told about never escalates, however quiet', () => {
-    const a = make('Rewrite the ingest doc');
-    escalations.onBoard(
-      board(wsId, { stalled: [row(a, 'in-progress', 6 * 60 * 60_000)] }),
-      new Map(),
-      now,
-    );
-    expect(items(a.id)).toHaveLength(0);
-  });
-
-  it('a second qualifying row REVISES the same item rather than filing another', () => {
-    const a = make('Move the queue drain off the request path');
-    const b = make('Delete the shim nobody imports');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    const first = openItems(a.id)[0];
-    expect(first).toBeDefined();
-    expect((first?.review.detail ?? '').includes(b.id)).toBe(false);
-
-    // `a` is now masked by the item we just filed — the gate stops naming it —
-    // and `b` has crossed the window.
-    told.set(b.id, { at: now - ESCALATE_MS - 60_000, delivered: true });
-    escalations.onBoard(board(wsId, { stalled: [row(b, 'in-progress')] }), told, now + 60_000);
-    const after = openItems(a.id);
-    expect(after).toHaveLength(1);
-    expect(after[0]?.id).toBe(first?.id);
-    expect(after[0]?.review.detail ?? '').toContain(b.id);
-    // The words it replaced are kept, not overwritten.
-    expect(after[0]?.revisions?.length).toBe(1);
-    expect(items(b.id)).toHaveLength(0);
-  });
-
-  it('withdraws the item when the rows it named are moving again', () => {
-    const a = make('Ship the digest job');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    expect(openItems(a.id)).toHaveLength(1);
-
-    // Somebody finished it: the anchor's ticket is closed, so it no longer
-    // counts even though the gate cannot see it while our item is open.
-    store.transition(a.id, 'done', { actor: PERSON });
-    escalations.onBoard(board(wsId), told, now + 60_000);
-    expect(openItems(a.id)).toHaveLength(0);
-    expect(items(a.id)[0]?.review.withdrawnAt).toBeGreaterThan(0);
-    expect(escalations.filedCount()).toBe(0);
-  });
-
-  it('does not escalate a row its own lead has been working since it was told', () => {
-    const a = make('Re-point the digest at the new bucket');
-    // The shape the field produced: the lead was told about this row a day and
-    // a half ago and has been on it since — it commented, then moved it to
-    // in-progress twenty-five minutes back. `ToldRow.toldAt` is stamped once
-    // and never refreshed, so the told clock still reads 33h while the row's
-    // own clock reads 25m.
-    const told = toldMap([[a.id, now - 33 * 60 * 60_000]]);
-    escalations.onBoard(board(wsId, { stalled: [row(a, 'in-progress', 25 * 60_000)] }), told, now);
-
-    // Nothing filed: a row whose newest write is its own lead's is the lead
-    // being reachable on it, which is the absence this module escalates for.
-    expect(items(a.id)).toHaveLength(0);
-    expect(queued()).toHaveLength(0);
-    expect(escalations.filedCount()).toBe(0);
-  });
-
-  it('does not take an item back because the row posted one note', () => {
-    const a = make('Drain the retry queue');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    const filed = openItems(a.id)[0]?.id ?? '';
-    expect(filed).not.toBe('');
-
-    // The commonest write on any live board: the row's own agent posting its
-    // end-of-turn note. It bumps `updatedAt`, which is the only signal the
-    // anchor test has — and on the field board it withdrew the ask sixty
-    // seconds after it was filed, while a watching session was still telling
-    // the reader something was waiting for them.
-    //
-    // The STORE's clock is pinned a second on, for the reason the asked-back
-    // test below gives: `appendNote` stamps `updatedAt` with `Date.now()` and
-    // ignores the `ts` it is handed, so left to the real clock the note lands
-    // in the same millisecond as the filing, `anchorUntouched` stays true for
-    // a reason that has nothing to do with this fix, and the assertion passes
-    // vacuously.
-    setSystemTime(Date.now() + 1_000);
-    store.appendNote(a.id, {
-      kind: 'status',
-      text: 'Still on the retry queue; the consumer restart is next.',
-      agent: AGENT.name,
-      ts: now + 30_000,
-    });
-    escalations.onBoard(board(wsId), told, now + 60_000);
-
-    expect(openItems(a.id).map((i) => i.id)).toEqual([filed]);
-    expect(queued().map((r) => r.reviewItemId)).toEqual([filed]);
-  });
-
-  it('does take it back once the item has stood and the row is still being written', () => {
-    const a = make('Split the importer in two');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    expect(openItems(a.id)).toHaveLength(1);
-
-    // The other half of the settle window, so it does not read as "an ask is
-    // never retracted". Past it, a written-to anchor with nothing else
-    // qualifying is the board's rows moving again, and the item goes.
-    //
-    // Clock pinned for the same reason as the test above — `appendNote` dates
-    // `updatedAt` from `Date.now()`, not from the `ts` it is given.
-    setSystemTime(Date.now() + 1_000);
-    store.appendNote(a.id, {
-      kind: 'status',
-      text: 'Picked it back up; PR open.',
-      agent: AGENT.name,
-      ts: now + SETTLE_MS + 30_000,
-    });
-    escalations.onBoard(board(wsId), told, now + SETTLE_MS + 60_000);
-
-    expect(openItems(a.id)).toHaveLength(0);
-    expect(items(a.id)[0]?.review.withdrawnAt).toBeGreaterThan(0);
-    expect(escalations.filedCount()).toBe(0);
-  });
-
-  it('escalates an unfiled ask on the same clock as any other row', () => {
-    const a = make('Decide which of the two writers stays');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    // A `blocked-on-owner-unfiled` row is judged on its quiet time and nothing
-    // else. There used to be a second clock (`stuckMs`) for an ask read out of
-    // the row's notes; a wait is declared now, so there is nothing to read.
-    escalations.onBoard(
-      board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled', 3 * 60 * 60_000)] }),
-      told,
-      now,
-    );
-
-    expect(openItems(a.id)).toHaveLength(1);
-    expect(openItems(a.id)[0]?.review.detail ?? '').toContain('Quiet 3h');
-  });
-
-  it('keeps the item open while the anchor is masked by the item itself', () => {
-    const a = make('Take the lock off the writer');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    const filed = openItems(a.id)[0]?.id;
-
-    // Three ticks with the row absent from the gate's lists — which is what
-    // our own filing causes — must not take the item back. This is the
-    // blink-on-blink-off loop the anchor test exists to prevent.
-    for (const tick of [1, 2, 3]) escalations.onBoard(board(wsId), told, now + tick * 60_000);
-    expect(openItems(a.id).map((i) => i.id)).toEqual([filed ?? '']);
-  });
-
-  it('the anchor line keeps saying what the row WAS, not what our own item made it', () => {
-    // A claimed row, silent fifteen hours, is the only thing stuck. Once the
-    // item hangs on it the gate reads it as waiting on a person with our
-    // write as its newest activity — and the line degraded to "waiting on a
-    // person. Quiet 13m" on a row nobody had touched all day (2026-09-07).
-    const a = make('Take the lock off the writer');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(
-      board(wsId, { stalled: [row(a, 'in-progress', 15 * 60 * 60_000)] }),
-      told,
-      now,
-    );
-    const first = openItems(a.id)[0]?.review.detail ?? '';
-    expect(first).toContain('gone quiet. Quiet 15h');
-
-    // A second row joins, so the item is revised and the anchor line is
-    // rebuilt from the sidecar rather than from the gate's masked reading.
-    const b = make('Retire the second scheduler');
-    const laterTold = toldMap([
-      [a.id, now - ESCALATE_MS - 60_000],
-      [b.id, now - ESCALATE_MS - 60_000],
-    ]);
-    const later = now + 30 * 60_000;
-    escalations.onBoard(board(wsId, { stalled: [row(b, 'in-progress')] }), laterTold, later);
-    const revised = openItems(a.id)[0]?.review.detail ?? '';
-    expect(revised).toContain(`(/workspaces/${wsId}?task=${b.id})`);
-    expect(revised).toContain('gone quiet. Quiet 16h');
-    expect(revised).not.toContain('waiting on a person');
-  });
-
-  it('does not re-file for rows the reader has already answered about', () => {
-    const a = make('Split the parser out of the loader');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    const filed = openItems(a.id)[0]?.id ?? '';
-    store.answerTaskReview(a.id, filed, 'Looking at it now', { actor: PERSON });
-
-    // The row is still stuck and still told about; the reader has spoken.
-    escalations.onBoard(
-      board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }),
-      told,
-      now + 60_000,
-    );
-    expect(items(a.id)).toHaveLength(1);
-  });
-
-  it('a retired board escalates nothing', () => {
-    const a = make('Archive the old importer');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(
-      board(wsId, { retired: true, unfiled: [row(a, 'blocked-on-owner-unfiled')] }),
-      told,
-      now,
-    );
-    expect(items(a.id)).toHaveLength(0);
-  });
-
-  it('a restart reads the sidecar and does not file a second item', () => {
-    const a = make('Land the backfill');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    const snapshot = board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] });
-    escalations.onBoard(snapshot, told, now);
-    expect(openItems(a.id)).toHaveLength(1);
-    expect(readFileSync(join(dataDir, STALL_ESCALATION_FILENAME), 'utf8')).toContain(a.id);
-
-    const restarted = new StallEscalations({
-      store,
-      dataDir,
-      escalateMs: ESCALATE_MS,
-      report: () => {},
-    });
-    restarted.onBoard(snapshot, told, now + 60_000);
-    restarted.onBoard(snapshot, told, now + 120_000);
-    expect(openItems(a.id)).toHaveLength(1);
-    expect(restarted.filedCount()).toBe(1);
-  });
-
-  it('waits out a cooldown before escalating the same board again', () => {
-    const a = make('Rebuild the index on boot');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    const first = openItems(a.id)[0]?.id;
-    store.transition(a.id, 'done', { actor: PERSON });
-    escalations.onBoard(board(wsId), told, now + 60_000);
-    expect(openItems(a.id)).toHaveLength(0);
-
-    // The row comes straight back. Inside the cooldown nothing is filed…
-    const b = make('Rebuild the index on boot, again');
-    told.set(b.id, { at: now - ESCALATE_MS - 60_000, delivered: true });
-    const back = board(wsId, { unfiled: [row(b, 'blocked-on-owner-unfiled')] });
-    escalations.onBoard(back, told, now + 120_000);
-    expect(items(b.id)).toHaveLength(0);
-    // …and past it, the board may speak again.
-    escalations.onBoard(back, told, now + 60_000 + ESCALATE_MS + 1);
-    const filed = openItems(b.id);
-    expect(filed).toHaveLength(1);
-    expect(filed[0]?.id).not.toBe(first);
-  });
-
-  it('MOVES the item to a row that still qualifies when the anchor closes', () => {
-    const a = make('Cut the reader over to the new index');
-    const b = make('Drain the queue the old reader left');
-    const told = toldMap([
-      [a.id, now - ESCALATE_MS - 60_000],
-      [b.id, now - ESCALATE_MS - 60_000],
-    ]);
-    const both = board(wsId, {
-      unfiled: [row(a, 'blocked-on-owner-unfiled')],
-      stalled: [row(b, 'in-progress')],
-    });
-    escalations.onBoard(both, told, now);
-    expect(openItems(a.id)).toHaveLength(1);
-
-    // The anchor gets finished while `b` stays stuck. Revised in place, the
-    // ask would sit open on a done ticket — invisible to the queue forever,
-    // with `b` never reported because the board already has "an item".
-    store.transition(a.id, 'done', { actor: PERSON });
-    escalations.onBoard(board(wsId, { stalled: [row(b, 'in-progress')] }), told, now + 60_000);
-
-    expect(openItems(a.id)).toHaveLength(0);
-    expect(openItems(b.id)).toHaveLength(1);
-    expect(escalations.filedCount()).toBe(1);
-    const rows = queued();
-    expect(rows.map((r) => r.taskId)).toEqual([b.id]);
-    expect(rows[0]?.review.detail ?? '').toContain(`(/workspaces/${wsId}?task=${b.id})`);
-  });
-
-  it('re-anchors in the same tick, with no cooldown between the two', () => {
-    const a = make('Retire the legacy exporter');
-    const b = make('Point the dashboards at the new table');
-    const told = toldMap([
-      [a.id, now - ESCALATE_MS - 60_000],
-      [b.id, now - ESCALATE_MS - 60_000],
-    ]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    store.transition(a.id, 'done', { actor: PERSON });
-
-    // One tick, one second later: well inside the re-file cooldown, which
-    // exists for a board that keeps flickering and not for an ask being
-    // carried to a row the reader can see.
-    escalations.onBoard(
-      board(wsId, { unfiled: [row(b, 'blocked-on-owner-unfiled')] }),
-      told,
-      now + 1_000,
-    );
-    expect(openItems(b.id)).toHaveLength(1);
-  });
-
-  it('withdraws the item it already filed when the board is retired', () => {
-    const a = make('Sweep the orphaned uploads');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    expect(openItems(a.id)).toHaveLength(1);
-
-    // Retiring a board is the owner saying nobody is working it. The gate
-    // names nothing on it, so the qualifying set is empty — and the anchor
-    // would otherwise be re-read off its own ticket and keep the item alive.
-    escalations.onBoard(board(wsId, { retired: true }), told, now + 60_000);
-    expect(openItems(a.id)).toHaveLength(0);
-    expect(items(a.id)[0]?.review.withdrawnAt).toBeGreaterThan(0);
-    expect(escalations.filedCount()).toBe(0);
-    expect(queued()).toHaveLength(0);
-  });
-
-  it('an item the reader asked back on is REVISED, not moved, when a row joins it', () => {
-    const a = make('Split the ingest worker in two');
-    const b = make('Retire the duplicate cron');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    const filed = openItems(a.id)[0]?.id ?? '';
-
-    // The reader asks back, doc-style — a question anchored on a thread is
-    // what puts the item in `waiting`, and `waiting` leaves the queue: it is
-    // the owner's turn, on a ticket that is very much alive.
-    //
-    // The STORE's clock is pinned across these two writes, and only here.
-    // Asking a question WRITES to the ticket, so `updatedAt` moves — and
-    // `anchorHolds` reads that field to ask whether anybody else has touched
-    // the row. Left to the real clock this test passed only when the question
-    // and the filing landed in the same millisecond; one millisecond later the
-    // module read the reader's own question as the row moving and re-anchored,
-    // which is the failure this test is named for (it flaked in CI on a branch
-    // that touches no stall file). So the ordering is made explicit — a second
-    // between them, no sleep — and the module now discounts writes its own
-    // item explains.
-    const asked = Date.now() + 1000;
-    setSystemTime(asked);
-    store.requestMoreInfoOnReview(a.id, filed, 'Which of these is holding the other up?', {
-      actor: PERSON,
-      threadId: 'th-reader-asked-back',
-    });
-    expect(queued()).toHaveLength(0);
-
-    setSystemTime(asked + 1000);
-    told.set(b.id, { at: now - ESCALATE_MS - 60_000, delivered: true });
-    escalations.onBoard(board(wsId, { stalled: [row(b, 'in-progress')] }), told, now + 60_000);
-
-    // Revising is itself the answer to their turn, so the SAME item comes
-    // back to the queue carrying both rows. Re-anchoring here would have
-    // dropped the thread they started.
-    const rows = queued();
-    expect(rows.map((r) => r.reviewItemId)).toEqual([filed]);
-    expect(rows[0]?.taskId).toBe(a.id);
-    expect(rows[0]?.review.detail ?? '').toContain(b.id);
-    expect(items(b.id)).toHaveLength(0);
-  });
-
-  it('still holds the reader\u2019s thread when the ask is older than the settle window', () => {
-    const a = make('Merge the two ingest paths');
-    const b = make('Delete the shim the old path needed');
-    const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), told, now);
-    const filed = openItems(a.id)[0]?.id ?? '';
-
-    // The same scenario as the test above, run PAST the settle window on
-    // purpose. Inside it nothing may re-anchor at all, so that test can no
-    // longer tell whether `ownActivityAt` still discounts the reader's own
-    // question — it passes with the question ignored. This one is the control
-    // for that: here the item is old enough to be re-anchored, so the only
-    // thing keeping it on `a` is the module reading the reader's question as
-    // its own item's write rather than as the row moving.
-    const asked = Date.now() + 1000;
-    setSystemTime(asked);
-    store.requestMoreInfoOnReview(a.id, filed, 'Which of these is holding the other up?', {
-      actor: PERSON,
-      threadId: 'th-reader-asked-back-late',
-    });
-    expect(queued()).toHaveLength(0);
-
-    setSystemTime(asked + 1000);
-    told.set(b.id, { at: now - ESCALATE_MS - 60_000, delivered: true });
-    escalations.onBoard(
-      board(wsId, { stalled: [row(b, 'in-progress')] }),
-      told,
-      now + SETTLE_MS + 60_000,
-    );
-
-    const rows = queued();
-    expect(rows.map((r) => r.reviewItemId)).toEqual([filed]);
-    expect(rows[0]?.taskId).toBe(a.id);
-    expect(items(b.id)).toHaveLength(0);
-  });
-
-  it('says nobody could be reached when no wake was ever delivered', () => {
-    const a = make('Re-point the importer at the new bucket');
-    const told = new Map([[a.id, { at: now - ESCALATE_MS - 60_000, delivered: false }]]);
-    // The case the whole feature opened with: a board whose lead seat is held
-    // by a session that has died, so the wake was owed for an hour and went
-    // nowhere. Escalating on a DELIVERED wake alone would never fire here.
-    escalations.onBoard(board(wsId, { stalled: [row(a, 'in-progress')] }), told, now);
-    const item = openItems(a.id)[0];
-    expect(item?.review.headline ?? '').toContain('Nobody could be reached');
-    expect(item?.review.detail ?? '').toContain('not answering');
-    expect(queued()).toHaveLength(1);
-  });
-});
-
-describe('when the lead was told, as the nudger measures it', () => {
-  const heard: Array<{ ws: string; told: ReadonlyMap<string, ToldTime>; now: number }> = [];
-  const stuck = { id: 't-9', title: 'Land the reader fix', bucket: 'in-progress', quietMs: 60_000 };
-
-  const nudgerAt = (clock: () => number, reachable: boolean) =>
-    new StallNudger({
-      snapshot: () => [board('ws-told', { stalled: [stuck] })],
-      canReach: () => reachable,
-      send: () => 1,
-      now: clock,
-      escalate: (b, told, now) => heard.push({ ws: b.workspaceId, told: new Map(told), now }),
+  describe('the trigger', () => {
+    it('a live lead with a row waiting on a person produces nothing, however long', () => {
+      const a = make('Choose the retention window');
+      const escalations = build();
+      const waiting = {
+        id: a.id,
+        title: a.title,
+        waitingOn: [{ kind: 'task' as const, taskId: a.id, reviewItemId: 'r-1' }],
+      };
+      for (let hours = 0; hours < 30; hours += 1) {
+        escalations.onBoard(
+          board(wsId, { sessionLive: true, waiting: [waiting] }),
+          now + hours * ESCALATE_MS,
+        );
+      }
+      expect(items(a.id)).toHaveLength(0);
+      expect(sent).toHaveLength(0);
     });
 
-  beforeEach(() => {
-    heard.length = 0;
+    it('a live lead with STUCK rows produces nothing either — the wake is its addressee', () => {
+      const a = make('Split the parser out of the loader');
+      const escalations = build();
+      const rows = { unfiled: [row(a, 'blocked-on-owner-unfiled', 9 * ESCALATE_MS)] };
+      escalations.onBoard(board(wsId, { sessionLive: true, ...rows }), now);
+      escalations.onBoard(
+        board(wsId, { sessionLive: false, agentActiveAt: now - ESCALATE_MS / 2, ...rows }),
+        now,
+      );
+      escalations.onBoard(
+        board(wsId, { sessionLive: false, sessionObservedAt: now - ESCALATE_MS / 2, ...rows }),
+        now,
+      );
+      expect(items(a.id)).toHaveLength(0);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('a dead board with a row waiting on a person, and nothing stuck, produces nothing', () => {
+      const a = make('Choose the retention window');
+      build().onBoard(
+        board(wsId, {
+          waiting: [
+            {
+              id: a.id,
+              title: a.title,
+              waitingOn: [{ kind: 'task', taskId: a.id, reviewItemId: 'r-1' }],
+            },
+          ],
+        }),
+        now,
+      );
+      expect(items(a.id)).toHaveLength(0);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('does not escalate a minute before the window, and does at it', () => {
+      const a = make('Land the backfill');
+      const escalations = build({ withTeamLead: false });
+      const last = now - ESCALATE_MS;
+      escalations.onBoard(
+        board(wsId, { agentActiveAt: last + 60_000, stalled: [row(a, 'in-progress')] }),
+        now,
+      );
+      expect(items(a.id)).toHaveLength(0);
+      escalations.onBoard(
+        board(wsId, { agentActiveAt: last, stalled: [row(a, 'in-progress')] }),
+        now,
+      );
+      expect(openItems(a.id)).toHaveLength(1);
+    });
+
+    it('a retired board escalates nothing, and takes back what it had filed', () => {
+      const a = make('Archive the old importer');
+      const escalations = build({ withTeamLead: false });
+      escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), now);
+      expect(openItems(a.id)).toHaveLength(1);
+      escalations.onBoard(
+        board(wsId, { retired: true, unfiled: [row(a, 'blocked-on-owner-unfiled')] }),
+        now + 60_000,
+      );
+      expect(openItems(a.id)).toHaveLength(0);
+      expect(items(a.id)[0]?.review.withdrawnAt).toBeDefined();
+    });
   });
 
-  it('stamps the told time on a DELIVERED wake and never restarts it', () => {
-    let t = 1_000_000;
-    const nudger = nudgerAt(() => t, true);
-    nudger.tick();
-    expect(heard[0]?.told.get(stuck.id)).toEqual({ at: t, delivered: true });
-    const first = t;
-    t += 30 * 60_000;
-    nudger.tick();
-    // Seen again, told once: the escalation clock measures the stretch, not
-    // the last time anybody looked.
-    expect(heard[1]?.told.get(stuck.id)).toEqual({ at: first, delivered: true });
-  });
-
-  it('the told time survives a restart, so the clock is not reset by a deploy', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'stall-told-'));
-    const stampFile = join(dir, 'stamps.json');
-    const build = (clock: () => number) =>
-      new StallNudger({
-        snapshot: () => [board('ws-told', { stalled: [stuck] })],
-        canReach: () => true,
-        send: () => 1,
-        now: clock,
-        stampFile,
-        escalate: (b, told, now) => heard.push({ ws: b.workspaceId, told: new Map(told), now }),
+  describe('Team Lead first', () => {
+    it('a dead lead produces a frame to Team Lead, on its own board, and no item', () => {
+      const a = make('Rank results by recency');
+      reachOn.add(wsId);
+      build().onBoard(board(wsId, { stalled: [row(a, 'in-progress')] }), now);
+      expect(items(a.id)).toHaveLength(0);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        on: wsId,
+        to: TEAM_LEAD,
+        frame: {
+          event: STALL_EVENT,
+          workspaceId: wsId,
+          taskId: a.id,
+          title: a.title,
+          stalledCount: 1,
+          escalatedFrom: AGENT.id,
+        },
       });
-    const told = 3_000_000;
-    build(() => told).tick();
-    expect(heard[0]?.told.get(stuck.id)).toEqual({ at: told, delivered: true });
+    });
 
-    // Prod restarts at every merge. A clock that started again there would
-    // hand every board another full window before anybody heard.
-    build(() => told + 45 * 60_000).tick();
-    expect(heard[1]?.told.get(stuck.id)).toEqual({ at: told, delivered: true });
-    rmSync(dir, { recursive: true, force: true });
+    it('reaches Team Lead on ANOTHER board when it holds no stream on the dead one', () => {
+      const a = make('Rank results by recency');
+      const other = store.createWorkspace('Harbour board').id;
+      reachOn.add(other);
+      build().onBoard(board(wsId, { stalled: [row(a, 'in-progress')] }), now);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.on).toBe(other);
+      // The frame still names the DEAD board: that is what Team Lead acts on.
+      expect(sent[0]?.frame.workspaceId).toBe(wsId);
+      expect(items(a.id)).toHaveLength(0);
+    });
+
+    it('tells Team Lead once per window while the board stays dead, not once per tick', () => {
+      const a = make('Rank results by recency');
+      reachOn.add(wsId);
+      const escalations = build();
+      const snapshot = board(wsId, { stalled: [row(a, 'in-progress')] });
+      escalations.onBoard(snapshot, now);
+      escalations.onBoard(snapshot, now + 60_000);
+      escalations.onBoard(snapshot, now + ESCALATE_MS - 60_000);
+      expect(sent).toHaveLength(1);
+      escalations.onBoard(snapshot, now + ESCALATE_MS);
+      expect(sent).toHaveLength(2);
+    });
+
+    it('a Team Lead that comes back mid-stretch takes over from the reader', () => {
+      // Filed to the reader because nobody could be reached; then Team Lead
+      // attaches somewhere. The reader's item is not withdrawn — the board is
+      // still dead and the ask still stands — but nothing more is filed, and
+      // Team Lead hears about it.
+      const a = make('Rank results by recency');
+      const escalations = build();
+      const snapshot = board(wsId, { stalled: [row(a, 'in-progress')] });
+      escalations.onBoard(snapshot, now);
+      expect(openItems(a.id)).toHaveLength(1);
+      expect(sent).toHaveLength(0);
+      reachOn.add(wsId);
+      escalations.onBoard(snapshot, now + 60_000);
+      expect(sent).toHaveLength(1);
+      expect(openItems(a.id)).toHaveLength(1);
+    });
   });
 
-  it('a finding nobody could be reached about stamps its own clock, undelivered', () => {
-    const nudger = nudgerAt(() => 2_000_000, false);
-    nudger.tick();
-    // The wake stays owed — nothing is recorded as told — but the board knows
-    // when it first had nobody to tell, which is the case this whole feature
-    // opened with: a lead session that had died with nothing else attached.
-    expect(heard[0]?.told.get(stuck.id)).toEqual({ at: 2_000_000, delivered: false });
-  });
+  describe('the reader, when Team Lead is unreachable too', () => {
+    it('files ONE item, on the unfiled row, naming every stuck row with a relative link', () => {
+      const a = make('Choose the retention window');
+      const b = make('Rank results by recency');
+      const c = make('Write the migration');
+      build().onBoard(
+        board(wsId, {
+          stalled: [row(b, 'in-progress', 3 * ESCALATE_MS), row(c, 'ready-unpicked')],
+          unfiled: [row(a, 'blocked-on-owner-unfiled', 2 * ESCALATE_MS)],
+        }),
+        now,
+      );
+      expect(sent).toHaveLength(0);
+      expect(openItems(a.id)).toHaveLength(1);
+      expect(openItems(b.id)).toHaveLength(0);
+      expect(openItems(c.id)).toHaveLength(0);
+      const item = openItems(a.id)[0];
+      expect(item?.createdBy).toBe('Claude Workspaces');
+      const detail = item?.review.detail ?? '';
+      for (const t of [a, b, c]) {
+        expect(detail).toContain(`(/workspaces/${wsId}?task=${t.id})`);
+        expect(detail).toContain(t.title);
+      }
+      expect(detail).not.toContain('http');
+      expect(queued()).toHaveLength(1);
+    });
 
-  it('the undeliverable clock starts once, not on every tick', () => {
-    let t = 5_000_000;
-    const nudger = nudgerAt(() => t, false);
-    nudger.tick();
-    t += 20 * 60_000;
-    nudger.tick();
-    expect(heard[1]?.told.get(stuck.id)).toEqual({ at: 5_000_000, delivered: false });
+    it('a second stuck row REVISES the same item rather than filing another', () => {
+      const a = make('Choose the retention window');
+      const b = make('Rank results by recency');
+      const escalations = build({ withTeamLead: false });
+      escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), now);
+      escalations.onBoard(
+        board(wsId, {
+          unfiled: [row(a, 'blocked-on-owner-unfiled')],
+          stalled: [row(b, 'in-progress')],
+        }),
+        now + 60_000,
+      );
+      expect(openItems(a.id)).toHaveLength(1);
+      expect(items(b.id)).toHaveLength(0);
+      expect(openItems(a.id)[0]?.review.detail ?? '').toContain(b.title);
+      expect(queued()).toHaveLength(1);
+    });
+
+    it('withdraws the item the tick a session is on the board again', () => {
+      const a = make('Choose the retention window');
+      const escalations = build({ withTeamLead: false });
+      const rows = { unfiled: [row(a, 'blocked-on-owner-unfiled')] };
+      escalations.onBoard(board(wsId, rows), now);
+      expect(openItems(a.id)).toHaveLength(1);
+      // The row is exactly as stuck; the only change is that somebody is here.
+      escalations.onBoard(board(wsId, { sessionLive: true, ...rows }), now + 60_000);
+      expect(openItems(a.id)).toHaveLength(0);
+      expect(items(a.id)[0]?.review.withdrawnAt).toBeDefined();
+      expect(escalations.filedCount()).toBe(0);
+    });
+
+    it('withdraws the item when the rows it named are no longer stuck', () => {
+      const a = make('Choose the retention window');
+      const escalations = build({ withTeamLead: false });
+      escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), now);
+      escalations.onBoard(board(wsId), now + 60_000);
+      expect(openItems(a.id)).toHaveLength(0);
+      expect(queued()).toHaveLength(0);
+    });
+
+    it('a board that dies again files again, with no cooldown in the way', () => {
+      const a = make('Choose the retention window');
+      const escalations = build({ withTeamLead: false });
+      const rows = { unfiled: [row(a, 'blocked-on-owner-unfiled')] };
+      escalations.onBoard(board(wsId, rows), now);
+      escalations.onBoard(board(wsId, { sessionLive: true, ...rows }), now + 60_000);
+      expect(openItems(a.id)).toHaveLength(0);
+      escalations.onBoard(board(wsId, rows), now + 120_000);
+      expect(openItems(a.id)).toHaveLength(1);
+      expect(items(a.id)).toHaveLength(2);
+    });
+
+    it('does not re-file for rows the reader has already answered about', () => {
+      const a = make('Split the parser out of the loader');
+      const b = make('Write the migration');
+      const escalations = build({ withTeamLead: false });
+      escalations.onBoard(board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }), now);
+      const filed = openItems(a.id)[0]?.id ?? '';
+      store.answerTaskReview(a.id, filed, 'Looking at it now', { actor: PERSON });
+
+      // Still dead, still stuck; the reader has spoken about this row.
+      escalations.onBoard(
+        board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] }),
+        now + 60_000,
+      );
+      expect(items(a.id)).toHaveLength(1);
+      // A row they were NOT shown is new.
+      escalations.onBoard(
+        board(wsId, {
+          unfiled: [row(a, 'blocked-on-owner-unfiled')],
+          stalled: [row(b, 'in-progress')],
+        }),
+        now + 120_000,
+      );
+      expect(openItems(a.id)).toHaveLength(1);
+      expect(openItems(a.id)[0]?.review.detail ?? '').toContain(b.title);
+    });
+
+    it('MOVES the item to a row that is still stuck when the anchor closes', () => {
+      const a = make('Choose the retention window');
+      const b = make('Rank results by recency');
+      const escalations = build({ withTeamLead: false });
+      escalations.onBoard(
+        board(wsId, {
+          unfiled: [row(a, 'blocked-on-owner-unfiled')],
+          stalled: [row(b, 'in-progress')],
+        }),
+        now,
+      );
+      expect(openItems(a.id)).toHaveLength(1);
+      store.transition(a.id, 'done', { actor: PERSON });
+      // A done ticket's items are invisible to the reader; the board is still
+      // dead and b is still stuck.
+      escalations.onBoard(board(wsId, { stalled: [row(b, 'in-progress')] }), now + 60_000);
+      expect(openItems(a.id)).toHaveLength(0);
+      expect(openItems(b.id)).toHaveLength(1);
+      expect(queued()).toHaveLength(1);
+      expect(escalations.filedCount()).toBe(1);
+    });
+
+    it('a restart reads the sidecar and does not file a second item', () => {
+      const a = make('Land the backfill');
+      const snapshot = board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled')] });
+      build({ withTeamLead: false }).onBoard(snapshot, now);
+      expect(openItems(a.id)).toHaveLength(1);
+      expect(readFileSync(join(dataDir, STALL_ESCALATION_FILENAME), 'utf8')).toContain(a.id);
+
+      const restarted = build({ withTeamLead: false });
+      restarted.onBoard(snapshot, now + 60_000);
+      restarted.onBoard(snapshot, now + 120_000);
+      expect(openItems(a.id)).toHaveLength(1);
+      expect(restarted.filedCount()).toBe(1);
+    });
+
+    it('a board with no Team Lead configured goes straight to the reader', () => {
+      const a = make('Land the backfill');
+      build({ withTeamLead: false }).onBoard(
+        board(wsId, { stalled: [row(a, 'in-progress')] }),
+        now,
+      );
+      expect(openItems(a.id)).toHaveLength(1);
+    });
   });
 });
 
@@ -704,56 +482,44 @@ describe('the words a reader sees', () => {
   const rows = [
     {
       id: 't-1',
-      title: 'Cut the export path over',
+      title: 'Choose the retention window',
       bucket: 'blocked-on-owner-unfiled',
       quietMs: 3 * 60 * 60_000,
-      toldMs: 2 * 60 * 60_000,
-      delivered: true,
     },
   ];
 
   it('names the row once, in plain words, with a relative link and the quiet span', () => {
     const review = buildStallEscalationReview({
-      workspaceId: 'w-abc',
+      workspaceId: 'ws-1',
       rows,
-      escalateMs: ESCALATE_MS,
-    }) as { review_type: string; headline: string; detail: string; options?: unknown };
+      deadForMs: 2 * 60 * 60_000,
+    });
     expect(review.review_type).toBe('question');
-    // A question is answered in the reader's own words — options would be a
-    // decision, and there is nothing here to choose between.
-    expect(review.options).toBeUndefined();
-    expect(review.headline).toContain('Cut the export path over');
-    expect(review.headline.includes('\n')).toBe(false);
-    expect(review.detail).toContain('[Cut the export path over](/workspaces/w-abc?task=t-1)');
-    expect(review.detail).toContain('Quiet 3h');
-    // The told-time is NOT printed on a delivered line. It is stamped once per
-    // remembered stretch, so on a row that was worked and went quiet again it
-    // names a stretch that has ended — which is how an item came to read
-    // "Quiet 1h; the lead was told 2d ago" about a row its lead had been
-    // writing to all along.
-    expect(review.detail).not.toContain('told 2h ago');
-    expect(review.detail).not.toMatch(/the lead was told \d/);
+    expect(review.headline).toBe(
+      'Nobody is on this board, and “Choose the retention window” is stuck',
+    );
+    const detail = String(review.detail);
+    expect(detail).toContain('[Choose the retention window](/workspaces/ws-1?task=t-1)');
+    expect(detail).toContain('waiting on a person, with no question filed anywhere they read');
+    expect(detail).toContain('Quiet 3h');
+    expect(detail).not.toContain('blocked-on-owner-unfiled');
   });
 
-  it('still says how long nobody could be reached, which no other line carries', () => {
-    // The control for the assertion above: the span is dropped because a
-    // DELIVERED wake's age cannot be trusted, not because spans are noise. On
-    // an undelivered finding the age IS the finding, and dropping it here
-    // would leave the reader with nothing to act on.
-    const review = buildStallEscalationReview({
-      workspaceId: 'w-abc',
-      rows: [{ ...rows[0], delivered: false } as (typeof rows)[0]],
-      escalateMs: ESCALATE_MS,
-    }) as { detail: string };
-    expect(review.detail).toContain('nobody could be reached on this board for 2h');
+  it('says how long nobody has been here, and that Team Lead was tried', () => {
+    const detail = String(
+      buildStallEscalationReview({ workspaceId: 'ws-1', rows, deadForMs: 2 * 60 * 60_000 }).detail,
+    );
+    expect(detail).toContain('for over 2h');
+    expect(detail).toContain('Team Lead could not be reached');
+    expect(detail).toContain('withdraws on its own');
   });
 
   it('counts the rows in the headline when there is more than one', () => {
     const review = buildStallEscalationReview({
-      workspaceId: 'w-abc',
-      rows: [...rows, { ...rows[0], id: 't-2', title: 'Retire the scheduler' } as (typeof rows)[0]],
-      escalateMs: ESCALATE_MS,
-    }) as { headline: string };
-    expect(review.headline).toBe('2 rows have not moved since the lead was told');
+      workspaceId: 'ws-1',
+      rows: [...rows, { id: 't-2', title: 'Rank results', bucket: 'in-progress', quietMs: 60_000 }],
+      deadForMs: 60 * 60_000,
+    });
+    expect(review.headline).toBe('Nobody is on this board, and 2 rows are stuck');
   });
 });

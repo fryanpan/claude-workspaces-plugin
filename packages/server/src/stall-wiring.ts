@@ -71,6 +71,7 @@ import {
   DEFAULT_PARALLELISM_CAP,
   LEGACY_REVIEW_ITEM_ID,
   type ParallelismCapChange,
+  type Task,
   type TaskStore,
 } from './tasks.ts';
 
@@ -92,6 +93,30 @@ export interface ParallelismCapRead {
   free: number;
   holders: Array<{ taskId: string; title?: string; agentName?: string }>;
   lastChange?: ParallelismCapChange;
+}
+
+/**
+ * The moments the board's OWN escalation writes stamped on a row: its item's
+ * filing, each revision of it, its withdrawal. `stallSnapshot` reads these to
+ * keep those writes from counting as the row moving (see the `updatedAt`
+ * note there), and it is the actor NAME that identifies them, because that
+ * is the only mark a review item keeps of who wrote it.
+ */
+function escalationWroteAt(task: Task): Set<number> {
+  const at = new Set<number>();
+  for (const item of task.reviews ?? []) {
+    if (item.createdBy === STALL_ESCALATION_ACTOR.name) at.add(item.createdAt);
+    for (const rev of item.revisions ?? []) {
+      if (rev.by === STALL_ESCALATION_ACTOR.name) at.add(rev.at);
+    }
+    if (
+      item.review.withdrawnAt !== undefined &&
+      item.review.withdrawnBy === STALL_ESCALATION_ACTOR.name
+    ) {
+      at.add(item.review.withdrawnAt);
+    }
+  }
+  return at;
 }
 
 /** The long-lived collaborators this subsystem reads, plus the tuning knobs
@@ -150,9 +175,12 @@ export interface StallWiringContext {
   stallNudgeRepeatMs?: number;
   /** How long a held review item may stand before it is a finding (ms). */
   heldReviewItemMs?: number;
-  /** How long a row the lead was already told about may stay a finding
-   *  before the board files over the lead's head (ms). */
+  /** How long a board must be without any live session — no stream, no
+   *  heartbeat, no agent write — before it files past its lead (ms). */
   stallEscalateMs?: number;
+  /** The fleet's spawner — Team Lead — by agent id: the first addressee when
+   *  a board is dead. Absent → the reader is the only one. */
+  spawnerAgentId?: string;
   /** How often each board's keep-moving verdict is recorded (ms). */
   keepMovingCadenceMs?: number;
 }
@@ -399,7 +427,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       createdAt: t.createdAt,
       transitions: t.transitions,
       ownerKind: ownerKindOf(t) as string,
-      updatedAt: t.updatedAt,
+      // `updatedAt` — unless the last thing to bump it was the board's own
+      // escalation item. Filing, revising or withdrawing that item stamps
+      // the row like any edit, and read as movement it would un-stall the
+      // very row the item was filed about, withdraw the item, and file it
+      // again a window later. The row's other clocks are untouched: a real
+      // edit after ours moves `updatedAt` past this and counts as it should.
+      ...(escalationWroteAt(t).has(t.updatedAt) ? {} : { updatedAt: t.updatedAt }),
       ...(t.schedule !== undefined ? { schedule: t.schedule } : {}),
       ...(t.bodyWrittenAt !== undefined ? { bodyWrittenAt: t.bodyWrittenAt } : {}),
       ...(t.titleWrittenAt !== undefined ? { titleWrittenAt: t.titleWrittenAt } : {}),
@@ -413,7 +447,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // actor: the question this feeds is "did anything touch this row", and an
     // unattributed tick beats a false silence.
     const events: Array<{ taskId: string; ts: number }> = [];
-    for (const t of tasks) {
+    for (const t of rows) {
       for (const ts of [t.updatedAt, t.bodyWrittenAt, t.titleWrittenAt]) {
         if (typeof ts === 'number' && ts > 0) events.push({ taskId: t.id, ts });
       }
@@ -464,6 +498,10 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       if (state.unreadable > 0) unreadableReviewTaskIds.add(t.id);
       for (const item of taskStore.listReviewItems(t.id)) {
         if (!isReviewItemOnQueue(item)) continue;
+        // The board's OWN escalation item is not the row's ask: counting it
+        // would turn its anchor `blocked-on-owner` and hide from every later
+        // tick the very row the item was filed about.
+        if (item.createdBy === STALL_ESCALATION_ACTOR.name) continue;
         reviewItems.push({
           taskId: t.id,
           askedAt: item.createdAt,
@@ -761,10 +799,22 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       for (const tr of task.transitions ?? [])
         if (tr.by?.kind === 'agent' && tr.ts > agentActiveAt) agentActiveAt = tr.ts;
     }
+    // …and the board's SESSIONS, from the store's own attachment records: a
+    // session can be present and deliverable having written nothing on any
+    // row yet. Both reads are what `hasLiveAttachment` and the presence strip
+    // already answer from; nothing here is measured a second way.
+    const sessionLive = taskStore.hasLiveAttachment(workspace.id);
+    let sessionObservedAt = 0;
+    for (const att of taskStore.listAttachments(workspace.id)) {
+      const seen = Math.max(att.lastHeartbeat ?? 0, att.lastToolCallAt ?? 0);
+      if (seen > sessionObservedAt) sessionObservedAt = seen;
+    }
     return {
       workspaceId: workspace.id,
       ...(workspace.leadAgentId !== undefined ? { leadAgentId: workspace.leadAgentId } : {}),
       ...(agentActiveAt > 0 ? { agentActiveAt } : {}),
+      sessionLive,
+      ...(sessionObservedAt > 0 ? { sessionObservedAt } : {}),
       retired: workspace.retiredAt !== undefined,
       stalled: verdict.stalled,
       unfiled: verdict.unfiled,
@@ -777,21 +827,30 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     };
   };
   /**
-   * The second addressee: when a row the lead was told about is still stuck
-   * an hour later, the board files a review item on the reader's own queue
-   * (`stall-escalation.ts`). Built here, driven by the nudger's tick, because
-   * the told-times it runs on are the nudger's memory and nothing else's.
+   * The addressees past the lead: when a board has had NO live session for
+   * the escalation window, its stall frame goes to Team Lead on whichever
+   * board it is attached to, and only if Team Lead is unreachable too does
+   * the board file a review item on the reader's own queue
+   * (`stall-escalation.ts`). Driven by the nudger's tick because it reads the
+   * same snapshot the wake does, on the same clock.
    */
   const escalations = new StallEscalations({
     store: taskStore,
     dataDir,
     ...(ctx.stallEscalateMs !== undefined ? { escalateMs: ctx.stallEscalateMs } : {}),
-    // A filed item may not be retracted for movement until it has stood as
-    // long as the board's own quiet window — the span this board already uses
-    // to decide a row has stopped moving. Read from the same knob rather than
-    // kept as a second number, so a board tuned to a short window does not
-    // hold an ask open on a scale it does not otherwise use.
-    ...(ctx.stallNudgeQuietMs !== undefined ? { settleMs: ctx.stallNudgeQuietMs } : {}),
+    ...(ctx.spawnerAgentId !== undefined
+      ? {
+          teamLead: {
+            agentId: ctx.spawnerAgentId,
+            boards: () => taskStore.listWorkspaces().map((w) => w.id),
+            // The same addressed delivery the wake rides — `agentsOn` rather
+            // than `count`, for the reason the nudger below gives.
+            canReach: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+            send: (workspaceId, agentId, frame) =>
+              sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+          },
+        }
+      : {}),
   });
   /**
    * The measurement (`keep-moving-verdict.ts`), fed the SAME snapshots the
@@ -838,7 +897,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     sendToFiler: (workspaceId, agentId, frame) =>
       sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
     ...(ctx.stallNudgeRepeatMs !== undefined ? { repeatMs: ctx.stallNudgeRepeatMs } : {}),
-    escalate: (board, toldAt, now) => escalations.onBoard(board, toldAt, now),
+    escalate: (board, now) => escalations.onBoard(board, now),
     // Prod restarts at every merge; without this each deploy would re-fire one
     // wake per board over rows their leads had already been told about.
     stampFile: join(dataDir, STALL_NUDGE_STAMP_FILENAME),
