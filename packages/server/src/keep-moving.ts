@@ -6,6 +6,14 @@
  * 2026-09-08, and the measurement now runs in-process off the same snapshot
  * as the wake, so the loop and the verdict cannot drift apart. This module
  * owns every decision about what counts as blocked, stalled, or active.
+ *
+ * "Waiting on a person" is DECLARED, never inferred (rebuild step 2,
+ * 2026-09-08): a row is waiting when an open review item is filed for it —
+ * on the ticket, on its own thread, or on a doc it links — and the row then
+ * carries the ADDRESS of that item (`Classified.waitingOn`). Whether an item
+ * is open is the Home queue's own predicate, read by the caller that builds
+ * `reviewItems`; this module never reads prose. The note reader that used to
+ * guess from an agent's end-of-turn text was removed with that step.
  */
 
 export interface TaskRow {
@@ -47,11 +55,25 @@ export interface EventRow {
   ts: number;
   actor?: { kind?: string; name?: string };
 }
+/**
+ * Where a filed item lives — the thing a waiting row carries so that every
+ * later reader (the wake, the verdict, the escalation) can find the ask
+ * rather than take the row's word for it. Same three shapes the review gate
+ * addresses (`review-gate.ts`), minus nothing: a ticket's own decision is a
+ * `task` address under the derived legacy id.
+ */
+export type FiledItemAddress =
+  | { kind: 'task'; taskId: string; reviewItemId: string }
+  | { kind: 'thread'; docId: string; threadId: string; commentId: string };
+
 export interface ReviewItemRow {
   taskId?: string;
   docId?: string;
   /** When the ask was filed — a review filing is board activity. */
   askedAt?: number;
+  /** The item's own address. Absent only from a caller that has none to
+   *  give; the server always does. */
+  address?: FiledItemAddress;
 }
 
 export type Bucket =
@@ -90,37 +112,17 @@ export interface Classified {
    *  loop member as its own blocker. */
   cycle?: string[];
   /**
-   * When the row's own NOTES started saying it is waiting on a person, with
-   * no review item filed anywhere the person reads — the oldest note in the
-   * unbroken run of such notes ending at the newest one. Absent when the
-   * newest note says nothing of the kind, which is the ordinary case.
-   *
-   * Present is what makes the row `blocked-on-owner-unfiled` on evidence the
-   * BOARD could not see: an agent-owned row under a dispatching band whose
-   * ask exists only in prose. See the `noteAsk` parameter for why the run is
-   * walked rather than the newest note alone.
+   * blocked-on-owner only: every open item filed for this row, newest first
+   * — the declaration that makes the wait legitimate, by address. A row
+   * waiting on a person names the ask it waits on; nothing else may put a
+   * row in that bucket.
    */
-  askedInNoteAt?: number;
+  waitingOn?: FiledItemAddress[];
   /** TRUE means this row is waiting on the owner with NO pending review item
    *  anywhere on its chain's terminal — an ask that exists only in someone's
    *  head. The owner cannot see it on the Home queue, so it counts toward FAIL
    *  (7 of 10 "blocked-on-owner" rows on the 08-27 "PASS" board were this). */
   unfiledAsk: boolean;
-}
-
-/**
- * How a caller reads a note for an ask to a person. Declared here rather than
- * imported so this module stays what it is — a pure classifier the CLI report
- * and the server both run — while the detector itself (`note-ask.ts`, plus
- * the Haiku confirmation under it) stays out of the report's dependency tree.
- * `NoteAskClassifier` satisfies it structurally.
- */
-export interface NoteAskSeam {
-  /** The full reading: prefilter, cached judge verdict, and the background
-   *  confirmation this call may schedule. */
-  asks(note: { ts: number; text?: string }): boolean;
-  /** The deterministic half alone — no cache read, no judge call. */
-  prefilterOnly(note: { ts: number; text?: string }): boolean;
 }
 
 /** A ticket's own clock: when it entered its current status. */
@@ -137,31 +139,6 @@ function newestNoteAt(t: TaskRow): number {
   let newest = 0;
   for (const n of t.notes ?? []) if (typeof n.ts === 'number' && n.ts > newest) newest = n.ts;
   return newest;
-}
-
-/**
- * When this row's notes started saying it is waiting on a person, or
- * undefined when they do not say so.
- *
- * The newest note decides — see the `noteAsk` parameter — and the answer is
- * then dated by walking back through the unbroken run of notes that read the
- * same way. Notes are sorted rather than trusted in append order, for the
- * reason `newestNoteAt` gives: they arrive in order but carry the poster's
- * clock.
- */
-function noteAskStartedAt(t: TaskRow, noteAsk: NoteAskSeam | undefined): number | undefined {
-  if (noteAsk === undefined) return undefined;
-  const notes = (t.notes ?? []).filter((n) => typeof n.ts === 'number');
-  if (notes.length === 0) return undefined;
-  const newestFirst = [...notes].sort((a, b) => b.ts - a.ts);
-  const newest = newestFirst[0];
-  if (newest === undefined || !noteAsk.asks(newest)) return undefined;
-  let startedAt = newest.ts;
-  for (const older of newestFirst.slice(1)) {
-    if (!noteAsk.prefilterOnly(older)) break;
-    startedAt = older.ts;
-  }
-  return startedAt;
 }
 
 export function classifyOpenTasks(
@@ -204,30 +181,15 @@ export function classifyOpenTasks(
    * means somebody actually changed the content.)
    */
   threadActivity?: Map<string, number>,
-  /**
-   * Reads a note for "the agent is waiting on a person" — absent means the
-   * notes are not read that way at all, which is every caller that predates
-   * this and the CLI report's default.
-   *
-   * Only the NEWEST note is put to the full reading (`asks`), and only when
-   * that one says yes are the older notes walked with the deterministic half
-   * (`prefilterOnly`) to find where the run of them began. Both halves of that
-   * are deliberate. The newest note is what the row is saying NOW — a later
-   * note reporting progress means the agent moved on — and the walk is what
-   * stops an agent from resetting the finding by restating the same ask every
-   * turn, because the clock the wake reads runs from the START of the run
-   * (see `askedInNoteAt`, and its use in stall-gate.ts). Judging only the
-   * newest note is also what bounds the confirmation spend: the older ones
-   * cost nothing at all.
-   */
-  noteAsk?: NoteAskSeam,
 ): Classified[] {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   // Presence in askedTaskIds is what "an ask is FILED" means; newestAskAt
   // additionally carries the newest pending item's askedAt where one exists,
-  // so old asks can go on the re-verify list.
+  // so old asks can go on the re-verify list; addresses carries the items
+  // themselves, newest first, for the row to name.
   const askedTaskIds = new Set<string>();
   const newestAskAt = new Map<string, number>();
+  const addresses = new Map<string, Array<{ at: number; address: FiledItemAddress }>>();
   for (const r of reviewItems) {
     const id = r.taskId ?? (r.docId?.startsWith('task:') ? r.docId.slice(5) : undefined);
     if (!id) continue;
@@ -237,7 +199,17 @@ export function classifyOpenTasks(
       r.askedAt > (newestAskAt.get(id) ?? Number.NEGATIVE_INFINITY)
     )
       newestAskAt.set(id, r.askedAt);
+    if (r.address) {
+      const list = addresses.get(id) ?? [];
+      list.push({ at: r.askedAt ?? 0, address: r.address });
+      addresses.set(id, list);
+    }
   }
+  const waitingOnFor = (id: string): FiledItemAddress[] | undefined => {
+    const list = addresses.get(id);
+    if (!list || list.length === 0) return undefined;
+    return [...list].sort((a, b) => b.at - a.at).map((entry) => entry.address);
+  };
   const lastEventByTask = new Map<string, number>();
   for (const e of events) {
     if (e.taskId && e.ts > (lastEventByTask.get(e.taskId) ?? 0))
@@ -285,29 +257,24 @@ export function classifyOpenTasks(
     // nowhere he reads: blocked-on-owner-unfiled, a protocol violation that
     // counts toward FAIL (the owner's 08-27 review: 7 of 10 "blocked-on-owner"
     // rows were invisible on his queue).
+    //
+    // Those are the ONLY two ways a row reads as waiting on a person. A note
+    // saying "waiting on Bryan" with nothing filed is not a third: the note
+    // is movement like any other, and once it is a window old the row is a
+    // plain stall to the lead, whose remedy is to file the ask. A reader
+    // that guessed from such prose was here from 2026-09-04 to 2026-09-08
+    // and was removed because it could only ever be wrong in one of two
+    // directions — a missed phrasing left a silent stall, a matched one woke
+    // the lead over a row whose ask WAS filed where the reader did not look.
     const hasPendingAsk = askedTaskIds.has(t.id);
-    // …and the third way a row can be waiting on a person: its own agent
-    // SAID SO, in a note, with nothing filed. The board cannot see that from
-    // the row — the owner is an agent and the band dispatches — so before
-    // this such a row read as ordinary in-progress work while its note reset
-    // the clock that would have named it (2026-09-04: three rows, hours
-    // each). A filed ask beats it: a pending review item is the ask being
-    // where the person reads, which is the whole protocol.
-    // Asked only of the rows whose answer could change anything. A row the
-    // board ALREADY reads as waiting on a person is unfiled whatever its notes
-    // say, so reading them would schedule a judge call whose verdict cannot
-    // move the bucket — spend with no possible effect.
     const boardSaysOwnerWaits = t.ownerKind === 'person' || bands.ownerBand.has(t.goal ?? '');
-    const askedInNoteAt =
-      hasPendingAsk || boardSaysOwnerWaits ? undefined : noteAskStartedAt(t, noteAsk);
     let bucket: Bucket;
     // A rule row first: whatever else is true of it, it is not work anyone
     // picks up, and reading it as ready-unpicked is how the nudge sent a
     // session at a runbook (2026-09-07).
     if (t.schedule !== undefined) bucket = 'scheduled-rule';
     else if (hasPendingAsk) bucket = 'blocked-on-owner';
-    else if (boardSaysOwnerWaits || askedInNoteAt !== undefined)
-      bucket = 'blocked-on-owner-unfiled';
+    else if (boardSaysOwnerWaits) bucket = 'blocked-on-owner-unfiled';
     else if (unmet.length > 0) bucket = 'blocked-on-dependency';
     else if (t.status === 'in-progress') bucket = 'in-progress';
     // The standing owner rule (2026-08-22): the backlog is NOT auto-dispatched — goal
@@ -330,7 +297,9 @@ export function classifyOpenTasks(
       ...(bucket === 'blocked-on-owner' && newestAskAt.has(t.id)
         ? { askAgeMs: now - (newestAskAt.get(t.id) ?? now) }
         : {}),
-      ...(askedInNoteAt !== undefined ? { askedInNoteAt } : {}),
+      ...(bucket === 'blocked-on-owner' && waitingOnFor(t.id) !== undefined
+        ? { waitingOn: waitingOnFor(t.id) }
+        : {}),
       unfiledAsk: bucket === 'blocked-on-owner-unfiled',
     });
   }

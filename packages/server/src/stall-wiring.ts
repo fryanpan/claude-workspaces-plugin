@@ -42,8 +42,8 @@ import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
 import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
+import type { ReviewItemRow } from './keep-moving.ts';
 import { createLeadPresenceMonitor } from './lead-presence.ts';
-import { NoteAskClassifier, type NoteAskJudge } from './note-ask.ts';
 import { evaluateReadyWork } from './ready-gate.ts';
 import {
   READY_IDLE_DEFAULT_MS,
@@ -53,6 +53,7 @@ import {
   isBoardActivity,
 } from './ready-nudge.ts';
 import type { ReviewGateAddress } from './review-gate.ts';
+import { isReviewItemOnQueue } from './review-items/queries.ts';
 import type { SseBus } from './sse.ts';
 import { STALL_ESCALATION_ACTOR, StallEscalations } from './stall-escalation.ts';
 import {
@@ -154,13 +155,6 @@ export interface StallWiringContext {
   stallEscalateMs?: number;
   /** How often each board's keep-moving verdict is recorded (ms). */
   keepMovingCadenceMs?: number;
-  /**
-   * Confirms that a note flagged by the deterministic prefilter really does
-   * say the agent is waiting on a person (`note-ask-judge.ts`). **No
-   * default**, the summarizer's seam rule; absent leaves the prefilter
-   * running alone, which is the documented no-key state.
-   */
-  noteAskJudge?: NoteAskJudge;
 }
 
 /** What `createServer` keeps a handle on. The two snapshots and
@@ -361,20 +355,6 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * and the rows that would benefit are precisely the handful about to be
    * reported.
    */
-  /**
-   * Reads a row's own notes for an ask to a person nobody filed — the third
-   * way a row can be waiting on somebody, and the only one the board's own
-   * fields cannot show (`note-ask.ts` opens with the incident).
-   *
-   * Built ONCE, outside the per-board function, because the thing it holds is
-   * a cache: a note is confirmed by the judge once in its life, and a board
-   * whose notes have all been read schedules nothing on any later tick. Its
-   * person names are swapped per board below.
-   */
-  const noteAsk = new NoteAskClassifier(
-    ctx.noteAskJudge !== undefined ? { judge: ctx.noteAskJudge } : {},
-  );
-
   const stallVerdict = (workspace: BoardWorkspace): StallVerdict => {
     const tasks = taskStore.listTasks(workspace.id);
     const ownerKindOf = taskProjection.ownerKindReader(workspace.id);
@@ -410,38 +390,6 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
             goals.map((g) => g.id).filter((id) => !ownerBand.has(id) && !triageGoals.has(id)),
           );
 
-    // Who on this board is a PERSON, by name — the prefilter's other half:
-    // a waiting phrase is only an ask when it names somebody. Derived from the
-    // rows rather than from a roster call, because the owner-kind reader is
-    // already open here and there is no cheaper list of a board's people. The
-    // first token counts too, since a note says "Bryan" where the row says
-    // "Bryan Chan"; two characters or fewer is dropped as too common a word
-    // to mean a person.
-    //
-    // TWO sources, and the second is the fix for the hole the first has (PR
-    // 691 review): an assignee is only a name on a board where the person
-    // OWNS a row, and on a board where every row is an agent's the set came
-    // out empty and the prefilter could not read any note as an ask. So the
-    // people the board has RECORDED ACTING also count — every transition
-    // actor whose kind is `person`, which is how a board knows the human who
-    // moved a row without ever being given one. There is no board-owner
-    // field to read; this is the nearest true thing.
-    const personNames = new Set<string>();
-    const addPerson = (raw: string | undefined) => {
-      const name = (raw ?? '').trim();
-      if (name.length < 3) return;
-      personNames.add(name);
-      const first = name.split(/\s+/)[0] ?? '';
-      if (first.length >= 3) personNames.add(first);
-    };
-    for (const t of tasks) {
-      if (ownerKindOf(t) === 'person') addPerson(t.assignee);
-      for (const transition of t.transitions) {
-        if (transition.by.kind === 'person') addPerson(transition.by.name);
-      }
-    }
-    noteAsk.setPersonNames([...personNames]);
-
     const rows = tasks.map((t) => ({
       id: t.id,
       title: t.title,
@@ -470,7 +418,39 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         if (typeof ts === 'number' && ts > 0) events.push({ taskId: t.id, ts });
       }
     }
-    const reviewItems: Array<{ taskId: string; askedAt?: number }> = [];
+    /**
+     * The asks a row is legitimately waiting on, BY ADDRESS — the
+     * declaration that makes a wait a wait (rebuild step 2). Two of the
+     * three places an ask can be filed are read here for every row: the
+     * ticket's own items, and a payload on a comment in the ticket's body
+     * doc. The third — a doc the row links — is read below for the rows the
+     * first pass named, because it costs a doc walk per link.
+     *
+     * Openness is the Home queue's own predicate in both cases
+     * (`isReviewItemOnQueue`; `pendingDeclaration` minus a gated payload),
+     * so a row parks exactly while its ask is in front of the reader: a held,
+     * withdrawn, answered or reader-asked-back item excuses nothing, and
+     * neither does a note saying "waiting on Bryan".
+     */
+    const declaredAsks = (
+      docId: string,
+      taskId: string,
+      counts: (askedBy: string | undefined) => boolean = () => true,
+    ): ReviewItemRow[] => {
+      const out: ReviewItemRow[] = [];
+      for (const thread of docStore.listThreads(docId)) {
+        const declaring = pendingDeclaration(thread);
+        if (!declaring?.review || isReviewPayloadGated(declaring.review)) continue;
+        if (!counts(declaring.author?.id)) continue;
+        out.push({
+          taskId,
+          askedAt: declaring.ts,
+          address: { kind: 'thread', docId, threadId: thread.id, commentId: declaring.id },
+        });
+      }
+      return out;
+    };
+    const reviewItems: ReviewItemRow[] = [];
     const unreadableReviewTaskIds = new Set<string>();
     for (const t of tasks) {
       const state = taskStore.reviewState(t.id);
@@ -482,7 +462,15 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         continue;
       }
       if (state.unreadable > 0) unreadableReviewTaskIds.add(t.id);
-      if (state.open > 0) reviewItems.push({ taskId: t.id });
+      for (const item of taskStore.listReviewItems(t.id)) {
+        if (!isReviewItemOnQueue(item)) continue;
+        reviewItems.push({
+          taskId: t.id,
+          askedAt: item.createdAt,
+          address: { kind: 'task', taskId: t.id, reviewItemId: item.id },
+        });
+      }
+      reviewItems.push(...declaredAsks(taskBodyDocId(t.id), t.id));
     }
 
     const now = Date.now();
@@ -524,7 +512,6 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(ctx.stallBuilderSilentMultiplier !== undefined
         ? { builderSilentMultiplier: ctx.stallBuilderSilentMultiplier }
         : {}),
-      noteAsk,
     };
     const first = evaluateStalls(input);
     const suspect = [...first.stalled, ...first.unfiled];
@@ -533,16 +520,14 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // opened holds no threads and answers nothing, which is the right answer:
     // a row with no discussion has no comment activity to find.
     //
-    // The same walk also collects the asks `reviewState` cannot see: a review
-    // item filed as a payload ON A COMMENT lives in the doc, not on the
-    // ticket, yet it sits on the reader's Home queue exactly like a
-    // ticket-borne one — so a row behind one is legitimately waiting, and the
-    // loop woke a live lead over exactly this shape. Openness is
-    // `pendingDeclaration`, the rule the queue itself reads: an answered
-    // declaration or a resolved thread is nobody being waited on, and excuses
-    // nothing.
+    // The same walk also collects the asks the first pass could not: a
+    // review item filed as a payload ON A COMMENT of a doc the row LINKS —
+    // on the reader's Home queue exactly like a ticket-borne one, so a row
+    // behind one is legitimately waiting, and the loop woke a live lead over
+    // exactly this shape. Read by `declaredAsks`, the same predicate the
+    // ticket's own doc was read with above.
     const threadActivity = new Map<string, number>();
-    const commentAsks: Array<{ taskId: string; askedAt: number }> = [];
+    const commentAsks: ReviewItemRow[] = [];
     // How many rows link each doc — the fact that decides whether an ask on a
     // doc is unambiguously about ONE row. Counted over every row on the board,
     // not just the suspects: a doc shared with a row that is moving fine is
@@ -559,39 +544,17 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         linkingRowCount.set(ref.docId, (linkingRowCount.get(ref.docId) ?? 0) + 1);
       }
     }
-    /**
-     * One doc's discussion, read for both things a discussion can say about
-     * a row: that somebody is talking on it, and that somebody is waiting on
-     * an answer. Returns the newest comment time it saw.
-     *
-     * Factored out because the row's own `task:<id>` doc and each doc the
-     * row LINKS are read by exactly the same rules — and were not, which is
-     * the bug. Two copies of "is this ask still open" is how one of them
-     * comes to disagree with the Home queue.
-     */
-    const readDiscussion = (
-      docId: string,
-      taskId: string,
-      askCounts?: (askedBy: string | undefined) => boolean,
-    ): number => {
+    /** The newest comment time on a doc's discussion — somebody talking on
+     *  it is the row moving. The asks on it are `declaredAsks`'s to read. */
+    const newestComment = (docId: string): number => {
       let newest = 0;
       for (const thread of docStore.listThreads(docId)) {
         if (thread.lastActivity > newest) newest = thread.lastActivity;
-        const declaring = pendingDeclaration(thread);
-        // A HELD ask exonerates nothing. The whole point of a hold is that
-        // the reader cannot see the item, so a row sitting behind one is not
-        // legitimately waiting on a person — it is waiting on its own filer
-        // to revise, which is exactly what the loop should keep saying.
-        if (declaring?.review && !isReviewPayloadGated(declaring.review)) {
-          if (askCounts === undefined || askCounts(declaring.author?.id)) {
-            commentAsks.push({ taskId, askedAt: declaring.ts });
-          }
-        }
       }
       return newest;
     };
     for (const row of suspect) {
-      let newest = readDiscussion(taskBodyDocId(row.id), row.id);
+      let newest = newestComment(taskBodyDocId(row.id));
       // A registered builder's worktree churn is the row moving, exactly as
       // a comment is — the builder works in a checkout the board cannot see,
       // and without this the loop woke leads over its silence (8 of 9 wakes
@@ -670,12 +633,15 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         // is the `newest` half below and stays unscoped, because that
         // exoneration expires with the quiet window rather than lasting as
         // long as the question does.
-        const discussed = readDiscussion(ref.docId, row.id, (askedBy) => {
-          if ((linkingRowCount.get(ref.docId) ?? 0) <= 1) return true;
-          if (ownerId === undefined || askedBy === undefined) return false;
-          return (taskStore.resolveAgentId(askedBy) ?? askedBy) === ownerId;
-        });
+        const discussed = newestComment(ref.docId);
         if (discussed > newest) newest = discussed;
+        commentAsks.push(
+          ...declaredAsks(ref.docId, row.id, (askedBy) => {
+            if ((linkingRowCount.get(ref.docId) ?? 0) <= 1) return true;
+            if (ownerId === undefined || askedBy === undefined) return false;
+            return (taskStore.resolveAgentId(askedBy) ?? askedBy) === ownerId;
+          }),
+        );
       }
       if (newest > 0) threadActivity.set(row.id, newest);
     }
@@ -802,6 +768,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       retired: workspace.retiredAt !== undefined,
       stalled: verdict.stalled,
       unfiled: verdict.unfiled,
+      ...(verdict.waiting.length > 0 ? { waiting: verdict.waiting } : {}),
       considered: verdict.considered,
       undetermined: verdict.undetermined,
       ...(verdict.beyondCapacity > 0 ? { beyondCapacity: verdict.beyondCapacity } : {}),

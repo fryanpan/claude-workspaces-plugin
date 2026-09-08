@@ -86,6 +86,16 @@ describe('what a verdict says', () => {
     });
   });
 
+  it('records a waiting row with the address of its ask, and stays PASS', () => {
+    const address = { kind: 'task' as const, taskId: 't-w', reviewItemId: 'r-1' };
+    const v = keepMovingVerdictFor(
+      board('w-1', { waiting: [{ id: 't-w', title: 'a wait', waitingOn: [address] }] }),
+      T0,
+      quiet,
+    );
+    expect(v).toMatchObject({ verdict: 'PASS', waiting: [{ id: 't-w', waitingOn: [address] }] });
+  });
+
   it('counts a held item only once it has stood longer than the window', () => {
     const fresh = keepMovingVerdictFor(
       board('w-1', { held: [held('r-new', HELD_OVER - 1)] }),
@@ -164,7 +174,7 @@ describe('once per board per cadence, and no more', () => {
     });
     r.observe([board('w-1', { stalled: [row('t-a')], unfiled: [row('t-b')] })], T0);
     expect(lines).toEqual([
-      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 unreadable=0 held=0 escalated=0',
+      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 waiting=0 unreadable=0 held=0 escalated=0',
     ]);
   });
 });

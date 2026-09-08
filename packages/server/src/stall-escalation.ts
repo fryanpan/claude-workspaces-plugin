@@ -137,14 +137,7 @@ export interface EscalatedRow {
   id: string;
   title: string;
   bucket: string;
-  /**
-   * How long the row has been STUCK, on the clock its own bucket is judged by
-   * (`StalledRow.stuckMs`, falling back to `quietMs`). For every bucket but
-   * one those are the same number. The exception is an unfiled ask that lives
-   * in a row's notes: the agent restating it touches the row every turn, so
-   * its silence is seconds while the ask nobody filed is hours old, and the
-   * hours are what this item is about.
-   */
+  /** How long the row has been quiet — `StalledRow.quietMs`. */
   quietMs: number;
   /** How long ago the lead was told about it — or, when nobody could be
    *  reached, how long the board has been unable to tell anybody
@@ -482,13 +475,12 @@ export class StallEscalations {
       // A row whose newest write is its own lead's comment or transition is
       // the lead being reachable on that row, which is the one thing this
       // module escalates for the absence of.
-      const stuckMs = row.stuckMs ?? row.quietMs;
-      if (stuckMs < this.escalateMs) continue;
+      if (row.quietMs < this.escalateMs) continue;
       rows.push({
         id: row.id,
         title: row.title,
         bucket: row.bucket,
-        quietMs: stuckMs,
+        quietMs: row.quietMs,
         toldMs: now - stamp.at,
         delivered: stamp.delivered,
       });

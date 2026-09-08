@@ -1,5 +1,5 @@
 /**
- * ── The prompt settings routes: read the seven, change the five ──
+ * ── The prompt settings routes: read the six, change the five ──
  *
  * `/settings/prompts` is a page outside any board, so its data comes from a
  * top-level resource rather than from a board's own settings. Three routes

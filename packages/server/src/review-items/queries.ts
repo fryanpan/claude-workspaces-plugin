@@ -45,9 +45,10 @@ import type {
  *
  * The predicates are reused rather than re-derived for exactly that reason: a
  * second spelling of "on the queue" is free to disagree with the first, and
- * this bug is what that disagreement costs.
+ * this bug is what that disagreement costs. Exported so the stall wiring
+ * reads the same predicate when it names the items a row waits on.
  */
-function isCountedOpen(item: TaskReviewItem): boolean {
+export function isReviewItemOnQueue(item: TaskReviewItem): boolean {
   return (
     isReviewItemOpen(item) &&
     !isReviewItemGated(item) &&
@@ -136,7 +137,7 @@ export class ReviewItemQueries {
     // chosen between. A ticket item lives in `task.reviews`; a doc-thread
     // item lives on a comment in `task:<id>` and is counted through the
     // persistence reader. Either one means somebody is waiting.
-    const open = items.filter(isCountedOpen).length + this.p.openThreadAsks(taskId);
+    const open = items.filter(isReviewItemOnQueue).length + this.p.openThreadAsks(taskId);
     let unreadable = 0;
     for (const raw of task.reviews ?? []) {
       if (!readTaskReviewItem(raw)) unreadable++;

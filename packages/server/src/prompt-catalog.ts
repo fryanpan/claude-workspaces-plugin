@@ -1,9 +1,9 @@
 /**
  * Every prompt this server sends to a model, in one list.
  *
- * Seven call sites, found by grepping `packages/**` for the messages endpoint
+ * Six call sites, found by grepping `packages/**` for the messages endpoint
  * and confirmed one by one. The list exists so the settings page can be a
- * list rather than seven hand-written rows, and so a new prompt is one entry
+ * list rather than six hand-written rows, and so a new prompt is one entry
  * here instead of a page edit plus a route edit plus a store edit.
  *
  * The PURPOSE line is what the reader sees under the name, and it is written
@@ -33,7 +33,6 @@ import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-e
 import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-judge-prompt';
 import { DEFAULT_THREAD_SUMMARY_SYSTEM } from '@claude-workspaces/core/summary-prompt';
 import { DEFAULT_TASK_CAPTURE_SYSTEM } from './meeting-capture-prompt.ts';
-import { NOTE_ASK_SYSTEM } from './note-ask-judge.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
 import { DEFAULT_VOICE_SYSTEM } from './voice-prompt.ts';
 
@@ -100,14 +99,6 @@ export const PROMPT_CATALOG: readonly PromptDefinition[] = [
     scope: 'board',
     editable: true,
     default: DEFAULT_EFFORT_ESTIMATE_PROMPT,
-  },
-  {
-    id: 'waiting-on-you',
-    name: 'Waiting on you',
-    purpose: 'Whether a note an agent left means it is waiting on a person.',
-    scope: 'server',
-    editable: true,
-    default: NOTE_ASK_SYSTEM,
   },
   {
     id: 'voice-router',
