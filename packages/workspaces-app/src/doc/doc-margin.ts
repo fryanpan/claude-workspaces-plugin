@@ -64,10 +64,11 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // across every author) — per-suggestion Accept/Reject lives on the
   // balloon/chip card the margin just wired above.
   const suggestionsSummary = mountSuggestionsSummary({ docId, ydoc, scope });
-  // Off-screen comment counts + the "N waiting on you" chip — the
-  // information scent for what the reader cannot see (comment-hints.ts).
-  // Jumping goes the same route a tap on the highlight takes: scroll, pulse,
-  // and open the card where it lives (balloon above 1100px, inline below).
+  // The new-content indicator's measurement: what has been written that the
+  // reader cannot see, above and below (comment-hints.ts, drawn by
+  // new-indicator.ts). Jumping goes the same route a tap on the highlight
+  // takes: scroll, pulse, and open the card where it lives (balloon above
+  // 1100px, inline below).
   const spanFor = (id: string): HTMLElement | null =>
     editor.editor.view.dom.querySelector<HTMLElement>(
       `.thread-range[data-thread-id="${CSS.escape(id)}"]`,
@@ -104,7 +105,6 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
       editorMount.closest<HTMLElement>('#editor-pane') ??
       editorMount.parentElement ??
       document.body,
-    chipEl: document.getElementById('doc-asks'),
     threads: () => chrome.collectThreads(),
     spanFor,
     cardsFor: (id) => threadCards(id),

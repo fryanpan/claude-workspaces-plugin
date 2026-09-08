@@ -281,7 +281,7 @@ transport — and its models are DOM-free, which is what lets `board/board-model
 document. `suggestions/` sits in the editor tier rather than inside `redline/`,
 because Redline is the change view and a suggestion is the proposal: the chip
 and the doc-level pending badge render on the plain markdown surface and on the
-board's task-body editor, neither of which mounts a redline module. `recent-note-markers.ts` sits beside `settle-wash.ts` in the meeting family: the tint marks a fresh note where it landed, the markers say how many such notes are off screen. `meeting-live-hold.ts` joins the meeting family in that same view tier and
+board's task-body editor, neither of which mounts a redline module. `new-indicator.ts` sits in the view tier as the doc's one report of what the reader has not seen: `comment-hints.ts` measures (threads off screen, and the tinted note blocks `settle-wash.ts` marks) and this draws the two pills. It replaced four controls that counted overlapping halves of that fact — the edge markers, the off-screen hints and the top bar's asks chip — so `recent-note-markers.ts` is gone. `recent-note-cards.ts` joins the same family for the wide layout's other half: it builds and ages the "who wrote this, and when" card and hands it to `redline/markup-margin.ts` to PLACE, which is the one direction that keeps a single stacking pass over the balloon column. `meeting-live-hold.ts` joins the meeting family in that same view tier and
 changes none of the picture: it is one screenful of geometry that
 `meeting-live-zone.ts` owned until the zone crossed 500 lines, holding the
 live transcript still across the frame a settled chunk splits off on. Nothing

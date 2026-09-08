@@ -372,40 +372,6 @@ body.view-mode #toggle-format {
   display: inline-block;
 }
 
-/* "N waiting on you" — every open review item on the doc, behind the one
-   amber glyph the highlight and the card also carry (comments mock 3). A
-   pill, not an icon button: it is a sentence on a wide screen and a glyph
-   plus a count on a phone (`.w` is the wordy part; see INLINE THREAD CARDS
-   for the width rule). Hidden while nothing is waiting — a permanent
-   "nothing waiting on you" is metadata the reader cannot act on — except for
-   a few seconds after the last item is answered, when saying so is the
-   answer to "did that land?". */
-.doc-asks {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 30px;
-  padding: 3px 10px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--warn-wash, #fff4e5);
-  color: var(--warn-fg, #b25e09);
-  font: 600 12px var(--sans);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.doc-asks:hover {
-  filter: brightness(0.97);
-}
-.doc-asks[hidden] {
-  display: none;
-}
-.doc-asks.is-done {
-  background: var(--bg-hover);
-  color: var(--fg-muted);
-  cursor: default;
-}
-
 /* ‹ › comment nav. Shown wherever the comments are INLINE (≤1100px): the
    cards are spread through the document, so stepping between them is the
    only way to walk the conversation. Above that the balloon margin shows
@@ -617,6 +583,11 @@ body.view-mode #toggle-format {
    keyboard-inset.ts). edit-viewport.ts does the scrolling; this is what makes
    the scroll possible. */
 #editor {
+  /* The one row of #editor-pane that takes the leftover height; `min-height:
+     0` is what lets it actually shrink instead of pushing the strips below
+     it off the pane. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 36px 40px calc(var(--safe-bottom) + max(160px, var(--kb-bottom, 0px)));
   -webkit-overflow-scrolling: touch;

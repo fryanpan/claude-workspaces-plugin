@@ -1,0 +1,158 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { MountScope } from '../src/mount-scope.ts';
+import {
+  type NewCount,
+  mountNewIndicator,
+  newPillLabel,
+  newPillParts,
+  renderNewPill,
+} from '../src/new-indicator.ts';
+
+/**
+ * The one new-content indicator. The words are pure and pinned here; the
+ * mount is driven against a hand-measured DOM, because happy-dom lays
+ * nothing out and every rect below is stubbed.
+ */
+
+const count = (questions: number, fresh: number): NewCount => ({ questions, fresh });
+
+describe('the pill words', () => {
+  it('says how many new things, in words, with the questions first', () => {
+    expect(newPillLabel(count(0, 4), 'above')).toBe('4 new above');
+    expect(newPillLabel(count(1, 2), 'below')).toBe('1 question and 2 new below');
+    expect(newPillLabel(count(3, 0), 'below')).toBe('3 questions below');
+  });
+
+  it('says nothing at zero — there is no "0 new"', () => {
+    expect(newPillParts(count(0, 0))).toEqual([]);
+    expect(newPillLabel(count(0, 0), 'above')).toBe('');
+  });
+});
+
+describe('renderNewPill', () => {
+  function pill(): HTMLElement {
+    const strip = document.createElement('div');
+    strip.className = 'edge-strip edge-strip-top';
+    const b = document.createElement('button');
+    strip.appendChild(b);
+    document.body.appendChild(strip);
+    return b;
+  }
+
+  it('reads as words a person can act on, and colours only for an ask', () => {
+    const el = pill();
+    renderNewPill(el, count(0, 4), 'above');
+    expect(el.textContent).toContain('4 new');
+    expect(el.classList.contains('has-ask')).toBe(false);
+    renderNewPill(el, count(1, 2), 'above');
+    expect(el.textContent?.replace(/\s+/g, ' ')).toContain('1 question · 2 new');
+    expect(el.classList.contains('has-ask')).toBe(true);
+  });
+
+  it('hides the pill AND collapses its strip at zero', () => {
+    const el = pill();
+    renderNewPill(el, count(2, 1), 'below');
+    expect(el.hidden).toBe(false);
+    expect((el.parentElement as HTMLElement).hidden).toBe(false);
+    renderNewPill(el, count(0, 0), 'below');
+    expect(el.hidden).toBe(true);
+    expect((el.parentElement as HTMLElement).hidden).toBe(true);
+    expect(el.textContent).toBe('');
+  });
+});
+
+// --- the mount -------------------------------------------------------------
+
+const cleanups: Array<() => void> = [];
+afterEach(() => {
+  for (const f of cleanups.splice(0)) f();
+  document.body.replaceChildren();
+});
+
+function harness(opts: { wide?: boolean; dock?: number } = {}) {
+  const pane = document.createElement('section');
+  pane.getBoundingClientRect = () =>
+    ({ top: 0, bottom: 820, left: 0, right: 800, width: 800, height: 820 }) as DOMRect;
+  const scroller = document.createElement('div');
+  scroller.getBoundingClientRect = () =>
+    ({ top: 40, bottom: 640, left: 0, right: 800, width: 800, height: 600 }) as DOMRect;
+  const marginEl = document.createElement('div');
+  marginEl.getBoundingClientRect = () =>
+    ({ top: 40, bottom: 640, left: 540, right: 800, width: 260 }) as DOMRect;
+  const dock = document.createElement('div');
+  dock.getBoundingClientRect = () => ({ height: opts.dock ?? 0 }) as DOMRect;
+  pane.append(scroller, dock);
+  document.body.appendChild(pane);
+  const scope = new MountScope();
+  const jumps: string[] = [];
+  const handle = mountNewIndicator({
+    pane,
+    scroller,
+    marginEl,
+    marginVisible: () => opts.wide !== false,
+    dockEl: () => (opts.dock ? dock : null),
+    onJump: (dir) => jumps.push(dir),
+    scope,
+  });
+  cleanups.push(() => scope.dispose());
+  return { pane, scroller, handle, jumps };
+}
+
+const strip = (pane: HTMLElement, which: 'top' | 'bottom') =>
+  pane.querySelector<HTMLElement>(`.edge-strip-${which}`) as HTMLElement;
+const edge = (pane: HTMLElement, which: 'top' | 'bottom') =>
+  pane.querySelector<HTMLElement>(`.cw-edge-${which}`) as HTMLElement;
+
+describe('mountNewIndicator', () => {
+  it('puts each pill in a strip OUTSIDE the scroll area, one each side of it', () => {
+    const h = harness();
+    const kids = Array.from(h.pane.children);
+    expect(kids.indexOf(strip(h.pane, 'top'))).toBeLessThan(kids.indexOf(h.scroller));
+    expect(kids.indexOf(strip(h.pane, 'bottom'))).toBeGreaterThan(kids.indexOf(h.scroller));
+    // Nothing of the indicator is inside the scroller, so it can never sit on
+    // top of the first or the last comment card.
+    expect(h.scroller.querySelector('.cw-edge')).toBe(null);
+  });
+
+  it('takes the balloon column’s footprint on a wide layout', () => {
+    const h = harness();
+    h.handle.render({ questions: 0, fresh: 1 }, { questions: 0, fresh: 1 });
+    // The column spans x 540..800 in a pane at x 0..800.
+    expect(strip(h.pane, 'top').style.left).toBe('540px');
+    expect(strip(h.pane, 'top').style.width).toBe('260px');
+    // …and starts just inside the scroller's own top edge (40 + 10).
+    expect(strip(h.pane, 'top').style.top).toBe('50px');
+  });
+
+  it('lets go of the column on a phone, where there is none', () => {
+    const h = harness({ wide: false });
+    h.handle.render({ questions: 0, fresh: 1 }, { questions: 0, fresh: 1 });
+    expect(strip(h.pane, 'top').style.left).toBe('');
+    expect(strip(h.pane, 'top').style.width).toBe('');
+    expect(strip(h.pane, 'top').style.top).toBe('');
+  });
+
+  it('keeps the bottom strip clear of the action dock, which keeps its own row', () => {
+    const wide = harness({ dock: 60 });
+    wide.handle.render({ questions: 0, fresh: 0 }, { questions: 0, fresh: 2 });
+    // 60px of dock + a 10px gap + the dock's own 22px inset.
+    expect(strip(wide.pane, 'bottom').style.bottom).toBe('92px');
+    const phone = harness({ dock: 60, wide: false });
+    phone.handle.render({ questions: 0, fresh: 0 }, { questions: 0, fresh: 2 });
+    expect(strip(phone.pane, 'bottom').style.marginBottom).toBe('70px');
+  });
+
+  it('a tap says which way the reader asked to go', () => {
+    const h = harness();
+    h.handle.render({ questions: 0, fresh: 2 }, { questions: 1, fresh: 0 });
+    edge(h.pane, 'top').click();
+    edge(h.pane, 'bottom').click();
+    expect(h.jumps).toEqual(['above', 'below']);
+  });
+
+  it('goes away with the scope', () => {
+    const h = harness();
+    for (const f of cleanups.splice(0)) f();
+    expect(h.pane.querySelector('.edge-strip')).toBe(null);
+  });
+});
