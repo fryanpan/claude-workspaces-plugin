@@ -61,6 +61,9 @@ export interface BrowserSentryConfig {
    * came from. The build id is still sent, as a `build_id` TAG.
    */
   release?: string | null;
+  /** Sentry `environment` — `production`, `staging`, `development`. The
+   *  server sends the same string, so one filter reads both projects. */
+  environment?: string | null;
 }
 
 const escapeAttr = (v: string): string =>
@@ -79,10 +82,14 @@ export function sentryHeadTags(
 ): string {
   if (!cfg?.dsn) return '';
   const release = cfg.release?.trim();
+  const environment = cfg.environment?.trim();
   return [
     `<meta name="sentry-dsn" content="${escapeAttr(cfg.dsn)}" />`,
     `<meta name="sentry-page-type" content="${escapeAttr(pageType)}" />`,
     ...(release ? [`<meta name="sentry-release" content="${escapeAttr(release)}" />`] : []),
+    ...(environment
+      ? [`<meta name="sentry-environment" content="${escapeAttr(environment)}" />`]
+      : []),
     // Content-addressed like every other asset a shell names, so a deploy
     // cannot leave a page reporting from last week's monitoring bundle.
     // No manifest (unbuilt dist, or one from before hashing) falls back to

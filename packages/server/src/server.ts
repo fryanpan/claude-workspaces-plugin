@@ -291,7 +291,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * from one check rather than five. See browser-sentry.ts.
    */
   const browserSentry: BrowserSentryConfig | null = opts.sentryDsn
-    ? { dsn: opts.sentryDsn, release: opts.sentryRelease ?? null }
+    ? {
+        dsn: opts.sentryDsn,
+        release: opts.sentryRelease ?? null,
+        environment: opts.sentryEnvironment ?? null,
+      }
     : null;
   const demosDir = opts.demosDir ?? null;
 

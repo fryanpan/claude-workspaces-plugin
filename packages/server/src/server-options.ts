@@ -158,6 +158,13 @@ export interface ServerOptions {
    */
   sentryRelease?: string;
   /**
+   * Sentry `environment` for the BROWSER (`CW_SENTRY_ENVIRONMENT`, or
+   * `production` / `development` derived from whether this start is a
+   * published release). The same string the server stamps on its own
+   * events, so the two projects filter alike.
+   */
+  sentryEnvironment?: string;
+  /**
    * The address whose email identity is the fleet OWNER (`CW_OWNER_EMAIL`).
    *
    * `isOwnerActor` is otherwise hardcoded to the two spellings that predate

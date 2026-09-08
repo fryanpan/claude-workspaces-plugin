@@ -36,6 +36,9 @@ if (dsn) {
     // The deploy, not the bundle — see browser-sentry.ts. Omitted rather
     // than guessed at when the shell names none (dev, staging).
     release: meta('sentry-release') || undefined,
+    // Same string the server stamps, so one `environment` filter reads both
+    // Sentry projects.
+    environment: meta('sentry-environment') || undefined,
     integrations: [Sentry.browserTracingIntegration()],
     // Low-traffic internal tool: sample everything rather than guess at a
     // rate that would drop the one slow iPad load that matters.

@@ -56,6 +56,12 @@ export interface ServerSentryTelemetry {
   lastSendAt: number | null;
   /** `transaction` for a span envelope, `error` for an event, as the SDK names them. */
   lastSendType: string | null;
+  /** The Sentry project id the DSN names (its path segment — the public
+   *  half of a DSN, never the key), so "wrong project" is readable from
+   *  the process instead of from the plist. `null` when unconfigured. */
+  project: string | null;
+  /** The `environment` every event is stamped with. `null` when unconfigured. */
+  environment: string | null;
 }
 
 const telemetry: Omit<ServerSentryTelemetry, 'active'> = {
@@ -64,7 +70,20 @@ const telemetry: Omit<ServerSentryTelemetry, 'active'> = {
   lastSendStatus: null,
   lastSendAt: null,
   lastSendType: null,
+  project: null,
+  environment: null,
 };
+
+/** The project id is the last path segment of a DSN; the key before `@` is
+ *  never read. A DSN that does not parse reports no project. */
+export function sentryProjectOf(dsn: string): string | null {
+  try {
+    const seg = new URL(dsn).pathname.split('/').filter(Boolean).pop();
+    return seg && /^\d+$/.test(seg) ? seg : null;
+  } catch {
+    return null;
+  }
+}
 
 export function serverSentryTelemetry(): ServerSentryTelemetry {
   return { active: sentryModule !== null, ...telemetry };
@@ -80,6 +99,8 @@ export function resetServerSentryForTest(): void {
   telemetry.lastSendStatus = null;
   telemetry.lastSendAt = null;
   telemetry.lastSendType = null;
+  telemetry.project = null;
+  telemetry.environment = null;
 }
 
 export function isServerSentryActive(): boolean {
@@ -95,11 +116,16 @@ export function isServerSentryActive(): boolean {
 export async function initServerSentry(opts: {
   dsn: string;
   release: string | null;
+  /** `production` / `staging` / `development`; see server-config.ts. */
+  environment?: string | null;
 }): Promise<void> {
   const Sentry = await import('@sentry/bun');
+  telemetry.project = sentryProjectOf(opts.dsn);
+  telemetry.environment = opts.environment ?? null;
   Sentry.init({
     dsn: opts.dsn,
     release: opts.release ?? undefined,
+    environment: opts.environment ?? undefined,
     tracesSampleRate: 1.0,
     // Default (false): no IPs, no cookies, no headers beyond what tracing
     // itself needs. Traces carry shapes and counts, never content — see
