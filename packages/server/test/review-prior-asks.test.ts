@@ -46,6 +46,8 @@ describe('the two filing channels see each other', () => {
     expect(asks).toHaveLength(1);
     expect(asks[0]?.headline).toBe('Eleven documents have no address — archive or rehome?');
     expect(asks[0]?.answer).toBe('Archive them');
+    // The id the judge quotes in a hold is the ticket item's own.
+    expect(asks[0]?.id).toBe('r-first');
   });
 
   it('hands an item filed on the TICKET a question asked on one of its threads', () => {
@@ -68,6 +70,8 @@ describe('the two filing channels see each other', () => {
       NOW,
     );
     expect(asks.map((a) => a.headline)).toEqual(['Same question, other words']);
+    // A thread ask is addressed by its comment id — the payload has none of its own.
+    expect(asks.map((a) => a.id)).toEqual(['c-1']);
   });
 
   it("reads a ticket thread under the ticket's own doc id, not some other doc", () => {

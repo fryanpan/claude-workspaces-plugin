@@ -17,7 +17,7 @@ import type { ReviewOption } from './review-item.ts';
 
 /** Bumped when the frame around the criteria changes, so a stored verdict
  *  can be told from one made under an older ask. */
-export const REVIEW_JUDGE_PROMPT_VERSION = 5;
+export const REVIEW_JUDGE_PROMPT_VERSION = 6;
 
 /**
  * What a workspace judges its review items against until somebody edits it.
@@ -53,6 +53,13 @@ export const DEFAULT_REVIEW_ITEM_CRITERIA = [
  * and the reader recognises the day.
  */
 export interface PriorAsk {
+  /**
+   * The earlier item's id — the review item's, or the comment's when it rode
+   * on one. The judge quotes it in a hold so the filer can open THAT item and
+   * say what this one asks that it did not, instead of guessing which of the
+   * row's asks the judge matched on (2026-09-08: three guesses in a day).
+   */
+  id: string;
   /** The earlier item's headline, as it was put to the reader. */
   headline: string;
   /** When it was asked, written the way it should be quoted ("6 September"). */
@@ -223,7 +230,7 @@ export function buildReviewJudgePrompt(
       // The whole point of the block. An item can meet every criterion above
       // and still be the wrong thing to put on the queue, because the reader
       // has settled it already and re-asking reads as not having listened.
-      'If this item asks the same question as one of them, hold it — however differently it is worded, and however well written it is. Say in the reason that it was asked on that date and what the answer was, so the filer can act on the answer instead of re-filing.',
+      'If this item asks the same question as one of them, hold it — however differently it is worded, and however well written it is. Say in the reason which one, by the id in brackets and the date it was asked, and what the answer was, so the filer can open that item and act on the answer instead of re-filing.',
       'A question that BUILDS on an earlier answer is not a repeat: asking what to do next, or about a case the answer did not cover, is new. Only hold when answering this item again would mean giving the same answer.',
       // The case the rule above kept holding (2026-09-07, twice on each of two
       // rows): the reader answered, the answer led to a fix, and the fix
@@ -231,6 +238,14 @@ export function buildReviewJudgePrompt(
       // earlier answer was about the old code and cannot answer this; holding
       // it left the ask alive only as a plain reply the reader had to notice.
       'A retest is new when the item says what shipped since the earlier answer — a fix, a PR, a deploy — and asks the reader to try again on it: the earlier answer was about the old code. Hold a retest that names nothing shipped since.',
+      // The sibling case (2026-09-08, three items on one row in a day): the
+      // reader approved BUILDING nine fixes, and the item asking to PUSH them
+      // was held as the same approval; a reframed question was held under the
+      // same reason twice, then answered with new information; a decision on
+      // one review round was held as repeating an answer about another. The
+      // judge had matched on topic — same task, same subject — rather than on
+      // the step being asked.
+      'A later step in the same flow is new. When the item names the earlier answer and asks about a step or case that answer did not cover — the fixes were approved to build and this asks to push them; this is a different review round; the options are not the ones offered before — it is a different question, and the same topic on the same row does not make it a repeat. Hold only when the earlier answer, read again, already answers this item.',
     );
   }
   if (item.priorHolds && item.priorHolds.length > 0) {
@@ -274,7 +289,7 @@ export function buildReviewJudgePrompt(
     for (const a of item.priorAsks) {
       const answer = oneLine(a.answer);
       lines.push(
-        `- asked ${oneLine(a.askedAt)}: ${oneLine(a.headline)} — ${
+        `- [${oneLine(a.id)}] asked ${oneLine(a.askedAt)}: ${oneLine(a.headline)} — ${
           answer ? `answered: ${answer}` : 'still unanswered'
         }`,
       );
