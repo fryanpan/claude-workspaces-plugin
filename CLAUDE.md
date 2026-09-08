@@ -20,8 +20,9 @@ before non-trivial work.
 Per-subsystem summaries live in [docs/architecture/](docs/architecture/):
 [meeting-assistant](docs/architecture/meeting-assistant.md) (live
 transcription + notes on a pause-or-cadence clock),
-[stall-detection](docs/architecture/stall-detection.md) (board wakes and
-their economics),
+[stall-check/](docs/architecture/stall-check/README.md) (the design, what
+"working" means, per-module criteria; the mechanics are
+[stall-detection](docs/architecture/stall-detection.md)),
 [goal-projection](docs/architecture/goal-projection.md) (the goal bar, the
 remainder, and when a goal lands),
 [scheduled-tasks](docs/architecture/scheduled-tasks.md) (a row's rule for when

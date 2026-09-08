@@ -72,6 +72,7 @@ const {
   stallNudgeRepeatMs,
   heldReviewItemMs,
   stallEscalateMs,
+  keepMovingCadenceMs,
 } = cfg;
 
 if (sentryDsn) {
@@ -243,6 +244,7 @@ while (!handle) {
       ...(stallNudgeRepeatMs !== undefined ? { stallNudgeRepeatMs } : {}),
       ...(heldReviewItemMs !== undefined ? { heldReviewItemMs } : {}),
       ...(stallEscalateMs !== undefined ? { stallEscalateMs } : {}),
+      ...(keepMovingCadenceMs !== undefined ? { keepMovingCadenceMs } : {}),
       ...(reviewJudge ? { reviewJudge } : {}),
       ...(noteAskJudge ? { noteAskJudge } : {}),
       promptStore,

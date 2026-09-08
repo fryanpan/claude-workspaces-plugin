@@ -1,9 +1,10 @@
 /**
- * Pure classification/stall logic for the keep-moving report AND for the
- * server's own stall loop (`stall-nudge.ts`) — extracted from
- * scripts/keep-moving-report.ts so it is unit-testable without a server, then
- * moved in-package so the loop and the report cannot drift apart.
- * The CLI (keep-moving-report.ts) owns fetching and formatting; this module
+ * Pure classification/stall logic for the server's stall loop
+ * (`stall-nudge.ts`) and for the keep-moving verdict it records
+ * (`keep-moving-verdict.ts`). It began as the library behind a box-cron
+ * report script; that script died on a routes change and was removed
+ * 2026-09-08, and the measurement now runs in-process off the same snapshot
+ * as the wake, so the loop and the verdict cannot drift apart. This module
  * owns every decision about what counts as blocked, stalled, or active.
  */
 

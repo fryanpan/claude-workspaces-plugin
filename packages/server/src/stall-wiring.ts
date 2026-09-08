@@ -41,6 +41,7 @@ import {
 import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
+import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
 import { createLeadPresenceMonitor } from './lead-presence.ts';
 import { NoteAskClassifier, type NoteAskJudge } from './note-ask.ts';
 import { evaluateReadyWork } from './ready-gate.ts';
@@ -53,7 +54,7 @@ import {
 } from './ready-nudge.ts';
 import type { ReviewGateAddress } from './review-gate.ts';
 import type { SseBus } from './sse.ts';
-import { StallEscalations } from './stall-escalation.ts';
+import { STALL_ESCALATION_ACTOR, StallEscalations } from './stall-escalation.ts';
 import {
   HELD_ITEM_DEFAULT_MS,
   type HeldItemInput,
@@ -151,6 +152,8 @@ export interface StallWiringContext {
   /** How long a row the lead was already told about may stay a finding
    *  before the board files over the lead's head (ms). */
   stallEscalateMs?: number;
+  /** How often each board's keep-moving verdict is recorded (ms). */
+  keepMovingCadenceMs?: number;
   /**
    * Confirms that a note flagged by the deterministic prefilter really does
    * say the agent is waiting on a person (`note-ask-judge.ts`). **No
@@ -173,6 +176,9 @@ export interface StallWiring {
   /** The comment-queue bridge, for the late-bound hook `DocStore` was built
    *  with — `DocStore` is constructed before the stores this needs. */
   onLiveDocEvent: (docId: string, payload: WebhookPayload) => void;
+  /** The keep-moving verdicts, for the one route that reads them. Read-only
+   *  by type: recording happens on the stall tick and nowhere else. */
+  keepMoving: Pick<KeepMovingRecorder, 'latest' | 'history'>;
 }
 
 export function createStallWiring(ctx: StallWiringContext): StallWiring {
@@ -820,8 +826,34 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // hold an ask open on a scale it does not otherwise use.
     ...(ctx.stallNudgeQuietMs !== undefined ? { settleMs: ctx.stallNudgeQuietMs } : {}),
   });
+  /**
+   * The measurement (`keep-moving-verdict.ts`), fed the SAME snapshots the
+   * wake reads, on the same tick: it cannot judge a different board than the
+   * lead is told about, and it stops only when the server does.
+   */
+  const keepMoving = new KeepMovingRecorder({
+    path: join(dataDir, KEEP_MOVING_VERDICTS_FILENAME),
+    ...(ctx.keepMovingCadenceMs !== undefined ? { cadenceMs: ctx.keepMovingCadenceMs } : {}),
+    // A hold counts once it has stood as long as a row may stay quiet.
+    ...(ctx.stallNudgeQuietMs !== undefined ? { heldOverMs: ctx.stallNudgeQuietMs } : {}),
+    // The board's own filings to the reader: written as the server, so the
+    // author name is the only mark they carry.
+    escalatedSince: (workspaceId, since) => {
+      let n = 0;
+      for (const task of taskStore.listTasks(workspaceId)) {
+        for (const item of task.reviews ?? []) {
+          if (item.createdAt >= since && item.createdBy === STALL_ESCALATION_ACTOR.name) n += 1;
+        }
+      }
+      return n;
+    },
+  });
   const stallNudger = new StallNudger({
-    snapshot: () => taskStore.listWorkspaces().map(stallSnapshot),
+    snapshot: () => {
+      const snapshots = taskStore.listWorkspaces().map(stallSnapshot);
+      keepMoving.observe(snapshots, Date.now());
+      return snapshots;
+    },
     // Addressed, never broadcast, and `agentsOn` rather than `count` for the
     // same reason the ready-work wake uses it: `count` cannot tell an agent
     // from an open browser tab, and a wake fanned out to every peer is the
@@ -1028,5 +1060,5 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     }
   };
 
-  return { leadPresence, readyNudger, stallNudger, onLiveDocEvent };
+  return { leadPresence, readyNudger, stallNudger, onLiveDocEvent, keepMoving };
 }

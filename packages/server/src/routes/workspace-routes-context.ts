@@ -2,6 +2,7 @@ import type { DocType, User } from '@claude-workspaces/core';
 import type { AgentWatches } from '../agent-watches.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';
+import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
@@ -97,6 +98,11 @@ export interface WorkspaceRoutesContext {
   workspacesOfDoc: (docId: string) => string[];
   /** Whether a watch key still names something on this server. */
   watchKeyExists: (key: string) => boolean;
+  /** The board's keep-moving verdicts (`keep-moving-verdict.ts`), read-only. */
+  keepMovingVerdicts: {
+    latest: (workspaceId: string) => KeepMovingVerdict | undefined;
+    history: (workspaceId: string) => readonly KeepMovingVerdict[];
+  };
 }
 
 /** What only this request knows. */
