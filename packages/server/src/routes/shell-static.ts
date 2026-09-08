@@ -300,6 +300,9 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       headers: {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-cache',
+        // The mockup is a real page with Sentry injected, so it profiles
+        // too — see HTML_SHELL_HEADERS.
+        'document-policy': 'js-profiling',
         // Content-derived like serveStatic's, and for the same reason: a
         // reload of an unchanged mock should cost a 304, and a deploy that
         // changed nothing should not throw the cache away. Hashed from the

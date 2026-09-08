@@ -20,7 +20,11 @@
  * DSN is configured — not by reading this file.
  */
 
-import { routePatternForSpan, scrubEventForPrivacy } from '@claude-workspaces/core/trace-privacy';
+import {
+  routePatternForSpan,
+  scrubEventForPrivacy,
+  scrubTelemetryItem,
+} from '@claude-workspaces/core/trace-privacy';
 
 /**
  * The privacy floor is shared with the browser build, so it lives in
@@ -155,10 +159,28 @@ export async function initServerSentry(opts: {
     // explicit control, so they're the single source of truth here — same
     // reasoning as disabling `BunServer` below and leaving withRouteSpan as
     // the one thing that names a span.
-    integrations: (defaults) =>
-      defaults.filter(
+    integrations: (defaults) => [
+      ...defaults.filter(
         (i) => !['BunServer', 'OnUncaughtException', 'OnUnhandledRejection'].includes(i.name),
       ),
+      // Logs: every console.warn / console.error the server prints is also a
+      // Sentry log line, searchable next to the error or trace it belongs
+      // to. `log`/`info` stay local — the server narrates every request at
+      // those levels and the volume would bury the signal.
+      Sentry.consoleLoggingIntegration({ levels: ['warn', 'error'] }),
+      // Metrics: CPU, RSS, heap, event-loop utilisation and uptime, sampled
+      // every 30s under the SDK's defaults, so a slow prod reads as a curve
+      // rather than a hunch. Application counters go through
+      // `Sentry.metrics.*` and ride the same channel.
+      Sentry.bunRuntimeMetricsIntegration(),
+    ],
+    // Sentry's defaults, stated so a future SDK cannot silently flip them:
+    // logs and metrics are product features Bryan asked for by name
+    // (2026-09-08). Profiling is deliberately absent — @sentry/bun has no
+    // profiler (the Node one needs a native addon Bun cannot load), so the
+    // browser is the only side that profiles; see sentry-boot.ts.
+    enableLogs: true,
+    enableMetrics: true,
     // Floor, not a substitute for the above: disabling BunServer closes the
     // one leak source this file found by reading the SDK's source. It does
     // not prove there isn't another — a different default integration, or
@@ -172,6 +194,17 @@ export async function initServerSentry(opts: {
     },
     beforeSendTransaction(event) {
       return scrubEventForPrivacy(event) as typeof event;
+    },
+    // Logs and metrics leave by their own envelopes, so the two hooks above
+    // never see them. A log line is free text from a console call and a
+    // metric's attributes are whatever the caller passed, which makes these
+    // the two easiest places to paste a doc path; scrubTelemetryItem adds
+    // the embedded-path pass the event floor does not need.
+    beforeSendLog(log) {
+      return scrubTelemetryItem(log) as typeof log;
+    },
+    beforeSendMetric(metric) {
+      return scrubTelemetryItem(metric) as typeof metric;
     },
   });
   sentryModule = Sentry;
