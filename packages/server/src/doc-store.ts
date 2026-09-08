@@ -102,7 +102,8 @@ import {
   LiveDocFanout,
   type LiveDocFanoutHost,
 } from './live-doc-fanout.ts';
-import { deleteMockupCapture } from './mockup-capture.ts';
+import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
+import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
 import {
   deletePrivateMeta,
   liftPrivateMetaFromYdoc,
@@ -400,8 +401,43 @@ export class DocStore {
         this.lastTouchedAt.set(docId, at);
       },
       broadcast: (doc, payload) => this.fanout.broadcastToDoc(doc, payload),
+      onMockupChanged: (doc, html) => this.recordMockupRound(doc, html),
       decorate: (meta) => this.cfg.decorateDocMeta?.(meta) ?? meta,
     };
+  }
+
+  /**
+   * A watched mockup's source changed: keep the round, refresh the fallback,
+   * and tell everyone holding the page.
+   *
+   * Order matters. The capture and the round are both written BEFORE the
+   * broadcast, because the frame names a version the viewer immediately asks
+   * for — announcing a round that is not yet on disk is a race whose loser
+   * gets a 404 in place of the update it was told about.
+   *
+   * Content that has not actually changed records nothing and announces
+   * nothing (`recordMockupVersion` compares against the newest round), so a
+   * touch, a formatting-only save, or a rebind to a byte-identical file leaves
+   * every open page exactly where it was.
+   */
+  private recordMockupRound(doc: LiveDoc, html: string): void {
+    const outcome = recordMockupVersion(this.cfg.dataDir, doc.docId, html);
+    if (!outcome.recorded || outcome.version === null) return;
+    // `allowEmpty`: this content was read from the bound file moments ago and
+    // is what the page now IS. The serve-time refusal exists to stop a
+    // half-written source emptying the fallback; here the round is already
+    // durable, so the fallback can safely follow it.
+    captureMockup(this.cfg.dataDir, doc.docId, html, { allowEmpty: true });
+    doc.seq++;
+    this.fanout.broadcastToDoc(doc, {
+      event: 'mockup.updated',
+      docId: doc.docId,
+      doc: this.cfg.decorateDocMeta?.(doc.meta) ?? doc.meta,
+      version: outcome.version,
+      versions: outcome.versions,
+      at: Date.now(),
+      seq: doc.seq,
+    });
   }
   /**
    * Who hears about a change to a doc, and over which channel
@@ -1273,6 +1309,9 @@ export class DocStore {
       // caller that has actually been asked for the bytes to be gone, so it
       // goes with the .ydoc rather than outliving it in the data dir.
       deleteMockupCapture(this.cfg.dataDir, docId);
+      // …and its rounds, for the same reason and on the same rule: archiving
+      // keeps them addressable by docId, a purge takes them.
+      deleteMockupVersions(this.cfg.dataDir, docId);
       return !existsSync(p);
     } catch (err) {
       console.error(`[doc-store] failed to remove persisted ${docId}:`, err);
@@ -1425,6 +1464,12 @@ export class DocStore {
         !doc.meta.diffTarget &&
         !(doc.meta.relPath ?? '').toLowerCase().endsWith('.md');
       return this.attachFlatFile(docId, src, { ...attachOpts, writeBack }).ok;
+    }
+    if (doc.meta.type === 'mockup') {
+      // A mockup's binding is watch-only, so hydration re-arms it exactly as
+      // it re-arms a code doc's: a mock whose source is still being edited
+      // must keep updating the pages people have open across a restart.
+      return this.attachMockupFile(docId, src).ok;
     }
     return false;
   }
@@ -2676,6 +2721,12 @@ export class DocStore {
   }
 
   /** Bind a READ-ONLY source file (type='code') for review — no write-back. */
+  /** Watch a mockup's source HTML for edits. See
+   *  `FileBindings.attachMockupFile`. */
+  attachMockupFile(docId: string, filePath: string): ReturnType<FileBindings['attachMockupFile']> {
+    return this.bindings.attachMockupFile(docId, filePath);
+  }
+
   attachReadonlyFile(
     docId: string,
     filePath: string,

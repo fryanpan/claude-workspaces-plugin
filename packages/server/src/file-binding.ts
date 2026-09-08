@@ -164,6 +164,19 @@ interface FileBinding {
   /** True when this flat binding writes doc edits back to the file (the
    *  editable File view). Absent/false = classic read-only code binding. */
   writeBack?: boolean;
+  /**
+   * True when this binding watches a MOCKUP's source HTML.
+   *
+   * A mockup's doc holds no content surface (`contentKind` is `none`) — its
+   * surface is the host page — so this binding never touches the ydoc's text
+   * and never writes back. It exists for the disk→doc direction only: the
+   * shared mtime sweep spots the edit, the reconcile hands the bytes to
+   * `onMockupChanged`, and the page a reviewer already has open becomes the
+   * new round. Nothing else about the sweep changes, which is the point —
+   * a second watcher for mockups would be a second timer, a second set of
+   * inode-replacement bugs, and a second thing to get the quarantine wrong.
+   */
+  mockup?: boolean;
   /** The content-Y.Text observer wired by attachFlatFile({writeBack:true}).
    *  Kept so a re-attach can unobserve it (same stacking hazard as
    *  `observer` above). */
@@ -303,6 +316,15 @@ export interface FileBindingHost {
   noteTouched(docId: string, at: number): void;
   /** Fan an event out to the doc's sockets, SSE and webhooks. */
   broadcast(doc: LiveDoc, payload: WebhookPayload): void;
+  /**
+   * A watched mockup's source file changed; `html` is what it now holds.
+   *
+   * The bindings do not know what a capture or a round is — that is the doc
+   * store's business, next to the data dir it owns — so the reconcile stops
+   * at "these are the new bytes" and this thunk decides what to keep and who
+   * to tell.
+   */
+  onMockupChanged(doc: LiveDoc, html: string): void;
   /** Fill in `reviewUrl` and friends; the URL machinery stays in the server layer. */
   decorate(meta: DocMeta): DocMeta;
 }
@@ -739,6 +761,48 @@ export class FileBindings {
     // through the normal debounced writer (which also stamps the poll
     // baseline so the reassert isn't misread as an external edit).
     if (reassertDoc) this.scheduleFileWrite(doc, binding);
+    return { ok: true, resolvedPath: abs };
+  }
+
+  /**
+   * Watch a MOCKUP's source HTML for edits.
+   *
+   * Same shared sweep as every other binding — arming enrols it in
+   * `sweepFilePolls`, so a mockup nobody is looking at is visited on the idle
+   * rotation and one somebody has open is visited every tick. What differs is
+   * only what happens when the file moves: there is no fragment to seed, no
+   * write-back to schedule and no conflict to arbitrate, because the browser
+   * never edits a mockup's HTML. It comments on it. So the reconcile's whole
+   * job is to hand the new bytes to `onMockupChanged`.
+   *
+   * Idempotent on the same path: re-serving a mockup calls this on every
+   * request, and re-binding a doc to a NEW path replaces the binding the way
+   * every other attach does.
+   */
+  attachMockupFile(
+    docId: string,
+    filePath: string,
+  ): { ok: boolean; error?: 'not-found' | 'path-empty'; resolvedPath?: string } {
+    if (!filePath || filePath.trim() === '') return { ok: false, error: 'path-empty' };
+    const doc = this.p.doc(docId);
+    if (!doc) return { ok: false, error: 'not-found' };
+    const abs = filePath.startsWith('/') ? filePath : join(process.cwd(), filePath);
+    const existing = this.bindings.get(docId);
+    // Already watching this exact file: leave the poll bookkeeping alone.
+    // Re-arming would re-baseline `lastMtimeMs` from a fresh stat, and an
+    // edit that landed between the last sweep and this call would be
+    // baselined away — read as "nothing happened" for good. The serve path
+    // calls this on every request, so that would be most of them.
+    if (existing?.mockup && existing.path === abs) return { ok: true, resolvedPath: abs };
+    if (existing?.writeTimer) clearTimeout(existing.writeTimer);
+    if (existing?.readTimer) clearTimeout(existing.readTimer);
+    if (existing) existing.pollArmed = false;
+    const binding: FileBinding = { path: abs, mockup: true };
+    this.bindings.set(docId, binding);
+    // No preread: this door is reached from a serve and from a bind, both of
+    // which have just read the file successfully, so the one stat that arming
+    // costs is on a path already proved to answer.
+    this.armFileWatcher(doc, binding);
     return { ok: true, resolvedPath: abs };
   }
 
@@ -1375,6 +1439,15 @@ export class FileBindings {
         console.error(`[doc-store] read failed for ${binding.path}:`, err);
         return 'missing';
       }
+    }
+    // A mockup has no content surface in the doc at all — see
+    // `attachMockupFile`. The bytes go to the doc store, which captures the
+    // round and tells the open viewers; nothing here touches the ydoc.
+    if (binding.mockup) {
+      if (md === binding.lastWritten) return 'in-sync';
+      binding.lastWritten = md;
+      this.p.onMockupChanged(doc, md);
+      return 'apply';
     }
     // Code and working-tree diff docs are flat text — replace the whole
     // `content` Y.Text on change. Read-only bindings can't hold live edits,

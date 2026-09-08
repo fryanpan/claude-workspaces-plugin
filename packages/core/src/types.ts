@@ -607,5 +607,41 @@ export interface DocSyncErrorPayload {
   eid?: string;
 }
 
+/**
+ * Broadcast on a mockup's own channels when its source file changed and the
+ * server captured a new round.
+ *
+ * A mockup used to update only when somebody reloaded, so an agent's second
+ * round reached the reviewer as a page that looked exactly like the first one
+ * until he thought to refresh — and Bryan's own report of the flow was that
+ * every round made him leave what he was doing to go find the new link. This
+ * frame is what lets the page he already has open become the new round in
+ * place, with his comments re-anchoring onto it.
+ *
+ * It carries no HTML. The page fetches the round it is told about, so one
+ * broadcast costs the same whether the mock is two kilobytes or two hundred,
+ * and a viewer that missed frames catches up to the newest rather than
+ * replaying every round it slept through.
+ */
+export interface MockupUpdatedPayload {
+  event: 'mockup.updated';
+  docId: string;
+  doc: DocMeta;
+  /** The round just captured — the `v` a reader can ask this mockup for. */
+  version: number;
+  /** Every round this mockup now has, oldest first. */
+  versions: { v: number; at: number; bytes: number }[];
+  /** ms epoch the round was captured. */
+  at: number;
+  /** Per-doc and per-epoch; see ThreadWebhookPayload.seq. */
+  seq: number;
+  /** See ThreadWebhookPayload.eid. */
+  eid?: string;
+}
+
 /** Payload POSTed to a host integration webhook. */
-export type WebhookPayload = ThreadWebhookPayload | SuggestionWebhookPayload | DocSyncErrorPayload;
+export type WebhookPayload =
+  | ThreadWebhookPayload
+  | SuggestionWebhookPayload
+  | DocSyncErrorPayload
+  | MockupUpdatedPayload;

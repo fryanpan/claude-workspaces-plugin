@@ -73,9 +73,9 @@ const cssMinify: BunPlugin = {
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
-async function build(format: 'esm' | 'iife', name: string) {
+async function build(format: 'esm' | 'iife', name: string, entry = 'widget.ts') {
   const result = await Bun.build({
-    entrypoints: [join(pkgRoot, 'src', 'widget.ts')],
+    entrypoints: [join(pkgRoot, 'src', entry)],
     outdir: dist,
     target: 'browser',
     format: format === 'iife' ? 'iife' : 'esm',
@@ -96,6 +96,12 @@ async function build(format: 'esm' | 'iife', name: string) {
 
 await build('esm', 'widget.esm.js');
 await build('iife', 'widget.iife.js');
+// The mockup live-update script. Its own entrypoint, not part of the widget:
+// it runs on ONE surface (a mockup the workspace serves) and it replaces the
+// host page's DOM, which the widget — a guest on other people's pages — must
+// never do. Separate also keeps it off `check:widget-size`, which measures the
+// bundle every embed loads, not this one.
+await build('iife', 'mockup-live.js', 'mockup-live.ts');
 
 writeFileSync(join(dist, 'BUILD_INFO.txt'), `built ${new Date().toISOString()}\n`);
 

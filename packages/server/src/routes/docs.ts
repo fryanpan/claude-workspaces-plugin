@@ -57,6 +57,7 @@ import {
   isHtmlMockupSource,
   readMockupHtml,
 } from '../mockup-capture.ts';
+import { recordMockupVersion } from '../mockup-versions.ts';
 import { OUT_OF_SHARE_SCOPE, firstRefOutOfScope } from '../share/ref-scope.ts';
 import {
   BAD_OPTIONS_ERROR,
@@ -294,6 +295,11 @@ export async function handleDocCreateListRoutes(
       // caught mid-write; a rebind names a different file, and holding
       // the old copy there would leave the link resolving to a mockup
       // nobody pointed it at.
+      // The round is kept BEFORE the capture and the response, so a rebind
+      // that is the next round of an iteration lands in the history even if
+      // nobody ever opens the page. Identical bytes record nothing, so a
+      // re-post that only re-tags a set adds no round.
+      recordMockupVersion(dataDir, canonicalId, mockupHtml);
       const captured = captureMockup(dataDir, canonicalId, mockupHtml, { allowEmpty: true });
       if (captured === 'failed') {
         // The bind READ fine — this is the data dir refusing the write,
@@ -319,6 +325,14 @@ export async function handleDocCreateListRoutes(
           hint: `Bound ${canonicalId} to ${sourceUrl}, but could not store its captured copy under the data dir — see the server log for the write error. The binding works and serves from the file; it is NOT durable, so it will 404 once that file is gone. Fix the data dir and bind again.`,
         });
       }
+    }
+    // Watch the source from the bind, not from the first serve: a mockup
+    // bound and then edited before anyone opens it is the ordinary shape of
+    // an agent's second round, and the reviewer who arrives later should find
+    // the rounds already recorded. Watch-only — nothing here ever writes to
+    // the agent's file. See `FileBindings.attachMockupFile`.
+    if (type === 'mockup' && sourceUrl && isHtmlMockupSource(sourceUrl)) {
+      docStore.attachMockupFile(canonicalId, sourceUrl);
     }
     return j(200, {
       docId: doc.docId,
