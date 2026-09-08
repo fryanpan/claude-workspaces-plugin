@@ -228,6 +228,22 @@ export async function judgeCarried(
 /** The gate, from the row that asked for this: under five per cent. */
 export const MAX_LOST_IDEA_RATE = 0.05;
 
+/**
+ * The fewest ideas a run may gate on.
+ *
+ * A five per cent bar cannot be held by a sample of eight: one miss is twelve
+ * per cent, and the CI smoke slice — three ticks of one meeting — would go red
+ * on a single judgement call about a single bullet. That is not the gate
+ * failing, it is arithmetic, and a gate that cries wolf is turned off.
+ *
+ * So a thin sample REPORTS and does not gate, and says out loud that it did
+ * not — which is a different thing from the zero case below, where nothing was
+ * measured at all and the run fails. The full corpus is 847 committed ideas
+ * plus whatever `--corpus` adds, so the bar binds on every run that is meant
+ * to hold it.
+ */
+export const MIN_GATED_IDEAS = 100;
+
 export interface MeetingIdeaRate {
   meeting: string;
   ideas: number;
@@ -284,6 +300,14 @@ export function reportIdeaRates(rows: readonly MeetingIdeaRate[], gate: boolean)
     for (const e of row.examples.slice(0, 5)) console.log(`  ${e}`);
   }
   if (!gate) return 0;
+  if (ideas < MIN_GATED_IDEAS) {
+    console.log(
+      `\n${ideas} idea(s) is too thin a sample to hold a ` +
+        `${(MAX_LOST_IDEA_RATE * 100).toFixed(0)}% bar (${MIN_GATED_IDEAS} needed). ` +
+        'Reported, not gated.',
+    );
+    return 0;
+  }
   if (overall > MAX_LOST_IDEA_RATE) {
     console.log(
       `\nFAILED: ${(overall * 100).toFixed(1)}% of ideas reached no note, over the ` +

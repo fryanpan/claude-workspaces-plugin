@@ -11,6 +11,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   MAX_LOST_IDEA_RATE,
+  MIN_GATED_IDEAS,
   type MeetingIdeaRate,
   rateOf,
   reportIdeaRates,
@@ -44,9 +45,17 @@ describe('the lost-idea rate', () => {
     // Four in a hundred passes; six fails. And the verdict is the overall
     // rate, not the worst meeting: a short meeting that lost one idea of
     // three must not fail a corpus that is otherwise clean.
-    expect(verdict([row('a', 100, 4)], true)).toBe(0);
-    expect(verdict([row('a', 100, 6)], true)).toBe(1);
-    expect(verdict([row('a', 100, 1), row('b', 3, 1)], true)).toBe(0);
+    expect(verdict([row('a', 200, 8)], true)).toBe(0);
+    expect(verdict([row('a', 200, 12)], true)).toBe(1);
+    expect(verdict([row('a', 200, 2), row('b', 3, 1)], true)).toBe(0);
+  });
+
+  it('reports without gating on a sample too thin to hold the bar', () => {
+    // The CI smoke slice is three ticks of one meeting. One judgement call
+    // about one bullet is twelve per cent of eight ideas, and a gate that
+    // goes red on that gets turned off rather than read.
+    expect(verdict([row('a', 8, 8)], true)).toBe(0);
+    expect(verdict([row('a', MIN_GATED_IDEAS, MIN_GATED_IDEAS)], true)).toBe(1);
   });
 
   it('fails a gated run that measured nothing at all', () => {
