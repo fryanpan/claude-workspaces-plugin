@@ -1067,11 +1067,17 @@ and testable with no model in the loop):
   capture" outranks the subject in every sentence containing the word "task".
   The top row is linked when it clears a low bar and beats the runner-up by a
   margin; a near-tie is not guessed at, it is offered.
-- **Not asked.** The same scores, a much higher bar, and the answer is never a
-  link. At most two rows are written into the note as questions.
+- **Not asked.** Nothing. No scoring runs at all.
 
-**Neither branch is allowed to be silent.** An ask that finds nothing clear
-still leaves the shortlist in the note as questions, so the room can see what
+**The unasked half was removed on 2026-09-08.** A row that merely scored well
+used to be written into the note as a question. One planning huddle came out
+with twelve of those on a single bullet and four on another, and the owner's
+verdict was *"just a bunch of garbage… I did not ask for any tickets to be
+attached"*. Every question the note carries now answers something somebody
+said out loud.
+
+**An ask is still never answered with silence.** An ask that finds nothing
+clear leaves the shortlist in the note as questions, so the room can see what
 was considered. That is the difference from the strict matcher, which is
 silent by design.
 

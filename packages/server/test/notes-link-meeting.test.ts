@@ -253,18 +253,18 @@ describe('a spoken "link that to the existing task", over a scripted meeting', (
   });
 });
 
-describe('a probable match nobody asked about', () => {
-  it('reaches the note as a question the reader can accept', async () => {
+describe('a row nobody asked about', () => {
+  it('stays out of the note even when the words match it well', async () => {
     const harness = meeting();
-    // No ask anywhere in this, and not one word of the row's title in it
-    // either — "Card write failures" against somebody describing a lost take.
-    // The strict matcher cannot see this and is not meant to.
+    // Nobody asked for a link. The words describe "Card write failures"
+    // closely enough that the old unasked path suggested it; the owner's
+    // verdict on a note full of those was that he had asked for none of them.
     const shot = await harness.speak(
       'We lost a whole forty minute take last month because the write to the memory card failed part way through.',
     );
     expect(harness.taskLinks).toEqual([]);
-    expect(shot.notes).toContain('related: Card write failures?');
-    expect(shot.notes).toContain('task=t-card&suggest=1');
+    expect(shot.notes).not.toContain('related:');
+    expect(shot.notes).not.toContain('suggest=1');
   });
 
   it('says nothing at all when nothing on the board is probable', async () => {
