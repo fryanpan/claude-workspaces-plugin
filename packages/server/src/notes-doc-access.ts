@@ -20,8 +20,9 @@
  * interface is deliberately too narrow to grow one.
  */
 
+import { contentKind, prose } from '@claude-workspaces/core';
 import type { suggestOps } from '@claude-workspaces/core';
-import type { DocType, prose } from '@claude-workspaces/core';
+import type { DocType } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import type { BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 
@@ -108,4 +109,25 @@ export function readNotesOutline(
   opts: prose.OutlineOptions = {},
 ): readonly prose.OutlineEntry[] {
   return docStore.readOutline(docId, opts)?.blocks ?? [];
+}
+
+/**
+ * Drop the note-taker's claim on every block it still holds in `docId`.
+ *
+ * Called when a recording STARTS, so the previous meeting's notes stop
+ * reading as this one's to rewrite. `NOTES_AUTHOR_ID` is one constant for
+ * every meeting, so without this the second recording sees the first's
+ * bullets marked as its own and the prompt's regroup instruction — replace
+ * two of your own bullets, delete the ones you folded in — becomes a hard
+ * delete of notes somebody has already read. Released, the same edit reaches
+ * `applyBlockEdits` as a suggestion.
+ *
+ * Total and quiet: a doc that is gone, or is not prose, releases nothing.
+ * Returns how many blocks were released, which is what a test asserts on.
+ */
+export function releaseNotesAuthorship(docStore: NotesDocStore, docId: string): number {
+  const doc = docStore.get(docId);
+  if (!doc) return 0;
+  if (contentKind(doc.meta.type) !== 'prose') return 0;
+  return prose.releaseAuthorship(doc.ydoc, NOTES_AUTHOR_ID);
 }

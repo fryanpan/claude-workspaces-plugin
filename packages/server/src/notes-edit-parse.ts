@@ -35,27 +35,42 @@ function stripFence(raw: string): string {
   return fenced?.[1] !== undefined ? fenced[1].trim() : text;
 }
 
+/** The JSON value spanning the first `open` to the last `close` in `text`,
+ *  or `undefined` when there is no such span or it does not parse. */
+function sliceParse(text: string, open: string, close: string): unknown {
+  const start = text.indexOf(open);
+  if (start < 0) return undefined;
+  const end = text.lastIndexOf(close);
+  if (end <= start) return undefined;
+  try {
+    return JSON.parse(text.slice(start, end + 1)) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * The first JSON array or object in `text`, as a value — or `undefined`.
+ * The JSON array or object in `text`, as a value — or `undefined`.
  *
  * Sliced to the outermost brackets before parsing, so a sentence of preamble
  * ("Here are the edits:") costs the tick nothing. A reply with no bracket at
  * all is not JSON and is reported as such.
+ *
+ * BOTH SHAPES ARE TRIED, not whichever bracket came first. Taking the
+ * earlier of `[` and `{` lost a whole tick to a stray brace in the preamble:
+ * "Here's what I'd note {roughly}: [ … ]" picked the `{`, and `lastIndexOf`
+ * for its `}` landed before the array had even opened, so the reply parsed
+ * to nothing and every turn in it was carried forward. Whichever slice
+ * yields an edit list wins; the array is preferred because that is the shape
+ * the prompt asks for.
  */
 function parseJsonish(text: string): unknown {
   const trimmed = stripFence(text);
-  const starts = [trimmed.indexOf('['), trimmed.indexOf('{')].filter((i) => i >= 0);
-  if (starts.length === 0) return undefined;
-  const start = Math.min(...starts);
-  const open = trimmed[start];
-  const close = open === '[' ? ']' : '}';
-  const end = trimmed.lastIndexOf(close);
-  if (end <= start) return undefined;
-  try {
-    return JSON.parse(trimmed.slice(start, end + 1)) as unknown;
-  } catch {
-    return undefined;
-  }
+  const asArray = sliceParse(trimmed, '[', ']');
+  if (Array.isArray(asArray)) return asArray;
+  const asObject = sliceParse(trimmed, '{', '}');
+  if (asObject !== undefined) return asObject;
+  return asArray;
 }
 
 /** A non-empty string, or nothing. Block ids and markdown are both this. */

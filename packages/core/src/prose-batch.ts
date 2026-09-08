@@ -180,26 +180,24 @@ function insertBlocksMerging(
   const created: Y.XmlElement[] = [];
   const siblings = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
   const before = siblings[index - 1];
-  const at = siblings[index];
   const leading = splitLeadingListItems(markdown);
   let rest = markdown;
   if (leading) {
-    // Grow the list on EITHER side of the insertion point rather than
-    // splicing a third one between two. The list before wins when both
-    // qualify: appending keeps the new points in the order they were said.
+    // Grow the list ENDING AT the insertion point rather than splicing a
+    // second one after it: appending keeps the new points in the order they
+    // were said. There used to be a mirror branch that prepended into a list
+    // sitting AFTER the insertion point; nothing ever reached it — every
+    // caller inserts at a section end or at the fragment end — and it put the
+    // `rest` blocks in front of the items it had just spliced, inverting the
+    // markdown's own order. It is gone rather than fixed.
     const wanted = leading.ordered ? 'orderedList' : 'bulletList';
-    const host =
-      isList(before) && before.nodeName === wanted
-        ? { list: before, at: before.length }
-        : isList(at) && at.nodeName === wanted
-          ? { list: at, at: 0 }
-          : null;
+    const host = isList(before) && before.nodeName === wanted ? before : null;
     if (host) {
       const items = leading.items
         .map(buildListItem)
         .filter((li): li is Y.XmlElement => li !== null);
       if (items.length > 0) {
-        host.list.insert(host.at, items);
+        host.insert(host.length, items);
         created.push(...items);
       }
       rest = leading.rest;
@@ -215,6 +213,33 @@ function insertBlocksMerging(
     if (el instanceof Y.XmlElement) created.push(el);
   }
   return created;
+}
+
+/**
+ * Put `markdown` immediately after the list `holder` — the home for the tail
+ * a multi-item `replace_block` left over. A no-op when `holder` is not a list
+ * or has left the doc: losing the tail is bad, but writing it into the middle
+ * of somebody's list would be worse.
+ */
+function insertAfterList(
+  fragment: Y.XmlFragment,
+  holder: Y.XmlFragment | Y.XmlElement,
+  markdown: string,
+  author: string,
+): void {
+  if (!(holder instanceof Y.XmlElement) || !isList(holder)) return;
+  const grand = (holder.parent as Y.XmlFragment | Y.XmlElement | null) ?? fragment;
+  const at = (grand.toArray() as unknown[]).indexOf(holder) + 1;
+  if (at <= 0) return;
+  const blocks = parseMarkdownBlocks(markdown);
+  if (blocks.length === 0) return;
+  grand.insert(at, blocks);
+  for (const made of (grand.toArray() as (Y.XmlElement | Y.XmlText)[]).slice(
+    at,
+    at + blocks.length,
+  )) {
+    if (made instanceof Y.XmlElement) claimSubtree(made, author);
+  }
 }
 
 /** The end of a heading's section: the index of the next heading at the same
@@ -363,14 +388,31 @@ export function applyBlockEdits(
             break;
           }
           if (el.nodeName === 'listItem') {
-            const li = buildListItem(replacement.replace(LIST_LINE, '$3'));
-            if (!li) {
+            // ONE BULLET MAY BECOME SEVERAL. The prompt lets a `replace_block`
+            // carry multi-line markdown — regrouping a topic replaces one flat
+            // bullet with a lead bullet and its sub-points — so the marker
+            // stripping has to be a per-line read, not a single-line regex.
+            // `LIST_LINE` has no `m` flag, so it matched nothing on a
+            // multi-line string and the `- ` markers survived into the item's
+            // text: an empty bullet with the whole replacement nested under
+            // it, reported as `applied`.
+            const split = splitLeadingListItems(replacement);
+            const items = (split ? split.items : [replacement.replace(LIST_LINE, '$3')])
+              .map(buildListItem)
+              .filter((made): made is Y.XmlElement => made !== null);
+            if (items.length === 0) {
               outcomes.push({ op: edit.op, status: 'failed', error: 'parse-failed' });
               break;
             }
             parent.delete(idx, 1);
-            parent.insert(idx, [li]);
-            claimSubtree(li, opts.author);
+            parent.insert(idx, items);
+            for (const made of items) claimSubtree(made, opts.author);
+            // Whatever followed the run of items is still the caller's words,
+            // and a paragraph cannot live between two list items — it goes
+            // after the list that holds them.
+            if (split && split.rest.trim().length > 0) {
+              insertAfterList(fragment, parent, split.rest, opts.author);
+            }
             outcomes.push({ op: edit.op, status: 'applied' });
             break;
           }

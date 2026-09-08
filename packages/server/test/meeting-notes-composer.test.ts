@@ -186,11 +186,31 @@ describe('readNotesEdits', () => {
     expect(edits).toEqual([{ op: 'insert_at_end', markdown: '## Risks' }]);
   });
 
-  it('a reply that yields no edit throws, so the tick carries its words forward', () => {
+  it('a reply it could not read throws, so the tick carries its words forward', () => {
     // Prose is the failure this contract exists to catch: the old composer
     // would have taken it as the notes.
     expect(() => readNotesEdits('## Meeting notes\n- a point')).toThrow('no usable edits');
-    expect(() => readNotesEdits('[]')).toThrow('no usable edits');
+    // Every entry discarded is the same failure: nothing usable came back.
+    expect(() => readNotesEdits('[{"op":"teleport"}]')).toThrow('no usable edits');
+  });
+
+  it('a well-formed empty list is an answer, not a failure', () => {
+    // A tick of greetings changes nothing, and `NotesComposer.compose`
+    // documents that as legitimate. Throwing on it made every such tick a
+    // compose failure whose turns were carried forward UNCAPPED, so a stretch
+    // of small talk re-sent an ever-growing turn list to the model.
+    expect(readNotesEdits('[]')).toEqual([]);
+    expect(readNotesEdits('{"edits": []}')).toEqual([]);
+    expect(readNotesEdits('```json\n[]\n```')).toEqual([]);
+  });
+
+  it('finds the array past a stray brace in the preamble', () => {
+    // Taking whichever of `[` and `{` came first picked the brace here, and
+    // the matching `}` closed before the array had opened — so the whole
+    // reply parsed to nothing and a good tick was lost.
+    expect(readNotesEdits(`Here's what I'd note {roughly}: ${ONE_EDIT}`)).toEqual([
+      { op: 'insert_under_heading', headingId: 'h1', markdown: '- the sync is slow' },
+    ]);
   });
 });
 

@@ -81,6 +81,7 @@ import {
   type NotesDocStore,
   applyNotesBlockEdits,
   readNotesOutline,
+  releaseNotesAuthorship,
 } from './notes-doc-access.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
@@ -147,7 +148,7 @@ export interface NotesContextTasks {
  * Which heading each meeting doc's notes are under, by BLOCK ID.
  *
  * THIS IS THE WHOLE OF WHAT REPLACED THE OWNERSHIP LEDGER'S SECTION HALF, and
- * it is one map from doc id to block id. The ledger existed to answer "which
+ * it is one map from a meeting's ids to a block id. The ledger existed to answer "which
  * section is mine, and which lines in it may I replace"; the second half is an
  * attribute on the block now, and the first is this.
  *
@@ -160,25 +161,32 @@ export interface NotesContextTasks {
  * section the agent is writing into. A block id changes under neither, so the
  * memory of it is what makes a rename a non-event.
  *
- * PER DOC, CLEARED PER MEETING. A new recording opens its own section below
+ * PER DOC **AND** PER MEETING. A new recording opens its own section below
  * whatever the last one wrote — the owner's 2026-08-31 rule that a
  * stop-and-restart never replaces what is already written. It is memory only:
  * a restarted server remembers no heading, opens a new section on its first
  * tick, and can still only suggest on the previous one's bullets, which is the
  * safe direction.
  */
+/** What a heading memory is keyed by. Both halves are load-bearing — see the
+ *  `NotesHeadingMemory` note on cross-wiring. */
+export interface NotesMeetingIds {
+  docId: string;
+  meetingId: string;
+}
+
 export interface NotesHeadingMemory {
   /**
-   * The heading this doc's meeting is writing under, or `undefined` when it
-   * has none yet — a meeting that has not ticked, or one whose heading a
-   * person has DELETED, which are the two cases that should open a section.
+   * The heading this meeting is writing under, or `undefined` when it has
+   * none yet — a meeting that has not ticked, or one whose heading a person
+   * has DELETED, which are the two cases that should open a section.
    *
    * Checked against the outline every time rather than trusted: a remembered
    * id whose block is gone is worse than no memory, because every edit
    * addressed to it would fail with `unknown-block` for the rest of the
    * meeting.
    */
-  headingId(docId: string, outline: readonly prose.OutlineEntry[]): string | undefined;
+  headingId(ids: NotesMeetingIds, outline: readonly prose.OutlineEntry[]): string | undefined;
   /**
    * Learn the heading a batch just opened: the one heading in `after` that was
    * not in `before` and that this agent wrote.
@@ -188,13 +196,14 @@ export interface NotesHeadingMemory {
    * section heading is the level-2 one.
    */
   learn(
-    docId: string,
+    ids: NotesMeetingIds,
     before: readonly prose.OutlineEntry[],
     after: readonly prose.OutlineEntry[],
   ): void;
-  /** A new meeting is starting on this doc: forget the last one's heading, so
-   *  this one opens its own section rather than extending theirs. */
-  beginMeeting(docId: string): void;
+  /** This meeting is (re)starting: forget whatever it remembered, so it opens
+   *  its own section. Another meeting's memory of the same doc is untouched —
+   *  that is the whole reason the key carries the meeting id. */
+  beginMeeting(ids: NotesMeetingIds): void;
 }
 
 /** The level a meeting's own section heading is written at. Deeper headings
@@ -203,19 +212,26 @@ export interface NotesHeadingMemory {
 const NOTES_HEADING_LEVEL = 2;
 
 export function createNotesHeadingMemory(): NotesHeadingMemory {
-  const byDoc = new Map<string, string>();
+  // KEYED BY DOC **AND** MEETING. Keyed by doc alone, two recordings into one
+  // doc cross-wired: the second one's `beginMeeting` wiped the first one's
+  // memory, so the first one's next tick either adopted the second's heading
+  // or opened a third section under a doc that already had two.
+  const byMeeting = new Map<string, string>();
+  const keyOf = ({ docId, meetingId }: NotesMeetingIds): string => `${docId}::${meetingId}`;
   const present = (id: string, outline: readonly prose.OutlineEntry[]): boolean =>
     outline.some((e) => e.id === id && e.kind === 'heading');
   return {
-    headingId(docId, outline) {
-      const id = byDoc.get(docId);
+    headingId(ids, outline) {
+      const key = keyOf(ids);
+      const id = byMeeting.get(key);
       if (id === undefined) return undefined;
       if (present(id, outline)) return id;
-      byDoc.delete(docId);
+      byMeeting.delete(key);
       return undefined;
     },
-    learn(docId, before, after) {
-      const held = byDoc.get(docId);
+    learn(ids, before, after) {
+      const key = keyOf(ids);
+      const held = byMeeting.get(key);
       if (held !== undefined && present(held, after)) return;
       const known = new Set(before.map((e) => e.id));
       const opened = after.find(
@@ -225,11 +241,11 @@ export function createNotesHeadingMemory(): NotesHeadingMemory {
           e.author === NOTES_AUTHOR_ID &&
           (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL,
       );
-      if (opened) byDoc.set(docId, opened.id);
-      else if (held !== undefined) byDoc.delete(docId);
+      if (opened) byMeeting.set(key, opened.id);
+      else if (held !== undefined) byMeeting.delete(key);
     },
-    beginMeeting(docId) {
-      byDoc.delete(docId);
+    beginMeeting(ids) {
+      byMeeting.delete(keyOf(ids));
     },
   };
 }
@@ -289,7 +305,7 @@ export function applyNotesUpdate(
   const res = applyNotesBlockEdits(docStore, update.docId, update.edits);
   if (!res.ok) return false;
   heading.learn(
-    update.docId,
+    { docId: update.docId, meetingId: update.meetingId },
     before,
     readNotesOutline(docStore, update.docId, { headingsOnly: true }),
   );
@@ -358,13 +374,14 @@ export function applyNotesRelabel(docStore: NotesDocStore, relabel: NotesRelabel
  * notes are somewhere this cannot reach. `'none'` covers all of those and the
  * ordinary case besides — a correction whose words are in no note.
  *
- * THROUGH THE RECLAIM WRAPPER, for the reason the rename is: the revision
- * edits the agent's own bullet IN PLACE, so the ledger's record of that
- * bullet's wording goes stale the moment it lands. Without the wrapper the
- * correction would hand every note it fixed to the person — the next tick
- * could only propose on it — and the notes would freeze at the correction.
- * The wrapper re-records only lines the ledger ALREADY claimed, so a note the
- * person had made theirs stays theirs.
+ * NO RECLAIM WRAPPER AND NO LEDGER — both are gone, and this comment used to
+ * describe them. The ledger recorded a line's WORDING, so a correction that
+ * rewrote those words in place made the agent stop recognising its own note
+ * unless a wrapper re-recorded it. Authorship is an attribute on the ELEMENT
+ * now: the correction changes the text inside a block the agent owns and the
+ * block is still the agent's afterwards, with no bookkeeping in between.
+ * Whose note it is stays the question that decides direct-vs-proposed, and
+ * `meeting-notes-correction.ts` answers it from `cwAuthor`.
  */
 export function applyNotesCorrection(
   docStore: NotesDocStore,
@@ -567,9 +584,27 @@ export function withServerNotesSinks(
     },
     onSessionStart: (ids): void => {
       // A new recording on this doc: whatever the previous one wrote is
-      // finished writing. Releasing the claims is what makes stop-and-restart
-      // append instead of replace — the reported data-loss bug.
-      heading.beginMeeting(ids.docId);
+      // FINISHED, and this recording may not rewrite it.
+      //
+      // Two things make that true, and forgetting the heading id was only the
+      // first. `NOTES_AUTHOR_ID` is one constant for every meeting, so without
+      // the release meeting two reads meeting one's bullets as its own — the
+      // note-taking prompt explicitly invites deleting your own bullets when
+      // regrouping a topic, and `applyBlockEdits` applies that directly. That
+      // is a hard delete of notes a person has already read, against the
+      // project-wide never-hard-delete rule. Releasing the claim leaves the
+      // blocks exactly where they are and turns any edit naming one into a
+      // SUGGESTION, which is the reviewable form.
+      //
+      // Per DOC, deliberately: the claim is per author and the author id is
+      // shared, so there is nothing meeting-shaped to release. The heading
+      // memory below is per meeting because a section IS meeting-shaped. Two
+      // concurrent recordings on one doc therefore keep separate sections
+      // while each loses direct-edit rights on its own bullets when the other
+      // starts — the safe direction, and the same one a restarted server
+      // lands in.
+      releaseNotesAuthorship(deps.docStore(), ids.docId);
+      heading.beginMeeting(ids);
       reviewAsked.delete(ids.docId);
       spentCues.delete(ids.docId);
       options.onSessionStart?.(ids);
@@ -662,7 +697,8 @@ export function withServerNotesSinks(
         return [];
       }
     },
-    notesHeadingId: ({ docId, outline }): string | undefined => heading.headingId(docId, outline),
+    notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
+      heading.headingId({ docId, meetingId }, outline),
     onNotes: (update: NotesUpdate): void => {
       try {
         if (

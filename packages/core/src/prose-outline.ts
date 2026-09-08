@@ -106,7 +106,7 @@ export function parentOf(node: unknown): unknown {
 }
 
 /** Is this element one an id is minted for? */
-export function isAddressable(el: Y.XmlElement): boolean {
+function isAddressable(el: Y.XmlElement): boolean {
   return ADDRESSABLE.has(el.nodeName);
 }
 
@@ -277,6 +277,13 @@ export function readOutline(doc: Y.Doc, opts: OutlineOptions = {}): OutlineEntry
  * The test is therefore "a non-null origin that is not a string", and it is
  * written this way round on purpose: a new server-side writer that forgets
  * to name itself gets a loud misclassification rather than a silent pass.
+ *
+ * THE SERVER ASKS THE SAME QUESTION A DIFFERENT WAY. `isAuthoringOrigin` in
+ * `packages/server/src/live-doc-fanout.ts` decides whether an update should
+ * bump the doc's revision, and it names the two positive cases (an origin
+ * string starting `agent`, or a connection this doc actually holds) instead
+ * of naming the negative one. Both are right today; they answer differently
+ * for an origin neither has met, so a change to either belongs in both.
  */
 export function isPersonOrigin(origin: unknown): boolean {
   return origin != null && typeof origin !== 'string';
@@ -295,10 +302,16 @@ export const AUTHOR_CLEAR_ORIGIN = 'author-clear';
  * bullet back and leaves its neighbours alone. Deleting a block needs no
  * handling: the attribute goes with it.
  *
- * Runs inside the person's own transaction — Yjs merges a nested
- * `transact` into the one in flight — so the doc is never observable in a
- * state where the person's character has landed and the claim has not. The
- * second pass this triggers finds nothing left to clear and stops.
+ * THE CLEAR IS ITS OWN TRANSACTION, and it lands a beat after the edit.
+ * Observers run once the transaction that triggered them has been cleaned
+ * up, so this handler is outside the person's transaction by the time it
+ * runs and its `doc.transact` opens a second one, under
+ * `AUTHOR_CLEAR_ORIGIN`. A reader watching the doc can therefore see the
+ * person's character with the agent's claim still on the block. That is
+ * safe because nothing decides anything in the gap: the only reader of the
+ * attribute is `applyBlockEdits`, which runs on a tick of its own and sees
+ * the cleared state, and the second observer pass this write triggers is
+ * not a person's origin, so it finds nothing to clear and stops.
  */
 export function clearAuthorshipOnPersonEdit(doc: Y.Doc): () => void {
   const fragment = getProseFragment(doc);
@@ -321,20 +334,6 @@ export function clearAuthorshipOnPersonEdit(doc: Y.Doc): () => void {
   };
   fragment.observeDeep(onChange);
   return () => fragment.unobserveDeep(onChange);
-}
-
-/** The top-level block an element sits in, or the element itself. */
-export function topLevelBlockOf(
-  fragment: Y.XmlFragment,
-  el: Y.XmlElement,
-): Y.XmlElement | undefined {
-  const tops = fragment.toArray() as (Y.XmlElement | Y.XmlText)[];
-  let node: unknown = el;
-  while (node != null) {
-    if (node instanceof Y.XmlElement && tops.includes(node)) return node;
-    node = parentOf(node);
-  }
-  return undefined;
 }
 
 /** Plain text of a doc's blocks, for a caller that wants the words without

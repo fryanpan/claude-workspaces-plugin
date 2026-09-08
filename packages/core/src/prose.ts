@@ -93,7 +93,6 @@ export {
   readBlockId,
   readBlockAuthor,
   setBlockAuthor,
-  isAddressable,
   addressableBlocks,
   ensureBlockIds,
   newBlockId,
@@ -104,7 +103,6 @@ export {
   readOutline,
   isPersonOrigin,
   clearAuthorshipOnPersonEdit,
-  topLevelBlockOf,
   plainTextOf,
 } from './prose-outline.ts';
 export type { OutlineEntry, OutlineKind, OutlineOptions } from './prose-outline.ts';

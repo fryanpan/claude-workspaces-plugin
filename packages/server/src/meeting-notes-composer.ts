@@ -217,19 +217,25 @@ function speakerPrefix(turn: NotesTurn): string {
  * A reply read as edits: fences stripped, malformed entries discarded with a
  * reason, and nothing thrown.
  *
- * THROWS ONLY WHEN THERE IS NOTHING LEFT. An edit list that came back with two
- * good entries and one nonsense one is two good edits; a reply that yields
- * none is a tick that composed nothing, which the session must hear as a
- * FAILURE so the words carry into the next tick rather than being counted as
- * covered. The dropped reasons ride the message, because a model reply nobody
- * can read is worth one log line naming what arrived.
+ * THROWS ONLY WHEN THE REPLY COULD NOT BE READ. An edit list that came back
+ * with two good entries and one nonsense one is two good edits; a reply the
+ * parser could make nothing of — bad JSON, or entries it all discarded — is a
+ * tick the session must hear as a FAILURE so the words carry into the next
+ * tick rather than being counted as covered. The dropped reasons ride the
+ * message, because a model reply nobody can read is worth one log line naming
+ * what arrived.
+ *
+ * A WELL-FORMED EMPTY LIST IS NOT A FAILURE. `parseNotesEdits` separates the
+ * two: nothing parsed AND nothing dropped means the model answered `[]`, and
+ * a tick of greetings that changes nothing is the documented right answer
+ * (see `NotesComposer.compose`). Throwing on it re-sent the same turns every
+ * tick through an uncapped carry-forward and logged a compose failure for
+ * each one, so a stretch of small talk grew the prompt without bound.
  */
 export function readNotesEdits(raw: string): readonly prose.BlockEdit[] {
   const { edits, dropped } = parseNotesEdits(raw);
-  if (edits.length === 0) {
-    throw new Error(
-      `notes compose returned no usable edits${dropped.length > 0 ? `: ${dropped.join('; ')}` : ''}`,
-    );
+  if (edits.length === 0 && dropped.length > 0) {
+    throw new Error(`notes compose returned no usable edits: ${dropped.join('; ')}`);
   }
   if (dropped.length > 0) {
     console.error(

@@ -193,6 +193,51 @@ describe('applyBlockEdits', () => {
     expect(topKinds(doc)).toEqual(['heading', 'bulletList']);
   });
 
+  it('turns one bullet into the several a multi-line regroup asks for', () => {
+    // THE FAILURE THIS REPLACED: the marker stripping was a single-line regex
+    // with no `m` flag, so on the multi-line markdown the prompt asks for when
+    // regrouping a topic it matched nothing, the `- ` markers survived into
+    // one item's text, and the bullet came back EMPTY with the whole
+    // replacement nested underneath it — reported as `applied`.
+    const doc = docOf('## Topic\n');
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- one\n- two\n' }]);
+    const first = readOutline(doc).find((e) => e.text === 'one')?.id as string;
+    const res = apply(doc, [
+      { op: 'replace_block', blockId: first, markdown: '- one, revised\n- and a second line' },
+    ]);
+    expect(res.applied).toBe(1);
+    expect(md(doc)).toBe('## Topic\n\n- one, revised\n- and a second line\n- two');
+    // One list, and every line in it is a bullet with words on it.
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList']);
+    expect(readOutline(doc).map((e) => e.text)).toEqual([
+      'Topic',
+      'one, revised',
+      'and a second line',
+      'two',
+    ]);
+    // Both new bullets are the agent's, so the next tick may revise them.
+    expect(blocksAuthoredBy(doc, AGENT).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps a nested sub-point nested, and the tail after the list', () => {
+    const doc = docOf('## Topic\n');
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- flat point\n' }]);
+    const flat = readOutline(doc).find((e) => e.text === 'flat point')?.id as string;
+    const res = apply(doc, [
+      {
+        op: 'replace_block',
+        blockId: flat,
+        markdown: '- What the dialog gets wrong\n  - It forgets the range.\n\nStill open.',
+      },
+    ]);
+    expect(res.applied).toBe(1);
+    expect(md(doc)).toBe(
+      '## Topic\n\n- What the dialog gets wrong\n  - It forgets the range.\n\nStill open.',
+    );
+  });
+
   it('proposes rather than rewrites a line it does not own', () => {
     const doc = docOf('## Topic\n\n- a line a person typed\n');
     const bulletId = readOutline(doc)[1]?.id as string;

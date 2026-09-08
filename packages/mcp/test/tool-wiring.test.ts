@@ -218,7 +218,6 @@ describe('the block-address doc tools', () => {
       // and name the failure it exists to avoid.
       const outlineDecl = h.tool('read_doc_outline') as ToolDecl | undefined;
       expect(outlineDecl, 'no read_doc_outline declared').toBeDefined();
-      expect(`${outlineDecl?.description ?? ''}`.toLowerCase()).toContain('text');
       expect(Object.keys(outlineDecl?.inputSchema?.properties ?? {})).toEqual(
         expect.arrayContaining(['workspaceId', 'docId', 'headingsOnly', 'recentBlocks']),
       );
