@@ -74,6 +74,53 @@ today's code fails is flagged.
   about.
 - **Measured by:** the verdict's `held` line at zero.
 
+## `ui-review-gate.ts` — the UI gate — *rebuild step 5*
+
+- **Must:** name every row that an agent filed, that is in flight, whose
+  words read as UI work, and that carries no answered review item on either
+  surface — in the lead's stall frame as `ungatedUi` and on the verdict's
+  `ungatedUi` line, off the same snapshot, so the frame and the measurement
+  cannot name different rows. *Passes since step 5:* the wired test
+  (`ui-gate-finding.test.ts`) files a UI row as an attached agent, takes it
+  in-progress, and asserts the lead's frame and the verdict both name it with
+  the word that matched; its three controls are the same row with an answered
+  item, the same row filed by a person, and a row with no UI words.
+- **Must never:** name a row a person filed, a row nobody has started, a row
+  somebody answered an item on, or a row whose words say nothing about a
+  screen. A finding here costs a lead turn about work that is going fine, so
+  a false positive is the expensive failure and a miss is the cheap one.
+- **Measured by:** the verdict's `ungatedUi` line at zero, and — because this
+  is the one finding with a judgement in it — the share of findings the lead
+  dismisses. A dismissal rate that is not near zero means the keyword set is
+  wrong, not that leads are ignoring it.
+
+### The heuristic, and what it cannot see
+
+Three of the four reads are explicit state the store holds: the roster
+answers whether the filer is an agent, the row's transitions answer whether
+anybody started it, and the two review-item surfaces answer whether anybody
+was asked and answered. The fourth — "is this a UI change" — is read out of
+the row's title and body against a thirteen-word list (button, screen, page,
+layout, mockup, UI, CSS, tap, banner, indicator, badge, panel, float), whole
+words, case folded, with a plural or gerund counting as the same word.
+
+Nothing on a task declares which surface it touches, so there is no honest
+alternative to reading the prose. Four things this therefore misses, written
+down rather than hidden:
+
+1. **A row that changes a screen without saying so.** "Agent can see why a
+   task is blocked" is a UI change and matches nothing. This is the common
+   miss and it is accepted: the board catches nothing at all today.
+2. **A row whose filer never attached.** "Filed by an agent" is answered by
+   the roster, and a name it cannot place reads as not-an-agent — the safe
+   direction, since guessing from a name is how a person's row becomes an
+   agent's.
+3. **A row that shipped before anybody looked.** The check names a row in
+   flight; a row taken and finished between two ticks is never seen.
+4. **The words "design", "view", "render", "style" and "component"**, each
+   left out because it is at least as common in server prose here as in UI
+   prose, and a finding people learn to dismiss is worse than none.
+
 ## `stall-escalation.ts` — the last resort — *rebuild step 3*
 
 - **Must:** file past the lead only when no session on the board is alive:

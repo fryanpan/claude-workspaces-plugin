@@ -37,6 +37,7 @@ import {
   isReviewPayloadGated,
   isReviewPayloadHeld,
   pendingDeclaration,
+  reviewAnswered,
 } from '@claude-workspaces/core';
 import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
@@ -74,6 +75,7 @@ import {
   type Task,
   type TaskStore,
 } from './tasks.ts';
+import { collectUngatedUiRows } from './ui-review-gate.ts';
 
 /** The cap as a wake names it — `capSummary`'s answer, built in
  *  `createServer` so every reader of the number shares one spelling. */
@@ -753,6 +755,30 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     }
     return out;
   }
+  /**
+   * Has anybody ANSWERED a review item on this row, on either surface? The
+   * ticket-borne items live on the row; the comment-borne ones live in the
+   * row's body doc, the same two places `heldThreadReviewItems` walks and for
+   * the same reason — an answer the gate cannot see is a gate that fires at
+   * the reader who did the work.
+   */
+  function answeredReviewItemOn(taskId: string): boolean {
+    for (const item of taskStore.listReviewItems(taskId)) {
+      // `answer` is the whole close on this surface — the ticket-borne item
+      // carries the verbatim words and their timestamp there, and
+      // `isReviewItemOpen` reads exactly this field. The comment-borne twin
+      // below carries its stamp inside the payload instead, which is what
+      // `reviewAnswered` reads; two spellings of one question, because the
+      // two surfaces store an answer in two places.
+      if (item.answer !== undefined) return true;
+    }
+    for (const thread of docStore.listThreads(taskBodyDocId(taskId))) {
+      for (const comment of thread.comments) {
+        if (comment.review !== undefined && reviewAnswered(comment.review)) return true;
+      }
+    }
+    return false;
+  }
   const stallSnapshot = (workspace: BoardWorkspace): StallSnapshot => {
     const verdict = stallVerdict(workspace);
     const capRead = taskStore.parallelismCap(workspace.id);
@@ -803,6 +829,12 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // session can be present and deliverable having written nothing on any
     // row yet. Both reads are what `hasLiveAttachment` and the presence strip
     // already answer from; nothing here is measured a second way.
+    // The UI gate's breaches (`ui-review-gate.ts`): rows an agent filed that
+    // read as UI work and are being built with nobody's answer on them.
+    const ungatedUi = collectUngatedUiRows(taskStore.listTasks(workspace.id), {
+      isAgentName: (name) => taskStore.resolveAgentId(name) !== null,
+      answeredReviewItem: answeredReviewItemOn,
+    });
     const sessionLive = taskStore.hasLiveAttachment(workspace.id);
     let sessionObservedAt = 0;
     for (const att of taskStore.listAttachments(workspace.id)) {
@@ -824,6 +856,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(verdict.beyondCapacity > 0 ? { beyondCapacity: verdict.beyondCapacity } : {}),
       ...(capRead ? { parallelismCap: capSummary(capRead) } : {}),
       ...(held.length > 0 ? { held } : {}),
+      ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
     };
   };
   /**

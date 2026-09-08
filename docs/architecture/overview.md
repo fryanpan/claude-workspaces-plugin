@@ -55,7 +55,7 @@ flowchart TB
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
-    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict"]
+    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · client-release.ts · plugin-release.ts · sentry.ts"]
@@ -146,7 +146,9 @@ reaches through `fetch`, and the table is the registry rather than the router.
 request, and all three take an injected `now` so a test moves the clock
 instead of waiting: the two board wakes in the Keep-moving group (the
 stall tick also records `keep-moving-verdict.ts`, the PASS/FAIL measurement
-of that group, off the same snapshot the wake reads —
+of that group, off the same snapshot the wake reads, and reads
+`ui-review-gate.ts` — the one finding in the group about a row that is
+MOVING, an agent-filed UI row being built with nobody's answer on it —
 [stall-check/](stall-check/README.md)), and
 `task-scheduler.ts`, which files an instance each time a row's schedule comes
 due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
@@ -232,7 +234,7 @@ family and moves nothing in the picture: it is the fan-out one level below
 two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `notes-section.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-section.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 

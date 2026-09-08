@@ -74,6 +74,8 @@ Then **place it**: the right goal, in the right position relative to the rows al
 
 **Complex or UI-design tasks clear a human gate first.** Their acceptance criteria include reviewing the ticket body — and mocks, for UI — with the primary user before implementing, surfaced as a review item when the task comes up for dispatch. Small, obvious tasks run without the gate.
 
+**On an agent-filed row that changes the UI, the gate is an ANSWERED item, not a filed one.** You check it twice: once when you re-rank the band, and again in the second before you hand the row to anybody. An unanswered item means the row is not dispatchable yet, whatever its rank. The board watches this too — a row an agent filed that reads as UI work and is in flight with no answered item on it arrives in your stall frame as `ungatedUi` and on the keep-moving verdict's line of the same name — but that flag fires after somebody started building, so it is a record of a check you missed rather than the check itself.
+
 Staff the top of the queue, in parallel where the rows don't collide, and keep going until the **goal** is met — not until the batch drains.
 
 **Every dispatch prompt states the final-message contract.** A dispatched agent reports to you as a final message, so the cap is what keeps that report a pointer instead of a paste: the agent posts its full report with `post_status` first — onto the task's Activity tab, not its comments — then writes 150 words or less — the outcome in a line, the task's link, and any blocker. The same three parts and the same 150 words bind the message you write to the primary user at the end of a batch.

@@ -31,6 +31,10 @@
  *   escalated   review items the BOARD filed to the reader inside the last
  *               day (`stall-escalation.ts`) — the last resort, counted so
  *               that it is visible when it is not a last resort
+ *   ungatedUi   rows an agent filed that read as UI work and are being built
+ *               with no answered review item on them (`ui-review-gate.ts`) —
+ *               the one finding here about a row that IS moving, because the
+ *               rule it breaks is about what got skipped on the way
  *
  * Any of them non-zero is a FAIL. A FAIL is not an alarm — the wake already
  * told the lead — it is the record that the promise was not kept at that
@@ -72,6 +76,8 @@ export interface KeepMovingVerdict {
   held: string[];
   /** How many items the board filed to the reader inside the last day. */
   escalated: number;
+  /** Row ids dispatched past the UI gate. */
+  ungatedUi: string[];
 }
 
 export interface KeepMovingRecorderOptions {
@@ -103,11 +109,13 @@ export function keepMovingVerdictFor(
   const unfiled = snapshot.unfiled.map((r) => r.id);
   const waiting = (snapshot.waiting ?? []).map((r) => ({ id: r.id, waitingOn: [...r.waitingOn] }));
   const unreadable = snapshot.undetermined.map((r) => r.id);
+  const ungatedUi = (snapshot.ungatedUi ?? []).map((r) => r.id);
   const failing =
     stalled.length > 0 ||
     unfiled.length > 0 ||
     unreadable.length > 0 ||
     held.length > 0 ||
+    ungatedUi.length > 0 ||
     opts.escalated > 0;
   return {
     workspaceId: snapshot.workspaceId,
@@ -120,6 +128,7 @@ export function keepMovingVerdictFor(
     unreadable,
     held,
     escalated: opts.escalated,
+    ungatedUi,
   };
 }
 
@@ -167,7 +176,8 @@ export class KeepMovingRecorder {
           `considered=${verdict.considered} stalled=${verdict.stalled.length} ` +
           `unfiled=${verdict.unfiled.length} waiting=${verdict.waiting.length} ` +
           `unreadable=${verdict.unreadable.length} ` +
-          `held=${verdict.held.length} escalated=${verdict.escalated}`,
+          `held=${verdict.held.length} escalated=${verdict.escalated} ` +
+          `ungated-ui=${verdict.ungatedUi.length}`,
       );
     }
     if (recorded.length > 0) this.save();

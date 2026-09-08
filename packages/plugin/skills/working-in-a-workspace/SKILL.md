@@ -102,6 +102,18 @@ sits, since parking a task moves it there. Read those with
 `list_tasks(status: "triage")`, and read the task's comments before picking one
 up: that is where a park says why it was deferred and when to come back.
 
+**A UI change an agent filed waits for an answer before you build it.** If the
+row you are about to start changes what somebody sees on screen — a button, a
+screen, a layout, a mockup, a badge, a banner, anything they will look at —
+and an agent filed it rather than a person, file a review item with
+`add_review_item(taskId, review)` naming the options and what each costs, and
+stop there. The answer is the thing you build against, so there is nothing to
+build before it arrives. Not "start now and ask in parallel". Not "build it
+and show them the result". Not "this one is obviously right". Not "it is small
+enough to redo". A row a person filed already carries their answer; a row an
+agent filed carries nobody's. Post the item, take another row, come back when
+it is answered.
+
 File a batch of rows in ONE `create_tasks` call rather than one call per row.
 A bad row comes back in `failures` by index instead of rejecting the batch.
 
