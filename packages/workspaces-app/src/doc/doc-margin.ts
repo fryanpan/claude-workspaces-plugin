@@ -19,6 +19,7 @@ import { balloonMarginVisible } from '../card-placement.ts';
 import { mountCommentHints } from '../comment-hints.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
+import { type RecentNoteCardsHandle, mountRecentNoteCards } from '../recent-note-cards.ts';
 import { type MarkupMarginHandle, mountMarkupMargin } from '../redline/markup-margin.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
 import { mountSuggestionsSummary } from '../suggestions/suggestions-summary.ts';
@@ -50,6 +51,9 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // Mounted unconditionally; the `#editor.redline-layout` grid and the
   // `.markup-margin` column both collapse via CSS below 1100px, so this
   // never introduces horizontal scroll on mobile.
+  // Declared first so the column can ASK for the note cards while the module
+  // that ages them still needs the column's relayout to place them.
+  let noteCards: RecentNoteCardsHandle | null = null;
   const margin: MarkupMarginHandle = mountMarkupMargin({
     editorEl: editorMount,
     view: editor.editor.view,
@@ -58,8 +62,21 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     chrome,
     getSuggestions: () => suggestOps.listSuggestions(ydoc),
     docId,
+    getNoteCards: () => noteCards?.cards() ?? [],
     scope,
   });
+  // "Notes agent added notes 30s ago" beside each block the note-taker just
+  // wrote — the wide layout's half of the tint. There is no column at phone
+  // width, so `balloonMarginVisible` is also the gate that keeps the cards
+  // off a phone entirely.
+  noteCards = mountRecentNoteCards({
+    prose: editor.editor.view.dom,
+    visible: balloonMarginVisible,
+    onChange: () => margin.scheduleRelayout(),
+    scope,
+  });
+  const cards = noteCards;
+  scope.onCleanup(() => cards.destroy());
   // Doc-level "N pending suggestions" topbar badge (Accept all / Reject all
   // across every author) — per-suggestion Accept/Reject lives on the
   // balloon/chip card the margin just wired above.
@@ -117,6 +134,9 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     scope,
   });
   const onMarginTransaction = (): void => {
+    // A note landing, stepping down or ageing out arrives as a transaction:
+    // re-read the tinted set before the column lays out against it.
+    cards.tick();
     margin.scheduleRelayout();
     suggestionsSummary.scheduleRefresh();
     hints.refresh();

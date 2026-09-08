@@ -3511,6 +3511,48 @@ body.redline-mode #toggle-suggest-mode {
   }
 }
 
+/* The note-provenance card (recent-note-cards.ts): who wrote the block the
+   tint is on, and how long ago. A lighter sibling of a comment balloon —
+   this column is already where anything said ABOUT a block lives — and it
+   never carries a control, so it reads as a caption rather than a card to
+   act on. Wide layouts only: the column is `display: none` below 1101px, so
+   a phone gets the tint and the pill counts and no label at all.
+
+   Two stacked lines, because the age CROSSFADES rather than jumping: the
+   outgoing line is taken out of the flow so the card does not change height
+   mid-fade. */
+.margin-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border-soft, #e6eaee);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: 400 11px / 1.4 var(--sans);
+  transition: opacity 600ms linear;
+}
+.margin-note .mn-line {
+  display: block;
+  transition: opacity 1000ms linear;
+}
+.margin-note .mn-line.is-out {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  opacity: 0;
+}
+.margin-note .mn-line.is-in {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .margin-note,
+  .margin-note .mn-line {
+    transition: none;
+  }
+}
+
 /* One overlay for every leader line; never intercepts clicks. */
 .cw-leader-overlay {
   position: absolute;

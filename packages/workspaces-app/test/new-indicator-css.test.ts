@@ -68,4 +68,20 @@ describe('the new-content indicator', () => {
     expect(styleOf(pill).maxWidth).toBe('calc(100% - 84px)');
   });
 
+  it('the outgoing half of a note card’s crossfade is taken out of the flow', () => {
+    const card = document.createElement('div');
+    card.className = 'balloon margin-note';
+    const out = document.createElement('span');
+    out.className = 'mn-line is-out';
+    const held = document.createElement('span');
+    held.className = 'mn-line';
+    card.append(held, out);
+    document.body.appendChild(card);
+    // Both fade over a second; only the outgoing one is lifted out, so the
+    // card cannot change height mid-fade.
+    expect(styleOf(held).transition).toContain('1000ms');
+    expect(styleOf(held).position).not.toBe('absolute');
+    expect(styleOf(out).position).toBe('absolute');
+    expect(styleOf(out).opacity).toBe('0');
+  });
 });
