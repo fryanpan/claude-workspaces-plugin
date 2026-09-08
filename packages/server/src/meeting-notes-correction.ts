@@ -3,13 +3,13 @@
  * Tuesday, instead of the doc growing a second note that disagrees with the
  * first one.
  *
- * WHY THIS IS NOT A COMPOSE. The composer already revises — it is handed the
- * whole notes and returns the whole notes, and it is told to "correct earlier
- * notes the new speech overturns". What it cannot do is be RELIED ON to: the
- * result is a whole section rewritten from a model's reading, so the same ask
- * lands as a fix on one tick and as an extra bullet on the next, and either
- * way the merge has to reconcile a section that changed everywhere. A person
- * saying two words wants two words changed. So a correction is a TARGETED,
+ * WHY THIS IS NOT A COMPOSE. The composer already revises — it sees the
+ * outline and may answer with a `replace_block`, and it is told to "correct
+ * earlier notes the new speech overturns". What it cannot do is be RELIED ON
+ * to: the block it rewrites is re-emitted from a model's reading, so the same
+ * ask lands as a fix on one tick and as an extra bullet on the next, and the
+ * fix costs the bullet's marks and anchors either way. A person saying two
+ * words wants two words changed. So a correction is a TARGETED,
  * in-place replacement, exactly as a speaker rename is (`relabelNotesSection`)
  * and for the same reason: a two-word fix must cost no more than two words.
  *

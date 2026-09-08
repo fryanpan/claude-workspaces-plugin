@@ -341,11 +341,11 @@ export interface NotesUpdate {
  * "Every place the notes say `from`, they should say `to`" — a rename
  * reaching notes already written.
  *
- * A SEPARATE SINK FROM `onNotes` ON PURPOSE. An update carries whole notes
- * this module composed and replaces the section with them; a relabel carries
- * two words and asks for those two words. Sent down the update path it would
- * have to re-send a whole section built from `previous`, discarding anything
- * the human typed into it since the last tick.
+ * A SEPARATE SINK FROM `onNotes` ON PURPOSE. An update carries the blocks a
+ * tick decided to write; a relabel carries two words and asks for those two
+ * words wherever they already appear. Sent down the update path it would have
+ * to re-emit every block that mentions the voice, which costs a bullet's marks
+ * and anchors to change a name inside it.
  */
 export interface NotesRelabel {
   docId: string;
@@ -376,10 +376,10 @@ export interface NotesRelabel {
  * A spoken correction on its way to the doc that holds the note it fixes.
  *
  * A SEPARATE SINK FROM `onNotes`, for the reason {@link NotesRelabel} is one:
- * an update carries whole notes and merges them; a correction carries two
- * phrases and asks for two phrases. Routed through the update path it would
- * have to re-send a section, which is exactly the cost this intent exists to
- * avoid.
+ * an update carries the blocks a tick decided to write; a correction carries
+ * two phrases and asks for two phrases. Routed through the update path it
+ * would have to re-emit the whole bullet, which is exactly the cost this
+ * intent exists to avoid.
  *
  * It answers, where a relabel does not: the session cannot tell whether the
  * phrase resolved to one note, to somebody's note, or to nothing at all —
@@ -404,8 +404,8 @@ export type NotesCorrectionResult = 'revised' | 'suggested' | 'none';
  * notes that were already written.
  *
  * A THIRD SINK, beside `onNotes` and `onRelabel`, because it is a third kind
- * of change. An update carries whole notes and replaces what the agent
- * wrote; a relabel says a voice is called something new and rewrites two
+ * of change. An update carries the blocks a tick decided to write; a relabel
+ * says a voice is called something new and rewrites two
  * words wherever that voice appears; this says nothing about any name — it
  * moves a MENTION from one voice to another, and which mentions move is
  * decided per site from the turns each was composed from.
