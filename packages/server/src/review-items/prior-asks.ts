@@ -134,6 +134,7 @@ function fromTask(task: Task, exceptItemId: string | undefined, now: number): Ga
       at: item.createdAt,
       answered: answer !== undefined,
       ask: {
+        id: item.id,
         headline: item.review.headline,
         askedAt: formatAskedAt(item.createdAt, now),
         ...(answer !== undefined ? { answer } : {}),
@@ -167,6 +168,7 @@ function fromThreads(
         at: comment.ts,
         answered: answer !== undefined,
         ask: {
+          id: comment.id,
           headline: review.headline,
           askedAt: formatAskedAt(comment.ts, now),
           ...(answer !== undefined ? { answer } : {}),
