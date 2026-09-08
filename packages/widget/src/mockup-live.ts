@@ -72,14 +72,29 @@ export function streamUrl(cfg: Pick<Config, 'docId' | 'workspaceId'>): string {
 /**
  * Which nodes in the CURRENT body must survive a swap.
  *
- * The widget's host element holds the comment panel, the open thread and the
- * pin layer; the version control is this module's own; and the two script tags
- * are what is running. Everything else on the page is the mock, and the mock is
- * what a round replaces.
+ * The widget's host element holds the comment panel and the open thread; the
+ * version control is this module's own; and the two script tags are what is
+ * running. Everything else on the page is the mock, and the mock is what a
+ * round replaces.
+ *
+ * The widget's chrome is NOT all inside its host element, which is the thing
+ * this had wrong. The pin overlay is a sibling `<div>` in the light DOM —
+ * deliberately, so a pin can be positioned in page coordinates — and the
+ * stylesheet those pins are drawn with is another. Both carry the widget's own
+ * `data-feedback-widget` marker (the light-DOM styles carry an id instead),
+ * which is the same marker the widget uses to know a node is its own. Keeping
+ * the host element alone left `pinLayer` pointing at a detached node, so after
+ * a round every surviving thread still listed in the panel and NOT ONE had a
+ * pin on the page — caught headless at 1180x820, not by any unit test, because
+ * the panel row is right and only the page is wrong.
  */
+const WIDGET_OWN_ATTR = 'data-feedback-widget';
+
 function isOurs(node: Node): boolean {
   if (!(node instanceof Element)) return false;
   if (node.tagName === 'CLAUDE-FEEDBACK-WIDGET') return true;
+  if (node.hasAttribute(WIDGET_OWN_ATTR)) return true;
+  if (node.id === 'cfw-light-styles') return true;
   if (node.hasAttribute(CONTROL_ATTR)) return true;
   if (node.tagName === 'SCRIPT') {
     const src = (node as HTMLScriptElement).getAttribute('src') ?? '';
@@ -175,7 +190,7 @@ export function swapDocument(html: string): void {
  * text. It appears only once a second round exists, so a mockup with one round
  * carries no chrome at all.
  */
-function renderControl(state: Config, go: (v: number | null) => void): void {
+export function renderControl(state: Config, go: (v: number | null) => void): void {
   const existing = document.querySelector(`[${CONTROL_ATTR}]`);
   if (state.versions.length < 2) {
     existing?.remove();
@@ -240,7 +255,47 @@ function renderControl(state: Config, go: (v: number | null) => void): void {
   }
 }
 
-function start(cfg: Config): void {
+/**
+ * What a `mockup.updated` frame does to a reader, decided without touching the
+ * DOM or the network.
+ *
+ * Exported because the rule it holds is the one a reviewer would notice being
+ * broken and no swap or fetch could reveal: a reader who has stepped BACK to
+ * an earlier round is LEFT WHERE HE PUT HIMSELF. The new round joins the
+ * history so the forward chevron lights up, but nothing moves under him —
+ * yanking a reader off the round he is part-way through commenting on is the
+ * same interruption this whole mechanism exists to remove.
+ *
+ * `null` for a frame that is not JSON: a malformed frame leaves the page
+ * exactly as it is rather than reloading it on a guess.
+ */
+export function applyUpdateFrame(
+  versions: number[],
+  pinned: number | null,
+  data: string,
+): { versions: number[]; reload: boolean } | null {
+  let frame: { version?: number; versions?: { v: number }[] };
+  try {
+    frame = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  let next = versions;
+  if (Array.isArray(frame.versions)) {
+    next = frame.versions.map((r) => r.v).filter((v) => Number.isInteger(v));
+  } else if (typeof frame.version === 'number' && !versions.includes(frame.version)) {
+    next = [...versions, frame.version];
+  }
+  return { versions: next, reload: pinned === null };
+}
+
+/**
+ * Wire a served mockup up to its own stream. Exported so a test can drive the
+ * whole loop — frame in, round fetched, page swapped, control redrawn —
+ * against a stub stream, which is the only way to see that the three halves
+ * are actually connected to each other rather than merely each correct.
+ */
+export function startMockupLive(cfg: Config): void {
   const state: Config = { ...cfg };
   // Claim the stylesheets this page loaded with. They belong to round N, and
   // the first swap has to be able to take them away — without this the second
@@ -271,22 +326,10 @@ function start(cfg: Config): void {
 
   const es = new EventSource(streamUrl(state));
   es.addEventListener('mockup.updated', (ev) => {
-    let frame: { version?: number; versions?: { v: number }[] };
-    try {
-      frame = JSON.parse((ev as MessageEvent).data as string);
-    } catch {
-      return;
-    }
-    if (Array.isArray(frame.versions)) {
-      state.versions = frame.versions.map((r) => r.v).filter((v) => Number.isInteger(v));
-    } else if (typeof frame.version === 'number' && !state.versions.includes(frame.version)) {
-      state.versions.push(frame.version);
-    }
-    // A reader who has stepped BACK is left where he put himself — the new
-    // round joins the history and the forward chevron lights up, but nothing
-    // moves under him. Yanking a reader off the round he is commenting on is
-    // the same interruption this whole mechanism exists to remove.
-    if (pinned !== null) {
+    const next = applyUpdateFrame(state.versions, pinned, (ev as MessageEvent).data as string);
+    if (next === null) return;
+    state.versions = next.versions;
+    if (!next.reload) {
       renderControl(state, load);
       return;
     }
@@ -300,8 +343,8 @@ const script = document.currentScript as HTMLScriptElement | null;
 const parsed = readConfig(script);
 if (parsed) {
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => start(parsed), { once: true });
+    document.addEventListener('DOMContentLoaded', () => startMockupLive(parsed), { once: true });
   } else {
-    start(parsed);
+    startMockupLive(parsed);
   }
 }
