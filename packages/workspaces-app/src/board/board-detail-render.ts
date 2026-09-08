@@ -43,7 +43,6 @@ import {
 } from './board-model.ts';
 import { type ActivityEvent, assigneeLabel, describeEvent } from './board-presence-model.ts';
 import { type BlockerRow, type ReviewThreadItem } from './board-review-model.ts';
-import type { TaskAskKind, TaskAskState } from './task-asks.ts';
 /**
  * Who has this task, as a picker over everyone it could go to.
  *
@@ -430,25 +429,7 @@ export interface DetailHandlers {
   /** Take one entry back off: the `after` edge for a blocker, the ref for a
    *  doc or a plain URL. Absent → no x is drawn. */
   onRelatedRemove?: (task: BoardTask, entry: RelatedEntry) => void;
-  /**
-   * Ask the board's agent to plan this ticket, or to review it — the two
-   * one-tap asks a huddle doc carries as floats. Resolves to whether the ask
-   * LANDED, so a refused press puts the control back rather than leaving a
-   * receipt for an ask nobody received.
-   *
-   * Absent → neither ask is OFFERED, which is the honest state for a reader
-   * who cannot write and for a board served by a server that predates the
-   * ask routes. A receipt below still renders: whether somebody has asked is
-   * ticket state, and hiding it would show a reader an untouched ticket.
-   */
-  onAsk?: (task: BoardTask, kind: TaskAskKind) => Promise<boolean>;
-  /**
-   * What the ticket's own doc says about the two asks — who asked and when,
-   * per kind. Undefined until the app has read the doc, which the controls
-   * deliberately render as "not yet asked": see `TaskAskState`.
-   */
-  taskAsks?: TaskAskState;
-  /** Clock for the "asked 3h ago" lines. Injected so a test can pin it. */
+  /** Clock for the relative-time lines. Injected so a test can pin it. */
   now?: number;
   /**
    * The workspace's audit rows, unfiltered — the panel takes this task's out

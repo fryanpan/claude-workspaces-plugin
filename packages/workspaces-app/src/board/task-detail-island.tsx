@@ -94,14 +94,6 @@ import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
 import { markPhrase } from './review-item-phrase.ts';
 import { ScheduleEditor } from './schedule-editor.tsx';
 import { selectWordAtPoint, useSelectionPill } from './selection-pill.ts';
-import {
-  TASK_ASK_KINDS,
-  TASK_ASK_LABEL,
-  TASK_ASK_TITLE,
-  type TaskAskKind,
-  taskAskFace,
-  taskAskReceipt,
-} from './task-asks.ts';
 import { NOBODY, type OpenComment, ThreadCard, draftThread } from './thread-card.tsx';
 
 // ── The contract with the vanilla loader ───────────────────────────────────
@@ -1091,86 +1083,6 @@ function RelatedLinkAdd(props: { onAdd: (url: string) => void }) {
   );
 }
 
-/**
- * The ticket's two one-tap asks — the live half of what used to be a pair of
- * disabled receipts.
- *
- * One control per kind, each in one of two states. Offered, it is a button
- * saying "Plan" or "Review"; pressed, it is a `<span>` saying who asked and
- * when. The receipt is deliberately NOT a disabled button: a greyed-out
- * button is still button-shaped, and this panel already carried two of them
- * that a reader could keep pressing at (the complaint this row replaces).
- *
- * The face comes from the ticket's own doc, so a reload — or another tab's
- * press — shows the receipt without this component tracking anything. What
- * it keeps locally is only the in-flight press: a control cannot be pressed
- * twice while the first ask is on the wire, and a REFUSED ask puts the
- * button back rather than leaving a receipt for something nobody received.
- */
-function TaskAskControls(props: {
-  task: BoardTask;
-  handlers: DetailHandlers;
-  now: number;
-}) {
-  const { task, handlers } = props;
-  const [busy, setBusy] = useState<TaskAskKind | null>(null);
-  // Which kinds this press has confirmed, so the receipt appears the moment
-  // the ask lands rather than waiting for the app's re-read of the doc to
-  // arrive. Cleared implicitly by unmount — the reopened panel reads the
-  // doc's own stamps, which is the durable answer.
-  const [justAsked, setJustAsked] = useState<readonly TaskAskKind[]>([]);
-
-  const receiptFor = (kind: TaskAskKind) => (
-    // `<output>`, whose implicit ARIA role is `status`: the swap is otherwise
-    // silent, and a screen reader hears a button disappear with nothing
-    // taking its place — the one confirmation that the ask landed would
-    // reach only the eye. The element rather than `role="status"` on a span
-    // because it carries the same semantics without an attribute, which is
-    // what `a11y/useSemanticElements` asks for.
-    <output key={kind} class="board-task-ask-receipt" data-ask={kind}>
-      {taskAskReceipt(kind, handlers.taskAsks, props.now) ?? `${TASK_ASK_LABEL[kind]} requested`}
-    </output>
-  );
-
-  const offerFor = (kind: TaskAskKind) => (
-    <button
-      key={kind}
-      type="button"
-      class="board-btn board-task-ask"
-      data-ask={kind}
-      title={TASK_ASK_TITLE[kind]}
-      aria-label={TASK_ASK_TITLE[kind]}
-      disabled={busy !== null}
-      onClick={(ev) => {
-        ev.stopPropagation();
-        if (busy !== null) return;
-        setBusy(kind);
-        void Promise.resolve(handlers.onAsk?.(task, kind))
-          .then((landed) => {
-            if (landed) setJustAsked((was) => [...was, kind]);
-          })
-          .finally(() => setBusy(null));
-      }}
-    >
-      {TASK_ASK_LABEL[kind]}
-    </button>
-  );
-
-  // Read access is not write access, and the two decide DIFFERENT halves of
-  // this row. Without `onAsk` nothing may be OFFERED — a press would come
-  // back 403 with no sign-in path — but a receipt for an ask somebody else
-  // already made is ticket state, and withholding it shows a reader an
-  // untouched ticket. So the offer is gated and the receipt is not; the row
-  // disappears only when there is neither.
-  const controls = TASK_ASK_KINDS.map((kind) => {
-    const asked = taskAskFace(kind, handlers.taskAsks) === 'requested' || justAsked.includes(kind);
-    if (asked) return receiptFor(kind);
-    return handlers.onAsk ? offerFor(kind) : null;
-  }).filter((c) => c !== null);
-  if (controls.length === 0) return null;
-  return <div class="board-task-asks">{controls}</div>;
-}
-
 function TaskDetailPanel(props: {
   host: HTMLElement;
   task: BoardTask;
@@ -1449,12 +1361,6 @@ function TaskDetailPanel(props: {
           metadata list, the preserved capture, and finally the description —
           spent the entire first screen on facts identical across every task. */}
       <dl ref={fieldsRef} class="board-detail-fields" />
-
-      {/* The ticket's two one-tap asks, directly under the facts they act on
-          and above everything that is waiting on the reader. Right-aligned
-          with the rest of the panel's chips; no caption under either — what
-          "Plan" does is the button, not a sentence beside it. */}
-      <TaskAskControls task={task} handlers={handlers} now={now} />
 
       {/* WHEN this row's work starts, as a sentence and as chips — one rule,
           two views. It sits with the facts rather than below the description
