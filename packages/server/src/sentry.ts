@@ -37,11 +37,49 @@ type SentryBunModule = typeof import('@sentry/bun');
 
 let sentryModule: SentryBunModule | null = null;
 
+/**
+ * What this process has actually done with Sentry, counted at the SDK's own
+ * hooks rather than inferred from outside. `captured` counts events the
+ * client accepted (after sampling, before `beforeSend`); `sent` counts
+ * envelopes the transport answered, with the last answer's status. The gap
+ * between the two is the number this exists for: on 2026-09-08 prod's
+ * process was known to be initialised, resolvable and reachable, yet no
+ * span ever arrived, and nothing outside the process could say which of
+ * "never captured", "dropped before send" or "sent and refused" it was.
+ * Read by `GET /api/sentry` (routes/ops.ts) and the daily health check.
+ */
+export interface ServerSentryTelemetry {
+  active: boolean;
+  captured: number;
+  sent: number;
+  lastSendStatus: number | null;
+  lastSendAt: number | null;
+  /** `transaction` for a span envelope, `error` for an event, as the SDK names them. */
+  lastSendType: string | null;
+}
+
+const telemetry: Omit<ServerSentryTelemetry, 'active'> = {
+  captured: 0,
+  sent: 0,
+  lastSendStatus: null,
+  lastSendAt: null,
+  lastSendType: null,
+};
+
+export function serverSentryTelemetry(): ServerSentryTelemetry {
+  return { active: sentryModule !== null, ...telemetry };
+}
+
 /** Test-only: forget the module-global client so a test file can exercise
  *  both the configured and unconfigured paths without leaking state between
  *  `it()` blocks. Never called from production code. */
 export function resetServerSentryForTest(): void {
   sentryModule = null;
+  telemetry.captured = 0;
+  telemetry.sent = 0;
+  telemetry.lastSendStatus = null;
+  telemetry.lastSendAt = null;
+  telemetry.lastSendType = null;
 }
 
 export function isServerSentryActive(): boolean {
@@ -111,6 +149,37 @@ export async function initServerSentry(opts: {
     },
   });
   sentryModule = Sentry;
+  // Counted at the client's own hooks: `beforeSendEvent` fires once per
+  // event the client accepted, `afterSendEvent` once per envelope the
+  // transport answered — for transactions as well as errors (core's
+  // `sendEvent` emits both regardless of `event.type`).
+  const client = Sentry.getClient();
+  client?.on('beforeSendEvent', () => {
+    telemetry.captured += 1;
+  });
+  client?.on('afterSendEvent', (event, sendResponse) => {
+    telemetry.sent += 1;
+    telemetry.lastSendStatus = sendResponse.statusCode ?? null;
+    telemetry.lastSendAt = Date.now();
+    telemetry.lastSendType = event.type ?? 'error';
+  });
+}
+
+/**
+ * Send one deliberately harmless event and wait for the transport's answer,
+ * so a process can prove its own path to Sentry rather than have it
+ * inferred from a socket table. Returns the telemetry as it stood after the
+ * flush, plus whether the flush completed inside its window. An
+ * unconfigured process answers `active: false` and sends nothing.
+ */
+export async function selfTestServerSentry(
+  timeoutMs = 3000,
+): Promise<ServerSentryTelemetry & { flushed: boolean; eventId: string | null }> {
+  const Sentry = sentryModule;
+  if (!Sentry) return { ...serverSentryTelemetry(), flushed: true, eventId: null };
+  const eventId = Sentry.captureMessage('server sentry self-test', 'info');
+  const flushed = await Sentry.flush(timeoutMs);
+  return { ...serverSentryTelemetry(), flushed, eventId };
 }
 
 export async function flushServerSentry(timeoutMs = 2000): Promise<boolean> {

@@ -36,6 +36,7 @@ import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-
 import type { PluginRefresher } from '../plugin-refresh.ts';
 import type { PushNotifier } from '../push-notify.ts';
 import type { PushStore } from '../push-store.ts';
+import { selfTestServerSentry, serverSentryTelemetry } from '../sentry.ts';
 import type { WebhookLogEntry } from '../webhooks.ts';
 
 /** The long-lived collaborators these routes need, built once per server. */
@@ -324,6 +325,27 @@ export async function handleOpsRoutes(
         deploy: await deployer.deploy({ force, ...(requestedBy ? { requestedBy } : {}) }),
       });
     }
+    return j(405, { error: 'method not allowed' });
+  }
+  // --- REST: this process's own Sentry state ---
+  // GET reads what the SDK's hooks have counted (see sentry.ts); POST sends
+  // one harmless event and waits for the transport's answer. Both sit
+  // behind the deploy route's gates, for the deploy route's reasons: the
+  // counts name this machine's outbound telemetry and the POST spends the
+  // project's quota, so the box and only the box may ask — loopback peer,
+  // never through the edge, and never from a page riding the owner's
+  // session. Nothing here names a DSN, a key or a release.
+  if (pathname === '/api/sentry') {
+    if (visitor) return j(403, { error: 'not available to share visitors' });
+    if (!isLoopbackAddress(requestAddress(req))) {
+      return j(403, { error: 'sentry state is read from this machine only (loopback)' });
+    }
+    if (req.headers.has('cf-ray')) {
+      return j(403, { error: 'sentry state cannot be read through the edge (proxied request)' });
+    }
+    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+    if (req.method === 'GET') return j(200, { sentry: serverSentryTelemetry() });
+    if (req.method === 'POST') return j(200, { sentry: await selfTestServerSentry() });
     return j(405, { error: 'method not allowed' });
   }
 
