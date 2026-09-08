@@ -35,9 +35,10 @@
  * prove — the transcript is still the record, and the next compose still sees
  * the correction in the speech.
  *
- * A PERSON'S NOTE IS NEVER OVERWRITTEN. Ownership is the ledger's
- * (`meeting-notes-merge.ts`): the agent may revise only an item it wrote that
- * still reads as it left it. When the only note carrying the mistaken phrase
+ * A PERSON'S NOTE IS NEVER OVERWRITTEN. Ownership is the block's own
+ * `cwAuthor` (`prose-outline.ts`): the agent may revise only a block it wrote
+ * that no person has touched since — the doc clears the mark the moment they
+ * do, so those are one question with one answer. When the only note carrying the mistaken phrase
  * is one a person wrote — or one the agent wrote and the person has since
  * edited — the correction lands as a REDLINE SUGGESTION on that phrase, the
  * same `suggestOps` mechanism the composer already uses when it wants
@@ -62,15 +63,8 @@ import {
   suggestOps,
 } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  NOTES_SUGGESTION_AUTHOR,
-  type NoteItem,
-  type NotesOwnership,
-  classifyOwnership,
-  findNotesSection,
-  itemsInSection,
-} from './meeting-notes-merge.ts';
 import type { SpokenCorrection } from './meeting-notes.ts';
+import { NOTES_AUTHOR_ID, NOTES_SUGGESTION_AUTHOR } from './notes-doc-access.ts';
 
 /**
  * The shortest a mistaken phrase may be and still identify a note. A
@@ -208,6 +202,37 @@ interface Site {
   offset: number;
 }
 
+/**
+ * One note a correction could land on: the block, and whether the note-taker
+ * still owns it.
+ *
+ * WHAT REPLACED THE SECTION SCAN. This used to be "the items inside the
+ * heading that reads Meeting notes, classified against an ownership ledger".
+ * Both halves came from beside the doc and both could go stale. The candidate
+ * set is now the doc's own addressable blocks and ownership is the attribute
+ * on each one, which makes "mine" and "untouched by a person" the single
+ * question `applyBlockEdits` also asks.
+ *
+ * LISTS AND HEADINGS ARE OUT. A list container carries no words of its own,
+ * and a heading is a topic rather than a note — correcting "Thursday" inside
+ * one would be retitling a section on a mishearing.
+ */
+interface NoteBlock {
+  el: Y.XmlElement;
+  mine: boolean;
+}
+
+const NOT_A_NOTE = new Set(['bulletList', 'orderedList', 'heading']);
+
+function noteBlocks(ydoc: Y.Doc): NoteBlock[] {
+  const out: NoteBlock[] = [];
+  for (const el of prose.addressableBlocks(prose.getProseFragment(ydoc))) {
+    if (NOT_A_NOTE.has(el.nodeName)) continue;
+    out.push({ el, mine: prose.readBlockAuthor(el) === NOTES_AUTHOR_ID });
+  }
+  return out;
+}
+
 /** Every `Y.XmlText` under `el`, itself included, in reading order. */
 function collectTextNodes(el: Y.XmlElement, into: Y.XmlText[]): void {
   for (const child of el.toArray()) {
@@ -247,7 +272,7 @@ function runBlock(attributes: Record<string, unknown> | undefined): 'tag' | 'pen
  * at all, and a correction aimed at it never slides onto the note next door.
  */
 function sitesInItem(
-  item: NoteItem,
+  item: NoteBlock,
   phrase: string,
 ): { sites: Site[]; blocked: number; blockedByTag: number } {
   const nodes: Y.XmlText[] = [];
@@ -315,12 +340,7 @@ function sitesInItem(
  * or the note-taker hands them to the person and freezes. See
  * `applyNotesCorrection`.
  */
-export function correctNotesSection(
-  ydoc: Y.Doc,
-  heading: string | readonly string[],
-  ownership: NotesOwnership,
-  correction: SpokenCorrection,
-): CorrectionOutcome {
+export function correctNotesSection(ydoc: Y.Doc, correction: SpokenCorrection): CorrectionOutcome {
   const wrong = correction.wrong.trim();
   const right = correction.right.trim();
   if (!correctionPhraseUsable(wrong) || right.length === 0) {
@@ -328,19 +348,16 @@ export function correctNotesSection(
   }
   if (wrong.toLowerCase() === right.toLowerCase()) return { applied: 'none', reason: 'no-match' };
 
-  const fragment = prose.getProseFragment(ydoc);
-  const span = findNotesSection(fragment, heading);
-  if (!span) return { applied: 'none', reason: 'no-section' };
-  const items = itemsInSection(fragment, span);
-  const isAgent = classifyOwnership(items, ownership);
+  const items = noteBlocks(ydoc);
+  if (items.length === 0) return { applied: 'none', reason: 'no-section' };
 
-  type Hit = { item: NoteItem; sites: Site[]; blockedByTag: number };
+  type Hit = { item: NoteBlock; sites: Site[]; blockedByTag: number };
   const agentHits: Hit[] = [];
   const humanHits: Hit[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const { sites, blocked, blockedByTag } = sitesInItem(items[i]!, wrong);
+  for (const item of items) {
+    const { sites, blocked, blockedByTag } = sitesInItem(item, wrong);
     if (sites.length === 0 && blocked === 0) continue;
-    (isAgent[i] ? agentHits : humanHits).push({ item: items[i]!, sites, blockedByTag });
+    (item.mine ? agentHits : humanHits).push({ item, sites, blockedByTag });
   }
 
   const hits = agentHits.length > 0 ? agentHits : humanHits;
@@ -407,7 +424,7 @@ function reviseInPlace(
  */
 function proposeOnHumanNote(
   ydoc: Y.Doc,
-  item: NoteItem,
+  item: NoteBlock,
   site: Site,
   wrongLength: number,
   right: string,

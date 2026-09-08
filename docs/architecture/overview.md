@@ -204,7 +204,7 @@ family and moves nothing in the picture: it is the fan-out one level below
 two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `notes-section.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `notes-edit-parse.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
@@ -255,6 +255,25 @@ processes.
 picture: it is the check the server runs after a write, asserting the live doc
 holds no markdown syntax that should have become blocks. It is named here so the
 next reader knows a new `prose-*` module was placed rather than missed.
+
+`prose-identity.ts`, `prose-outline.ts` and `prose-batch.ts` join that same
+document-model tier, and together they are how an agent addresses a block
+rather than a region of text. `prose-identity.ts` is the leaf that names the
+two attributes a block can carry — its stable id, and the agent that wrote it.
+`prose-outline.ts` reads a document as a list of those ids with their headings
+and text, and installs the observer that drops the authorship attribute the
+moment a person edits the block. `prose-batch.ts` applies a list of scoped
+edits in one transaction, refusing to rewrite what the agent no longer owns and
+raising a suggestion instead. Server-side they are reached through
+`doc-outline-ops.ts`, which sits beside `doc-edit-ops.ts` in the services tier
+for the reason that module already gives: `doc-edit-ops.ts` was at the
+500-line bar, and the outline verbs are a family of their own.
+
+The note-taker is the first caller and deliberately not a privileged one. It
+holds no private write path into a document: it reads an outline and posts
+block edits through the same `DocStore` verbs the MCP tools expose, which is
+why the modules that used to give it one — a section finder, an ownership
+ledger, a whole-section merge planner — are gone rather than moved.
 
 ## The core flows
 
