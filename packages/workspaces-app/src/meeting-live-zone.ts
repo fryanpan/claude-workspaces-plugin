@@ -39,9 +39,10 @@
  * voice has actually been heard, and then only where the voice CHANGES — a
  * pill on every few words of one speaker is the engine's turn boundary
  * showing through again. A solo huddle's own name is noise (owner's call,
- * 2026-08-31).
+ * 2026-08-31). It reads through `speakerDisplayName`: a label carries a group.
  */
 
+import { speakerDisplayName } from '@claude-workspaces/core';
 import { createStreamHold } from './meeting-live-hold.ts';
 
 /** One transcript turn as the zone tracks it. */
@@ -255,7 +256,7 @@ export function createMeetingLiveZone(opts: {
     if (t.speaker !== undefined && voices.size >= 2 && t.speaker !== prev?.speaker) {
       const pill = document.createElement('span');
       pill.className = 'lz-speaker';
-      pill.textContent = names[t.speaker] ?? `Speaker ${t.speaker}`;
+      pill.textContent = speakerDisplayName(t.speaker, names);
       span.append(pill);
     }
     const parts = t.text.split('\n');

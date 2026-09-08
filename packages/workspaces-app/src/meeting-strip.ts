@@ -70,6 +70,7 @@ import {
   MEETING_AUDIO_ENCODING,
   MEETING_SAMPLE_RATE,
   type MeetingBotStatus,
+  type MeetingCaptureSource,
   type MeetingServerMessage,
   type MeetingUnavailableReason,
   type TranscriptionEngineName,
@@ -86,12 +87,16 @@ import {
   tuningPayload,
 } from './meeting-advanced.ts';
 import {
-  type MeetingCapture,
   type MeetingCaptureStart,
   type RoomAudioProcessing,
   startMeetingCapture,
 } from './meeting-audio.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
+import {
+  type CaptureSetResult,
+  openCaptureSet,
+  partialCaptureNote,
+} from './meeting-capture-set.ts';
 import { type ChooserState, createMeetingChooser } from './meeting-chooser.ts';
 import { type MeetingFeed, createMeetingFeed } from './meeting-feed.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
@@ -103,7 +108,11 @@ import {
   parseMeetingServerMessage,
   rollTranscript,
 } from './meeting-protocol.ts';
-import { type MeetingAudioSource, systemAudioOffered } from './meeting-source.ts';
+import {
+  COMBINED_ECHO_NOTE,
+  type MeetingAudioSource,
+  systemAudioOffered,
+} from './meeting-source.ts';
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
 import type { DocSpeakers } from './speaker-voices.ts';
 
@@ -176,13 +185,17 @@ export interface MeetingStripOpts {
    *  deterministic in tests. */
   interval?: (fn: () => void, ms: number) => () => void;
   openSocket?: (url: string) => MeetingSocket;
+  /**
+   * How ONE stream is opened. A mic + Mac-audio meeting calls it twice — see
+   * `meeting-capture-set.ts`, which is what the strip actually talks to.
+   */
   startCapture?: (opts: {
     onFrame: (pcm: Int16Array) => void;
     mode: CaptureMode;
     room?: RoomAudioProcessing;
     source?: MeetingAudioSource;
   }) => Promise<MeetingCaptureStart>;
-  /** Whether to offer "This Mac's audio". Defaults to asking the browser. */
+  /** Whether to offer the Mac Audio source. Defaults to asking the browser. */
   systemAudioOffered?: () => boolean;
   /**
    * Ask for the mic on mount, without a press — the Board's "Start a planning
@@ -452,7 +465,14 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   let state: StripState = { kind: 'idle' };
   let view: PopView = 'none';
   let turns: TranscriptTurn[] = [];
-  let capture: MeetingCapture | null = null;
+  /** Every stream this meeting opened, or null between meetings. */
+  let capture: (CaptureSetResult & { ok: true }) | null = null;
+  /**
+   * What the strip says while a meeting runs and nothing has been said yet:
+   * a stream that was refused, or the headphone note a two-stream meeting
+   * carries. Empty for every ordinary microphone meeting.
+   */
+  let startNote = '';
   let socket: MeetingSocket | null = null;
   let socketOpen = false;
   let stopClock: (() => void) | null = null;
@@ -472,8 +492,14 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * session nobody chose it for.
    */
   let mode: CaptureMode = opts.mode ?? DEFAULT_CAPTURE_MODE;
-  /** What the next capture opens; the chooser's pick, read at the press. */
-  let source: MeetingAudioSource = 'mic';
+  /**
+   * What the next capture ASKS for; the chooser's pick, read at the press.
+   * What it GOT is `liveSource`, and the two differ whenever a stream was
+   * refused — the record and the wire follow the second one.
+   */
+  let source: MeetingCaptureSource = 'mic';
+  /** The source actually running, settled once the streams are open. */
+  let liveSource: MeetingCaptureSource = 'mic';
   /** The auto-start was refused in the way a missing gesture is: the note in
    *  the strip is the tap that supplies one, and says so. Cleared by any
    *  press. */
@@ -636,6 +662,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     state: () => state,
     turns: () => turns,
     mode: () => mode,
+    startNote: () => startNote,
     names: () => names,
     liveBot,
     botFarewell,
@@ -735,7 +762,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       return;
     }
     mode = choose.chooseMode;
-    source = choose.chooseSource === 'system' ? 'system' : 'mic';
+    source = choose.chooseSource === 'mic+system' ? 'mic+system' : 'mic';
     closePop();
     void start(false);
   }
@@ -853,8 +880,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   }
 
   function releaseAudio(): void {
-    capture?.stop();
+    capture?.stopAll();
     capture = null;
+    startNote = '';
   }
 
   function closeSocket(): void {
@@ -972,7 +1000,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     lastMeetingId = null;
     tapToStart = false;
     setState({ kind: 'requesting' });
-    const started = await startCapture({
+    startNote = '';
+    const started = await openCaptureSet({
+      // Every stream this source names, opened in order — one for a
+      // microphone meeting, two for mic + Mac audio.
+      source,
       onFrame: (pcm) => {
         if (!socketOpen) return;
         socket?.send(pcm);
@@ -985,10 +1017,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // about to open.
       mode,
       ...(opts.room ? { room: opts.room } : {}),
-      ...(source === 'system' ? { source } : {}),
+      startCapture,
     });
     if (disposed || attempt !== generation) {
-      if (started.ok) started.capture.stop();
+      if (started.ok) started.stopAll();
       return;
     }
     if (!started.ok) {
@@ -998,7 +1030,18 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       setState({ kind: 'blocked', message: started.message });
       return;
     }
-    capture = started.capture;
+    capture = started;
+    // What is RUNNING, which is what the record and the wire have to name — a
+    // meeting that asked for two streams and got one is a one-stream meeting.
+    liveSource = started.source;
+    // A refused stream outranks the headphone note: the person needs to know
+    // half of what they asked for is missing before they need to know how to
+    // stop hearing the other half twice.
+    startNote =
+      partialCaptureNote(
+        started.refusals,
+        started.captures.map((c) => c.stream),
+      ) || (started.source === 'mic+system' ? COMBINED_ECHO_NOTE : '');
     // The board this surface is on. Reading it from the URL rather than
     // taking it as a prop keeps it the same board every other request from
     // this page names — the strip is mounted on a doc page, which is always
@@ -1016,8 +1059,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
           encoding: MEETING_AUDIO_ENCODING,
           mode,
           // Absent for the microphone, so an older server's frame is what it
-          // was; the record is the only thing the source changes.
-          ...(source === 'system' ? { source } : {}),
+          // was. `mic+system` is the one value that also changes the AUDIO
+          // frames behind this one — each carries a stream byte — so it names
+          // what actually opened, never what was asked for.
+          ...(liveSource !== 'mic' ? { source: liveSource } : {}),
           // Absent unless somebody said, so the server's default stays the
           // one place the room size is guessed.
           ...(opts.speakers !== undefined ? { speakers: opts.speakers } : {}),

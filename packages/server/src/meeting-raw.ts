@@ -49,7 +49,12 @@ import {
   writeSync,
 } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
-import { speakerDisplayName } from '@claude-workspaces/core';
+import {
+  MEETING_CAPTURE_SOURCES,
+  type MeetingCaptureSource,
+  describeCaptureSource,
+  speakerDisplayName,
+} from '@claude-workspaces/core';
 import {
   type MeetingRecord,
   type TranscriptTurn,
@@ -69,10 +74,21 @@ export type DocInfoResolver = (docId: string) => DocInfo | undefined;
 
 /**
  * Where the audio came from. A bot's audio never reaches this server;
- * `system` is the Mac's own output through Chrome's share picker, on the
- * same socket as a microphone and told apart only here.
+ * `system` is the Mac's own output through Chrome's share picker, and
+ * `mic+system` is BOTH on one socket — the meeting that hears the room and
+ * the call at once, with a `segment-N-<stream>.pcm` per side.
  */
-export type MeetingSource = 'mic' | 'bot' | 'system';
+export type MeetingSource = MeetingCaptureSource | 'bot';
+
+/** Every value `MeetingSource` can hold, for parsing a stored record. */
+export const MEETING_SOURCES: readonly MeetingSource[] = [...MEETING_CAPTURE_SOURCES, 'bot'];
+
+/** A stored source, or nothing — and nothing reads as the microphone. */
+export function parseMeetingSource(raw: unknown): MeetingSource | undefined {
+  return (MEETING_SOURCES as readonly string[]).includes(raw as string)
+    ? (raw as MeetingSource)
+    : undefined;
+}
 
 export interface MeetingJsonAudio {
   /** `mic` for the microphone; a per-participant id when a source has several. */
@@ -195,13 +211,19 @@ export function formatRawSegment(seg: RawSegmentInput): string {
   const facts = [
     `Engine: ${seg.engine}`,
     `Mode: ${seg.mode}`,
-    `Source: ${seg.source}`,
+    // In words as well as in the stored value: a two-stream meeting has to
+    // NAME both sources where a person reads the record, and "mic+system"
+    // alone does not say what the second one was.
+    `Source: ${seg.source}${seg.source === 'bot' ? '' : ` (${describeCaptureSource(seg.source)})`}`,
     seg.endedAt !== null
       ? `Ended: ${new Date(seg.endedAt).toISOString()}`
       : 'Ended: no recorded end (the server stopped mid-meeting)',
   ];
   if (seg.audio.length > 0) {
     const first = seg.audio[0] as MeetingJsonAudio;
+    // The file names carry the stream (`segment-2-system.pcm`), and
+    // `meeting.json` carries it as a field beside the byte count — a
+    // two-stream meeting lists one entry per stream here.
     facts.push(
       `Audio: ${seg.audio.map((a) => a.file).join(', ')} (${first.codec}, ${first.sampleRate} Hz, mono)`,
     );
@@ -407,7 +429,7 @@ export function flushRawSegments(args: {
       args.ended?.meetingId === record.meetingId
         ? args.ended.audio
         : audioOnDisk(dir, n, record.sampleRate);
-    const source: MeetingSource = record.source ?? 'mic';
+    const source: MeetingSource = parseMeetingSource(record.source) ?? 'mic';
     appended += formatRawSegment({
       n,
       startedAt: record.startedAt,

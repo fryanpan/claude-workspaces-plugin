@@ -56,6 +56,13 @@ export interface MeetingFeedDeps {
   turns(): TranscriptTurn[];
   /** What the live capture is listening for; a solo one gets no consent note. */
   mode(): CaptureMode;
+  /**
+   * What this recording has to say before any words arrive, over and above
+   * the consent reminder: a stream that was refused, or the headphone note a
+   * mic + Mac-audio meeting carries. Empty for an ordinary microphone
+   * meeting, which is what leaves the consent line exactly where it was.
+   */
+  startNote(): string;
   /** Engine label → what the person calls that voice. */
   names(): Record<string, string>;
   /** The bot's status while it will still act, or null. */
@@ -186,7 +193,12 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
     // to act on it is a question with no answer (Urgent-fixes ticket,
     // 2026-09-02).
     if (turns.length === 0) {
-      if (deps.mode() !== 'solo') showNote(RECORDING_CONSENT_NOTE, 'meeting-consent-note');
+      // A capture-specific line outranks the consent reminder: it is about
+      // THIS recording rather than about recording in general, and both
+      // cannot share the one line the strip has.
+      const note = deps.startNote();
+      if (note) showNote(note, 'meeting-consent-note');
+      else if (deps.mode() !== 'solo') showNote(RECORDING_CONSENT_NOTE, 'meeting-consent-note');
       return;
     }
     renderTurns(true);

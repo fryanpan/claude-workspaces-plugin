@@ -197,6 +197,13 @@ debounced snapshot of it.
 | --- | --- | --- |
 | **HTTP** | `server.ts`, `routes/**`, `middleware/**`, `shells.ts`, `request-admission.ts`, `request-attribution.ts`, `socket-handlers.ts` | The only code that knows about HTTP. Parse, admit, call one service, format. |
 | **Services / stores** | `doc-store.ts`, `tasks.ts` and the `task-*` stores, `review-items/**`, `home-pane.ts`, `share/**`, `auth/**`, the `meeting-*` and `notes-*` families, `sse.ts`, `activity.ts` | Owns durable state and orchestrates one change across stores and adapters. |
+
+`meeting-stream-set.ts` joins that services tier inside the `meeting-*`
+family and moves nothing in the picture: it is the fan-out one level below
+`meeting-protocol.ts`, opening an engine session per audio stream and folding
+two engines' independent turn numbering and speaker labels back into the one
+transcript a meeting keeps. The relay still owns the lifecycle; this owns only
+what two sessions collide on.
 | **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `notes-section.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
@@ -228,7 +235,7 @@ board's task-body editor, neither of which mounts a redline module. `recent-note
 changes none of the picture: it is one screenful of geometry that
 `meeting-live-zone.ts` owned until the zone crossed 500 lines, holding the
 live transcript still across the frame a settled chunk splits off on. Nothing
-but the zone imports it. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `notes-link-affordance.ts` joins the editor tier beside
+but the zone imports it. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `meeting-capture-set.ts` joins that family for the meeting that opens BOTH: it is the tier above one capture, opening each stream in turn and deciding what a meeting runs on when only one of the two doors was answered. It changes no layer — it is a view-tier module calling the same `startMeetingCapture` a single-source meeting always did — and it is named here because the strip now talks to it rather than to the capture directly. `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing
 a link edits the stored doc and calls the board. `core` is three tiers: wire types, the document model (`prose-*.ts`,
@@ -237,6 +244,12 @@ a link edits the stored doc and calls the board. `core` is three tiers: wire typ
 `note-suggestion.ts`, which is how a note's written "did you mean this row?"
 is spelled — server writes it, browser reads it back, one definition so the
 two cannot drift into a suggestion nobody can accept).
+
+`meeting-streams.ts` belongs to core's wire-types tier beside `meeting.ts`, and
+is there for the usual core reason: a two-stream meeting's group names and
+namespaced speaker labels are rendered by the browser, written by the server
+and read back by the notes composer, so one spelling has to serve three
+processes.
 
 `prose-integrity.ts` belongs to that document-model tier and does not move the
 picture: it is the check the server runs after a write, asserting the live doc

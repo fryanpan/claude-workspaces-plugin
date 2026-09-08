@@ -129,6 +129,24 @@ describe('the provisional live zone', () => {
     ).toEqual(['Dana', 'Speaker B']);
   });
 
+  it('a two-stream meeting’s pills say which side of the call a voice is on', () => {
+    // Both engines hand out "A", so the pill has to carry the group or the
+    // room and the call read as one person talking to themselves.
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'in the room.', final: true, speaker: 'room:A' });
+    zone.onTurn({ turn: 1, text: 'on the call.', final: true, speaker: 'remote:A' });
+    expect(
+      [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')].map((p) => p.textContent),
+    ).toEqual(['Room Speaker A', 'Remote Speaker A']);
+    // And a name keeps the group beside it, because where somebody is
+    // sitting is the fact the two streams were separated to preserve.
+    zone.setNames({ 'remote:A': 'Dana' });
+    expect(
+      [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')].map((p) => p.textContent),
+    ).toEqual(['Room Speaker A', 'Dana (Remote)']);
+  });
+
   it('composing splits the tick’s lines off with nothing drawn around them, and the rest streams on', () => {
     const zone = createMeetingLiveZone({ parent, now });
     zone.begin(now());

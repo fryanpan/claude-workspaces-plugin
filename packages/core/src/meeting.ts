@@ -20,6 +20,8 @@
  * thinks ended. There is one fact here and one owner of it.
  */
 
+import type { MeetingCaptureSource, MeetingGroup } from './meeting-streams.ts';
+import { groupLabel, parseCaptureSource, parseNamespacedSpeaker } from './meeting-streams.ts';
 import type { MeetingTimingMark } from './meeting-timing.ts';
 import { MAX_ROOM_SPEAKERS, MIN_ROOM_SPEAKERS, parseRawTuning } from './meeting-tuning.ts';
 
@@ -195,8 +197,12 @@ export type MeetingClientMessage =
        * microphone — every client built before the choice existed. `system`
        * is the Mac's own output, handed to the page by Chrome's share
        * picker; it rides the same pipeline and differs only in the record.
+       * `mic+system` is BOTH at once, and it is the one value that changes
+       * what the bytes on this socket mean: every audio frame carries a
+       * stream byte in front of it (`tagAudioFrame`), because one meeting is
+       * now carrying two engine sessions. See `meeting-streams.ts`.
        */
-      source?: 'mic' | 'system';
+      source?: MeetingCaptureSource;
       /**
        * Which transcription engine to open, when the person chose one.
        * Absent means the server's default — AssemblyAI wherever both are
@@ -264,7 +270,17 @@ export const MAX_SPEAKER_NAME = 60;
  * the strip, the record and the notes never disagree about it.
  */
 export function speakerDisplayName(label: string, names: Readonly<Record<string, string>>): string {
-  return names[label] ?? `Speaker ${label}`;
+  const named = names[label];
+  // A bare label is a single-stream meeting's, and reads exactly as it always
+  // did — which is every meeting recorded before two streams existed.
+  const ns = parseNamespacedSpeaker(label);
+  if (!ns) return named ?? `Speaker ${label}`;
+  // A two-stream meeting keeps the group on the name even after the voice has
+  // one, because WHERE somebody is sitting is the fact the two streams were
+  // separated to preserve: "Dana (Remote)" is what makes a transcript line
+  // answer Bryan's question about who is in the room.
+  const where = groupLabel(ns.group);
+  return named ? `${named} (${where})` : `${where} Speaker ${ns.base}`;
 }
 
 /**
@@ -304,6 +320,13 @@ export type MeetingServerMessage =
       text: string;
       final: boolean;
       speaker?: string;
+      /**
+       * Which half of a two-stream meeting these words came from — the
+       * people in the room, or the people coming out of the speakers.
+       * Absent on every single-stream meeting, where there is only one
+       * answer and stating it would be noise.
+       */
+      group?: MeetingGroup;
       /** Stage marks for this frame, present only on a timing meeting. */
       timing?: MeetingTimingMark;
     }
@@ -379,6 +402,7 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
     if (m.encoding !== MEETING_AUDIO_ENCODING) return null;
     const speakers = parseRoomSpeakers(m.speakers);
     const engine = parseEngineName(m.engine);
+    const source = parseCaptureSource(m.source);
     const tuning = parseRawTuning(m.tuning);
     // Same shape as a speaker name: trimmed, bounded, dropped when empty.
     const participant =
@@ -407,9 +431,9 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       // asking for it.
       ...(m.timing === true ? { timing: true } : {}),
       ...(participant ? { participant } : {}),
-      // Only the one other value the client can mean; anything else is the
-      // microphone, which is what absent has always meant.
-      ...(m.source === 'system' ? { source: 'system' as const } : {}),
+      // A value this build knows, or nothing — and nothing is the microphone,
+      // which is what absent has always meant.
+      ...(source !== undefined && source !== 'mic' ? { source } : {}),
     };
   }
   return null;
