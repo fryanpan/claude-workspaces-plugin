@@ -106,8 +106,10 @@ async function defaultFetchJson(url: string, init?: RequestInit): Promise<unknow
 export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
   const { docId, root, user, canWrite } = opts;
   const fetchJson = opts.fetchJson ?? defaultFetchJson;
-  const docUrl = api(`docs/${encodeURIComponent(docId)}`);
-  // The RECORD, not the page. See `docJsonUrl`.
+  // POST ONLY — the press hangs `/review-request` off this. A GET here gets
+  // the editor's HTML page, which is the bug `docJsonUrl` exists to close.
+  const docPostBase = api(`docs/${encodeURIComponent(docId)}`);
+  // The RECORD. Same path, and only the query asks for data.
   const docReadUrl = docJsonUrl(docId);
 
   const float = document.createElement('button');
@@ -200,7 +202,7 @@ export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
     error.textContent = '';
     busy = true;
     render();
-    void fetchJson(`${docUrl}/review-request`, {
+    void fetchJson(`${docPostBase}/review-request`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ author: user }),

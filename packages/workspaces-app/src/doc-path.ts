@@ -154,6 +154,13 @@ export function api(sub: string, workspaceId?: string | null): string {
  * So it is ONE builder, for the reason `api` is one builder: a caller that
  * spells the path by hand is a caller that can forget the half that makes it
  * answer data.
+ *
+ * Docs are not the only merged address. The board's own record, its Home brief
+ * and its task list share their pages' paths the same way, and those four
+ * readers still spell the query by hand — `board/board-app.ts`,
+ * `board/board-home-region.ts`, and two in `packages/mcp/src/tools/` that
+ * cannot import this module at all. They are correct today; they are the
+ * places to look first if the same silence turns up on the board.
  */
 export function docJsonUrl(docId: string, workspaceId?: string | null): string {
   return `${api(`docs/${encodeURIComponent(docId)}`, workspaceId)}?format=json`;

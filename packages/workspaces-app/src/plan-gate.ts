@@ -150,9 +150,10 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
   const subscribe = opts.subscribe ?? defaultSubscribe;
   const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms) as unknown as number);
   const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h));
-  const docUrl = api(`docs/${encodeURIComponent(docId)}`);
-  // The RECORD, not the page: the same path serves the editor's HTML shell
-  // without this query. See `docJsonUrl`.
+  // POST ONLY — the two presses hang their verbs off this. A GET here gets
+  // the editor's HTML page, which is the bug `docJsonUrl` exists to close.
+  const docPostBase = api(`docs/${encodeURIComponent(docId)}`);
+  // The RECORD. Same path, and only the query asks for data.
   const docReadUrl = docJsonUrl(docId);
 
   const float = document.createElement('button');
@@ -321,7 +322,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
     // `requested` is disabled above and files nothing — one ask, one thread.
     if (face === 'make') {
       press(() =>
-        fetchJson(`${docUrl}/plan-request`, {
+        fetchJson(`${docPostBase}/plan-request`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ author: user }),
@@ -331,7 +332,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
     }
     if (face !== 'approve') return;
     press(async () => {
-      const res = (await fetchJson(`${docUrl}/plan`, {
+      const res = (await fetchJson(`${docPostBase}/plan`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ state: 'approved', author: user }),
