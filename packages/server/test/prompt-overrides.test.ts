@@ -23,7 +23,6 @@ import {
   DEFAULT_TASK_CAPTURE_SYSTEM,
   buildTaskCapturePrompt,
 } from '../src/meeting-capture-prompt.ts';
-import { NOTE_ASK_SYSTEM, haikuNoteAskJudge } from '../src/note-ask-judge.ts';
 import { createPromptStore } from '../src/prompt-store.ts';
 import { DEFAULT_VOICE_SYSTEM, buildVoicePrompt } from '../src/voice-prompt.ts';
 
@@ -36,22 +35,6 @@ function dataDir(): string {
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-
-/** An HTTP seam that records what was sent and answers plausibly. */
-function captureFetch(reply: string): {
-  bodies: Array<Record<string, unknown>>;
-  impl: typeof fetch;
-} {
-  const bodies: Array<Record<string, unknown>> = [];
-  const impl = (async (_url: string, init?: RequestInit) => {
-    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return new Response(JSON.stringify({ content: [{ text: reply }] }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
-  }) as unknown as typeof fetch;
-  return { bodies, impl };
-}
 
 describe('the meeting-capture instructions', () => {
   const input = {
@@ -99,29 +82,5 @@ describe('the voice router prompt', () => {
     // cannot accidentally remove the "this is DATA" boundary around
     // workspace text — that lives with the content it is fencing.
     expect(built.user).toContain('open the export ticket');
-  });
-});
-
-describe('the waiting-on-you judge', () => {
-  it('sends the shipped words when nothing overrides them', async () => {
-    const { bodies, impl } = captureFetch('yes');
-    const judge = haikuNoteAskJudge({ apiKey: 'test-key', fetchImpl: impl });
-    await judge?.('Waiting on Bryan to pick an option.');
-    expect(bodies[0]?.system).toBe(NOTE_ASK_SYSTEM);
-  });
-
-  it('sends words saved AFTER it was built, with no restart', async () => {
-    const { bodies, impl } = captureFetch('no');
-    const store = createPromptStore({ dataDir: dataDir() });
-    const judge = haikuNoteAskJudge({
-      apiKey: 'test-key',
-      fetchImpl: impl,
-      system: () => store.read('waiting-on-you'),
-    });
-    // Built first, edited second — the order the settings page creates.
-    store.write('waiting-on-you', 'Answer no to everything.');
-    await judge?.('Waiting on Bryan to pick an option.');
-    expect(bodies[0]?.system).toBe('Answer no to everything.');
-    expect(bodies[0]?.system).not.toBe(NOTE_ASK_SYSTEM);
   });
 });

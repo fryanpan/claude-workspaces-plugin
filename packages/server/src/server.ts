@@ -7,6 +7,7 @@ import {
   agentIdForName,
   attachmentIdOf,
   contentKind,
+  isReviewPayloadGated,
   parseThreadReviewItemId,
   pendingDeclaration,
 } from '@claude-workspaces/core';
@@ -864,13 +865,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   //
   // `pendingDeclaration` is the house predicate, not a second rule written
   // here: an OPEN thread, its newest un-withdrawn review payload, unanswered.
-  // A HELD payload is skipped for the same reason a held ticket item is left
-  // out of `open` — nobody was shown it, so it cannot excuse the row.
+  // A GATED payload — held, or still being judged — is skipped for the same
+  // reason a gated ticket item is left out of `open` (`isReviewItemOnQueue`):
+  // nobody was shown it, so it cannot excuse the row. `isReviewPayloadGated`
+  // is the queue's own spelling of that; this used to test `held` alone and
+  // count an item mid-judgement as open.
   taskStore.setThreadAskReader((taskId) => {
     let open = 0;
     for (const thread of docStore.listThreads(`task:${taskId}`, { status: 'open' })) {
       const pending = pendingDeclaration(thread);
-      if (pending && pending.review?.judge?.verdict !== 'held') open += 1;
+      if (pending?.review && !isReviewPayloadGated(pending.review)) open += 1;
     }
     return open;
   });
@@ -1014,7 +1018,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
       : {}),
-    ...(opts.noteAskJudge !== undefined ? { noteAskJudge: opts.noteAskJudge } : {}),
   });
   const { leadPresence, readyNudger, stallNudger } = stallWiring;
 

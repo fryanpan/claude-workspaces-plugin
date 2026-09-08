@@ -21,6 +21,10 @@
  *
  *   stalled     rows that should be moving and are not
  *   unfiled     rows waiting on a person with nothing on that person's queue
+ *   waiting     rows waiting on a person WITH the ask on that person's queue,
+ *               each with the address of the item — not a finding, recorded
+ *               so that a wait is always traceable to the item that excuses
+ *               it (a wait that is not is `unfiled`)
  *   unreadable  rows the gate could not judge
  *   held        review items the quality gate has held longer than the
  *               board's own quiet window — an ask on nobody's queue
@@ -40,6 +44,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { FiledItemAddress } from './keep-moving.ts';
 import type { StallSnapshot } from './stall-nudge.ts';
 
 /** Default: four hours, the cadence the old report ran on. */
@@ -60,6 +65,8 @@ export interface KeepMovingVerdict {
   /** Row ids, quietest first. */
   stalled: string[];
   unfiled: string[];
+  /** Rows excused by a filed ask, and the address of every ask excusing each. */
+  waiting: Array<{ id: string; waitingOn: FiledItemAddress[] }>;
   unreadable: string[];
   /** Held review items older than the window — the item ids. */
   held: string[];
@@ -94,6 +101,7 @@ export function keepMovingVerdictFor(
     .map((h) => h.reviewItemId);
   const stalled = snapshot.stalled.map((r) => r.id);
   const unfiled = snapshot.unfiled.map((r) => r.id);
+  const waiting = (snapshot.waiting ?? []).map((r) => ({ id: r.id, waitingOn: [...r.waitingOn] }));
   const unreadable = snapshot.undetermined.map((r) => r.id);
   const failing =
     stalled.length > 0 ||
@@ -108,6 +116,7 @@ export function keepMovingVerdictFor(
     considered: snapshot.considered,
     stalled,
     unfiled,
+    waiting,
     unreadable,
     held,
     escalated: opts.escalated,
@@ -156,7 +165,8 @@ export class KeepMovingRecorder {
       this.say(
         `[keep-moving] ws=${verdict.workspaceId} verdict=${verdict.verdict} ` +
           `considered=${verdict.considered} stalled=${verdict.stalled.length} ` +
-          `unfiled=${verdict.unfiled.length} unreadable=${verdict.unreadable.length} ` +
+          `unfiled=${verdict.unfiled.length} waiting=${verdict.waiting.length} ` +
+          `unreadable=${verdict.unreadable.length} ` +
           `held=${verdict.held.length} escalated=${verdict.escalated}`,
       );
     }

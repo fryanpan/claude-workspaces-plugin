@@ -12,9 +12,9 @@ today's code fails is flagged.
   (status, dependency edges, a filed item's address, a schedule rule), and
   measure quiet time from the newest of status change, board event, thread
   activity and Activity note.
-- **Must never:** read prose to decide a bucket. *Fails today* — the
-  `blocked-on-owner-unfiled` reading comes from `note-ask.ts`; removed in
-  step 2.
+- **Must never:** read prose to decide a bucket. A row's wait is declared
+  by the filed item it carries the address of (`waitingOn`), never read out
+  of a note (step 2).
 - **Measured by:** its unit tests, and the verdict's `unfiled` line reading
   zero on a board where every waiting row carries an item address.
 
@@ -84,7 +84,7 @@ today's code fails is flagged.
 
 ## `note-ask.ts` + `note-ask-judge.ts` — *removed in step 2*
 
-- No criteria: a row's waiting state is declared, so there is nothing to
-  read. Until removal, its measurement is the count of `unfiled` findings
-  whose row carried a filed item the reader had missed — every one is a
-  false wake.
+- Gone, with the `waiting-on-you` prompt. A row's waiting state is
+  declared, so there is nothing to read. The measurement that stands in
+  its place is the verdict's `waiting` line: every excused row names the
+  item excusing it, so a wait with no address cannot exist.

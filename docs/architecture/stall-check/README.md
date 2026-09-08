@@ -41,14 +41,21 @@ item is already on their queue and is never re-announced.
 
 Approved 2026-09-08, each step one PR, no stopgaps.
 
-1. **Measurement is internal** (`keep-moving-verdict.ts`, this PR). A verdict
+1. **Measurement is internal** (`keep-moving-verdict.ts`, PR 801). A verdict
    per board on a fixed cadence, off the same snapshot the wake reads,
    persisted, read from `GET /workspaces/<id>/keep-moving` and the log.
    Appears on no board. The box cron it replaced posted 404s for nine days
    before anyone noticed.
-2. **"Waiting on a person" is declared, not inferred.** A row waiting on a
-   person carries the address of its filed item, wherever it was filed. The
-   note reader (`note-ask.ts`) and its Haiku confirmation are removed.
+2. **"Waiting on a person" is declared, not inferred** (this PR). A row
+   waiting on a person carries the address of every filed item excusing it —
+   a ticket item, or a comment-borne item on the ticket's thread or a doc
+   the row links — and whether an item still excuses the row is the Home
+   queue's own predicate (`isReviewItemOnQueue`, `pendingDeclaration`), so a
+   held, answered, withdrawn or reader-asked-back item excuses nothing. A
+   note saying "waiting on Bryan" with nothing filed is a plain stall to the
+   lead. The note reader (`note-ask.ts`), its Haiku confirmation and the
+   `waiting-on-you` prompt are gone; the snapshot and the verdict carry a
+   `waiting` list so every excused wait is traceable to its item.
 3. **Escalation is on liveness only.** The board files past the lead when no
    session on the board is alive — no board write and no heartbeat in the
    window — to Team Lead first. The anchor mask, settle and cooldown go with
@@ -61,7 +68,9 @@ Approved 2026-09-08, each step one PR, no stopgaps.
 `GET /workspaces/<id>/keep-moving` returns the latest verdict and a week of
 history. Each verdict is PASS or FAIL with the rows behind it: `stalled`,
 `unfiled`, `unreadable`, `held` (items past the window) and `escalated` (items
-the board filed to the owner in the last day). The target is PASS on every
+the board filed to the owner in the last day), plus `waiting` — the rows a
+filed item excuses, each with the item's address — which is a record rather
+than a finding. The target is PASS on every
 run and `escalated` at zero. The log line is
 `[keep-moving] ws=<id> verdict=PASS|FAIL …` with the same counts.
 `CW_KEEP_MOVING_HOURS` sets the cadence; the default is four.

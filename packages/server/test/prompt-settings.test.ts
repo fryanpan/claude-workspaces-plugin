@@ -122,7 +122,6 @@ describe('the prompt store', () => {
       'thread-summary',
       'review-item-criteria',
       'effort-estimate',
-      'waiting-on-you',
       'voice-router',
     ]);
     // Every default is real text, not an empty string somebody forgot to
@@ -162,13 +161,13 @@ describe('the prompt routes', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('lists the seven with a purpose apiece and no prompt text', async () => {
+  it('lists the six with a purpose apiece and no prompt text', async () => {
     const res = await local('/api/prompts');
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       prompts: Array<{ id: string; name: string; purpose: string; editable: boolean }>;
     };
-    expect(body.prompts).toHaveLength(7);
+    expect(body.prompts).toHaveLength(6);
     for (const row of body.prompts) {
       expect(row.name.length).toBeGreaterThan(0);
       expect(row.purpose.length).toBeGreaterThan(0);

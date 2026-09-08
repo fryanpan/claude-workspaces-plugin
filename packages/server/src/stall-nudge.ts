@@ -82,7 +82,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { ParallelismCapSummary } from './ready-nudge.ts';
-import type { HeldItemRow, StallUndeterminedRow, StalledRow } from './stall-gate.ts';
+import type { HeldItemRow, StallUndeterminedRow, StalledRow, WaitingRow } from './stall-gate.ts';
 
 /**
  * How long a row must stay quiet before the wake says it AGAIN.
@@ -132,6 +132,10 @@ export interface StallSnapshot {
   stalled: readonly StalledRow[];
   /** Rows waiting on a person with no question filed where they would see it. */
   unfiled: readonly StalledRow[];
+  /** Rows waiting on a person with the question filed, by address. Not a
+   *  finding and never woken over; carried so the verdict and the escalation
+   *  can check the ask. Absent when none, the same as empty. */
+  waiting?: readonly WaitingRow[];
   /** THE DENOMINATOR: how many open rows the gate examined. */
   considered: number;
   /** Rows the gate could not evaluate. Neither stalled nor healthy. */

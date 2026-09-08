@@ -324,17 +324,14 @@ describe('a told row that has not moved escalates to the reader', () => {
     expect(escalations.filedCount()).toBe(0);
   });
 
-  it('escalates an unfiled ask its row keeps restating, whose silence is seconds', () => {
+  it('escalates an unfiled ask on the same clock as any other row', () => {
     const a = make('Decide which of the two writers stays');
     const told = toldMap([[a.id, now - ESCALATE_MS - 60_000]]);
-    // What the gate hands over for a `blocked-on-owner-unfiled` row whose ask
-    // lives in its notes: the agent restated it this minute, so `quietMs` is
-    // seconds, while the ask nobody filed is hours old. The hours are the
-    // finding, and `stuckMs` is where the gate puts them.
+    // A `blocked-on-owner-unfiled` row is judged on its quiet time and nothing
+    // else. There used to be a second clock (`stuckMs`) for an ask read out of
+    // the row's notes; a wait is declared now, so there is nothing to read.
     escalations.onBoard(
-      board(wsId, {
-        unfiled: [{ ...row(a, 'blocked-on-owner-unfiled', 30_000), stuckMs: 3 * 60 * 60_000 }],
-      }),
+      board(wsId, { unfiled: [row(a, 'blocked-on-owner-unfiled', 3 * 60 * 60_000)] }),
       told,
       now,
     );

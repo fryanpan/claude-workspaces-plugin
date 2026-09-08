@@ -38,11 +38,11 @@
  * two incompatible actions in it. It runs on the same clock as `stalled`,
  * for the reason given where the gate is applied below: an ask that was
  * created a minute ago is one the lead may well be in the middle of filing.
- * A row reaches it three ways — a person owns it, its band is the owner's own
- * queue, or its own NOTES say the agent is waiting on a person and nothing
- * was filed (`note-ask.ts`). The third is the one the board's fields cannot
- * see, and the clock for it is the longer of the row's silence and the ask's
- * own age, because posting the note is itself what moves the row.
+ * A row reaches it two ways — a person owns it, or its band is the owner's
+ * own queue — and nothing else: the row's prose is never read for a wait
+ * (rebuild step 2). A row that IS legitimately waiting carries the address
+ * of its filed item, and the verdict lists those rows too (`waiting`) so a
+ * later reader can check the ask rather than trust the bucket.
  *
  * `undetermined` is the load-bearing one, and it is the same argument
  * `ready-gate.ts` makes: a row whose review items cannot be parsed answers
@@ -53,7 +53,7 @@
  */
 import {
   type EventRow,
-  type NoteAskSeam,
+  type FiledItemAddress,
   type ReviewItemRow,
   type TaskRow,
   classifyOpenTasks,
@@ -131,19 +131,16 @@ export interface StalledRow {
   /** How long since anything touched the row — a transition, an edit, or a
    *  comment on its discussion. */
   quietMs: number;
-  /**
-   * How long the row has been the FINDING it is, on the clock its own bucket
-   * is judged by — absent when that is `quietMs`, which is every bucket but
-   * one.
-   *
-   * The exception is a `blocked-on-owner-unfiled` row whose ask lives in its
-   * notes. Posting a note touches the row, so `quietMs` is near zero for an
-   * agent that restates "waiting on Bryan" every turn, while the thing being
-   * reported — an ask nobody has filed — is hours old (`unfiledQuietMs`).
-   * A reader of `quietMs` alone would conclude such a row was moving; the
-   * escalation does read it that way and needs the other number.
-   */
-  stuckMs?: number;
+}
+
+/** A row legitimately waiting on a person: the ask is filed, and this is
+ *  where. Not a finding — the reader has it on their queue. */
+export interface WaitingRow {
+  id: string;
+  title: string;
+  /** Every open item filed for the row, newest first. Never empty: a row
+   *  with none is `unfiled`, not waiting. */
+  waitingOn: FiledItemAddress[];
 }
 
 /** A row the gate could not evaluate. */
@@ -157,6 +154,9 @@ export interface StallVerdict {
   stalled: StalledRow[];
   /** Rows waiting on a person with no question filed where they would see it. */
   unfiled: StalledRow[];
+  /** Rows waiting on a person WITH the question filed — by address. Listed
+   *  so the wait is checkable, not so anyone is woken. */
+  waiting: WaitingRow[];
   /** THE DENOMINATOR: how many open rows were examined. Stated so an empty
    *  `stalled` reads as "nine rows, all accounted for" rather than as an
    *  empty board. */
@@ -235,17 +235,6 @@ export interface EvaluateStallsInput {
    */
   parallelismCap?: number;
   priorityOrder?: readonly string[];
-  /**
-   * Reads a row's own notes for an ask to a person that was never filed —
-   * `NoteAskClassifier` in `note-ask.ts`. Absent means notes are read only as
-   * activity, which is what every caller did before 2026-09-04 and what the
-   * CLI report still does unless it is given one.
-   *
-   * A row it flags is `blocked-on-owner-unfiled` like any other, so it needs
-   * no new list and no new bucket: the lead's action is the same one — file
-   * the ask where the person reads.
-   */
-  noteAsk?: NoteAskSeam;
 }
 
 /**
@@ -270,7 +259,6 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     quietMs,
     input.bands,
     input.threadActivity,
-    input.noteAsk,
   );
 
   // Which runnable rows the cap leaves out of reach — see `parallelismCap` on
@@ -293,6 +281,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
 
   const stalled: StalledRow[] = [];
   const unfiled: StalledRow[] = [];
+  const waiting: WaitingRow[] = [];
   const undetermined: StallUndeterminedRow[] = [];
   for (const row of rows) {
     // Before every other verdict, deliberately: an unreadable review array is
@@ -337,45 +326,25 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // nothing stalled in any of them, its unfiled count walking 1→2→3→2→1.
     //
     // This clock belongs to the WAKE and to nothing else. `classifyOpenTasks`
-    // is unchanged, so the keep-moving report still counts every unfiled ask
+    // is unchanged, so the keep-moving verdict still counts every unfiled ask
     // however fresh — there the question is whether the protocol is being
     // followed right now, and a young violation is still a violation.
-    //
-    // For a row whose ask was found IN A NOTE the clock is the longer of the
-    // two ages (`unfiledQuietMs`), and that is the half of this fix the
-    // bucket alone would not have delivered. Posting a note bumps the row's
-    // `updatedAt`, so an agent that restates "waiting on Bryan" every turn
-    // keeps `sinceActivityMs` at zero forever and would never cross this
-    // gate — the note's own time rescuing the row from the very finding the
-    // note is evidence for.
-    else if (row.bucket === 'blocked-on-owner-unfiled' && unfiledQuietMs(row, input.now) > quietMs)
-      unfiled.push({ ...named, stuckMs: unfiledQuietMs(row, input.now) });
+    else if (row.bucket === 'blocked-on-owner-unfiled' && row.sinceActivityMs > quietMs)
+      unfiled.push(named);
+    // A filed wait, by address. Not gated on the clock: it is not a finding.
+    else if (row.bucket === 'blocked-on-owner' && row.waitingOn && row.waitingOn.length > 0)
+      waiting.push({ id: row.id, title: row.title, waitingOn: row.waitingOn });
   }
   // `classifyOpenTasks` already sorts by silence, longest first, and both
   // lists inherit that order — the row at the top is the one to start with.
   return {
     stalled,
     unfiled,
+    waiting,
     considered: rows.length,
     undetermined,
     beyondCapacity: beyond.size,
   };
-}
-
-/**
- * How long this row has been waiting on a person with nothing filed.
- *
- * The row's ordinary silence, or the age of the unfiled ask its notes carry,
- * whichever is LONGER. The grace window is preserved either way — a freshly
- * posted ask is one the lead may be in the middle of filing — while a note
- * that keeps being restated can no longer hold the clock at zero.
- */
-function unfiledQuietMs(
-  row: { sinceActivityMs: number; askedInNoteAt?: number },
-  now: number,
-): number {
-  if (row.askedInNoteAt === undefined) return row.sinceActivityMs;
-  return Math.max(row.sinceActivityMs, now - row.askedInNoteAt);
 }
 
 /**

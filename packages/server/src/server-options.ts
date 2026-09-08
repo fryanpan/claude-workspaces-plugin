@@ -24,7 +24,6 @@ import type { EffortEstimator } from './effort-estimator.ts';
 import type { GoogleOauthApp, RefreshTokenVault } from './google-oauth.ts';
 import type { MeetingNotesOptions } from './meeting-notes.ts';
 import type { CfAccessOptions } from './middleware/cf-access.ts';
-import type { NoteAskJudge } from './note-ask.ts';
 import type { PluginRefresher } from './plugin-refresh.ts';
 import type { PromptStore } from './prompt-store.ts';
 import type { PushFetch } from './push-notify.ts';
@@ -293,16 +292,6 @@ export interface ServerOptions {
    */
   reviewJudge?: ReviewJudge;
   /**
-   * Confirms that a task note the deterministic prefilter flagged really does
-   * say the agent is waiting on a person, so the stall loop can call the row
-   * `blocked-on-owner-unfiled` on the strength of its own prose
-   * (`note-ask.ts`). **No default**, the same seam rule as the review judge:
-   * omitting it leaves the prefilter deciding alone and nothing that merely
-   * spins a server up reaches the network. `bin.ts` constructs the real one
-   * (`haikuNoteAskJudge`); tests pass a stub.
-   */
-  noteAskJudge?: NoteAskJudge;
-  /**
    * The words this server's prompts run on, and the settings page's writes.
    *
    * UNLIKE the judges above this one HAS a default: `createServer` builds a
@@ -310,7 +299,7 @@ export interface ServerOptions {
    * reads a file and never reaches the network, and the settings page has to
    * answer on a server somebody spun up in a test exactly as it does in prod.
    * `bin.ts` passes the process's own store so the notes composer, the
-   * capture extractor, the note-ask judge and the routes all read one
+   * capture extractor and the routes all read one
    * instance and the migration off `notes-prompt.md` is announced once.
    */
   promptStore?: PromptStore;

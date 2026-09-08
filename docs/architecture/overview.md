@@ -55,7 +55,7 @@ flowchart TB
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
-    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · note-ask · keep-moving<br/>keep-moving-verdict"]
+    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · client-release.ts · plugin-release.ts · sentry.ts"]
@@ -91,13 +91,13 @@ flowchart TB
 words this server sends to a model is one row of `prompt-catalog.ts`, and
 `prompt-store.ts` keeps whatever the owner has rewritten in
 `<dataDir>/prompts.json`. Each caller — the notes composer, the meeting
-capture extractor, the note-ask judge, the voice router — takes its
+capture extractor, the voice router — takes its
 instructions as a **thunk** and calls it per tick, so an edit made on
 `/settings/prompts` reaches the next model call without a restart or a
 deploy. The shipped default for each stays beside the code that builds the
 rest of its message (`notes-prompt-store.ts`, `meeting-capture-prompt.ts`,
 `voice-prompt.ts`, `core/summary-prompt.ts`), and the catalog imports them;
-the store never holds a default, only an override. Two of the seven are
+the store never holds a default, only an override. Two of the six are
 fields on a **board** rather than on the server and keep being written
 through `PUT /api/workspaces/<id>/settings` — `routes/prompts.ts` says so
 with `scope` rather than serving them twice, and the client hides the split.

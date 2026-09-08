@@ -25,7 +25,6 @@ flowchart TB
   W --> RN["ready-nudge.ts + ready-gate.ts<br/>the ready-work half"]
   KM --> G["stall-gate.ts<br/>stalled · unfiled · undetermined"]
   W --> G
-  G --> NA["note-ask.ts + note-ask-judge.ts<br/>ask prefilter, then Haiku confirmation"]
   G --> RJ["review-judge.ts<br/>Haiku judge (prompt in core)"]
   G --> N["stall-nudge.ts<br/>stamps · told-times · wakes"]
   LP["lead-presence.ts<br/>is the seat still listening"] --> N
@@ -107,47 +106,24 @@ clock without lighting up every board it is attached to. The board-level
 ready-idle clock (`ready-nudge.ts`) ignores notes on purpose — that wake
 exists to catch a session that keeps talking without moving anything.
 
-**Except a note that says the agent is waiting on a PERSON.** That is not
-movement, it is an unfiled ask wearing movement's clothes: three rows waited
-hours on 2026-09-04 while their end-of-turn notes said "Waiting on Bryan: …"
-and "parked on Bryan's (a) / (b) / (c)", nothing was filed, and the loop saw
-an agent-owned row under a dispatching band and called it ordinary quiet work
-the lead had already been told about. Such a row is now
-`blocked-on-owner-unfiled` with `unfiledAsk`, so it joins the `unfiled` list
-on both the report path and the wake path, and the lead is re-woken because a
-row that comes back under a different BUCKET is news. The reading is the
-row's NEWEST note — a later note reporting progress means the agent moved on
-— and the wake's clock is then the longer of the row's silence and the age of
-the ask, walked back through the unbroken run of notes that say the same
-thing. Without that second half nothing would ever fire: posting a note bumps
-`updatedAt`, so an agent restating the same ask each turn holds the quiet
-clock at zero forever.
-
-Detection is two stages and the second only ever narrows the first
-(`note-ask.ts`). A deterministic prefilter reads the note for a waiting phrase
-(waiting on, parked on, blocked on, needs, ready for) whose OBJECT is a
-person: a name the board supplied, an object pronoun, or a possessive plus an
-act — "your read", "his call", "their sign-off". The object test is what
-separates an ask from ordinary work, and it is not a refinement but the
-finding itself: "any waiting phrase anywhere AND any person word anywhere"
-reads "Blocked on the CI runner outage; the vendor says their fix is rolling
-out." as an ask, and with no key configured that row leaves `in-progress`,
-drops off the stalled list where `builder-silent` could still have named it,
-and wakes the lead to file an ask nobody has. An explicit release vocabulary
-wins over all of it: a note opening "Not waiting", "Not stalled" or "Not
-blocked", or saying the person answered, is not an ask. A prefilter HIT
-is then confirmed by the same Haiku key the review gate uses
-(`note-ask-judge.ts`, `CW_NOTE_ASK_JUDGE=0` to turn it off), one word back,
-cached per note by timestamp and text hash, run in the background between
-ticks and at most four in flight. A prefilter MISS is never sent anywhere, and neither is a row the board
-already reads as waiting on a person — no verdict could move that bucket — so
-the spend is one call per new ask-note and none at all on a board whose notes
-have been read. No key, an error, a timeout or an unparseable reply leaves the
-prefilter's verdict standing — a nudge, never a door that closes when the API
-does. The bias is stated rather than hidden: the release vocabulary winning
-means a note still waiting while it mentions an answer reads as released, and
-that direction is chosen because a false wake costs a lead's whole turn while
-a missed one still surfaces on the ordinary stall clock a window later.
+**A note that says the agent is waiting on a person is still just a note.**
+Waiting is DECLARED, never inferred (rebuild step 2, 2026-09-08). A row is
+`blocked-on-owner` only while a filed ask on the person's queue excuses it,
+and the snapshot carries the ADDRESS of every such ask on the row
+(`waitingOn`: a ticket item by id, or a comment-borne item by doc, thread and
+comment), read from the three places an ask can be filed — the ticket's own
+items, a payload on a comment in the ticket's body doc, and a payload on a
+comment in a doc the row links. Whether an item still excuses the row is the
+Home queue's own predicate (`isReviewItemOnQueue` for ticket items,
+`pendingDeclaration` minus a gated payload for comment-borne ones), so an
+answered, withdrawn, held or reader-asked-back item excuses nothing. A row
+whose status says the owner is waiting with nothing filed is
+`blocked-on-owner-unfiled`; a row whose NOTE says "waiting on Bryan" with
+nothing filed is a plain stall, and the lead hears about it on the ordinary
+clock. Between 2026-09-04 and 2026-09-08 a prose reader (`note-ask.ts`, a
+prefilter plus a Haiku confirmation) tried to recover the unfiled ask from
+the note itself; it was removed because a wait that has to be guessed from
+prose is a wait nobody filed, and the fix for that is to file it.
 
 Known gap, deliberately open: nothing ages review items sitting unanswered
 on the owner's queue. That is a different signal (ask-aging, not
@@ -399,10 +375,8 @@ would have escalated never.
   all day since, qualified again the moment it went quiet for the gate's
   twenty minutes. The item that produced said so in its own words — *"Quiet
   1h; the lead was told 33h ago"* — thirty-two of those hours being the lead
-  working the row. The clock the row is judged by is its bucket's
-  (`StalledRow.stuckMs`, falling back to `quietMs`): for an unfiled ask living
-  in a row's notes that is the ask's age, not the row's silence, because the
-  agent restating it touches the row every turn.
+  working the row. The clock the row is judged by is its
+  quiet time (`StalledRow.quietMs`) and nothing else.
 - **It clears itself, and does not blink.** The item is withdrawn when no
   named row still qualifies; the anchor, which the gate can no longer judge,
   is read from its own ticket instead (closed, or touched by somebody after
@@ -473,7 +447,6 @@ grace window that #411 fixed.
 | `CW_HELD_ITEM_MINUTES` | 5 | how long a held review item may stand before its filer, then the lead, is told |
 | `CW_STALL_ESCALATE_MINUTES` | 60 | how long a row the lead was already told about may stay stuck — told AND silent, both — before the board files over the lead's head. Also caps the settle window below |
 | `CW_REVIEW_GATE` | on | `0` turns the judge off; every item passes unjudged (also the state with no summary API key) |
-| `CW_NOTE_ASK_JUDGE` | on | `0` turns the note-ask confirmation off; the deterministic prefilter decides alone (also the state with no summary API key) |
 
 Both accept fractions; zero, negative, or unreadable values fall back to
 the default rather than firing every tick (`positiveEnvDuration` in
@@ -490,8 +463,6 @@ the two nudgers, the lead-presence monitor and the comment-queue bridge —
 lead, and its sidecar `stall-escalations.json`) ·
 `packages/server/src/review-judge.ts` (the Haiku judge; prompt in
 `packages/core/src/review-judge-prompt.ts`) ·
-`packages/server/src/note-ask.ts` (the note prefilter and its verdict cache)
-· `packages/server/src/note-ask-judge.ts` (its Haiku confirmation) ·
 `packages/server/src/keep-moving.ts` (shared row classifier — the report
 counts unfiled asks with NO age gate on purpose; only the wake path has
 the grace) · `packages/mcp/src/nudge-line.ts` (frame rendering) ·
