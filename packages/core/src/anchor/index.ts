@@ -40,4 +40,8 @@ export function isResolvable(anchor: Anchor): boolean {
   return anchor.kind !== 'orphan' && anchor.kind !== 'subject' && anchor.kind !== 'review-item';
 }
 
-export const SCORE_THRESHOLD = 40;
+// Defined in the leaf that uses it, re-exported here for the callers that
+// read it off the barrel. It used to live here and be imported BACK by
+// element.ts, which made the barrel and the leaf a runtime cycle — the shape
+// that took every doc page down in PR 817. `bun run check:import-cycles`.
+export { SCORE_THRESHOLD } from './element.ts';

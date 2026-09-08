@@ -89,6 +89,12 @@ export const MEMBERS: Member[] = [
     ci: 'check:imports',
   },
   {
+    id: 'check:import-cycles',
+    title: 'no runtime import cycles in the code a browser loads',
+    argv: ['check:import-cycles'],
+    ci: 'check:import-cycles',
+  },
+  {
     id: 'check:architecture',
     title: 'the overview diagram matches the modules',
     argv: ['check:architecture', '--base', '{base}'],
@@ -142,6 +148,12 @@ export const MEMBERS: Member[] = [
     title: 'tsc --noEmit; no test runner typechecks',
     argv: ['typecheck'],
     ci: 'typecheck',
+  },
+  {
+    id: 'check:client-boot',
+    title: 'the BUILT client boots a doc page without throwing',
+    argv: ['check:client-boot'],
+    ci: 'check:client-boot',
   },
   // The last three are a chain: both suites run instrumented and write their
   // lcov under .coverage/, and `coverage` reads it back instead of running

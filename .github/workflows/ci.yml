@@ -110,6 +110,15 @@ jobs:
       # shipped as `import type`, which nothing else in CI can see.
       - name: Import direction holds
         run: bun run check:imports
+      # No runtime import cycle in packages/core/src or packages/workspaces-app/src.
+      # A cycle is not an error in ESM — it just makes correctness depend on
+      # evaluation order, and the bundler orders differently from vitest and
+      # bun. PR 817 shipped a client that threw ReferenceError while tiptap
+      # built the editor, with all sixteen verify members and all eight checks
+      # green, because the only place the order differed was the bundle.
+      # Type-only edges are excluded: they are erased, so they cannot do this.
+      - name: No import cycles in client code
+        run: bun run check:import-cycles
       - name: Build widget
         run: bun run build:widget
       - name: Widget bundle size
@@ -142,6 +151,18 @@ jobs:
       # `bun run verify` run the SAME check instead of two hand-copied versions.
       - name: MCP bundle matches source
         run: bun run check:mcp-bundle
+      # THE ONE THING CI HAD NEVER DONE: load the artifact a user receives.
+      # PR 817 merged with every other check in this file green and took every
+      # doc page in production down, because the bundled client threw while
+      # tiptap built the editor and nothing in CI had ever opened a page. This
+      # builds the real client, publishes it the way prod does, serves it on a
+      # throwaway port and data dir, and opens a doc in headless Chrome.
+      # --no-sandbox is for the container; the runner's own Chrome is found by
+      # scripts/ui-shot-lib.ts's candidate list, so no path is named here.
+      - name: Built client boots a doc page
+        env:
+          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+        run: bun run check:client-boot
 
   # The client + unit suite, in four shards.
   #

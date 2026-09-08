@@ -1,14 +1,12 @@
 import * as Y from 'yjs';
-import {
-  type TextSlice,
-  coveringInlineMarks,
-  getProseFragment,
-  insertTextWithMarks,
-  resolveRelativePositionRaw,
-  resolveSingleFind,
-  serializeBlockToMarkdown,
-  walkProse,
-} from './prose.ts';
+// Import from the leaf modules, never from the './prose.ts' barrel: prose.ts
+// re-exports prose-batch.ts, which imports this module. Going through the
+// barrel closes that loop, and the bundled client then evaluates this module
+// while prose.ts's own bindings are still in their temporal dead zone.
+import { resolveSingleFind } from './prose-blocks.ts';
+import { type TextSlice, coveringInlineMarks, insertTextWithMarks } from './prose-edit.ts';
+import { getProseFragment, resolveRelativePositionRaw, walkProse } from './prose-fragment.ts';
+import { serializeBlockToMarkdown } from './prose-markdown.ts';
 import {
   SUGGEST_DELETE_MARK,
   SUGGEST_INSERT_MARK,
