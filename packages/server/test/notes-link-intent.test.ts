@@ -17,9 +17,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ASK_AMBIGUITY_MARGIN,
-  ASK_LINK_MIN_SCORE,
   MAX_SUGGESTIONS,
-  SUGGEST_MIN_SCORE,
   appendSuggestions,
   detectLinkAsk,
   linkAskQuery,
@@ -189,29 +187,34 @@ describe('resolveNoteLinks — an explicit ask', () => {
     expect(out.suggested).toEqual([]);
   });
 
-  it('still never SUGGESTS a row the strict matcher already cited', () => {
-    // The unasked direction is unchanged: a row already in the note is not
-    // something to ask the reader about.
+  it('caps how many questions one tick may carry', () => {
+    // Three rows named at once, so the ask cannot be settled and the
+    // shortlist is what is left. It is the top two, never all three.
     const out = resolveNoteLinks({
-      spokenText: 'The volume buttons sit under the thumb and the travel is too short.',
+      spokenText:
+        'The volume, channel and LCD screen buttons all need rethinking. ' +
+        'Link that to the existing task.',
       catalogue: BOARD,
-      named: [BOARD[0]!],
     });
-    expect(titles(out.suggested)).not.toContain('Volume buttons');
+    expect(out.linked).toEqual([]);
+    expect(out.suggested).toHaveLength(MAX_SUGGESTIONS);
   });
 });
 
 describe('resolveNoteLinks — nobody asked', () => {
-  it('suggests a probable row rather than staying silent', () => {
+  it('says nothing about a row it was not asked about, however well it scores', () => {
+    // The words below describe "Volume buttons" closely enough that the
+    // withdrawn unasked path suggested it. Removed 2026-09-08: the owner read
+    // a huddle's notes carrying sixteen of these and had asked for none.
     const out = resolveNoteLinks({
       spokenText: 'The up and down keys sit right under the thumb and the travel is too short.',
       catalogue: BOARD,
     });
     expect(out.linked).toEqual([]);
-    expect(titles(out.suggested)).toEqual(['Volume buttons']);
+    expect(out.suggested).toEqual([]);
   });
 
-  it('suggests nothing when the speech is about nothing on the board', () => {
+  it('says nothing when the speech is about nothing on the board either', () => {
     const out = resolveNoteLinks({
       spokenText: 'Shall we break for ten minutes and pick this up after?',
       catalogue: BOARD,
@@ -220,7 +223,7 @@ describe('resolveNoteLinks — nobody asked', () => {
   });
 
   it('never links without being asked, however well a row scores', () => {
-    // The same words that LINK under an ask only SUGGEST without one. An
+    // The same words that LINK under an ask do nothing without one. An
     // unprompted citation is a claim about what the discussion was about.
     const words =
       'Voice control keeps coming up and we still have not said what happens when it mishears.';
@@ -232,22 +235,9 @@ describe('resolveNoteLinks — nobody asked', () => {
       }).linked,
     ).toHaveLength(1);
   });
-
-  it('caps how many questions one tick may carry', () => {
-    const out = resolveNoteLinks({
-      spokenText:
-        'The up down volume keys, the numeric channel entry rocker, the voice control wake word ' +
-        'microphone, the house yellow grey casing colour scheme and the twelve fifty unit factory cost.',
-      catalogue: BOARD,
-    });
-    expect(out.suggested.length).toBeLessThanOrEqual(MAX_SUGGESTIONS);
-  });
 });
 
 describe('the thresholds say what they mean', () => {
-  it('asks for less evidence to answer an ask than to raise one unprompted', () => {
-    expect(ASK_LINK_MIN_SCORE).toBeLessThan(SUGGEST_MIN_SCORE);
-  });
   it('keeps a real margin, so a near-tie can never resolve to a link', () => {
     expect(ASK_AMBIGUITY_MARGIN).toBeGreaterThan(0);
   });

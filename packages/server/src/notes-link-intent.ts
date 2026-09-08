@@ -21,17 +21,21 @@
  * means. The scorer is imported, never the MCP verb: this runs inside a tick,
  * and a tick may not make a network call.
  *
- * THREE OUTCOMES, AND THE THIRD IS THE POINT.
+ * TWO OUTCOMES, AND AN ASK IS BEHIND BOTH.
  *
  *   • Asked, and one row is clearly ahead → LINK it. The person asked.
  *   • Asked, and two rows are neck and neck → SUGGEST both. A coin flip
  *     between two plausible rows is how a wrong link gets written, and a
  *     wrong link is worse than a question: nobody rereading the notes can
  *     tell it was a guess.
- *   • Not asked, but a row scores well above the mention threshold →
- *     SUGGEST it. This is the owner's second half — "suggest tickets to add
- *     if it's not sure but probably has some related tickets" — and it is
- *     why the unasked path may not simply stay silent.
+ *
+ * THERE WAS A THIRD, AND IT WAS REMOVED (2026-09-08). A row that merely
+ * scored well without anybody asking used to be suggested too. In practice
+ * one planning huddle's notes came out with twelve questions on one bullet
+ * and four on another; the owner's verdict was "just a bunch of garbage… I
+ * did not ask for any tickets to be attached". So an unasked tick now says
+ * nothing about the board, and every suggestion left is the answer to a
+ * question somebody actually asked out loud.
  *
  * A SUGGESTION IS A LINK THE READER TAPS, not a caption saying a link might
  * belong. It is written into the note as ordinary markdown whose href carries
@@ -76,16 +80,6 @@ export {
  * about 0.16 through the scorer's title floor, so this sits just under that.
  */
 export const ASK_LINK_MIN_SCORE = 0.15;
-
-/**
- * Enough score to SUGGEST a row nobody asked about.
- *
- * Above the scorer's default rather than below it, because this is the
- * unprompted direction: roughly two of a title's own words have to turn up in
- * the speech. A suggestion on every bullet is noise a reader learns to skip,
- * and a suggestion nobody reads is the same as no suggestion.
- */
-export const SUGGEST_MIN_SCORE = 0.3;
 
 /**
  * How far ahead the best row must be before an ASK is answered with a link
@@ -247,8 +241,8 @@ export interface NoteLinkOutcome {
    * the work findable from the board.
    */
   linked: NoteReference[];
-  /** Rows to ASK ABOUT: a near-tie under an explicit ask, or a probable
-   *  match nobody raised. */
+  /** Rows to ASK ABOUT: a near-tie under an explicit ask. Empty whenever
+   *  nobody asked for a link. */
   suggested: NoteReference[];
 }
 
@@ -291,52 +285,41 @@ export function resolveNoteLinks(input: ResolveNoteLinksInput): NoteLinkOutcome 
   const none: NoteLinkOutcome = { linked: [], suggested: [] };
   const spoken = input.spokenText.trim();
   if (spoken.length === 0 || input.catalogue.length === 0) return none;
+  // No ask, nothing to say. The scoring below never runs for a tick that did
+  // not ask, so an ordinary sentence about ordinary work cannot reach the
+  // note as a question — see the header.
+  if (!detectLinkAsk(spoken)) return none;
 
   const named = input.named ?? [];
   const alreadyNamed = new Set(named.map((r) => r.url));
   const open = input.catalogue.filter((r) => !alreadyNamed.has(r.url));
-  const asked = detectLinkAsk(spoken);
-  if (open.length === 0) return asked ? { linked: [...named], suggested: [] } : none;
+  if (open.length === 0) return { linked: [...named], suggested: [] };
 
   const candidates = asCandidates(open);
   const byId = new Map(candidates.map((c, at) => [c.id, open[at]!]));
-  // The floor is the LOWER of the two thresholds either outcome could use, so
-  // one scoring pass answers both questions; the outcome rules below are what
-  // actually decide.
   const ranked = scoreRelatedWork(linkAskQuery(spoken), candidates, {
-    threshold: Math.min(ASK_LINK_MIN_SCORE, SUGGEST_MIN_SCORE),
+    threshold: ASK_LINK_MIN_SCORE,
     limit: MAX_SUGGESTIONS + 1,
   });
   const refOf = (id: string): NoteReference | undefined => byId.get(id);
   const top = ranked[0];
-  if (!top) return asked && named.length > 0 ? { linked: [...named], suggested: [] } : none;
+  if (!top) return named.length > 0 ? { linked: [...named], suggested: [] } : none;
 
-  if (asked) {
-    const runnerUp = ranked[1];
-    const clear =
-      top.score >= ASK_LINK_MIN_SCORE &&
-      (runnerUp === undefined || top.score - runnerUp.score >= ASK_AMBIGUITY_MARGIN);
-    const chosen = clear ? refOf(top.id) : undefined;
-    const linked = [...named, ...(chosen ? [chosen] : [])];
-    // An ask that landed on something is answered. Adding the shortlist on
-    // top would ask the reader to confirm alternatives to a link the note now
-    // carries, which is a question with nothing behind it.
-    if (linked.length > 0) return { linked, suggested: [] };
-    // Asked, and the words did not settle it. The shortlist is the honest
-    // answer: it is what the person would have been shown had they searched.
-    return {
-      linked: [],
-      suggested: ranked
-        .slice(0, MAX_SUGGESTIONS)
-        .map((m) => refOf(m.id))
-        .filter((r): r is NoteReference => r !== undefined),
-    };
-  }
-
+  const runnerUp = ranked[1];
+  const clear =
+    top.score >= ASK_LINK_MIN_SCORE &&
+    (runnerUp === undefined || top.score - runnerUp.score >= ASK_AMBIGUITY_MARGIN);
+  const chosen = clear ? refOf(top.id) : undefined;
+  const linked = [...named, ...(chosen ? [chosen] : [])];
+  // An ask that landed on something is answered. Adding the shortlist on top
+  // would ask the reader to confirm alternatives to a link the note now
+  // carries, which is a question with nothing behind it.
+  if (linked.length > 0) return { linked, suggested: [] };
+  // Asked, and the words did not settle it. The shortlist is the honest
+  // answer: it is what the person would have been shown had they searched.
   return {
     linked: [],
     suggested: ranked
-      .filter((m) => m.score >= SUGGEST_MIN_SCORE)
       .slice(0, MAX_SUGGESTIONS)
       .map((m) => refOf(m.id))
       .filter((r): r is NoteReference => r !== undefined),
