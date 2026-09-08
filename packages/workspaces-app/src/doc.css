@@ -3487,22 +3487,27 @@ body.redline-mode #toggle-suggest-mode {
 .cw-edge.has-ask .dot {
   color: var(--warn-fg, #b25e09);
 }
-@media (min-width: 1101px) {
-  /* Out of the flow and into the balloon column's footprint: the module
-     writes `left`, `width` and the top/bottom inset, measured against the
-     column and the action dock, so the prose column runs top to bottom with
-     nothing over it and nothing shortening it. */
-  .edge-strip {
-    position: absolute;
-    z-index: 25;
-    padding: 0;
-    background: transparent;
-    border: 0;
-    pointer-events: none;
-  }
-  .edge-strip > * {
-    pointer-events: auto;
-  }
+/* Out of the flow and into the balloon column's footprint: the module writes
+   `left`, `width` and the top/bottom inset, measured against the column and
+   the action dock, so the prose column runs top to bottom with nothing over
+   it and nothing shortening it.
+
+   Keyed on the class the module sets and NOT on a width query, because the
+   column is a stored preference (`card-placement.ts` publishes
+   `body[data-cards]`) rather than a width: a reader on a wide screen who put
+   the cards inline has no column, and a width-keyed rule floated these
+   strips over a column that was not there, with no insets to place them by.
+   The class means "there is a column, and I have measured it". */
+.edge-strip.is-floating {
+  position: absolute;
+  z-index: 25;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  pointer-events: none;
+}
+.edge-strip.is-floating > * {
+  pointer-events: auto;
 }
 @media (max-width: 1100px) {
   /* Clear of the widget bubble in the bottom-right corner. */

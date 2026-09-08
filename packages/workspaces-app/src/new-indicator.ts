@@ -178,8 +178,11 @@ export function mountNewIndicator(opts: NewIndicatorOpts): NewIndicatorHandle {
     const wide = opts.marginVisible();
     const column = wide && opts.marginEl ? opts.marginEl.getBoundingClientRect() : null;
     if (!column || column.width === 0) {
-      // Phone: ordinary rows. Only the dock clearance is set from here.
+      // No column to sit in: ordinary rows, whatever the width. The class
+      // goes with the insets, so a strip is never floated with nothing to
+      // float against.
       for (const s of [topStrip, botStrip]) {
+        s.classList.remove('is-floating');
         s.style.left = '';
         s.style.width = '';
         s.style.top = '';
@@ -192,6 +195,7 @@ export function mountNewIndicator(opts: NewIndicatorOpts): NewIndicatorHandle {
     const scrollRect = scroller.getBoundingClientRect();
     botStrip.style.marginBottom = '';
     for (const s of [topStrip, botStrip]) {
+      s.classList.add('is-floating');
       s.style.left = `${Math.round(column.left - paneRect.left)}px`;
       s.style.width = `${Math.round(column.width)}px`;
     }

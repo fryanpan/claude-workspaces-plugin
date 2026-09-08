@@ -55,6 +55,17 @@ describe('splitOffscreen', () => {
     expect(split.below).toEqual({ comments: 2, questions: 0, fresh: 1, freshComments: 1 });
   });
 
+  it('a new question is counted as a question and NOT also as new', () => {
+    // The pill reads "1 question · N new"; counting the same thread in both
+    // halves would tell the reader to look for two things.
+    const split = splitOffscreen(
+      [item('a', -100, { kind: 'question', isNew: true }), item('b', -50, { isNew: true })],
+      view,
+    );
+    expect(split.above.fresh).toBe(2);
+    expect(split.above.freshComments).toBe(1);
+  });
+
   it('names the NEAREST off-screen thread in each direction', () => {
     const split = splitOffscreen(
       [item('a', -300), item('b', -100), item('c', 700), item('d', 900)],

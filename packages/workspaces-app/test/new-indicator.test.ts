@@ -122,6 +122,7 @@ describe('mountNewIndicator', () => {
     expect(strip(h.pane, 'top').style.width).toBe('260px');
     // …and starts just inside the scroller's own top edge (40 + 10).
     expect(strip(h.pane, 'top').style.top).toBe('50px');
+    expect(strip(h.pane, 'top').classList.contains('is-floating')).toBe(true);
   });
 
   it('lets go of the column on a phone, where there is none', () => {
@@ -130,6 +131,7 @@ describe('mountNewIndicator', () => {
     expect(strip(h.pane, 'top').style.left).toBe('');
     expect(strip(h.pane, 'top').style.width).toBe('');
     expect(strip(h.pane, 'top').style.top).toBe('');
+    expect(strip(h.pane, 'top').classList.contains('is-floating')).toBe(false);
   });
 
   it('keeps the bottom strip clear of the action dock, which keeps its own row', () => {

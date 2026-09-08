@@ -55,11 +55,16 @@ describe('the new-content indicator', () => {
     expect(styleOf(pill).backgroundColor).not.toBe(plain);
   });
 
-  it('leaves the flow into the balloon column on a wide layout, and is a row on a phone', () => {
+  it('leaves the flow only once the module says it has a column to sit in', () => {
+    // Not a width rule: the balloon column is a stored preference, so a wide
+    // screen with the cards inline has no column and the strip must stay a
+    // row. The class is the module's claim that it measured one.
     const { strip } = indicator();
+    expect(styleOf(strip).position).not.toBe('absolute');
+    strip.classList.add('is-floating');
     expect(styleOf(strip).position).toBe('absolute');
     setViewport(PHONE);
-    expect(styleOf(strip).position).not.toBe('absolute');
+    expect(styleOf(strip).position).toBe('absolute');
   });
 
   it('the pill stays clear of the widget bubble at phone width', () => {
