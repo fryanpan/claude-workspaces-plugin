@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
@@ -182,6 +182,26 @@ not),
 pair and are asserted to be inverses, which is what lets the editor show one
 rule as a phrase and as chips without either view being the source
 ([scheduled-tasks](scheduled-tasks.md)).
+
+**A bound mockup is a live surface, and it keeps its rounds.** A mockup's doc
+holds no content of its own — its surface is somebody's HTML file — so the four
+`mockup-*.ts` modules are what make that file behave like an attachment.
+`mockup-widget.ts` adds the comment widget on the way out and
+`mockup-live.ts` adds the script that makes the page update itself, both at
+serve time, so review scaffolding never has to live in a file a build step
+writes or git tracks. `file-binding.ts` watches the source through the SAME
+shared mtime sweep every bound `.md` uses — a mockup binding is watch-only,
+never writes back, and touches no fragment — and hands each change up as a
+`mockup.updated` frame on the doc's own channels. An open page fetches the
+round it names and swaps its content in place, keeping the reader's scroll and
+letting the widget re-anchor its threads onto the new DOM, so a comment whose
+element is gone becomes an outdated one rather than a lost one. `mockup-capture.ts`
+still keeps the single fallback copy that lets a link outlive its scratch
+directory; `mockup-versions.ts` keeps the history beside it, so the page a
+reviewer was looking at when he commented is still readable at `?v=<n>` after
+the next round replaces it. Same link, every round — which is what a rebind
+under an existing id has meant since it started destroying the page underneath
+the comments.
 
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,

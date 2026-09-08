@@ -46,6 +46,8 @@ import {
   readMockupCapture,
   readMockupHtml,
 } from '../mockup-capture.ts';
+import { injectMockupLive, parseVersionParam } from '../mockup-live.ts';
+import { listMockupVersions, readMockupVersion, recordMockupVersion } from '../mockup-versions.ts';
 import { injectWidget } from '../mockup-widget.ts';
 import { decodePathParam } from '../path-params.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
@@ -270,7 +272,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
    * does the capture answer, which is the case that used to be a 404 in front
    * of the reviewer. See mockup-capture.ts.
    */
-  const serveMockup = (docId: string, workspaceId: string): Response => {
+  const serveMockup = (docId: string, workspaceId: string, url: URL): Response => {
     const notFound = () =>
       new Response(renderMockupNotFound(docId), {
         status: 404,
@@ -282,14 +284,42 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // A mockup bound to something that isn't HTML is served as-is, as before:
     // nothing is injected into it and nothing is captured from it.
     if (!isHtmlMockupSource(source)) return serveStatic(source) ?? notFound();
-    const live = readMockupHtml(source);
-    if (live !== null) captureMockup(dataDir, doc.docId, live);
-    const html = live ?? readMockupCapture(dataDir, doc.docId);
+    // An explicit round. `?v=` is a query on the mockup's own address rather
+    // than a second address, so nothing about which visitors may read a
+    // mockup changes: whoever can open the page can open its history, and
+    // whoever cannot, still cannot.
+    const askedVersion = parseVersionParam(url.searchParams.get('v'));
+    if (askedVersion === 'bad') return j(400, { error: 'bad version' });
+    // Watch the source, so an edit reaches the page this reader is about to
+    // have open. Idempotent, and watch-only: nothing here writes to the file.
+    docStore.attachMockupFile(doc.docId, source);
+    const live = askedVersion === null ? readMockupHtml(source) : null;
+    if (live !== null) {
+      captureMockup(dataDir, doc.docId, live);
+      // A serve is also a round, for the case the poll cannot cover: a mock
+      // edited while the server was down, or bound by a path that never came
+      // through POST. Identical bytes record nothing.
+      recordMockupVersion(dataDir, doc.docId, live);
+    }
+    const versions = listMockupVersions(dataDir, doc.docId);
+    const pinned =
+      askedVersion === null ? null : readMockupVersion(dataDir, doc.docId, askedVersion);
+    // An unknown round is a 404 rather than a silent fall-through to the
+    // current page: a reader who followed `?v=2` and got round 5 without being
+    // told has been shown the wrong thing under a 200.
+    if (askedVersion !== null && pinned === null) return notFound();
+    const html = pinned ?? live ?? readMockupCapture(dataDir, doc.docId);
     if (html === null) return notFound();
     // Sentry tags ride out with the widget embed, for the same reason and by
     // the same route: a mockup is somebody's own file, and neither the review
     // scaffolding nor the box's monitoring config belongs in it on disk.
-    const withWidget = injectWidget(html, doc.meta.docId, workspaceId);
+    const shownVersion = askedVersion ?? versions[versions.length - 1]?.v ?? null;
+    const withWidget = injectMockupLive(injectWidget(html, doc.meta.docId, workspaceId), {
+      docId: doc.meta.docId,
+      workspaceId,
+      version: shownVersion,
+      versions,
+    });
     const body = injectSentryHead(
       withWidget,
       browserSentry,
@@ -315,7 +345,11 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
         // Which copy answered. A page served from the capture is still the
         // page — but "the source file is gone" is a fact somebody may want to
         // act on, and it must not be inferred from the absence of an error.
-        'x-mockup-source': live !== null ? 'live' : 'captured',
+        'x-mockup-source': pinned !== null ? 'version' : live !== null ? 'live' : 'captured',
+        // Which round the bytes are. A reader pinned to an old one, and a
+        // test asserting an in-place swap landed, both need this without
+        // parsing the page.
+        ...(shownVersion !== null ? { 'x-mockup-version': String(shownVersion) } : {}),
       },
     });
   };
@@ -462,7 +496,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       }
       if (!isValidDocId(id)) return j(400, { error: 'bad docId' });
       const canonical = docStore.get(id)?.docId ?? id;
-      if (kind === 'mockups') return serveMockup(canonical, wsSeg);
+      if (kind === 'mockups') return serveMockup(canonical, wsSeg, url);
       if (isMockupDoc(canonical)) {
         return redirectTo(
           `/workspaces/${encodeURIComponent(wsSeg)}/mockups/${encodeURIComponent(canonical)}`,
