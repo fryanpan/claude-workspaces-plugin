@@ -97,6 +97,8 @@ import {
   handleRecallWebhookRoute,
 } from './routes/recall-webhook.ts';
 import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/review-files.ts';
+import { ROUTE_TABLE } from './routes/route-table-rows.ts';
+import { mountRouteTable } from './routes/route-table.ts';
 import { createShellStatic } from './routes/shell-static.ts';
 import { handleStaleClient } from './routes/stale-client.ts';
 import {
@@ -1924,6 +1926,589 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     keepMovingVerdicts: stallWiring.keepMoving,
   };
 
+  /**
+   * The front door: everything every request passes through, whatever
+   * address it named.
+   *
+   * Lifted out of the `fetch` option so the `routes` table below and the
+   * fallback can be the SAME handler. A route in the table and a route that
+   * falls through therefore cannot diverge: both run this, and this runs the
+   * ordered chain in `route()` unchanged. The table decides nothing about
+   * dispatch on purpose — see `routes/route-table.ts` for why the chain, not
+   * Bun’s specificity matching, still orders the eight adjacencies whose
+   * comments call them load-bearing.
+   */
+  async function handleRequest(req: Request): Promise<Response | undefined> {
+    const startedAt = performance.now();
+    const pathname = new URL(req.url).pathname;
+    // A stray `%` anywhere in the path is a caller's typo, and it has to
+    // be answered before anything decodes it: `decodeURIComponent` throws a
+    // `URIError` inside whichever matcher pulls the id out of the path, and
+    // that surfaces as a 500 naming nothing. Front door rather than per
+    // route — a check each route must remember covers only the routes
+    // somebody remembered to change, and there are 95 direct decode calls.
+    const badSegment = malformedPathSegment(pathname);
+    if (badSegment !== undefined) {
+      return applyCors(
+        req,
+        new Response(
+          JSON.stringify({
+            error: 'bad-path',
+            message: 'a path segment is not valid percent-encoding',
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    }
+    // A docId-addressed request may HYDRATE that doc, and hydration reads
+    // the doc's bound file. That read used to run on the main thread, where
+    // a cloud-sync folder that had stopped answering parked the whole
+    // server — every route, not just this one (see slow-fs.ts). Doing it
+    // here, on the thread pool and under a deadline, means the synchronous
+    // hydrate inside the route either finds the bytes already in hand or
+    // finds the path quarantined and parks the doc without touching it.
+    const prewarmUrl = new URL(req.url);
+    const prewarmIds = docIdsAddressedBy(prewarmUrl);
+    if (prewarmIds.length > 0) {
+      await Promise.all(prewarmIds.map((id) => docStore.prewarmHydration(id)));
+    }
+    // Server-side Sentry (a no-op passthrough when unconfigured — see
+    // sentry.ts): one span per request, named by route PATTERN never raw
+    // path, continuing the browser's trace when it sent one so a page load
+    // reads end to end. A throw inside `route()` is reported with the same
+    // route-pattern context, then rethrown unchanged — this wrapper only
+    // observes, it does not change what a request returns.
+    let routed: Response | undefined;
+    try {
+      routed = await withRouteSpan(req, pathname, () => route(req));
+    } catch (err) {
+      captureServerError(err, { route: routePatternForSpan(pathname), method: req.method });
+      throw err;
+    }
+    // Compress BEFORE the CORS merge so the encoding headers ride out on the
+    // same response the wrapper copies; `maybeCompress` skips anything whose
+    // content-type isn't on its allowlist (see compress.ts for why that gate
+    // is narrow — a live stream must never be buffered to compress it).
+    //
+    // `maybeNotModified` runs first: when the client already holds the body,
+    // gzipping it is the one case where the CPU buys nothing, and a 304 has
+    // no body for `maybeCompress` to act on anyway.
+    // `undefined` means the request became a websocket — nothing to decorate.
+    if (routed === undefined) return undefined;
+    const response = applyCors(
+      req,
+      refreshSession(req, await maybeCompress(req, maybeNotModified(req, routed))),
+    );
+    const elapsedMs = performance.now() - startedAt;
+    if (elapsedMs >= slowRequestMs) {
+      // Path only — the query can carry a person's name (`?user=`), and
+      // the line is for a grep over durations, not a record of who asked.
+      console.error(
+        `[timing] ${req.method} ${pathname} ${Math.round(elapsedMs)}ms ` +
+          `status=${response.status} bytes=${response.headers.get('content-length') ?? '?'}`,
+      );
+    }
+    return response;
+
+    // Hoisted, so the wrapper above can call it first. The whole route
+    // table lives in here unchanged.
+    async function route(req: Request): Promise<Response | undefined> {
+      const url = new URL(req.url);
+      const { pathname } = url;
+
+      // --- CORS preflight ---
+      // The canonical embed loads the widget bundle from this server but
+      // runs on a different origin (e.g. an Astro dev server on :4321).
+      // Every REST call from the widget is therefore cross-origin and
+      // browsers preflight non-simple requests (POST + JSON body) with an
+      // OPTIONS. Reply once here so we don't have to thread the response
+      // through every route handler.
+      // The wrapper above attaches the CORS headers when the origin is
+      // allowed. A disallowed origin gets a bare 204 with no
+      // Access-Control-Allow-* — which is exactly how the browser learns no.
+      if (req.method === 'OPTIONS') {
+        return new Response(null, { status: 204 });
+      }
+
+      // --- Cross-origin WRITE gate ---
+      // Withholding CORS headers only hides the RESPONSE. A "simple request"
+      // — POST with content-type text/plain — is never preflighted, so the
+      // browser sends it and the write lands; the page just can't read the
+      // reply. safeJson() parses the body whatever the content-type says, so
+      // that was a working CSRF write: post comments as someone else, or
+      // create a doc bound to any file on the machine.
+      //
+      // GET stays open on purpose. Its response is already withheld by CORS,
+      // and refusing it would break <script>/<img>-style loads of the widget
+      // bundle from arbitrary dev sites (those send no Origin at all).
+      if (
+        req.method !== 'GET' &&
+        req.method !== 'HEAD' &&
+        !isAllowedBrowserOrigin(req.headers.get('origin'), policyFor(req))
+      ) {
+        return j(403, { error: 'origin_not_allowed' });
+      }
+
+      // ── Request admission ── see request-admission.ts.
+      // The gate ANSWERS this request or hands back what it proved. A
+      // refused answer carries no per-request value with it, so nothing
+      // below can read a visitor off a request that never got in — the
+      // union is what makes that a compile error rather than a review note.
+      const gate = await admit(req, { pathname });
+      if (!gate.admitted) return gate.response;
+      const { visitor, visitorShareId, visitorMemberKey, metaFor } = gate;
+
+      // --- REST: email login ---
+      // Reachability (the host gate, Access, a share session) and identity
+      // (who you are) stay orthogonal: a local host still bypasses the host
+      // guard — it may REACH the server — and still has to say who it is.
+      // These routes are what "saying who you are" means.
+      //
+      // They sit AFTER the host decision on purpose, so a share visitor
+      // reaches them only if `shareScopeAllows` lets them, and it does not:
+      // a share visitor is already proven by Cloudflare Access, and this is
+      // not a second way to claim an identity on a share host.
+      // ── Request attribution ── see request-attribution.ts.
+      // Chained after admission rather than composed beside it, because its
+      // input is what the gate just proved. Called from the position the
+      // widget-token gate held — that gate lives inside, and its 401 has to
+      // land exactly here. `attributed: false` carries no helpers at all, so
+      // no route can name an author on a request whose token was refused.
+      const attribution = attributeRequest(req, gate);
+      if (!attribution.attributed) return attribution.response;
+      const {
+        widgetIdentity,
+        provenIdentityFor,
+        authorFor,
+        refuseCategoryAuthor,
+        withTaskChips,
+        browserProvedNobody,
+      } = attribution;
+
+      // --- Sign-in write gate ---
+      // Every ordinary write — a comment, a task edit, a review answer, a
+      // doc bind — passes through here, because every one of them is a
+      // non-GET and every route on this server lives below this line. The
+      // predicate is method-keyed rather than a route list on purpose: a
+      // list is a thing that silently stops being complete.
+      //
+      // Reads are untouched, agents are untouched (see write-gate.ts for
+      // what tells them apart and what that boundary is worth), and the
+      // refusal carries the URL that fixes it — a bare 401 is
+      // indistinguishable from a bug, and the client turns this body into
+      // a sign-in prompt.
+      //
+      // Order: below the widget-token gate so a valid token counts as
+      // proof, and below the host/Access gates so an Access visitor's
+      // verified email is already in hand.
+      if (requireSignInToWrite && isGatedWrite(req.method, pathname) && browserProvedNobody()) {
+        return j(401, signInRequiredBody());
+      }
+
+      // --- Sign-in, session and share links (routes/auth-share.ts) ---
+      // Extracted whole and called from the position the block occupied, so
+      // nothing above or below it overtakes anything. See that file's header
+      // for the two places the order inside it is load-bearing.
+      {
+        const handled = await handleAuthShareRoutes(authShareRoutesCtx, {
+          req,
+          url,
+          pathname,
+          widgetIdentity,
+          browserProvedNobody,
+          provenIdentityFor,
+        });
+        if (handled) return handled;
+      }
+
+      // --- Recall's bot status-change webhook --- see
+      // ./routes/recall-webhook.ts. Called from the position the block
+      // held: it must stay IMMEDIATELY above the `/recall/` websocket
+      // upgrade below, because that upgrade's own test is
+      // `startsWith('/recall/')` and would answer a status POST with the
+      // token lookup's 404. That adjacency is behaviour — keep these two
+      // adjacent.
+      {
+        const handled = await handleRecallWebhookRoute(recallWebhookRoutesCtx, {
+          req,
+          pathname,
+        });
+        if (handled) return handled;
+      }
+
+      // ── Upgrade and stream ── see routes/upgrade-stream.ts.
+      // Six blocks that end in a long-lived connection rather than a body:
+      // the three websocket upgrades and the three SSE openers. Called from
+      // the position the run held, so the `/recall/` upgrade still sits
+      // IMMEDIATELY below the status webhook above it — that adjacency is
+      // load-bearing and the comment on the webhook says why. Null means no
+      // block there claimed this address, which is the same fall-through the
+      // run did in place; `upgraded` is the one outcome that must reach Bun
+      // as `undefined`, and this is the only place that spells it.
+      const streamed = serveUpgradeAndStreamRoutes({
+        req,
+        url,
+        pathname,
+        visitor,
+        visitorShareId,
+        visitorMemberKey,
+        browserProvedNobody,
+      });
+      if (streamed) {
+        if (streamed.kind === 'upgraded') return undefined;
+        return streamed.response;
+      }
+
+      // ── The workspace scope ── see middleware/workspace-scope.ts.
+      //
+      // ONE resolver for every canonical `/workspaces/<id>/…` request, run
+      // once here rather than at the top of each handler. It answers two
+      // questions and refuses on either: does this board exist, and does the
+      // row named under it belong to it. That second question only became
+      // askable when the board went into the path — `/api/goals/<id>` named
+      // a row and left the server to find its board, so "a goal on somebody
+      // else's board" was not a shape a request could have.
+      //
+      // Placed BELOW the stream block, because a websocket upgrade and an
+      // SSE open are taken over rather than answered, and ABOVE every REST
+      // handler, because the whole point is that no handler resolves a board
+      // for itself. Whether the CALLER may reach the board is not asked here
+      // — `shareScopeAllows` in the host guard has already answered it, and
+      // a second copy of that rule is the thing this file exists to remove.
+      //
+      // `pass` means the path is not its business: not under `/workspaces/`,
+      // or one of the board's HTML pages, which the shell at the tail of the
+      // chain serves with its own not-found.
+      //
+      // What it hands DOWN is the other half. `scope` travels on every
+      // resource route's request and is what those routes match against —
+      // see `matchRest`. A handler with no scope has no remainder to match,
+      // so "the workspace was resolved" stops being something each route
+      // remembers to check and becomes the condition of it answering at
+      // all.
+      let scope: WorkspaceScope<BoardWorkspace> | undefined;
+      {
+        const scoped = resolveWorkspaceScope(
+          {
+            workspaceRecord: (id: string) => taskStore.getWorkspace(id),
+            workspacesOfMember,
+            j,
+            // A browser asked for a page; answer it with one. The same
+            // shell the review route renders when a review has no members.
+            notFoundPage: () =>
+              new Response(renderReviewNotFound(pathname), {
+                status: 404,
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+              }),
+          },
+          { pathname, method: req.method, url },
+        );
+        if (scoped.kind === 'refused') return scoped.response;
+        if (scoped.kind === 'scope') scope = scoped.scope;
+      }
+
+      // --- REST: run the summary backfill on request --- see
+      // ./routes/ops.ts. Same chain position as before the split: above the
+      // metrics route, which is the next call below.
+      {
+        const handled = await handleSummaryBackfillRoute(opsRoutesCtx, {
+          req,
+          pathname,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+
+      // --- REST: what this process currently costs ---
+      //
+      // The 2026-08-29 jetsam kill left nothing to read: the server was at
+      // 2.6 GB and the only evidence of how it got there was the absence of
+      // the process. `DocStore.stats()` is also written to the log every five
+      // minutes; this route is the same numbers on demand, so the NEXT
+      // incident can be sampled over time instead of reconstructed.
+      //
+      // Counts only — no doc ids, no paths, no titles. That is what makes
+      // it safe to leave un-gated for anyone already past the front door,
+      // and it still refuses a share visitor: an external reviewer invited
+      // to one document has no business reading how many others exist.
+      {
+        const handled = handleOpsMetricsRoute(opsRoutesCtx, {
+          req,
+          pathname,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+
+      // --- REST: docs, created and listed — ./routes/docs.ts ---
+      {
+        const handled = await handleDocCreateListRoutes(docRoutesCtx, {
+          scope,
+          req,
+          url,
+          pathname,
+          visitor,
+          authorFor,
+          refuseCategoryAuthor,
+          metaFor,
+          withTaskChips,
+        });
+        if (handled) return handled;
+      }
+
+      // --- REST: workspaces (the board's own routes) — ./routes/ ---
+      // A board is created here, read here, and every field on it is
+      // written here: its Home queue, its next-work answer, its settings,
+      // its lead, and the docs and huddles filed onto it. They run HERE, in
+      // the position they were written in: the chain's order is behaviour,
+      // and `routes/workspaces.ts` keeps it.
+      {
+        const handled = await handleWorkspaceRoutes(workspaceRoutesCtx, {
+          scope,
+          req,
+          pathname,
+          url,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+
+      // --- REST: tasks (plan §3.10) — ./routes/ ---
+      // Every handler over there hand-copies body fields into the store
+      // call. A field that isn't copied is silently discarded while the
+      // request still returns 200 — so every param has an HTTP-level test
+      // in task-routes.test.ts (the `groups` lesson). They run HERE, in the
+      // position they were written in: the chain's order is behaviour, and
+      // `routes/tasks.ts` keeps it.
+      {
+        const handled = await handleTaskRoutes(taskRoutesCtx, {
+          scope,
+          req,
+          pathname,
+          url,
+          visitor,
+          authorFor,
+          refuseCategoryAuthor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: goal bands and the ordered goal list --- see
+      // ./routes/workspace-goals.ts. Same chain position as before the
+      // split: below the task routes, above the thread promote.
+      {
+        const handled = await handleWorkspaceGoalRoutes(workspaceRoutesCtx, {
+          scope,
+          req,
+          pathname,
+          url,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: promote a thread to a task — ./routes/docs.ts ---
+      {
+        const handled = await handleDocPromoteRoute(docRoutesCtx, {
+          scope,
+          req,
+          url,
+          pathname,
+          visitor,
+          authorFor,
+          refuseCategoryAuthor,
+          metaFor,
+          withTaskChips,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: durable agent watches, and the agent merge --- see
+      // ./routes/agent-identity.ts. Same chain position as before the
+      // split: after the promote route, before the builder dispatches.
+      {
+        const handled = await handleAgentIdentityRoutes(agentIdentityRoutesCtx, {
+          req,
+          pathname,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: builder dispatches, and a session's notes on the row it
+      // holds --- see ./routes/dispatch-and-notes.ts. Same chain position
+      // as before the split: after the agent merge route, before chat-audit.
+      {
+        const handled = await handleDispatchAndNoteRoutes(taskRoutesCtx, {
+          scope,
+          req,
+          pathname,
+          url,
+          visitor,
+          authorFor,
+          refuseCategoryAuthor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: chat-audit counters --- see ./routes/chat-audit-routes.ts.
+      // Same chain position as before the split: after the builder
+      // dispatches, before the operator routes.
+      {
+        const handled = await handleChatAuditRoutes(chatAuditRoutesCtx, {
+          scope,
+          req,
+          pathname,
+          visitor,
+        });
+        if (handled) return handled;
+      }
+      // --- Operator routes: plugin refresh, push and deploy — ./routes/ops.ts ---
+      // Same chain position as before the split: after the chat-audit
+      // routes, before the agent attachments.
+      {
+        const handled = await handleOpsRoutes(opsRoutesCtx, {
+          req,
+          pathname,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: agent attachments (§4) --- see
+      // ./routes/workspace-attachments.ts. Same chain position as before
+      // the split: after the deploy routes, before the archive pair.
+      {
+        const handled = await handleWorkspaceAttachmentRoutes(workspaceRoutesCtx, {
+          scope,
+          req,
+          pathname,
+          url,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: archive and unarchive, for a review and for one doc ---
+      // see ./routes/archive.ts. Same chain position as before the split:
+      // after the agent attachments, before the board delete.
+      {
+        const handled = await handleArchiveRoutes({ req, pathname, url, visitor, scope });
+        if (handled) return handled;
+      }
+      // --- REST: the board delete --- see ./routes/workspace-delete.ts.
+      // It stays BELOW the archive family, which serves `DELETE
+      // /workspaces/<ws>/attachments/<setId>`. The order used to be load-bearing
+      // because one path meant either store; now the two verbs have two
+      // addresses and cannot be confused, and the order is kept because
+      // nothing is gained by moving it.
+      {
+        const handled = await handleWorkspaceDeleteRoute(workspaceRoutesCtx, {
+          scope,
+          req,
+          pathname,
+          url,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: a review's own files --- see ./routes/review-files.ts.
+      // Same chain position as before the split: after the board delete,
+      // before the meeting and calendar routes.
+      {
+        const handled = await handleReviewFileRoutes(reviewFileRoutesCtx, {
+          scope,
+          req,
+          url,
+          pathname,
+          visitor,
+          metaFor,
+          withTaskChips,
+        });
+        if (handled) return handled;
+      }
+      // --- Meetings, transcripts and the calendar — ./routes/meetings-calendar.ts ---
+      // Called from the position the block occupied: every
+      // `/api/docs/<id>/meetings...` pattern has to be tried before the
+      // doc catch-all below, which would otherwise swallow all of them.
+      {
+        const handled = await handleMeetingCalendarRoutes(meetingCalendarRoutesCtx, {
+          scope,
+          req,
+          url,
+          pathname,
+          visitor,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: one doc and its threads — ./routes/docs.ts ---
+      {
+        const handled = await handleDocResourceRoutes(docRoutesCtx, {
+          scope,
+          req,
+          url,
+          pathname,
+          visitor,
+          authorFor,
+          refuseCategoryAuthor,
+          metaFor,
+          withTaskChips,
+        });
+        if (handled) return handled;
+      }
+
+      // --- REST: the prompt settings --- see ./routes/prompts.ts.
+      // Top-level rather than under a board: `/settings/prompts` is a page
+      // outside any board, and five of the seven prompts belong to the
+      // server rather than to one of them.
+      {
+        const handled = await handlePromptRoutes(promptRoutesCtx, {
+          req,
+          pathname,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+
+      // --- Web log --- see ./routes/ops.ts. Same chain position as before
+      // the split: under the doc resource routes, above the shell tail.
+      {
+        const handled = handleWebhookLogRoute(opsRoutesCtx, {
+          req,
+          pathname,
+          visitor,
+          authorFor,
+        });
+        if (handled) return handled;
+      }
+
+      // ── Shell and static serving ── see routes/shell-static.ts.
+      // The tail of the router: an HTML shell, a built asset, a mockup's
+      // own file, or a redirect to the address that has one. Null means no
+      // block there claimed this address, which is the same fall-through
+      // the run did in place, and it lands on the 404 below.
+      const shell = serveShellRoutes({ req, url, pathname, visitor });
+      if (shell) return shell;
+
+      // ── Stale-client 410 ── see routes/stale-client.ts. Above the
+      // wrong-prefix hint and below everything that exists: an address the
+      // pre-cutover client used is told the client is behind, rather than
+      // getting the bare 404 a deleted board also answers.
+      const stale = handleStaleClient(pathname);
+      if (stale) return stale;
+
+      // ── Wrong-prefix 404 ── see routes/wrong-prefix.ts. Below everything
+      // that exists, so it shadows nothing: a guess at a board route with
+      // `/api` in front is told the address without it.
+      const wrongPrefix = handleWrongPrefix(pathname);
+      if (wrongPrefix) return wrongPrefix;
+
+      return new Response('not found', { status: 404 });
+    }
+  }
+
   const server = Bun.serve<UpgradeData>({
     port,
     // Unset means Bun's own default (every interface) — unchanged for every
@@ -1946,575 +2531,24 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // it, and they now reach it through the narrowed forward reference the
     // upgrade-stream factory holds. Bun still passes it; nothing here wants
     // it.
+    // ── The route table ── see routes/route-table.ts.
+    //
+    // Every front-door path pattern this server answers, each registered
+    // through `gated(...)` naming the gate it sits behind. Mounting it here
+    // is what makes it a runtime value rather than a document: the drift
+    // test reads the same object Bun dispatches on, so a pattern that leaves
+    // the table leaves the server’s own registry with it.
+    //
+    // Every entry’s handler IS `handleRequest`, and an address the table
+    // does not name reaches the same function through `fetch` below. That is
+    // deliberate: Bun matches by specificity, and this router’s order is
+    // behaviour in eight documented places (the Recall status webhook above
+    // the `/recall/` upgrade, meetings above the doc catch-all, and the rest
+    // named in `route-table.ts`). Handing dispatch to a matcher that does not
+    // know those adjacencies would change what a request is answered by.
+    routes: mountRouteTable(ROUTE_TABLE, handleRequest),
     async fetch(req) {
-      const startedAt = performance.now();
-      const pathname = new URL(req.url).pathname;
-      // A stray `%` anywhere in the path is a caller's typo, and it has to
-      // be answered before anything decodes it: `decodeURIComponent` throws a
-      // `URIError` inside whichever matcher pulls the id out of the path, and
-      // that surfaces as a 500 naming nothing. Front door rather than per
-      // route — a check each route must remember covers only the routes
-      // somebody remembered to change, and there are 95 direct decode calls.
-      const badSegment = malformedPathSegment(pathname);
-      if (badSegment !== undefined) {
-        return applyCors(
-          req,
-          new Response(
-            JSON.stringify({
-              error: 'bad-path',
-              message: 'a path segment is not valid percent-encoding',
-            }),
-            { status: 400, headers: { 'content-type': 'application/json' } },
-          ),
-        );
-      }
-      // A docId-addressed request may HYDRATE that doc, and hydration reads
-      // the doc's bound file. That read used to run on the main thread, where
-      // a cloud-sync folder that had stopped answering parked the whole
-      // server — every route, not just this one (see slow-fs.ts). Doing it
-      // here, on the thread pool and under a deadline, means the synchronous
-      // hydrate inside the route either finds the bytes already in hand or
-      // finds the path quarantined and parks the doc without touching it.
-      const prewarmUrl = new URL(req.url);
-      const prewarmIds = docIdsAddressedBy(prewarmUrl);
-      if (prewarmIds.length > 0) {
-        await Promise.all(prewarmIds.map((id) => docStore.prewarmHydration(id)));
-      }
-      // Server-side Sentry (a no-op passthrough when unconfigured — see
-      // sentry.ts): one span per request, named by route PATTERN never raw
-      // path, continuing the browser's trace when it sent one so a page load
-      // reads end to end. A throw inside `route()` is reported with the same
-      // route-pattern context, then rethrown unchanged — this wrapper only
-      // observes, it does not change what a request returns.
-      let routed: Response | undefined;
-      try {
-        routed = await withRouteSpan(req, pathname, () => route(req));
-      } catch (err) {
-        captureServerError(err, { route: routePatternForSpan(pathname), method: req.method });
-        throw err;
-      }
-      // Compress BEFORE the CORS merge so the encoding headers ride out on the
-      // same response the wrapper copies; `maybeCompress` skips anything whose
-      // content-type isn't on its allowlist (see compress.ts for why that gate
-      // is narrow — a live stream must never be buffered to compress it).
-      //
-      // `maybeNotModified` runs first: when the client already holds the body,
-      // gzipping it is the one case where the CPU buys nothing, and a 304 has
-      // no body for `maybeCompress` to act on anyway.
-      // `undefined` means the request became a websocket — nothing to decorate.
-      if (routed === undefined) return undefined;
-      const response = applyCors(
-        req,
-        refreshSession(req, await maybeCompress(req, maybeNotModified(req, routed))),
-      );
-      const elapsedMs = performance.now() - startedAt;
-      if (elapsedMs >= slowRequestMs) {
-        // Path only — the query can carry a person's name (`?user=`), and
-        // the line is for a grep over durations, not a record of who asked.
-        console.error(
-          `[timing] ${req.method} ${pathname} ${Math.round(elapsedMs)}ms ` +
-            `status=${response.status} bytes=${response.headers.get('content-length') ?? '?'}`,
-        );
-      }
-      return response;
-
-      // Hoisted, so the wrapper above can call it first. The whole route
-      // table lives in here unchanged.
-      async function route(req: Request): Promise<Response | undefined> {
-        const url = new URL(req.url);
-        const { pathname } = url;
-
-        // --- CORS preflight ---
-        // The canonical embed loads the widget bundle from this server but
-        // runs on a different origin (e.g. an Astro dev server on :4321).
-        // Every REST call from the widget is therefore cross-origin and
-        // browsers preflight non-simple requests (POST + JSON body) with an
-        // OPTIONS. Reply once here so we don't have to thread the response
-        // through every route handler.
-        // The wrapper above attaches the CORS headers when the origin is
-        // allowed. A disallowed origin gets a bare 204 with no
-        // Access-Control-Allow-* — which is exactly how the browser learns no.
-        if (req.method === 'OPTIONS') {
-          return new Response(null, { status: 204 });
-        }
-
-        // --- Cross-origin WRITE gate ---
-        // Withholding CORS headers only hides the RESPONSE. A "simple request"
-        // — POST with content-type text/plain — is never preflighted, so the
-        // browser sends it and the write lands; the page just can't read the
-        // reply. safeJson() parses the body whatever the content-type says, so
-        // that was a working CSRF write: post comments as someone else, or
-        // create a doc bound to any file on the machine.
-        //
-        // GET stays open on purpose. Its response is already withheld by CORS,
-        // and refusing it would break <script>/<img>-style loads of the widget
-        // bundle from arbitrary dev sites (those send no Origin at all).
-        if (
-          req.method !== 'GET' &&
-          req.method !== 'HEAD' &&
-          !isAllowedBrowserOrigin(req.headers.get('origin'), policyFor(req))
-        ) {
-          return j(403, { error: 'origin_not_allowed' });
-        }
-
-        // ── Request admission ── see request-admission.ts.
-        // The gate ANSWERS this request or hands back what it proved. A
-        // refused answer carries no per-request value with it, so nothing
-        // below can read a visitor off a request that never got in — the
-        // union is what makes that a compile error rather than a review note.
-        const gate = await admit(req, { pathname });
-        if (!gate.admitted) return gate.response;
-        const { visitor, visitorShareId, visitorMemberKey, metaFor } = gate;
-
-        // --- REST: email login ---
-        // Reachability (the host gate, Access, a share session) and identity
-        // (who you are) stay orthogonal: a local host still bypasses the host
-        // guard — it may REACH the server — and still has to say who it is.
-        // These routes are what "saying who you are" means.
-        //
-        // They sit AFTER the host decision on purpose, so a share visitor
-        // reaches them only if `shareScopeAllows` lets them, and it does not:
-        // a share visitor is already proven by Cloudflare Access, and this is
-        // not a second way to claim an identity on a share host.
-        // ── Request attribution ── see request-attribution.ts.
-        // Chained after admission rather than composed beside it, because its
-        // input is what the gate just proved. Called from the position the
-        // widget-token gate held — that gate lives inside, and its 401 has to
-        // land exactly here. `attributed: false` carries no helpers at all, so
-        // no route can name an author on a request whose token was refused.
-        const attribution = attributeRequest(req, gate);
-        if (!attribution.attributed) return attribution.response;
-        const {
-          widgetIdentity,
-          provenIdentityFor,
-          authorFor,
-          refuseCategoryAuthor,
-          withTaskChips,
-          browserProvedNobody,
-        } = attribution;
-
-        // --- Sign-in write gate ---
-        // Every ordinary write — a comment, a task edit, a review answer, a
-        // doc bind — passes through here, because every one of them is a
-        // non-GET and every route on this server lives below this line. The
-        // predicate is method-keyed rather than a route list on purpose: a
-        // list is a thing that silently stops being complete.
-        //
-        // Reads are untouched, agents are untouched (see write-gate.ts for
-        // what tells them apart and what that boundary is worth), and the
-        // refusal carries the URL that fixes it — a bare 401 is
-        // indistinguishable from a bug, and the client turns this body into
-        // a sign-in prompt.
-        //
-        // Order: below the widget-token gate so a valid token counts as
-        // proof, and below the host/Access gates so an Access visitor's
-        // verified email is already in hand.
-        if (requireSignInToWrite && isGatedWrite(req.method, pathname) && browserProvedNobody()) {
-          return j(401, signInRequiredBody());
-        }
-
-        // --- Sign-in, session and share links (routes/auth-share.ts) ---
-        // Extracted whole and called from the position the block occupied, so
-        // nothing above or below it overtakes anything. See that file's header
-        // for the two places the order inside it is load-bearing.
-        {
-          const handled = await handleAuthShareRoutes(authShareRoutesCtx, {
-            req,
-            url,
-            pathname,
-            widgetIdentity,
-            browserProvedNobody,
-            provenIdentityFor,
-          });
-          if (handled) return handled;
-        }
-
-        // --- Recall's bot status-change webhook --- see
-        // ./routes/recall-webhook.ts. Called from the position the block
-        // held: it must stay IMMEDIATELY above the `/recall/` websocket
-        // upgrade below, because that upgrade's own test is
-        // `startsWith('/recall/')` and would answer a status POST with the
-        // token lookup's 404. That adjacency is behaviour — keep these two
-        // adjacent.
-        {
-          const handled = await handleRecallWebhookRoute(recallWebhookRoutesCtx, {
-            req,
-            pathname,
-          });
-          if (handled) return handled;
-        }
-
-        // ── Upgrade and stream ── see routes/upgrade-stream.ts.
-        // Six blocks that end in a long-lived connection rather than a body:
-        // the three websocket upgrades and the three SSE openers. Called from
-        // the position the run held, so the `/recall/` upgrade still sits
-        // IMMEDIATELY below the status webhook above it — that adjacency is
-        // load-bearing and the comment on the webhook says why. Null means no
-        // block there claimed this address, which is the same fall-through the
-        // run did in place; `upgraded` is the one outcome that must reach Bun
-        // as `undefined`, and this is the only place that spells it.
-        const streamed = serveUpgradeAndStreamRoutes({
-          req,
-          url,
-          pathname,
-          visitor,
-          visitorShareId,
-          visitorMemberKey,
-          browserProvedNobody,
-        });
-        if (streamed) {
-          if (streamed.kind === 'upgraded') return undefined;
-          return streamed.response;
-        }
-
-        // ── The workspace scope ── see middleware/workspace-scope.ts.
-        //
-        // ONE resolver for every canonical `/workspaces/<id>/…` request, run
-        // once here rather than at the top of each handler. It answers two
-        // questions and refuses on either: does this board exist, and does the
-        // row named under it belong to it. That second question only became
-        // askable when the board went into the path — `/api/goals/<id>` named
-        // a row and left the server to find its board, so "a goal on somebody
-        // else's board" was not a shape a request could have.
-        //
-        // Placed BELOW the stream block, because a websocket upgrade and an
-        // SSE open are taken over rather than answered, and ABOVE every REST
-        // handler, because the whole point is that no handler resolves a board
-        // for itself. Whether the CALLER may reach the board is not asked here
-        // — `shareScopeAllows` in the host guard has already answered it, and
-        // a second copy of that rule is the thing this file exists to remove.
-        //
-        // `pass` means the path is not its business: not under `/workspaces/`,
-        // or one of the board's HTML pages, which the shell at the tail of the
-        // chain serves with its own not-found.
-        //
-        // What it hands DOWN is the other half. `scope` travels on every
-        // resource route's request and is what those routes match against —
-        // see `matchRest`. A handler with no scope has no remainder to match,
-        // so "the workspace was resolved" stops being something each route
-        // remembers to check and becomes the condition of it answering at
-        // all.
-        let scope: WorkspaceScope<BoardWorkspace> | undefined;
-        {
-          const scoped = resolveWorkspaceScope(
-            {
-              workspaceRecord: (id: string) => taskStore.getWorkspace(id),
-              workspacesOfMember,
-              j,
-              // A browser asked for a page; answer it with one. The same
-              // shell the review route renders when a review has no members.
-              notFoundPage: () =>
-                new Response(renderReviewNotFound(pathname), {
-                  status: 404,
-                  headers: { 'content-type': 'text/html; charset=utf-8' },
-                }),
-            },
-            { pathname, method: req.method, url },
-          );
-          if (scoped.kind === 'refused') return scoped.response;
-          if (scoped.kind === 'scope') scope = scoped.scope;
-        }
-
-        // --- REST: run the summary backfill on request --- see
-        // ./routes/ops.ts. Same chain position as before the split: above the
-        // metrics route, which is the next call below.
-        {
-          const handled = await handleSummaryBackfillRoute(opsRoutesCtx, {
-            req,
-            pathname,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-
-        // --- REST: what this process currently costs ---
-        //
-        // The 2026-08-29 jetsam kill left nothing to read: the server was at
-        // 2.6 GB and the only evidence of how it got there was the absence of
-        // the process. `DocStore.stats()` is also written to the log every five
-        // minutes; this route is the same numbers on demand, so the NEXT
-        // incident can be sampled over time instead of reconstructed.
-        //
-        // Counts only — no doc ids, no paths, no titles. That is what makes
-        // it safe to leave un-gated for anyone already past the front door,
-        // and it still refuses a share visitor: an external reviewer invited
-        // to one document has no business reading how many others exist.
-        {
-          const handled = handleOpsMetricsRoute(opsRoutesCtx, {
-            req,
-            pathname,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-
-        // --- REST: docs, created and listed — ./routes/docs.ts ---
-        {
-          const handled = await handleDocCreateListRoutes(docRoutesCtx, {
-            scope,
-            req,
-            url,
-            pathname,
-            visitor,
-            authorFor,
-            refuseCategoryAuthor,
-            metaFor,
-            withTaskChips,
-          });
-          if (handled) return handled;
-        }
-
-        // --- REST: workspaces (the board's own routes) — ./routes/ ---
-        // A board is created here, read here, and every field on it is
-        // written here: its Home queue, its next-work answer, its settings,
-        // its lead, and the docs and huddles filed onto it. They run HERE, in
-        // the position they were written in: the chain's order is behaviour,
-        // and `routes/workspaces.ts` keeps it.
-        {
-          const handled = await handleWorkspaceRoutes(workspaceRoutesCtx, {
-            scope,
-            req,
-            pathname,
-            url,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-
-        // --- REST: tasks (plan §3.10) — ./routes/ ---
-        // Every handler over there hand-copies body fields into the store
-        // call. A field that isn't copied is silently discarded while the
-        // request still returns 200 — so every param has an HTTP-level test
-        // in task-routes.test.ts (the `groups` lesson). They run HERE, in the
-        // position they were written in: the chain's order is behaviour, and
-        // `routes/tasks.ts` keeps it.
-        {
-          const handled = await handleTaskRoutes(taskRoutesCtx, {
-            scope,
-            req,
-            pathname,
-            url,
-            visitor,
-            authorFor,
-            refuseCategoryAuthor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: goal bands and the ordered goal list --- see
-        // ./routes/workspace-goals.ts. Same chain position as before the
-        // split: below the task routes, above the thread promote.
-        {
-          const handled = await handleWorkspaceGoalRoutes(workspaceRoutesCtx, {
-            scope,
-            req,
-            pathname,
-            url,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: promote a thread to a task — ./routes/docs.ts ---
-        {
-          const handled = await handleDocPromoteRoute(docRoutesCtx, {
-            scope,
-            req,
-            url,
-            pathname,
-            visitor,
-            authorFor,
-            refuseCategoryAuthor,
-            metaFor,
-            withTaskChips,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: durable agent watches, and the agent merge --- see
-        // ./routes/agent-identity.ts. Same chain position as before the
-        // split: after the promote route, before the builder dispatches.
-        {
-          const handled = await handleAgentIdentityRoutes(agentIdentityRoutesCtx, {
-            req,
-            pathname,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: builder dispatches, and a session's notes on the row it
-        // holds --- see ./routes/dispatch-and-notes.ts. Same chain position
-        // as before the split: after the agent merge route, before chat-audit.
-        {
-          const handled = await handleDispatchAndNoteRoutes(taskRoutesCtx, {
-            scope,
-            req,
-            pathname,
-            url,
-            visitor,
-            authorFor,
-            refuseCategoryAuthor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: chat-audit counters --- see ./routes/chat-audit-routes.ts.
-        // Same chain position as before the split: after the builder
-        // dispatches, before the operator routes.
-        {
-          const handled = await handleChatAuditRoutes(chatAuditRoutesCtx, {
-            scope,
-            req,
-            pathname,
-            visitor,
-          });
-          if (handled) return handled;
-        }
-        // --- Operator routes: plugin refresh, push and deploy — ./routes/ops.ts ---
-        // Same chain position as before the split: after the chat-audit
-        // routes, before the agent attachments.
-        {
-          const handled = await handleOpsRoutes(opsRoutesCtx, {
-            req,
-            pathname,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: agent attachments (§4) --- see
-        // ./routes/workspace-attachments.ts. Same chain position as before
-        // the split: after the deploy routes, before the archive pair.
-        {
-          const handled = await handleWorkspaceAttachmentRoutes(workspaceRoutesCtx, {
-            scope,
-            req,
-            pathname,
-            url,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: archive and unarchive, for a review and for one doc ---
-        // see ./routes/archive.ts. Same chain position as before the split:
-        // after the agent attachments, before the board delete.
-        {
-          const handled = await handleArchiveRoutes({ req, pathname, url, visitor, scope });
-          if (handled) return handled;
-        }
-        // --- REST: the board delete --- see ./routes/workspace-delete.ts.
-        // It stays BELOW the archive family, which serves `DELETE
-        // /workspaces/<ws>/attachments/<setId>`. The order used to be load-bearing
-        // because one path meant either store; now the two verbs have two
-        // addresses and cannot be confused, and the order is kept because
-        // nothing is gained by moving it.
-        {
-          const handled = await handleWorkspaceDeleteRoute(workspaceRoutesCtx, {
-            scope,
-            req,
-            pathname,
-            url,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: a review's own files --- see ./routes/review-files.ts.
-        // Same chain position as before the split: after the board delete,
-        // before the meeting and calendar routes.
-        {
-          const handled = await handleReviewFileRoutes(reviewFileRoutesCtx, {
-            scope,
-            req,
-            url,
-            pathname,
-            visitor,
-            metaFor,
-            withTaskChips,
-          });
-          if (handled) return handled;
-        }
-        // --- Meetings, transcripts and the calendar — ./routes/meetings-calendar.ts ---
-        // Called from the position the block occupied: every
-        // `/api/docs/<id>/meetings...` pattern has to be tried before the
-        // doc catch-all below, which would otherwise swallow all of them.
-        {
-          const handled = await handleMeetingCalendarRoutes(meetingCalendarRoutesCtx, {
-            scope,
-            req,
-            url,
-            pathname,
-            visitor,
-          });
-          if (handled) return handled;
-        }
-        // --- REST: one doc and its threads — ./routes/docs.ts ---
-        {
-          const handled = await handleDocResourceRoutes(docRoutesCtx, {
-            scope,
-            req,
-            url,
-            pathname,
-            visitor,
-            authorFor,
-            refuseCategoryAuthor,
-            metaFor,
-            withTaskChips,
-          });
-          if (handled) return handled;
-        }
-
-        // --- REST: the prompt settings --- see ./routes/prompts.ts.
-        // Top-level rather than under a board: `/settings/prompts` is a page
-        // outside any board, and five of the seven prompts belong to the
-        // server rather than to one of them.
-        {
-          const handled = await handlePromptRoutes(promptRoutesCtx, {
-            req,
-            pathname,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-
-        // --- Web log --- see ./routes/ops.ts. Same chain position as before
-        // the split: under the doc resource routes, above the shell tail.
-        {
-          const handled = handleWebhookLogRoute(opsRoutesCtx, {
-            req,
-            pathname,
-            visitor,
-            authorFor,
-          });
-          if (handled) return handled;
-        }
-
-        // ── Shell and static serving ── see routes/shell-static.ts.
-        // The tail of the router: an HTML shell, a built asset, a mockup's
-        // own file, or a redirect to the address that has one. Null means no
-        // block there claimed this address, which is the same fall-through
-        // the run did in place, and it lands on the 404 below.
-        const shell = serveShellRoutes({ req, url, pathname, visitor });
-        if (shell) return shell;
-
-        // ── Stale-client 410 ── see routes/stale-client.ts. Above the
-        // wrong-prefix hint and below everything that exists: an address the
-        // pre-cutover client used is told the client is behind, rather than
-        // getting the bare 404 a deleted board also answers.
-        const stale = handleStaleClient(pathname);
-        if (stale) return stale;
-
-        // ── Wrong-prefix 404 ── see routes/wrong-prefix.ts. Below everything
-        // that exists, so it shadows nothing: a guess at a board route with
-        // `/api` in front is told the address without it.
-        const wrongPrefix = handleWrongPrefix(pathname);
-        if (wrongPrefix) return wrongPrefix;
-
-        return new Response('not found', { status: 404 });
-      }
+      return handleRequest(req);
     },
     // ── Socket handlers ── see socket-handlers.ts. A19 decided the socket
     // may open and what is stamped on it; this is what Bun calls for the
