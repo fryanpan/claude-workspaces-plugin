@@ -88,10 +88,53 @@ describe('the notetaking instructions', () => {
     expect(system).toMatch(/beginning with[\s\S]{0,40}"- "/);
   });
 
+  it('say that ideas are never dropped, only compressed', () => {
+    // The rule this replaced ended "fewer, better notes beat complete ones",
+    // which told the note-taker that leaving an idea out was a success. A
+    // minute of real conversation then produced no note at all.
+    expect(system).toContain('COMPRESS, NEVER DROP');
+    expect(system).not.toMatch(/fewer, better notes/i);
+    expect(system).toMatch(/every idea/i);
+  });
+
+  it('give open questions one fixed heading rather than a good place', () => {
+    // Both halves, and they are different rules: the FLOOR says a topic is
+    // not finished until what is open is written down, and HOW TO ORGANISE
+    // says where. Asserting only the heading text passed with the organising
+    // rule deleted, because the floor bullet quotes the same heading — an
+    // assertion that could not fail on the behaviour it named.
+    expect(system).toContain('### Open questions');
+    expect(system).toContain('ONE HEADING IS FIXED');
+  });
+
+  it('name the floor a finished topic has to reach', () => {
+    for (const asked of [
+      'what was discussed',
+      'what it means and why it matters',
+      'what was decided, and by whom',
+      'what happens next, and who owns it',
+      '(unconfirmed)',
+    ]) {
+      expect(system).toContain(asked);
+    }
+  });
+
   it('name the four things a note should carry', () => {
     for (const asked of ['discussed', 'why it matters', 'decided', 'happens next']) {
       expect(system).toContain(asked);
     }
+  });
+
+  it('offer a missed sentence back as a second look, not as new speech', () => {
+    const withMissed = buildNotesPrompt({
+      ...emptyInput,
+      missed: [{ turn: 0, text: 'The export dialog forgets the range.', speaker: 'Devi' }],
+    }).user;
+    expect(withMissed).toContain('STILL IN NO NOTE');
+    expect(withMissed).toContain('The export dialog forgets the range.');
+    // And a tick with nothing outstanding is not told about a section that
+    // does not apply to it.
+    expect(buildNotesPrompt(emptyInput).user).not.toContain('STILL IN NO NOTE');
   });
 
   it('ask for topic headings that are reused rather than reopened', () => {

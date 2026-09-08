@@ -51,12 +51,28 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  * rather than by the model reading a paragraph of prompt.
  *
  * WHAT SURVIVED IS EVERYTHING THAT WAS ABOUT THE NOTES RATHER THAN ABOUT THE
- * PROTOCOL. Paraphrase; filter hard; one point per bullet under twenty words;
- * cover discussed / why / decided / next; a decision is its own bullet; mark a
- * guess `(unconfirmed)`; keep the speaker on a decision and an open question;
- * cite what a note names; organise under `###` topic headings; group a topic
- * that has grown past a flat run. Those are the notes a person wants whatever
- * shape the reply takes.
+ * PROTOCOL. Paraphrase; one point per bullet under twenty words; a decision is
+ * its own bullet; mark a guess `(unconfirmed)`; keep the speaker on a decision
+ * and an open question; cite what a note names; organise under `###` topic
+ * headings; group a topic that has grown past a flat run. Those are the notes
+ * a person wants whatever shape the reply takes.
+ *
+ * WHY "FILTER HARD" IS GONE, AND WHAT REPLACED IT. The rule used to end
+ * "fewer, better notes beat complete ones", and a note-taker that reads that
+ * sentence has been told, in as many words, that leaving an idea out is a
+ * success. It behaved accordingly: a minute of real conversation about one
+ * subject produced no note at all, and nothing downstream could tell, because
+ * coverage counted the TURNS that reached a compose rather than the IDEAS the
+ * notes came to carry. What stands in its place says the same thing about
+ * length and the opposite thing about ideas — compress, never drop — and
+ * `notes-idea-coverage.ts` is the half that measures whether it worked.
+ *
+ * THE FLOOR IS THE OTHER HALF. "Cover, where the speech has it" was a hint;
+ * a topic that is not finished until the notes say what was discussed, what
+ * it means, what was decided and by whom, what happens next and who owns it,
+ * what is still open, what is unconfirmed, and what it named, is a bar. Open
+ * questions have a FIXED heading for the reason a fixed place always beats a
+ * good place: the room stops hunting.
  *
  * WHY REGROUPING STILL ASKS FOR SUB-BULLETS. Nesting costs the reader less
  * than a re-cut section: no block they have commented on is re-created, and
@@ -105,12 +121,25 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '  is two bullets, and a bullet that needs a dash, a semicolon or the word',
   '  "and" to hold two ideas is already those two bullets. The speaker tag',
   '  does not count towards the twenty.',
-  '- Filter hard. Most of what is said does not belong in notes: greetings,',
-  '  thinking aloud, a point already made, going round again. Fewer, better',
-  '  notes beat complete ones.',
-  '- Cover, where the speech has it: what was discussed, why it matters, what',
-  '  was decided and who decided it, and what happens next — with an owner',
-  '  when one was named.',
+  '- COMPRESS, NEVER DROP. What goes is the packaging: greetings, thinking',
+  '  aloud, false starts, a point already in the notes, the same point said',
+  '  again in other words. What STAYS is every idea. If the speech raised a',
+  '  subject the notes do not yet carry, it gets a note — even a small one,',
+  '  even a single sentence that mattered for a moment. Length is what you',
+  '  cut; ideas are not. When you must choose, write the idea in five words',
+  '  rather than leaving it out.',
+  '- THE FLOOR FOR EVERY TOPIC, wherever the speech supplies it. A topic is',
+  '  not finished until the notes say:',
+  '    - what was discussed,',
+  '    - what it means and why it matters,',
+  '    - what was decided, and by whom,',
+  '    - what happens next, and who owns it,',
+  '    - what is still open, under the "### Open questions" heading and',
+  '      nowhere else, so the room always looks in the same place,',
+  '    - which parts are not confirmed, marked "(unconfirmed)",',
+  '    - and every task, doc or earlier meeting it named, linked inline.',
+  '  Where the speech gives one of these and the notes do not have it, that',
+  '  is a missing note, not a tidy one.',
   '- Keep what happened, what it means and what to do apart. A decision is',
   '  its own bullet, not a clause inside a description of the discussion.',
   '- When this speech overturns or corrects a bullet of YOURS, replace_block',
@@ -119,6 +148,11 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   'HOW TO ORGANISE',
   '- Group the notes under "### " topic headings, one per topic or question',
   '  the room worked on.',
+  '- ONE HEADING IS FIXED: "### Open questions". Everything the room left',
+  '  unresolved goes there and only there, so a reader always knows where to',
+  '  look. Open it the first time something is left open, never twice, and',
+  '  keep it last. When a question is later answered, replace_block it with',
+  '  the answer under the topic it belongs to and delete the open one.',
   '- When this speech continues a topic the doc already has, add under THAT',
   "  heading's id. Never open a second heading for a topic that already has",
   '  one.',

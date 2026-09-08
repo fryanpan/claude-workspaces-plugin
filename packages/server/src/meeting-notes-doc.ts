@@ -571,14 +571,20 @@ export function withServerNotesSinks(
       const line =
         `[meeting-notes] ${summary.docId} meeting ${summary.meetingId}: ` +
         `${plural(summary.ticks, 'tick')} over ${plural(summary.turnsSettled, 'settled turn')}, ` +
-        `${plural(summary.turnsLost, 'turn')} in no note` +
+        `${plural(summary.turnsLost, 'turn')} in no note, ` +
+        // The number the "I said that and it is not in the notes" report is
+        // about. `turnsLost` counts what the composer never SAW; this counts
+        // what it saw and wrote nothing about, which is the same complaint
+        // from the reader's side and the one that used to be invisible.
+        `${summary.ideas.lost} of ${summary.ideas.seen} ideas in no note` +
+        (summary.ideas.retried > 0 ? ` (${summary.ideas.retried} retried)` : '') +
         (summary.composeFailures > 0
           ? `, ${plural(summary.composeFailures, 'failed compose')}`
           : '');
       // Only a meeting that actually lost words is an error. A clean one is
       // still logged, because the absence of a line is not evidence that a
       // meeting went well — it is evidence that nothing was written down.
-      if (summary.turnsLost > 0) console.error(line);
+      if (summary.turnsLost > 0 || summary.ideas.lost > 0) console.error(line);
       else console.log(line);
       options.onMeetingSummary?.(summary);
     },

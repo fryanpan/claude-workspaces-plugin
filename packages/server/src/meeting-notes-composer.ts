@@ -130,6 +130,20 @@ export function buildNotesPrompt(
     );
   }
 
+  if (input.missed?.length) {
+    parts.push(
+      [
+        'SAID EARLIER AND STILL IN NO NOTE. Each of these went past without',
+        'producing anything. Read them again with the notes above in front of',
+        'you: write the note each one should have produced, under the heading',
+        'it belongs to. Leave one out only if it is genuinely packaging — a',
+        'greeting, a false start, or a point the notes already carry in other',
+        'words. This is their last offer; nothing asks again.',
+        ...input.missed.map((t) => `- ${speakerPrefix(t)}${t.text}`),
+      ].join('\n'),
+    );
+  }
+
   parts.push(renderOutline(input));
   parts.push(
     `New transcript since the last update:\n${input.tick.turns
