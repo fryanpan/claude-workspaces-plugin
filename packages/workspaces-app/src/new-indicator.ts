@@ -25,7 +25,11 @@
  * document already lives; at phone widths there is no column, so the strips
  * are real rows at the top and bottom of the pane and the prose sits between
  * them. The action dock (Make Plan and friends) keeps its own row: the
- * bottom strip is measured clear of it rather than sharing it.
+ * bottom strip is measured clear of it rather than sharing it — and, on a
+ * wide layout, is seated in the SAME column footprint. A dock centred on the
+ * pane sits over the prose, and nothing may cover body text (Bryan, on round
+ * 3 of the mock): the column is the one strip of the page that is not
+ * something to read.
  */
 import type { MountScope } from './mount-scope.ts';
 
@@ -166,27 +170,42 @@ export function mountNewIndicator(opts: NewIndicatorOpts): NewIndicatorHandle {
   scroller.before(topStrip);
   scroller.after(botStrip);
 
+  /** The dock's ROW (`float-dock.ts`), which is what the stylesheet places —
+   *  the caller hands us a float inside it. */
+  function dockRow(): HTMLElement | null {
+    const float = opts.dockEl?.() ?? null;
+    if (!float || float.hidden) return null;
+    return float.closest<HTMLElement>('.doc-floats') ?? float;
+  }
+
   /** How much room the dock needs under the bottom strip, in pixels. */
   function dockClearance(): number {
-    const dock = opts.dockEl?.() ?? null;
-    if (!dock || dock.hidden) return 0;
-    const r = dock.getBoundingClientRect();
+    const row = dockRow();
+    if (!row) return 0;
+    const r = row.getBoundingClientRect();
     return r.height > 0 ? r.height + DOCK_GAP : 0;
   }
 
   function place(): void {
     const wide = opts.marginVisible();
     const column = wide && opts.marginEl ? opts.marginEl.getBoundingClientRect() : null;
+    const row = dockRow();
     if (!column || column.width === 0) {
       // No column to sit in: ordinary rows, whatever the width. The class
       // goes with the insets, so a strip is never floated with nothing to
-      // float against.
+      // float against — and the dock goes back to the centred pill the phone
+      // layout wants.
       for (const s of [topStrip, botStrip]) {
         s.classList.remove('is-floating');
         s.style.left = '';
         s.style.width = '';
         s.style.top = '';
         s.style.bottom = '';
+      }
+      if (row) {
+        row.classList.remove('is-floating');
+        row.style.left = '';
+        row.style.width = '';
       }
       botStrip.style.marginBottom = `${dockClearance()}px`;
       return;
@@ -201,6 +220,13 @@ export function mountNewIndicator(opts: NewIndicatorOpts): NewIndicatorHandle {
     }
     topStrip.style.top = `${Math.max(0, Math.round(scrollRect.top - paneRect.top)) + 10}px`;
     botStrip.style.bottom = `${Math.round(dockClearance()) + 22}px`;
+    // The dock joins them in the column rather than centring on the pane,
+    // where it lay over the prose.
+    if (row) {
+      row.classList.add('is-floating');
+      row.style.left = `${Math.round(column.left - paneRect.left)}px`;
+      row.style.width = `${Math.round(column.width)}px`;
+    }
   }
 
   function render(above: NewCount, below: NewCount): void {

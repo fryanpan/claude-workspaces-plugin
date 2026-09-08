@@ -79,9 +79,15 @@ function harness(opts: { wide?: boolean; dock?: number } = {}) {
   const marginEl = document.createElement('div');
   marginEl.getBoundingClientRect = () =>
     ({ top: 40, bottom: 640, left: 540, right: 800, width: 260 }) as DOMRect;
-  const dock = document.createElement('div');
-  dock.getBoundingClientRect = () => ({ height: opts.dock ?? 0 }) as DOMRect;
-  pane.append(scroller, dock);
+  // The real shape: a float inside the dock ROW (`float-dock.ts`), because
+  // the row is what the stylesheet places and what gets seated.
+  const row = document.createElement('div');
+  row.className = 'doc-floats';
+  row.getBoundingClientRect = () => ({ height: opts.dock ?? 0 }) as DOMRect;
+  const dock = document.createElement('button');
+  dock.className = 'plan-float';
+  row.appendChild(dock);
+  pane.append(scroller, row);
   document.body.appendChild(pane);
   const scope = new MountScope();
   const jumps: string[] = [];
@@ -95,7 +101,7 @@ function harness(opts: { wide?: boolean; dock?: number } = {}) {
     scope,
   });
   cleanups.push(() => scope.dispose());
-  return { pane, scroller, handle, jumps };
+  return { pane, scroller, handle, jumps, row };
 }
 
 const strip = (pane: HTMLElement, which: 'top' | 'bottom') =>
@@ -142,6 +148,27 @@ describe('mountNewIndicator', () => {
     const phone = harness({ dock: 60, wide: false });
     phone.handle.render({ questions: 0, fresh: 0 }, { questions: 0, fresh: 2 });
     expect(strip(phone.pane, 'bottom').style.marginBottom).toBe('70px');
+  });
+
+  it('seats the action dock in the column too, so it covers no body text', () => {
+    // Centred on the pane the dock lay over the prose — the one thing round 3
+    // of the mock said nothing may do. In the column it is beside the text.
+    const h = harness({ dock: 60 });
+    h.handle.render({ questions: 0, fresh: 1 }, { questions: 0, fresh: 1 });
+    expect(h.row.classList.contains('is-floating')).toBe(true);
+    expect(h.row.style.left).toBe('540px');
+    expect(h.row.style.width).toBe('260px');
+    // The prose column ends where the balloon column starts, so the dock's
+    // whole box is clear of it.
+    expect(Number.parseInt(h.row.style.left, 10)).toBeGreaterThanOrEqual(540);
+  });
+
+  it('gives the dock back its centred pill where there is no column', () => {
+    const h = harness({ dock: 60, wide: false });
+    h.handle.render({ questions: 0, fresh: 1 }, { questions: 0, fresh: 1 });
+    expect(h.row.classList.contains('is-floating')).toBe(false);
+    expect(h.row.style.left).toBe('');
+    expect(h.row.style.width).toBe('');
   });
 
   it('a tap says which way the reader asked to go', () => {

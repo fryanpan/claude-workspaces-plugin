@@ -3509,6 +3509,17 @@ body.redline-mode #toggle-suggest-mode {
 .edge-strip.is-floating > * {
   pointer-events: auto;
 }
+/* The action dock joins them there. Centred on the pane it lay over the body
+   text — the one thing round 3 said nothing may cover — so on a layout that
+   HAS a column the module seats it in the column's footprint and the centring
+   transform comes off. `left` and `width` are written inline by the same
+   pass that places the strips; without the transform reset the row would
+   still be dragged half its width to the left of them. */
+.doc-floats.is-floating {
+  transform: none;
+  max-width: none;
+  justify-content: stretch;
+}
 @media (max-width: 1100px) {
   /* Clear of the widget bubble in the bottom-right corner. */
   .cw-edge {

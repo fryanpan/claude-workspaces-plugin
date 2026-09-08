@@ -67,6 +67,17 @@ describe('the new-content indicator', () => {
     expect(styleOf(strip).position).toBe('absolute');
   });
 
+  it('the seated dock drops the centring transform that put it over the prose', () => {
+    const row = document.createElement('div');
+    row.className = 'doc-floats';
+    document.body.appendChild(row);
+    // The control: unseated, it is still the centred pill, which is what laid
+    // it over the body text.
+    expect(styleOf(row).transform).toContain('-50%');
+    row.classList.add('is-floating');
+    expect(styleOf(row).transform).toBe('none');
+  });
+
   it('the pill stays clear of the widget bubble at phone width', () => {
     setViewport(PHONE);
     const { pill } = indicator();
