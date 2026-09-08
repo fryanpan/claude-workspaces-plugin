@@ -195,3 +195,92 @@ describe('insert_blocks tools forward placement', () => {
     }
   }, 60_000);
 });
+
+/**
+ * The block-address family — `read_doc_outline`, `apply_block_edits` and the
+ * `insert_blocks_under_heading` shortcut over the second.
+ *
+ * Asserted on the requests the RUNNING BUNDLE made, for the reason this file's
+ * header gives: a route literal survives in the bundle text whether or not a
+ * handler asks for it, and these three are the first tools whose whole value
+ * is that they address a block by id rather than by quoting text — a wiring
+ * that silently dropped `edits`, or sent the outline's options nowhere, would
+ * still look right in the source.
+ */
+describe('the block-address doc tools', () => {
+  it('declare the trap each avoids, and reach the right route with the right body', async () => {
+    let h: BundleHarness | undefined;
+    try {
+      h = await startBundle();
+
+      // The descriptions are the product surface: an agent picks between
+      // these three from the tool list alone. Each has to say what it is for
+      // and name the failure it exists to avoid.
+      const outlineDecl = h.tool('read_doc_outline') as ToolDecl | undefined;
+      expect(outlineDecl, 'no read_doc_outline declared').toBeDefined();
+      expect(`${outlineDecl?.description ?? ''}`.toLowerCase()).toContain('text');
+      expect(Object.keys(outlineDecl?.inputSchema?.properties ?? {})).toEqual(
+        expect.arrayContaining(['workspaceId', 'docId', 'headingsOnly', 'recentBlocks']),
+      );
+      const batchDecl = h.tool('apply_block_edits') as ToolDecl | undefined;
+      expect(batchDecl, 'no apply_block_edits declared').toBeDefined();
+      expect(`${batchDecl?.description ?? ''}`.toLowerCase()).toContain('one transaction');
+      const underDecl = h.tool('insert_blocks_under_heading') as ToolDecl | undefined;
+      expect(underDecl, 'no insert_blocks_under_heading declared').toBeDefined();
+      expect(`${underDecl?.description ?? ''}`.toLowerCase()).toContain('renamed');
+
+      // read_doc_outline: a GET, with both options on the query string.
+      const opts = await h.call('read_doc_outline', {
+        workspaceId: 'w-1',
+        docId: 'doc-1',
+        headingsOnly: true,
+        recentBlocks: 5,
+      });
+      const read = opts.sent.find((r) => r.method === 'GET' && r.path.endsWith('/outline'));
+      expect(read, `no outline GET; sent ${JSON.stringify(opts.sent)}`).toBeDefined();
+      expect(read?.path).toBe('/workspaces/w-1/docs/doc-1/outline');
+      expect(read?.query.get('headings_only')).toBe('1');
+      expect(read?.query.get('recent')).toBe('5');
+
+      // CONTROL: omitted options are omitted, so the server's own defaults
+      // (every block, no cap) still decide for a caller that passes neither.
+      const bare = await h.call('read_doc_outline', { workspaceId: 'w-1', docId: 'doc-1' });
+      const plain = bare.sent.find((r) => r.method === 'GET' && r.path.endsWith('/outline'));
+      expect(plain?.query.get('headings_only')).toBeNull();
+      expect(plain?.query.get('recent')).toBeNull();
+
+      // apply_block_edits: a POST carrying the caller's edits verbatim, plus
+      // the identity the server attributes the blocks to.
+      const edits = [
+        { op: 'insert_under_heading', headingId: 'b-h1', markdown: 'a line' },
+        { op: 'delete_block', blockId: 'b-2' },
+      ];
+      const batch = await h.call('apply_block_edits', {
+        workspaceId: 'w-1',
+        docId: 'doc-1',
+        edits,
+      });
+      const posted = batch.sent.find((r) => r.method === 'POST' && r.path.endsWith('/block_edits'));
+      expect(posted, `no block_edits POST; sent ${JSON.stringify(batch.sent)}`).toBeDefined();
+      expect(posted?.path).toBe('/workspaces/w-1/docs/doc-1/block_edits');
+      const body = posted?.body as { edits?: unknown; author?: { id?: unknown } };
+      expect(body.edits).toEqual(edits);
+      expect(typeof body.author?.id).toBe('string');
+
+      // insert_blocks_under_heading: the same route, one edit built for you.
+      const one = await h.call('insert_blocks_under_heading', {
+        workspaceId: 'w-1',
+        docId: 'doc-1',
+        headingId: 'b-h1',
+        markdown: '- a bullet',
+      });
+      const sent = one.sent.find((r) => r.method === 'POST' && r.path.endsWith('/block_edits'));
+      expect(sent, `no block_edits POST; sent ${JSON.stringify(one.sent)}`).toBeDefined();
+      expect((sent?.body as { edits?: unknown }).edits).toEqual([
+        { op: 'insert_under_heading', headingId: 'b-h1', markdown: '- a bullet' },
+      ]);
+    } finally {
+      await h?.stop();
+    }
+  }, 60_000);
+});

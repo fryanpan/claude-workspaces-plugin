@@ -15937,6 +15937,87 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "read_doc_outline",
+      description: "The doc's blocks with the ID of each — the address to send an edit back with. Read this before apply_block_edits: every other doc tool addresses the doc by TEXT, and a text address moves under a doc somebody else is typing in (the heading gets renamed, the sentence you matched is rewritten), while a block id does not. Entries carry the block's text, its nearest heading, and which agent wrote it — a block still marked yours is one no person has touched since, and the only kind you may replace or delete outright. Pass headingsOnly for the cheap 'where could this go?' read, and recentBlocks to cap the tail so a doc that grows all meeting long does not grow your prompt with it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+          },
+          docId: { type: "string" },
+          headingsOnly: {
+            type: "boolean",
+            description: "Return only the headings — the outline you pick an insertion point from."
+          },
+          recentBlocks: {
+            type: "number",
+            description: "Cap on non-heading entries, counted from the END of the doc. Headings are never dropped, so the shape of the doc survives the cap."
+          }
+        },
+        required: ["workspaceId", "docId"]
+      }
+    },
+    {
+      name: "apply_block_edits",
+      description: "Apply several block-addressed edits as ONE transaction. Use it whenever you are making more than one change at a time: separate calls are separate transactions, so a reader watching the doc sees your batch arrive in pieces and a failure halfway leaves half of it applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Each edit is one of insert_under_heading (headingId + markdown), insert_at_end (markdown), replace_block (blockId + markdown) or delete_block (blockId). Replacing or deleting a block that is not still marked yours does not destroy it — it comes back as a SUGGESTION for the person to accept, so a block someone typed in is never overwritten by a batch.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+          },
+          docId: { type: "string" },
+          edits: {
+            type: "array",
+            description: "Up to 50 edits, applied in order inside one transaction.",
+            items: {
+              type: "object",
+              properties: {
+                op: {
+                  type: "string",
+                  enum: ["insert_under_heading", "insert_at_end", "replace_block", "delete_block"]
+                },
+                headingId: { type: "string", description: "insert_under_heading only." },
+                blockId: {
+                  type: "string",
+                  description: "replace_block / delete_block only — from read_doc_outline."
+                },
+                markdown: {
+                  type: "string",
+                  description: "The new block(s), for every op but delete_block."
+                }
+              },
+              required: ["op"]
+            }
+          }
+        },
+        required: ["workspaceId", "docId", "edits"]
+      }
+    },
+    {
+      name: "insert_blocks_under_heading",
+      description: "Append markdown blocks at the END of a heading's section, addressed by the heading's ID rather than its wording — so a heading renamed since you read the outline still receives the text. The one-edit shortcut over apply_block_edits; batch with that instead when you are making more than one change, so a reader never sees half of it. Get headingId from read_doc_outline. Blocks are marked as yours, which is what later lets you rewrite them — until a person types in one, and then it is theirs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+          },
+          docId: { type: "string" },
+          headingId: {
+            type: "string",
+            description: "The id of the heading whose section to append to, from read_doc_outline."
+          },
+          markdown: { type: "string" }
+        },
+        required: ["workspaceId", "docId", "headingId", "markdown"]
+      }
+    },
+    {
       name: "insert_blocks_at_anchor",
       description: "Parse markdown and insert the resulting blocks after the block holding an anchor. This is the one for new sections, sub-headings and tables; edit_at_anchor keeps text trapped inside the block. An anchor inside a list item nests under that item unless you pass placement top-level.",
       inputSchema: {
@@ -17539,6 +17620,33 @@ async function handleDocsTool(name, a, ctx) {
     case "edit_at_anchor": {
       const { docId, anchorId, op } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/edit`, op);
+      return ok2(res);
+    }
+    case "read_doc_outline": {
+      const { docId, headingsOnly, recentBlocks } = a;
+      const q = new URLSearchParams;
+      if (headingsOnly === true)
+        q.set("headings_only", "1");
+      if (typeof recentBlocks === "number")
+        q.set("recent", String(recentBlocks));
+      const qs = q.toString();
+      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/outline${qs ? `?${qs}` : ""}`);
+      return ok2(res);
+    }
+    case "apply_block_edits": {
+      const { docId, edits } = a;
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
+        edits,
+        author: suggestionAuthor()
+      });
+      return ok2(res);
+    }
+    case "insert_blocks_under_heading": {
+      const { docId, headingId, markdown } = a;
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
+        edits: [{ op: "insert_under_heading", headingId, markdown }],
+        author: suggestionAuthor()
+      });
       return ok2(res);
     }
     case "insert_blocks_at_anchor": {
