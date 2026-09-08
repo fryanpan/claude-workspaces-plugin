@@ -116,7 +116,7 @@ describe('the bot meeting', () => {
     name: 'stub',
     compose(input) {
       notesSeen.push(input);
-      return Promise.resolve([{ op: 'insert_at_end', markdown: '- a note' }]);
+      return Promise.resolve('- a note');
     },
   };
 

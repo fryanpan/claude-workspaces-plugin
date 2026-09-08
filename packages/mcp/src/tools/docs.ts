@@ -700,46 +700,6 @@ export async function handleDocsTool(
       );
       return ok(res);
     }
-    case 'read_doc_outline': {
-      const { docId, headingsOnly, recentBlocks } = a as {
-        docId: string;
-        headingsOnly?: boolean;
-        recentBlocks?: number;
-      };
-      const q = new URLSearchParams();
-      if (headingsOnly === true) q.set('headings_only', '1');
-      if (typeof recentBlocks === 'number') q.set('recent', String(recentBlocks));
-      const qs = q.toString();
-      const res = await http(
-        'GET',
-        `${board()}/docs/${encodeURIComponent(docId)}/outline${qs ? `?${qs}` : ''}`,
-      );
-      return ok(res);
-    }
-    case 'apply_block_edits': {
-      const { docId, edits } = a as { docId: string; edits: unknown };
-      const res = await http('POST', `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
-        edits,
-        // Always sent: block edits are ATTRIBUTED — the id is what later lets
-        // this session rewrite its own blocks and stops it rewriting anyone
-        // else's, and the name/colour are what a proposal is signed with when
-        // an edit lands on a block a person has since touched.
-        author: suggestionAuthor(),
-      });
-      return ok(res);
-    }
-    case 'insert_blocks_under_heading': {
-      const { docId, headingId, markdown } = a as {
-        docId: string;
-        headingId: string;
-        markdown: string;
-      };
-      const res = await http('POST', `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
-        edits: [{ op: 'insert_under_heading', headingId, markdown }],
-        author: suggestionAuthor(),
-      });
-      return ok(res);
-    }
     case 'insert_blocks_at_anchor': {
       const { docId, anchorId, markdown, placement } = a as {
         docId: string;

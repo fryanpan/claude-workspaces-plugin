@@ -12,7 +12,6 @@
  * editing/deleting one; listing suggestions vs. resolving one), so they
  * moved here with their family rather than staying unassigned.
  */
-import type { prose } from '@claude-workspaces/core';
 import { taskIdOfBodyDoc } from '../task-projection.ts';
 import {
   type DocResourceRouteRequest,
@@ -22,93 +21,6 @@ import {
   parseSuggestionAuthor,
   withSyncError,
 } from './docs-routes-context.ts';
-
-/** Most edits one `block_edits` call may carry. A batch is one transaction, so
- *  the ceiling is what stops a single request holding the doc's write lock
- *  (and every reader's view of it) for an unbounded walk. */
-const MAX_BLOCK_EDITS = 50;
-/** Longest markdown one edit may carry — a block, not a document. */
-const MAX_EDIT_MARKDOWN = 20_000;
-
-/** A non-empty string, which is what every id and markdown field has to be.
- *  `typeof` rather than truthiness: `0` and `false` are not ids either, and a
- *  number that stringifies to one is exactly the value worth refusing. */
-function str(v: unknown): string | null {
-  return typeof v === 'string' && v.length > 0 ? v : null;
-}
-
-/**
- * Validate a `block_edits` body's `edits` into the union `prose.applyBlockEdits`
- * takes, or say which entry and which field is wrong.
- *
- * Every branch names the INDEX as well as the field: a batch is applied as one
- * transaction, so "one of your fifty edits is malformed" is not an answer a
- * caller can act on. Nothing is coerced — a numeric `blockId` is a caller bug
- * that would otherwise be silently stringified into an id matching no block,
- * and the batch would report `unknown-block` for a reason nowhere in the reply.
- */
-export function parseBlockEdits(
-  raw: unknown,
-): { ok: true; edits: prose.BlockEdit[] } | { ok: false; error: string } {
-  if (!Array.isArray(raw)) return { ok: false, error: 'edits must be an array' };
-  if (raw.length === 0) return { ok: false, error: 'edits must not be empty' };
-  if (raw.length > MAX_BLOCK_EDITS) {
-    return { ok: false, error: `edits must hold at most ${MAX_BLOCK_EDITS} entries` };
-  }
-  const edits: prose.BlockEdit[] = [];
-  for (let i = 0; i < raw.length; i++) {
-    const e = raw[i] as Record<string, unknown> | null;
-    if (typeof e !== 'object' || e === null || Array.isArray(e)) {
-      return { ok: false, error: `edits[${i}] must be an object` };
-    }
-    const op = e.op;
-    const md = (): string | { ok: false; error: string } => {
-      const m = str(e.markdown);
-      if (m === null)
-        return { ok: false, error: `edits[${i}].markdown must be a non-empty string` };
-      if (m.length > MAX_EDIT_MARKDOWN) {
-        return {
-          ok: false,
-          error: `edits[${i}].markdown must be at most ${MAX_EDIT_MARKDOWN} characters`,
-        };
-      }
-      return m;
-    };
-    if (op === 'insert_at_end' || op === 'insert_under_heading') {
-      const m = md();
-      if (typeof m !== 'string') return m;
-      if (op === 'insert_at_end') {
-        edits.push({ op, markdown: m });
-        continue;
-      }
-      const headingId = str(e.headingId);
-      if (headingId === null) {
-        return { ok: false, error: `edits[${i}].headingId must be a non-empty string` };
-      }
-      edits.push({ op, headingId, markdown: m });
-      continue;
-    }
-    if (op === 'replace_block' || op === 'delete_block') {
-      const blockId = str(e.blockId);
-      if (blockId === null) {
-        return { ok: false, error: `edits[${i}].blockId must be a non-empty string` };
-      }
-      if (op === 'delete_block') {
-        edits.push({ op, blockId });
-        continue;
-      }
-      const m = md();
-      if (typeof m !== 'string') return m;
-      edits.push({ op, blockId, markdown: m });
-      continue;
-    }
-    return {
-      ok: false,
-      error: `edits[${i}].op must be one of insert_under_heading, insert_at_end, replace_block, delete_block`,
-    };
-  }
-  return { ok: true, edits };
-}
 
 /**
  * The content-edit routes: `content` POST, `reparse_from_disk`,
@@ -267,27 +179,6 @@ export async function handleDocEditRoutes(
     // on edit results, not on get_doc, so this is where a conflict
     // actually gets seen.
     return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
-  }
-  // A batch of BLOCK-ADDRESSED edits, applied in one transaction. The rest of
-  // this family addresses the doc by text; this one takes the opaque ids
-  // `outline` handed out, so a heading renamed between the read and the write
-  // changes nothing about where the edit lands — and a reader watching the doc
-  // never sees half a batch. Authorship decides direct-vs-proposal inside
-  // core: an edit to a block a person has touched comes back `suggested`.
-  if (rest === 'block_edits' && req.method === 'POST') {
-    const body = await safeJson(req);
-    const parsed = parseBlockEdits(body?.edits);
-    if (!parsed.ok) return j(400, parsed);
-    const author = parseSuggestionAuthor(visitor ? { author: authorFor(body?.author) } : body);
-    if (!author)
-      return j(400, { error: 'author {id,name} is required — block edits are attributed' });
-    const res = docStore.applyBlockEdits(docId, parsed.edits, {
-      author: author.id,
-      authorName: author.name,
-      authorColor: author.color,
-    });
-    if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
-    return j(200, withSyncError(docStore, docId, res));
   }
   // Suggested edits (redline-suggestions phase 2, commit 3): list/
   // accept/reject/resolve-all over the doc's pending proposals. See
