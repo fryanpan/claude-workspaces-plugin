@@ -191,8 +191,10 @@ export const MEMBERS: Member[] = [
  */
 export const NON_GATE_JOBS: Record<string, string> = {
   'notes-eval-smoke':
-    'spends money and reaches the network, runs `continue-on-error`, and skips itself when ' +
-    'no key is configured — it reports, it does not gate.',
+    'spends money and reaches the network, so it runs only on a diff that moves the ' +
+    "note-taking surface and never on a builder's machine. It DOES gate now — a missing " +
+    'CW_SUMMARY_API_KEY secret fails it rather than passing green as a skip — which is why ' +
+    'it is listed here as a hole rather than as a member: `bun run verify` cannot run it.',
 };
 
 /**

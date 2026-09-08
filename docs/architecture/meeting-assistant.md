@@ -715,12 +715,25 @@ They ask for what a good notetaker does in a shared meeting (Bryan's row,
 2026-09-03: *"the doc is the room's shared memory instead of a transcript
 with headings"*):
 
-- **Paraphrase, and filter hard.** Say what a point MEANS in a short written
-  sentence. One point per bullet, at most **20 words**. Most of what is said —
-  greetings, thinking aloud, a point going round again — is not a note.
-- **Cover the four things**: what was discussed, why it matters, what was
-  decided and by whom, what happens next. A decision is its own bullet, never
-  a clause inside a description of the discussion.
+- **Paraphrase, and COMPRESS — never drop.** Say what a point MEANS in a short
+  written sentence. One point per bullet, at most **20 words**. What goes is
+  the packaging: greetings, thinking aloud, a point already in the notes, the
+  same point said again. What stays is every idea, a brief important sentence
+  included. This REPLACED "filter hard … fewer, better notes beat complete
+  ones", which told the note-taker in as many words that leaving an idea out
+  was a success — and it behaved accordingly: a minute of real conversation on
+  one subject produced no note, and nothing downstream could see it, because
+  coverage counted the turns that reached a compose rather than the ideas the
+  notes came to carry.
+- **The floor for every topic**, wherever the speech supplies it: what was
+  discussed, what it means and why, what was decided and by whom, what happens
+  next and who owns it, what is still open, what is unconfirmed, and every
+  task, doc or meeting it named, linked inline. A hint became a bar. A
+  decision is its own bullet, never a clause inside a description of the
+  discussion.
+- **Open questions have one fixed heading**, `### Open questions`, kept last.
+  A fixed place beats a good place: the room stops hunting, and a question
+  later answered is replaced under the topic it belongs to.
 - **Organise under `###` topic headings**, one per topic or question. Speech
   that continues a topic goes under THAT heading, reused exactly; a new
   heading means the discussion actually moved.
@@ -850,8 +863,9 @@ settle on a vendor event that a stop can precede. The final pass is what makes
 the last sentence survive all three.
 
 **Every meeting says what it came to, in one line.** At the stop the session
-reports `ticks`, `turnsSettled`, `turnsComposed` and `turnsLost` — settled
-turns no successful compose ever carried — and `meeting-notes-doc.ts` logs it
+reports `ticks`, `turnsSettled`, `turnsComposed`, `turnsLost` — settled
+turns no successful compose ever carried — and `ideas`, and
+`meeting-notes-doc.ts` logs it
 (`console.error` when anything was lost, `console.log` otherwise). It exists
 because a meeting reported as "skipping chunks" left NOTHING in the log to
 check the claim against: the pipeline spoke only when a stage threw, so a
@@ -861,6 +875,32 @@ coverage. It is a summary and not a tick log on purpose — a line per tick is
 hundreds per meeting for a number nobody reads while the meeting is fine.
 `turnsComposed` may run one ahead of `turnsSettled`, because the final pass
 carries a sentence that by definition never settled.
+
+**Coverage is counted twice, because there are two ways to lose a meeting.**
+`turnsLost` counts turns the composer never SAW. `ideas` counts what it saw
+and wrote nothing about — the complaint a reader actually makes. The second
+number is `notes-idea-coverage.ts`: settled speech is cut into sentences,
+a sentence with enough content is an idea, and an idea the notes do not carry
+is offered back on the NEXT tick as its own prompt section (`missed` — a
+second look, deliberately not dressed as new speech, or the mention
+provenance a tick stamps would gain a turn nobody spoke in it). Missed twice,
+it is counted lost. One retry and not three, because the words ride the
+prompt and an unbounded queue of them is the uncapped carry-forward that once
+grew a meeting's prompt without limit.
+
+The runtime check is LEXICAL — content-word overlap, stemmed — and its errors
+are asymmetric on purpose: a paraphrase it cannot recognise costs one cheap
+retry, while an idea wrongly called carried is silently counted covered, so
+the threshold is set to over-count misses. The real number is measured over a
+corpus by `bun run notes:eval`, whose lost-idea rate is judged per idea
+against a ground-truth list written once beside each fixture
+(`scripts/notes-eval-ideas.ts`, hand-correctable JSON) and **fails the run
+above 5%**. Unlike every other rate in that harness its denominator is fixed
+rather than re-derived, which is what makes it a gate rather than a reading.
+The corpus is two halves: AMI excerpts, committed; and this machine's own
+meetings, which `scripts/notes-eval-prod-corpus.ts` writes OUTSIDE the repo
+and refuses to write inside it (`--corpus <dir>` reads them). Only counts and
+rates ever come back from that half.
 
 **What holds all of this is a coverage audit, not more unit tests.** The ways
 a meeting loses words are spread across the ticker's delta, the compose

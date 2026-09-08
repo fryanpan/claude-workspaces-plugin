@@ -280,22 +280,47 @@ jobs:
   # The note-taking behaviour, on three ticks of one real meeting.
   #
   # A SEPARATE JOB, not a step of a gating one, because it is the only thing in
-  # CI that spends money and reaches the network, and because it must never be
-  # able to fail the build for anyone else's change. `continue-on-error` says
-  # that in the one place it is enforced: the slice reports, and a red note-
-  # taker is read rather than merged around. scripts/verify.ts names it in
-  # NON_GATE_JOBS for the same reason — that is what keeps `verify:parity` from
+  # CI that spends money and reaches the network. scripts/verify.ts names it in
+  # NON_GATE_JOBS for that reason — that is what keeps `verify:parity` from
   # demanding `notes:eval` be runnable on a builder's machine.
   #
-  # It SKIPS ITSELF when no key is configured, which is the state of this repo
-  # today. That is deliberate and it is also the failure mode to watch — a
-  # skipped job looks exactly like a passing one in the checks list, so the
-  # step below says out loud which of the two happened.
+  # IT NO LONGER PASSES WHEN IT DID NOT RUN. It used to `continue-on-error`
+  # and, with no key configured, print a notice and `exit 0` — so the checks
+  # list showed a green tick that meant "skipped", which is indistinguishable
+  # from "the note-taker behaved" to everybody who reads a checks list rather
+  # than a log. A check that cannot fail is not a check. Both halves are gone:
+  # a missing key is a hard failure naming the secret to add, and a real
+  # failure is a real failure.
+  #
+  # IT ONLY RUNS WHEN THE NOTE-TAKING SURFACE MOVED. Every other PR skips it
+  # — a genuine GitHub skip, which reads as "skipped" and not as a pass — so
+  # the money is spent on the diffs whose behaviour it measures: the prompt,
+  # the composer, the edit path the composer answers in, the coverage ledger,
+  # and the eval harness itself.
   #
   # The full run is `bun run notes:eval`, on demand, from somebody's machine.
-  notes-eval-smoke:
+  notes-eval-changes:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.filter.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            notes:
+              - 'packages/server/src/notes-*.ts'
+              - 'packages/server/src/meeting-notes*.ts'
+              - 'scripts/notes-eval*.ts'
+              - '.github/workflows/ci.yml'
+
+  notes-eval-smoke:
+    needs: notes-eval-changes
+    if: needs.notes-eval-changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -309,9 +334,9 @@ jobs:
           CW_SUMMARY_API_KEY: ${{ secrets.CW_SUMMARY_API_KEY }}
         run: |
           if [ -z "${CW_SUMMARY_API_KEY}" ]; then
-            echo "::notice::No CW_SUMMARY_API_KEY secret — the note-taking eval did not run."
-            echo "Add the repository secret to turn this job on. Until then it is a no-op,"
-            echo "and a green tick here means 'skipped', not 'the note-taker behaved'."
-            exit 0
+            echo "::error::No CW_SUMMARY_API_KEY repository secret. This job measures the"
+            echo "note-taker against real speech and cannot run without one. It used to"
+            echo "exit 0 here, which showed a green tick meaning 'skipped'."
+            exit 1
           fi
           bun run notes:eval --smoke
