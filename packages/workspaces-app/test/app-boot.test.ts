@@ -120,7 +120,11 @@ afterEach(() => {
 describe('the editor boots against the doc the address names', () => {
   it('asks the server for that doc, and opens one socket for it', async () => {
     const { sockets } = await boot('https://docs.test/workspaces/w-1/docs/d-notes');
-    expect(server.calls.some((c) => c.url === `/workspaces/${WS}/docs/d-notes`)).toBe(true);
+    // `?format=json` and not the bare path: that address also serves this very
+    // page, and only the query asks for the doc's record (see `docJsonUrl`).
+    expect(server.calls.some((c) => c.url === `/workspaces/${WS}/docs/d-notes?format=json`)).toBe(
+      true,
+    );
     expect(sockets.opened).toHaveLength(1);
     expect(sockets.first().url).toBe('wss://docs.test/workspaces/w-1/docs/d-notes/y?type=markdown');
   });

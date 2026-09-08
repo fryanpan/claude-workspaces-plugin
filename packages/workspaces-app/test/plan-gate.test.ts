@@ -57,6 +57,27 @@ function stubFetch(answers: DocAnswer[], post: unknown = { released: [] }) {
   return { fetchJson, calls };
 }
 
+/**
+ * A fetch stub that answers the way the SERVER does: `/workspaces/<ws>/docs/<id>`
+ * is the editor PAGE, and only `?format=json` asks for the doc's record. A
+ * reader that spells the address without the query gets an HTML shell under a
+ * 200, and `defaultFetchJson` turns an unparseable 200 into `{}` — a read that
+ * neither throws nor carries anything.
+ *
+ * That is not a hypothetical stub: it is what the doc surface did in
+ * production after the address cutover moved the record onto the page's path,
+ * and it is why a plan huddle opened with no planning flow in it. So this is
+ * the fixture the gate has to survive.
+ */
+function serverShapedFetch(
+  record: DocAnswer,
+): (url: string, init?: RequestInit) => Promise<unknown> {
+  return (url: string, init?: RequestInit): Promise<unknown> => {
+    if (init?.method === 'POST') return Promise.resolve({ released: [] });
+    return Promise.resolve(url.includes('format=json') ? record : {});
+  };
+}
+
 /** Hand-cranked timers, so the receipt's expiry is a step in the test rather
  *  than six real seconds of waiting. */
 function stubTimers() {
@@ -604,6 +625,19 @@ describe('mountPlanGate', () => {
     expect(sub()).toBe('Asked by Sam — no lead attached; answered when one joins');
     feed.push({ event: 'lead.presence', docId: 'd-ask', workspaceId: 'w-1', live: true });
     expect(sub()).toBe('Asked by Sam — waiting for Workspaces');
+    gate.destroy();
+  });
+  it('offers Make Plan on a plan huddle read from a server that also serves a page there', async () => {
+    const gate = mountPlanGate({
+      docId: 'd-plan',
+      root,
+      user: JORDAN,
+      canWrite: true,
+      fetchJson: serverShapedFetch({ meta: { huddleKind: 'plan' }, tasks: [] }),
+    });
+    await gate.ready;
+    expect(gate.face()).toBe('make');
+    expect(label()).toBe('Make Plan');
     gate.destroy();
   });
 });
