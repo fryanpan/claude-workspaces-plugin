@@ -60,7 +60,13 @@ function board(over: Partial<StallSnapshot> = {}): StallSnapshot {
 }
 
 function harness(
-  opts: { repeatMs?: number; stampFile?: string; world?: World; filerDelivers?: () => number } = {},
+  opts: {
+    repeatMs?: number;
+    leadHeldMs?: number;
+    stampFile?: string;
+    world?: World;
+    filerDelivers?: () => number;
+  } = {},
 ) {
   const world: World = opts.world ?? {
     now: 1_000_000,
@@ -88,6 +94,7 @@ function harness(
     },
     report: (line) => reported.push(line),
     ...(opts.repeatMs !== undefined ? { repeatMs: opts.repeatMs } : {}),
+    ...(opts.leadHeldMs !== undefined ? { leadHeldMs: opts.leadHeldMs } : {}),
     ...(opts.stampFile !== undefined ? { stampFile: opts.stampFile } : {}),
   });
   return { world, sent, toFilers, reported, nudger };
@@ -100,8 +107,8 @@ const HELD = {
   reviewItemId: 'ri-1',
   headline: 'ok?',
   reason: 'The headline is not a question the reader can answer.',
-  heldMs: 6 * MIN,
-  heldAt: 1_000_000 - 6 * MIN,
+  heldMs: 26 * MIN,
+  heldAt: 1_000_000 - 26 * MIN,
   filedBy: 'Index Keeper',
   filerAgentId: 'agent-index-keeper',
 };
@@ -1026,6 +1033,63 @@ describe('the timer', () => {
 
 // ── A held review item is its own finding ────────────────────────────────────
 
+describe("a hold is the filer's alone until it outlives the window — then it is the lead's", () => {
+  // Step 4 of the rebuild (docs/architecture/stall-check/README.md): a hold
+  // older than the quiet window is a finding for the lead and a line in the
+  // measurement. Before it, the lead heard of every hold at the filer's
+  // five-minute window — twenty minutes before the verdict counted it.
+  const young = { ...HELD, heldMs: 6 * MIN, heldAt: 1_000_000 - 6 * MIN };
+
+  it('a six-minute hold wakes the filer and says nothing to the lead', () => {
+    const { world, sent, toFilers, nudger } = harness();
+    world.boards = [board({ stalled: [], held: [young] })];
+    world.reachable.add('agent-index-keeper');
+    nudger.tick();
+    expect(toFilers.map((f) => f.frame.reviewItemId)).toEqual(['ri-1']);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("the same hold past twenty minutes is named in the lead's frame — once", () => {
+    const { world, sent, toFilers, nudger } = harness();
+    world.boards = [board({ stalled: [], held: [young] })];
+    world.reachable.add('agent-index-keeper');
+    nudger.tick();
+    world.now += 15 * MIN;
+    world.boards = [board({ stalled: [], held: [{ ...young, heldMs: 21 * MIN }] })];
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.agentId).toBe('agent-cartographer');
+    expect(sent[0]?.frame.heldItems?.map((r) => r.reviewItemId)).toEqual(['ri-1']);
+    expect(sent[0]?.frame.taskId).toBe('t-7');
+    // The filer was told at six minutes and is not told again at twenty-one.
+    expect(toFilers).toHaveLength(1);
+    world.now += 3 * MIN;
+    world.boards = [board({ stalled: [], held: [{ ...young, heldMs: 24 * MIN }] })];
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('a young hold does not arm the board: a hold that ends inside the window leaves no stamp', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], held: [young] })];
+    nudger.tick();
+    // Revised and passed inside the window; the board is clean and the lead
+    // was never woken about it.
+    world.now += 5 * MIN;
+    world.boards = [board({ stalled: [], held: [] })];
+    nudger.tick();
+    expect(sent).toHaveLength(0);
+  });
+
+  it("the window is the caller's: leadHeldMs 0 hands every hold to the lead", () => {
+    const { world, sent, nudger } = harness({ leadHeldMs: 0 });
+    world.boards = [board({ stalled: [], held: [young] })];
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.frame.heldItems?.map((r) => r.reviewItemId)).toEqual(['ri-1']);
+  });
+});
+
 describe('a held review item wakes its filer and then the lead — once each', () => {
   it('a quiet board with one overdue hold sends the lead a frame naming it', () => {
     const { world, sent, toFilers, nudger } = harness();
@@ -1055,7 +1119,7 @@ describe('a held review item wakes its filer and then the lead — once each', (
     world.reachable.add('agent-index-keeper');
     nudger.tick();
     world.now += 3 * MIN;
-    world.boards = [board({ stalled: [], held: [{ ...HELD, heldMs: 9 * MIN }] })];
+    world.boards = [board({ stalled: [], held: [{ ...HELD, heldMs: 29 * MIN }] })];
     nudger.tick();
     expect(sent).toHaveLength(1);
     expect(toFilers).toHaveLength(1);
@@ -1115,7 +1179,7 @@ describe('a held review item wakes its filer and then the lead — once each', (
     nudger.tick();
     world.now += 10 * MIN;
     world.boards = [
-      board({ stalled: [], held: [{ ...HELD, heldMs: 6 * MIN, heldAt: HELD.heldAt + 10 * MIN }] }),
+      board({ stalled: [], held: [{ ...HELD, heldMs: 26 * MIN, heldAt: HELD.heldAt + 10 * MIN }] }),
     ];
     nudger.tick();
     expect(sent).toHaveLength(2);
@@ -1123,7 +1187,7 @@ describe('a held review item wakes its filer and then the lead — once each', (
     // The control: the same hold, older, is still one hold.
     world.now += 1 * MIN;
     world.boards = [
-      board({ stalled: [], held: [{ ...HELD, heldMs: 7 * MIN, heldAt: HELD.heldAt + 10 * MIN }] }),
+      board({ stalled: [], held: [{ ...HELD, heldMs: 27 * MIN, heldAt: HELD.heldAt + 10 * MIN }] }),
     ];
     nudger.tick();
     expect(sent).toHaveLength(2);

@@ -939,7 +939,7 @@ describe('the review-item quality gate', () => {
 
   describe('stall monitor', () => {
     it(
-      'an overdue held item is a finding: the filer is nudged, then the lead — once per item',
+      'an overdue held item nudges its filer once; the lead is not told inside the quiet window',
       async () => {
         verdict = { ok: false, reason: 'No stakes.' };
         const { workspaceId, taskId } = await board();
@@ -972,28 +972,22 @@ describe('the review-item quality gate', () => {
           while (Date.now() <= (stampedAt as number)) await settle(1);
 
           handle.nudgeStalls();
-          const [stall] = await waitForFrames(lead.frames, STALL_EVENT, 1);
-          expect(stall?.data).toMatchObject({
-            workspaceId,
-            stalledCount: 0,
-            taskId,
-          });
-          const held = stall?.data?.heldItems as Array<Record<string, unknown>>;
-          expect(held).toHaveLength(1);
-          expect(held[0]).toMatchObject({
-            id: taskId,
-            reviewItemId: res.item.id,
-            reason: 'No stakes.',
-            filedBy: FILER.name,
-          });
           const nudges = await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 2);
           expect(nudges).toHaveLength(2);
           expect(nudges[1]?.data).toMatchObject({ reviewItemId: res.item.id, overdue: true });
+          // The lead hears nothing: the hold is seconds old and this suite's
+          // quiet window is an hour. A hold that outlives the window IS the
+          // lead's finding — held-item-finding.test.ts, where the window is
+          // short enough to wait out. Before step 4 of the stall-check
+          // rebuild this same pass handed the lead the hold at the filer's
+          // window, twenty minutes before the verdict counted it.
+          await settle(200);
+          expect(lead.frames.filter((f) => f.event === STALL_EVENT)).toEqual([]);
 
           // A second pass says nothing new to anybody.
           handle.nudgeStalls();
           await settle(200);
-          expect(lead.frames.filter((f) => f.event === STALL_EVENT)).toHaveLength(1);
+          expect(lead.frames.filter((f) => f.event === STALL_EVENT)).toEqual([]);
           expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toHaveLength(2);
 
           // Revising it away clears the finding; the board falls silent.
@@ -1009,7 +1003,7 @@ describe('the review-item quality gate', () => {
           );
           handle.nudgeStalls();
           await settle(200);
-          expect(lead.frames.filter((f) => f.event === STALL_EVENT)).toHaveLength(1);
+          expect(lead.frames.filter((f) => f.event === STALL_EVENT)).toEqual([]);
         } finally {
           await filer.stop();
           await lead.stop();
@@ -1232,7 +1226,7 @@ describe('the review-item quality gate', () => {
     });
 
     it(
-      'the filer is woken with the doc-form address, and the stall report carries it',
+      'the filer is woken with the doc-form address',
       async () => {
         const { workspaceId, taskId } = await board();
         const filer = await agentStream(workspaceId, FILER);
@@ -1256,23 +1250,10 @@ describe('the review-item quality gate', () => {
             revise,
             reason: 'No stakes.',
           });
-          // The wake is the FILER's; the lead hears about it through the loop.
+          // The wake is the FILER's. The lead's copy — the stall report past
+          // the quiet window, carrying this same address — is
+          // held-item-finding.test.ts.
           expect(lead.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
-
-          // `overdueHeldItems` is STRICTLY greater than the window, and this
-          // suite pins the window at 0 — so a pass run in the same
-          // millisecond as the verdict sees no overdue hold at all, and the
-          // next natural tick is a minute away. One tick of the clock is what
-          // makes the hold older than nothing.
-          await settle(5);
-          handle.nudgeStalls();
-          // Waited for, never slept for: under a loaded suite a fixed settle
-          // is a coin toss, and a missing frame has to be reported as the miss
-          // it is rather than as a slow machine.
-          const stalls = await waitForFrames(lead.frames, STALL_EVENT, 1);
-          const held = (stalls.at(-1)?.data as { heldItems?: Array<Record<string, unknown>> })
-            ?.heldItems;
-          expect(held?.[0]).toMatchObject({ revise, reason: 'No stakes.' });
         } finally {
           await filer.stop();
           await lead.stop();
@@ -1440,7 +1421,7 @@ describe('the review-item quality gate', () => {
     });
 
     it(
-      'the filer is woken with the ticket address, and the stall report carries it',
+      'the filer is woken with the ticket address',
       async () => {
         const { workspaceId } = await board();
         const filer = await agentStream(workspaceId, FILER);
@@ -1465,18 +1446,7 @@ describe('the review-item quality gate', () => {
           });
           // Addressed at the ticket, with no doc half of the address on it.
           expect(frame?.data?.docId).toBeUndefined();
-
-          // The stall loop names the SAME call — see the doc-form test above
-          // for why one tick has to pass first.
-          await settle(5);
-          handle.nudgeStalls();
-          const stalls = await waitForFrames(lead.frames, STALL_EVENT, 1);
-          const held = (stalls.at(-1)?.data as { heldItems?: Array<Record<string, unknown>> })
-            ?.heldItems;
-          expect(held?.[0]).toMatchObject({
-            revise,
-            reason: 'The headline is a ticket id, not a decision.',
-          });
+          // The lead's copy of this address is held-item-finding.test.ts.
         } finally {
           await filer.stop();
           await lead.stop();

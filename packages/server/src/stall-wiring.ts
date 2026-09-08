@@ -896,6 +896,9 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // the stall frame; the filer is the one who can end it in a call.
     sendToFiler: (workspaceId, agentId, frame) =>
       sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+    // The lead hears of a hold at the quiet window — the window the verdict
+    // above counts it under — not at the filer's shorter one.
+    ...(ctx.stallNudgeQuietMs !== undefined ? { leadHeldMs: ctx.stallNudgeQuietMs } : {}),
     ...(ctx.stallNudgeRepeatMs !== undefined ? { repeatMs: ctx.stallNudgeRepeatMs } : {}),
     escalate: (board, now) => escalations.onBoard(board, now),
     // Prod restarts at every merge; without this each deploy would re-fire one
