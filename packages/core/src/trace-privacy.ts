@@ -426,3 +426,43 @@ export function scrubBrowserEvent(event: unknown): unknown {
   }
   return scrubEventForPrivacy(event);
 }
+
+/**
+ * A log line or a metric, on the way out — the `beforeSendLog` /
+ * `beforeSendMetric` floor on both sides.
+ *
+ * Neither of the two floors above reaches the shape these carry. A log's
+ * `message` is FREE TEXT from a console call, and the path a developer pasted
+ * into it (`failed to save /workspaces/w-…/docs/quarterly-comp-review.md`)
+ * is not a whole-string path, so `scrubSpanName` leaves it alone; and the
+ * slug at its end is ordinary words, so the minted-id shape never fires. A
+ * metric's attributes are whatever the caller passed, same story. So every
+ * string in the item is searched for embedded path tokens — a `/`-led or
+ * `http(s)://` run — and each is replaced by its route pattern, and THEN the
+ * ordinary floors run over the result.
+ */
+export function scrubTelemetryItem(item: unknown): unknown {
+  return scrubEventForPrivacy(redactPathsInStrings(item));
+}
+
+const EMBEDDED_PATH = /(?<=^|[\s"'`(\[])(https?:\/\/[^\s"'`)\]]+|\/[^\s"'`)\]]+)/g;
+
+function redactPathsInText(text: string): string {
+  return text.replace(EMBEDDED_PATH, (token) => {
+    const path = pathOf(token);
+    return path === null ? token : routePatternForSpan(path);
+  });
+}
+
+function redactPathsInStrings(value: unknown): unknown {
+  if (typeof value === 'string') return redactPathsInText(value);
+  if (Array.isArray(value)) return value.map(redactPathsInStrings);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactPathsInStrings(v);
+    }
+    return out;
+  }
+  return value;
+}

@@ -150,6 +150,24 @@ describe('the served shells carry the Sentry DSN and page type only when configu
     });
   }
 
+  for (const { what, path } of surfaces) {
+    it(`${what} arrives with Document-Policy: js-profiling, DSN or not`, async () => {
+      // The browser profiler (sentry-boot.ts) samples the JS Self-Profiling
+      // API, which a document may only call when its HTML response granted
+      // it. Sent unconditionally — see HTML_SHELL_HEADERS — so the
+      // unconfigured box is the control that the header does not ride on
+      // the DSN.
+      for (const [base, ws] of [
+        [baseA, wsA],
+        [baseB, wsB],
+      ] as const) {
+        const res = await fetch(`${base}${path(ws)}`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('document-policy')).toBe('js-profiling');
+      }
+    });
+  }
+
   it('the mockup keeps its own content and its widget embed alongside the tags', async () => {
     const html = await (await fetch(`${baseA}/workspaces/${wsA}/mockups/a-mock`)).text();
     // The tags are additive: the page under review is still the page under
