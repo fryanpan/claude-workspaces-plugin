@@ -363,30 +363,6 @@ describe('a browser that may not write is told before it tries', () => {
     expect(document.querySelector('.signin-bar')).toBeNull();
   });
 
-  it('offers a ticket no Plan or Review ask when this browser may not write', async () => {
-    // The panel draws the two asks only when the board hands it `onAsk`, and
-    // the board must withhold that from a reader who cannot write — the same
-    // way the plan and review floats hide themselves on `!canWrite`. Pressed
-    // by a signed-out reader or a share visitor the ask comes back 403, and
-    // all they get is a failure toast: no sign-in path, no way to make it.
-    server.on('/api/auth/session', { authenticated: false, canWrite: false });
-    await boot(`https://board.test/workspaces/${WS}/tasks?task=t-2`);
-    const panel = document.getElementById('board-detail');
-    expect(panel?.classList.contains('hidden')).toBe(false);
-    expect(panel?.querySelectorAll('button.board-task-ask')).toHaveLength(0);
-  });
-
-  it('offers both asks on the same ticket when this browser may write', async () => {
-    // The positive control for the case above: with the ONLY difference the
-    // session's `canWrite`, the same deep-linked ticket draws both buttons.
-    // Without it the assertion above passes on a panel that never renders
-    // the row at all, and the gate it is meant to pin could be deleted.
-    await boot(`https://board.test/workspaces/${WS}/tasks?task=t-2`);
-    const panel = document.getElementById('board-detail');
-    const asks = [...(panel?.querySelectorAll('button.board-task-ask') ?? [])];
-    expect(asks.map((b) => b.textContent)).toEqual(['Plan', 'Review']);
-  });
-
   it('wraps fetch for the sign-in notice before it opens the board doc', async () => {
     // A FRESH module registry. `installWriteGateNotice` installs once per
     // process and returns early ever after, so a boot later in this file
@@ -457,5 +433,23 @@ describe('a browser that may not write is told before it tries', () => {
     const socket = firstAt('socket ');
     expect(session).toBeGreaterThanOrEqual(0);
     expect(session).toBeLessThan(socket);
+  });
+});
+
+describe('a ticket carries no Plan or Review ask of its own', () => {
+  it('draws neither control on a deep-linked ticket, even for a writer', async () => {
+    // The two asks are the huddle doc's floats and nothing else: "doc only"
+    // (owner's call, 2026-09-08). The ticket panel used to draw a second copy
+    // of them, filed by an agent rather than asked for. Asserted on a session
+    // that MAY write because that was the one state the old panel drew them
+    // in — a no-write session passed this before the row was removed, so it
+    // would prove nothing here.
+    await boot(`https://board.test/workspaces/${WS}/tasks?task=t-2`);
+    const panel = document.getElementById('board-detail');
+    expect(panel?.classList.contains('hidden')).toBe(false);
+    const labels = [...(panel?.querySelectorAll('button') ?? [])].map((b) => b.textContent?.trim());
+    expect(labels).not.toContain('Plan');
+    expect(labels).not.toContain('Review');
+    expect(panel?.querySelector('.board-task-asks')).toBeNull();
   });
 });
