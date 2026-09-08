@@ -41,6 +41,7 @@ function fakeBuild(marker: string): { dir: string; widget: string; markdownApp: 
   mkdirSync(markdownApp, { recursive: true });
   writeFileSync(join(widget, 'widget.iife.js'), `//${marker}\n`);
   writeFileSync(join(widget, 'widget.esm.js'), `//${marker}\n`);
+  writeFileSync(join(widget, 'mockup-live.js'), `//${marker}\n`);
   writeFileSync(join(markdownApp, 'app.js'), `//${marker}\n`);
   writeFileSync(join(markdownApp, 'board.js'), `//${marker}\n`);
   writeFileSync(join(markdownApp, 'index.html'), `<!--${marker}-->\n`);
@@ -187,6 +188,21 @@ describe('publishClientRelease', () => {
     rmSync(join(broken.markdownApp, 'sw.js'));
     try {
       expect(() => publishClientRelease({ root, sources: broken })).toThrow(/sw\.js/);
+    } finally {
+      for (const d of [root, broken.dir]) rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a build with no mockup live script — the other silent failure', () => {
+    // Same shape as the service worker above, on the mockup surface. Every
+    // mockup still serves and still takes comments, so nothing looks wrong;
+    // what stops is a round arriving under the reader without a reload, which
+    // is the one thing he would not think to check.
+    const root = tmpRoot();
+    const broken = fakeBuild('gen-1');
+    try {
+      rmSync(join(broken.widget, 'mockup-live.js'));
+      expect(() => publishClientRelease({ root, sources: broken })).toThrow(/mockup-live\.js/);
     } finally {
       for (const d of [root, broken.dir]) rmSync(d, { recursive: true, force: true });
     }
