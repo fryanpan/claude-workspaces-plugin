@@ -18,13 +18,6 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:
 import { join } from 'node:path';
 import { type Thread, contentKind, prose, suggestOps } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  type BlockEditsAuthor,
-  type BlockEditsResult,
-  type DocOutline,
-  applyDocBlockEdits,
-  readDocOutline,
-} from './doc-outline-ops.ts';
 import type { LiveDoc } from './doc-store.ts';
 
 /** Backups kept per doc by `backupReplacedContent` before rotation. */
@@ -455,28 +448,6 @@ export class DocEditOps {
     const doc = this.p.doc(docId);
     if (!doc) return { ok: false, error: 'no-match' };
     return prose.deleteSection(doc.ydoc, opts);
-  }
-
-  /**
-   * The doc's addressable blocks, each with the id an edit comes back with.
-   * `null` for a doc that does not exist; an empty outline for one that has
-   * no prose. Lives in `doc-outline-ops.ts` — see that file's header.
-   */
-  readOutline(docId: string, opts: prose.OutlineOptions = {}): DocOutline | null {
-    const doc = this.p.doc(docId);
-    if (!doc) return null;
-    return readDocOutline(doc, opts);
-  }
-
-  /** Apply a batch of block-addressed edits in one transaction. */
-  applyBlockEdits(
-    docId: string,
-    edits: prose.BlockEdit[],
-    who: BlockEditsAuthor,
-  ): BlockEditsResult {
-    const doc = this.p.doc(docId);
-    if (!doc) return { ok: false, error: 'not-found' };
-    return applyDocBlockEdits(doc, edits, who);
   }
 
   /**

@@ -31,7 +31,7 @@ import {
   createStubNotesComposer,
 } from '../src/meeting-notes.ts';
 import { listMeetings, readTranscript } from '../src/meetings.ts';
-import { LEGACY_TRANSCRIPT_HEADING } from '../src/notes-legacy-transcript.ts';
+import { LEGACY_TRANSCRIPT_HEADING } from '../src/notes-section.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type MockScriptTurn, createMockTranscriptionEngine } from '../src/transcribe.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -319,30 +319,25 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
 
     // The fresh engine session replays the script from its first turn; the
     // fresh notes session starts from nothing — and the first meeting's notes
-    // are FINISHED writing. A stop-and-restart never costs the doc the notes
-    // already written (the owner's reported data loss, 2026-08-31).
+    // are FINISHED writing. Its session-start released the ledger's claims,
+    // so the first pause APPENDS after them rather than replacing them: a
+    // stop-and-restart never costs the doc the notes already written (the
+    // owner's reported data loss, 2026-08-31).
     client.speak(7);
     await waitFor(() => client.finals().length === 1, 'the second meeting settled turn');
     schedule.fire();
     await waitFor(() => updates.length === 4, 'the second meeting notes');
     const md = docMarkdown();
-    // WHAT CHANGED, AND IT IS DELIBERATE. This used to assert ONE section: the
-    // old note-taker replaced a section it recognised by its heading TEXT, so
-    // a second meeting had to be talked out of replacing the first one's
-    // notes, and joining the end of them was the safest available answer.
-    // A meeting now remembers the block ID of the section it opened and never
-    // adopts one it did not, so the second meeting opens its own — which is
-    // also what a reader wants, two meetings being two records.
-    expect(md.split('## Meeting notes').length).toBe(3);
+    // One section still — the old one ended the doc, so this meeting joins
+    // its end instead of opening a second heading mid-air.
+    expect(md.split('## Meeting notes').length).toBe(2);
     // Every note the FIRST meeting wrote is still there, after stop/restart.
-    // This is the assertion that mattered, and it did not change.
     expect(md).toContain('So the sync is the bottleneck.');
     expect(md).toContain("Let's measure it first.");
     expect(md).toContain('then we');
-    // The second meeting re-spoke the first sentence, and it is written once
-    // per meeting: the same words said in two meetings are two notes, and
-    // nothing reaches back into the earlier meeting's section to dedupe them.
-    expect(readerMarkdown().split('So the sync is the bottleneck.').length).toBe(3);
+    // The second meeting re-spoke the first sentence; the merge recognises
+    // the line already in the doc rather than writing it twice.
+    expect(readerMarkdown().split('So the sync is the bottleneck.').length).toBe(2);
     // And the doc holds no verbatim record at all (owner, 2026-09-03): the
     // words said in both meetings are kept apart in the JSONL and the
     // `-raw-transcript.md` sister file, asserted below.

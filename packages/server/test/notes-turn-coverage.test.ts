@@ -27,10 +27,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { prose } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
-import { addNotes, createNotesTickHarness, notesItems } from './notes-tick-harness.ts';
+import { MEETING_NOTES_HEADING } from '../src/notes-section.ts';
+import { createNotesTickHarness, notesItems } from './notes-tick-harness.ts';
 
 /** One thing said, and what the notes owe it. */
 interface Line {
@@ -197,16 +196,9 @@ const MEETING_SECONDS = LINES.length * SECONDS_PER_LINE + (SCRIPT.length - 1) * 
  *
  * Matching is by prefix so the interrupted sentence — which arrives as the
  * engine's raw partial — is recognised as the line it is the beginning of.
- *
- * IT ANSWERS WITH THE TICK'S NEW NOTES ONLY, which is the contract change this
- * audit now also covers. It used to return every note it had ever written,
- * every tick, and the merge downstream worked out which were new — so a bug
- * that wrote a bullet twice was invisible here, because the whole section was
- * re-stated anyway. Emitting only the delta means a duplicate in the doc is a
- * duplicate this test can see, which is what `notesItems` is counted for.
  */
 function scriptedComposer(): {
-  compose: (input: NotesComposeInput) => prose.BlockEdit[];
+  compose: (input: NotesComposeInput) => string;
   /** Every line the composer chose not to write a note for, in order. */
   readonly skipped: string[];
 } {
@@ -215,7 +207,6 @@ function scriptedComposer(): {
   return {
     skipped,
     compose(input) {
-      const fresh: string[] = [];
       for (const turn of input.tick.turns) {
         const line = LINES.find((l) => l.said === turn.text || l.said.startsWith(turn.text.trim()));
         if (!line) continue;
@@ -223,11 +214,9 @@ function scriptedComposer(): {
           if (!skipped.includes(line.said)) skipped.push(line.said);
           continue;
         }
-        if (written.includes(line.note)) continue;
-        written.push(line.note);
-        fresh.push(line.note);
+        if (!written.includes(line.note)) written.push(line.note);
       }
-      return addNotes(input, fresh.map((n) => `- ${n}`).join('\n'));
+      return `## ${MEETING_NOTES_HEADING}\n\n${written.map((n) => `- ${n}`).join('\n')}\n`;
     },
   };
 }

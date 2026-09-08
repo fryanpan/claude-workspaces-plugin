@@ -1,11 +1,11 @@
 /**
  * A meeting, scripted: utterances in, the doc after every tick out.
  *
- * The notes pipeline is a pause ticker, a promise chain, an LLM seam and a
- * doc store, and a test that wants to ask "what does the doc look like after
- * the third tick" had to assemble all four. So they are assembled once here. A
- * test says what was said and what edits the model answers with, and reads the
- * doc back after each tick.
+ * The notes pipeline is a pause ticker, a promise chain, an LLM seam, an
+ * ownership ledger and a Yjs merge, and a test that wants to ask "what does
+ * the doc look like after the third tick" had to assemble all five. So they
+ * are assembled once here. A test says what was said and what the model
+ * answers, and reads the doc back after each tick.
  *
  * WHY IT MATTERS MORE THAN THE USUAL HELPER. Almost everything worth knowing
  * about a note-taker is a statement about a SEQUENCE — the heading does not
@@ -19,45 +19,17 @@
  * All fixtures are synthetic. The repo is public.
  */
 
-import { type DocType, type prose, prose as proseNs } from '@claude-workspaces/core';
+import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import { type NotesHeadingMemory, withServerNotesSinks } from '../src/meeting-notes-doc.ts';
+import { type NotesLedger, withServerNotesSinks } from '../src/meeting-notes-doc.ts';
 import {
   type NotesComposeInput,
   type NotesMeetingSummary,
   type TickScheduler,
   beginNotesSession,
 } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
-import { headingsOf, noteLines, oneDocStore, sectionBody } from './notes-doc-helpers.ts';
+import { MEETING_NOTES_HEADINGS, findNotesSection, itemsInSection } from '../src/notes-section.ts';
 import { waitFor } from './wait-for.ts';
-
-/**
- * The edits a script means by "add these bullets".
- *
- * Almost every script here says the same thing — put this markdown in the
- * notes — and the only variable is whether the meeting has opened its section
- * yet. Spelling that in each test would put the same four lines in forty
- * places and make a script about duplicate bullets read as a script about
- * block ops.
- */
-export function addNotes(input: NotesComposeInput, markdown: string): prose.BlockEdit[] {
-  if (markdown.trim().length === 0) return [];
-  const headingId = input.notesHeadingId;
-  return headingId === undefined
-    ? [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}\n\n${markdown}` }]
-    : [{ op: 'insert_under_heading', headingId, markdown }];
-}
-
-/** Rewrite one block the outline says is the note-taker's own. Null when the
- *  outline holds no such block, so a script can say "revise the last bullet"
- *  without knowing whether there is one yet. */
-export function replaceOwnBullet(input: NotesComposeInput, markdown: string): prose.BlockEdit[] {
-  const own = [...input.outline]
-    .reverse()
-    .find((e) => e.author !== undefined && e.kind !== 'heading');
-  return own === undefined ? [] : [{ op: 'replace_block', blockId: own.id, markdown }];
-}
 
 /**
  * A scheduler the test advances by hand. `fire()` runs whatever is armed,
@@ -111,29 +83,21 @@ export interface TickSnapshot {
    */
   input?: NotesComposeInput;
   /** What it answered. */
-  composed: readonly prose.BlockEdit[];
+  composed: string;
 }
 
 export interface NotesTickHarnessOptions {
   /** The doc before the meeting starts. Default: an empty doc. */
   doc?: string;
   /**
-   * The fake model. Returns the EDITS this tick calls for, the way the real
-   * composer does; throw to script a failed compose. `addNotes(input, md)`
-   * above is the sugar most scripts want. The tick number is 1-based.
+   * The fake model. Returns the WHOLE notes, the way the real composer does;
+   * throw to script a failed compose. The tick number is 1-based.
    */
-  compose: (
-    input: NotesComposeInput,
-    tick: number,
-  ) => readonly prose.BlockEdit[] | Promise<readonly prose.BlockEdit[]>;
+  compose: (input: NotesComposeInput, tick: number) => string | Promise<string>;
   /** Default `markdown`; pass a flat type to test the refusal path. */
   docType?: DocType;
-  /** Share a heading memory across two harnesses to model a second meeting on
-   *  one doc. */
-  heading?: NotesHeadingMemory;
-  /** A doc a second harness is already driving, so two meetings can run over
-   *  one `Y.Doc`. */
-  ydoc?: Y.Doc;
+  /** Share a ledger across two harnesses to model a second meeting on one doc. */
+  ledger?: NotesLedger;
   docId?: string;
   meetingId?: string;
   docTitle?: string;
@@ -216,27 +180,23 @@ export interface NotesTickHarness {
 export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTickHarness {
   const docId = opts.docId ?? 'd-meeting';
   const meetingId = opts.meetingId ?? 'm1';
-  const ydoc = opts.ydoc ?? new Y.Doc();
-  if (opts.doc) proseNs.applyMarkdownToFragment(proseNs.getProseFragment(ydoc), opts.doc);
+  const ydoc = new Y.Doc();
+  if (opts.doc) prose.applyMarkdownToFragment(prose.getProseFragment(ydoc), opts.doc);
   const meta = {
     type: opts.docType ?? ('markdown' as DocType),
     ...(opts.docTitle ? { title: opts.docTitle } : {}),
   };
-  const docStore = oneDocStore(docId, {
-    ydoc,
-    meta,
-    ...(opts.boundPath !== undefined ? { boundPath: opts.boundPath } : {}),
-  });
+  const docStore = {
+    get: (id: string) => (id === docId ? { ydoc, meta } : undefined),
+    boundPathOf: (id: string) => (id === docId ? opts.boundPath : undefined),
+  };
 
   const schedule = new ManualScheduler();
   const snapshots: TickSnapshot[] = [];
   const errors: string[] = [];
   const taskLinks: Array<{ taskId: string; docId: string }> = [];
   let summary: NotesMeetingSummary | null = null;
-  const settled = new Map<
-    number,
-    { input: NotesComposeInput; composed: readonly prose.BlockEdit[] }
-  >();
+  const settled = new Map<number, { input: NotesComposeInput; composed: string }>();
   const done = new Set<number>();
   let turnNo = 0;
   let tickNo = 0;
@@ -245,7 +205,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     {
       composer: {
         name: 'scripted',
-        async compose(input: NotesComposeInput): Promise<readonly prose.BlockEdit[]> {
+        async compose(input: NotesComposeInput): Promise<string> {
           const n = input.tick.tick;
           const composed = await opts.compose(input, n);
           settled.set(n, { input, composed });
@@ -273,25 +233,44 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
         taskLinks.push({ taskId, docId: linkedDocId });
       },
       ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
-      ...(opts.heading ? { heading: opts.heading } : {}),
+      ...(opts.ledger ? { ledger: opts.ledger } : {}),
     },
   );
   const session = beginNotesSession(deps, { docId, meetingId });
 
-  const markdown = (): string =>
-    proseNs.serializeFragmentToMarkdown(proseNs.getProseFragment(ydoc));
+  const markdown = (): string => prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
 
-  const headings = (): string[] => headingsOf(ydoc);
+  const sectionBody = (heading: string | readonly string[]): string => {
+    const fragment = prose.getProseFragment(ydoc);
+    const span = findNotesSection(fragment, heading);
+    if (!span) return '';
+    const top = fragment.toArray() as Y.XmlElement[];
+    const out: string[] = [];
+    for (let i = span.start + 1; i < span.endExclusive; i++) {
+      const md = prose.serializeBlockToMarkdown(top[i]!);
+      if (md.length > 0) out.push(md);
+    }
+    return out.join('\n\n');
+  };
+
+  const headings = (): string[] => {
+    const top = prose.getProseFragment(ydoc).toArray() as Y.XmlElement[];
+    return top
+      .filter((el) => el.nodeName === 'heading')
+      .map((el) =>
+        (prose.serializeBlockToMarkdown(el).split('\n', 1)[0] ?? '').replace(/^#+\s+/, ''),
+      );
+  };
 
   const snapshot = (tick: number): TickSnapshot => {
     const seen = settled.get(tick);
     return {
       tick,
       markdown: markdown(),
-      notes: sectionBody(ydoc, MEETING_NOTES_HEADING),
+      notes: sectionBody(MEETING_NOTES_HEADINGS),
       headings: headings(),
       ...(seen?.input ? { input: seen.input } : {}),
-      composed: seen?.composed ?? [],
+      composed: seen?.composed ?? '',
     };
   };
 
@@ -302,7 +281,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     summary: () => summary,
     ydoc,
     markdown,
-    notes: () => sectionBody(ydoc, MEETING_NOTES_HEADING),
+    notes: () => sectionBody(MEETING_NOTES_HEADINGS),
     headings,
     countHeadings: (text) => headings().filter((h) => h === text).length,
     say(...utterances) {
@@ -360,8 +339,10 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
   return harness;
 }
 
-/** The lines the notes section currently holds — the unit a test counts when
- *  it wants to know whether a note appeared twice. */
+/** The items the notes section currently holds, as markdown — the unit the
+ *  merge works in, for a test that wants to count notes rather than lines. */
 export function notesItems(ydoc: Y.Doc): string[] {
-  return noteLines(ydoc, MEETING_NOTES_HEADING);
+  const fragment = prose.getProseFragment(ydoc);
+  const span = findNotesSection(fragment, MEETING_NOTES_HEADINGS);
+  return span ? itemsInSection(fragment, span).map((i) => i.md) : [];
 }

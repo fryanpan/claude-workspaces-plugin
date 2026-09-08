@@ -24,7 +24,6 @@
 import { readFileSync } from 'node:fs';
 import { buildNotesPrompt } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
-import { NOTES_AUTHOR_ID } from '../packages/server/src/notes-doc-access.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from '../packages/server/src/notes-prompt-store.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
@@ -71,70 +70,19 @@ const INPUT: NotesComposeInput = {
       },
     ],
   },
-  // The doc a mid-meeting tick reads back: the section this meeting opened,
-  // the topic headings under it, its own bullets — and one line a person
-  // typed, which is what carries no author.
-  outline: [
-    {
-      id: 'h1',
-      kind: 'heading',
-      nodeName: 'heading',
-      level: 2,
-      text: 'Meeting notes',
-      author: NOTES_AUTHOR_ID,
-    },
-    {
-      id: 'h2',
-      kind: 'heading',
-      nodeName: 'heading',
-      level: 3,
-      text: 'Sync wakes too often',
-      author: NOTES_AUTHOR_ID,
-      underHeadingId: 'h1',
-    },
-    {
-      id: 'b1',
-      kind: 'listItem',
-      nodeName: 'listItem',
-      text: '[@Priya](speaker:A) The sync wakes on a ninety-second retry loop.',
-      author: NOTES_AUTHOR_ID,
-      underHeadingId: 'h2',
-    },
-    {
-      id: 'b2',
-      kind: 'listItem',
-      nodeName: 'listItem',
-      text: '[@Marcus](speaker:B) Cause: backoff never resets after a successful run.',
-      author: NOTES_AUTHOR_ID,
-      underHeadingId: 'h2',
-    },
-    {
-      id: 'h3',
-      kind: 'heading',
-      nodeName: 'heading',
-      level: 3,
-      text: 'Export range',
-      author: NOTES_AUTHOR_ID,
-      underHeadingId: 'h1',
-    },
-    {
-      id: 'b3',
-      kind: 'listItem',
-      nodeName: 'listItem',
-      text: '[@Marcus](speaker:B) The export dialog forgets the range between opens.',
-      author: NOTES_AUTHOR_ID,
-      underHeadingId: 'h3',
-    },
-    {
-      id: 'b4',
-      kind: 'listItem',
-      nodeName: 'listItem',
-      text: 'check whether this predates the 0.4 rollout',
-      underHeadingId: 'h3',
-    },
-  ],
-  notesHeadingId: 'h1',
-  humanNotes: ['check whether this predates the 0.4 rollout'],
+  previous: [
+    '## Meeting notes',
+    '',
+    '### Sync wakes too often',
+    '',
+    '- [@Priya](speaker:A) The sync wakes on a ninety-second retry loop.',
+    '- [@Marcus](speaker:B) Cause: backoff never resets after a successful run.',
+    '',
+    '### Export range',
+    '',
+    '- [@Marcus](speaker:B) The export dialog forgets the range between opens.',
+  ].join('\n'),
+  humanNotes: ['- check whether this predates the 0.4 rollout'],
   context: {
     docTitle: 'Weekly sync',
     taskTitles: [

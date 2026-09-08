@@ -1,6 +1,6 @@
 /**
- * The real notes composer: one Haiku call per pause in, a short list of
- * block-addressed edits out.
+ * The real notes composer: one Haiku call per pause, in, the whole notes
+ * section out.
  *
  * SAME CONSENT SEAM AS THE SUMMARIZER. What leaves the machine here is the
  * meeting transcript itself — the most sensitive content this server holds —
@@ -20,11 +20,8 @@
  * the key.
  */
 
-import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
-import { parseNotesEdits } from './notes-edit-parse.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { resolveKeyFrom } from './summarize.ts';
@@ -32,38 +29,29 @@ import { resolveKeyFrom } from './summarize.ts';
 export const NOTES_MODEL = 'claude-haiku-4-5-20251001';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 /**
- * A reply that hits this is refused rather than truncated — a cut edit list
- * would end mid-JSON and parse to nothing, and the next tick retries with the
- * same words carried, so nothing said is lost.
+ * A reply that hits this is refused rather than truncated — cut notes would
+ * REPLACE whole ones, and the next tick retries with the same words carried,
+ * so nothing said is lost.
  *
- * THE CEILING STOPPED BEING THE BINDING CONSTRAINT WHEN THE REPLY STOPPED
- * BEING THE WHOLE NOTES. `bun run notes:eval` measured about a tenth of ticks
- * refused here, all of them late in the longer meetings, because a whole-notes
- * reply grew with the MEETING rather than with the tick. An edit list grows
- * with what was just said: a handful of bullets, whatever hour of the meeting
- * it is. The number is left where it was measured so the eval keeps reporting
- * any refusal rather than hiding one behind a bigger ceiling.
+ * IT IS NOT AS FAR ABOVE A LONG MEETING AS THIS COMMENT USED TO CLAIM. It
+ * said the ceiling sat "well above a long meeting's notes (~2 pages of
+ * bullets)"; `bun run notes:eval` measured otherwise. Whole-notes replies
+ * grow with the MEETING rather than the tick, so the reply length climbs all
+ * meeting and the ticks that hit the ceiling are the late ones. Across the
+ * eval corpus — eight fifteen-minute excerpts — about a tenth of ticks were
+ * refused this way, all of them in the second half of the longer meetings.
+ *
+ * A real hour-long meeting is four times the excerpt, so raising the number
+ * only moves where the wall is: the shape of the fix is a compose that
+ * returns a CHANGE rather than the whole notes, which is a different design
+ * and not this constant. Left as measured rather than nudged, so the eval
+ * keeps reporting the refusals instead of hiding them one meeting longer.
  */
 const MAX_TOKENS = 2_000;
 const TIMEOUT_MS = 30_000;
 
-/**
- * How much of the doc's body the outline may carry into one prompt.
- *
- * Headings are never dropped by the cap (`prose.readOutline`), so the model
- * can always see every topic and put a point under the right one; what this
- * bounds is the BULLETS, counted from the end of the doc. That is what keeps a
- * tick's prompt the size of the recent conversation rather than the size of
- * the meeting — the exact thing that made late ticks slow and then refused.
- * Eighty is generous against what a tick needs: a pause covers a minute or two
- * of speech and lands two or three bullets, so eighty is most of the last
- * half-hour of notes, and a point older than that belongs under a heading
- * rather than folded into a bullet the model can no longer see.
- */
-export const NOTES_OUTLINE_RECENT_BLOCKS = 80;
-
-/** The heading a meeting's section is opened under, as one markdown line. */
-const HEADING_LINE = `## ${MEETING_NOTES_HEADING}`;
+/** The heading contract shared with `meeting-notes-doc.ts`'s replacer. */
+const HEADING_LINE = '## Meeting notes';
 
 /**
  * Prompt building is pure and exported: what the transcript is asked to
@@ -130,66 +118,22 @@ export function buildNotesPrompt(
     );
   }
 
-  parts.push(renderOutline(input));
+  parts.push(
+    `Current notes:\n${input.previous ?? '(none yet — this is the first update of the meeting)'}`,
+  );
+  if (input.humanNotes?.length) {
+    parts.push(
+      ['Written by a person — reproduce verbatim:', ...input.humanNotes.map((n) => `- ${n}`)].join(
+        '\n',
+      ),
+    );
+  }
   parts.push(
     `New transcript since the last update:\n${input.tick.turns
       .map((t) => `- ${speakerPrefix(t)}${t.text}${t.partial ? PARTIAL_SUFFIX : ''}`)
       .join('\n')}`,
   );
   return { system, user: parts.join('\n\n') };
-}
-
-/**
- * The doc as the model addresses it: one line per block, carrying the id an
- * edit comes back with, what kind of block it is, whose it is, and its words.
- *
- * DELIBERATELY NOT MARKDOWN. Handing the model the section as prose is what
- * made it answer with prose — a whole rewritten section, indistinguishable
- * from the one it was given except where it had changed its mind. A table of
- * ids is a different question: it can only be answered by naming blocks.
- *
- * "yours" and "theirs" are read off `author`, which the doc clears the moment
- * a person edits a block (`clearAuthorshipOnPersonEdit`). So "yours" means
- * "you wrote this and nobody has touched it since", which is exactly the set
- * of blocks an edit may rewrite directly — anything else reaches them as a
- * suggestion, and the instructions say so.
- */
-function renderOutline(input: NotesComposeInput): string {
-  if (input.outline.length === 0) {
-    return [
-      'The doc is empty, and this meeting has no notes section yet.',
-      `Open one with a single insert_at_end carrying "${HEADING_LINE}", then`,
-      'insert_at_end the first notes under it.',
-    ].join('\n');
-  }
-  const lines = input.outline.map((entry) => {
-    const kind =
-      entry.kind === 'heading'
-        ? `h${entry.level ?? 2}`
-        : entry.kind === 'listItem'
-          ? 'bullet'
-          : 'para';
-    const whose = entry.author === undefined ? 'theirs' : 'yours';
-    const under =
-      entry.kind === 'heading' || entry.underHeadingId === undefined
-        ? ''
-        : ` under=${entry.underHeadingId}`;
-    return `${entry.id} ${kind} ${whose}${under} | ${entry.text}`;
-  });
-  const head =
-    input.notesHeadingId === undefined
-      ? [
-          'This meeting has NO notes section in the doc below.',
-          `Open one with a single insert_at_end carrying "${HEADING_LINE}".`,
-        ]
-      : [`This meeting's notes are under heading ${input.notesHeadingId}.`];
-  return [
-    ...head,
-    '',
-    'The doc, block by block — "id kind whose | text". Only the most recent',
-    'blocks are listed; every heading is.',
-    ...lines,
-  ].join('\n');
 }
 
 /**
@@ -214,35 +158,16 @@ function speakerPrefix(turn: NotesTurn): string {
 }
 
 /**
- * A reply read as edits: fences stripped, malformed entries discarded with a
- * reason, and nothing thrown.
- *
- * THROWS ONLY WHEN THE REPLY COULD NOT BE READ. An edit list that came back
- * with two good entries and one nonsense one is two good edits; a reply the
- * parser could make nothing of — bad JSON, or entries it all discarded — is a
- * tick the session must hear as a FAILURE so the words carry into the next
- * tick rather than being counted as covered. The dropped reasons ride the
- * message, because a model reply nobody can read is worth one log line naming
- * what arrived.
- *
- * A WELL-FORMED EMPTY LIST IS NOT A FAILURE. `parseNotesEdits` separates the
- * two: nothing parsed AND nothing dropped means the model answered `[]`, and
- * a tick of greetings that changes nothing is the documented right answer
- * (see `NotesComposer.compose`). Throwing on it re-sent the same turns every
- * tick through an uncapped carry-forward and logged a compose failure for
- * each one, so a stretch of small talk grew the prompt without bound.
+ * A reply the doc can hold: fences stripped (models wrap markdown in
+ * markdown), and the heading restored when the model forgot it — without it
+ * the section replacer could never find this write again.
  */
-export function readNotesEdits(raw: string): readonly prose.BlockEdit[] {
-  const { edits, dropped } = parseNotesEdits(raw);
-  if (edits.length === 0 && dropped.length > 0) {
-    throw new Error(`notes compose returned no usable edits: ${dropped.join('; ')}`);
-  }
-  if (dropped.length > 0) {
-    console.error(
-      `[meeting-notes] dropped ${dropped.length} malformed edit(s): ${dropped.join('; ')}`,
-    );
-  }
-  return edits;
+export function sanitizeNotesReply(raw: string): string {
+  let text = raw.trim();
+  const fenced = text.match(/^```[a-zA-Z]*\n([\s\S]*?)\n?```$/);
+  if (fenced?.[1] !== undefined) text = fenced[1].trim();
+  if (!/^#{1,6}\s/.test(text)) text = `${HEADING_LINE}\n\n${text}`;
+  return text;
 }
 
 export interface HaikuNotesComposerOpts {
@@ -275,7 +200,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
 
   return {
     name: 'haiku',
-    async compose(input: NotesComposeInput): Promise<readonly prose.BlockEdit[]> {
+    async compose(input: NotesComposeInput): Promise<string> {
       if (!announcedOn) {
         announcedOn = true;
         console.log(
@@ -309,11 +234,11 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
           stop_reason?: string | null;
         };
         if (body.stop_reason === 'max_tokens') {
-          throw new Error('notes compose hit max_tokens; refusing a truncated edit list');
+          throw new Error('notes compose hit max_tokens; refusing a truncated section');
         }
         const text = body.content?.map((b) => b.text ?? '').join('') ?? '';
         if (!text.trim()) throw new Error('notes compose returned an empty reply');
-        return readNotesEdits(text);
+        return sanitizeNotesReply(text);
       } finally {
         clearTimeout(timeout);
       }

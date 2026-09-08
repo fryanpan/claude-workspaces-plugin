@@ -32,7 +32,6 @@ import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
-import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 import { type DocStoreWorkspacePersistence, DocStoreWorkspaces } from './doc-store-workspaces.ts';
 import { type DocThreadPersistence, DocThreads } from './doc-threads.ts';
 import {
@@ -253,14 +252,6 @@ export interface LiveDoc {
   pendingRevisionBump?: boolean;
   /** The debounce timer for the pending bump, so an early commit can cancel it. */
   revisionTimer?: ReturnType<typeof setTimeout> | null;
-  /**
-   * Disposer for the authorship observer on a prose doc — the one that drops
-   * an agent's claim off a block the moment a person types in it (see
-   * `prose.clearAuthorshipOnPersonEdit`). Held here because it is per-doc and
-   * must be released wherever the ydoc is destroyed; a doc that came back
-   * from disk gets a fresh one.
-   */
-  disposeAuthorship?: (() => void) | null;
 }
 
 /** A file leaf in the workspace tree (a single bound attachment). */
@@ -630,8 +621,6 @@ export class DocStore {
     // done its job; a doc that comes back re-derives it from its own binding.
     this.bindings.forgetFailedWrite(docId);
     this.fanout.forgetDoc(doc);
-    doc.disposeAuthorship?.();
-    doc.disposeAuthorship = null;
     try {
       // peek, not `doc.awareness`: the getter would construct an Awareness
       // purely to destroy it.
@@ -1196,8 +1185,6 @@ export class DocStore {
     this.lastTouchedAt.delete(docId);
     this.hydratedAt.delete(docId);
     this.fanout.forgetDoc(doc);
-    doc.disposeAuthorship?.();
-    doc.disposeAuthorship = null;
     try {
       // peek, not `doc.awareness`: the getter would construct an Awareness
       // (and register a fresh sweep entry) purely to destroy it.
@@ -1777,13 +1764,6 @@ export class DocStore {
     this.docs.set(docId, doc);
     this.hydratedAt.set(docId, this.now());
     this.fanout.wireEvents(doc);
-    // A person's keystroke hands the block back: the block-authorship model
-    // only means anything if "still marked the agent's" also means "no person
-    // has touched it since". Prose docs only — a flat doc has no addressable
-    // blocks to claim in the first place.
-    if (contentKind(meta.type) === 'prose') {
-      doc.disposeAuthorship = prose.clearAuthorshipOnPersonEdit(ydoc);
-    }
     // For freshly-created docs (no on-disk state), the initDocMeta call
     // above fired its update event before wireEvents listened, so nothing
     // would ever flush this doc to disk if the user hasn't done another
@@ -3161,20 +3141,6 @@ export class DocStore {
     opts: { action: 'accept' | 'reject'; authorId?: string },
   ): { ok: true; resolved: number; sids: string[] } | { ok: false; error: 'not-found' } {
     return this.docEdits.resolveAllSuggestions(docId, opts);
-  }
-
-  /** The doc's addressable blocks and their ids. `null` for an unknown doc. */
-  readOutline(docId: string, opts: prose.OutlineOptions = {}): DocOutline | null {
-    return this.docEdits.readOutline(docId, opts);
-  }
-
-  /** Apply a batch of block-addressed edits in one transaction. */
-  applyBlockEdits(
-    docId: string,
-    edits: prose.BlockEdit[],
-    who: BlockEditsAuthor,
-  ): BlockEditsResult {
-    return this.docEdits.applyBlockEdits(docId, edits, who);
   }
 
   insertBlocksAtAnchor(

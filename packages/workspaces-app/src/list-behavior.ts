@@ -1,9 +1,8 @@
 import { type Editor, Extension } from '@tiptap/core';
 import type { Node as ProseNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
+import { Plugin, PluginKey, Selection, TextSelection } from '@tiptap/pm/state';
 import { canJoin } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { ySyncPluginKey } from '@tiptap/y-tiptap';
 
 /**
  * Bullet-list ergonomics for the doc editor (meeting-notes UX plan, AC 3):
@@ -26,8 +25,7 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap';
  *    would lift the item but strand the host bullet); any other nested item
  *    falls through to the stock commands.
  *
- * 2. Adjacent sibling lists of the SAME type auto-join, for a LOCAL edit
- *    only. Enter-splitting a
+ * 2. Adjacent sibling lists of the SAME type auto-join. Enter-splitting a
  *    numbered list and deleting the empty item leaves two orderedLists that
  *    each restart at 1 and nothing ever merges them — an appendTransaction
  *    joins such neighbours (top level and nested alike), so the numbering
@@ -147,31 +145,6 @@ function stepPastImplicitHost(oldSel: Selection, sel: Selection): Selection | nu
   return TextSelection.create($from.doc, $from.pos + 4);
 }
 
-/**
- * The transaction a batch entry ultimately came from. ProseMirror tags every
- * appended transaction with `appendedTransaction` — the transaction that
- * triggered it — and an appended transaction inherits NONE of its trigger's
- * meta. A remote write reaches this plugin as a second round holding only
- * StarterKit's trailing-paragraph append, which reads local unless the chain
- * is walked back.
- */
-function originOf(tr: Transaction): Transaction {
-  let cur = tr;
-  // Bounded: an append chain is a few deep, and a cycle must not hang a keystroke.
-  for (let hop = 0; hop < 16; hop++) {
-    const trigger = cur.getMeta('appendedTransaction') as Transaction | undefined;
-    if (!trigger || trigger === cur) break;
-    cur = trigger;
-  }
-  return cur;
-}
-
-/** A doc change this browser's own user made, as opposed to one the
- *  collaboration binding is applying on the server's behalf. */
-function isLocalDocChange(tr: Transaction): boolean {
-  return tr.docChanged && !originOf(tr).getMeta(ySyncPluginKey);
-}
-
 /** First position where a list sits right after a same-type sibling list. */
 function joinableListBoundary(doc: ProseNode): number | null {
   let found: number | null = null;
@@ -236,16 +209,7 @@ export const ListBehavior = Extension.create({
       new Plugin({
         key: new PluginKey('list-join'),
         appendTransaction: (transactions, _oldState, newState) => {
-          // A LOCAL doc change only. A remote/server write arrives through the
-          // collaboration binding, and joining there re-creates the server's
-          // own blocks under browser-minted identity — losing the `cwId` /
-          // `cwAuthor` the note-taker addresses its bullets by, and (because
-          // the binding suppresses the write-back of a change it is itself
-          // applying) leaving the editor showing one list where the Y.Doc
-          // holds two. The join must still run for a person's Backspace or
-          // Enter, which is what it is for, so the test is "no local change in
-          // this batch", not "some transaction in it was remote".
-          if (!transactions.some(isLocalDocChange)) return null;
+          if (!transactions.some((tr) => tr.docChanged)) return null;
           const tr = newState.tr;
           let joined = false;
           // Each join removes one boundary, so this terminates.

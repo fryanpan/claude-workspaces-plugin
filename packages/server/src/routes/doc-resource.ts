@@ -23,10 +23,6 @@ import { clipToWordBoundary } from '../task-title.ts';
 import { type Task, taskChip } from '../tasks.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
 
-/** Ceiling on the outline read's `?recent=`: past any real meeting's tail,
- *  short of an unbounded walk a hostile value could ask for. */
-const OUTLINE_RECENT_MAX = 500;
-
 /**
  * The doc's own routes: `''`, `threads` GET, `tasks`, `plan`,
  * `plan-request`, `lead-presence`, `review-request`, `research-request`,
@@ -368,30 +364,6 @@ export async function handleDocResourceCore(
     const reader = url.searchParams.get('reader');
     if (reader) docStore.noteAgentRead(docId, reader);
     return j(200, doc);
-  }
-  // The doc as an agent ADDRESSES it: every block with its opaque id, so an
-  // edit names a block instead of quoting text a person may have moved since.
-  // `headings_only=1` is the cheap "where could this go?" read; `recent=<n>`
-  // caps non-heading entries from the END, keeping a note-taker's tick the
-  // size of the conversation rather than of the meeting. `recent` is
-  // validated, never coerced — a clamped `recent=abc` answers nobody's ask.
-  if (rest === 'outline' && req.method === 'GET') {
-    const headingsRaw = url.searchParams.get('headings_only');
-    const recentRaw = url.searchParams.get('recent');
-    const recent = recentRaw === null ? undefined : Number(recentRaw);
-    if (
-      recent !== undefined &&
-      (!Number.isInteger(recent) || recent < 0 || recent > OUTLINE_RECENT_MAX)
-    ) {
-      const error = `recent must be an integer between 0 and ${OUTLINE_RECENT_MAX}`;
-      return j(400, { error, field: 'recent' });
-    }
-    const outline = docStore.readOutline(docId, {
-      ...(headingsRaw === '1' || headingsRaw === 'true' ? { headingsOnly: true } : {}),
-      ...(recent !== undefined ? { recentBlocks: recent } : {}),
-    });
-    if (!outline) return j(404, { error: 'doc not found' });
-    return j(200, outline);
   }
   // Cheap doc health check — metadata + counts, never the body.
   // Exists because get_doc has returned 320KB for one doc: an agent
