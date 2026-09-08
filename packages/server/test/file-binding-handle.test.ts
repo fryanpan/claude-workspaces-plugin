@@ -63,6 +63,8 @@ type Recorder = {
   host: FileBindingHost;
   calls: string[];
   broadcasts: WebhookPayload[];
+  /** Each round the mockup binding handed up, in order. */
+  mockupHtml: string[];
   /** Move the residency clock, which is the ONLY clock the fast lane reads. */
   advance(ms: number): void;
 };
@@ -70,6 +72,7 @@ type Recorder = {
 function recorder(dataDir: string, doc: LiveDoc): Recorder {
   const calls: string[] = [];
   const broadcasts: WebhookPayload[] = [];
+  const mockupHtml: string[] = [];
   const touched = new Map<string, number>();
   let clock = 1_000_000;
   const host: FileBindingHost = {
@@ -93,12 +96,17 @@ function recorder(dataDir: string, doc: LiveDoc): Recorder {
       calls.push(`broadcast(${payload.event})`);
       broadcasts.push(payload);
     },
+    onMockupChanged: (_doc, html) => {
+      calls.push(`onMockupChanged(${html.length})`);
+      mockupHtml.push(html);
+    },
     decorate: (meta) => meta,
   };
   return {
     host,
     calls,
     broadcasts,
+    mockupHtml,
     advance: (ms) => {
       clock += ms;
     },
