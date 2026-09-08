@@ -136,7 +136,17 @@ export interface HeldRowPayload {
   revise?: string;
 }
 
-/** What `workspace.stalled` carries. Four lists, because the lead's next act
+/** A row an agent filed that reads as UI work and is being built with no
+ *  answered review item on it — the UI gate's breach (`ui-review-gate.ts`
+ *  on the server). `keyword` is the word that made it read as UI work, so
+ *  the lead can dismiss a false positive without re-reading the ticket. */
+export interface UngatedUiRowPayload {
+  id: string;
+  title?: string;
+  keyword?: string;
+}
+
+/** What `workspace.stalled` carries. Five lists, because the lead's next act
  *  differs for each — see `stalledLine`. */
 export interface StallPayload {
   taskId?: string;
@@ -148,6 +158,9 @@ export interface StallPayload {
   undetermined?: { count?: number; reasons?: string[] };
   /** `heldItems`, not `held` — ready_idle spends that name on its counts. */
   heldItems?: HeldRowPayload[];
+  /** Rows built past the UI gate. A frame carrying only this is a real
+   *  wake: the row is MOVING, so no other list here would ever name it. */
+  ungatedUi?: UngatedUiRowPayload[];
   /** Runnable rows past the board's parallelism cap, which the pass did not
    *  judge — idle by rule, not healthy. Absent when none. */
   beyondCapacity?: number;
@@ -157,6 +170,7 @@ export interface StallPayload {
     rows?: StalledRowPayload[];
     undetermined?: string[];
     heldItems?: HeldRowPayload[];
+    ungatedUi?: UngatedUiRowPayload[];
     escalated?: boolean;
   };
   /** The cap that kept them out, with who moved it and when. Sent only
@@ -376,6 +390,8 @@ function changedClause(changed: StallPayload['changed']): string {
   if (unread.length > 0) bits.push(`${unread.join(', ')} became unreadable`);
   const held = changed.heldItems ?? [];
   if (held.length > 0) bits.push(`${held.length} review item(s) newly held`);
+  const ungated = changed.ungatedUi ?? [];
+  if (ungated.length > 0) bits.push(`${ungated.length} row built past the UI gate`);
   if (changed.escalated === true)
     bits.push('the board\u2019s quietest row crossed another repeat window');
   if (bits.length === 0) return '';
@@ -450,7 +466,16 @@ export function stalledLine(p: StallPayload): string {
         `${heldRowsClause(held)}. Get each filer to revise_review_item; nobody can answer a held ask.`,
     );
   }
-  // Never empty: the server does not send this frame with all four lists
+  const ungated = p.ungatedUi ?? [];
+  if (ungated.length > 0) {
+    const noun = ungated.length === 1 ? 'UI row is' : 'UI rows are';
+    parts.push(
+      `${ungated.length} ${noun} being built past the review gate — an agent filed it, it reads as ` +
+        `UI work, and nobody answered a review item on it — ${ungatedRowsClause(ungated)}. ` +
+        'Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.',
+    );
+  }
+  // Never empty: the server does not send this frame with all five lists
   // empty, and a line that could render to a bare slug would be the
   // no-subject wake the whole file exists to prevent.
   // Ahead of the lists, so a repeat says what moved before it says what to
@@ -516,6 +541,21 @@ function heldRowClause(row: HeldRowPayload): string {
 
 function heldRowsClause(rows: readonly HeldRowPayload[]): string {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(heldRowClause);
+  const rest = rows.length - shown.length;
+  return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
+}
+
+/** One row past the UI gate: title, id, and the word that made it UI work,
+ *  so a false positive ("page" in prose about a page of notes) is dismissable
+ *  from the line. */
+function ungatedRowClause(row: UngatedUiRowPayload): string {
+  const title = row.title ? `"${row.title}" ` : '';
+  const word = row.keyword ? `, matched: ${row.keyword}` : '';
+  return `${title}(${row.id}${word})`;
+}
+
+function ungatedRowsClause(rows: readonly UngatedUiRowPayload[]): string {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(ungatedRowClause);
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
 }

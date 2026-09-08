@@ -551,6 +551,40 @@ describe('stalledLine tells a stand-in why it, and not the lead, was woken', () 
   });
 });
 
+const UNGATED_ROW = {
+  id: 't-u1',
+  title: 'Reader sees one subdued new-content badge',
+  keyword: 'badge',
+};
+
+describe('stalledLine names rows built past the UI gate as their own finding', () => {
+  it('names the row, the word that made it UI work, and what clears it', () => {
+    const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, ungatedUi: [UNGATED_ROW] });
+    expect(line).toContain('1 UI row is being built past the review gate');
+    expect(line).toContain('t-u1');
+    expect(line).toContain('matched: badge');
+    expect(line).toContain('answered review item');
+  });
+
+  it('a frame carrying only the UI gate is a real wake, not a bug report', () => {
+    // The first frame the deployed gate sent read "no rows on it" because
+    // this reader had never heard of the field; that is the regression
+    // pinned here.
+    const line = stalledLine({ ungatedUi: [UNGATED_ROW] });
+    expect(line).not.toContain('no rows on it');
+    expect(line).toContain('review gate');
+  });
+
+  it('a gate breach new since the last wake is called out first', () => {
+    const line = stalledLine({ ...STALL, changed: { ungatedUi: [UNGATED_ROW] } });
+    expect(line).toContain('NEW since the last wake: 1 row built past the UI gate');
+  });
+
+  it('the control: a frame with no ungated list says nothing about the gate', () => {
+    expect(stalledLine(STALL)).not.toContain('review gate');
+  });
+});
+
 describe('stalledLine names held review items as their own finding', () => {
   it('says how many are held, which, by whom, and what the judge found', () => {
     const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, heldItems: [HELD_ROW] });
