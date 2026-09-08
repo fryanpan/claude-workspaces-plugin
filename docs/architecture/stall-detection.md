@@ -1,5 +1,10 @@
 # Server-side stall detection
 
+> This page is the mechanics as they run today and the record of why each
+> layer exists. The design the rebuild of 2026-09-08 holds them to — what
+> "working" means, who is told what, and each module's criteria — is
+> [stall-check/](stall-check/README.md). Read that first.
+
 **Goal:** every open ticket on every board is moving or names its blocker
 where the owner can see and answer it — without the owner poking, and
 without agents polling. The server watches; leads get woken only when there

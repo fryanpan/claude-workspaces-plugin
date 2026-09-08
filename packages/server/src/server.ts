@@ -1011,6 +1011,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       : {}),
     ...(opts.stallEscalateMs !== undefined ? { stallEscalateMs: opts.stallEscalateMs } : {}),
     ...(opts.heldReviewItemMs !== undefined ? { heldReviewItemMs: opts.heldReviewItemMs } : {}),
+    ...(opts.keepMovingCadenceMs !== undefined
+      ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
+      : {}),
     ...(opts.noteAskJudge !== undefined ? { noteAskJudge: opts.noteAskJudge } : {}),
   });
   const { leadPresence, readyNudger, stallNudger } = stallWiring;
@@ -1910,6 +1913,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     unfileFromDefault,
     workspacesOfDoc: shareWorkspacesOf,
     watchKeyExists,
+    keepMovingVerdicts: stallWiring.keepMoving,
   };
 
   const server = Bun.serve<UpgradeData>({

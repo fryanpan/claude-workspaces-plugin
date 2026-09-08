@@ -143,6 +143,12 @@ export function resolveServerConfig(opts: {
   // how often a person is interrupted by their own board.
   const stallEscalateMs = positiveEnvDuration(env, 'CW_STALL_ESCALATE_MINUTES', MINUTE_MS);
 
+  // How often each board's keep-moving verdict is recorded
+  // (keep-moving-verdict.ts). Hours, like the repeat window: it is a
+  // measurement cadence, not a wake, and four hours is the rate the old
+  // report ran at.
+  const keepMovingCadenceMs = positiveEnvDuration(env, 'CW_KEEP_MOVING_HOURS', HOUR_MS);
+
   // Extra hostnames to treat as LOCAL. Loopback, the tailnet name, this
   // machine's LAN names, and private IPv4 ranges are detected automatically;
   // this covers anything we can't detect (a reverse proxy in front, a custom
@@ -596,6 +602,7 @@ export function resolveServerConfig(opts: {
     stallNudgeRepeatMs,
     heldReviewItemMs,
     stallEscalateMs,
+    keepMovingCadenceMs,
     allowedOrigins,
     sharingEnvLocked,
     requireEmailAuth,

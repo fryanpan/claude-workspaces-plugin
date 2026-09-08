@@ -55,7 +55,7 @@ flowchart TB
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
-    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · note-ask · keep-moving"]
+    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · note-ask · keep-moving<br/>keep-moving-verdict"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · client-release.ts · plugin-release.ts · sentry.ts"]
@@ -116,7 +116,10 @@ need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.
 
 **What runs on a clock.** Three loops in the server tick rather than answer a
 request, and all three take an injected `now` so a test moves the clock
-instead of waiting: the two board wakes in the Keep-moving group, and
+instead of waiting: the two board wakes in the Keep-moving group (the
+stall tick also records `keep-moving-verdict.ts`, the PASS/FAIL measurement
+of that group, off the same snapshot the wake reads —
+[stall-check/](stall-check/README.md)), and
 `task-scheduler.ts`, which files an instance each time a row's schedule comes
 due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
 `task-run-record.ts` read each rule's last run back — recording the success,
@@ -275,7 +278,7 @@ exactly once, and nothing word-rate enters the SSE buffer.
 ## Subsystem docs
 
 - [meeting-assistant.md](meeting-assistant.md) — live transcription and notes on a pause-or-cadence clock.
-- [stall-detection.md](stall-detection.md) — board wakes, what counts as stalled, and their economics.
+- [stall-check/](stall-check/README.md) — the stall check's design, what "working" means, and per-module criteria; [stall-detection.md](stall-detection.md) is the mechanics as they run today and why each layer exists.
 - [goal-projection.md](goal-projection.md) — the goal bar, the remainder, and when a goal lands.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.
