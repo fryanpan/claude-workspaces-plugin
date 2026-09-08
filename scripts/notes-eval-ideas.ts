@@ -263,7 +263,11 @@ export function rateOf(row: { ideas: number; lost: number }): number {
  * Returns the exit code the caller should use — 0 unless `gate` and the
  * overall rate is above the bar.
  */
-export function reportIdeaRates(rows: readonly MeetingIdeaRate[], gate: boolean): number {
+export function reportIdeaRates(
+  rows: readonly MeetingIdeaRate[],
+  gate: boolean,
+  quote = true,
+): number {
   if (rows.length === 0) {
     console.log('\nNo idea ground truth for this corpus — the lost-idea rate was not measured.');
     console.log('Build it with: bun run scripts/notes-eval-ideas.ts --build');
@@ -294,8 +298,19 @@ export function reportIdeaRates(rows: readonly MeetingIdeaRate[], gate: boolean)
     )}`,
   );
   if (unjudged > 0) console.log(`${unjudged} idea(s) had no readable verdict and are not counted.`);
+  // An example IS a line of the meeting, restated. On a corpus that is not in
+  // this repo that meeting is somebody's private one, and the brief for the
+  // private half is counts, rates and ids only — so the examples are withheld
+  // rather than trusted to a log file, a CI transcript or a scrollback.
   for (const row of rows) {
     if (row.examples.length === 0) continue;
+    if (!quote) {
+      console.log(
+        `\n${row.meeting} — ${row.examples.length} idea(s) reached no note. ` +
+          'Text withheld: this corpus is private.',
+      );
+      continue;
+    }
     console.log(`\n${row.meeting} — ideas the notes did not carry, first five:`);
     for (const e of row.examples.slice(0, 5)) console.log(`  ${e}`);
   }

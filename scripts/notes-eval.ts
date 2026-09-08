@@ -63,7 +63,8 @@
  * `notes-eval-fixtures.ts`. Speakers are letters; no fixture names a person.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NoteReference, NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
 import {
@@ -605,6 +606,7 @@ function report(
   failOnWalls: boolean,
   ideaRows: readonly MeetingIdeaRate[],
   gateIdeas: boolean,
+  quote: boolean,
 ): number {
   console.log('\nBehaviour                                  examples   pass rate');
   console.log('-'.repeat(66));
@@ -615,8 +617,15 @@ function report(
     if (b.examples < 25) thin++;
   }
   console.log('-'.repeat(66));
+  // A failure line quotes the bullet that failed, and a bullet is the meeting
+  // restated. Off-repo corpora are private meetings, so they get the count
+  // and nothing else.
   for (const b of Object.values(behaviours)) {
     if (b.failures.length === 0) continue;
+    if (!quote) {
+      console.log(`\n${b.what} — ${b.failures.length} failures. Text withheld: private corpus.`);
+      continue;
+    }
     console.log(`\n${b.what} — ${b.failures.length} failures, first five:`);
     for (const f of b.failures.slice(0, 5)) console.log(`  ${f}`);
   }
@@ -637,7 +646,7 @@ function report(
   // Both verdicts are computed, and both are printed, before either exits.
   // A run that stopped at the first failure would hide the number the row is
   // about behind a formatting one.
-  const ideaCode = gateIdeas ? reportIdeaRates(ideaRows, true) : reportIdeaRates(ideaRows, false);
+  const ideaCode = reportIdeaRates(ideaRows, gateIdeas, quote);
   const walls = behaviours.flatRuns!;
   if (failOnWalls && walls.failures.length > 0) {
     console.log(
@@ -719,7 +728,11 @@ async function main(argv: string[]): Promise<number> {
   // reading rather than a verdict. The lost-idea rate is not that kind of
   // number: it is measured against a fixed ground truth, so it means the same
   // thing every run, and it gates on every run that measured it.
-  return report(behaviours, smoke, ideaRows, ideas);
+  // A corpus outside this repo is a private meeting corpus by construction —
+  // that is the only reason `--corpus` exists. Its examples never print.
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const quote = !relative(repoRoot, resolve(corpusDir)).startsWith('..');
+  return report(behaviours, smoke, ideaRows, ideas, quote);
 }
 
 if (import.meta.main) {
