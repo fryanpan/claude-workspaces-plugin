@@ -466,10 +466,14 @@ describe('the canonical routes, over HTTP', () => {
     }
   });
 
-  it('answers nothing at the retired /api spellings', async () => {
+  it('answers nothing at the retired /api spellings, and says why', async () => {
     // No old-path support: the previous addresses were deleted in the same
-    // change that moved every caller. A 404 here is the whole of criterion 3
-    // that a test can see.
+    // change that moved every caller, and none of them serves data. What they
+    // answer is now the stale-client verdict rather than a bare 404 (see
+    // `routes/stale-client.ts`) — a 410 carrying no board content, because a
+    // caller still on these spellings is running an older bundle and the bare
+    // 404 read as a deleted board. Criterion 3 is the absence of data, which
+    // is asserted here more tightly than the status alone did.
     for (const p of [
       `/api/workspaces/${board}`,
       `/api/workspaces/${board}/tasks`,
@@ -477,8 +481,14 @@ describe('the canonical routes, over HTTP', () => {
       `/api/workspaces/${board}/settings`,
       `/api/goals/${bandOnOther}/cascade`,
     ]) {
-      expect((await local(p)).status, p).toBe(404);
+      const r = await local(p);
+      expect(r.status, p).toBe(410);
+      const body = (await r.json()) as { reason: string; tasks?: unknown; goals?: unknown };
+      expect(body.reason, p).toBe('stale-client');
+      expect(body.tasks, p).toBeUndefined();
+      expect(body.goals, p).toBeUndefined();
     }
-    expect((await post(`/api/goals/${bandOnOther}/archive`, { author: PERSON })).status).toBe(404);
+    const archived = await post(`/api/goals/${bandOnOther}/archive`, { author: PERSON });
+    expect(archived.status).toBe(410);
   });
 });

@@ -14624,6 +14624,16 @@ function resolveBaseUrl(deps) {
   }
   throw new Error("claude-workspaces server not found — start it with `bun run dev` (or set CW_BASE_URL). " + `Looked for a discovery file at ${discoveryCandidates(deps.homedir()).join(" and ")}.`);
 }
+function staleClientMessage(text) {
+  try {
+    const body = JSON.parse(text);
+    if (body.reason !== "stale-client")
+      return;
+    return typeof body.message === "string" && body.message.trim() !== "" ? body.message : undefined;
+  } catch {
+    return;
+  }
+}
 function createHttp(resolve, fetchFn = fetch, authHeaders = async () => ({})) {
   return async (method, path, body) => {
     const baseUrl = resolve();
@@ -14636,8 +14646,9 @@ function createHttp(resolve, fetchFn = fetch, authHeaders = async () => ({})) {
       body: body ? JSON.stringify(body) : undefined
     });
     const text = await res.text();
-    if (!res.ok)
-      throw new Error(`${method} ${path} → ${res.status}: ${text}`);
+    if (!res.ok) {
+      throw new Error(`${method} ${path} → ${res.status}: ${staleClientMessage(text) ?? text}`);
+    }
     return text ? JSON.parse(text) : {};
   };
 }
@@ -19088,7 +19099,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.189";
+var PLUGIN_VERSION = "0.1.190";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
