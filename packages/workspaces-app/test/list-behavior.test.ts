@@ -209,6 +209,39 @@ describe('Adjacent same-type lists auto-join', () => {
     expect(nested.child(1).textContent).toBe('b');
   });
 
+  it('leaves a SERVER-written adjacent list alone — only a local edit joins', () => {
+    const { ydoc, fragment, handle } = mountEditor('- alpha\n');
+    expect(topKinds(handle)[0]).toBe('bulletList');
+    // The real remote path: a write into the Y.Doc under a non-local origin,
+    // which reaches the editor through the collaboration binding exactly as
+    // the server's own note-taker write does.
+    ydoc.transact(() => {
+      fragment.insert(1, prose.parseMarkdownBlocks('- beta\n'));
+    }, 'agent');
+
+    // Two adjacent bulletLists, still two: joining them here would re-create
+    // the server's block and strip the identity attributes it carries.
+    expect(topKinds(handle).filter((k) => k === 'bulletList')).toHaveLength(2);
+    const doc = handle.editor.state.doc;
+    expect(doc.child(0).textContent).toBe('alpha');
+    expect(doc.child(1).textContent).toBe('beta');
+  });
+
+  it('a local edit after a server write still joins — the guard is per batch', () => {
+    const { ydoc, fragment, handle, view } = mountEditor('- alpha\n');
+    ydoc.transact(() => {
+      fragment.insert(1, prose.parseMarkdownBlocks('- beta\n'));
+    }, 'agent');
+    expect(topKinds(handle).filter((k) => k === 'bulletList')).toHaveLength(2);
+
+    // A person now types in the first bullet: a local doc change, so the
+    // pending adjacency is joined the way Backspace-merge always was.
+    view.dispatch(view.state.tr.insertText('!', 4));
+
+    expect(topKinds(handle).filter((k) => k === 'bulletList')).toHaveLength(1);
+    expect(handle.editor.state.doc.child(0).childCount).toBe(2);
+  });
+
   it('leaves different-type neighbours (ul next to ol) alone', () => {
     const { handle, view } = mountEditor('- alpha\n');
     const { state } = view;
