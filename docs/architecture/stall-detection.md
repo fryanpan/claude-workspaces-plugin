@@ -155,13 +155,19 @@ closes when the API does (`decisions.md`, 2026-08-29). Held state is
 stored on the item (`judge: {at, verdict, reason}`) and the filer's agent id
 beside it, store-only; the item is `pending` — off the queue, nothing on
 the ticket — from the moment it is filed until the verdict lands, and a
-`pending` still on disk at boot becomes `unavailable`. `stallSnapshot` lists the holds older than
-`CW_HELD_ITEM_MINUTES` (default 5) as `held`; the nudger wakes the FILER
-once per item per process (`filersTold`), and the frame to the lead carries
-them as `heldItems` — a board with nothing else wrong still wakes on one.
-Held rows enter the stall stamp under their ticket's id, so a later stall
-or unfiled finding on the same ticket while it stays held re-wakes nothing:
-one complaint per item, not per pass. Revising re-judges; a pass clears
+`pending` still on disk at boot becomes `unavailable`. A hold has two
+windows, one per person who can act on it. `stallSnapshot` lists the holds
+older than `CW_HELD_ITEM_MINUTES` (default 5) as `held`, and the nudger
+wakes the FILER once per item per process (`filersTold`) — the filer can end
+the hold in one call. A hold still standing at the quiet window
+(`CW_STALL_NUDGE_MINUTES`, 20) is the LEAD's finding: the nudger's
+`leadHeldMs` is that window, and only the holds past it reach the lead's
+frame as `heldItems`, arm the stamp, or count as told — a board with
+nothing else wrong still wakes on one. The verdict's `held` line counts
+under the same window, so the frame and the measurement name the same
+items. Held rows enter the stall stamp under their ticket's id, so a later
+stall or unfiled finding on the same ticket while it stays held re-wakes
+nothing: one complaint per item, not per pass. Revising re-judges; a pass clears
 the hold, keeps the original filing time, and forgets the filer stamp, so
 a fresh hold on the same item is nudged afresh.
 
@@ -434,7 +440,7 @@ grace window that #411 fixed.
 |---|---|---|
 | `CW_STALL_NUDGE_MINUTES` | 20 | quiet time before a row is a finding |
 | `CW_STALL_REPEAT_HOURS` | 4 | how often an unchanged bad board is re-said |
-| `CW_HELD_ITEM_MINUTES` | 5 | how long a held review item may stand before its filer, then the lead, is told |
+| `CW_HELD_ITEM_MINUTES` | 5 | how long a held review item may stand before its filer is told; the lead hears at the quiet window (`CW_STALL_NUDGE_MINUTES`) |
 | `CW_STALL_ESCALATE_MINUTES` | 60 | how long a board must be without any live session — no stream, no heartbeat, no agent write — before it files past its lead: to Team Lead first, the reader only if Team Lead is unreachable too |
 | `CW_REVIEW_GATE` | on | `0` turns the judge off; every item passes unjudged (also the state with no summary API key) |
 

@@ -34,7 +34,11 @@ import type {
 } from '../src/review-items/persistence.ts';
 import { ReviewItemQueries } from '../src/review-items/queries.ts';
 import { ReviewItemStore } from '../src/review-items/store.ts';
-import { HELD_ITEM_DEFAULT_MS, overdueHeldItems } from '../src/stall-gate.ts';
+import {
+  HELD_ITEM_DEFAULT_MS,
+  STALL_QUIET_DEFAULT_MS,
+  overdueHeldItems,
+} from '../src/stall-gate.ts';
 import {
   REVIEW_ITEM_HELD_EVENT,
   type ReviewItemHeldFrame,
@@ -184,8 +188,10 @@ describe('a withdrawn review item leaves the held index', () => {
     const kept = fileHeld(f, 'Which tie-break wins?', 'the headline names no decision');
     const takenBack = fileHeld(f, 'Do we still need the legend?', 'no options named');
 
-    // Past the hold window, so both are overdue rather than freshly filed.
-    f.tick(T0 + HELD_ITEM_DEFAULT_MS + 60_000);
+    // Past the QUIET window, not just the hold window: the filers hear at
+    // five minutes, the lead at twenty (stall-check rebuild step 4), and this
+    // test reads both deliveries off one tick.
+    f.tick(T0 + STALL_QUIET_DEFAULT_MS + 60_000);
     const first = nudger(f);
     first.nudger.tick();
 

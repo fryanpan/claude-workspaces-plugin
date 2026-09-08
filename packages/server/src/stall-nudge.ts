@@ -82,7 +82,13 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { ParallelismCapSummary } from './ready-nudge.ts';
-import type { HeldItemRow, StallUndeterminedRow, StalledRow, WaitingRow } from './stall-gate.ts';
+import {
+  type HeldItemRow,
+  STALL_QUIET_DEFAULT_MS,
+  type StallUndeterminedRow,
+  type StalledRow,
+  type WaitingRow,
+} from './stall-gate.ts';
 
 /**
  * How long a row must stay quiet before the wake says it AGAIN.
@@ -339,6 +345,17 @@ export interface StallNudgerOptions {
    * the tap on the shoulder that costs the cheaper turn.
    */
   sendToFiler?: (workspaceId: string, agentId: string, frame: ReviewItemHeldFrame) => number;
+  /**
+   * How old a hold must be before it is the LEAD's finding — named in the
+   * stall frame, armed in the stamp, remembered as told. Younger than this
+   * it is the filer's alone: the filer hears at the store's shorter window
+   * (`HELD_ITEM_DEFAULT_MS`) and can end the hold in one call, and a lead
+   * told in the same breath is told about something that is not yet theirs.
+   * The verdict counts a hold over this same window (`heldOverMs` in
+   * `keep-moving-verdict.ts`), so the lead's frame and the measurement name
+   * the same items. Defaults to the quiet window a row may stand in.
+   */
+  leadHeldMs?: number;
   repeatMs?: number;
   now?: () => number;
   /**
@@ -457,6 +474,7 @@ export class StallNudger {
   private readonly opts: StallNudgerOptions;
   private readonly now: () => number;
   private readonly repeatMs: number;
+  private readonly leadHeldMs: number;
   private readonly report: (message: string) => void;
   /** The stamp each workspace was last woken for. */
   private readonly armed = new Map<string, string>();
@@ -511,6 +529,7 @@ export class StallNudger {
     this.opts = opts;
     this.now = opts.now ?? Date.now;
     this.repeatMs = opts.repeatMs ?? STALL_REPEAT_DEFAULT_MS;
+    this.leadHeldMs = opts.leadHeldMs ?? STALL_QUIET_DEFAULT_MS;
     this.report = opts.report ?? ((message) => console.error(message));
     this.stampFile = opts.stampFile ?? null;
     this.loadStamps();
@@ -586,12 +605,17 @@ export class StallNudger {
   private considerBoard(board: StallSnapshot, now: number): void {
     const key = board.workspaceId;
     const lead = board.leadAgentId;
-    const held = board.retired ? [] : (board.held ?? []);
-    this.pruneFilersTold(key, held);
+    const heldAll = board.retired ? [] : (board.held ?? []);
+    this.pruneFilersTold(key, heldAll);
     // The filer first, before the lead's seat is even looked at: the filer
     // can end a hold in one call, their nudge is per item rather than per
     // board stamp, and a board with an empty lead seat still has filers.
-    this.nudgeFilers(key, held, now);
+    this.nudgeFilers(key, heldAll, now);
+    // The lead's list is the OLDER subset. A hold the filer has only just
+    // been told about is not yet a finding against the board; one that has
+    // outlived the window is — the same window the verdict counts it under,
+    // so nothing below this line can name a hold the measurement omits.
+    const held = heldAll.filter((item) => item.heldMs > this.leadHeldMs);
     // Nobody to tell. Drop the arming so a board that becomes woken again
     // starts from a clean slate rather than from a stamp recorded under
     // different conditions.
@@ -619,7 +643,7 @@ export class StallNudger {
       this.reported.delete(key);
       return;
     }
-    const stamp = this.stampFor(board);
+    const stamp = this.stampFor(board, held);
     // Named before both the wake decision and the reachability check below,
     // and that ordering is the point: the commonest reason a wake is not
     // delivered is a lead holding no stream, which is exactly when an
@@ -627,7 +651,13 @@ export class StallNudger {
     // the condition itself, so a tick that says nothing costs no line.
     this.reportUnevaluable(board);
     const memory = this.rememberSeen(key, board, now);
-    const change = this.changeOn(this.priorFor(key, memory.rows), stamp, board, memory.before);
+    const change = this.changeOn(
+      this.priorFor(key, memory.rows),
+      stamp,
+      board,
+      memory.before,
+      held,
+    );
     if (!change) {
       // Silent, but RECORDED. A shrink that left the old stamp standing would
       // keep naming rows that are no longer on the list, so the board's
@@ -908,7 +938,7 @@ export class StallNudger {
    * genuinely new stall still fires immediately rather than waiting out
    * somebody else's window.
    */
-  private stampFor(board: StallSnapshot): string {
+  private stampFor(board: StallSnapshot, held: readonly HeldItemRow[]): string {
     const rows = [...board.stalled, ...board.unfiled];
     // Ids alone, without the bucket they used to carry. A row changing bucket
     // is most often the lead's OWN action landing — dispatching a worker moves
@@ -926,8 +956,9 @@ export class StallNudger {
     // an id-only key needed a tick to see the gap between two holds). It
     // stays OUT of the escalation bucket below: a hold is the filer's to
     // end, and re-saying it every repeat window would bill the lead for
-    // the filer's silence.
-    const held = board.held ?? [];
+    // the filer's silence. Only the lead's subset of the holds is armed —
+    // `considerBoard` passes the ones past `leadHeldMs` — so a hold that is
+    // still the filer's alone does not arm the board either.
     const ids = Array.from(
       new Set([
         ...rows.map((row) => row.id),
@@ -1005,6 +1036,7 @@ export class StallNudger {
     next: string,
     board: StallSnapshot,
     told: Map<string, ToldRow>,
+    held: readonly HeldItemRow[],
   ): StallNudgeFrame['changed'] | undefined {
     const before = prior === undefined ? undefined : parseStamp(prior);
     const after = parseStamp(next);
@@ -1023,7 +1055,7 @@ export class StallNudger {
     const undetermined = board.undetermined
       .filter((u) => before === undefined || !before.undetermined.has(`${u.id}:${u.reason}`))
       .map((u) => u.id);
-    const heldItems = (board.held ?? []).filter(
+    const heldItems = held.filter(
       (item) => before === undefined || !before.ids.has(`held:${item.reviewItemId}@${item.heldAt}`),
     );
     if (!escalated && rows.length === 0 && undetermined.length === 0 && heldItems.length === 0)

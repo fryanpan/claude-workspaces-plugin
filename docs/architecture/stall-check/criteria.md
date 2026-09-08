@@ -59,12 +59,19 @@ today's code fails is flagged.
 - **Measured by:** holds per week by reason from the activity log, and the
   false-repeat count (three of sixteen in the week to 2026-09-08, fixed).
 
-## Held items (`stall-gate.ts` `overdueHeldItems`) — *rebuild step 4*
+## Held items (`stall-gate.ts` `overdueHeldItems`, `stall-nudge.ts` `leadHeldMs`) — *rebuild step 4*
 
-- **Must:** wake the filer once per hold, and count a hold past the window
-  as a finding for the lead and a line in the verdict.
+- **Must:** wake the filer once per hold at the store's window (five
+  minutes), and count a hold past the QUIET window (twenty minutes) as a
+  finding for the lead — in the stall frame's `heldItems` — and a line in the
+  verdict, under one window for both. *Passes since step 4:* the wired test
+  (`held-item-finding.test.ts`) files a hold, reads the filer's nudge with
+  nothing on the lead's stream, waits the hold past the window, and asserts
+  the lead's frame and the verdict's `held` line name the same item; its
+  control revises a hold away inside the window and asserts neither does.
 - **Must never:** let a held ask stand on nobody's queue without the lead
-  knowing.
+  knowing, or wake the lead over a hold the filer has only just been told
+  about.
 - **Measured by:** the verdict's `held` line at zero.
 
 ## `stall-escalation.ts` — the last resort — *rebuild step 3*

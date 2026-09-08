@@ -56,7 +56,7 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    lead. The note reader (`note-ask.ts`), its Haiku confirmation and the
    `waiting-on-you` prompt are gone; the snapshot and the verdict carry a
    `waiting` list so every excused wait is traceable to its item.
-3. **Escalation is on liveness only** (this PR). A board is dead when no
+3. **Escalation is on liveness only** (PR 803). A board is dead when no
    session on it is deliverable — no stream open, nobody observed inside the
    delivery window — and none has written to it or heartbeated on it for the
    escalation window (an hour). Only then does it go past its lead: its own
@@ -69,8 +69,20 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    window and the re-file cooldown are gone with the trigger: the item is
    withdrawn the tick a session is on the board again, and the board's own
    writes on its anchor row do not count as the row moving.
-4. **A hold cannot become a silent ask.** A held item past the window is a
-   finding for the lead and a line in the verdict.
+4. **A hold cannot become a silent ask** (this PR). A held review item has
+   two windows, and they belong to two people. At five minutes
+   (`CW_HELD_ITEM_MINUTES`) the FILER is told, once per hold — the filer can
+   end it in one call, so the tap goes to them first and to nobody else. At
+   the quiet window (`CW_STALL_NUDGE_MINUTES`, twenty minutes) a hold still
+   standing is the LEAD's finding: it is named in the lead's stall frame as
+   `heldItems`, it arms the board's stamp, and it is counted on the verdict's
+   `held` line — one window for the frame and the measurement, so the lead
+   cannot be woken about a hold the verdict omits, and the verdict cannot
+   fail on one the lead was never told of. Before this step the lead heard
+   of every hold at the filer's five minutes, fifteen minutes before the
+   verdict counted it, which was the same wake said twice with a different
+   number on each. A hold revised away inside the window never reaches the
+   lead at all.
 
 ## How to read the verdict
 
