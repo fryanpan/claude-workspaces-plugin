@@ -176,6 +176,39 @@ describe('createHttp', () => {
     );
   });
 
+  /**
+   * THE FAILURE THIS GUARDS. A client a release behind calls addresses the
+   * cutover deleted, and the server answers 410 with a sentence saying so.
+   * Pasting the whole JSON body into the tool error buries that sentence
+   * among fields nobody reads, and the agent takes the same "my board is
+   * gone" reading the bare 404 gave it.
+   */
+  it('leads a stale-client failure with the server sentence, not its JSON', async () => {
+    const body = JSON.stringify({
+      error: 'gone',
+      reason: 'stale-client',
+      path: '/workspaces/w-1/tasks',
+      serverVersion: '0.1.189',
+      message: 'The board is not missing. Update the plugin, then restart the session.',
+    });
+    const { fn } = fakeFetch([{ status: 410, body }]);
+    const http = createHttp(() => 'http://localhost:8787', fn);
+    await expect(http('GET', '/api/workspaces/w-1/tasks')).rejects.toThrow(
+      'GET /api/workspaces/w-1/tasks → 410: The board is not missing. Update the plugin, then restart the session.',
+    );
+  });
+
+  it('leaves every other failure body alone, including a 410 that is not this one', async () => {
+    for (const body of [
+      JSON.stringify({ error: 'gone', detail: 'the share expired' }),
+      'not found',
+    ]) {
+      const { fn } = fakeFetch([{ status: 410, body }]);
+      const http = createHttp(() => 'http://localhost:8787', fn);
+      await expect(http('GET', '/x')).rejects.toThrow(body);
+    }
+  });
+
   it('resolves the base URL per call, so a moved server is followed mid-session', async () => {
     const { fn, calls } = fakeFetch([{ status: 200, body: '{}' }]);
     let base = 'http://localhost:8787';

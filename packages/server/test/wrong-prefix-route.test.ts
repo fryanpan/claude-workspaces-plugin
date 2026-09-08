@@ -70,17 +70,26 @@ describe('over HTTP', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  /**
+   * `workspaces` and `tasks` were both real addresses before the cutover, so
+   * over HTTP they now reach the stale-client 410 one line above this hint
+   * (`routes/stale-client.ts`), which carries the same address in its own
+   * body. The families that were NEVER `/api` addresses — `threads` lived
+   * under a doc, `attachments` and `next` under a board — are the ones this
+   * hint still answers alone, and they are what the HTTP case asserts.
+   * `wrongPrefixOf` itself is unchanged, which the unit block above shows.
+   */
   it('names the right address on a prefixed board route, and stays a 404', async () => {
-    const r = await local(`/api/workspaces/${boardId}/tasks/t-1/schedule`, { method: 'POST' });
+    const r = await local('/api/attachments/a-1', { method: 'POST' });
     expect(r.status).toBe(404);
     const body = (await r.json()) as { error: string; path: string; hint: string };
     expect(body.error).toBe('not found');
-    expect(body.path).toBe(`/workspaces/${boardId}/tasks/t-1/schedule`);
-    expect(body.hint).toContain('no /api prefix');
-    const bare = await local('/api/tasks/t-1/schedule', { method: 'POST' });
+    expect(body.path).toBe('/workspaces/<workspaceId>/attachments/a-1');
+    expect(body.hint).toContain('take no /api prefix');
+    const bare = await local('/api/threads/th-1/resolve', { method: 'POST' });
     expect(bare.status).toBe(404);
     expect(((await bare.json()) as { path: string }).path).toBe(
-      '/workspaces/<workspaceId>/tasks/t-1/schedule',
+      '/workspaces/<workspaceId>/threads/th-1/resolve',
     );
   });
 
@@ -94,10 +103,10 @@ describe('over HTTP', () => {
   });
 
   it('refuses a share visitor before the hint exists, as it does the real path', async () => {
-    const real = await pub(`/workspaces/${boardId}/tasks/t-1/schedule`);
-    const guessed = await pub(`/api/workspaces/${boardId}/tasks/t-1/schedule`);
+    const real = await pub(`/workspaces/${boardId}/attachments/a-1`);
+    const guessed = await pub('/api/attachments/a-1');
     expect(guessed.status).toBe(real.status);
     expect(guessed.status).not.toBe(404);
-    expect(await guessed.text()).not.toContain('no /api prefix');
+    expect(await guessed.text()).not.toContain('take no /api prefix');
   });
 });
