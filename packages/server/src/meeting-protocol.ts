@@ -31,7 +31,9 @@
 import {
   AudioChunkLedger,
   type CaptureMode,
+  type MeetingCaptureSource,
   type MeetingServerMessage,
+  type MeetingStreamId,
   type MeetingTimingMark,
   detectsSpeakers,
   maxSpeakersFor,
@@ -39,14 +41,17 @@ import {
   parseMeetingClientMessage,
   pickLiveTuning,
   sanitizeTuning,
+  streamsForSource,
+  untagAudioFrame,
 } from '@claude-workspaces/core';
 import {
   type MeetingNotesDeps,
   type MeetingNotesSession,
   beginNotesSession,
 } from './meeting-notes.ts';
+import { type MeetingStreamSet, openMeetingStreamSet } from './meeting-stream-set.ts';
 import type { ActiveMeeting, MeetingStore } from './meetings.ts';
-import type { TranscriptionEngine, TranscriptionSession } from './transcribe.ts';
+import type { TranscriptionEngine } from './transcribe.ts';
 
 /** The slice of a Bun `ServerWebSocket` this module needs. */
 export interface MeetingClient {
@@ -104,10 +109,19 @@ const DISPOSE_DRAIN_MS = 5_000;
 interface Conn {
   state: ConnState;
   meeting: ActiveMeeting | null;
-  session: TranscriptionSession | null;
+  /**
+   * Every engine session this meeting is running — one for a microphone,
+   * two for a mic + Mac-audio capture. See `meeting-stream-set.ts`.
+   */
+  streams: MeetingStreamSet | null;
   /** This meeting's notes pipeline, when the server has a composer. */
   notes: MeetingNotesSession | null;
-  /** Audio that arrived before the engine session finished opening. */
+  /**
+   * Audio that arrived before the engine session finished opening, exactly as
+   * it came off the wire — still carrying its stream byte on a two-stream
+   * meeting, because which engine it belongs to is not known until the set is
+   * open.
+   */
   pending: Uint8Array[];
   /**
    * When each of those buffered chunks arrived, parallel to `pending`, so the
@@ -122,6 +136,12 @@ interface Conn {
    * a mid-meeting `tune` frame is sanitized against. Null while idle.
    */
   engineName: string | null;
+  /**
+   * Whether audio frames on this socket carry a stream byte in front of them.
+   * True exactly when the capture opened more than one stream; see
+   * `tagAudioFrame` in core.
+   */
+  tagged: boolean;
   /** What was forwarded and when, once the meeting is live. */
   ledger: AudioChunkLedger | null;
   /**
@@ -205,12 +225,13 @@ export class MeetingRelay {
     this.conns.set(ws, {
       state: 'idle',
       meeting: null,
-      session: null,
+      streams: null,
       notes: null,
       pending: [],
       pendingRecv: [],
       wantsTiming: false,
       engineName: null,
+      tagged: false,
       ledger: null,
       pendingStop: null,
     });
@@ -280,14 +301,16 @@ export class MeetingRelay {
       // everything else waits for the next recording, and the client knows
       // which is which from the same shared specs.
       const engineName = conn.engineName;
-      const session = conn.session;
-      if (conn.state !== 'live' || !engineName || !session?.update) {
+      const streams = conn.streams;
+      if (conn.state !== 'live' || !engineName || !streams) {
         this.send(ws, { type: 'tuned', applied: [] });
         return;
       }
       const live = pickLiveTuning(engineName, sanitizeTuning(engineName, msg.settings));
-      const applied = Object.keys(live);
-      if (applied.length > 0) session.update(live);
+      // Applied only where a session actually took it — an engine with no
+      // update channel answers nothing applied, exactly as it did when there
+      // was one session to ask.
+      const applied = Object.keys(live).length > 0 && streams.update(live) ? Object.keys(live) : [];
       this.send(ws, { type: 'tuned', applied });
       return;
     }
@@ -327,18 +350,41 @@ export class MeetingRelay {
       return;
     }
     if (conn.state !== 'live') return;
-    // Teed to the meeting's retained audio before the engine sees it — the
-    // same bytes, so a replay hears exactly what the engine heard.
-    conn.meeting?.recordAudio(chunk);
-    if (!conn.ledger) {
-      conn.session?.send(chunk);
-      return;
+    this.deliver(conn, chunk, Date.now());
+  }
+
+  /**
+   * One frame off the wire into the meeting that owns it: split from its
+   * stream byte where there is one, teed to that stream's audio file, then
+   * fed to that stream's engine.
+   *
+   * `recvMs` is when the frame ARRIVED, which is not now for a frame that
+   * waited out the handshake — that wait belongs to the server's own leg of
+   * the latency budget rather than disappearing into the engine's.
+   */
+  private deliver(conn: Conn, frame: Uint8Array, recvMs: number): void {
+    let stream: MeetingStreamId = 'mic';
+    let chunk = frame;
+    if (conn.tagged) {
+      const split = untagAudioFrame(frame);
+      // A frame whose tag names no stream is dropped rather than guessed at:
+      // feeding it to whichever engine came first would put the room's words
+      // under the remote group in a record nothing can correct afterwards.
+      if (!split) return;
+      stream = split.stream;
+      chunk = split.chunk;
+    } else {
+      stream = conn.streams?.streams[0] ?? 'mic';
     }
+    // Teed to the meeting's retained audio before the engine sees it — the
+    // same bytes, so a replay hears exactly what the engine heard, and under
+    // the stream's own name so `segment-N-<stream>.pcm` says where it came
+    // from.
+    conn.meeting?.recordAudio(chunk, stream);
     // Recorded BEFORE the send: an engine may answer inside it, and the turn
     // it answers with has to find this chunk already in the ledger.
-    const at = Date.now();
-    conn.ledger.record(chunk.byteLength, at, at);
-    conn.session?.send(chunk);
+    conn.ledger?.record(chunk.byteLength, recvMs, Date.now());
+    conn.streams?.send(stream, chunk);
   }
 
   /** The socket went away. Whatever it was holding ends here. */
@@ -405,7 +451,7 @@ export class MeetingRelay {
     engineName?: string,
     rawTuning?: Record<string, unknown>,
     participant?: string,
-    source?: 'mic' | 'system',
+    source?: MeetingCaptureSource,
   ): Promise<void> {
     if (conn.state !== 'idle') return;
     const docId = ws.data.docId;
@@ -443,6 +489,10 @@ export class MeetingRelay {
         : maxSpeakersFor(mode, speakers);
     // Claim the doc BEFORE the handshake: two sockets starting at once would
     // otherwise both pass the check and both open a billed session.
+    // Which captures this meeting is carrying. More than one means every
+    // audio frame on this socket wears a stream byte, and it means two billed
+    // engine sessions — the mic-plus-Mac-audio meeting's whole cost.
+    const streams = streamsForSource(source ?? 'mic');
     const meeting = this.deps.store.start({
       docId,
       engine: engine.name,
@@ -462,6 +512,12 @@ export class MeetingRelay {
     conn.state = 'opening';
     conn.meeting = meeting;
     conn.engineName = engine.name;
+    conn.tagged = streams.length > 1;
+    // Stage timing measures ONE audio stream: the ledger correlates a turn to
+    // the chunk it ended in by an offset into the engine's own stream, and two
+    // engines have two of those. A combined capture is not measured rather
+    // than measured against whichever stream wrote the ledger last.
+    if (conn.tagged) conn.wantsTiming = false;
     // The notes pipeline exists for exactly the meeting's lifetime. Created
     // before the handshake so the closure below can feed it, but it holds no
     // resource until a turn arrives — abandoning it on a failed handshake
@@ -498,20 +554,24 @@ export class MeetingRelay {
     const ledger = conn.wantsTiming ? new AudioChunkLedger(sampleRate) : null;
     conn.ledger = ledger;
 
-    let session: TranscriptionSession;
+    let streamSet: MeetingStreamSet;
     try {
-      session = await engine.open({
-        sampleRate,
-        // The mode is the only thing that turns diarization on, and it turns
-        // it on for the ENGINE SESSION — there is no later switch.
-        detectSpeakers: detectsSpeakers(mode),
-        // And how many voices it may name. Same one-shot rule: the cap is
-        // part of the session's configuration, so a person arriving late does
-        // not raise it.
-        ...(maxSpeakers !== undefined ? { maxSpeakers } : {}),
-        // The knobs the person moved, already clamped into this engine's
-        // ranges. Untouched knobs are absent — the engine's own defaults run.
-        ...(tuning !== undefined && Object.keys(tuning).length > 0 ? { tuning } : {}),
+      streamSet = await openMeetingStreamSet({
+        engine,
+        streams,
+        session: {
+          sampleRate,
+          // The mode is the only thing that turns diarization on, and it turns
+          // it on for the ENGINE SESSION — there is no later switch.
+          detectSpeakers: detectsSpeakers(mode),
+          // And how many voices it may name. Same one-shot rule: the cap is
+          // part of the session's configuration, so a person arriving late does
+          // not raise it.
+          ...(maxSpeakers !== undefined ? { maxSpeakers } : {}),
+          // The knobs the person moved, already clamped into this engine's
+          // ranges. Untouched knobs are absent — the engine's own defaults run.
+          ...(tuning !== undefined && Object.keys(tuning).length > 0 ? { tuning } : {}),
+        },
         onTurn: (turn) => {
           this.send(ws, {
             type: 'transcript',
@@ -519,6 +579,9 @@ export class MeetingRelay {
             text: turn.text,
             final: turn.final,
             ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}),
+            // Which half of a two-stream meeting spoke. Absent on every
+            // single-stream meeting, where there is only one answer.
+            ...(turn.group !== undefined ? { group: turn.group } : {}),
             // The ledger is a local (see above) but the PERMISSION is read
             // off the connection every frame: the ledger is built before the
             // handshake is awaited, and audio dropped during that wait
@@ -543,6 +606,7 @@ export class MeetingRelay {
       conn.state = 'idle';
       conn.meeting = null;
       conn.engineName = null;
+      conn.tagged = false;
       // Nothing has fed it, so there is nothing to flush — just let it go.
       conn.notes = null;
       // The socket stays open after `unavailable`, so a client may retry
@@ -561,19 +625,16 @@ export class MeetingRelay {
       return;
     }
 
-    conn.session = session;
+    conn.streams = streamSet;
     conn.state = 'live';
     // Whatever was said during the handshake goes in FIRST, and before any
     // pending stop: a meeting ended a second after it started still owes the
     // speaker the sentence they had already begun.
     for (let i = 0; i < conn.pending.length; i++) {
-      const chunk = conn.pending[i] as Uint8Array;
-      // `recvMs` is when the chunk actually arrived, so the wait for the
+      // `recvMs` is when the frame actually arrived, so the wait for the
       // handshake reads as the server holding it — which is what happened —
       // instead of disappearing into the engine's leg.
-      ledger?.record(chunk.byteLength, conn.pendingRecv[i] ?? Date.now(), Date.now());
-      meeting.recordAudio(chunk);
-      session.send(chunk);
+      this.deliver(conn, conn.pending[i] as Uint8Array, conn.pendingRecv[i] ?? Date.now());
     }
     conn.pending = [];
     conn.pendingRecv = [];
@@ -617,12 +678,13 @@ export class MeetingRelay {
     if (conn.state !== 'live') return;
     conn.state = 'ending';
     const meeting = conn.meeting;
-    const session = conn.session;
+    const streams = conn.streams;
     const notes = conn.notes;
-    conn.session = null;
+    conn.streams = null;
     conn.meeting = null;
     conn.notes = null;
     conn.engineName = null;
+    conn.tagged = false;
     conn.pending = [];
     conn.pendingRecv = [];
     conn.ledger = null;
@@ -630,7 +692,7 @@ export class MeetingRelay {
     // sentence of a meeting reaches `onTurn` — and therefore the file —
     // before the record is stopped.
     try {
-      await session?.close();
+      await streams?.close();
     } catch (err) {
       console.error('[meeting] engine close failed:', err);
     }

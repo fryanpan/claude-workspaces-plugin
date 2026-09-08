@@ -2036,10 +2036,103 @@ nobody to have asked. Nothing on the server changed: a `start` with no
 engine already opened the default, and the huddle routes never held a
 consent step.
 
+## The room and the call at once — two streams, one meeting
+
+**Shipped 2026-09-08.** Bryan: *"I need it to hear what the Mac is playing
+through its speakers as well as what it's recording, and ideally handle those
+two groups as different sets of speakers (mic is whoever is here in the room
+and Mac audio is whoever is remote)."* A laptop on a call hears two rooms, and
+until this the assistant could hear either one but never both.
+
+**The chooser's Mac Audio card MEANS the microphone as well.** It replaced the
+Mac-audio-only card (PR 793), which heard the far end of a call and nobody
+present — a mode nobody named a use for. The bare `system` source stays in the
+wire contract and in `MeetingSource` so records written under it still parse;
+nothing offers it any more. The card is shown only where
+`systemAudioOffered()` is true, exactly as its predecessor was: Safari and the
+iPad have no share picker, and a card that always fails is worse than no card.
+
+**One socket, one meeting, two engine sessions.** A second socket would have
+been a second meeting — the store refuses a doc that is already recording, so
+two connections would need the one-at-a-time rule relaxed, two index rows, two
+transcripts and two notes sessions over one conversation. Instead, when a
+capture opens more than one stream, every audio frame carries a **stream byte**
+in front of its PCM (`tagAudioFrame` / `untagAudioFrame` in
+`packages/core/src/meeting-streams.ts`): one byte per 50 ms frame, 20 bytes a
+second against 32 000. A single-stream meeting sends raw PCM exactly as it
+always did, so an older server reads a microphone meeting unchanged and an
+older client is never sent a tagged frame. A frame whose tag names no stream is
+DROPPED rather than fed to whichever engine came first — the wrong words under
+the wrong group in an append-only record cannot be corrected afterwards.
+
+`packages/server/src/meeting-stream-set.ts` is the fan-out one level below the
+relay. It opens the sessions **in sequence**, not concurrently: they are paid
+sockets, and a `Promise.all` that rejects leaves the winners open with nobody
+holding a handle. A set that cannot be completed closes what it already opened
+before the failure leaves the function.
+
+**Three things two sessions collide on, and what is done about each:**
+
+- **Turn ids.** Both engines number from zero. `MeetingTurnMerger` hands out a
+  global id per (stream, engine turn) **in arrival order**. The obvious fix —
+  `turn * 2 + stream` — produces ids that run backwards whenever one stream is
+  ahead of the other, and `rollTranscript` drops a turn whose id is below the
+  newest it has seen, so the quieter stream's words would vanish from the
+  strip. Arrival order is also the merge-by-time the meeting wants, and a
+  revision still lands on the turn it belongs to.
+- **Speaker labels.** Both engines hand out "A". `namespacedSpeaker` puts the
+  group in front — `room:A`, `remote:A` — so the two are voices a person can
+  name separately. `speakerDisplayName` renders an unnamed one as "Room
+  Speaker A" and a named one as "Dana (Remote)": where somebody is sitting is
+  the fact the streams were separated to preserve, so it stays on the name
+  after the name is given. A bare label (every meeting recorded before this)
+  reads exactly as it always did. The colon is safe inside a
+  `speaker:room:A` tag href because `parseSpeakerTagHref` splits on the scheme
+  only.
+- **Audio files.** `recordAudio(chunk, stream)` was already per-stream for the
+  bot path; a two-stream meeting now writes `segment-N-mic.pcm` beside
+  `segment-N-system.pcm`, and `meeting.json` names the stream behind each.
+  (A Mac-audio-only meeting used to write its audio to `-mic.pcm`; it now
+  names the stream it actually heard.)
+
+**Echo, and why headphones are still the fallback.** The microphone in a
+combined capture asks for `echoCancellation` and `noiseSuppression` whatever
+the address said — `combinedMicRoom` is the one place a `?mic=ec0` is
+overruled, because the knob was measured on a room with no far-end signal in
+it (see `ROOM_AUDIO_DEFAULT`) and this mode always has one. Cancellation is a
+best-effort filter on the device, not a guarantee, so the strip's line for
+this mode says headphones keep remote voices from being heard twice. The
+share picker's own track is NOT put through those processors: it is a clean
+copy of what the Mac is playing, and cancelling an echo in it would be
+cancelling the remote side itself.
+
+**A refused stream is not a refused meeting.** The microphone is asked for
+first — it is the permission the page may already hold, where the picker is a
+modal somebody has to drive — and `openCaptureSet` runs on whatever was
+granted. The `start` frame then names the source **actually running**, never
+the one asked for: a record that claims two streams and holds one is a record
+that lies about a meeting. The strip's opening line names what is missing AND
+what is still running, because a line that only says what failed reads as a
+meeting that did not start. Only with nothing at all granted does the strip
+block, and then it carries both reasons.
+
+**Stage timing is off for a combined capture.** `AudioChunkLedger` correlates
+a turn to the chunk it ended in by an offset into ONE engine's stream, and two
+engines have two of those. `?timing=1` on a two-stream meeting is refused
+rather than measured against whichever stream wrote the ledger last.
+
+**Cost doubles per meeting-hour** while both streams run: two billed streaming
+sessions, each with its own diarization surcharge on a `conversation`.
+
 ## Where things live
 
 `packages/core/src/meeting.ts` (wire contract, incl. `CaptureMode` and
-`RECORDING_CONSENT_NOTE`) ·
+`RECORDING_CONSENT_NOTE`) · `packages/core/src/meeting-streams.ts` (the
+two-stream vocabulary: groups, namespaced speaker labels, the frame tag, the
+turn merger) ·
+`packages/server/src/meeting-stream-set.ts` (an engine session per stream) ·
+`packages/workspaces-app/src/meeting-capture-set.ts` (opening both streams in
+the browser, and what runs when one is refused) ·
 `packages/server/src/meeting-protocol.ts` (lifecycle) ·
 `packages/server/src/transcribe-assemblyai.ts` (engine) ·
 `packages/server/src/meetings.ts` (store) · `meeting-raw.ts` (the raw

@@ -16,7 +16,14 @@
  * stream with a screen and no sound rather than as an error.
  */
 
-export type MeetingAudioSource = 'mic' | 'system';
+import type { MeetingStreamId } from '@claude-workspaces/core';
+
+/**
+ * One capture this module can open. The SOURCE a meeting was started with
+ * may name two of them — see `MeetingCaptureSource` in core, and
+ * `meeting-capture-set.ts` for the thing that opens the pair.
+ */
+export type MeetingAudioSource = MeetingStreamId;
 
 /** The subset of `navigator.mediaDevices` this module touches, for tests. */
 export interface MediaDeviceSeam {
@@ -55,6 +62,20 @@ export const SYSTEM_AUDIO_REQUEST: DisplayMediaStreamOptions & Record<string, un
   systemAudio: 'include',
   selfBrowserSurface: 'exclude',
 };
+
+/**
+ * The wording the strip shows while a mic + Mac-audio meeting runs.
+ *
+ * Echo cancellation is the mechanism and headphones are the fallback, in
+ * that order, because that is the order they actually work in: the canceller
+ * removes what the Mac is PLAYING from what the microphone hears, and it is a
+ * best-effort filter running on the device rather than a guarantee. Where it
+ * falls short the remote side is heard twice — once through the Mac's own
+ * audio and once bounced off the room — and headphones are what removes the
+ * second copy outright.
+ */
+export const COMBINED_ECHO_NOTE =
+  'Hearing the room and this Mac. Headphones keep remote voices from being heard twice.';
 
 /** Open the source. Throws an `Error` whose `message` the strip can show. */
 export async function openMeetingSource(

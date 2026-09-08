@@ -21,6 +21,7 @@ import {
   parseMeetingServerMessage,
   rollTranscript,
 } from '../src/meeting-protocol.ts';
+import type { MeetingAudioSource } from '../src/meeting-source.ts';
 import {
   type MeetingSocket,
   type MeetingStripHandle,
@@ -276,6 +277,8 @@ type CaptureCall = {
   onFrame: (pcm: Int16Array) => void;
   mode: CaptureMode;
   room?: RoomAudioProcessing;
+  /** Which stream this call opens — a Mac Audio press makes two of them. */
+  source?: MeetingAudioSource;
 };
 
 const cleanups: Array<() => void> = [];
@@ -500,16 +503,81 @@ describe('the start chooser decides who it is listening for', () => {
     expect(selected?.textContent).toBe('Use microphone');
   });
 
-  it('a press on the Mac’s audio opens that source and tells the server so', async () => {
-    const capture = vi.fn(() => Promise.resolve({ ok: true as const, capture: fakeCapture() }));
+  it('a press on Mac Audio opens BOTH streams and tells the server so', async () => {
+    const capture = vi.fn((_o: CaptureCall) =>
+      Promise.resolve({ ok: true as const, capture: fakeCapture() }),
+    );
     const h = mount(capture, { systemAudioOffered: () => true });
-    h.pressStart({ pick: "This Mac's audio" });
+    h.pressStart({ pick: 'Mac Audio' });
     await settle();
-    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ source: 'system' }));
+    // Mac Audio MEANS the microphone as well — the Mac-audio-only card it
+    // replaced heard the far end of a call and nobody in the room.
+    expect(capture.mock.calls.map((c) => c[0]?.source)).toEqual(['mic', 'system']);
     h.sockets[0]?.onopen?.();
-    expect(startFrame(h).source).toBe('system');
+    expect(startFrame(h).source).toBe('mic+system');
     // The microphone press above is the control: its frame carries no
     // `source` key, so an older server reads exactly what it always did.
+  });
+
+  it('runs on what was granted and says which stream is missing', async () => {
+    const capture = vi.fn((o: CaptureCall) =>
+      Promise.resolve(
+        o.source === 'system'
+          ? { ok: false as const, kind: 'denied' as const, message: 'Chrome shared no sound.' }
+          : { ok: true as const, capture: fakeCapture() },
+      ),
+    );
+    const h = mount(capture, { systemAudioOffered: () => true });
+    h.pressStart({ pick: 'Mac Audio' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    // The frame names the one stream that opened, so the record cannot claim
+    // a meeting it never heard.
+    expect(startFrame(h).source).toBeUndefined();
+    expect(h.strip.state().kind).toBe('requesting');
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm-partial',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'conversation',
+    });
+    expect(h.caption()).toContain('Chrome shared no sound.');
+    expect(h.caption()).toContain('microphone');
+  });
+
+  it('blocks only when BOTH streams were refused, and gives both reasons', async () => {
+    const capture = vi.fn((o: CaptureCall) =>
+      Promise.resolve({
+        ok: false as const,
+        kind: 'denied' as const,
+        message: `${o.source} refused.`,
+      }),
+    );
+    const h = mount(capture, { systemAudioOffered: () => true });
+    h.pressStart({ pick: 'Mac Audio' });
+    await settle();
+    expect(h.strip.state().kind).toBe('blocked');
+    expect(h.caption()).toContain('mic refused.');
+    expect(h.caption()).toContain('system refused.');
+  });
+
+  it('tells the person headphones stop the remote side being heard twice', async () => {
+    const capture = vi.fn((_o: CaptureCall) =>
+      Promise.resolve({ ok: true as const, capture: fakeCapture() }),
+    );
+    const h = mount(capture, { systemAudioOffered: () => true });
+    h.pressStart({ pick: 'Mac Audio' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm-echo',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'conversation',
+    });
+    expect(h.caption()).toContain('Headphones');
   });
 
   it('an address that says solo presets the chooser the other way', async () => {

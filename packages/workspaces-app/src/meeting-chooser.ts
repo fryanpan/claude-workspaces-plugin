@@ -18,7 +18,7 @@
  * than as a captured closure, which is why they could leave the mount at all.
  */
 
-import type { CaptureMode } from '@claude-workspaces/core';
+import { COMBINED_SOURCE, type CaptureMode } from '@claude-workspaces/core';
 import { liveTuningKeys } from '@claude-workspaces/core';
 import { advancedControls, buildAdvancedSection } from './meeting-advanced.ts';
 import type { AdvancedState } from './meeting-advanced.ts';
@@ -30,8 +30,16 @@ import type { MeetingBotClient } from './meeting-bot-client.ts';
  * fetch the strip owns.
  */
 export interface ChooserState {
-  /** The chooser's source choice. Mic unless the last press said otherwise. */
-  chooseSource: 'mic' | 'bot' | 'system';
+  /**
+   * The chooser's source choice. Mic unless the last press said otherwise.
+   *
+   * `mic+system` is Mac Audio, and it MEANS the microphone as well: a
+   * Mac-audio-only capture (what PR 793 shipped as "This Mac's audio") heard
+   * the remote side of a call and nobody in the room, which is not a meeting
+   * anybody asked to record. The bare `system` value stays in the wire
+   * contract so old records still parse; it is no longer offered here.
+   */
+  chooseSource: 'mic' | 'bot' | typeof COMBINED_SOURCE;
   /**
    * The chooser's speaker choice. Multiple by default — this product's
    * ordinary meeting has other people in it, and the approved mock preselects
@@ -288,11 +296,11 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     if (systemAudioOffered()) {
       const systemChoice = choice({
         group: 'meeting-source',
-        title: "This Mac's audio",
-        detail: 'Hear any call or video playing here — Chrome asks what to share',
-        checked: choose.chooseSource === 'system',
+        title: 'Mac Audio',
+        detail: 'Microphone plus what this Mac plays — Chrome asks what to share',
+        checked: choose.chooseSource === COMBINED_SOURCE,
         onPick: () => {
-          choose.chooseSource = 'system';
+          choose.chooseSource = COMBINED_SOURCE;
           renderChoiceSelection();
         },
       });
