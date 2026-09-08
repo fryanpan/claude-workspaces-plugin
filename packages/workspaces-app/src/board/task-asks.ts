@@ -21,7 +21,7 @@
  * write.
  */
 
-import { api } from '../doc-path.ts';
+import { api, docJsonUrl } from '../doc-path.ts';
 import { timeAgo } from './board-presence-model.ts';
 
 export type TaskAskKind = 'plan' | 'review';
@@ -113,7 +113,13 @@ export function taskAskRequestPath(taskId: string, kind: TaskAskKind): string {
   return api(`docs/${encodeURIComponent(`task:${taskId}`)}/${kind}-request`);
 }
 
-/** Where the panel reads the two stamps back from after a press or a reopen. */
+/**
+ * Where the panel reads the two stamps back from after a press or a reopen.
+ *
+ * Unlike its sibling above, the returned URL ALREADY CARRIES A QUERY — the
+ * ticket's body doc is read at the page's own address, and `?format=json` is
+ * what asks for the record there. A caller adding a parameter appends `&`.
+ */
 export function taskAskStatePath(taskId: string): string {
-  return api(`docs/${encodeURIComponent(`task:${taskId}`)}`);
+  return docJsonUrl(`task:${taskId}`);
 }

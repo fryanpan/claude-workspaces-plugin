@@ -307,6 +307,9 @@ describe('what the ask model decides', () => {
     expect(taskAskRequestPath('t-42', 'review')).toBe(
       `/workspaces/${WS}/docs/task%3At-42/review-request`,
     );
-    expect(taskAskStatePath('t-42')).toBe(`/workspaces/${WS}/docs/task%3At-42`);
+    // …and the state read asks for the RECORD. That same address serves the
+    // editor page without `format=json`, so a read spelled without it comes
+    // back as HTML and the two receipts never appear.
+    expect(taskAskStatePath('t-42')).toBe(`/workspaces/${WS}/docs/task%3At-42?format=json`);
   });
 });

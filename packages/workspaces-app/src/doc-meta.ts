@@ -1,5 +1,5 @@
 import type { HuddleKind } from '@claude-workspaces/core';
-import { api } from './doc-path.ts';
+import { docJsonUrl } from './doc-path.ts';
 import type { DocMeta } from './mount-context.ts';
 
 /**
@@ -25,7 +25,7 @@ export async function fetchDocMeta(docId: string): Promise<DocMeta> {
     diffTarget: '',
   };
   try {
-    const res = await fetch(api(`docs/${encodeURIComponent(docId)}`));
+    const res = await fetch(docJsonUrl(docId));
     if (!res.ok) return fallback;
     const data = (await res.json()) as {
       meta?: {

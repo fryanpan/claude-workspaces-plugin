@@ -37,7 +37,7 @@
  */
 
 import type { LeadPresence, User } from '@claude-workspaces/core';
-import { api } from './doc-path.ts';
+import { api, docJsonUrl } from './doc-path.ts';
 import { floatDock } from './float-dock.ts';
 import { leadReceiptSuffix } from './lead-banner.ts';
 
@@ -150,7 +150,11 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
   const subscribe = opts.subscribe ?? defaultSubscribe;
   const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms) as unknown as number);
   const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h));
-  const docUrl = api(`docs/${encodeURIComponent(docId)}`);
+  // POST ONLY — the two presses hang their verbs off this. A GET here gets
+  // the editor's HTML page, which is the bug `docJsonUrl` exists to close.
+  const docPostBase = api(`docs/${encodeURIComponent(docId)}`);
+  // The RECORD. Same path, and only the query asks for data.
+  const docReadUrl = docJsonUrl(docId);
 
   const float = document.createElement('button');
   float.type = 'button';
@@ -274,7 +278,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
 
   async function load(): Promise<void> {
     try {
-      const body = (await fetchJson(docUrl)) as DocAnswer;
+      const body = (await fetchJson(docReadUrl)) as DocAnswer;
       if (disposed) return;
       state = body.meta?.planState;
       kind = body.meta?.huddleKind;
@@ -318,7 +322,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
     // `requested` is disabled above and files nothing — one ask, one thread.
     if (face === 'make') {
       press(() =>
-        fetchJson(`${docUrl}/plan-request`, {
+        fetchJson(`${docPostBase}/plan-request`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ author: user }),
@@ -328,7 +332,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
     }
     if (face !== 'approve') return;
     press(async () => {
-      const res = (await fetchJson(`${docUrl}/plan`, {
+      const res = (await fetchJson(`${docPostBase}/plan`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ state: 'approved', author: user }),

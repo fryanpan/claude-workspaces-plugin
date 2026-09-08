@@ -52,6 +52,23 @@ function stubFetch(answers: DocAnswer[], post: unknown = { threadId: 't-ask' }) 
   return { fetchJson, calls };
 }
 
+/**
+ * A fetch stub that answers the way the SERVER does: `/workspaces/<ws>/docs/<id>`
+ * is the editor PAGE, and only `?format=json` asks for the doc's record.
+ * `defaultFetchJson` turns the HTML it gets otherwise into `{}` — a read that
+ * neither throws nor carries anything, so the float hides and reports nothing.
+ * That is what took the review flow off the doc surface after the address
+ * cutover, so it is the fixture the float has to survive.
+ */
+function serverShapedFetch(
+  record: DocAnswer,
+): (url: string, init?: RequestInit) => Promise<unknown> {
+  return (url: string, init?: RequestInit): Promise<unknown> => {
+    if (init?.method === 'POST') return Promise.resolve({ threadId: 't-ask' });
+    return Promise.resolve(url.includes('format=json') ? record : {});
+  };
+}
+
 /** A hand-cranked watcher: the test fires it, the float re-reads. */
 function stubWatch() {
   let fn: (() => void) | null = null;
@@ -407,5 +424,18 @@ describe('mountReviewFloat', () => {
       expect(sub()).toBe('Ask Workspaces to review the notes');
       float.destroy();
     });
+  });
+  it('offers Review on a huddle read from a server that also serves a page there', async () => {
+    const float = mountReviewFloat({
+      docId: 'd-h',
+      root,
+      user: JORDAN,
+      canWrite: true,
+      fetchJson: serverShapedFetch({ meta: { huddle: true, huddleKind: 'plan' } }),
+    });
+    await float.ready;
+    expect(float.face()).toBe('ask');
+    expect(label()).toBe('Review');
+    float.destroy();
   });
 });
