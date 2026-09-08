@@ -9,6 +9,7 @@ import {
   routePatternForSpan,
   sanitizeErrorForCapture,
   scrubEventForPrivacy,
+  serverSentryTelemetry,
   withRouteSpan,
 } from '../src/sentry.ts';
 
@@ -382,10 +383,11 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
   // letters-before-the-dash prefix, so this fixture stays realistic instead
   // of accidentally exercising a collision that production doesn't have.
   const release = 'a822618-dirty';
+  const environment = 'capture-env-b7c1';
 
   beforeAll(async () => {
     capture = startCaptureServer();
-    await initServerSentry({ dsn: capture.dsn, release });
+    await initServerSentry({ dsn: capture.dsn, release, environment });
   });
 
   afterAll(async () => {
@@ -396,6 +398,13 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
 
   it('is active once initialized with a DSN', () => {
     expect(isServerSentryActive()).toBe(true);
+  });
+
+  it('reports the project its DSN names and the environment it stamps, never the key', () => {
+    const t = serverSentryTelemetry();
+    expect(t.project).toBe('1');
+    expect(t.environment).toBe(environment);
+    expect(JSON.stringify(t)).not.toContain('examplekey');
   });
 
   it('a deliberately slow request produces a transaction naming the route pattern, stamped with the release', async () => {
@@ -420,6 +429,7 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
     const joined = bodies.join('\n');
     expect(joined).toContain('GET /workspaces/:id/docs/:id/content');
     expect(joined).toContain(release);
+    expect(joined).toContain(`"environment":"${environment}"`);
     // The whole point: the raw docId never left the process.
     expect(joined).not.toContain(docId);
   });

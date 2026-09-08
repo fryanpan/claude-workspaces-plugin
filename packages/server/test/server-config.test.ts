@@ -44,6 +44,41 @@ describe('resolveServerConfig', () => {
     expect(cfg.dataDir.length).toBeGreaterThan(0);
   });
 
+  describe('Sentry: one project per platform, one environment string for both', () => {
+    const SHARED = 'https://examplekey@o0.ingest.sentry.io/10';
+    const SERVER = 'https://examplekey@o0.ingest.sentry.io/20';
+
+    it('the server reports to its own DSN when one is set, and the browser keeps the shared one', () => {
+      const cfg = resolve({ CW_SENTRY_DSN: SHARED, CW_SENTRY_SERVER_DSN: SERVER });
+      expect(cfg.sentryServerDsn).toBe(SERVER);
+      expect(cfg.sentryDsn).toBe(SHARED);
+    });
+
+    it('a box with only the shared key keeps reporting both sides to it', () => {
+      const cfg = resolve({ CW_SENTRY_DSN: SHARED });
+      expect(cfg.sentryServerDsn).toBe(SHARED);
+    });
+
+    it('a server key alone configures the server and leaves the browser unconfigured', () => {
+      const cfg = resolve({ CW_SENTRY_SERVER_DSN: SERVER });
+      expect(cfg.sentryServerDsn).toBe(SERVER);
+      expect(cfg.sentryDsn).toBeUndefined();
+    });
+
+    it('environment: explicit wins, a published release means production, a checkout means development', () => {
+      expect(resolve({ CW_SENTRY_ENVIRONMENT: 'staging' }).sentryEnvironment).toBe('staging');
+      const releaseRoot = mkdtempSync(join(tmpdir(), 'cw-release-root-'));
+      try {
+        expect(
+          resolve({}, argsFrom({ 'client-release-root': releaseRoot })).sentryEnvironment,
+        ).toBe('production');
+      } finally {
+        rmSync(releaseRoot, { recursive: true, force: true });
+      }
+      expect(resolve({}).sentryEnvironment).toBe('development');
+    });
+  });
+
   it('lets a flag beat the environment for the port', () => {
     const cfg = resolve({ PORT: '9001' }, argsFrom({ port: '9002' }));
     expect(cfg.requestedPort).toBe(9002);
