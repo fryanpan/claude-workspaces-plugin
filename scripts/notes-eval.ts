@@ -6,6 +6,22 @@
  *   bun run notes:eval --smoke         # the CI slice, a few cents
  *   bun run notes:eval --meeting ES2002a
  *   bun run notes:eval --judge off     # programmatic checks only, no Sonnet
+ *   bun run notes:eval --no-ideas      # skip the lost-idea rate and its gate
+ *   bun run notes:eval --corpus <dir>  # a corpus that is NOT in this repo
+ *
+ * THE NUMBER THIS RUN EXISTS FOR IS THE LOST-IDEA RATE. Everything else here
+ * asks whether the notes are well FORMED; that one asks whether they are
+ * COMPLETE, which is the question a person asks when they say "I said that,
+ * where is it". It is measured against a list of the ideas in each tick,
+ * written down once beside the fixture and corrected by hand afterwards
+ * (`notes-eval-ideas.ts`), and it FAILS the run above five per cent — unlike
+ * every other rate here, because its denominator is fixed rather than
+ * re-derived, so it means the same thing on two different days.
+ *
+ * REAL MEETINGS ARE NOT IN THIS REPO. `--corpus <dir>` reads fixtures and
+ * their ground truth from anywhere, which is how the rate is measured over
+ * private meetings without a line of them being committed, quoted or printed.
+ * Only counts and rates come out.
  *
  * WHY THIS EXISTS. Everything the note-taking behaviour asks for — paraphrase,
  * short bullets, one heading per topic, a marked guess, a link on a row that
@@ -66,6 +82,12 @@ import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
 import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
+import {
+  type MeetingIdeaRate,
+  judgeCarried,
+  readTruth,
+  reportIdeaRates,
+} from './notes-eval-ideas.ts';
 
 const JUDGE_MODEL = 'claude-sonnet-5';
 const NOTES_MODEL = 'claude-haiku-4-5-20251001';
@@ -336,14 +358,23 @@ interface Options {
   meetings: string[];
   judgePerMeeting: number;
   key: string;
+  /** Where the fixtures live. `--corpus <dir>` points it at a corpus that is
+   *  NOT in this repo — real meetings are private and never committed. */
+  corpusDir: string;
+  /** Measure the lost-idea rate against the ground truth beside each fixture,
+   *  and let it fail the run. */
+  ideas: boolean;
 }
 
-function loadFixtures(only: readonly string[]): NotesEvalFixture[] {
-  return readdirSync(FIXTURE_DIR)
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(readFileSync(join(FIXTURE_DIR, f), 'utf8')) as NotesEvalFixture)
-    .filter((f) => only.length === 0 || only.includes(f.meeting))
-    .sort((a, b) => a.meeting.localeCompare(b.meeting));
+function loadFixtures(only: readonly string[], dir: string): NotesEvalFixture[] {
+  return (
+    readdirSync(dir)
+      // `.ideas.json` files are the ground truth beside a fixture, not fixtures.
+      .filter((f) => f.endsWith('.json') && !f.endsWith('.ideas.json'))
+      .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as NotesEvalFixture)
+      .filter((f) => only.length === 0 || only.includes(f.meeting))
+      .sort((a, b) => a.meeting.localeCompare(b.meeting))
+  );
 }
 
 /** `/workspaces/w-eval?task=t-3` → `t-3`, so the harness rebuilds the row's
@@ -357,7 +388,7 @@ async function runMeeting(
   opts: Options,
   behaviours: Record<string, Behaviour>,
   ticksWanted: number,
-): Promise<void> {
+): Promise<MeetingIdeaRate | null> {
   const composer = createHaikuNotesComposer({
     apiKey: opts.key,
     fetchImpl: countingFetch(NOTES_MODEL),
@@ -510,6 +541,45 @@ async function runMeeting(
   }
   await harness.end();
 
+  // THE LOST-IDEA RATE, judged against the notes the meeting was LEFT with.
+  // That is what a person opens afterwards, and it is the only reading under
+  // which a retry that landed two ticks later counts as coverage rather than
+  // as a miss.
+  let rate: MeetingIdeaRate | null = null;
+  if (opts.ideas) {
+    const truth = readTruth(opts.corpusDir, fixture.meeting);
+    if (!truth) {
+      console.log(`  ${fixture.meeting}: no idea ground truth beside the fixture`);
+    } else {
+      const row: MeetingIdeaRate = {
+        meeting: fixture.meeting,
+        ideas: 0,
+        lost: 0,
+        unjudged: 0,
+        examples: [],
+      };
+      const finalNotes = harness.notes();
+      for (const entry of truth.ticks) {
+        // Only the ticks this run actually played. A slice measured against
+        // the whole meeting's ground truth would report every idea after the
+        // slice as lost.
+        if (entry.tick > ticks.length) continue;
+        const verdicts = await judgeCarried(opts.key, entry.ideas, finalNotes);
+        if (!verdicts) {
+          row.unjudged += entry.ideas.length;
+          continue;
+        }
+        entry.ideas.forEach((idea, i) => {
+          row.ideas++;
+          if (verdicts[i]) return;
+          row.lost++;
+          if (row.examples.length < 5) row.examples.push(`tick ${entry.tick}: ${idea}`);
+        });
+      }
+      rate = row;
+    }
+  }
+
   const marked = unconfirmedBullets(harness.notes()).length;
   console.log(
     `  ${fixture.meeting}: ${ticks.length} ticks, ${allBullets(harness.notes()).length} bullets, ` +
@@ -527,9 +597,15 @@ async function runMeeting(
   for (const reason of new Set(harness.errors)) {
     console.log(`    ${fixture.meeting}: ${reason}`);
   }
+  return rate;
 }
 
-function report(behaviours: Record<string, Behaviour>, failOnWalls: boolean): number {
+function report(
+  behaviours: Record<string, Behaviour>,
+  failOnWalls: boolean,
+  ideaRows: readonly MeetingIdeaRate[],
+  gateIdeas: boolean,
+): number {
   console.log('\nBehaviour                                  examples   pass rate');
   console.log('-'.repeat(66));
   let thin = 0;
@@ -558,6 +634,10 @@ function report(behaviours: Record<string, Behaviour>, failOnWalls: boolean): nu
   }
   console.log(`  total: $${totalCost().toFixed(4)}`);
   if (thin > 0) console.log(`\n${thin} behaviour(s) saw fewer than 25 examples.`);
+  // Both verdicts are computed, and both are printed, before either exits.
+  // A run that stopped at the first failure would hide the number the row is
+  // about behind a formatting one.
+  const ideaCode = gateIdeas ? reportIdeaRates(ideaRows, true) : reportIdeaRates(ideaRows, false);
   const walls = behaviours.flatRuns!;
   if (failOnWalls && walls.failures.length > 0) {
     console.log(
@@ -567,7 +647,7 @@ function report(behaviours: Record<string, Behaviour>, failOnWalls: boolean): nu
     );
     return 1;
   }
-  return 0;
+  return ideaCode;
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -602,7 +682,15 @@ async function main(argv: string[]): Promise<number> {
     unconfirmed: new Behaviour('1.4', 'Uncertain points marked unconfirmed'),
   };
 
-  const fixtures = loadFixtures(smoke ? ['ES2002a'] : meetings);
+  const corpusAt = argv.indexOf('--corpus');
+  const corpusDir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
+  // On by default for a full run, because the rate is the point of the corpus;
+  // `--no-ideas` is for a formatting-only pass that must not spend a judge.
+  const ideas = !argv.includes('--no-ideas');
+  const fixtures = loadFixtures(
+    smoke && corpusDir === FIXTURE_DIR ? ['ES2002a'] : meetings,
+    corpusDir,
+  );
   if (fixtures.length === 0) throw new Error('No fixtures matched. Run notes-eval-fixtures.ts?');
   const opts: Options = {
     smoke,
@@ -611,6 +699,8 @@ async function main(argv: string[]): Promise<number> {
     // harness still runs end to end, not to measure anything.
     judgePerMeeting: judgeOff ? 0 : smoke ? 1 : 6,
     key,
+    corpusDir,
+    ideas,
   };
   const ticksWanted = smoke ? 3 : Number.POSITIVE_INFINITY;
 
@@ -618,9 +708,18 @@ async function main(argv: string[]): Promise<number> {
     `${smoke ? 'Smoke slice' : 'Full run'}: ${fixtures.length} meeting(s), ` +
       `notes on ${NOTES_MODEL}, judge ${opts.judgePerMeeting > 0 ? JUDGE_MODEL : 'off'}`,
   );
-  for (const fixture of fixtures) await runMeeting(fixture, opts, behaviours, ticksWanted);
-  // Only the smoke slice can turn a verdict red — see the header.
-  return report(behaviours, smoke);
+  const ideaRows: MeetingIdeaRate[] = [];
+  for (const fixture of fixtures) {
+    const row = await runMeeting(fixture, opts, behaviours, ticksWanted);
+    if (row) ideaRows.push(row);
+  }
+  // Two things can turn a verdict red, and they are red for different
+  // reasons. The flat-wall check is a SHAPE the notes may not have, and only
+  // the smoke slice gates on it because a rate over a model's output is a
+  // reading rather than a verdict. The lost-idea rate is not that kind of
+  // number: it is measured against a fixed ground truth, so it means the same
+  // thing every run, and it gates on every run that measured it.
+  return report(behaviours, smoke, ideaRows, ideas);
 }
 
 if (import.meta.main) {

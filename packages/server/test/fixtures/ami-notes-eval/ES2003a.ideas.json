@@ -1,0 +1,87 @@
+{
+  "meeting": "ES2003a",
+  "listedBy": "claude-sonnet-5",
+  "listedAt": "2026-09-08T23:16:46.281Z",
+  "ticks": [
+    {
+      "tick": 1,
+      "ideas": [
+        "Consider a remote specialised for game playing or interactive TV",
+        "New remote lets users set favourite channels",
+        "Slide a bar to set recording start time instead of typing"
+      ]
+    },
+    {
+      "tick": 2,
+      "ideas": [
+        "Add a bar showing what time something ends",
+        "Reference existing bar-code design as precedent",
+        "Remote control shouldn't require cleverness to use",
+        "Design should have big buttons for up/down/left/right/shoot"
+      ]
+    },
+    {
+      "tick": 3,
+      "ideas": [
+        "Need buttons to change camera/viewing angles in interactive TV",
+        "Running out of time in meeting",
+        "Thirty minutes until next meeting",
+        "Must decide on basic functionality soon",
+        "User interface design is a key aspect",
+        "Consider a macros facility for programming",
+        "Need strong feedback/response if macros are used"
+      ]
+    },
+    {
+      "tick": 4,
+      "ideas": [
+        "Need to determine what the user wants",
+        "Asked if anyone has anything to add or missed"
+      ]
+    },
+    {
+      "tick": 5,
+      "ideas": [
+        "Suggestion to add a joystick/control stick for gaming",
+        "Question whether a control stick is unnecessary/ridiculous",
+        "Claim most people are already used to console-style controls",
+        "Observation that mobile phones are starting to include small keypads"
+      ]
+    },
+    {
+      "tick": 6,
+      "ideas": [
+        "Interface familiar to most users",
+        "Interface could double as a joystick for navigation"
+      ]
+    },
+    {
+      "tick": 7,
+      "ideas": [
+        "Design should be ergonomic and comfortable to hold",
+        "Design should allow for a more customizable/alternative option"
+      ]
+    },
+    {
+      "tick": 8,
+      "ideas": [
+        "Design should have an unconventional, attractive shape",
+        "Product should be small and stylish",
+        "Shape should be slightly curved and different",
+        "Form should be biomorphic to fit hand shape more efficiently"
+      ]
+    },
+    {
+      "tick": 9,
+      "ideas": [
+        "Task should be easy to complete",
+        "Plan to finish current item then start next",
+        "Will write up summary and send to everyone"
+      ]
+    },
+    {
+      "tick": 11,
+      "ideas": ["Leave microphones in the room", "Take the laptops when leaving"]
+    }
+  ]
+}

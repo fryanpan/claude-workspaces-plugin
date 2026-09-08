@@ -1,0 +1,260 @@
+{
+  "meeting": "ES2003b",
+  "listedBy": "claude-sonnet-5",
+  "listedAt": "2026-09-08T23:06:44.143Z",
+  "ticks": [
+    {
+      "tick": 1,
+      "ideas": [
+        "Design covers three birds/goals",
+        "Voice recognition is the innovative feature",
+        "Question: is voice recognition practical in a remote",
+        "Belief that people will buy the remote"
+      ]
+    },
+    {
+      "tick": 2,
+      "ideas": [
+        "Question: will users tolerate training period for remote",
+        "Claim: remote accuracy improves over time with same user",
+        "Problem: visitors unfamiliar with user's speech can't use remote",
+        "Question: how to account for regional accents",
+        "Question: will people return the remote control",
+        "Claim: young people will buy remote if affordable"
+      ]
+    },
+    {
+      "tick": 3,
+      "ideas": [
+        "Question whether target audience would keep the product after initial novelty",
+        "Concern that product is slower than pressing a button",
+        "Concern the product is not practical",
+        "Suggestion to speed up the product/process"
+      ]
+    },
+    {
+      "tick": 4,
+      "ideas": ["There are important considerations to address"]
+    },
+    {
+      "tick": 5,
+      "ideas": [
+        "Presentation file is saved in the folder",
+        "A website was used as an information source"
+      ]
+    },
+    {
+      "tick": 7,
+      "ideas": [
+        "Presentation covers technical functions of the remote",
+        "Presentation is slightly outdated",
+        "Original design aimed to control multiple devices",
+        "Some content remains relevant despite being outdated"
+      ]
+    },
+    {
+      "tick": 8,
+      "ideas": [
+        "Reviewed other remote control models for design ideas",
+        "Existing designs were unsatisfactory",
+        "Use existing designs as springboard for improvement"
+      ]
+    },
+    {
+      "tick": 9,
+      "ideas": [
+        "Device's job is sending commands to an appliance (TV)",
+        "Purpose is remote control convenience, avoiding getting up",
+        "Trend 1: early models had many buttons covering every function",
+        "Too many buttons creates a user-unfriendly interface",
+        "Trend 2: user-focused approach limits buttons to most-used functions"
+      ]
+    },
+    {
+      "tick": 10,
+      "ideas": [
+        "Some loss of function is acceptable if peripheral",
+        "Design should be intuitive to use",
+        "TV remote core functions are channel and volume control",
+        "Consider incorporating DVD control into remote"
+      ]
+    },
+    {
+      "tick": 11,
+      "ideas": [
+        "Design should include play, pause, stop, rewind, fast-forward, record functions",
+        "Advocates for a user-focused design approach",
+        "Problem: existing user-focused designs assume in advance what users want most"
+      ]
+    },
+    {
+      "tick": 12,
+      "ideas": [
+        "Device should be more programmable with full range of functions",
+        "User can customize which functions are most accessible",
+        "Minimal number of controls for immediate access",
+        "Include a joystick in the design",
+        "Include a minimal number of function buttons",
+        "Include a basic display on the device",
+        "Display shows function of each direction/mode when switching"
+      ]
+    },
+    {
+      "tick": 13,
+      "ideas": [
+        "Joystick and function buttons' roles need defining",
+        "Design inspired by game controllers",
+        "Use distinctive geometric shapes for basic function buttons",
+        "Button functions get further specified depending on context/task"
+      ]
+    },
+    {
+      "tick": 14,
+      "ideas": ["Designer's work is not yet finished", "Question about where to save the file"]
+    },
+    {
+      "tick": 15,
+      "ideas": [
+        "Desktop has link to project folder/documents",
+        "Save files there for shared access"
+      ]
+    },
+    {
+      "tick": 21,
+      "ideas": [
+        "Responsible for the working design",
+        "Remote control has an energy source",
+        "Remote control has a user interface",
+        "User presses button to trigger chip response",
+        "Chip sends digital signal to TV"
+      ]
+    },
+    {
+      "tick": 22,
+      "ideas": [
+        "Question: how many buttons needed on user interface",
+        "Option: use light bulbs to show which appliances are on",
+        "Concern: more components may require more power",
+        "Option: adding a joystick",
+        "Constraint: joystick would require additional components"
+      ]
+    },
+    {
+      "tick": 23,
+      "ideas": [
+        "Electronic design layout still undetermined",
+        "Details depend on deciding user interface contents"
+      ]
+    },
+    {
+      "tick": 25,
+      "ideas": [
+        "Energy source connects to the chip",
+        "User interface contains all controls",
+        "Switch turns the device on",
+        "Infrared bulb contacts the TV/DVD player",
+        "Bulb signals device is on",
+        "Question: separate buttons vs different light bulbs to choose device"
+      ]
+    },
+    {
+      "tick": 27,
+      "ideas": ["New user requirements to be incorporated"]
+    },
+    {
+      "tick": 28,
+      "ideas": [
+        "Concern about power required for voice-activated control",
+        "Concern about feasibility/ability to implement voice control"
+      ]
+    },
+    {
+      "tick": 29,
+      "ideas": [
+        "Cost of embedded system could cause issues",
+        "Existing robust voice services on computers (e.g. IBM ViaVoice/Dragon Dictate)"
+      ]
+    },
+    {
+      "tick": 30,
+      "ideas": [
+        "Advanced speech recognition needs high memory and processing power",
+        "Voice activation proposed as a feature idea",
+        "Voice activation may not be feasible per Industrial Designer's research"
+      ]
+    },
+    {
+      "tick": 31,
+      "ideas": [
+        "Proposal to use a joystick plus LCD display",
+        "Idea to control most functionality from the display",
+        "Question about how much power an LCD would consume"
+      ]
+    },
+    {
+      "tick": 32,
+      "ideas": [
+        "Remote could have an LCD screen",
+        "LCD could show interactive info",
+        "Display size slightly larger than a mobile phone screen",
+        "Cost of LCD might be quite low"
+      ]
+    },
+    {
+      "tick": 33,
+      "ideas": [
+        "Design could allow reading info across multiple menus",
+        "Mobile phones as example of keypad plus menu navigation",
+        "Separate common buttons from menu-accessed functions"
+      ]
+    },
+    {
+      "tick": 34,
+      "ideas": [
+        "Joystick up/down controls volume by default",
+        "Joystick left/right controls channels by default",
+        "Concern users may get confused switching between screens"
+      ]
+    },
+    {
+      "tick": 35,
+      "ideas": [
+        "Initial adjustment period of a few hours needed",
+        "Muscle memory helps overcome initial adjustment",
+        "Display size matched expectations"
+      ]
+    },
+    {
+      "tick": 36,
+      "ideas": [
+        "Proposal to use black and white display instead of colour",
+        "Reason: keep unit cost down",
+        "Colour could be a future/subsequent development"
+      ]
+    },
+    {
+      "tick": 37,
+      "ideas": [
+        "Extra feature adds nothing useful",
+        "Possible to create a useful user interface",
+        "Option: remote with menu and joystick",
+        "Question: what is our target audience/niche",
+        "Concern: product lacks a specific target market"
+      ]
+    },
+    {
+      "tick": 38,
+      "ideas": [
+        "Target most people who have used a mobile phone",
+        "Design relies on users' prior mobile phone experience"
+      ]
+    },
+    {
+      "tick": 39,
+      "ideas": [
+        "LCD and joystick support additional, less-used functionality",
+        "These features may ease reprogramming/changing frequency channels"
+      ]
+    }
+  ]
+}
