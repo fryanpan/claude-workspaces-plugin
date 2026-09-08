@@ -158,6 +158,24 @@ describe('POST /api/deploy through the edge', () => {
   });
 });
 
+describe('/api/sentry through the edge', () => {
+  it('refuses GET and POST alike, naming the hop', async () => {
+    for (const method of ['GET', 'POST']) {
+      const r = await viaEdge('/api/sentry', method);
+      expect(r.status).toBe(403);
+      const body = (await r.json()) as { error: string };
+      expect(body.error).toMatch(/proxied|edge/i);
+    }
+  });
+
+  it('positive control: the same GET from the box answers the state', async () => {
+    const r = await fromBox('/api/sentry', 'GET');
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { sentry: { active: boolean } };
+    expect(body.sentry.active).toBe(false);
+  });
+});
+
 describe('POST /api/plugin/refresh through the edge', () => {
   it('positive control: the operator REACHES the route through the edge (GET)', async () => {
     const r = await viaEdge('/api/plugin/refresh', 'GET');
