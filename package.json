@@ -9,6 +9,7 @@
     "dev": "bun run scripts/serve.ts",
     "dev:bare": "bun run packages/server/src/bin.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
+    "routes:table": "bun run scripts/routes-table.ts",
     "verify": "bun run scripts/verify.ts",
     "verify:parity": "bun run scripts/verify.ts --parity",
     "test": "bun run test:vitest && bun run test:server",

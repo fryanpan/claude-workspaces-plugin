@@ -89,6 +89,7 @@ import {
   type StalledRow,
   type WaitingRow,
 } from './stall-gate.ts';
+import type { UngatedUiRow } from './ui-review-gate.ts';
 
 /**
  * How long a row must stay quiet before the wake says it AGAIN.
@@ -156,6 +157,13 @@ export interface StallSnapshot {
    *  exist on a ticket and on nobody's queue. Absent on a snapshot from a
    *  caller that does not read them, which is the same as none. */
   held?: readonly HeldItemRow[];
+  /**
+   * Rows an agent filed that read as UI work and are being built with no
+   * answered review item on them — the UI gate's breaches
+   * (`ui-review-gate.ts`). Absent when none, and absent from a caller that
+   * does not compute them, which is the same thing.
+   */
+  ungatedUi?: readonly UngatedUiRow[];
   /**
    * When a session last WROTE on this board — the newest agent-written note
    * or agent transition on any row. One of the three reads the escalation's
@@ -283,6 +291,13 @@ export interface StallNudgeFrame {
    */
   heldItems?: readonly HeldItemRow[];
   /**
+   * Rows built past the UI gate, each with the word that made it read as UI
+   * work. Absent when none. A frame carrying only this is a real wake: the
+   * row is moving, so nothing else here would ever mention it, and the whole
+   * point of the gate is that somebody notices before the change ships.
+   */
+  ungatedUi?: readonly UngatedUiRow[];
+  /**
    * What is new since the last wake this board was sent — the reason the
    * lead is being woken again rather than the whole state of the board.
    *
@@ -303,6 +318,8 @@ export interface StallNudgeFrame {
     undetermined?: readonly string[];
     /** Holds placed since the last wake. */
     heldItems?: readonly HeldItemRow[];
+    /** Rows that went past the UI gate since the last wake. */
+    ungatedUi?: readonly UngatedUiRow[];
     /** The board's worst row crossed another repeat window. Present only when
      *  true, so its absence is "nothing got older", not "false". */
     escalated?: true;
@@ -632,18 +649,24 @@ export class StallNudger {
     // board is healthy, and returning on the stalled list alone is precisely
     // how "I could not look" comes to be delivered as "I looked and saw
     // nothing".
+    // The gate's breaches count here beside the other four: a row being
+    // BUILT past the UI gate is never quiet, never unfiled and never held, so
+    // a check that omitted it would report the board healthy at exactly the
+    // moment the rule it exists for is being broken.
+    const ungatedUi = board.ungatedUi ?? [];
     if (
       board.stalled.length === 0 &&
       board.unfiled.length === 0 &&
       board.undetermined.length === 0 &&
-      held.length === 0
+      held.length === 0 &&
+      ungatedUi.length === 0
     ) {
       this.armed.delete(key);
       this.held.delete(key);
       this.reported.delete(key);
       return;
     }
-    const stamp = this.stampFor(board, held);
+    const stamp = this.stampFor(board, held, ungatedUi);
     // Named before both the wake decision and the reachability check below,
     // and that ordering is the point: the commonest reason a wake is not
     // delivered is a lead holding no stream, which is exactly when an
@@ -657,6 +680,7 @@ export class StallNudger {
       board,
       memory.before,
       held,
+      ungatedUi,
     );
     if (!change) {
       // Silent, but RECORDED. A shrink that left the old stamp standing would
@@ -674,7 +698,7 @@ export class StallNudger {
     // has ANYBODY on it is the escalation's question, and it answers it from
     // the store's liveness reads rather than from a failed delivery here.
     if (to === undefined) return;
-    const top = board.stalled[0] ?? board.unfiled[0] ?? held[0];
+    const top = board.stalled[0] ?? board.unfiled[0] ?? held[0] ?? ungatedUi[0];
     this.emit(key, to.agentId, {
       event: STALL_EVENT,
       workspaceId: key,
@@ -692,6 +716,7 @@ export class StallNudger {
       // `heldItems`, not `held`: the ready_idle frame already spends `held` on
       // its withheld-row counts, and the plugin reads both frames into one type.
       ...(held.length > 0 ? { heldItems: held } : {}),
+      ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
       ...(board.undetermined.length > 0
         ? {
             undetermined: {
@@ -938,7 +963,11 @@ export class StallNudger {
    * genuinely new stall still fires immediately rather than waiting out
    * somebody else's window.
    */
-  private stampFor(board: StallSnapshot, held: readonly HeldItemRow[]): string {
+  private stampFor(
+    board: StallSnapshot,
+    held: readonly HeldItemRow[],
+    ungatedUi: readonly UngatedUiRow[],
+  ): string {
     const rows = [...board.stalled, ...board.unfiled];
     // Ids alone, without the bucket they used to carry. A row changing bucket
     // is most often the lead's OWN action landing — dispatching a worker moves
@@ -964,6 +993,10 @@ export class StallNudger {
         ...rows.map((row) => row.id),
         ...held.map((row) => row.id),
         ...held.map((row) => `held:${row.reviewItemId}@${row.heldAt}`),
+        // Under its OWN key, not the row id: a row can be stalled AND built
+        // past the gate, and folding the two together would let a wake about
+        // the silence stand in for the one about the rule.
+        ...ungatedUi.map((row) => `ui:${row.id}`),
       ]),
     ).sort();
     // The oldest row speaks for the board. `0` on a board whose only finding
@@ -1037,6 +1070,7 @@ export class StallNudger {
     board: StallSnapshot,
     told: Map<string, ToldRow>,
     held: readonly HeldItemRow[],
+    ungatedUi: readonly UngatedUiRow[],
   ): StallNudgeFrame['changed'] | undefined {
     const before = prior === undefined ? undefined : parseStamp(prior);
     const after = parseStamp(next);
@@ -1058,12 +1092,25 @@ export class StallNudger {
     const heldItems = held.filter(
       (item) => before === undefined || !before.ids.has(`held:${item.reviewItemId}@${item.heldAt}`),
     );
-    if (!escalated && rows.length === 0 && undetermined.length === 0 && heldItems.length === 0)
+    // Keyed on the token the stamp writes, so a row already reported stays
+    // silent while the same row reported again after a wake it was absent
+    // from is news — the same rule every other finding here follows.
+    const ungated = ungatedUi.filter(
+      (row) => before === undefined || !before.ids.has(`ui:${row.id}`),
+    );
+    if (
+      !escalated &&
+      rows.length === 0 &&
+      undetermined.length === 0 &&
+      heldItems.length === 0 &&
+      ungated.length === 0
+    )
       return undefined;
     return {
       ...(rows.length > 0 ? { rows } : {}),
       ...(undetermined.length > 0 ? { undetermined } : {}),
       ...(heldItems.length > 0 ? { heldItems } : {}),
+      ...(ungated.length > 0 ? { ungatedUi: ungated } : {}),
       ...(escalated ? { escalated: true as const } : {}),
     };
   }

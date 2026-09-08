@@ -44,7 +44,7 @@ describe('fetchDocMeta', () => {
       backTo: { workspaceId: 'w-abc', name: 'search-revamp' },
     });
     const meta = await fetchDocMeta('d1');
-    expect(seen.urls[0]).toBe(`/workspaces/${WS}/docs/d1`);
+    expect(seen.urls[0]).toBe(`/workspaces/${WS}/docs/d1?format=json`);
     // Presence of the neighbouring fields, so "backTo arrived" is not the only
     // thing this run proves — a mapping that returned the fallback object would
     // otherwise satisfy nothing but the absence cases below.
@@ -83,6 +83,41 @@ describe('fetchDocMeta', () => {
     expect(meta.docType).toBe('markdown');
     expect(meta.backTo).toBeUndefined();
   });
+  /**
+   * The page and the record share one address, and only `?format=json` asks
+   * for the record. A reader that drops it gets the editor's HTML shell under
+   * a 200 — which is not a failed read, so the fallback below never fires and
+   * the crumb silently calls a plan doc an ordinary one.
+   *
+   * The stub therefore answers the way the SERVER does rather than answering
+   * everything: the bare address returns a shell whose `json()` rejects.
+   */
+  it('asks the address that answers the record, not the page', async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const asked = String(input);
+      if (!asked.includes('format=json')) {
+        return {
+          ok: true,
+          json: async (): Promise<unknown> => {
+            throw new SyntaxError('Unexpected token < in JSON');
+          },
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          meta: { type: 'markdown', relPath: 'huddles/d-p.md', huddle: true, huddleKind: 'plan' },
+        }),
+      } as Response;
+    }) as typeof fetch;
+    const meta = await fetchDocMeta('d-p');
+    expect(meta.relPath).toBe('huddles/d-p.md'); // control: the record was read
+    expect(meta.huddle).toBe(true);
+    // The crumb's word comes off this, and the Make Plan float off the same
+    // record: absent, a plan huddle opens with no planning flow in it.
+    expect(meta.huddleKind).toBe('plan');
+  });
+
   it('carries the huddle flag, and reads its absence as an ordinary doc', async () => {
     serve({ meta: { type: 'markdown', relPath: 'huddles/d-abc1.md', huddle: true } });
     const huddle = await fetchDocMeta('d6');

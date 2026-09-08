@@ -84,6 +84,22 @@ describe('what a verdict says', () => {
       verdict: 'FAIL',
       escalated: 1,
     });
+    // A row being BUILT past the UI gate: the one finding here about work
+    // that is moving, and a FAIL on its own.
+    expect(
+      keepMovingVerdictFor(
+        board('w-1', { ungatedUi: [{ id: 't-ui', title: 'move the button', keyword: 'button' }] }),
+        T0,
+        quiet,
+      ),
+    ).toMatchObject({ verdict: 'FAIL', ungatedUi: ['t-ui'] });
+  });
+
+  it('stays PASS and names no ungated row on a board with none', () => {
+    expect(keepMovingVerdictFor(board('w-1'), T0, quiet)).toMatchObject({
+      verdict: 'PASS',
+      ungatedUi: [],
+    });
   });
 
   it('records a waiting row with the address of its ask, and stays PASS', () => {
@@ -174,7 +190,7 @@ describe('once per board per cadence, and no more', () => {
     });
     r.observe([board('w-1', { stalled: [row('t-a')], unfiled: [row('t-b')] })], T0);
     expect(lines).toEqual([
-      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 waiting=0 unreadable=0 held=0 escalated=0',
+      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 waiting=0 unreadable=0 held=0 escalated=0 ungated-ui=0',
     ]);
   });
 });

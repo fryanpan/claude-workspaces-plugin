@@ -91,6 +91,12 @@ const CT: Record<string, string> = {
 export const HTML_SHELL_HEADERS: Record<string, string> = {
   'content-type': 'text/html; charset=utf-8',
   'cache-control': 'no-store',
+  // Lets the page's own scripts use the JS Self-Profiling API, which is what
+  // Sentry's browser profiler samples from (sentry-boot.ts). Sent whether or
+  // not a DSN is configured: it grants the document nothing but a capability
+  // its own code may call, and a header that varies with config is one more
+  // thing to get wrong on the one deploy that matters.
+  'document-policy': 'js-profiling',
 };
 
 /**

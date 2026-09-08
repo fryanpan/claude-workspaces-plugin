@@ -42,6 +42,8 @@ const {
   publicBaseUrlOverride,
   clientReleaseRootDir,
   sentryDsn,
+  sentryServerDsn,
+  sentryEnvironment,
   releaseSourceRef,
   allowedOrigins,
   sharingEnvLocked,
@@ -75,8 +77,12 @@ const {
   keepMovingCadenceMs,
 } = cfg;
 
-if (sentryDsn) {
-  await initServerSentry({ dsn: sentryDsn, release: releaseSourceRef });
+if (sentryServerDsn) {
+  await initServerSentry({
+    dsn: sentryServerDsn,
+    release: releaseSourceRef,
+    environment: sentryEnvironment,
+  });
   // A crash Sentry never gets to see is the exact failure mode this exists
   // to fix — so these two catch what a request-scoped span cannot: an error
   // that isn't inside any one request. Capture, THEN preserve Bun's default
@@ -224,6 +230,8 @@ while (!handle) {
       // …and the deploy it should call itself, when this start is a published
       // release. Same string `initServerSentry` got above.
       ...(sentryDsn && releaseSourceRef ? { sentryRelease: releaseSourceRef } : {}),
+      // …and the environment it runs in, the same string the server stamps.
+      ...(sentryDsn ? { sentryEnvironment } : {}),
       cfAccess,
       // The share hostname and the audience of the ONE Access application in
       // front of it. Passed only when BOTH resolved: `resolveServerConfig`

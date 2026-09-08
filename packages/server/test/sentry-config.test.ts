@@ -23,6 +23,7 @@ import { type ServerHandle, createServer } from '../src/server.ts';
  */
 const FAKE_DSN = 'https://examplekey@o0.ingest.sentry.io/0';
 const FAKE_RELEASE = 'v9.9.9-12-gfeedface';
+const FAKE_ENVIRONMENT = 'test-environment';
 
 describe('the served shells carry the Sentry DSN and page type only when configured', () => {
   let withDsn: ServerHandle;
@@ -94,6 +95,7 @@ describe('the served shells carry the Sentry DSN and page type only when configu
       markdownAppDistDir: appDistA,
       sentryDsn: FAKE_DSN,
       sentryRelease: FAKE_RELEASE,
+      sentryEnvironment: FAKE_ENVIRONMENT,
       emailCodeSignIn: true,
     });
     without = createServer({
@@ -132,6 +134,7 @@ describe('the served shells carry the Sentry DSN and page type only when configu
       expect(html).toContain(`<meta name="sentry-dsn" content="${FAKE_DSN}" />`);
       expect(html).toContain(`<meta name="sentry-page-type" content="${pageType}" />`);
       expect(html).toContain(`<meta name="sentry-release" content="${FAKE_RELEASE}" />`);
+      expect(html).toContain(`<meta name="sentry-environment" content="${FAKE_ENVIRONMENT}" />`);
       expect(html).toContain('<script type="module" src="/app/sentry.js"></script>');
     });
 
@@ -144,6 +147,24 @@ describe('the served shells carry the Sentry DSN and page type only when configu
       expect(html.length).toBeGreaterThan(20);
       expect(html).not.toContain('sentry');
       expect(html).not.toContain('/app/sentry.js');
+    });
+  }
+
+  for (const { what, path } of surfaces) {
+    it(`${what} arrives with Document-Policy: js-profiling, DSN or not`, async () => {
+      // The browser profiler (sentry-boot.ts) samples the JS Self-Profiling
+      // API, which a document may only call when its HTML response granted
+      // it. Sent unconditionally — see HTML_SHELL_HEADERS — so the
+      // unconfigured box is the control that the header does not ride on
+      // the DSN.
+      for (const [base, ws] of [
+        [baseA, wsA],
+        [baseB, wsB],
+      ] as const) {
+        const res = await fetch(`${base}${path(ws)}`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('document-policy')).toBe('js-profiling');
+      }
     });
   }
 

@@ -47,6 +47,7 @@ import {
   readMockupHtml,
 } from '../mockup-capture.ts';
 import { injectWidget } from '../mockup-widget.ts';
+import { decodePathParam } from '../path-params.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
 import {
   HTML_SHELL_HEADERS,
@@ -299,6 +300,9 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       headers: {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-cache',
+        // The mockup is a real page with Sentry injected, so it profiles
+        // too — see HTML_SHELL_HEADERS.
+        'document-policy': 'js-profiling',
         // Content-derived like serveStatic's, and for the same reason: a
         // reload of an unchanged mock should cost a 304, and a deploy that
         // changed nothing should not throw the cache away. Hashed from the
@@ -570,12 +574,14 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // proportional to the project somebody actually opened, not to every
     // doc on the server.
     if (pathname.startsWith('/projects/')) {
-      let owner: string;
-      try {
-        owner = decodeURIComponent(pathname.slice('/projects/'.length));
-      } catch {
-        return new Response('bad project', { status: 400 });
-      }
+      // The one shared decoder, not a try/catch of its own. The front-door
+      // guard already answered a bad escape with 400 `bad-path` before this
+      // route was reached, so the `undefined` branch is unreachable from the
+      // network — but a second, differently-worded 400 was a second answer to
+      // the same question, and the next reader could not tell which one the
+      // server actually gives. See `path-params.ts`.
+      const owner = decodePathParam(pathname.slice('/projects/'.length));
+      if (owner === undefined) return new Response('bad project', { status: 400 });
       if (owner === '') return new Response('not found', { status: 404 });
       const artifacts = buildProjectArtifacts(docStore, withReviewUrl, owner);
       return new Response(

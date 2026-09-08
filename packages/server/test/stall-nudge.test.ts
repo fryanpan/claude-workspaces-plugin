@@ -1356,3 +1356,68 @@ describe('a lead that cannot be woken escalates to whoever is attached', () => {
     expect(sent[1]?.frame.escalatedFrom).toBeUndefined();
   });
 });
+
+/** One row an agent filed, in flight, that reads as UI work with nobody's
+ *  answer on it (`ui-review-gate.ts`). */
+const UNGATED = { id: 't-9', title: 'Move the Plan button onto the ticket', keyword: 'button' };
+
+describe('a row built past the UI gate is the lead’s finding', () => {
+  it('wakes the lead on a board where nothing else is wrong', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], ungatedUi: [UNGATED] })];
+
+    nudger.tick();
+
+    expect(sent).toHaveLength(1);
+    const frame = sent[0]?.frame as StallNudgeFrame;
+    expect(frame.ungatedUi).toEqual([UNGATED]);
+    // Nameable without a lookup, like every other finding that can lead a
+    // frame: the row is what the lead has to go and look at.
+    expect(frame.taskId).toBe('t-9');
+    expect(frame.stalledCount).toBe(0);
+  });
+
+  it('says it once, and says a second row when one appears', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], ungatedUi: [UNGATED] })];
+
+    nudger.tick();
+    world.now += MIN;
+    nudger.tick();
+
+    expect(sent).toHaveLength(1);
+
+    const second = { id: 't-10', title: 'Redo the review panel', keyword: 'panel' };
+    world.boards = [board({ stalled: [], ungatedUi: [UNGATED, second] })];
+    world.now += MIN;
+    nudger.tick();
+
+    expect(sent).toHaveLength(2);
+    expect((sent[1]?.frame as StallNudgeFrame).ungatedUi).toEqual([UNGATED, second]);
+  });
+
+  it('names it under `changed` beside a row the lead was already told about', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board()];
+
+    nudger.tick();
+    world.boards = [board({ ungatedUi: [UNGATED] })];
+    world.now += MIN;
+    nudger.tick();
+
+    expect(sent).toHaveLength(2);
+    expect((sent[1]?.frame as StallNudgeFrame).changed?.ungatedUi).toEqual([UNGATED]);
+  });
+
+  it('goes quiet when the row clears the gate', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], ungatedUi: [UNGATED] })];
+
+    nudger.tick();
+    world.boards = [board({ stalled: [], ungatedUi: [] })];
+    world.now += MIN;
+    nudger.tick();
+
+    expect(sent).toHaveLength(1);
+  });
+});

@@ -31,6 +31,7 @@ check that serves none of them is weight.
 | A row is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
 | A row waits on a person and nothing is filed on that person's queue | The lead | Same frame, `unfiled` |
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
+| An agent-filed UI row is being built with no answered review item | The lead | Same frame, `ungatedUi` |
 | No session on the board is alive | Team Lead, then the owner | The last resort — the board files an item past the lead |
 
 The owner is the addressee of exactly one row of that table, and only when
@@ -83,13 +84,27 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    verdict counted it, which was the same wake said twice with a different
    number on each. A hold revised away inside the window never reaches the
    lead at all.
+5. **A UI change an agent proposed cannot ship unasked** (this PR). An
+   agent-filed row that changes what a person sees on screen clears a review
+   item — answered — before anybody builds it. That is the complex-task gate
+   the two board skills already carry; what is new is that a breach is
+   VISIBLE. A row an agent filed, in flight, whose words read as UI work
+   (`ui-review-gate.ts`), with no answered review item on either of its two
+   surfaces, is named in the lead's stall frame as `ungatedUi` and counted on
+   the verdict's `ungatedUi` line. It is the only finding here about a row
+   that IS moving, which is the point: the rule it breaks is about what got
+   skipped on the way, and every other check on this board is a check for
+   silence. Three of its four reads are explicit state; the fourth is a
+   keyword read of the row's own words, and its limits are in
+   [criteria.md](criteria.md).
 
 ## How to read the verdict
 
 `GET /workspaces/<id>/keep-moving` returns the latest verdict and a week of
 history. Each verdict is PASS or FAIL with the rows behind it: `stalled`,
-`unfiled`, `unreadable`, `held` (items past the window) and `escalated` (items
-the board filed to the owner in the last day), plus `waiting` — the rows a
+`unfiled`, `unreadable`, `held` (items past the window), `escalated` (items
+the board filed to the owner in the last day) and `ungatedUi` (rows built past
+the UI gate), plus `waiting` — the rows a
 filed item excuses, each with the item's address — which is a record rather
 than a finding. The target is PASS on every
 run and `escalated` at zero. The log line is

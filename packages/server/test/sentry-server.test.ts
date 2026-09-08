@@ -9,6 +9,7 @@ import {
   routePatternForSpan,
   sanitizeErrorForCapture,
   scrubEventForPrivacy,
+  serverSentryTelemetry,
   withRouteSpan,
 } from '../src/sentry.ts';
 
@@ -382,10 +383,11 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
   // letters-before-the-dash prefix, so this fixture stays realistic instead
   // of accidentally exercising a collision that production doesn't have.
   const release = 'a822618-dirty';
+  const environment = 'capture-env-b7c1';
 
   beforeAll(async () => {
     capture = startCaptureServer();
-    await initServerSentry({ dsn: capture.dsn, release });
+    await initServerSentry({ dsn: capture.dsn, release, environment });
   });
 
   afterAll(async () => {
@@ -396,6 +398,13 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
 
   it('is active once initialized with a DSN', () => {
     expect(isServerSentryActive()).toBe(true);
+  });
+
+  it('reports the project its DSN names and the environment it stamps, never the key', () => {
+    const t = serverSentryTelemetry();
+    expect(t.project).toBe('1');
+    expect(t.environment).toBe(environment);
+    expect(JSON.stringify(t)).not.toContain('examplekey');
   });
 
   it('a deliberately slow request produces a transaction naming the route pattern, stamped with the release', async () => {
@@ -420,6 +429,7 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
     const joined = bodies.join('\n');
     expect(joined).toContain('GET /workspaces/:id/docs/:id/content');
     expect(joined).toContain(release);
+    expect(joined).toContain(`"environment":"${environment}"`);
     // The whole point: the raw docId never left the process.
     expect(joined).not.toContain(docId);
   });
@@ -493,6 +503,70 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
     expect(joined).not.toContain(docId);
     expect(joined).not.toContain('url.full');
     expect(joined).not.toContain('"url.path"');
+  });
+
+  it('a console.error becomes a Sentry log line — with the doc id it named scrubbed out', async () => {
+    // Logs leave in their own envelope item (`{"type":"log"}`), which the
+    // error/transaction scrubs never see. The random id is the leak probe:
+    // it can only reach the wire by flowing through the console call. The
+    // markers carry no dash on purpose — `sentry-log-probe-…` reads as a
+    // minted id to the scrub and comes back as `[id]`, which the first run
+    // of this test found out.
+    capture.hits().length = 0;
+    const docId = `d-${crypto.randomUUID()}`;
+    const marker = `sentryLogProbe${crypto.randomUUID().slice(0, 8)}`;
+    // Two shapes in one line: a minted id (the shape floor) and a bound
+    // file's path mid-sentence (the embedded-path pass — ordinary words, no
+    // shape, and not a whole-string path either).
+    console.error(
+      `${marker} failed for ${docId} at /workspaces/${WS}/docs/quarterly-comp-review.md`,
+    );
+    await flushServerSentry(5000);
+    const joined = capture
+      .hits()
+      .map((h) => h.text)
+      .join('\n');
+    expect(joined).toContain('{"type":"log"');
+    expect(joined).toContain(marker);
+    // A log item carries the environment as an attribute, not a top-level
+    // field the way an event does.
+    expect(joined).toContain(`"sentry.environment":{"value":"${environment}"`);
+    expect(joined).not.toContain(docId);
+    expect(joined).not.toContain('quarterly-comp-review');
+    expect(joined).toContain('/workspaces/:id/docs/:id');
+  });
+
+  it('a console.log stays local — only warn and error are forwarded', async () => {
+    capture.hits().length = 0;
+    const marker = `sentryLogQuiet${crypto.randomUUID().slice(0, 8)}`;
+    console.log(`${marker} narrates a request`);
+    // Positive control in the same flush: a warn DOES arrive, so an empty
+    // capture below is "filtered", not "logs are off".
+    const control = `sentryLogControl${crypto.randomUUID().slice(0, 8)}`;
+    console.warn(control);
+    await flushServerSentry(5000);
+    const joined = capture
+      .hits()
+      .map((h) => h.text)
+      .join('\n');
+    expect(joined).toContain(control);
+    expect(joined).not.toContain(marker);
+  });
+
+  it('an application metric is sent as a trace metric — with a doc id in its attributes scrubbed out', async () => {
+    capture.hits().length = 0;
+    const Sentry = await import('@sentry/bun');
+    const docId = `w-${crypto.randomUUID()}`;
+    const name = `cw.test.metric_${crypto.randomUUID().slice(0, 8)}`;
+    Sentry.metrics.count(name, 1, { attributes: { subject: `doc ${docId}`, route: 'test' } });
+    await flushServerSentry(5000);
+    const joined = capture
+      .hits()
+      .map((h) => h.text)
+      .join('\n');
+    expect(joined).toContain('{"type":"trace_metric"');
+    expect(joined).toContain(name);
+    expect(joined).not.toContain(docId);
   });
 
   it('the beforeSend/beforeSendTransaction scrub catches a raw URL that withRouteSpan never touched', async () => {

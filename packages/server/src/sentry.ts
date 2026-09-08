@@ -20,7 +20,11 @@
  * DSN is configured — not by reading this file.
  */
 
-import { routePatternForSpan, scrubEventForPrivacy } from '@claude-workspaces/core/trace-privacy';
+import {
+  routePatternForSpan,
+  scrubEventForPrivacy,
+  scrubTelemetryItem,
+} from '@claude-workspaces/core/trace-privacy';
 
 /**
  * The privacy floor is shared with the browser build, so it lives in
@@ -56,6 +60,12 @@ export interface ServerSentryTelemetry {
   lastSendAt: number | null;
   /** `transaction` for a span envelope, `error` for an event, as the SDK names them. */
   lastSendType: string | null;
+  /** The Sentry project id the DSN names (its path segment — the public
+   *  half of a DSN, never the key), so "wrong project" is readable from
+   *  the process instead of from the plist. `null` when unconfigured. */
+  project: string | null;
+  /** The `environment` every event is stamped with. `null` when unconfigured. */
+  environment: string | null;
 }
 
 const telemetry: Omit<ServerSentryTelemetry, 'active'> = {
@@ -64,7 +74,20 @@ const telemetry: Omit<ServerSentryTelemetry, 'active'> = {
   lastSendStatus: null,
   lastSendAt: null,
   lastSendType: null,
+  project: null,
+  environment: null,
 };
+
+/** The project id is the last path segment of a DSN; the key before `@` is
+ *  never read. A DSN that does not parse reports no project. */
+export function sentryProjectOf(dsn: string): string | null {
+  try {
+    const seg = new URL(dsn).pathname.split('/').filter(Boolean).pop();
+    return seg && /^\d+$/.test(seg) ? seg : null;
+  } catch {
+    return null;
+  }
+}
 
 export function serverSentryTelemetry(): ServerSentryTelemetry {
   return { active: sentryModule !== null, ...telemetry };
@@ -80,6 +103,8 @@ export function resetServerSentryForTest(): void {
   telemetry.lastSendStatus = null;
   telemetry.lastSendAt = null;
   telemetry.lastSendType = null;
+  telemetry.project = null;
+  telemetry.environment = null;
 }
 
 export function isServerSentryActive(): boolean {
@@ -95,11 +120,16 @@ export function isServerSentryActive(): boolean {
 export async function initServerSentry(opts: {
   dsn: string;
   release: string | null;
+  /** `production` / `staging` / `development`; see server-config.ts. */
+  environment?: string | null;
 }): Promise<void> {
   const Sentry = await import('@sentry/bun');
+  telemetry.project = sentryProjectOf(opts.dsn);
+  telemetry.environment = opts.environment ?? null;
   Sentry.init({
     dsn: opts.dsn,
     release: opts.release ?? undefined,
+    environment: opts.environment ?? undefined,
     tracesSampleRate: 1.0,
     // Default (false): no IPs, no cookies, no headers beyond what tracing
     // itself needs. Traces carry shapes and counts, never content — see
@@ -129,10 +159,28 @@ export async function initServerSentry(opts: {
     // explicit control, so they're the single source of truth here — same
     // reasoning as disabling `BunServer` below and leaving withRouteSpan as
     // the one thing that names a span.
-    integrations: (defaults) =>
-      defaults.filter(
+    integrations: (defaults) => [
+      ...defaults.filter(
         (i) => !['BunServer', 'OnUncaughtException', 'OnUnhandledRejection'].includes(i.name),
       ),
+      // Logs: every console.warn / console.error the server prints is also a
+      // Sentry log line, searchable next to the error or trace it belongs
+      // to. `log`/`info` stay local — the server narrates every request at
+      // those levels and the volume would bury the signal.
+      Sentry.consoleLoggingIntegration({ levels: ['warn', 'error'] }),
+      // Metrics: CPU, RSS, heap, event-loop utilisation and uptime, sampled
+      // every 30s under the SDK's defaults, so a slow prod reads as a curve
+      // rather than a hunch. Application counters go through
+      // `Sentry.metrics.*` and ride the same channel.
+      Sentry.bunRuntimeMetricsIntegration(),
+    ],
+    // Sentry's defaults, stated so a future SDK cannot silently flip them:
+    // logs and metrics are product features Bryan asked for by name
+    // (2026-09-08). Profiling is deliberately absent — @sentry/bun has no
+    // profiler (the Node one needs a native addon Bun cannot load), so the
+    // browser is the only side that profiles; see sentry-boot.ts.
+    enableLogs: true,
+    enableMetrics: true,
     // Floor, not a substitute for the above: disabling BunServer closes the
     // one leak source this file found by reading the SDK's source. It does
     // not prove there isn't another — a different default integration, or
@@ -146,6 +194,17 @@ export async function initServerSentry(opts: {
     },
     beforeSendTransaction(event) {
       return scrubEventForPrivacy(event) as typeof event;
+    },
+    // Logs and metrics leave by their own envelopes, so the two hooks above
+    // never see them. A log line is free text from a console call and a
+    // metric's attributes are whatever the caller passed, which makes these
+    // the two easiest places to paste a doc path; scrubTelemetryItem adds
+    // the embedded-path pass the event floor does not need.
+    beforeSendLog(log) {
+      return scrubTelemetryItem(log) as typeof log;
+    },
+    beforeSendMetric(metric) {
+      return scrubTelemetryItem(metric) as typeof metric;
     },
   });
   sentryModule = Sentry;

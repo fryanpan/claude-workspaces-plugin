@@ -59,10 +59,12 @@ describe('a malformed escape over HTTP', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  // The two shapes measured answering 500 before the guard existed. They are
-  // in different modules, which is the point: neither was converted, and the
-  // front-door check covers both.
-  for (const path of ['/workspaces/a%zzb', '/api/prompts/a%zzb']) {
+  // The two shapes measured answering 500 before the guard existed, plus the
+  // one route that had answered 400 with a try/catch of its own until it was
+  // unified onto `decodePathParam`. They are in three different modules,
+  // which is the point: none was converted, and the front-door check covers
+  // all three with one answer rather than three spellings of it.
+  for (const path of ['/workspaces/a%zzb', '/api/prompts/a%zzb', '/projects/a%zzb']) {
     it(`answers 400 rather than 500 for ${path}`, async () => {
       const res = await fetch(`${base}${path}`);
       expect(res.status).toBe(400);

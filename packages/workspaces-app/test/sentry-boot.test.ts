@@ -15,10 +15,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 const init = vi.fn();
 const browserTracingIntegration = vi.fn(() => ({ name: 'BrowserTracing' }));
+const browserProfilingIntegration = vi.fn(() => ({ name: 'BrowserProfiling' }));
+const consoleLoggingIntegration = vi.fn((opts: { levels: string[] }) => ({
+  name: 'ConsoleLogs',
+  levels: opts.levels,
+}));
 
 vi.mock('@sentry/browser', () => ({
   init,
   browserTracingIntegration,
+  browserProfilingIntegration,
+  consoleLoggingIntegration,
   setMeasurement: vi.fn(),
 }));
 
@@ -26,10 +33,17 @@ type InitOptions = {
   dsn: string;
   release?: string;
   tracesSampleRate: number;
+  profileSessionSampleRate: number;
+  profileLifecycle: string;
+  enableLogs: boolean;
+  enableMetrics: boolean;
+  integrations: Array<{ name: string; levels?: string[] }>;
   sendDefaultPii: boolean;
   initialScope: { tags: Record<string, string> };
   beforeSend: (e: unknown) => unknown;
   beforeSendTransaction: (e: unknown) => unknown;
+  beforeSendLog: (e: unknown) => unknown;
+  beforeSendMetric: (e: unknown) => unknown;
 };
 
 function shell(tags: Record<string, string>): void {
@@ -112,6 +126,45 @@ describe('the page Sentry entry', () => {
     shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'board' });
     await boot();
     expect((init.mock.calls[0]?.[0] as InitOptions).release).toBeUndefined();
+  });
+
+  it('profiles every session while a trace is open, and forwards warn/error console lines as logs', async () => {
+    shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'board' });
+    await boot();
+    const opts = init.mock.calls[0]?.[0] as InitOptions;
+    const names = opts.integrations.map((i) => i.name);
+    expect(names).toContain('BrowserTracing');
+    expect(names).toContain('BrowserProfiling');
+    // Profiles ride the traces: a session is always sampled, and the
+    // profiler runs whenever a root span is open rather than on a manual
+    // start nobody calls.
+    expect(opts.profileSessionSampleRate).toBe(1);
+    expect(opts.profileLifecycle).toBe('trace');
+    // Logs and metrics stated on, not left to the SDK default.
+    expect(opts.enableLogs).toBe(true);
+    expect(opts.enableMetrics).toBe(true);
+    const logs = opts.integrations.find((i) => i.name === 'ConsoleLogs');
+    expect(logs?.levels).toEqual(['warn', 'error']);
+  });
+
+  it('scrubs every log line and every metric on the way out, same as events', async () => {
+    shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'doc' });
+    await boot();
+    const opts = init.mock.calls[0]?.[0] as InitOptions;
+    const needle = 'quarterly-comp-review.md';
+    const log = { level: 'warn', message: `slow save for /workspaces/${WS_ID}/docs/${needle}` };
+    expect(JSON.stringify(log)).toContain(needle);
+    expect(JSON.stringify(opts.beforeSendLog(log))).not.toContain(needle);
+    // The floor is paths and minted ids — the shapes the SDK and this code
+    // produce. A bare filename with no path around it has no shape to
+    // match and stays the caller's responsibility, as it does for events.
+    const metric = {
+      name: 'cw.save.ms',
+      value: 12,
+      attributes: { doc: `/workspaces/${WS_ID}/docs/${needle}` },
+    };
+    expect(JSON.stringify(metric)).toContain(needle);
+    expect(JSON.stringify(opts.beforeSendMetric(metric))).not.toContain(needle);
   });
 
   it('scrubs every event and every transaction on the way out', async () => {

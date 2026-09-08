@@ -14101,6 +14101,9 @@ function changedClause(changed) {
   const held = changed.heldItems ?? [];
   if (held.length > 0)
     bits.push(`${held.length} review item(s) newly held`);
+  const ungated = changed.ungatedUi ?? [];
+  if (ungated.length > 0)
+    bits.push(`${ungated.length} row built past the UI gate`);
   if (changed.escalated === true)
     bits.push("the board’s quietest row crossed another repeat window");
   if (bits.length === 0)
@@ -14133,6 +14136,11 @@ function stalledLine(p) {
     const noun = held.length === 1 ? "review item is" : "review items are";
     parts.push(`${held.length} ${noun} HELD by the quality gate and off the reader's queue — ` + `${heldRowsClause(held)}. Get each filer to revise_review_item; nobody can answer a held ask.`);
   }
+  const ungated = p.ungatedUi ?? [];
+  if (ungated.length > 0) {
+    const noun = ungated.length === 1 ? "UI row is" : "UI rows are";
+    parts.push(`${ungated.length} ${noun} being built past the review gate — an agent filed it, it reads as ` + `UI work, and nobody answered a review item on it — ${ungatedRowsClause(ungated)}. ` + "Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.");
+  }
   const changed = changedClause(p.changed);
   if (changed)
     parts.unshift(changed);
@@ -14157,6 +14165,16 @@ function heldRowClause(row) {
 }
 function heldRowsClause(rows) {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(heldRowClause);
+  const rest = rows.length - shown.length;
+  return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
+}
+function ungatedRowClause(row) {
+  const title = row.title ? `"${row.title}" ` : "";
+  const word = row.keyword ? `, matched: ${row.keyword}` : "";
+  return `${title}(${row.id}${word})`;
+}
+function ungatedRowsClause(rows) {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(ungatedRowClause);
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
 }
@@ -19207,7 +19225,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.190";
+var PLUGIN_VERSION = "0.1.192";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

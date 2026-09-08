@@ -30,7 +30,7 @@
  */
 
 import type { LeadPresence, User } from '@claude-workspaces/core';
-import { api } from './doc-path.ts';
+import { api, docJsonUrl } from './doc-path.ts';
 import { floatDock } from './float-dock.ts';
 import { leadReceiptSuffix } from './lead-banner.ts';
 
@@ -106,7 +106,11 @@ async function defaultFetchJson(url: string, init?: RequestInit): Promise<unknow
 export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
   const { docId, root, user, canWrite } = opts;
   const fetchJson = opts.fetchJson ?? defaultFetchJson;
-  const docUrl = api(`docs/${encodeURIComponent(docId)}`);
+  // POST ONLY — the press hangs `/review-request` off this. A GET here gets
+  // the editor's HTML page, which is the bug `docJsonUrl` exists to close.
+  const docPostBase = api(`docs/${encodeURIComponent(docId)}`);
+  // The RECORD. Same path, and only the query asks for data.
+  const docReadUrl = docJsonUrl(docId);
 
   const float = document.createElement('button');
   float.type = 'button';
@@ -178,7 +182,7 @@ export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
 
   async function load(): Promise<void> {
     try {
-      const body = (await fetchJson(docUrl)) as DocAnswer;
+      const body = (await fetchJson(docReadUrl)) as DocAnswer;
       if (disposed) return;
       huddle = body.meta?.huddle === true;
       requestedAt = body.meta?.reviewRequestedAt;
@@ -198,7 +202,7 @@ export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
     error.textContent = '';
     busy = true;
     render();
-    void fetchJson(`${docUrl}/review-request`, {
+    void fetchJson(`${docPostBase}/review-request`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ author: user }),

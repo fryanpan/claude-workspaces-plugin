@@ -88,6 +88,18 @@ export function resolveServerConfig(opts: {
   const HOUR_MS = 60 * MINUTE_MS;
 
   const sentryDsn = readRenamedEnv(env, 'CW_SENTRY_DSN')?.trim();
+  // Sentry's convention is one project per platform: the server reports to
+  // its own project (`CW_SENTRY_SERVER_DSN`) and the browser to the one
+  // `CW_SENTRY_DSN` names. A box that sets only the shared key keeps the old
+  // one-project behaviour — the fallback is what lets the server key be
+  // added without a coordinated restart.
+  const sentryServerDsn = readRenamedEnv(env, 'CW_SENTRY_SERVER_DSN')?.trim() || sentryDsn;
+  // Sentry's `environment` on every event, both sides. Explicit when set;
+  // otherwise a start with a client release directory is a published deploy
+  // (prod) and anything else is a checkout run straight from source.
+  const sentryEnvironment =
+    readRenamedEnv(env, 'CW_SENTRY_ENVIRONMENT')?.trim() ||
+    (clientReleaseRootDir ? 'production' : 'development');
 
   // Server-side Sentry: traces + error capture for THIS process, independent
   // of the `sentryDsn` handed to `createServer` below (that one only ever
@@ -595,6 +607,8 @@ export function resolveServerConfig(opts: {
     publicBaseUrlOverride,
     clientReleaseRootDir,
     sentryDsn,
+    sentryServerDsn,
+    sentryEnvironment,
     releaseSourceRef,
     readyNudgeIdleMs,
     stallNudgeQuietMs,

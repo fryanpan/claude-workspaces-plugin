@@ -55,7 +55,7 @@ flowchart TB
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
-    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict"]
+    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · client-release.ts · plugin-release.ts · sentry.ts"]
@@ -114,11 +114,41 @@ run for a request whatever path it named. `server-options.ts` holds
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
 
+**And every one of those paths is written down once.** `routes/route-table.ts`
+holds the vocabulary — a gate is `trusted-local`, `loopback-only`,
+`share-scope`, `owner-in-handler`, `collab-scope`, `recall-callback` or `open`
+— and `routes/route-table-rows.ts` holds the rows, one per path pattern.
+`Bun.serve` mounts them as its `routes` object, so the table is a value the
+process holds rather than a document that rots, and
+[routes.md](routes.md) is the rendered copy (`bun run routes:table`). Both
+files sit under `routes/` and change none of the picture above: they name URL
+paths, which is what that directory is for.
+
+The gate column is a CHECKED claim, not a comment.
+`shareScopeAllows` is a pure function of the path, the method and the share, so
+`test/route-table.test.ts` drives it with each row's own example address and
+fails when the guard disagrees. That is what makes a route added above its
+gate a CI failure: a new address under an already-allowed prefix either
+declares `share-scope`, or declares `owner-in-handler` and names where the
+in-route refusal lives. It cannot be filed as `trusted-local`, because the
+guard would say otherwise. What the table still cannot see is whether an
+`owner-in-handler` route really carries its refusal — that one is the
+reviewer's, and the routes that have it carry their own tests.
+
+Dispatch stays with the ordered chain in `server.ts` on purpose. Bun matches
+by specificity; this router's order is behaviour in eight documented places,
+among them the Recall status webhook immediately above the `/recall/` upgrade
+and every `…/docs/:docId/meetings…` pattern above the doc resource catch-all.
+So every mounted entry's handler is the same front door an unmatched address
+reaches through `fetch`, and the table is the registry rather than the router.
+
 **What runs on a clock.** Three loops in the server tick rather than answer a
 request, and all three take an injected `now` so a test moves the clock
 instead of waiting: the two board wakes in the Keep-moving group (the
 stall tick also records `keep-moving-verdict.ts`, the PASS/FAIL measurement
-of that group, off the same snapshot the wake reads —
+of that group, off the same snapshot the wake reads, and reads
+`ui-review-gate.ts` — the one finding in the group about a row that is
+MOVING, an agent-filed UI row being built with nobody's answer on it —
 [stall-check/](stall-check/README.md)), and
 `task-scheduler.ts`, which files an instance each time a row's schedule comes
 due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
@@ -204,7 +234,7 @@ family and moves nothing in the picture: it is the fan-out one level below
 two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `notes-edit-parse.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
@@ -313,6 +343,7 @@ exactly once, and nothing word-rate enters the SSE buffer.
 - [stall-check/](stall-check/README.md) — the stall check's design, what "working" means, and per-module criteria; [stall-detection.md](stall-detection.md) is the mechanics as they run today and why each layer exists.
 - [goal-projection.md](goal-projection.md) — the goal bar, the remainder, and when a goal lands.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
+- [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.
 
 ## Adding a file
