@@ -440,6 +440,14 @@ grows once a meeting has ended, split out of `meeting-chooser.ts` — which sits
 on the 500-line bar — because that panel is where every billed choice for the
 NEXT recording is made and this is a report on the last one. It reads the
 meetings route the cast list already reads, at the tap rather than at mount.
+`meeting-notetaker.ts` joins the same view tier for the same reason and
+changes no layer: it is the Note-taker fold in that panel — which of the three
+note-takers this doc's minutes are written by — split out of
+`meeting-chooser.ts` because that file sits on the 500-line bar and this is a
+section with its own state and no dependency on the rest of the form. It is
+also the client half of the `notes-method` route, so a switch made while a
+meeting is running goes over the meeting socket and one made at rest goes over
+HTTP.
 `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing
