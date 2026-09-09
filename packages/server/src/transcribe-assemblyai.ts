@@ -307,6 +307,33 @@ export function audioEndMsFromTurn(msg: Record<string, unknown>): number | undef
   return typeof end === 'number' && Number.isFinite(end) ? end : undefined;
 }
 
+/**
+ * The words of a `Turn` frame the engine has already finalized, joined.
+ *
+ * Universal Streaming marks each entry of `words` with `word_is_final`, and
+ * the final ones are a PREFIX: a word never un-finalizes, and the
+ * provisional tail sits after them. So the answer is the leading run, and a
+ * `false` ends the scan rather than being skipped over — a later `true` on
+ * this frame would be a contract this adapter has never seen, and quietly
+ * splicing across the gap would put words in the notes in the wrong order.
+ *
+ * Undefined when the frame carries no `words`, when nothing in it is final
+ * yet, or when the frame is the settled turn (whose whole text is final and
+ * whose punctuation the caller wants instead). See `EngineTurn.settledText`.
+ */
+export function settledWordsFromTurn(msg: Record<string, unknown>): string | undefined {
+  const words = msg.words;
+  if (!Array.isArray(words)) return undefined;
+  const out: string[] = [];
+  for (const raw of words) {
+    const word = raw as Record<string, unknown> | undefined;
+    if (word?.word_is_final !== true) break;
+    const text = word.text;
+    if (typeof text === 'string' && text.trim() !== '') out.push(text.trim());
+  }
+  return out.length > 0 ? out.join(' ') : undefined;
+}
+
 /** Labels the engine uses to mean "not decided yet" — never a speaker. */
 const PLACEHOLDER_LABELS = new Set(['PENDING', 'UNKNOWN']);
 
@@ -542,11 +569,17 @@ function buildEngine(opts: AssemblyAiOptions, variant: EngineVariant): Transcrip
                   const speaker = speakerFromLabel(msg.speaker_label);
                   if (final) leg.settled.set(order, { text: transcript, ...speaker });
                   const audioEndMs = audioEndMsFromTurn(msg);
+                  const settledText = final ? undefined : settledWordsFromTurn(msg);
                   sessionOpts.onTurn({
                     turn: idFor(leg, order),
                     text: transcript,
                     final,
                     ...speaker,
+                    // The already-final words of a turn still being spoken,
+                    // so the notes ceiling has something to write during a
+                    // long one. Never on a settled frame: there the whole
+                    // `transcript` is final, and formatted.
+                    ...(settledText !== undefined ? { settledText } : {}),
                     // Only when the frame actually carried words; a
                     // SpeakerRevision deliberately carries neither, because a
                     // relabel is not a latency event.

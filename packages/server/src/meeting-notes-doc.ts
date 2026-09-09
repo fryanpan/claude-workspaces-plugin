@@ -54,6 +54,7 @@
 
 import { contentKind } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { docLookupUrl } from './meeting-lookup.ts';
 import { NOTES_OUTLINE_RECENT_BLOCKS } from './meeting-notes-composer.ts';
 import { correctNotesSection } from './meeting-notes-correction.ts';
@@ -76,6 +77,7 @@ import {
   runTaskCapture,
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
+import { meetingTimingPath } from './meetings.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -83,10 +85,13 @@ import {
   readNotesOutline,
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
+import { type NotesHeadingStore, createNotesHeadingFileStore } from './notes-heading-store.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
+import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
+import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import {
@@ -94,6 +99,7 @@ import {
   relabelNotesSection,
   retagSpeakerInNotes,
 } from './notes-speaker-tags.ts';
+import { createNotesTimingLog } from './notes-timing.ts';
 
 export { type NotesDocStore, MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 export {
@@ -163,10 +169,16 @@ export interface NotesContextTasks {
  *
  * PER DOC **AND** PER MEETING. A new recording opens its own section below
  * whatever the last one wrote — the owner's 2026-08-31 rule that a
- * stop-and-restart never replaces what is already written. It is memory only:
- * a restarted server remembers no heading, opens a new section on its first
- * tick, and can still only suggest on the previous one's bullets, which is the
- * safe direction.
+ * stop-and-restart never replaces what is already written.
+ *
+ * AND IT IS NO LONGER MEMORY ONLY. It used to be: a restarted server
+ * remembered no heading and opened a new section on its first tick, so a
+ * lunchtime deploy split one conversation across two `Meeting notes`
+ * headings. The id is written beside the meeting's own transcript now
+ * (`notes-heading-store.ts`), and the map in front of it is a cache. Keying
+ * on the meeting is what keeps the two cases apart: an id the store already
+ * knows belongs to the recording that opened it, and a new recording carries
+ * a new id no record answers to.
  */
 /** What a heading memory is keyed by. Both halves are load-bearing — see the
  *  `NotesHeadingMemory` note on cross-wiring. */
@@ -211,27 +223,46 @@ export interface NotesHeadingMemory {
  *  mistaken for the section. */
 const NOTES_HEADING_LEVEL = 2;
 
-export function createNotesHeadingMemory(): NotesHeadingMemory {
+export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadingMemory {
   // KEYED BY DOC **AND** MEETING. Keyed by doc alone, two recordings into one
   // doc cross-wired: the second one's `beginMeeting` wiped the first one's
   // memory, so the first one's next tick either adopted the second's heading
   // or opened a third section under a doc that already had two.
+  //
+  // The map is now a CACHE over `store`, which keeps the same fact beside the
+  // meeting's transcript. Without one the memory behaves exactly as it did:
+  // remembered for the life of the process and no longer.
   const byMeeting = new Map<string, string>();
   const keyOf = ({ docId, meetingId }: NotesMeetingIds): string => `${docId}::${meetingId}`;
   const present = (id: string, outline: readonly prose.OutlineEntry[]): boolean =>
     outline.some((e) => e.id === id && e.kind === 'heading');
+  /** What this meeting is writing under, reading through to the store on a
+   *  cache miss — which is every read of the first tick after a restart. */
+  const remembered = (ids: NotesMeetingIds): string | undefined => {
+    const key = keyOf(ids);
+    const held = byMeeting.get(key);
+    if (held !== undefined) return held;
+    const stored = store?.read(ids);
+    if (stored !== undefined) byMeeting.set(key, stored);
+    return stored;
+  };
+  /** Forget it in both places. Used only where the heading is GONE from the
+   *  doc: a remembered id whose block no longer exists would fail every edit
+   *  addressed to it for the rest of the meeting. */
+  const forget = (ids: NotesMeetingIds): void => {
+    byMeeting.delete(keyOf(ids));
+    store?.clear(ids);
+  };
   return {
     headingId(ids, outline) {
-      const key = keyOf(ids);
-      const id = byMeeting.get(key);
+      const id = remembered(ids);
       if (id === undefined) return undefined;
       if (present(id, outline)) return id;
-      byMeeting.delete(key);
+      forget(ids);
       return undefined;
     },
     learn(ids, before, after) {
-      const key = keyOf(ids);
-      const held = byMeeting.get(key);
+      const held = remembered(ids);
       if (held !== undefined && present(held, after)) return;
       const known = new Set(before.map((e) => e.id));
       const opened = after.find(
@@ -241,10 +272,18 @@ export function createNotesHeadingMemory(): NotesHeadingMemory {
           e.author === NOTES_AUTHOR_ID &&
           (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL,
       );
-      if (opened) byMeeting.set(key, opened.id);
-      else if (held !== undefined) byMeeting.delete(key);
+      if (opened) {
+        byMeeting.set(keyOf(ids), opened.id);
+        store?.write(ids, opened.id);
+      } else if (held !== undefined) forget(ids);
     },
     beginMeeting(ids) {
+      // IN MEMORY ONLY, AND THAT IS THE RESTART FIX. A meeting id is minted
+      // from the millisecond a recording started, so a session starting under
+      // one the store already knows is the SAME recording coming back after a
+      // restart — and it must find the section it opened rather than open a
+      // second one. A genuinely new recording carries a new id, which no
+      // record answers to, so it still gets a section of its own.
       byMeeting.delete(keyOf(ids));
     },
   };
@@ -267,20 +306,37 @@ function noteLegacyKept(docId: string): void {
 }
 
 /**
+ * Why a tick's edits did not reach the doc.
+ *
+ * NAMED RATHER THAN COUNTED, because "doc write skipped" was for weeks the
+ * only thing production said about a meeting whose notes stopped growing —
+ * and it covered four unrelated failures at once. `no-doc` is a lookup that
+ * came back empty (an evicted or deleted doc); `not-prose` is a doc that is
+ * not a notepad; `store-refused` is the store declining the batch outright;
+ * `all-edits-failed` is every edit in the batch naming a block that is no
+ * longer there. Only the last two are a compose worth retrying, and no
+ * amount of reading the old line could tell them apart.
+ */
+export type NotesWriteSkip = 'no-doc' | 'not-prose' | 'store-refused' | 'all-edits-failed';
+
+/** What a tick's write came to: `null` when it landed, else why it did not. */
+export type NotesWriteResult = null | NotesWriteSkip;
+
+/**
  * Write one tick's edits into its meeting doc, through the shared
- * `applyBlockEdits` verb. False — never a throw — when the doc is gone, is not
- * prose, or the whole batch failed: a meeting on a vanished doc still has its
- * transcript file, and a flat doc is not a notepad.
+ * `applyBlockEdits` verb. A skip reason — never a throw — when the doc is
+ * gone, is not prose, or the whole batch failed: a meeting on a vanished doc
+ * still has its transcript file, and a flat doc is not a notepad.
  */
 export function applyNotesUpdate(
   docStore: NotesDocStore,
   update: NotesUpdate,
   heading: NotesHeadingMemory,
   opts: { dataDir?: string } = {},
-): boolean {
+): NotesWriteResult {
   const doc = docStore.get(update.docId);
-  if (!doc) return false;
-  if (contentKind(doc.meta.type) !== 'prose') return false;
+  if (!doc) return 'no-doc';
+  if (contentKind(doc.meta.type) !== 'prose') return 'not-prose';
   // NO TRANSCRIPT IN THIS DOC (owner, 2026-09-03). A tick used to append the
   // meeting's own words here under `## Raw transcript`. It does not any more:
   // the notes are the shorter record a person has reviewed and edited, and
@@ -297,23 +353,34 @@ export function applyNotesUpdate(
     dataDir: opts.dataDir,
   });
   if (legacy === 'kept') noteLegacyKept(update.docId);
-  if (update.edits.length === 0) return true;
+  if (update.edits.length === 0) return null;
   // Headings before and after, so the memory can tell the section this batch
   // OPENED from the topic headings it also wrote. Cheap: `headingsOnly` walks
   // the same blocks the batch is about to and returns a handful of entries.
   const before = readNotesOutline(docStore, update.docId, { headingsOnly: true });
   const res = applyNotesBlockEdits(docStore, update.docId, update.edits);
-  if (!res.ok) return false;
+  if (!res.ok) return 'store-refused';
   heading.learn(
     { docId: update.docId, meetingId: update.meetingId },
     before,
     readNotesOutline(docStore, update.docId, { headingsOnly: true }),
   );
   // A batch every one of whose edits failed wrote nothing, and saying so is
-  // what puts the "doc write skipped" line in the log. A batch that landed
-  // some of its edits is a success: the rest reported `unknown-block`, which
-  // is the ordinary answer for a block a person deleted mid-compose.
-  return res.applied + res.suggested > 0;
+  // what reports the skip. A batch that landed some of its edits is a
+  // success: the rest reported `unknown-block`, which is the ordinary answer
+  // for a block a person deleted mid-compose.
+  return res.applied + res.suggested > 0 ? null : 'all-edits-failed';
+}
+
+/** What the log says about a skip, beyond its name — the detail whoever is
+ *  reading it needs next. Empty when the name is the whole answer. */
+export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
+  if (skip === 'no-doc') {
+    return 'the doc store had no such doc — it was deleted, or evicted while the meeting ran';
+  }
+  if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
+  if (skip === 'store-refused') return 'the store refused the batch outright';
+  return 'every edit named a block that is no longer in the doc';
 }
 
 /** The doc as the composer addresses it, capped so a tick's prompt is the size
@@ -464,13 +531,34 @@ export function withServerNotesSinks(
     /** Tests: a heading memory they can share across two harnesses to model a
      *  second meeting on one doc. */
     heading?: NotesHeadingMemory;
+    /**
+     * The board a bad meeting's review item is filed on — `TaskStore` in the
+     * server. A thunk like `tasks`, for the same reason.
+     *
+     * Absent, a meeting whose notes came out badly still says so in the
+     * end-of-meeting line and still leaves a record for the daily rollup; what
+     * it cannot do is put the finding in front of a person. That is the right
+     * degradation rather than a reason to refuse: an embedded server with no
+     * board is a legitimate way to run this.
+     */
+    qualityBoard?: () => NotesQualityBoard;
+    /** Who a filed quality item is attributed to. Defaults to the note-taker
+     *  itself, which is the hand that wrote the notes being reported on. */
+    qualityActor?: { id: string; name: string; kind?: string };
   },
 ): MeetingNotesDeps {
   const extractor = options.taskExtractor;
   const captureBoard = deps.captureBoard;
-  // One heading memory per wiring, i.e. per server: it is keyed by doc, and a
-  // meeting is the life of one notes section.
-  const heading = deps.heading ?? createNotesHeadingMemory();
+  // One heading memory per wiring, i.e. per server: it is keyed by doc and
+  // meeting, and a meeting is the life of one notes section. Backed by the
+  // data dir when there is one, so the section survives a restart mid-meeting
+  // — a deploy at lunchtime used to leave one conversation under two
+  // headings.
+  const heading =
+    deps.heading ??
+    createNotesHeadingMemory(
+      deps.dataDir !== undefined ? createNotesHeadingFileStore(deps.dataDir) : undefined,
+    );
   const boardOf = (docId: string): string | undefined => {
     const doc = deps.docStore().get(docId);
     return doc?.meta.setId ?? deps.boardOf?.(docId);
@@ -492,6 +580,40 @@ export function withServerNotesSinks(
       spentCues.set(docId, set);
     }
     return set;
+  };
+  /**
+   * Read the notes this meeting produced and act on what they say — never
+   * throwing, because this runs inside the stop and a quality report is worth
+   * strictly less than the flush it would take down with it.
+   *
+   * `null` when the pass itself failed, which the line then simply omits.
+   */
+  const qualityPass = (summary: {
+    docId: string;
+    meetingId: string;
+  }): NotesQualityPassResult | null => {
+    try {
+      const doc = deps.docStore().get(summary.docId);
+      return runNotesQualityPass(
+        {
+          docStore: deps.docStore,
+          ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
+          boardOf,
+          ...(deps.dataDir !== undefined ? { dataDir: deps.dataDir } : {}),
+          headingIdOf: (docId, meetingId) =>
+            heading.headingId({ docId, meetingId }, readNotesOutline(deps.docStore(), docId)),
+          actor: deps.qualityActor ?? { id: NOTES_AUTHOR_ID, name: 'Meeting Assistant' },
+        },
+        {
+          docId: summary.docId,
+          meetingId: summary.meetingId,
+          ...(doc?.meta.title !== undefined ? { docTitle: doc.meta.title } : {}),
+        },
+      );
+    } catch (err) {
+      console.error('[meeting-notes] quality report failed:', err);
+      return null;
+    }
   };
   const captureIntents: MeetingNotesDeps['captureIntents'] =
     options.captureIntents ??
@@ -568,6 +690,14 @@ export function withServerNotesSinks(
     // exactly like a healthy one. This is the coverage, stated at the stop.
     onMeetingSummary: (summary): void => {
       const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
+      // AND WHAT THE NOTES THEMSELVES CAME OUT LIKE. The line above says how
+      // much of the meeting reached a compose, and a meeting once reported
+      // every turn handled while its doc carried dozens of repeated lines,
+      // a subject nobody wrote down and names for voices the room never had.
+      // Turns reaching a compose is a fact about the pipeline; this is the
+      // fact about the notes, and it rides the SAME line so that nobody has
+      // to join two of them to ask the one question.
+      const quality = qualityPass(summary);
       const line =
         `[meeting-notes] ${summary.docId} meeting ${summary.meetingId}: ` +
         `${plural(summary.ticks, 'tick')} over ${plural(summary.turnsSettled, 'settled turn')}, ` +
@@ -580,14 +710,43 @@ export function withServerNotesSinks(
         (summary.ideas.retried > 0 ? ` (${summary.ideas.retried} retried)` : '') +
         (summary.composeFailures > 0
           ? `, ${plural(summary.composeFailures, 'failed compose')}`
-          : '');
-      // Only a meeting that actually lost words is an error. A clean one is
-      // still logged, because the absence of a line is not evidence that a
-      // meeting went well — it is evidence that nothing was written down.
-      if (summary.turnsLost > 0 || summary.ideas.lost > 0) console.error(line);
+          : '') +
+        // The number Bryan actually feels, when the meeting was measured.
+        (summary.latencyMedianMs !== undefined
+          ? `, settled-to-written median ${Math.round(summary.latencyMedianMs)}ms / worst ` +
+            `${Math.round(summary.latencyWorstMs ?? summary.latencyMedianMs)}ms`
+          : '') +
+        (quality === null ? '' : ` | ${quality.line}`);
+      // Only a meeting that actually lost words — or whose notes went past a
+      // quality bar — is an error. A clean one is still logged, because the
+      // absence of a line is not evidence that a meeting went well; it is
+      // evidence that nothing was written down.
+      if (
+        summary.turnsLost > 0 ||
+        summary.ideas.lost > 0 ||
+        (quality?.report.flags.length ?? 0) > 0
+      )
+        console.error(line);
       else console.log(line);
       options.onMeetingSummary?.(summary);
     },
+    // TIMING IS ON WHENEVER THERE IS A DATA DIR TO WRITE IT IN. It was
+    // opt-in, on the reasoning that a measurement nobody asked for is still a
+    // file in Bryan's data dir — but the file has a reader now (the at-stop
+    // quality report scores how late the notes landed from it), and a
+    // measurement that is only there when somebody remembered to ask for it
+    // cannot be read by anything. It holds counts and durations and no words,
+    // so it is as private as the empty directory it sits in.
+    // `CW_NOTES_TIMING=0` turns it off; the replay harness and the tick
+    // harness pass their own log instead.
+    ...(readRenamedEnv(process.env, 'CW_NOTES_TIMING') !== '0' && deps.dataDir !== undefined
+      ? {
+          openTiming: (ids: { docId: string; meetingId: string }) =>
+            createNotesTimingLog({
+              path: meetingTimingPath(deps.dataDir ?? '', ids.docId, ids.meetingId),
+            }),
+        }
+      : {}),
     onSessionStart: (ids): void => {
       // A new recording on this doc: whatever the previous one wrote is
       // FINISHED, and this recording may not rewrite it.
@@ -705,21 +864,32 @@ export function withServerNotesSinks(
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
       heading.headingId({ docId, meetingId }, outline),
-    onNotes: (update: NotesUpdate): void => {
+    onNotes: (update: NotesUpdate): boolean => {
+      let landed = true;
       try {
-        if (
-          !applyNotesUpdate(deps.docStore(), update, heading, {
-            ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
-          })
-        ) {
-          console.error(`[meeting-notes] doc write skipped for ${update.docId}`);
+        const skip = applyNotesUpdate(deps.docStore(), update, heading, {
+          ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+        });
+        if (skip !== null) {
+          landed = false;
+          // The reason, the doc, the meeting and the tick. The line this
+          // replaces named only the doc, so a meeting whose notes stopped
+          // could not be told from a doc that had been deleted.
+          console.error(
+            `[meeting-notes] doc write skipped for ${update.docId} meeting ` +
+              `${update.meetingId} tick ${update.tick.tick} (${update.edits.length} ` +
+              `edit${update.edits.length === 1 ? '' : 's'}): ${skip} — ${notesWriteSkipDetail(skip)}`,
+          );
         }
       } catch (err) {
-        // The session chain treats an onNotes throw as a failed compose and
-        // carries the words — wrong for notes that DID compose. Contain it.
+        // A throw is a broken sink rather than a refused write, and the words
+        // DID compose. Contained, and reported as a skip so the tick's words
+        // are carried instead of vanishing.
+        landed = false;
         console.error('[meeting-notes] doc write failed:', err);
       }
       options.onNotes?.(update);
+      return landed;
     },
     onRelabel: (relabel: NotesRelabel): void => {
       try {

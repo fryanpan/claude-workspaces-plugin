@@ -343,6 +343,21 @@ export interface DocStoreConfig {
    * activity and mtimes stay on the real one, because they are data.
    */
   now?: () => number;
+  /**
+   * Is a meeting recording into this doc right now?
+   *
+   * A HOLD ON EVICTION, and the one hold nothing else in the list covers. A
+   * meeting is a person talking with the doc open somewhere else — the
+   * notes reach it through `applyNotesUpdate`, which is not a connection,
+   * not a pending write and not a human edit. Every other hold asks about
+   * the doc; this asks about the room. Dropping the doc mid-meeting makes
+   * the very next tick's lookup come back empty, and the notes for the rest
+   * of that meeting go to a log line instead of to the page.
+   *
+   * A thunk because the meeting store outlives no DocStore in particular;
+   * absent (a bare store, a test) nothing is recording.
+   */
+  isRecording?: (docId: string) => boolean;
 }
 
 /** How long a doc must go quiet before an authoring burst commits one
@@ -587,6 +602,22 @@ export class DocStore {
     return this.cfg.now?.() ?? Date.now();
   }
 
+  /**
+   * Is a meeting recording into this doc? Never throws: a resolver that
+   * fails must not stop the sweep, and the safe answer when nobody can say
+   * is "yes, hold it" — a doc kept one sweep too long costs memory, a doc
+   * dropped mid-meeting costs the meeting its notes.
+   */
+  private isRecording(docId: string): boolean {
+    if (!this.cfg.isRecording) return false;
+    try {
+      return this.cfg.isRecording(docId);
+    } catch (err) {
+      console.error(`[doc-store] recording check for ${docId} failed; holding it:`, err);
+      return true;
+    }
+  }
+
   /** How many docs are actually in memory. The number lazy hydration exists
    *  to keep small, and the one a test has to be able to read. */
   residentCount(): number {
@@ -695,6 +726,9 @@ export class DocStore {
   private evictionHold(docId: string, doc: LiveDoc, now: number): string | null {
     // Somebody is in it. Their next keystroke belongs to this Y.Doc.
     if (doc.conns.size > 0) return 'connected';
+    // A meeting is being recorded into it. The notes arrive by a door none
+    // of the holds below can see; see `DocStoreConfig.isRecording`.
+    if (this.isRecording(docId)) return 'recording';
     // The last write-back failed or collided. A wedged doc has a backup and
     // an unresolved disagreement with its file; dropping it now would leave
     // that to be rediscovered by whoever opens it next.

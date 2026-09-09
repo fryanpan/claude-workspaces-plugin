@@ -69,11 +69,15 @@ describe('the shell reserves a row for the strip', () => {
   });
 
   it('no longer asks #editor-pane for that row — the strip left the pane', () => {
-    // Two tracks only: the format bar and the document. The floating Approve
-    // button and the view-controls toggle are `position: absolute` and claim
-    // no track of their own.
+    // The pane is a plain column of rows now (the format bar, the two
+    // new-content strips and the document), so it declares no track for the
+    // strip and cannot grow one back by accident. The floating Approve button
+    // and the view-controls toggle are `position: absolute` and are no row at
+    // all.
     const pane = styleOf(attach('', { attrs: { id: 'editor-pane' } }));
-    expect(pane.gridTemplateRows).toBe('auto 1fr');
+    expect(pane.display).toBe('flex');
+    expect(pane.flexDirection).toBe('column');
+    expect(pane.gridTemplateRows).toBe('');
   });
 
   it('positive control: the shell really puts the strip between the bar and main', () => {

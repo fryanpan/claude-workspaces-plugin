@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { writeNotesQuality } from '../src/notes-quality-store.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -32,6 +33,21 @@ interface Metrics {
   uptimeSec: number;
   activations: { tag: string; count: number }[];
   activationsTotal: number;
+  /** The note-taker's week, counts only — see the notes-quality tests for
+   *  what each count means. */
+  notesQuality?: {
+    meetings: number;
+    flagged: number;
+    byFlag: Record<string, number>;
+    totals: Record<string, number>;
+    latenessUnknown: number;
+  };
+}
+
+/** Every leaf value under a nested counts object, in no particular order. */
+function numbersUnder(value: unknown): unknown[] {
+  if (value === null || typeof value !== 'object') return [value];
+  return Object.values(value as Record<string, unknown>).flatMap(numbersUnder);
 }
 
 /** The board this file's docs, tasks and reviews are filed under. */
@@ -146,6 +162,13 @@ describe('GET /api/metrics', () => {
     const parsed = JSON.parse(body) as Record<string, unknown>;
     for (const [key, value] of Object.entries(parsed)) {
       if (key === 'activations') continue;
+      // `notesQuality` is nested counts; every leaf under it is still a
+      // number, which is what keeps the no-identifiers promise true as the
+      // rollup grows fields.
+      if (key === 'notesQuality') {
+        for (const leaf of numbersUnder(value)) expect(typeof leaf).toBe('number');
+        continue;
+      }
       expect(typeof value).toBe('number');
     }
     // `activations` is the one non-scalar field: source locations and counts.
@@ -186,5 +209,41 @@ describe('GET /api/metrics', () => {
     expect(top).toBeDefined();
     expect(top?.tag).toContain('packages/server/src/routes/docs.ts:');
     expect(top?.count).toBeGreaterThan(0);
+  });
+
+  it('carries the note-taker’s week, and names no meeting in it', async () => {
+    // A meeting that went badly, as its stop would have left it.
+    writeNotesQuality(dataDir, {
+      docId: 'd-mtg',
+      meetingId: 'm-mtg-1',
+      at: Date.now(),
+      bullets: 5,
+      duplicateBulletLines: 4,
+      duplicateHeadings: 0,
+      longRuns: 1,
+      unknownVoices: 2,
+      ideas: 12,
+      uncoveredIdeas: 9,
+      uncoveredShare: 0.75,
+      lateShare: null,
+      lateMedianMs: null,
+      flags: ['duplicate-bullets', 'unknown-speakers'],
+    });
+
+    const m = await metrics();
+    // Positive control: the field is not a constant zero — it read the
+    // record this test just wrote.
+    expect(m.notesQuality?.meetings).toBe(1);
+    expect(m.notesQuality?.flagged).toBe(1);
+    expect(m.notesQuality?.byFlag['duplicate-bullets']).toBe(1);
+    expect(m.notesQuality?.totals.uncoveredIdeas).toBe(9);
+    expect(m.notesQuality?.latenessUnknown).toBe(1);
+
+    // And it names neither the doc nor the meeting: the route promises a body
+    // with no identifiers in it, and a bad meeting reaches a person on the
+    // row its doc belongs to instead.
+    const body = await (await local('/api/metrics')).text();
+    expect(body).not.toContain('d-mtg');
+    expect(body).not.toContain('m-mtg-1');
   });
 });

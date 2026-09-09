@@ -140,12 +140,13 @@ and mangles the text — which is why the ladder was walked rather than jumped.
 A person who moves the control still wins: the sanitized tuning is spread
 after the fixed fields.
 
-**And this is a small share of the wait.** With the notes clocks at 4s quiet /
-15s cadence, `scripts/notes-latency-check.ts` puts the median speech →
-note-written wait at 9.2s before this change and 8.9s after. Endpoint
-detection was 5% of that wait and is now 2%; the rest is the notes clocks,
-which are deliberately unchanged. Anything that wants a materially shorter
-wait has to move them, not the engine.
+**And this is a small share of the wait.** `scripts/notes-latency-check.ts`
+puts the median speech → note-written wait at 9.2s before the endpointing
+change and 8.9s after. Endpoint detection was 5% of that wait and is now 2%;
+the rest is the notes clocks, and moving them is what the 2026-09-08 latency
+work did — see "Three clocks fire a tick" below for the endpoint window that
+replaced most of the four-second quiet wait, and for the ceiling that now
+arms on a word.
 
 **Speaker labels** (added 2026-08-29): `speaker_labels=true` on the same
 streaming URL — supported on every streaming model, **+$0.12/hr** on top of
@@ -782,9 +783,10 @@ at the end of doc for now"*). A meeting opens its section with one
 that heading's BLOCK ID. So anything that lands below the section — a
 Research placeholder pressed or spoken between two ticks, a heading somebody
 typed — grows no second one; the next tick still addresses the same heading.
-The id is remembered per doc and cleared when a new recording starts
-(`NotesHeadingMemory`, below), which is the owner's 2026-08-31 rule that a
-stop-and-restart writes its own section rather than resuming the last one's.
+The id is remembered per doc AND per meeting, and a new recording carries a
+new meeting id (`NotesHeadingMemory`, below), which is the owner's 2026-08-31
+rule that a stop-and-restart writes its own section rather than resuming the
+last one's.
 Every earlier answer to "which section is mine" was a guess a person could
 invalidate — the doc's tail, the last heading whose text read "Meeting
 notes", the last section a ledger still claimed items in — and each produced
@@ -816,30 +818,82 @@ cross-fade and loses only the collapse's travel — less movement, not none
 (owner, 2026-09-05: the instant swap *"was too sudden"*). The settle wash on
 the written note carries the eye up.
 
-**Two clocks fire a tick, and whichever comes first wins.**
+**Three clocks fire a tick, and whichever comes first wins.**
 
-- **A pause** — no new turn activity for `DEFAULT_NOTES_QUIET_MS` (4s).
-  Partials count as speech in progress and defer it: every frame replaces the
-  countdown.
-- **The cadence ceiling** — `DEFAULT_NOTES_CADENCE_MS` (15s), started when the
-  first unwritten sentence settles and **not** reset by speech. Added
-  2026-08-30 (owner: *"waits too long to update notes"*), because the pause
-  clock alone means a conversation where nobody stops for four seconds
-  produces nothing until it ends. Measured on a scripted three-minute meeting
-  (`scripts/notes-latency-check.ts`), sentence-settled to note-written went
-  from a 43.0s median / 92.2s worst case to 8.7s / 15.0s, and the same script
-  wrote 10 notes instead of 2.
+- **The endpoint window** — `DEFAULT_NOTES_ENDPOINT_CONFIRM_MS` (1s), opened
+  when a turn settles and withdrawn by any later frame. The engine's own
+  endpoint detector has already decided the speaker stopped, at a median of
+  about 211ms on the wire; waiting four more seconds of wall clock to agree
+  with it was four seconds nobody was speaking for.
+- **The quiet fallback** — `DEFAULT_NOTES_QUIET_MS` (4s). Every frame replaces
+  the countdown. It is no longer the primary pause detector: it is what
+  answers a stream of partials that never endpoints at all.
+- **The cadence ceiling** — `DEFAULT_NOTES_CADENCE_MS` (15s), armed by the
+  first unwritten **word** and **not** reset by speech. Added 2026-08-30
+  (owner: *"waits too long to update notes"*); armed on a word rather than on
+  a settled turn 2026-09-08, which is the fix that made it reachable at all
+  in the case it exists for. A turn is one person talking until they stop —
+  somebody making an argument talks for a minute — and while the ceiling
+  armed only on a SETTLED turn, that whole minute ran with no clock going.
+
+**A ceiling tick carries the sentence in progress, as far as the engine has
+committed to it.** Both engines report which words of a turn are already
+final: Soniox tracks its final tokens, and AssemblyAI marks `word_is_final`
+per word. That prefix rides the frame as `EngineTurn.settledText`, and a
+ceiling tick reached mid-turn carries it, flagged `partial` exactly as the
+end tick's tail is. Those words are unformatted — punctuation and sentence
+casing arrive with the settled turn — so the composer is told they are
+fragments. The ticker counts what it has handed out per turn **in words**
+rather than characters, because the settled text is the same words re-cased
+and punctuated; the remainder goes out when the turn settles, marked
+`continued`, and is never written twice.
 
 **A tick is two Haiku calls** (compose + task capture), so the ceiling raises
-the per-meeting LLM cost roughly in proportion to the extra ticks — five times
-as many on the script above. Transcription is billed on socket-seconds and is
-unchanged.
+the per-meeting LLM cost roughly in proportion to the extra ticks.
+Transcription is billed on socket-seconds and is unchanged.
 
-**A cadence tick carries settled turns only.** This engine's partials are
-unformatted — punctuation and sentence casing arrive with `format_turns` when
-the turn settles — so there is no finished sentence inside a partial to cut
-at. A settled turn IS the unit of finished speech; the turn being spoken waits
-for the next tick rather than being written mid-clause.
+**Ticks that fire during a compose merge into one.** A tick used to queue
+behind a slow reply one per tick, so a single slow compose put the notes into
+a debt every later tick inherited. Only ticks that arrive with a compose IN
+FLIGHT merge; two ticks with the composer idle still get a compose each. The
+merged tick takes its own step on the promise chain rather than being picked
+up by the running compose, because that chain is what orders composes against
+speaker renames and reattributions. A size refusal, and a doc write the store
+refused, retry at once instead of costing a whole tick; a composer that is
+simply down still carries to the next tick, which is what keeps the window in
+which a late revision can re-label a carried turn.
+
+**A doc write that did not land fails the tick.** `applyNotesUpdate` returns
+which of four things happened — `no-doc`, `not-prose`, `store-refused`,
+`all-edits-failed` — rather than a boolean, and the sink reports to the
+session whether the write landed. A refusal is announced as `failed`, so the
+live area keeps the chunk on screen instead of clearing it against a note
+that never reached the doc. A doc a meeting is being recorded into is also
+held resident (`DocStoreConfig.isRecording`): the notes arrive by a door no
+other eviction hold can see.
+
+**Where the time goes, measured.** `scripts/notes-latency-check.ts --replay
+<transcript.jsonl>` replays a real meeting on a virtual clock with every word
+replaced by a placeholder before the pipeline sees it — word counts and
+settle times are all it keeps — and reports the same meeting under pause-only,
+under the ceiling, and under the ceiling plus the endpoint window. On a
+7.2-minute meeting from 2026-09-08 the median speech-to-note wait went from
+12.3s to 7.5s and the notes written from 18 to 29; on a 169-turn meeting,
+10.4s to 7.7s and 43 to 71. `bun run notes:latency` is the same script on the
+synthetic script with a ten-second threshold, run nightly.
+
+**And per tick, for every meeting.** A `<meetingId>-timing.jsonl` is written
+beside the transcript, holding one line per tick carrying
+the turn numbers it composed, when its words settled, when the tick fired and why, how long it waited
+behind the previous tick, the compose's prompt and reply sizes and model, the
+apply time, the edit and block counts, how many ticks merged into it, and the
+settled-to-written total — plus the hypothesis that line's shape settles. It
+holds no words: sizes and counts only, because the transcript beside it is
+already the record of what was said. The median and worst are carried into
+the one-line meeting summary. `CW_NOTES_TIMING=0` turns the file off; it is
+on by default because the at-stop quality report reads it, and a measurement
+that exists only when somebody set a flag is one nothing downstream can rely
+on.
 
 **Stopping is the third thing that fires a tick, and the only one that carries
 unfinished words.** Both clocks need the meeting to keep going: the sentence
@@ -864,8 +918,9 @@ the last sentence survive all three.
 
 **Every meeting says what it came to, in one line.** At the stop the session
 reports `ticks`, `turnsSettled`, `turnsComposed`, `turnsLost` — settled
-turns no successful compose ever carried — and `ideas`, and
-`meeting-notes-doc.ts` logs it
+turns no successful compose ever carried — `ideas` (seen, lost, retried),
+and, when the meeting was measured, the median and worst settled-to-written
+wait; `meeting-notes-doc.ts` logs it
 (`console.error` when anything was lost, `console.log` otherwise). It exists
 because a meeting reported as "skipping chunks" left NOTHING in the log to
 check the claim against: the pipeline spoke only when a stage threw, so a
@@ -971,14 +1026,25 @@ asked to follow, but as the only thing the write verb can do.
 heading its meeting opened — learned from the outline as the level-2 heading
 its first batch added — and re-checks each tick that the block is still there
 (`NotesHeadingMemory` in `meeting-notes-doc.ts`). Only a heading that has been
-DELETED makes it open a new one, and `beginMeeting` clears the memory so a new
-recording opens its own section below whatever the last one wrote. A person
-RENAMING the heading is a non-event, which is exactly what authorship alone
-could not deliver: renaming is a person edit, so it clears `cwAuthor` on the
-very heading the meeting is still writing under. The memory is in process
-only. A restarted server remembers no heading, opens a new section on its next
-tick, and can only suggest on the previous one's bullets — which is the safe
-direction to fall.
+DELETED makes it open a new one, and a new recording opens its own section
+below whatever the last one wrote — it carries a new meeting id, and the
+memory is keyed by meeting. A person RENAMING the heading is a non-event,
+which is exactly what authorship alone could not deliver: renaming is a person
+edit, so it clears `cwAuthor` on the very heading the meeting is still writing
+under.
+
+**And the memory outlives the process.** It used to be in process only: a
+restarted server remembered no heading and opened a second `Meeting notes` on
+its next tick, which split one conversation across two sections — and this
+repo deploys mid-day, so it happened for real. The id is written beside the
+meeting's own transcript as `<meetingId>-section.json`
+(`notes-heading-store.ts`), with the map in front of it as a cache, so a
+meeting that ticks again after a restart writes under the section it opened.
+The store holds a doc id, a meeting id and a block id — no words — and never
+throws: a record that cannot be written or read leaves the note-taker exactly
+as it behaved before the file existed. `beginMeeting` clears only the cache,
+because a session starting under a meeting id the store already knows IS that
+recording coming back.
 
 **A person and a tick may write in the same second.** There is ONE live Yjs
 document per file. The browser reaches it over the collaboration socket and the

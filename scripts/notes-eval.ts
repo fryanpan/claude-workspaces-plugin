@@ -79,6 +79,7 @@ import {
   unlinkedReferences,
   verbatimBullets,
 } from '../packages/server/src/notes-quality.ts';
+import { median } from '../packages/server/src/notes-timing.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
 import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
@@ -582,6 +583,23 @@ async function runMeeting(
   }
 
   const marked = unconfirmedBullets(harness.notes()).length;
+  // THE TWO NUMBERS THE LATENCY TICKET IS ABOUT, printed beside the coverage
+  // number they trade against: a note-taker can always be faster by writing
+  // less. `turnsLost` is the lost-idea rate — settled turns no successful
+  // compose ever carried — and the latencies are compose-and-write only,
+  // because this harness fires its own ticks (see `NotesTickHarness.timing`).
+  const latencies = harness
+    .timing()
+    .rows()
+    .map((r) => r.settledToWrittenMs)
+    .filter((v): v is number => v !== null);
+  const lost = harness.summary()?.turnsLost ?? 0;
+  if (latencies.length > 0) {
+    console.log(
+      `  ${fixture.meeting}: ${lost} turn(s) in no note, compose→written median ` +
+        `${Math.round(median(latencies) ?? 0)}ms, worst ${Math.round(Math.max(...latencies))}ms`,
+    );
+  }
   console.log(
     `  ${fixture.meeting}: ${ticks.length} ticks, ${allBullets(harness.notes()).length} bullets, ` +
       `${parseNotesTopics(harness.notes()).filter((t) => t.heading).length} topics, ` +

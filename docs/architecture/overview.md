@@ -248,6 +248,19 @@ debounced snapshot of it.
 | **HTTP** | `server.ts`, `routes/**`, `middleware/**`, `shells.ts`, `request-admission.ts`, `request-attribution.ts`, `socket-handlers.ts` | The only code that knows about HTTP. Parse, admit, call one service, format. |
 | **Services / stores** | `doc-store.ts`, `tasks.ts` and the `task-*` stores, `review-items/**`, `home-pane.ts`, `share/**`, `auth/**`, the `meeting-*` and `notes-*` families, `sse.ts`, `activity.ts` | Owns durable state and orchestrates one change across stores and adapters. |
 
+`notes-timing.ts` joins the same `notes-*` family in the services tier and
+changes none of the picture: it is where one meeting's per-tick latency is
+recorded, opened only when the operator turns timing on. It holds no meeting
+content — sizes, counts and durations — so it sits beside the notes modules
+rather than with the stores that own durable text.
+
+`notes-heading-store.ts` joins it too and changes none of the picture
+either: it is the one small file per meeting that records which heading that
+meeting's notes are written under, kept beside the meeting's transcript so a
+restart mid-recording keeps writing under the section it opened rather than
+opening a second one. Ids and a block id, no meeting words, so it sits with
+`notes-timing.ts` rather than with the stores that own durable text.
+
 `meeting-stream-set.ts` joins that services tier inside the `meeting-*`
 family and moves nothing in the picture: it is the fan-out one level below
 `meeting-protocol.ts`, opening an engine session per audio stream and folding
@@ -255,6 +268,17 @@ two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
 
+The `notes-quality-*` family joins the same services tier and adds no new box
+to the picture: `notes-quality-report.ts` and `notes-quality-thresholds.ts`
+are pure (they read a markdown string and a transcript and answer counts, so
+they belong beside `notes-edit-parse.ts` in the domain row on everything but
+their filename), `notes-quality-store.ts` and `notes-tick-timing.ts` read and
+write under the data dir the way the rest of the `meeting-*` family does, and
+`notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
+meeting's stop runs — read the notes, judge them, store the reading, file a
+bad one on the row the doc belongs to. Nothing under `routes/` is added: the
+week's rollup rides the existing `GET /api/metrics` reply, for the reason
+`uptimeSec` does.
 `notes-idea-coverage.ts` joins the DOMAIN tier below, not this one, and it
 changes no boundary: it is functions over values — sentences in, a verdict on
 whether the notes carry them out — plus a per-meeting ledger the notes session
@@ -288,7 +312,7 @@ transport — and its models are DOM-free, which is what lets `board/board-model
 document. `suggestions/` sits in the editor tier rather than inside `redline/`,
 because Redline is the change view and a suggestion is the proposal: the chip
 and the doc-level pending badge render on the plain markdown surface and on the
-board's task-body editor, neither of which mounts a redline module. `recent-note-markers.ts` sits beside `settle-wash.ts` in the meeting family: the tint marks a fresh note where it landed, the markers say how many such notes are off screen. `meeting-live-hold.ts` joins the meeting family in that same view tier and
+board's task-body editor, neither of which mounts a redline module. `new-indicator.ts` sits in the view tier as the doc's one report of what the reader has not seen: `comment-hints.ts` measures (threads off screen, and the tinted note blocks `settle-wash.ts` marks) and this draws the two pills. It replaced four controls that counted overlapping halves of that fact — the edge markers, the off-screen hints and the top bar's asks chip — so `recent-note-markers.ts` is gone. `recent-note-cards.ts` joins the same family for the wide layout's other half: it builds and ages the "who wrote this, and when" card and hands it to `redline/markup-margin.ts` to PLACE, which is the one direction that keeps a single stacking pass over the balloon column. `meeting-live-hold.ts` joins the meeting family in that same view tier and
 changes none of the picture: it is one screenful of geometry that
 `meeting-live-zone.ts` owned until the zone crossed 500 lines, holding the
 live transcript still across the frame a settled chunk splits off on. Nothing

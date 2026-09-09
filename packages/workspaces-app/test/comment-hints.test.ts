@@ -2,18 +2,18 @@ import type { Comment, ReviewPayload, Thread, User } from '@claude-workspaces/co
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type HintItem,
-  chipSentence,
-  hintParts,
-  hintSentence,
   mountCommentHints,
+  pillCount,
+  splitNotes,
   splitOffscreen,
 } from '../src/comment-hints.ts';
 import { MountScope } from '../src/mount-scope.ts';
 
 /**
- * Off-screen comment counts (comments mock 3). The tally is pure and pinned
- * here; the mount is exercised against a hand-measured DOM because happy-dom
- * lays nothing out — every rect below is stubbed.
+ * The measurement behind the new-content indicator: what has been written
+ * that the reader cannot see, and which way it lies. The tallies are pure and
+ * pinned here; the mount is exercised against a hand-measured DOM because
+ * happy-dom lays nothing out — every rect below is stubbed.
  */
 
 const item = (id: string, top: number, over: Partial<HintItem> = {}): HintItem => ({
@@ -49,10 +49,21 @@ describe('splitOffscreen', () => {
       ],
       view,
     );
-    expect(split.above).toEqual({ comments: 1, questions: 1, fresh: 1 });
+    expect(split.above).toEqual({ comments: 1, questions: 1, fresh: 1, freshComments: 1 });
     // Answered and resolved are comments as far as the count goes — nothing
     // is waiting on the reader there.
-    expect(split.below).toEqual({ comments: 2, questions: 0, fresh: 1 });
+    expect(split.below).toEqual({ comments: 2, questions: 0, fresh: 1, freshComments: 1 });
+  });
+
+  it('a new question is counted as a question and NOT also as new', () => {
+    // The pill reads "1 question · N new"; counting the same thread in both
+    // halves would tell the reader to look for two things.
+    const split = splitOffscreen(
+      [item('a', -100, { kind: 'question', isNew: true }), item('b', -50, { isNew: true })],
+      view,
+    );
+    expect(split.above.fresh).toBe(2);
+    expect(split.above.freshComments).toBe(1);
   });
 
   it('names the NEAREST off-screen thread in each direction', () => {
@@ -71,32 +82,48 @@ describe('splitOffscreen', () => {
   });
 });
 
-describe('the words', () => {
-  it('reads as a sentence on a wide screen', () => {
-    expect(hintSentence({ comments: 4, questions: 1, fresh: 0 }, 'above')).toBe(
-      '4 comments & 1 question above',
-    );
-    expect(hintSentence({ comments: 1, questions: 2, fresh: 1 }, 'below')).toBe(
-      '1 comment & 2 questions below · 1 new',
-    );
-    expect(hintSentence({ comments: 0, questions: 0, fresh: 0 }, 'below')).toBe('');
+describe('splitNotes', () => {
+  const view = { top: 0, bottom: 600 };
+  const note = (top: number) =>
+    ({ el: document.createElement('p'), top, bottom: top + 40 }) as never;
+
+  it('counts the freshly written blocks each side, and names the nearest', () => {
+    const near = note(-60);
+    const far = note(700);
+    const split = splitNotes([note(-400), near, far, note(900)], view);
+    expect([split.above, split.below]).toEqual([2, 2]);
+    expect(split.nearestAbove).toBe(near);
+    expect(split.nearestBelow).toBe(far);
   });
 
-  it('carries the red dot on the comment glyph, never on the question', () => {
-    const parts = hintParts({ comments: 2, questions: 1, fresh: 1 });
-    expect(parts.map((p) => [p.glyph, p.count, p.fresh])).toEqual([
-      ['comment', 2, true],
-      ['question', 1, false],
-    ]);
+  it('a block straddling an edge is on screen', () => {
+    const split = splitNotes([note(590), note(-20)], view);
+    expect([split.above, split.below]).toEqual([0, 0]);
+  });
+});
+
+describe('what one pill says', () => {
+  it('counts an open ask in its own word and everything else as new', () => {
+    // A question is not also counted as "new": the reader would read the
+    // same thread twice in one sentence.
+    expect(pillCount({ comments: 3, questions: 1, fresh: 3, freshComments: 2 }, 0)).toEqual({
+      questions: 1,
+      fresh: 2,
+    });
   });
 
-  it('the chip says how many are waiting on you, naming no kind', () => {
-    // It counts questions AND decisions under one glyph, so saying "questions"
-    // was a kind-chip in the top bar — the marking the cards themselves lost.
-    expect(chipSentence(1)).toBe('1 waiting on you');
-    expect(chipSentence(3)).toBe('3 waiting on you');
-    expect(chipSentence(0)).toBe('Nothing waiting on you');
-    expect(chipSentence(3)).not.toMatch(/question/i);
+  it('folds freshly written notes into the same number', () => {
+    expect(pillCount({ comments: 0, questions: 0, fresh: 0, freshComments: 0 }, 4)).toEqual({
+      questions: 0,
+      fresh: 4,
+    });
+  });
+
+  it('an old comment nobody has replied to is not new', () => {
+    expect(pillCount({ comments: 5, questions: 0, fresh: 0, freshComments: 0 }, 0)).toEqual({
+      questions: 0,
+      fresh: 0,
+    });
   });
 });
 
@@ -129,7 +156,13 @@ afterEach(() => {
 function harness(
   threads: Thread[],
   tops: Record<string, number>,
-  opts: { margin?: boolean; dock?: number; cards?: Record<string, Element[]> } = {},
+  opts: {
+    margin?: boolean;
+    dock?: number;
+    cards?: Record<string, Element[]>;
+    /** Tops of the tinted note blocks in the prose. */
+    notes?: number[];
+  } = {},
 ) {
   const pane = document.createElement('section');
   pane.id = 'editor-pane';
@@ -146,14 +179,16 @@ function harness(
   const marginEl = document.createElement('div');
   marginEl.className = 'markup-margin';
   scroller.appendChild(marginEl);
-  const chip = document.createElement('button');
-  chip.id = 'doc-asks';
-  chip.hidden = true;
-  document.body.append(pane, chip);
-  cleanups.push(() => {
-    pane.remove();
-    chip.remove();
+  const noteEls = (opts.notes ?? []).map((top) => {
+    const p = document.createElement('p');
+    p.className = 'recent-note';
+    p.getBoundingClientRect = () => ({ top, bottom: top + 30 }) as DOMRect;
+    p.scrollIntoView = () => noteJumps.push(top);
+    scroller.appendChild(p);
+    return p;
   });
+  document.body.append(pane);
+  cleanups.push(() => pane.remove());
   Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 });
   scroller.getBoundingClientRect = () => ({ top: 0, bottom: 600, left: 0, right: 800 }) as DOMRect;
   marginEl.getBoundingClientRect = () =>
@@ -167,13 +202,13 @@ function harness(
   const fresh = new Set(threads.filter((t) => t.id.startsWith('new')).map((t) => t.id));
   const seen: string[] = [];
   const jumps: string[] = [];
+  const noteJumps: number[] = [];
   const scope = new MountScope();
   cleanups.push(() => scope.dispose());
   const hints = mountCommentHints({
     scroller,
     marginEl: opts.margin === false ? null : marginEl,
     floatParent: pane,
-    chipEl: chip,
     threads: () => threads,
     spanFor: (id) => spans.get(id) ?? null,
     isNew: (t) => fresh.has(t.id),
@@ -189,112 +224,67 @@ function harness(
     scope,
     dwellMs: 50,
     marginVisible: () => opts.margin !== false,
+    reducedMotion: () => true,
   });
-  return { hints, pane, scroller, marginEl, chip, seen, jumps, threads };
+  const pill = (which: 'top' | 'bottom') =>
+    pane.querySelector<HTMLElement>(`.cw-edge-${which}`) as HTMLElement;
+  return { hints, pane, scroller, marginEl, seen, jumps, noteJumps, noteEls, threads, pill };
 }
 
 const q = (): ReviewPayload => ({ shape: 'review', headline: 'Why?' });
 
 describe('mountCommentHints', () => {
-  it('renders one hint per direction in the pane, hidden when empty', () => {
-    const h = harness([thread('a', [comment('x')]), thread('b', [comment('y')])], {
-      a: -200,
-      b: 300,
+  it('says how many new things lie each way, in words, and nothing at zero', () => {
+    const h = harness(
+      [thread('new1', [comment('x')]), thread('new2', [comment('y')]), thread('c', [comment('z')])],
+      { new1: -200, new2: -160, c: 300 },
+    );
+    expect(h.pill('top').hidden).toBe(false);
+    expect(h.pill('top').textContent).toContain('2 new');
+    expect(h.pill('top').title).toBe('2 new above');
+    // Nothing new below — `c` is an old comment the reader has already read.
+    expect(h.pill('bottom').hidden).toBe(true);
+  });
+
+  it('names an unanswered ask separately, and only then goes amber', () => {
+    const h = harness([thread('a', [comment('?', q())]), thread('new1', [comment('x')])], {
+      a: 900,
+      new1: 950,
     });
-    const top = h.pane.querySelector<HTMLElement>('.cw-offscreen-top');
-    const bot = h.pane.querySelector<HTMLElement>('.cw-offscreen-bottom');
-    expect(top?.hidden).toBe(false);
-    expect(top?.dataset.n).toBe('1');
-    expect(top?.title).toBe('1 comment above');
-    expect(bot?.hidden).toBe(true);
-    // Never inside the margin: a balloon there could land on top of it.
-    expect(h.marginEl.querySelector('.cw-offscreen')).toBe(null);
+    expect(h.pill('bottom').textContent?.replace(/\s+/g, ' ')).toContain('1 question · 1 new');
+    expect(h.pill('bottom').classList.contains('has-ask')).toBe(true);
+    expect(h.pill('top').classList.contains('has-ask')).toBe(false);
   });
 
-  it('lines the pair up over the balloon column on a wide screen, and lets go on a phone', () => {
-    const wide = harness([thread('a', [comment('x')])], { a: -200 });
-    const top = wide.pane.querySelector<HTMLElement>('.cw-offscreen-top');
-    // margin spans x 540..800 inside a pane at x 0..800 → 6px in from each edge.
-    expect(top?.style.left).toBe('546px');
-    expect(top?.style.right).toBe('6px');
-    const phone = harness([thread('a', [comment('x')])], { a: -200 }, { margin: false });
-    const ptop = phone.pane.querySelector<HTMLElement>('.cw-offscreen-top');
-    expect(ptop?.style.left).toBe('');
-    expect(ptop?.style.right).toBe('');
+  it('counts freshly written notes in the same number as the comments', () => {
+    const h = harness([thread('new1', [comment('x')])], { new1: -200 }, { notes: [-400, -300] });
+    expect(h.pill('top').dataset.fresh).toBe('3');
+    expect(h.pill('top').textContent).toContain('3 new');
   });
 
-  it('a tap jumps to the nearest off-screen thread in that direction', () => {
+  it('a tap goes to the nearest new thing that way, note or thread', () => {
     const h = harness(
-      [thread('a', [comment('x')]), thread('b', [comment('y')]), thread('c', [comment('z')])],
-      { a: -400, b: -100, c: 900 },
+      [thread('new1', [comment('x')]), thread('new2', [comment('y')])],
+      { new1: -400, new2: 900 },
+      { notes: [-100, 700] },
     );
-    h.pane.querySelector<HTMLElement>('.cw-offscreen-top')?.click();
-    h.pane.querySelector<HTMLElement>('.cw-offscreen-bottom')?.click();
-    expect(h.jumps).toEqual(['b', 'c']);
+    // A note sits closer to each edge than either thread does, so the pill
+    // that counted it has to be able to reach it.
+    h.pill('top').click();
+    h.pill('bottom').click();
+    expect(h.jumps).toEqual([]);
+    expect(h.noteJumps).toEqual([-100, 700]);
   });
 
-  it('the chip counts every open ask on the doc and starts at the first', () => {
+  it('…and falls back to the nearest thread when no note is nearer', () => {
     const h = harness(
-      [
-        thread('a', [comment('?', q())]),
-        thread('b', [comment('?', q())]),
-        thread('c', [comment('.')]),
-      ],
-      { a: 900, b: 100 },
+      [thread('new1', [comment('x')]), thread('new2', [comment('y')])],
+      { new1: -100, new2: 700 },
+      { notes: [-500, 1200] },
     );
-    expect(h.chip.hidden).toBe(false);
-    expect(h.chip.title).toBe('2 waiting on you');
-    expect(h.chip.querySelector('.cw-ic-question')).not.toBe(null);
-    h.chip.click();
-    // First in DOCUMENT order, not in thread order — `b` sits higher.
-    expect(h.jumps).toEqual(['b']);
-  });
-
-  it('every further tap steps to the next open ask, and the last wraps', () => {
-    // The chip used to jump to the first ask on every tap, which put three of
-    // this reader's four asks out of reach of the only control that told them
-    // the asks existed.
-    const h = harness(
-      [
-        thread('a', [comment('?', q())]),
-        thread('b', [comment('?', q())]),
-        thread('c', [comment('?', q())]),
-        thread('d', [comment('.')]),
-      ],
-      { a: 300, b: 100, c: 500, d: 200 },
-    );
-    h.chip.click();
-    h.chip.click();
-    h.chip.click();
-    h.chip.click();
-    expect(h.jumps).toEqual(['b', 'a', 'c', 'b']);
-    expect(h.chip.getAttribute('aria-label')).toBe('3 waiting on you — step through them');
-  });
-
-  it('a single ask says jump, not step', () => {
-    const h = harness([thread('a', [comment('?', q())])], { a: 100 });
-    expect(h.chip.getAttribute('aria-label')).toBe('1 waiting on you — jump to it');
-    h.chip.click();
-    h.chip.click();
-    // One ask taps to itself; the walk never runs off the end.
-    expect(h.jumps).toEqual(['a', 'a']);
-  });
-
-  it('an ask with no highlight is still in the walk, after the anchored ones', () => {
-    // A subject-anchored thread has nothing on the page to scroll to, and is
-    // exactly the ask a reader is least likely to find on their own.
-    const h = harness([thread('subject', [comment('?', q())]), thread('a', [comment('?', q())])], {
-      a: 100,
-    });
-    h.chip.click();
-    h.chip.click();
-    h.chip.click();
-    expect(h.jumps).toEqual(['a', 'subject', 'a']);
-  });
-
-  it('the chip hides when nothing is waiting', () => {
-    const h = harness([thread('c', [comment('.')])], { c: 100 });
-    expect(h.chip.hidden).toBe(true);
+    h.pill('top').click();
+    h.pill('bottom').click();
+    expect(h.jumps).toEqual(['new1', 'new2']);
   });
 
   it('a new thread that sits in view stops being new after the dwell; a flick past does not', () => {
@@ -303,14 +293,13 @@ describe('mountCommentHints', () => {
       new1: 100,
       new2: 900,
     });
-    const bot = h.pane.querySelector<HTMLElement>('.cw-offscreen-bottom');
-    expect(bot?.dataset.new).toBe('1');
+    expect(h.pill('bottom').dataset.fresh).toBe('1');
     // Not yet — the dwell has not elapsed.
     expect(h.seen).toEqual([]);
     vi.advanceTimersByTime(60);
     expect(h.seen).toEqual(['new1']);
     // `new2` never entered the viewport, so it is still new.
-    expect(bot?.dataset.new).toBe('1');
+    expect(h.pill('bottom').dataset.fresh).toBe('1');
   });
 
   it('a card in view counts as seen even when its sentence scrolled off (the phone)', () => {
@@ -322,19 +311,18 @@ describe('mountCommentHints', () => {
       { new1: -300 },
       { cards: { new1: [card] } },
     );
-    const top = h.pane.querySelector<HTMLElement>('.cw-offscreen-top');
     // The COUNT still says the sentence is above…
-    expect(top?.dataset.new).toBe('1');
+    expect(h.pill('top').dataset.fresh).toBe('1');
     vi.advanceTimersByTime(60);
     // …but the reader has been looking at the card, so it is seen.
     expect(h.seen).toEqual(['new1']);
-    expect(top?.dataset.new).toBe('0');
+    expect(h.pill('top').hidden).toBe(true);
   });
 
-  it('the bottom hint clears the action dock when one is showing', () => {
-    const h = harness([thread('a', [comment('x')])], { a: 900 }, { dock: 700 });
-    const bot = h.pane.querySelector<HTMLElement>('.cw-offscreen-bottom');
-    // pane bottom 820 − (dock top 700 − 8) = 128px up from the pane's edge.
-    expect(bot?.style.bottom).toBe('128px');
+  it('the bottom strip clears the action dock when one is showing', () => {
+    const h = harness([thread('new1', [comment('x')])], { new1: 900 }, { dock: 700 });
+    const strip = h.pane.querySelector<HTMLElement>('.edge-strip-bottom');
+    // 60px of dock, a 10px gap, and the dock's own 22px inset.
+    expect(strip?.style.bottom).toBe('92px');
   });
 });

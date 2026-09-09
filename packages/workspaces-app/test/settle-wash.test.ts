@@ -103,6 +103,10 @@ function lastListIndex(doc: EditorView['state']['doc']): number {
 
 const washed = (parent: HTMLElement): string[] =>
   [...parent.querySelectorAll<HTMLElement>('.recent-note')].map((el) => el.textContent ?? '');
+const arrivals = (parent: HTMLElement): string[] =>
+  [...parent.querySelectorAll<HTMLElement>('.recent-note')].map(
+    (el) => el.getAttribute('data-at') ?? '',
+  );
 const ages = (parent: HTMLElement): string[] =>
   [...parent.querySelectorAll<HTMLElement>('.recent-note')].map(
     (el) => el.getAttribute('data-age') ?? '',
@@ -125,6 +129,9 @@ describe('the fade steps', () => {
       const { view, parent } = mountEditor(DOC, { on: true }, undefined, clock);
       appendNote(view, 'the freshly composed note', true);
       expect(ages(parent)).toEqual(['0']);
+      // The instant it arrived rides on the tint too: four steps cannot say
+      // "1m 15s", and the margin card needs to (recent-note-cards.ts).
+      expect(arrivals(parent)).toEqual([String(clock.now)]);
       // Thirty seconds on: the timer the arrival armed re-bands the set.
       clock.now += RECENT_NOTE_STEP_MS;
       vi.advanceTimersByTime(RECENT_NOTE_STEP_MS);
@@ -147,7 +154,7 @@ describe('the fade steps', () => {
   });
 });
 
-describe('what the edge markers re-count on', () => {
+describe('what a caller watching the tint set re-counts on', () => {
   it('a remote note changes the tint set; a keystroke does not', () => {
     const { view } = mountEditor(DOC, { on: true });
     const before = view.state;

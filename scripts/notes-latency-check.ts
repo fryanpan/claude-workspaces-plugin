@@ -40,13 +40,16 @@
  * All speech in the script is synthetic. The repo is public.
  */
 
+import { readFileSync } from 'node:fs';
 import {
   DEFAULT_NOTES_CADENCE_MS,
+  DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
   DEFAULT_NOTES_QUIET_MS,
   type TickScheduler,
   beginNotesSession,
   createStubNotesComposer,
 } from '../packages/server/src/meeting-notes.ts';
+import { createNotesTimingLog } from '../packages/server/src/notes-timing.ts';
 import type { EngineTurn } from '../packages/server/src/transcribe.ts';
 
 /** Let the compose chain's microtasks settle without moving the clock. */
@@ -196,6 +199,112 @@ function buildScript(durationMs: number, pauseAtMs: number, endpointLagMs: numbe
   return frames.sort((a, b) => a.at - b.at);
 }
 
+/**
+ * ONE REAL MEETING, REPLAYED — with every word replaced before it enters the
+ * pipeline.
+ *
+ * `--replay <transcript.jsonl>` reads the append-only transcript a real
+ * recording left in the data dir and keeps ONE thing from it: when each turn
+ * settled, and how many words it held. Every word is replaced with the same
+ * placeholder token before a single frame reaches the session, so the meeting
+ * that produced the timings cannot come back out of this script — not in its
+ * output, not in a crash, not in a log. Latency does not depend on the words:
+ * the composer here is the deterministic stub.
+ *
+ * WHAT IS RECONSTRUCTED, and it matters when reading the numbers. A
+ * transcript holds settled turns only, so the partials are modelled: a turn
+ * is taken to have been spoken between the previous turn's settle and its
+ * own, with a growing prefix emitted every 400ms and the engine's
+ * already-final prefix riding it. That is the stream shape both engines
+ * produce, but it is a model of this meeting's partials rather than a
+ * recording of them.
+ */
+const REPLAY_PARTIAL_EVERY_MS = 400;
+/** The stand-in for every real word. Word COUNT is preserved; nothing else. */
+const REDACTED_WORD = 'word';
+
+interface ReplayTurn {
+  turn: number;
+  words: number;
+  settledAt: number;
+  speaker?: string;
+}
+
+/** Settled turns, redacted, in the order they settled. */
+export function readRedactedTranscript(path: string): ReplayTurn[] {
+  const byTurn = new Map<number, ReplayTurn>();
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (line.trim() === '') continue;
+    let row: Record<string, unknown>;
+    try {
+      row = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const turn = row.turn;
+    const text = row.text;
+    const ts = row.ts;
+    // A line with no words is a relabel, and carries no timing of its own.
+    if (typeof turn !== 'number' || typeof text !== 'string' || typeof ts !== 'number') continue;
+    const words = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+    byTurn.set(turn, {
+      turn,
+      words,
+      settledAt: ts,
+      ...(typeof row.speaker === 'string' ? { speaker: row.speaker } : {}),
+    });
+  }
+  return [...byTurn.values()].sort((a, b) => a.settledAt - b.settledAt);
+}
+
+/** Redacted frames on the script's own timeline, starting at zero. */
+export function buildReplayScript(
+  turns: readonly ReplayTurn[],
+  endpointLagMs: number,
+): ScriptFrame[] {
+  const first = turns[0]?.settledAt ?? 0;
+  const frames: ScriptFrame[] = [];
+  let previousEnd = 0;
+  for (const t of turns) {
+    if (t.words === 0) continue;
+    const settledAt = t.settledAt - first;
+    const speechEndAt = Math.max(previousEnd, settledAt - endpointLagMs);
+    const spokenFor = Math.max(REPLAY_PARTIAL_EVERY_MS, speechEndAt - previousEnd);
+    const speechStart = speechEndAt - spokenFor;
+    const full = Array.from({ length: t.words }, () => REDACTED_WORD).join(' ');
+    for (let i = REPLAY_PARTIAL_EVERY_MS; i < spokenFor; i += REPLAY_PARTIAL_EVERY_MS) {
+      const upto = Math.max(1, Math.round((t.words * i) / spokenFor));
+      const prefix = Array.from({ length: upto }, () => REDACTED_WORD).join(' ');
+      frames.push({
+        at: speechStart + i,
+        frame: {
+          turn: t.turn,
+          text: prefix,
+          final: false,
+          // The engine's own already-final prefix: one word behind the
+          // provisional tail, which is what both adapters report.
+          ...(upto > 1
+            ? { settledText: Array.from({ length: upto - 1 }, () => REDACTED_WORD).join(' ') }
+            : {}),
+          ...(t.speaker !== undefined ? { speaker: t.speaker } : {}),
+        },
+      });
+    }
+    frames.push({
+      at: settledAt,
+      speechEndAt,
+      frame: {
+        turn: t.turn,
+        text: full,
+        final: true,
+        ...(t.speaker !== undefined ? { speaker: t.speaker } : {}),
+      },
+    });
+    previousEnd = speechEndAt;
+  }
+  return frames.sort((a, b) => a.at - b.at);
+}
+
 interface RunResult {
   label: string;
   sentences: number;
@@ -213,6 +322,8 @@ async function run(
   script: ScriptFrame[],
   cadenceMs: number,
   endpointLagMs: number,
+  endpointConfirmMs: number = DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
+  timingOut?: string,
 ): Promise<RunResult> {
   const clock = new VirtualClock();
   const settledAt = new Map<number, number>();
@@ -226,7 +337,16 @@ async function run(
       composer: createStubNotesComposer(),
       quietMs: DEFAULT_NOTES_QUIET_MS,
       cadenceMs,
+      endpointConfirmMs,
       schedule: clock,
+      // The timing log is stamped from the VIRTUAL clock, not the wall clock:
+      // a replay composes with a stub in microseconds, so wall-clock waits
+      // would all read zero and the file would say nothing about the
+      // scheduling this script exists to measure.
+      now: () => clock.now,
+      ...(timingOut !== undefined
+        ? { openTiming: () => createNotesTimingLog({ path: timingOut }) }
+        : {}),
       onNotes: (update) => {
         notesWritten++;
         for (const t of update.tick.turns) {
@@ -293,6 +413,18 @@ function stats(result: RunResult) {
   };
 }
 
+/** `--flag value` where the value is a path; absent flag means no path. */
+function argValue(args: readonly string[], flag: string): string | undefined {
+  const at = args.indexOf(flag);
+  if (at < 0) return undefined;
+  const value = args[at + 1];
+  if (value === undefined || value.startsWith('--')) {
+    console.error(`${flag} needs a value`);
+    process.exit(2);
+  }
+  return value;
+}
+
 /** `--flag value` pairs; a flag naming no number keeps its default. */
 function numArg(args: readonly string[], flag: string, fallback: number): number {
   const at = args.indexOf(flag);
@@ -322,6 +454,74 @@ const cadenceMs = args.includes('--cadence-off')
 const asJson = args.includes('--json');
 
 const durationMs = minutes * 60_000;
+
+/** `--fail-over <ms>`: the daily check's threshold on the median wait. */
+const failOverMs = numArg(args, '--fail-over', Number.POSITIVE_INFINITY);
+
+const replayAt = args.indexOf('--replay');
+if (replayAt >= 0) {
+  const path = args[replayAt + 1];
+  if (path === undefined) {
+    console.error('--replay needs the path of a meeting transcript (.jsonl)');
+    process.exit(2);
+  }
+  const turns = readRedactedTranscript(path);
+  if (turns.length === 0) {
+    console.error(`no settled turns in ${path}`);
+    process.exit(2);
+  }
+  const script = buildReplayScript(turns, lagAfter);
+  const spanMin = ((script[script.length - 1]?.at ?? 0) / 60_000).toFixed(1);
+  // THREE CONFIGURATIONS OF THE SAME MEETING, so the columns say which clock
+  // the wait was in. Pause-only is what the pipeline did before a ceiling
+  // existed; the middle column adds the ceiling; the last adds the endpoint
+  // window. Nothing here simulates deleted code — every column is a
+  // configuration the shipped ticker still accepts.
+  const columns = [
+    { label: 'pause only', cadence: Number.POSITIVE_INFINITY, confirm: Number.POSITIVE_INFINITY },
+    { label: '+ ceiling', cadence: cadenceMs, confirm: Number.POSITIVE_INFINITY },
+    { label: '+ endpoint window', cadence: cadenceMs, confirm: DEFAULT_NOTES_ENDPOINT_CONFIRM_MS },
+  ];
+  // Only the LAST column writes a timing file. The three runs are the same
+  // meeting under three configurations; letting them share one path would
+  // interleave three meetings' ticks into a file that claims to be one.
+  const timingOut = argValue(args, '--timing-out');
+  const rows = [];
+  for (const c of columns) {
+    const out = c === columns[columns.length - 1] ? timingOut : undefined;
+    rows.push(stats(await run(c.label, script, c.cadence, lagAfter, c.confirm, out)));
+  }
+  if (timingOut !== undefined) console.log(`Timing log written to ${timingOut}`);
+  if (asJson) {
+    console.log(JSON.stringify({ turns: turns.length, minutes: Number(spanMin), rows }, null, 2));
+  } else {
+    const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+    console.log(
+      `Replayed ${turns.length} settled turns over ${spanMin} min. ` +
+        'Words redacted before the pipeline saw them; timings only.',
+    );
+    console.log('\n  configuration          notes   settled→note      speech→note');
+    console.log('                                    p50     max      p50     max');
+    for (const row of rows) {
+      console.log(
+        `  ${row.label.padEnd(20)} ${String(row.notesWritten).padStart(6)}  ${secs(
+          row.compose.medianMs,
+        ).padStart(7)} ${secs(row.compose.maxMs).padStart(7)}  ${secs(row.total.medianMs).padStart(
+          7,
+        )} ${secs(row.total.maxMs).padStart(7)}`,
+      );
+    }
+  }
+  const shipped = rows[rows.length - 1];
+  if (shipped !== undefined && shipped.total.medianMs > failOverMs) {
+    console.error(
+      `\nFAILED: median speech→note ${shipped.total.medianMs}ms is over the ` +
+        `${failOverMs}ms threshold.`,
+    );
+    process.exit(1);
+  }
+  process.exit(0);
+}
 
 const before = stats(
   await run(
@@ -375,4 +575,15 @@ if (asJson) {
       (before.endpointLagMs / before.total.medianMs) * 100
     ).toFixed(0)}% before); the median speech→note wait moved by ${won}ms.`,
   );
+}
+
+// The daily check's verdict. Without `--fail-over` this script only reports —
+// a number is a reading, and only a caller that named a threshold is asking
+// for a pass or a fail.
+if (after.total.medianMs > failOverMs) {
+  console.error(
+    `\nFAILED: median speech\u2192note ${after.total.medianMs}ms is over the ` +
+      `${failOverMs}ms threshold.`,
+  );
+  process.exit(1);
 }

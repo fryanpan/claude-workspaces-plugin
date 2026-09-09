@@ -289,7 +289,7 @@ describe('applyBlockEdits is the write', () => {
     const watcher = watched(oneDocStore('d', { ydoc, meta: { type: 'markdown' as DocType } }));
     expect(
       applyNotesUpdate(watcher.store, update('d', '- a note'), createNotesHeadingMemory()),
-    ).toBe(true);
+    ).toBe(null);
     expect(watcher.calls).toBe(1);
     expect(markdownOf(ydoc)).toContain('- a note');
   });
@@ -305,7 +305,7 @@ describe('applyBlockEdits is the write', () => {
     });
     expect(
       applyNotesUpdate(watcher.store, update('d', '- a note'), createNotesHeadingMemory()),
-    ).toBe(false);
+    ).toBe('store-refused');
     expect(watcher.calls).toBe(1);
     expect(markdownOf(ydoc)).toBe(before);
     expect(markdownOf(ydoc)).not.toContain('a note');

@@ -132,9 +132,8 @@ export function recentStep(at: number, now: number): number | null {
 
 /**
  * Whether the set of tinted lines differs between two editor states —
- * arrived, stepped or aged out. The edge markers (recent-note-markers.ts)
- * re-count on it, from the editor's transaction event, so the wiring lives
- * with the meeting surface rather than at editor construction.
+ * arrived, stepped or aged out. A cheap identity check for a caller that
+ * wants to react to the tint set alone rather than to every transaction.
  */
 export function recentTintChanged(prev: EditorState, next: EditorState): boolean {
   return key.getState(prev) !== key.getState(next);
@@ -147,9 +146,15 @@ interface Spec {
 function tint(from: number, to: number, at: number, now: number): Decoration | null {
   const step = recentStep(at, now);
   if (step === null) return null;
-  return Decoration.node(from, to, { class: 'recent-note', 'data-age': String(step) }, {
-    at,
-  } satisfies Spec);
+  // `data-at` is the arrival instant in the DOM. The step drives the tint;
+  // the instant drives the margin card's "added 1m 15s ago", which needs a
+  // finer grain than the four tint steps can carry (recent-note-cards.ts).
+  return Decoration.node(
+    from,
+    to,
+    { class: 'recent-note', 'data-age': String(step), 'data-at': String(at) },
+    { at } satisfies Spec,
+  );
 }
 
 /** The same lines, re-stepped for `now`; aged-out ones dropped. */

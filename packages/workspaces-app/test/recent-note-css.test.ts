@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-harness.ts';
+import { IPAD, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 /**
  * The recent-note tint's stylesheet contract (settle-wash.ts decorates,
@@ -42,17 +42,5 @@ describe('the recent-note tint', () => {
 
   it('a line with no step has no weight — the cascade never reaches it', () => {
     expect(styleOf(tintedLine(null)).getPropertyValue('--recent-w').trim()).toBe('');
-  });
-
-  it('the edge pill is pinned inside the pane at both sizes', () => {
-    for (const vp of [IPAD, PHONE]) {
-      setViewport(vp);
-      const pane = attach('editor-pane');
-      pane.id = 'editor-pane';
-      const pill = document.createElement('button');
-      pill.className = 'recent-edge top';
-      pane.appendChild(pill);
-      expect(styleOf(pill).position).toBe('absolute');
-    }
   });
 });
