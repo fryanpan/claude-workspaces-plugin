@@ -1,15 +1,19 @@
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   DOC_KEY_SEP,
   type DocKeyParts,
   docKeyForPath,
-  listRepoWorktrees,
   makeDocKey,
   parseDocKey,
   repoIdentityAt,
 } from './doc-key.ts';
-import { findWorktreeRoot, gitCommonDir } from './doc-origin-repo.ts';
+import { findWorktreeRoot } from './doc-origin-repo.ts';
+import {
+  findCheckoutRecord,
+  liveCheckouts,
+  retireCheckout,
+  touchCheckout,
+} from './repo-registry-checkouts.ts';
 import {
   REPO_REGISTRY_FILE,
   type RegisteredCheckout,
@@ -98,12 +102,24 @@ export class RepoRegistry {
   }
 
   /** Persist unless a batch is holding writes. */
+  /**
+   * Write the file, unless a batch is holding writes.
+   *
+   * A failed write LEAVES THE REGISTRY DIRTY, so the next write rewrites the
+   * whole file rather than the one change that came after it. The file is
+   * rewritten whole every time, so a retry is a repair.
+   *
+   * This one logs rather than throws, because it runs on the bind path: a
+   * full disk must not turn every bind into an exception when the doc itself
+   * is fine and the next write will carry the claim. `endBatch` is the
+   * opposite case and throws — see there.
+   */
   private persist(): void {
     if (this.deferred) {
       this.dirty = true;
       return;
     }
-    if (writeRegistryFile(this.path, this.data)) this.dirty = false;
+    this.dirty = !writeRegistryFile(this.path, this.data);
   }
 
   /** Hold writes until `endBatch`. One fsync for a migration over thousands
@@ -112,9 +128,26 @@ export class RepoRegistry {
     this.deferred = true;
   }
 
+  /**
+   * Commit the batch, or THROW.
+   *
+   * The one place a failed registry write must not be a log line. A batch is
+   * how the migration files thousands of claims, and it reports success from
+   * the fact that this returned: a write that failed quietly here left the
+   * run journaling claims that would be gone at the next restart. So the
+   * caller is told, and the migration answers by rolling back.
+   *
+   * The batch is ended either way. A caller that has been told the write
+   * failed is not left holding deferred state it did not ask for.
+   */
   endBatch(): void {
     this.deferred = false;
-    if (this.dirty) this.persist();
+    if (!this.dirty) return;
+    if (writeRegistryFile(this.path, this.data)) {
+      this.dirty = false;
+      return;
+    }
+    throw new Error(`[repo-registry] could not write ${this.path}: the batch was not committed`);
   }
 
   /**
@@ -374,25 +407,8 @@ export class RepoRegistry {
     const checkoutRoot = findWorktreeRoot(absPathInRepo);
     if (!identity || !checkoutRoot) return;
     const repo = this.upsertRepo({ repoKey: identity.repoKey, identity }, checkoutRoot);
-    this.touchCheckout(repo, checkoutRoot, false);
+    touchCheckout(repo, checkoutRoot, false);
     this.persist();
-  }
-
-  private touchCheckout(repo: RepoRecord, root: string, registered: boolean): RegisteredCheckout {
-    const now = Date.now();
-    const found = repo.checkouts.find((c) => c.root === root);
-    if (found) {
-      found.lastSeenAt = now;
-      // Registering again is how a lead un-removes a checkout they retired.
-      if (registered) {
-        found.registered = true;
-        found.removedAt = undefined;
-      }
-      return found;
-    }
-    const row: RegisteredCheckout = { root, addedAt: now, lastSeenAt: now, registered };
-    repo.checkouts.push(row);
-    return row;
   }
 
   /**
@@ -409,7 +425,7 @@ export class RepoRegistry {
     const repo = this.upsertRepo({ repoKey: identity.repoKey, identity }, checkoutRoot);
     const before = repo.checkouts.find((c) => c.root === checkoutRoot);
     const alreadyKnown = before?.registered === true && before.removedAt === undefined;
-    this.touchCheckout(repo, checkoutRoot, true);
+    touchCheckout(repo, checkoutRoot, true);
     this.persist();
     return {
       ok: true,
@@ -421,23 +437,21 @@ export class RepoRegistry {
   }
 
   /**
-   * Retire a checkout. Soft: the row keeps its dates and its docKeys, so a
-   * doc reviewed there still resolves and still opens with its comments. The
-   * caller is expected to have flushed first — a removal we can SEE is a
-   * removal we can flush before, which is the whole reason this verb exists
-   * rather than leaving people to `git worktree remove` unannounced.
+   * Retire a checkout. The caller is expected to have flushed first — a
+   * removal we can SEE is a removal we can flush before, which is the whole
+   * reason this verb exists rather than leaving people to
+   * `git worktree remove` unannounced. Soft, per `repo-registry-checkouts.ts`.
    */
   unregisterCheckout(path: string): { ok: boolean; repoKey?: string } {
     const root = findWorktreeRoot(path) ?? path;
-    for (const repo of this.data.repos) {
-      const row = repo.checkouts.find((c) => c.root === root);
-      if (!row) continue;
-      row.registered = false;
-      row.removedAt = Date.now();
-      this.persist();
-      return { ok: true, repoKey: repo.repoKey };
-    }
-    return { ok: false };
+    const res = retireCheckout(this.data, root);
+    if (res.ok) this.persist();
+    return res;
+  }
+
+  /** Is this path a checkout we hold a row for — asked without writing. */
+  checkoutRecordFor(path: string): { repoKey: string; root: string } | null {
+    return findCheckoutRecord(this.data, findWorktreeRoot(path) ?? path);
   }
 
   /** Rows the registry holds for a repo, whatever their state. */
@@ -445,27 +459,10 @@ export class RepoRegistry {
     return this.repoFor(repoKey)?.checkouts ?? [];
   }
 
-  /**
-   * Every checkout of the repo that EXISTS right now: git's own worktree list
-   * (which is authoritative and needs no registration) unioned with the
-   * registered rows that still exist on disk.
-   *
-   * The union is the point. Git knows about worktrees it created; the
-   * registry knows about a separate clone the lead pointed at, which git will
-   * never mention because it is a different repository object entirely.
-   */
+  /** Every checkout of the repo that exists right now — git's list unioned
+   *  with the registered rows still on disk. */
   checkoutsFor(repoKey: string): string[] {
-    const repo = this.repoFor(repoKey);
-    const out = new Set<string>();
-    if (repo) {
-      const common = gitCommonDir(repo.mainRoot);
-      if (common) for (const wt of listRepoWorktrees(common)) out.add(wt.root);
-      for (const row of repo.checkouts) {
-        if (row.removedAt !== undefined) continue;
-        if (existsSync(row.root)) out.add(row.root);
-      }
-    }
-    return [...out].sort();
+    return liveCheckouts(this.repoFor(repoKey));
   }
 
   /** Every repo the registry knows, newest checkout first inside each. */

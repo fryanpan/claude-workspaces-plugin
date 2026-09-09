@@ -23,7 +23,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { waitFor } from './wait-for.ts';
+import { pastWriteBack, waitFor } from './wait-for.ts';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, {
@@ -217,6 +217,39 @@ describe('/api/repos', () => {
         const raw = JSON.parse(readFileSync(sidecar, 'utf8')) as { bindingLostAt?: number };
         return typeof raw.bindingLostAt === 'number';
       });
+    });
+
+    it('does no work on the way to a 404', async () => {
+      // The verb used to flush every pending write and move every binding
+      // under the path, and only then find out the registry had never heard
+      // of it: real writes, on somebody else's document, for a caller who
+      // gets a 404 and never learns it happened.
+      //
+      // The fixture puts a doc's binding inside a checkout the registry holds
+      // no row for: only `main` is registered, and the live copy is the one
+      // in the worktree because it was edited later.
+      await register(main);
+      setMtime(join(main, rel), T0);
+      setMtime(join(wt, rel), T0 + 60);
+      const docId = await bindDoc('plan', join(main, rel));
+      const sidecar = join(dataDir, `${docId}.private.json`);
+      await waitFor(() => {
+        const raw = JSON.parse(readFileSync(sidecar, 'utf8')) as { liveCheckout?: string };
+        return raw.liveCheckout === wt;
+      });
+
+      const r = await send('/api/repos/checkouts', {
+        method: 'DELETE',
+        body: JSON.stringify({ path: wt }),
+      });
+      expect(r.status).toBe(404);
+      // timed: the meta write a retarget would have scheduled runs on the
+      // `.ydoc` persist debounce, so proving it never happened means waiting
+      // past that window. The wait IS the assertion; there is no observable
+      // to poll for an event that must not occur.
+      await new Promise((resolve) => setTimeout(resolve, pastWriteBack()));
+      const after = JSON.parse(readFileSync(sidecar, 'utf8')) as { liveCheckout?: string };
+      expect(after.liveCheckout).toBe(wt);
     });
 
     it('answers 404 for a checkout nobody registered', async () => {

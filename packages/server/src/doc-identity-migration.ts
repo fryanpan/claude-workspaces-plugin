@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { listThreads, readDocMeta } from '@claude-workspaces/core';
 import * as Y from 'yjs';
@@ -30,11 +30,20 @@ function loadYdoc(dataDir: string, docId: string): Y.Doc | null {
   return doc;
 }
 
+/**
+ * Write a merged document temp-then-RENAME.
+ *
+ * The copy-over-the-original version had a window where a failure left a
+ * TRUNCATED `.ydoc` — the durable record of somebody's document, the one
+ * thing in this whole run that cannot be rebuilt from anywhere else. A
+ * rename is atomic: the file is either the document as it was or the document
+ * with the conversations in it.
+ */
 function saveYdoc(dataDir: string, docId: string, doc: Y.Doc): void {
   const path = ydocPath(dataDir, docId);
   const tmp = `${path}.migrating`;
   writeFileSync(tmp, Y.encodeStateAsUpdate(doc));
-  writeFileSync(path, readFileSync(tmp));
+  renameSync(tmp, path);
 }
 
 /**
@@ -158,6 +167,11 @@ export function applyPlan(
     indexRowsRefreshed: 0,
     parity: [],
   };
+  // The record is read BEFORE anything is touched. A journal that exists and
+  // cannot be read stops the run here — no claim filed, no `.ydoc` rewritten —
+  // rather than after the corpus has already moved.
+  const journalBefore = readJournal(dataDir);
+
   /** Each document loaded at most once: the validation pass below reads every
    *  winner, and the merge loop would otherwise read them all again. */
   const loaded = new Map<string, Y.Doc | null>();
@@ -265,26 +279,48 @@ export function applyPlan(
     throw err;
   }
 
-  // The journal write is inside the rollback too: a run whose record cannot
-  // be written must not leave keys filed that nothing can release.
+  // Journal FIRST, then the registry. Between the two writes the safe
+  // direction to fail is a journal naming keys that were never filed —
+  // releasing one is a no-op — rather than filed keys nothing can release.
+  //
+  // Both writes are inside the rollback: a run whose record cannot be written
+  // must not leave keys filed, and a run whose keys cannot be filed must not
+  // leave a record saying they were.
   try {
-    const journal = readJournal(dataDir);
-    journal.runs.push({
-      ranAt: Date.now(),
-      claims: plan.claims,
-      keysFiled,
-      merges: journalMerges,
-      unresolved: plan.unresolved,
+    writeJournal(dataDir, {
+      ...journalBefore,
+      runs: [
+        ...journalBefore.runs,
+        {
+          ranAt: Date.now(),
+          claims: plan.claims,
+          keysFiled,
+          merges: journalMerges,
+          unresolved: plan.unresolved,
+        },
+      ],
     });
-    writeJournal(dataDir, journal);
   } catch (err) {
     registry.restore(before);
     throw err;
   }
-  // Journal FIRST, then the registry. Between the two writes the safe
-  // direction to fail is a journal naming keys that were never filed —
-  // releasing one is a no-op — rather than filed keys nothing can release.
-  registry.endBatch();
+  try {
+    registry.endBatch();
+  } catch (err) {
+    registry.restore(before);
+    // Put the record back the way it was. If even this fails the journal is
+    // left naming keys that were never filed, which releases as a no-op —
+    // still the safe direction, and now said out loud.
+    try {
+      writeJournal(dataDir, journalBefore);
+    } catch (undoErr) {
+      console.error(
+        '[migrate-doc-identity] the registry write failed and the journal entry could not be taken back; it names keys that were never filed:',
+        undoErr,
+      );
+    }
+    throw err;
+  }
   return out;
 }
 

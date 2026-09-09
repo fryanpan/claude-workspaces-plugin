@@ -12,11 +12,19 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listThreads } from '@claude-workspaces/core';
-import { readJournal } from '../src/doc-identity-journal.ts';
+import { readJournal, revert } from '../src/doc-identity-journal.ts';
 import { applyPlan, liveIo, reportLines } from '../src/doc-identity-migration.ts';
 import { planMigration } from '../src/doc-identity-plan.ts';
 import { readDocIndex } from '../src/doc-index.ts';
@@ -166,14 +174,61 @@ describe('what the doc-identity migration refuses to do', () => {
     rmSync(join(dataDir, 'repos.json'), { force: true });
     const plan = planMigration(liveIo(dataDir));
     const docKey = plan.claims[0]?.docKey as string;
-    // A directory where the journal file goes: the write throws, and nothing
-    // about the corpus had to be broken to make it.
-    mkdirSync(join(dataDir, 'doc-identity-migration.json'));
+    // A directory where the journal's TEMP file goes: the write throws while
+    // the read still answers "no journal yet", which is the state this is
+    // about. Nothing in the corpus had to be broken to make it.
+    mkdirSync(join(dataDir, 'doc-identity-migration.json.tmp'));
 
     const registry = new RepoRegistry(dataDir);
     expect(() => applyPlan(dataDir, plan, registry)).toThrow();
     expect(registry.docIdFor(docKey)).toBeUndefined();
     expect(new RepoRegistry(dataDir).docIdFor(docKey)).toBeUndefined();
+  });
+
+  it('refuses to run over a journal it cannot read, and leaves it alone', async () => {
+    // The journal is the only record of what earlier runs filed. Reading a
+    // damaged one as empty is how the next apply overwrites it, and the keys
+    // those runs claimed are then filed with nothing able to release them.
+    await seedDoc('d-plan', join(main, rel), 'Why at boot?', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const plan = planMigration(liveIo(dataDir));
+    const docKey = plan.claims[0]?.docKey as string;
+    const journalPath = join(dataDir, 'doc-identity-migration.json');
+    const damaged = '{"version":1,"runs":[{"ranAt":1,"keysFiled":["a b';
+    writeFileSync(journalPath, damaged);
+
+    const registry = new RepoRegistry(dataDir);
+    expect(() => applyPlan(dataDir, plan, registry)).toThrow(/did not parse/);
+    // Nothing filed, and the record is byte-for-byte what it was.
+    expect(registry.docIdFor(docKey)).toBeUndefined();
+    expect(readFileSync(journalPath, 'utf8')).toBe(damaged);
+    // A revert refuses for the same reason: the file it cannot read is the
+    // list of what it would be allowed to release.
+    expect(() => revert(dataDir, new RepoRegistry(dataDir))).toThrow(/did not parse/);
+
+    // CONTROL: with the damaged file moved aside, the same plan runs.
+    rmSync(journalPath);
+    expect(applyPlan(dataDir, plan, new RepoRegistry(dataDir)).claimed).toBe(1);
+  });
+
+  it('rolls the journal entry back when the registry cannot be written', async () => {
+    // The other half of one commit point: a run that journals its claims and
+    // then fails to file them would report success and lose them at the next
+    // restart.
+    await seedDoc('d-plan', join(main, rel), 'Why at boot?', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const plan = planMigration(liveIo(dataDir));
+    const docKey = plan.claims[0]?.docKey as string;
+    // A directory where the registry's temp file goes: the batch commit
+    // fails, and nothing about the corpus had to be broken to arrange it.
+    mkdirSync(join(dataDir, 'repos.json.tmp'));
+
+    expect(() => applyPlan(dataDir, plan, new RepoRegistry(dataDir))).toThrow(
+      /could not write|not committed/,
+    );
+    expect(new RepoRegistry(dataDir).docIdFor(docKey)).toBeUndefined();
+    // And the record does not claim a run that did not happen.
+    expect(readJournal(dataDir).runs).toEqual([]);
   });
 
   it('files no claim for a document it cannot read, and says which', async () => {
@@ -249,5 +304,27 @@ describe('what the doc-identity migration refuses to do', () => {
     expect(after?.meta.sourceUrl).toBe(before?.meta.sourceUrl as string);
     // CONTROL: the loser was not merged INTO, so its row is untouched.
     expect(readDocIndex(dataDir, 'd-wt-a')?.threads.total).toBe(1);
+  });
+  it('leaves no half-written record behind: the journal and the winner are renamed into place', async () => {
+    // Both writers used to put the bytes in a temp file and then COPY them
+    // over the real one, which is a window where the journal is half a file
+    // and the winner's `.ydoc` is a truncated document — the one record in
+    // this run that cannot be rebuilt from anywhere else. A rename leaves
+    // nothing beside the target, which is what this reads.
+    writeFileSync(join(wt, rel), '# Plan\n\nThe cache is warmed at boot.\n');
+    await seedDoc('d-wt-a', join(wt, rel), 'From the branch', 'cache is warmed');
+    await seedDoc('d-main', join(main, rel), 'From main', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+
+    const applied = applyPlan(dataDir, planMigration(liveIo(dataDir)), new RepoRegistry(dataDir));
+    expect(applied.merged).toBe(1);
+    const leftovers = readdirSync(dataDir).filter(
+      (f) => f.endsWith('.tmp') || f.endsWith('.migrating'),
+    );
+    expect(leftovers).toEqual([]);
+    // CONTROL: the files those temps would have been named after are there,
+    // so an empty list is a clean rename and not an empty data dir.
+    expect(readdirSync(dataDir)).toContain('doc-identity-migration.json');
+    expect(readdirSync(dataDir)).toContain('d-main.ydoc');
   });
 });

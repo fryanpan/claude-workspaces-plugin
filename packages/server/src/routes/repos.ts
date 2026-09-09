@@ -150,9 +150,15 @@ export async function handleRepoRoutes(
     if (!path) {
       return j(400, { error: 'path must be an absolute filesystem path to a checkout' });
     }
-    const flushed = docStore.flushBoundWrites([path]);
-    const retarget = docStore.retargetCheckout(path);
-    const res = docStore.repos.unregisterCheckout(path);
+    // Ask BEFORE doing anything. This used to flush every pending write and
+    // move every binding under the path, and only then discover the registry
+    // had never heard of it — real work, on a doc somebody else was editing,
+    // done for a caller who gets a 404 and never learns it happened.
+    const known = docStore.repos.checkoutRecordFor(path);
+    if (!known) return j(404, { error: 'not-registered', path });
+    const flushed = docStore.flushBoundWrites([known.root]);
+    const retarget = docStore.retargetCheckout(known.root);
+    const res = docStore.repos.unregisterCheckout(known.root);
     if (!res.ok) return j(404, { error: 'not-registered', path });
     return j(200, {
       ok: true,
