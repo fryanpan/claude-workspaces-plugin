@@ -260,6 +260,18 @@ family and moves nothing in the picture: it is the fan-out one level below
 two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
+
+The `notes-quality-*` family joins the same services tier and adds no new box
+to the picture: `notes-quality-report.ts` and `notes-quality-thresholds.ts`
+are pure (they read a markdown string and a transcript and answer counts, so
+they belong beside `notes-edit-parse.ts` in the domain row on everything but
+their filename), `notes-quality-store.ts` and `notes-tick-timing.ts` read and
+write under the data dir the way the rest of the `meeting-*` family does, and
+`notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
+meeting's stop runs — read the notes, judge them, store the reading, file a
+bad one on the row the doc belongs to. Nothing under `routes/` is added: the
+week's rollup rides the existing `GET /api/metrics` reply, for the reason
+`uptimeSec` does.
 | **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |

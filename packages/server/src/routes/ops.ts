@@ -33,6 +33,7 @@ import type { DocStore } from '../doc-store.ts';
 import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import { type NotesQualityRollup, notesQualityCounts } from '../notes-quality-store.ts';
 import type { PluginRefresher } from '../plugin-refresh.ts';
 import type { PushNotifier } from '../push-notify.ts';
 import type { PushStore } from '../push-store.ts';
@@ -55,6 +56,17 @@ export interface OpsRoutesContext {
   /** The ring of recent webhook deliveries. Read live rather than copied —
    *  the array is appended to for the life of the process. */
   webhookLog: WebhookLogEntry[];
+  /**
+   * How the meeting note-taker has been doing over the last week, rolled up
+   * from the reading each meeting's stop left behind.
+   *
+   * A thunk, and computed per request rather than kept: it is a walk of the
+   * meetings tree, the daily health check asks for it once a day, and a cached
+   * copy would be one more thing that can be stale. `null` from a server with
+   * no data dir to walk, which reads as an absent field rather than as zero
+   * meetings — the two are different claims.
+   */
+  notesQualityRollup: () => NotesQualityRollup | null;
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
@@ -88,7 +100,17 @@ export function handleOpsMetricsRoute(
   if (pathname === '/api/metrics' && req.method === 'GET') {
     if (visitor) return j(403, { error: 'not available to share visitors' });
     const stats = docStore.stats();
-    return j(200, { ...stats, uptimeSec: Math.round(process.uptime()) });
+    // The note-taker's own week rides the metrics reply for the reason
+    // uptime does: the daily health check reads one place, and a route of
+    // its own would be a second gate to keep right for a number that is
+    // already an operator's question. Absent, not zeroed, when there is no
+    // data dir to read.
+    const notesQuality = ctx.notesQualityRollup();
+    return j(200, {
+      ...stats,
+      uptimeSec: Math.round(process.uptime()),
+      ...(notesQuality !== null ? { notesQuality: notesQualityCounts(notesQuality) } : {}),
+    });
   }
   return undefined;
 }

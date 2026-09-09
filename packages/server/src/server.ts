@@ -43,6 +43,8 @@ import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
 import { isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
 import { spokenLinkRef } from './notes-link-intent.ts';
+import { rollupNotesQuality } from './notes-quality-store.ts';
+import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import {
   PARK_MIGRATION_ACTOR,
   type ParkMigrationResult,
@@ -386,6 +388,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           // gets. Both close over consts declared below; a meeting can only
           // start long after createServer has returned.
           captureBoard: () => taskStore,
+          // Where a meeting whose notes came out badly is reported: a review
+          // item on the row the meeting's doc is linked to. Same store, same
+          // thunk reason as `captureBoard`.
+          qualityBoard: () => taskStore,
           // Where "pull up last week's notes" looks. Board docs and when
           // each last carried a meeting; the meeting's own doc is dropped
           // by the caller, since "the last meeting" means the one before.
@@ -1719,6 +1725,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     pushStore,
     pushNotifier,
     webhookLog,
+    // The note-taker's week, walked per request. One window for every
+    // reader, so the health check and a person curling the route are looking
+    // at the same claim.
+    notesQualityRollup: () =>
+      rollupNotesQuality(dataDir, { now: Date.now(), windowMs: NOTES_QUALITY_WINDOW_MS }),
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
