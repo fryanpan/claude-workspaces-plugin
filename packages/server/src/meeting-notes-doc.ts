@@ -85,6 +85,7 @@ import {
   readNotesOutline,
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
+import { guardNotesEdits } from './notes-edit-guard.ts';
 import { type NotesHeadingStore, createNotesHeadingFileStore } from './notes-heading-store.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
@@ -306,6 +307,18 @@ function noteLegacyKept(docId: string): void {
 }
 
 /**
+ * One line per edit the guard refused.
+ *
+ * NOT DEDUPLICATED, unlike the legacy-transcript line above. A refusal is a
+ * property of ONE TICK's reply, not of the doc: the same model making the
+ * same mistake twice in a meeting is the signal that the prompt rule is not
+ * landing, and collapsing the two lines into one would hide exactly that.
+ */
+function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
+  console.log(`[meeting-notes] ${docId} meeting ${meetingId}: refused ${why}`);
+}
+
+/**
  * Why a tick's edits did not reach the doc.
  *
  * NAMED RATHER THAN COUNTED, because "doc write skipped" was for weeks the
@@ -358,7 +371,22 @@ export function applyNotesUpdate(
   // OPENED from the topic headings it also wrote. Cheap: `headingsOnly` walks
   // the same blocks the batch is about to and returns a handful of entries.
   const before = readNotesOutline(docStore, update.docId, { headingsOnly: true });
-  const res = applyNotesBlockEdits(docStore, update.docId, update.edits);
+  // THE MEMORY IS ASKED AGAINST THE WHOLE OUTLINE, NOT `before`. `before` is
+  // headings only for the `learn` call below; `headingId` checks its
+  // remembered id against the blocks that are actually there, so it needs the
+  // outline the tick itself read.
+  const full = readNotesOutline(docStore, update.docId);
+  const guarded = guardNotesEdits(update.edits, {
+    notesHeadingId: heading.headingId({ docId: update.docId, meetingId: update.meetingId }, full),
+  });
+  for (const why of guarded.refused) {
+    noteGuardRefusal(update.docId, update.meetingId, why);
+  }
+  // A batch the guard emptied wrote nothing, and it is not a store failure:
+  // it is the same outcome as a batch whose every edit named a missing block,
+  // which the caller already knows how to log and to retry.
+  if (guarded.edits.length === 0) return 'all-edits-failed';
+  const res = applyNotesBlockEdits(docStore, update.docId, guarded.edits);
   if (!res.ok) return 'store-refused';
   heading.learn(
     { docId: update.docId, meetingId: update.meetingId },
