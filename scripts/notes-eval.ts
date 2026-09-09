@@ -8,14 +8,16 @@
  *   bun run notes:eval --judge off     # programmatic checks only, no Sonnet
  *   bun run notes:eval --no-ideas      # skip the lost-idea rate and its gate
  *   bun run notes:eval --corpus <dir>  # a corpus that is NOT in this repo
+ *   bun run notes:eval --ratchet       # lower the lost-idea bar to this run's rate
  *
  * THE NUMBER THIS RUN EXISTS FOR IS THE LOST-IDEA RATE. Everything else here
  * asks whether the notes are well FORMED; that one asks whether they are
  * COMPLETE, which is the question a person asks when they say "I said that,
  * where is it". It is measured against a list of the ideas in each tick,
  * written down once beside the fixture and corrected by hand afterwards
- * (`notes-eval-ideas.ts`), and it FAILS the run above five per cent — unlike
- * every other rate here, because its denominator is fixed rather than
+ * (`notes-eval-ideas.ts`), and it FAILS the run above the ratcheted bar in
+ * `notes-eval.baseline.json` (`--ratchet` lowers it to a better run; the target
+ * is five per cent) — unlike every other rate here, because its denominator is fixed rather than
  * re-derived, so it means the same thing on two different days.
  *
  * REAL MEETINGS ARE NOT IN THIS REPO. `--corpus <dir>` reads fixtures and
@@ -85,8 +87,10 @@ import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
 import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
 import {
+  MIN_GATED_IDEAS,
   type MeetingIdeaRate,
   judgeCarried,
+  ratchetLostIdeaBar,
   readTruth,
   reportIdeaRates,
 } from './notes-eval-ideas.ts';
@@ -625,6 +629,7 @@ function report(
   ideaRows: readonly MeetingIdeaRate[],
   gateIdeas: boolean,
   quote: boolean,
+  ratchet = false,
 ): number {
   console.log('\nBehaviour                                  examples   pass rate');
   console.log('-'.repeat(66));
@@ -665,6 +670,17 @@ function report(
   // A run that stopped at the first failure would hide the number the row is
   // about behind a formatting one.
   const ideaCode = reportIdeaRates(ideaRows, gateIdeas, quote);
+  if (ratchet && gateIdeas && ideaCode === 0 && ideaRows.length > 0) {
+    const ideas = ideaRows.reduce((n, r) => n + r.ideas, 0);
+    const lost = ideaRows.reduce((n, r) => n + r.lost, 0);
+    if (ideas >= MIN_GATED_IDEAS) {
+      const bar = ratchetLostIdeaBar(
+        lost / ideas,
+        `${new Date().toISOString().slice(0, 10)}: ${ideaRows.length} meeting(s), ${ideas} ideas, ${((lost / ideas) * 100).toFixed(1)}% lost`,
+      );
+      console.log(`Bar now ${(bar * 100).toFixed(1)}%.`);
+    }
+  }
   const walls = behaviours.flatRuns!;
   if (failOnWalls && walls.failures.length > 0) {
     console.log(
@@ -750,7 +766,7 @@ async function main(argv: string[]): Promise<number> {
   // that is the only reason `--corpus` exists. Its examples never print.
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const quote = !relative(repoRoot, resolve(corpusDir)).startsWith('..');
-  return report(behaviours, smoke, ideaRows, ideas, quote);
+  return report(behaviours, smoke, ideaRows, ideas, quote, argv.includes('--ratchet'));
 }
 
 if (import.meta.main) {

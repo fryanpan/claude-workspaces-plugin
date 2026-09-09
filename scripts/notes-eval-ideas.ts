@@ -225,8 +225,53 @@ export async function judgeCarried(
 
 /* ===== The rate ===== */
 
-/** The gate, from the row that asked for this: under five per cent. */
-export const MAX_LOST_IDEA_RATE = 0.05;
+/**
+ * The bar the row asked for: under five per cent. Today's note-taker loses
+ * four ideas in ten, so this is where the ratchet is heading, not the gate.
+ */
+export const TARGET_LOST_IDEA_RATE = 0.05;
+
+/**
+ * The gate ratchets. `scripts/notes-eval.baseline.json` holds the highest
+ * rate a gated run may reach; it was set to the measured rate on the day the
+ * eval landed (Bryan, 2026-09-08: ship the prompt fixes, ratchet from there)
+ * and `--ratchet` lowers it to a better run's rate. It never rises: a bar
+ * that can be raised to fit the run is not a bar.
+ */
+export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'notes-eval.baseline.json');
+
+interface LostIdeaBaseline {
+  maxLostIdeaRate: number;
+  measured: string;
+  target: number;
+}
+
+export function readLostIdeaBar(path = BASELINE_PATH): number {
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<LostIdeaBaseline>;
+  const bar = raw.maxLostIdeaRate;
+  if (typeof bar !== 'number' || !(bar >= 0 && bar <= 1)) {
+    throw new Error(`${path}: maxLostIdeaRate must be a number in [0, 1]`);
+  }
+  return bar;
+}
+
+/**
+ * Lower the bar to `overall` when the run beat it. Returns the bar now in
+ * force. A run above the bar leaves it alone — the failure is the message.
+ */
+export function ratchetLostIdeaBar(
+  overall: number,
+  measured: string,
+  path = BASELINE_PATH,
+): number {
+  const current = JSON.parse(readFileSync(path, 'utf8')) as LostIdeaBaseline;
+  if (overall >= current.maxLostIdeaRate) return current.maxLostIdeaRate;
+  const next = Math.max(TARGET_LOST_IDEA_RATE, Math.ceil(overall * 1000) / 1000);
+  if (next >= current.maxLostIdeaRate) return current.maxLostIdeaRate;
+  const written: LostIdeaBaseline = { ...current, maxLostIdeaRate: next, measured };
+  writeFileSync(path, `${JSON.stringify(written, null, 2)}\n`);
+  return next;
+}
 
 /**
  * The fewest ideas a run may gate on.
@@ -267,6 +312,7 @@ export function reportIdeaRates(
   rows: readonly MeetingIdeaRate[],
   gate: boolean,
   quote = true,
+  bar = readLostIdeaBar(),
 ): number {
   if (rows.length === 0) {
     console.log('\nNo idea ground truth for this corpus — the lost-idea rate was not measured.');
@@ -318,18 +364,24 @@ export function reportIdeaRates(
   if (ideas < MIN_GATED_IDEAS) {
     console.log(
       `\n${ideas} idea(s) is too thin a sample to hold a ` +
-        `${(MAX_LOST_IDEA_RATE * 100).toFixed(0)}% bar (${MIN_GATED_IDEAS} needed). ` +
+        `${(bar * 100).toFixed(1)}% bar (${MIN_GATED_IDEAS} needed). ` +
         'Reported, not gated.',
     );
     return 0;
   }
-  if (overall > MAX_LOST_IDEA_RATE) {
+  if (overall > bar) {
     console.log(
       `\nFAILED: ${(overall * 100).toFixed(1)}% of ideas reached no note, over the ` +
-        `${(MAX_LOST_IDEA_RATE * 100).toFixed(0)}% bar. The note-taker is dropping things it ` +
+        `${(bar * 100).toFixed(1)}% bar. The note-taker is dropping things it ` +
         'was told to compress. Read the examples above before changing the bar.',
     );
     return 1;
+  }
+  if (bar > TARGET_LOST_IDEA_RATE) {
+    console.log(
+      `\nUnder the ${(bar * 100).toFixed(1)}% bar; the target is ` +
+        `${(TARGET_LOST_IDEA_RATE * 100).toFixed(0)}%. Pass --ratchet to lower the bar to this run.`,
+    );
   }
   return 0;
 }

@@ -8,12 +8,17 @@
  * an empty sample, a partial judge reply scored as loss, and a gate that
  * passes because it measured nothing.
  */
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  MAX_LOST_IDEA_RATE,
   MIN_GATED_IDEAS,
   type MeetingIdeaRate,
+  TARGET_LOST_IDEA_RATE,
+  ratchetLostIdeaBar,
   rateOf,
+  readLostIdeaBar,
   reportIdeaRates,
 } from './notes-eval-ideas.ts';
 
@@ -25,11 +30,15 @@ const row = (meeting: string, ideas: number, lost: number): MeetingIdeaRate => (
   examples: [],
 });
 
-/** Run the report with its console silenced, and give back the exit code. */
+/**
+ * Run the report with its console silenced, and give back the exit code.
+ * The bar is the row's target, injected, so these runs read the same on the
+ * day the ratchet reaches it as they do today.
+ */
 function verdict(rows: MeetingIdeaRate[], gate: boolean): number {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {
-    return reportIdeaRates(rows, gate);
+    return reportIdeaRates(rows, gate, true, TARGET_LOST_IDEA_RATE);
   } finally {
     log.mockRestore();
   }
@@ -108,7 +117,59 @@ describe('the lost-idea rate', () => {
     expect(verdict([row('a', 10, 10)], false)).toBe(0);
   });
 
-  it('states the bar the row asked for', () => {
-    expect(MAX_LOST_IDEA_RATE).toBe(0.05);
+  it('states the bar the row asked for, and gates on the ratcheted one', () => {
+    expect(TARGET_LOST_IDEA_RATE).toBe(0.05);
+    const bar = readLostIdeaBar();
+    expect(bar).toBeGreaterThanOrEqual(TARGET_LOST_IDEA_RATE);
+    expect(bar).toBeLessThanOrEqual(0.41);
+  });
+});
+
+describe('the ratchet', () => {
+  const baseline = (rate: number): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'notes-eval-bar-'));
+    const path = join(dir, 'baseline.json');
+    writeFileSync(path, JSON.stringify({ maxLostIdeaRate: rate, measured: 'test', target: 0.05 }));
+    return path;
+  };
+  const stored = (path: string): number =>
+    (JSON.parse(readFileSync(path, 'utf8')) as { maxLostIdeaRate: number }).maxLostIdeaRate;
+
+  it('reads the bar from the baseline file', () => {
+    expect(readLostIdeaBar(baseline(0.3))).toBe(0.3);
+  });
+
+  it('refuses a baseline that is not a rate', () => {
+    const path = baseline(0.3);
+    writeFileSync(path, JSON.stringify({ maxLostIdeaRate: 'lots' }));
+    expect(() => readLostIdeaBar(path)).toThrow(/maxLostIdeaRate/);
+  });
+
+  it('lowers the bar to a better run, rounded up so the run itself still passes', () => {
+    const path = baseline(0.41);
+    expect(ratchetLostIdeaBar(0.3141, 'better', path)).toBe(0.315);
+    expect(stored(path)).toBe(0.315);
+  });
+
+  it('never raises the bar, whatever the run measured', () => {
+    const path = baseline(0.3);
+    expect(ratchetLostIdeaBar(0.45, 'worse', path)).toBe(0.3);
+    expect(stored(path)).toBe(0.3);
+  });
+
+  it('stops at the target and goes no lower', () => {
+    const path = baseline(0.1);
+    expect(ratchetLostIdeaBar(0.01, 'great', path)).toBe(TARGET_LOST_IDEA_RATE);
+    expect(stored(path)).toBe(TARGET_LOST_IDEA_RATE);
+  });
+
+  it('gates on the injected bar', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(reportIdeaRates([row('a', 200, 60)], true, true, 0.41)).toBe(0);
+      expect(reportIdeaRates([row('a', 200, 60)], true, true, 0.05)).toBe(1);
+    } finally {
+      log.mockRestore();
+    }
   });
 });
