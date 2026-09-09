@@ -284,6 +284,12 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
         );
       }
       const { system, user } = buildNotesPrompt(input, opts.instructions?.());
+      // Sizes and the model name, so a slow tick can be read back against
+      // what it actually asked for. Reported BEFORE the call: a tick that
+      // times out is exactly the one whose prompt size matters, and a report
+      // after the await would never reach the log. There is no first-token
+      // number to give — this is a single non-streaming request.
+      input.measure?.({ promptChars: system.length + user.length, model: NOTES_MODEL });
       const ctl = new AbortController();
       const timeout = setTimeout(() => ctl.abort(), TIMEOUT_MS);
       try {
@@ -313,6 +319,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
         }
         const text = body.content?.map((b) => b.text ?? '').join('') ?? '';
         if (!text.trim()) throw new Error('notes compose returned an empty reply');
+        input.measure?.({ replyChars: text.length });
         return readNotesEdits(text);
       } finally {
         clearTimeout(timeout);

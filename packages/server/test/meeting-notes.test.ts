@@ -35,6 +35,7 @@ import {
   createPauseTicker,
   createStubNotesComposer,
 } from '../src/meeting-notes.ts';
+import { createNotesTimingLog } from '../src/notes-timing.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -577,6 +578,35 @@ describe('pause ticker', () => {
     ticker.onTurn({ turn: 1, text: 'but only once we have', final: false });
     schedule.fireAt(CADENCE_MS);
     expect(ticks[0]?.turns).toEqual([{ turn: 0, text: 'Ship the fix.' }]);
+  });
+
+  it("one stream talking through the other no longer holds the other's words", () => {
+    // Room and remote feed one ticker. The remote mic ran a single unbroken
+    // turn — one person making an argument — and every partial of it re-armed
+    // the quiet clock, so the room's finished sentence sat in `pending` for
+    // as long as the argument lasted. Neither stream is waiting on the other
+    // now: the ceiling armed on the first word, and it carries both what has
+    // settled and the engine's already-final prefix of what has not.
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({ turn: 0, text: 'the', final: false, settledText: 'the' });
+    ticker.onTurn({ turn: 1, text: 'That matches what I measured.', final: true });
+    for (const [text, settled] of [
+      ['the second thing', 'the second'],
+      ['the second thing we should', 'the second thing we'],
+      ['the second thing we should look at is the write', 'the second thing we should look at'],
+    ] as const) {
+      ticker.onTurn({ turn: 0, text, final: false, settledText: settled });
+    }
+    // No pause has happened and none is coming: somebody is still talking.
+    expect(ticks).toEqual([]);
+    expect(schedule.fireAt(CADENCE_MS)).toBe(1);
+    expect(ticks[0]?.reason).toBe('cadence');
+    // Settled words first, then the sentence still in progress — a tick is
+    // ordered by how finished its words are, not by turn number.
+    expect(ticks[0]?.turns).toEqual([
+      { turn: 1, text: 'That matches what I measured.' },
+      { turn: 0, text: 'the second thing we should look at', partial: true },
+    ]);
   });
 
   it('end() leaves no cadence timer armed', () => {
@@ -2437,6 +2467,198 @@ describe('session start and tick lifecycle', () => {
       // The retry composes the carried turn beside the new one, and says so.
       { phase: 'written', turns: [0, 1] },
     ]);
+  });
+
+  it('a doc write the store refused announces failed, and the words carry', async () => {
+    // The sink used to swallow a refused write and log it, while the session
+    // announced `written` on the strength of having CALLED it. The live area
+    // clears a chunk on `written`, so the words left the screen at the same
+    // moment they failed to reach the notes — lost from both at once.
+    const schedule = new ManualScheduler();
+    const events: Array<{ phase: string; turns: readonly number[] }> = [];
+    const landed: NotesUpdate[] = [];
+    let refuse = true;
+    const session = beginNotesSession(
+      {
+        composer: createStubNotesComposer(),
+        quietMs: 1000,
+        schedule,
+        onNotes: (u) => {
+          if (refuse) return false;
+          landed.push(u);
+          return true;
+        },
+        onError: () => {},
+        onTickLifecycle: (e) => events.push({ phase: e.phase, turns: e.turns }),
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'One.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    // Nothing was written, and the retry the refusal triggered is announced
+    // as its own composing pass — a refused write costs a round trip, not a
+    // whole tick.
+    expect(events).toEqual([
+      { phase: 'composing', turns: [0] },
+      { phase: 'failed', turns: [0] },
+      { phase: 'composing', turns: [0] },
+      { phase: 'failed', turns: [0] },
+    ]);
+    expect(landed).toEqual([]);
+    // The words are still in hand: let the store take them and they land.
+    refuse = false;
+    await session.end();
+    expect(events.filter((e) => e.phase === 'written').map((e) => e.turns)).toEqual([[0]]);
+    expect(landed).toHaveLength(1);
+  });
+
+  it('a sink that reports nothing is not a refusal', async () => {
+    // The contract is `void | boolean`, and every sink in the tree returns
+    // nothing. Only an explicit `false` may fail a tick — otherwise the fix
+    // above would report every meeting as broken.
+    const schedule = new ManualScheduler();
+    const events: string[] = [];
+    const session = beginNotesSession(
+      {
+        composer: createStubNotesComposer(),
+        quietMs: 1000,
+        schedule,
+        onNotes: () => {},
+        onTickLifecycle: (e) => events.push(e.phase),
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'One.', final: true });
+    schedule.fire();
+    await session.end();
+    expect(events).toEqual(['composing', 'written']);
+  });
+});
+
+describe('what the timing log records about a meeting', () => {
+  const ids = { docId: 'doc-timing', meetingId: 'm-timing' };
+
+  it('measures a tick from the sentence settling to the note being in the doc', async () => {
+    // The number the ticket is about, end to end, on an injected clock: real
+    // elapsed time is never the assertion (a loaded machine would decide it).
+    let now = 1_000;
+    const schedule = new ManualScheduler();
+    const timing = createNotesTimingLog();
+    const composer: NotesComposer = {
+      name: 'slow',
+      compose(input) {
+        now += 900; // the model call
+        return Promise.resolve(editsSaying(`- ${input.tick.turns.length} turn(s)`));
+      },
+    };
+    const session = beginNotesSession(
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        now: () => now,
+        openTiming: () => timing,
+        onNotes: () => {
+          now += 20; // the doc write
+        },
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'Measure the write path.', final: true });
+    now += 4_000; // the pause the ticker waited out
+    schedule.fire();
+    await session.end();
+
+    const rows = timing.rows();
+    expect(rows).toHaveLength(1);
+    const first = rows[0];
+    expect(first?.reason).toBe('pause');
+    expect(first?.outcome).toBe('written');
+    expect(first?.composeMs).toBe(900);
+    expect(first?.applyMs).toBe(20);
+    expect(first?.edits).toBe(1);
+    // 4,000 waiting for the clock + 900 composing + 20 writing.
+    expect(first?.settledToWrittenMs).toBe(4_920);
+    expect(first?.merged).toBe(1);
+  });
+
+  it('names the wait behind a slow compose, and counts the ticks that merged', async () => {
+    let now = 1_000;
+    const schedule = new ManualScheduler();
+    const timing = createNotesTimingLog();
+    let release: (() => void) | null = null;
+    const composer: NotesComposer = {
+      name: 'held',
+      compose(input) {
+        if (release === null) {
+          return new Promise((resolve) => {
+            release = () => {
+              now += 3_000;
+              resolve(editsSaying('- first'));
+            };
+          });
+        }
+        return Promise.resolve(editsSaying(`- ${input.tick.turns.length} turn(s)`));
+      },
+    };
+    const session = beginNotesSession(
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        now: () => now,
+        openTiming: () => timing,
+        onNotes: () => {},
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'One.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    // Two more ticks while the first compose is still out.
+    session.onTurn({ turn: 1, text: 'Two.', final: true });
+    schedule.fire();
+    session.onTurn({ turn: 2, text: 'Three.', final: true });
+    schedule.fire();
+    (release as unknown as () => void)();
+    await session.end();
+
+    const rows = timing.rows();
+    expect(rows.map((r) => r.merged)).toEqual([1, 2]);
+    // The second row's words had been waiting since the earlier of the two
+    // ticks that made it, through the whole of the first compose.
+    expect(rows[1]?.waitedMs).toBe(3_000);
+    // Control: the tick that was never behind anything waited for nothing.
+    expect(rows[0]?.waitedMs).toBe(0);
+  });
+
+  it('records a refused write as a failed tick with no latency to report', async () => {
+    let now = 1_000;
+    const schedule = new ManualScheduler();
+    const timing = createNotesTimingLog();
+    const session = beginNotesSession(
+      {
+        composer: createStubNotesComposer(),
+        quietMs: 1000,
+        schedule,
+        now: () => now,
+        openTiming: () => timing,
+        onNotes: () => false,
+        onError: () => {},
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'One.', final: true });
+    now += 2_000;
+    schedule.fire();
+    await session.end();
+
+    const rows = timing.rows();
+    expect(rows.every((r) => r.outcome === 'failed')).toBe(true);
+    expect(rows.every((r) => r.settledToWrittenMs === null)).toBe(true);
+    // A meeting that wrote nothing has no latency verdict to give.
+    expect(timing.summary()).toBeNull();
   });
 });
 

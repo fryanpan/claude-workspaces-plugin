@@ -54,6 +54,7 @@
 
 import { contentKind } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { docLookupUrl } from './meeting-lookup.ts';
 import { NOTES_OUTLINE_RECENT_BLOCKS } from './meeting-notes-composer.ts';
 import { correctNotesSection } from './meeting-notes-correction.ts';
@@ -76,6 +77,7 @@ import {
   runTaskCapture,
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
+import { meetingTimingPath } from './meetings.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -94,6 +96,7 @@ import {
   relabelNotesSection,
   retagSpeakerInNotes,
 } from './notes-speaker-tags.ts';
+import { createNotesTimingLog } from './notes-timing.ts';
 
 export { type NotesDocStore, MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 export {
@@ -602,6 +605,11 @@ export function withServerNotesSinks(
         `${plural(summary.turnsLost, 'turn')} in no note` +
         (summary.composeFailures > 0
           ? `, ${plural(summary.composeFailures, 'failed compose')}`
+          : '') +
+        // The number Bryan actually feels, when the meeting was measured.
+        (summary.latencyMedianMs !== undefined
+          ? `, settled-to-written median ${Math.round(summary.latencyMedianMs)}ms / worst ` +
+            `${Math.round(summary.latencyWorstMs ?? summary.latencyMedianMs)}ms`
           : '');
       // Only a meeting that actually lost words is an error. A clean one is
       // still logged, because the absence of a line is not evidence that a
@@ -610,6 +618,18 @@ export function withServerNotesSinks(
       else console.log(line);
       options.onMeetingSummary?.(summary);
     },
+    // TIMING IS OFF BY DEFAULT and opt-in per boot. It writes no words, but
+    // it writes a file per meeting, and a measurement nobody asked for is
+    // still a file in Bryan's data dir. `CW_NOTES_TIMING=1` turns it on; the
+    // replay harness passes its own log instead.
+    ...(readRenamedEnv(process.env, 'CW_NOTES_TIMING') === '1' && deps.dataDir !== undefined
+      ? {
+          openTiming: (ids: { docId: string; meetingId: string }) =>
+            createNotesTimingLog({
+              path: meetingTimingPath(deps.dataDir ?? '', ids.docId, ids.meetingId),
+            }),
+        }
+      : {}),
     onSessionStart: (ids): void => {
       // A new recording on this doc: whatever the previous one wrote is
       // FINISHED, and this recording may not rewrite it.

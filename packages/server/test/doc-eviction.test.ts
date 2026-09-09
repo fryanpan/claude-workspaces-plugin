@@ -43,6 +43,8 @@ describe('evicting an idle doc', () => {
   let srcDir: string;
   let docStore: DocStore;
   let clock: number;
+  /** Docs a meeting is being recorded into, as the server's hook reports them. */
+  let recording: Set<string>;
 
   function makeDocStore(dir: string): DocStore {
     return new DocStore({
@@ -50,11 +52,13 @@ describe('evicting an idle doc', () => {
       sse: new SseBus(),
       webhooks: createWebhookDispatcher({ onLog: () => {} }),
       now: () => clock,
+      isRecording: (docId) => recording.has(docId),
     });
   }
 
   beforeEach(() => {
     clock = Date.now();
+    recording = new Set();
     dataDir = mkdtempSync(join(tmpdir(), 'evict-data-'));
     srcDir = mkdtempSync(join(tmpdir(), 'evict-src-'));
     docStore = makeDocStore(dataDir);
@@ -267,6 +271,54 @@ describe('evicting an idle doc', () => {
     ]);
     // And the pending edit reached the file rather than being cancelled.
     expect(onDisk(midPath)).toContain('typed, not yet flushed');
+  });
+
+  it('holds a doc a meeting is being recorded into, and lets it go when the meeting ends', () => {
+    // The notes of a live meeting reach their doc through `applyNotesUpdate`,
+    // which neither opens a connection nor counts as a human edit — so every
+    // hold above is blind to it. A long meeting on a doc nobody has opened
+    // for two days was evictable mid-sentence, and the compose that followed
+    // wrote into a doc that was no longer there: the "doc write skipped"
+    // line, with the words gone from the live area at the same moment.
+    bound('in-a-meeting');
+    bound('quiet');
+    docStore.flush();
+    recording.add('in-a-meeting');
+
+    clock += 3 * DAY;
+    // The quiet doc goes; the one being recorded into stays.
+    expect(docStore.evictIdleDocs()).toEqual(['quiet']);
+    expect(resident('in-a-meeting')).toBe(true);
+
+    // POSITIVE CONTROL: the meeting is the only thing holding it. End the
+    // meeting and the same idle doc, on the same clock, evicts.
+    recording.delete('in-a-meeting');
+    expect(docStore.evictIdleDocs()).toEqual(['in-a-meeting']);
+    expect(resident('in-a-meeting')).toBe(false);
+  });
+
+  it('holds a doc when the recording check itself throws', () => {
+    // A hold that fails open would evict exactly the doc it exists to keep,
+    // and the failure mode is silent. Erring towards resident costs memory;
+    // erring the other way costs the meeting.
+    const throwing = new DocStore({
+      dataDir: mkdtempSync(join(tmpdir(), 'evict-throw-')),
+      sse: new SseBus(),
+      webhooks: createWebhookDispatcher({ onLog: () => {} }),
+      now: () => clock,
+      isRecording: () => {
+        throw new Error('meeting store is mid-restart');
+      },
+    });
+    try {
+      throwing.getOrCreate('unknowable', { type: 'markdown', title: 'unknowable' });
+      throwing.flush();
+      clock += 3 * DAY;
+      expect(throwing.evictIdleDocs()).toEqual([]);
+      expect(throwing.peek('unknowable')).toBeDefined();
+    } finally {
+      throwing.stop();
+    }
   });
 
   it('flushes a pending save instead of cancelling it', () => {

@@ -61,6 +61,12 @@ import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {
+  type NotesComposeMeasure,
+  type NotesTickTiming,
+  type NotesTimingLog,
+  median,
+} from './notes-timing.ts';
+import {
   DEFAULT_NOTES_CADENCE_MS,
   DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
   DEFAULT_NOTES_QUIET_MS,
@@ -118,6 +124,14 @@ export interface NotesMeetingSummary {
   turnsLost: number;
   composeFailures: number;
   refusedTooLong: number;
+  /**
+   * THE LATENCY, when the meeting was measured: milliseconds from a
+   * sentence settling to its note being in the doc, median and worst over
+   * every tick that produced one. Absent when timing was off — which is the
+   * default, and is why they are optional rather than zero.
+   */
+  latencyMedianMs?: number;
+  latencyWorstMs?: number;
 }
 
 /** One settled turn as a tick's delta carries it. */
@@ -286,6 +300,16 @@ export interface NotesComposeInput {
    * whose marker has to be exact is not a thing to ask a model to spell.
    */
   suggestions?: readonly NoteReference[];
+  /**
+   * Where a composer reports what its own call cost — prompt and reply size,
+   * the model it asked, time to first token if it streams. Optional on both
+   * sides: a composer that does not call it leaves those columns null, and
+   * the stub never calls it at all.
+   *
+   * SIZES, NEVER TEXT. The measurement seam must not become a second copy of
+   * the prompt.
+   */
+  measure?: (m: NotesComposeMeasure) => void;
 }
 
 export interface NotesComposer {
@@ -481,6 +505,15 @@ export interface MeetingNotesDeps {
    */
   endpointConfirmMs?: number;
   schedule?: TickScheduler;
+  /**
+   * Open the timing log for ONE meeting — a factory, not a log, because
+   * these deps are wired once per server while the file sits beside the
+   * meeting's own transcript. Absent, or returning undefined, measures
+   * nothing and costs nothing.
+   */
+  openTiming?: (ids: { docId: string; meetingId: string }) => NotesTimingLog | undefined;
+  /** The wall clock the timings are read from. Tests inject one. */
+  now?: () => number;
   context?: NotesProjectContext;
   /**
    * Resolve the context for THIS meeting's doc, read once at session start —
@@ -795,6 +828,7 @@ export function beginNotesSession(
   // Before anything else: whatever a previous recording wrote on this doc is
   // finished writing, and this session must never replace it.
   deps.onSessionStart?.(ids);
+  const timing = deps.openTiming?.(ids);
   const context = deps.resolveContext?.(ids.docId) ?? deps.context;
   /** The board as it stood when the meeting started. Not refreshed per tick:
    *  a row filed mid-meeting reaches the notes through the capture pass's
@@ -883,6 +917,18 @@ export function beginNotesSession(
   let queued: NotesTick | null = null;
   /** A compose is running, so a new tick merges rather than starting one. */
   let composing = false;
+  const clock = deps.now ?? (() => Date.now());
+  /**
+   * When each turn's words stopped changing — the moment Bryan finished the
+   * sentence, as the pipeline first knew it. A final frame stamps it; a
+   * partial stamps it only if the turn has none yet, so a turn that runs for
+   * a minute is measured from when it STARTED being said rather than from
+   * the last revision of it. That is the number the ceiling exists to bound.
+   */
+  const settledAtOf = new Map<number, number>();
+  /** When each tick fired, and how many ticks' words it ended up carrying. */
+  const firedAt = new WeakMap<NotesTick, number>();
+  const mergedOf = new WeakMap<NotesTick, number>();
   /** The merged tick already has a step on the chain waiting to run it. */
   let drainScheduled = false;
   /**
@@ -901,8 +947,12 @@ export function beginNotesSession(
     turns: [...a.turns, ...b.turns],
   });
 
+  /** How many ticks' worth of words a tick object carries. */
+  const mergeCount = (t: NotesTick): number => mergedOf.get(t) ?? 1;
+
   const composeTick = (tick: NotesTick): void => {
     lastTickNo = Math.max(lastTickNo, tick.tick);
+    if (!firedAt.has(tick)) firedAt.set(tick, clock());
     // Announced when the tick FIRES, not when the chain gets to it: this is
     // the moment the settled words split off from the provisional stream,
     // which is what the surface showing them wants to draw. Announced per
@@ -922,7 +972,17 @@ export function beginNotesSession(
       chain = chain.then(() => guarded(tick));
       return;
     }
-    queued = queued === null ? tick : mergeTicks(queued, tick);
+    if (queued !== null) {
+      const merged = mergeTicks(queued, tick);
+      // The merged tick inherits the EARLIER fire time: its oldest words
+      // have been waiting since then, and that wait is the thing being
+      // measured.
+      firedAt.set(merged, Math.min(firedAt.get(queued) ?? clock(), firedAt.get(tick) ?? clock()));
+      mergedOf.set(merged, mergeCount(queued) + mergeCount(tick));
+      queued = merged;
+    } else {
+      queued = tick;
+    }
     if (drainScheduled) return;
     drainScheduled = true;
     // ONE step on the chain for the whole merge, appended NOW rather than
@@ -955,6 +1015,42 @@ export function beginNotesSession(
       const raw = [...carry, ...tick.turns];
       carry = [];
       if (raw.length === 0) return;
+      // --- timing: opened here so every exit below reports one row ---
+      const startedAt = firedAt.get(tick) ?? clock();
+      const composeStart = clock();
+      const settled = raw
+        .map((t) => settledAtOf.get(t.turn))
+        .filter((v): v is number => v !== undefined);
+      const settledAt = settled.length > 0 ? Math.min(...settled) : null;
+      let measured: NotesComposeMeasure = {};
+      let composeMs = 0;
+      let applyMs = 0;
+      const report = (outcome: NotesTickTiming['outcome'], edits: readonly prose.BlockEdit[]) => {
+        if (timing === undefined) return;
+        const end = clock();
+        const blocks = new Set(
+          edits.map((e) => ('blockId' in e ? e.blockId : 'headingId' in e ? e.headingId : '')),
+        );
+        blocks.delete('');
+        timing.record({
+          tick: tick.tick,
+          reason: tick.reason,
+          settledAt,
+          startedAt,
+          waitedMs: composeStart - startedAt,
+          promptChars: measured.promptChars ?? null,
+          replyChars: measured.replyChars ?? null,
+          firstTokenMs: measured.firstTokenMs ?? null,
+          composeMs,
+          model: measured.model ?? null,
+          applyMs,
+          edits: edits.length,
+          blocks: blocks.size,
+          merged: mergeCount(tick),
+          outcome,
+          settledToWrittenMs: outcome === 'written' && settledAt !== null ? end - settledAt : null,
+        });
+      };
       // Speaker tags belong to multi-speaker sessions only (owner's call,
       // 2026-08-31: a solo huddle stamped with the speaker's own name on
       // every note is pure noise — and a `conversation` capture with one
@@ -1090,7 +1186,14 @@ export function beginNotesSession(
         ...(loose.suggested.length > 0 ? { suggestions: loose.suggested } : {}),
       };
       try {
-        const composed = await deps.composer.compose(input);
+        const composeCallStart = clock();
+        const composed = await deps.composer.compose({
+          ...input,
+          measure: (m) => {
+            measured = { ...measured, ...m };
+          },
+        });
+        composeMs = clock() - composeCallStart;
         // The deterministic gate on a model-made claim: a tag naming a voice
         // this meeting never carried is unwrapped to plain words, and a tag
         // naming a real one is re-rendered from the name map rather than
@@ -1144,6 +1247,7 @@ export function beginNotesSession(
             !outline.some((e) => e.text.includes(suggestionLabel(ref.title))),
         );
         const edits = withSuggestions(checked, unseen, input.humanNotes, notesHeadingId);
+        const applyStart = clock();
         const written =
           deps.onNotes({
             docId: ids.docId,
@@ -1151,6 +1255,7 @@ export function beginNotesSession(
             tick: input.tick,
             edits,
           }) !== false;
+        applyMs = clock() - applyStart;
         if (!written) {
           // The compose was fine and the DOC refused it. Same handling as a
           // failed compose — the words are still unwritten, so they carry —
@@ -1165,6 +1270,7 @@ export function beginNotesSession(
           deps.onError?.(
             `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: doc write skipped`,
           );
+          report('failed', edits);
           retryAfterFailure(tick);
           return;
         }
@@ -1179,6 +1285,7 @@ export function beginNotesSession(
           tick.tick,
           raw.map((t) => t.turn),
         );
+        report(edits.length > 0 ? 'written' : 'empty', edits);
       } catch (err) {
         carry = [...raw, ...carry];
         lifecycle(
@@ -1195,6 +1302,7 @@ export function beginNotesSession(
         deps.onError?.(`${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: ${reason}`);
         // Only a size refusal is worth trying again at once; see
         // `retryAfterFailure`.
+        report('failed', []);
         if (/max_tokens/.test(reason)) retryAfterFailure(tick);
       }
     })();
@@ -1225,7 +1333,14 @@ export function beginNotesSession(
   const retryAfterFailure = (tick: NotesTick): void => {
     if (retriedFailure || carry.length === 0) return;
     retriedFailure = true;
-    composeTick({ tick: ++lastTickNo, reason: tick.reason, turns: [] });
+    // The carried words ride ON the retry tick rather than being picked up
+    // from `carry` by the compose, so the retry announces `composing` for
+    // the turns it is about. A tick with no turns of its own announces
+    // nothing, and the surface would have seen a second `failed` for words
+    // it was never told were being tried again.
+    const turns = carry;
+    carry = [];
+    composeTick({ tick: ++lastTickNo, reason: tick.reason, turns });
   };
 
   /**
@@ -1314,6 +1429,10 @@ export function beginNotesSession(
     onTurn: (turn) => {
       if (turn.speaker !== undefined) seen.add(turn.speaker);
       if (turn.final) settledTurns.add(turn.turn);
+      // Stamped on the FIRST frame of a turn, not the last. A ceiling tick
+      // carries words out of a turn still being spoken, and the latency
+      // those words are owed is counted from when they were said.
+      if (!settledAtOf.has(turn.turn)) settledAtOf.set(turn.turn, clock());
       ticker.onTurn(turn);
     },
     nameSpeaker(speaker, name) {
@@ -1373,6 +1492,13 @@ export function beginNotesSession(
         );
       }
       const turnsLost = [...settledTurns].filter((t) => !composedTurns.has(t)).length;
+      // Written to the timing file as its last line, and carried into the
+      // meeting summary so the one line everybody already reads names the
+      // number the ticket is about.
+      const latencies = (timing?.rows() ?? [])
+        .map((r) => r.settledToWrittenMs)
+        .filter((v): v is number => v !== null);
+      timing?.summary();
       deps.onMeetingSummary?.({
         docId: ids.docId,
         meetingId: ids.meetingId,
@@ -1382,6 +1508,12 @@ export function beginNotesSession(
         turnsLost,
         composeFailures,
         refusedTooLong,
+        ...(latencies.length > 0
+          ? {
+              latencyMedianMs: median(latencies) ?? 0,
+              latencyWorstMs: Math.max(...latencies),
+            }
+          : {}),
       });
     },
     stats: () => ({
