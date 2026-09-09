@@ -136,37 +136,59 @@ function isStrictSource(source: string): boolean {
 }
 
 /**
- * The source to give a revived classic script, wrapped so re-running it is
- * clean.
+ * Insert a round's inline script, and fall back to a block only if it collides.
  *
  * A classic script's top-level `const`, `let` and `class` are bindings of the
  * page's global lexical scope, and that scope survives a swap because the page
  * does. So round two's `const METHODS` met round one's and threw
- * `Identifier 'METHODS' has already been declared` — inside `insertBefore`,
+ * `Identifier 'METHODS' has already been declared` — out of `insertBefore`,
  * which aborted the rest of the swap, so the round neither ran nor finished
  * landing (Sentry CLAUDE-WORKSPACES-8). Most mocks declare a top-level
  * `const`, so live reload was broken on round two for almost all of them.
  *
- * Wrapping the source in a block is what makes those three re-runnable: in a
- * block they are block-scoped and go away with the round, while the two things
- * the mock's own markup depends on stay exactly where they were. `var` is
- * still function-scoped, so still global; and a top-level function declaration
- * in a block is still hoisted to the global in sloppy mode (Annex B), which is
- * what an inline `onclick="doThing()"` looks up. So a mock's handlers keep
- * working across rounds.
+ * Wrapping every script in a block would fix that and quietly break working
+ * mocks: a block's `const` is gone the moment the script ends, so a later
+ * script reading an earlier one's `const`, or an inline `onclick="count++"`
+ * naming a top-level `let`, would start throwing `ReferenceError` on pages
+ * that work today. So the unwrapped source stays the DEFAULT and the block is
+ * the recovery: insert as written, and only if THAT throws a redeclaration
+ * put the same source in a block and insert it again.
  *
- * Annex B is the part a `"use strict"` script does not get: under strict mode
- * a function declared in a block stays in the block, so wrapping such a script
- * would take its handlers away. Those are left unwrapped and keep colliding —
- * a strict mock that redeclares is a narrower bug than the one this fixes, and
- * the swap now survives it either way rather than aborting.
+ * Retrying is safe precisely because a redeclaration is an early error: the
+ * script is rejected before its first statement runs, so nothing of it has
+ * happened and running it again is not running it twice. The failed element is
+ * taken back out first — a browser leaves it in the document.
+ *
+ * What the block still costs, for the round that needed it: `var` is
+ * function-scoped so stays global, and Annex B still hoists the block's
+ * function declarations to the global in sloppy mode (which is what an inline
+ * `onclick="doThing()"` looks up), but its `const` / `let` / `class` are now
+ * invisible to a LATER script in that same round. A mock that both collides
+ * and shares a lexical binding across two of its own scripts loses the second
+ * one — a much narrower page than the one this recovers, and it gets a
+ * `ReferenceError` in the console rather than a dead round.
+ *
+ * Left out of the retry entirely: `src` scripts (no source of ours to
+ * rewrite), `type="module"` (its own scope already, which is why this never
+ * happened to a module), other types like `application/json` (data, and
+ * wrapping would corrupt it), and `"use strict"` sources — strict mode does
+ * not give a block's functions to the global, so wrapping one would take its
+ * handlers away. Those keep colliding, and the caller's per-node catch keeps
+ * the rest of the round on screen.
  */
-export function reviveSource(el: HTMLScriptElement): string {
-  const source = el.textContent ?? '';
-  if (!isClassicInline(el) || isStrictSource(source)) return source;
-  // The newlines matter: a source ending in a `// line comment` would
-  // otherwise swallow the closing brace.
-  return `{\n${source}\n}`;
+function canRetryWrapped(el: HTMLScriptElement, source: string): boolean {
+  return isClassicInline(el) && !isStrictSource(source);
+}
+
+/**
+ * Is this the early error a redeclaration raises?
+ *
+ * Checked by name rather than by `instanceof`: what comes out of `insertBefore`
+ * is the browser's own exception, and a `SyntaxError` from another realm is not
+ * an `instanceof` match for this one's.
+ */
+function isSyntaxError(err: unknown): boolean {
+  return (err as { name?: string } | null)?.name === 'SyntaxError';
 }
 
 /**
@@ -177,11 +199,26 @@ export function reviveSource(el: HTMLScriptElement): string {
  * A mockup's own behaviour lives in those scripts, so a swap that dropped them
  * would hand the reviewer a page that looks right and does nothing.
  */
-function reviveScript(src: HTMLScriptElement): HTMLScriptElement {
+function reviveScript(src: HTMLScriptElement, source: string): HTMLScriptElement {
   const out = document.createElement('script');
   for (const a of Array.from(src.attributes)) out.setAttribute(a.name, a.value);
-  out.textContent = reviveSource(src);
+  out.textContent = source;
   return out;
+}
+
+/** Insert one of the round's scripts, blocking its scope only if it must. */
+function insertScript(src: HTMLScriptElement, before: Node | null): void {
+  const source = src.textContent ?? '';
+  const asWritten = reviveScript(src, source);
+  try {
+    document.body.insertBefore(asWritten, before);
+  } catch (err) {
+    if (!isSyntaxError(err) || !canRetryWrapped(src, source)) throw err;
+    asWritten.remove();
+    // The newlines matter: a source ending in a `// line comment` would
+    // otherwise swallow the closing brace.
+    document.body.insertBefore(reviveScript(src, `{\n${source}\n}`), before);
+  }
 }
 
 /** True for a head node that belongs to the mock rather than to the server. */
@@ -234,11 +271,8 @@ export function swapDocument(html: string): void {
   for (const node of Array.from(next.body.childNodes)) {
     if (isOurs(node)) continue;
     try {
-      const copy =
-        node instanceof HTMLScriptElement
-          ? reviveScript(node)
-          : (document.importNode(node, true) as Node);
-      document.body.insertBefore(copy, first);
+      if (node instanceof HTMLScriptElement) insertScript(node, first);
+      else document.body.insertBefore(document.importNode(node, true) as Node, first);
     } catch (err) {
       failures.push(err);
     }

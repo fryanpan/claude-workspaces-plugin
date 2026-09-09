@@ -1,13 +1,36 @@
+import vm from 'node:vm';
 import { afterEach, describe, expect, it } from 'vitest';
+
+/**
+ * A mock's own scripts, run again round after round.
+ *
+ * `swapDocument` revives the round's inline `<script>` elements and inserts
+ * them, which re-executes them in the page's ONE global scope. A classic
+ * script's top-level `const` / `let` / `class` binds there and the page
+ * outlives the swap, so round two used to throw `Identifier 'X' has already
+ * been declared` out of `insertBefore`, aborting the swap mid-round (Sentry
+ * CLAUDE-WORKSPACES-8).
+ *
+ * happy-dom cannot show any of this: it evaluates each `<script>` in a scope
+ * of its own, so redeclaring is silently fine there and a DOM-only test would
+ * pass against the bug. What a browser has is one shared global lexical scope
+ * across classic scripts, and `node:vm` has exactly that — a context whose
+ * `runInContext` calls share global `const` bindings, global `var`, and Annex
+ * B's block-function hoisting.
+ *
+ * So `browserLikeScripts` below makes happy-dom's `insertBefore` behave like a
+ * browser's: inserting an inline classic script RUNS its source, in one vm
+ * context that lives as long as the page, and an early error comes back out of
+ * `insertBefore` exactly as Chrome reports it. Everything else — the real
+ * `swapDocument`, the real revived elements, the real retry — is the module's.
+ */
 
 /** The page as the server serves it: the mock, then the widget, then us. */
 function paintRoundOne(): void {
   document.head.innerHTML = '<style id="r1">h1{color:red}</style>';
   document.body.innerHTML =
     '<h1 id="hero">Round one</h1>' +
-    '<p id="keeper">Unchanged paragraph</p>' +
     '<claude-feedback-widget doc-id="d-1" workspace-id="w-1"></claude-feedback-widget>' +
-    '<script src="/widget.iife.js"></script>' +
     '<script src="/widget/mockup-live.js" data-cw-live></script>';
   document.body.className = 'round-one';
 }
@@ -16,89 +39,113 @@ async function importLive() {
   return import('../src/mockup-live.ts');
 }
 
-/**
- * A mock's own scripts, re-run round after round.
- *
- * `reviveScript` copies each of the round's inline `<script>` elements into a
- * live one so the mock's behaviour actually runs. Every round therefore
- * executes its scripts in the SAME global scope as the round before it, and a
- * classic script's top-level `const` / `let` / `class` lands in that scope's
- * lexical bindings — so round two throws `Identifier 'X' has already been
- * declared`, the insert that was executing it throws mid-swap, and the round
- * neither runs nor finishes landing. Most mocks declare a top-level `const`,
- * so this was live reload broken on round two for almost all of them
- * (Sentry CLAUDE-WORKSPACES-8).
- *
- * happy-dom cannot show it: it evaluates each `<script>` in a scope of its
- * own, so redeclaring is silently fine there and a DOM-only test would pass
- * against the bug. What the browser does have is one shared global lexical
- * scope across classic scripts, and `node:vm` has exactly that — a context
- * whose `runInContext` calls share global `const` bindings, global `var` and
- * Annex B's block-function hoisting. So the DOM half runs in happy-dom (the
- * real `swapDocument`, the real revived elements) and the SOURCES those
- * elements carry are executed round by round in one vm context, which is the
- * semantics the browser applies to them.
- */
-function mockRound(n: number): string {
+interface Page {
+  /** The page's one global scope, as a plain object to read values off. */
+  globals: Record<string, unknown>;
+  /** Run a source in it, the way an inline `on*=` handler is run. */
+  run: (source: string) => unknown;
+  restore: () => void;
+}
+
+/** Make script insertion execute, and throw, the way a browser's does. */
+function browserLikeScripts(): Page {
+  const context = vm.createContext({});
+  const realInsert = document.body.insertBefore.bind(document.body);
+  document.body.insertBefore = ((node: Node, ref: Node | null) => {
+    const out = realInsert(node, ref);
+    if (node instanceof HTMLScriptElement && !node.hasAttribute('src')) {
+      const type = (node.getAttribute('type') ?? '').toLowerCase();
+      // A module has its own scope and a data block is not code; neither runs
+      // in the page's global scope, so neither is this harness's business.
+      if (type === '' || type === 'text/javascript') {
+        // The browser leaves the failed element in the document and lets the
+        // error out of the insert; taking it back out is the module's job.
+        vm.runInContext(node.textContent ?? '', context);
+      }
+    }
+    return out;
+  }) as typeof document.body.insertBefore;
+  return {
+    globals: context as Record<string, unknown>,
+    run: (source: string) => vm.runInContext(source, context),
+    restore: () => {
+      document.body.insertBefore = realInsert as typeof document.body.insertBefore;
+    },
+  };
+}
+
+/** A round that declares the five kinds of top-level binding a mock uses. */
+function declaringRound(n: number): string {
   return (
-    `<!doctype html><html><head><style id="r${n}">h1{color:red}</style></head>` +
-    `<body class="round-${n}"><h1 id="hero">Round ${n}</h1>` +
+    `<!doctype html><html><body class="round-${n}"><h1 id="hero">Round ${n}</h1>` +
     '<script>' +
     `const LABELS = ['round ${n}'];` +
     'let clicks = 0;' +
     'class Panel { label() { return LABELS[0]; } }' +
-    'function currentLabel() { clicks += 1; return new Panel().label(); }' +
+    'function currentLabel() { return new Panel().label(); }' +
     `var lastRound = ${n};` +
     'globalThis.onScreen = currentLabel();' +
-    '</script>' +
-    '<p id="keeper">Unchanged paragraph</p></body></html>'
+    '</script></body></html>'
   );
 }
 
-/** The sources of the inline scripts the last swap put on the page, in order. */
-function landedScriptSources(): string[] {
-  return [...document.body.querySelectorAll('script')]
-    .filter((s) => !s.hasAttribute('src'))
-    .map((s) => s.textContent ?? '');
-}
+describe("a mock's scripts across rounds", () => {
+  let page: Page | null = null;
 
-describe('a mock whose scripts declare things at top level', () => {
   afterEach(() => {
+    page?.restore();
+    page = null;
     document.body.innerHTML = '';
     document.head.innerHTML = '';
   });
 
-  it('survives three rounds and runs the third one, keeping functions and var global', async () => {
+  it('leaves a round that does not collide in the page scope it was written for', async () => {
     const { swapDocument } = await importLive();
-    const vm = await import('node:vm');
-    // One context for the whole page's life, which is what a browser tab is.
-    const page = vm.createContext({});
-    const globals = page as Record<string, unknown>;
-
+    page = browserLikeScripts();
     paintRoundOne();
-    const ran: string[] = [];
-    for (const n of [1, 2, 3]) {
-      swapDocument(mockRound(n));
-      // Executing here, between swaps, is the browser's timing: each round's
-      // scripts run as they are inserted, against everything the rounds
-      // before them left in the global scope.
-      for (const source of landedScriptSources()) vm.runInContext(source, page);
-      ran.push(String(globals.onScreen));
-    }
 
-    // AC 1: no exception, and round three's script has run.
-    expect(ran).toEqual(['round 1', 'round 2', 'round 3']);
-    expect(document.querySelector('#hero')?.textContent).toBe('Round 3');
+    swapDocument(
+      '<!doctype html><html><body><h1 id="hero">Round one</h1>' +
+        "<script>const SHARED = 'from the first script'; let count = 0;</script>" +
+        '<script>globalThis.readBack = SHARED;</script>' +
+        '<p id="keeper">Unchanged paragraph</p></body></html>',
+    );
 
-    // AC 2: what an inline `on*=` handler can reach is the GLOBAL scope, so
-    // the mock's top-level functions and `var`s must still be there after a
-    // swap — the wrapping only moves `const` / `let` / `class` out of it.
-    expect(typeof globals.currentLabel).toBe('function');
-    expect(globals.lastRound).toBe(3);
-    expect((globals.currentLabel as () => string)()).toBe('round 3');
+    // A later script in the same round reads the earlier one's `const`. Put
+    // every script in a block and this is a ReferenceError on a page that
+    // works today.
+    expect(page.globals.readBack).toBe('from the first script');
+    // And an inline `onclick="count++"` names a top-level `let` — a handler is
+    // compiled in the global scope, so it can only see a binding still there.
+    expect(() => page?.run('count += 1')).not.toThrow();
+    expect(page.run('count')).toBe(1);
+    expect(document.querySelector('#keeper')).not.toBeNull();
   });
 
-  it('leaves a module script and an external script exactly as the round wrote them', async () => {
+  it('recovers a colliding round instead of losing it, three rounds deep', async () => {
+    const { swapDocument } = await importLive();
+    page = browserLikeScripts();
+    paintRoundOne();
+
+    const ran: string[] = [];
+    for (const n of [1, 2, 3]) {
+      swapDocument(declaringRound(n));
+      ran.push(String(page.globals.onScreen));
+    }
+
+    // Every round ran, including the ones whose `const LABELS` met the round
+    // before it. Unrecovered, round two throws and the swap aborts.
+    expect(ran).toEqual(['round 1', 'round 2', 'round 3']);
+    expect(document.querySelector('#hero')?.textContent).toBe('Round 3');
+    // What the mock's own markup depends on survives the block: `var` is
+    // function-scoped, and Annex B hoists the block's functions to the global,
+    // which is what an inline `onclick="currentLabel()"` looks up.
+    expect(typeof page.globals.currentLabel).toBe('function');
+    expect(page.globals.lastRound).toBe(3);
+    expect(page.run('currentLabel()')).toBe('round 3');
+  });
+
+  it('leaves a module script, an external script and a data block as written', async () => {
     const { swapDocument } = await importLive();
     paintRoundOne();
     swapDocument(
@@ -111,8 +158,6 @@ describe('a mock whose scripts declare things at top level', () => {
     const scripts = [...document.body.querySelectorAll('script')].filter(
       (s) => !/widget\.iife|mockup-live/.test(s.getAttribute('src') ?? ''),
     );
-    // A module has its own scope already, an external script's source is not
-    // ours to rewrite, and a JSON data block is not code at all.
     expect(scripts[0]?.textContent).toBe('const M = 1; export {};');
     expect(scripts[1]?.getAttribute('src')).toBe('/mock/app.js');
     expect(scripts[2]?.textContent).toBe('{"const": 1}');
@@ -145,7 +190,7 @@ describe('a mock whose scripts declare things at top level', () => {
     }
 
     expect(failed).toBe(1);
-    // AC 3: the swap does not abort — the rest of the round is on screen …
+    // The swap does not abort — the rest of the round is on screen …
     expect(document.querySelector('#hero')?.textContent).toBe('Round boom');
     expect(document.querySelector('#keeper')).not.toBeNull();
     expect(document.body.className).toBe('round-boom');
