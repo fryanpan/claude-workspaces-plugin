@@ -102,7 +102,11 @@ describe('the end-of-meeting line', () => {
     expect(line).toContain('settled turn');
     expect(line).toContain('repeated bullets');
     expect(line).toContain('1/2 ideas in no note');
-    expect(line).toContain('lateness unknown');
+    // A meeting run with a data dir now leaves a per-tick timing record —
+    // the notes pipeline writes one unless an operator turns it off — so the
+    // line carries a measured lateness rather than the word unknown. The
+    // meeting below, which is given no data dir, is where unknown is asserted.
+    expect(line).toContain('0/1 notes late');
   });
 
   it('says the meeting went badly, and files, when the notes repeat themselves', async () => {
@@ -119,6 +123,10 @@ describe('the end-of-meeting line', () => {
       await harness.end();
     });
     const line = summaryLine(lines, 'm-repeats');
+    // No data dir, so no timing record was written and none could be read.
+    // The line has to say so in a word rather than print a lateness of zero,
+    // which is the number a reader would act on.
+    expect(line).toContain('lateness unknown');
     expect(line).toContain('BAD');
     expect(line).toContain('repeated bullet');
     expect(board.filed).toEqual(['t-season']);

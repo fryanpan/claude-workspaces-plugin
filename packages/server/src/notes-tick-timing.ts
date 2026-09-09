@@ -46,23 +46,19 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { meetingDirPath } from './meetings.ts';
+import { meetingTimingPath } from './meetings.ts';
 import type { NoteWait } from './notes-quality-report.ts';
 
 /**
- * Where a meeting's per-tick timing record lives.
+ * Where a meeting's per-tick timing record lives — the writer's own helper.
  *
- * The same path `meetingTimingPath` builds in `meetings.ts` on the branch
- * that writes the file, spelled here so this reader does not have to land in
- * the same commit as the writer. The filename is asserted exactly by this
- * module's test; collapse the two into the one exported helper once both are
- * on main.
+ * Re-exported under this module's name rather than reimplemented, so a reader
+ * and a writer that disagreed about the filename would be a type error rather
+ * than a meeting that silently reports an unknown lateness forever. This
+ * module's test asserts the filename exactly anyway, because the failure it
+ * guards against is the path moving under both of them at once.
  */
-export function tickTimingPath(dataDir: string, docId: string, meetingId: string): string {
-  const safe = meetingId.replace(/[^A-Za-z0-9._-]/g, '_');
-  return join(meetingDirPath(dataDir, docId), `${safe}-timing.jsonl`);
-}
+export const tickTimingPath = meetingTimingPath;
 
 /**
  * The waits a meeting's timing record reports, or `null` when it has none.
