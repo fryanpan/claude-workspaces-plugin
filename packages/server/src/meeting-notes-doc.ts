@@ -52,7 +52,7 @@
  * own provenance rather than off the voice.
  */
 
-import { contentKind } from '@claude-workspaces/core';
+import { contentKind, prose as proseNs } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { docLookupUrl } from './meeting-lookup.ts';
@@ -67,6 +67,7 @@ import {
   type NotesReattribution,
   type NotesRelabel,
   type NotesUpdate,
+  type NotesWriteRefusal,
 } from './meeting-notes.ts';
 import {
   type ResearchFiled,
@@ -87,6 +88,7 @@ import {
 } from './notes-doc-access.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
 import { type NotesHeadingStore, createNotesHeadingFileStore } from './notes-heading-store.ts';
+import { stripInventedLinks } from './notes-invented-links.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
   dropLegacyTranscriptSection,
@@ -319,6 +321,21 @@ function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
 }
 
 /**
+ * One line per tick that composed a link it was never given.
+ *
+ * ONE LINE WITH A COUNT, not a line per link, and unlike a refusal it says
+ * every URL it dropped: a tick that invents four addresses invented them from
+ * one belief, and the addresses themselves are the evidence for whoever is
+ * reading whether the compose prompt is drifting.
+ */
+function noteInventedLinks(docId: string, meetingId: string, dropped: readonly string[]): void {
+  console.log(
+    `[meeting-notes] ${docId} meeting ${meetingId}: dropped ${dropped.length} invented ` +
+      `link${dropped.length === 1 ? '' : 's'} — ${dropped.join(', ')}`,
+  );
+}
+
+/**
  * Why a tick's edits did not reach the doc.
  *
  * NAMED RATHER THAN COUNTED, because "doc write skipped" was for weeks the
@@ -390,6 +407,33 @@ export function applyNotesUpdate(
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);
   }
+  // THE SECOND DETERMINISTIC REFUSAL ON THIS PATH, and it runs after the
+  // guard for the same reason the guard runs before the store: an edit that
+  // is not going to be applied does not need its links judged.
+  //
+  // Absent sources mean "this caller cannot say what the tick was given", not
+  // "the tick was given nothing" — the section-open write and the tests that
+  // drive this function directly are both in that position, and stripping
+  // every link out of a batch whose inputs are unknown would drop a citation
+  // for having no evidence about it. The compose path always passes them.
+  const linked =
+    update.linkSources === undefined
+      ? { edits: guarded.edits, dropped: [] as string[] }
+      : stripInventedLinks(guarded.edits, {
+          urls: update.linkSources.urls,
+          // THE NOTES THEMSELVES ARE A SOURCE, and leaving them out was the
+          // one way this check could destroy a real citation. A regroup
+          // re-emits a bullet composed ticks ago, carrying the link that
+          // tick was given; the outline the compose reads carries a block's
+          // WORDS and not its links, so nothing else here can see it. Judged
+          // against the doc as it stands, a re-emitted citation is what it
+          // always was — already in the notes, and not this tick's claim.
+          text: [
+            ...update.linkSources.text,
+            proseNs.serializeFragmentToMarkdown(proseNs.getProseFragment(doc.ydoc)),
+          ],
+        });
+  if (linked.dropped.length > 0) noteInventedLinks(update.docId, update.meetingId, linked.dropped);
   // A batch the guard emptied wrote nothing, and it is not a store failure
   // or a missing block: it is the composer asking for the one edit the
   // notes cannot survive. Named on its own so the log can count how often
@@ -397,7 +441,7 @@ export function applyNotesUpdate(
   // `refused` is the evidence, not the empty list: an empty batch answered
   // `null` above before the guard ever saw it.
   if (guarded.edits.length === 0 && guarded.refused.length > 0) return 'guard-refused';
-  const res = applyNotesBlockEdits(docStore, update.docId, guarded.edits);
+  const res = applyNotesBlockEdits(docStore, update.docId, linked.edits);
   if (!res.ok) return 'store-refused';
   heading.learn(
     { docId: update.docId, meetingId: update.meetingId },
@@ -895,14 +939,18 @@ export function withServerNotesSinks(
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
       heading.headingId({ docId, meetingId }, outline),
-    onNotes: (update: NotesUpdate): boolean => {
-      let landed = true;
+    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
+      let landed: boolean | NotesWriteRefusal = true;
       try {
         const skip = applyNotesUpdate(deps.docStore(), update, heading, {
           ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
         });
         if (skip !== null) {
-          landed = false;
+          // A GUARD REFUSAL REACHES THE SESSION AS A REFUSAL, not as a failed
+          // write. `guard-refused` already says the batch was declined on
+          // policy; this is what stops the session composing the same tick
+          // again to be declined again.
+          landed = skip === 'guard-refused' ? 'refused' : false;
           // The reason, the doc, the meeting and the tick. The line this
           // replaces named only the doc, so a meeting whose notes stopped
           // could not be told from a doc that had been deleted.
