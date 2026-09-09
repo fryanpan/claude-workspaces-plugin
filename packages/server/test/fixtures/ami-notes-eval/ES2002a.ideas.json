@@ -1,0 +1,79 @@
+{
+  "meeting": "ES2002a",
+  "listedBy": "claude-sonnet-5",
+  "listedAt": "2026-09-08T23:01:05.618Z",
+  "ticks": [
+    {
+      "tick": 1,
+      "ideas": [
+        "Remote controls are easy to lose",
+        "Remote slips behind couch or under table",
+        "Option: remotes that beep when whistled at or high-pitched noise made"
+      ]
+    },
+    {
+      "tick": 2,
+      "ideas": [
+        "Memory of first family remote control had a cable to TV",
+        "That remote had large buttons similar to a blender"
+      ]
+    },
+    {
+      "tick": 3,
+      "ideas": [
+        "Current design still feels bulky and primitive",
+        "Consider streamlining the design"
+      ]
+    },
+    {
+      "tick": 4,
+      "ideas": [
+        "Option: use a touch screen interface",
+        "Constraint: feature must be technologically reasonable",
+        "Decision deferred to industrial designer",
+        "Claim: touch screen doesn't improve function, only appeal",
+        "Claim: home products trending toward chic design"
+      ]
+    },
+    {
+      "tick": 5,
+      "ideas": [
+        "Explore using nicer materials",
+        "Next meeting scheduled in thirty minutes",
+        "Industrial designer to work on actual working design"
+      ]
+    },
+    {
+      "tick": 6,
+      "ideas": [
+        "Design role covers user interface and technical functions",
+        "Marketing executive role focuses on requirements the product must fulfil",
+        "Instructions will be emailed to all participants"
+      ]
+    },
+    {
+      "tick": 8,
+      "ideas": ["Next stage is functional design", "Meeting is ending"]
+    },
+    {
+      "tick": 9,
+      "ideas": ["Question whether remote control design should stay TV-only or add extra features"]
+    },
+    {
+      "tick": 10,
+      "ideas": [
+        "Consider a design commitment to television features",
+        "Meeting time is up, need to finish quickly",
+        "Product needs a unique selling point"
+      ]
+    },
+    {
+      "tick": 11,
+      "ideas": [
+        "Production cost is a key factor",
+        "There is a cap on cost/price",
+        "Amount includable is limited by price cap"
+      ]
+    }
+  ]
+}

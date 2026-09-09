@@ -1,0 +1,244 @@
+{
+  "meeting": "ES2003c",
+  "listedBy": "claude-sonnet-5",
+  "listedAt": "2026-09-08T23:07:42.122Z",
+  "ticks": [
+    {
+      "tick": 1,
+      "ideas": ["Design likely needs a number keypad", "Consider what chip the design requires"]
+    },
+    {
+      "tick": 2,
+      "ideas": [
+        "Cost depends on where money is allocated",
+        "Fancy LCD display is a spending option",
+        "Question: does advanced chip for LCD drastically increase cost"
+      ]
+    },
+    {
+      "tick": 3,
+      "ideas": [
+        "Need an advanced chip for the LCD",
+        "Simple button press only sends infrared transmission",
+        "Controlling the LCD requires a more powerful chip"
+      ]
+    },
+    {
+      "tick": 4,
+      "ideas": [
+        "Compared chip choice to one used for pushing buttons",
+        "Budget constraint of twelve pounds fifty",
+        "Question on whether to continue or go back"
+      ]
+    },
+    {
+      "tick": 5,
+      "ideas": [
+        "Twelve Euros converts to roughly eight or nine Pounds",
+        "Plan relies on bulk buying for procurement",
+        "Need to research costs of bulk buying/procurement"
+      ]
+    },
+    {
+      "tick": 6,
+      "ideas": [
+        "Previous slides describe internal components of remote control",
+        "Remote translates key press into infra-red signal",
+        "TV receives the infra-red signal",
+        "Chip detects the key press",
+        "Chip sends signal to the amplifier"
+      ]
+    },
+    {
+      "tick": 7,
+      "ideas": [
+        "Next slide shows copper wires interacting with rubber buttons to send signals to the chip"
+      ]
+    },
+    {
+      "tick": 8,
+      "ideas": ["Need to decide which buttons to use for the control"]
+    },
+    {
+      "tick": 9,
+      "ideas": [
+        "Question about feasibility of using an LCD",
+        "LCD feasible if using conventional batteries",
+        "Option to avoid solar cells",
+        "Option to avoid kinetic power"
+      ]
+    },
+    {
+      "tick": 10,
+      "ideas": [
+        "Use a single curved case design",
+        "Curve needed for thumb to reach joystick easily",
+        "Advanced chip required for LCD"
+      ]
+    },
+    {
+      "tick": 11,
+      "ideas": [
+        "Conventional battery seems like a good choice",
+        "Uncertain about cost difference between single and double curved options",
+        "Plastic or rubber suggested as traditional casing material"
+      ]
+    },
+    {
+      "tick": 12,
+      "ideas": [
+        "Decision to choose rubber as the material",
+        "Speaker C also prefers rubber",
+        "Preference for rubber based on research"
+      ]
+    },
+    {
+      "tick": 13,
+      "ideas": ["Move discussion to user interface topic", "Move to interface concept subtopic"]
+    },
+    {
+      "tick": 14,
+      "ideas": [
+        "Will switch between slides and whiteboard",
+        "Reviewed HTML file of previous remote control designs",
+        "Existing designs didn't meet current design specifications",
+        "Decided to design based on human hand shape instead of other remotes",
+        "Goal: lay out elements so each finger/thumb naturally reaches them",
+        "Decided components: joystick, two function buttons, and LCD",
+        "Proposes eliminating numeric keypad",
+        "LCD menu could allow scrolling through channels instead of keypad"
+      ]
+    },
+    {
+      "tick": 15,
+      "ideas": [
+        "Digital or cable gives about four or five terrestrial channels",
+        "Need to account for VCR and/or DVD player channel/input",
+        "Not excessively concerned about number of channels/inputs",
+        "Device must have two modes: basic and menu",
+        "Basic mode: joystick left/right for channels, up/down for volume",
+        "Menu mode provides further functions",
+        "Use rubber material for ergonomic design",
+        "Design must be ergonomic for both left and right handed users"
+      ]
+    },
+    {
+      "tick": 16,
+      "ideas": [
+        "Double curved design is most appropriate",
+        "Whole device articulated at two points",
+        "Design should adjust for left- or right-handed users"
+      ]
+    },
+    {
+      "tick": 17,
+      "ideas": [
+        "Joystick placement should be on the right side",
+        "Design should have an organic feel",
+        "Product should be soft to touch",
+        "Product should be easy to move around"
+      ]
+    },
+    {
+      "tick": 18,
+      "ideas": ["Warning that time will be tight for the meeting"]
+    },
+    {
+      "tick": 19,
+      "ideas": [
+        "Offer to add illustrative pictures/diagrams",
+        "Joystick unit should rest over the four-finger joint",
+        "Position allows thumb to directly access joystick",
+        "Needs an articulation point below the joystick",
+        "Articulation allows switching for left- or right-handed users"
+      ]
+    },
+    {
+      "tick": 20,
+      "ideas": [
+        "Grip section design can stay same regardless of handedness",
+        "Use two large buttons covering most of the grip area",
+        "One button for four fingers, one for middle finger"
+      ]
+    },
+    {
+      "tick": 21,
+      "ideas": [
+        "Top part functions as joystick",
+        "Grip area houses the actual joystick grip",
+        "Battery should be placed in the grip",
+        "Grip/battery area is probably bulkiest part",
+        "LCD located at the bottom",
+        "LCD needs to be articulated",
+        "Device should rest at base of wrist",
+        "Design should fit nicely in the hand"
+      ]
+    },
+    {
+      "tick": 23,
+      "ideas": [
+        "Remote adjustable for left or right handed use",
+        "Top button in basic mode acts as on/off switch",
+        "Same button in menu mode acts as enter button",
+        "Bottom button switches between modes",
+        "Programming replacement remotes is often difficult",
+        "Option: connect remote to computer via cable for programming",
+        "Computer software would provide easier programming interface",
+        "Users could download manufacturer TV programs via computer",
+        "Constraint: must include non-computer programming mode for those without computers"
+      ]
+    },
+    {
+      "tick": 25,
+      "ideas": [
+        "Research compared user preference: functionality vs cool appearance",
+        "Researched fashion trends in Europe for design inspiration"
+      ]
+    },
+    {
+      "tick": 26,
+      "ideas": [
+        "Finding: appearance matters more than functionality to users",
+        "Users want it to look technologically innovative",
+        "Interface look is very important",
+        "Ease of use is a priority",
+        "Second priority is twice as important as third priority"
+      ]
+    },
+    {
+      "tick": 27,
+      "ideas": [
+        "Prioritize newest features over ease of use",
+        "Ease of use is a bonus, not required",
+        "Fruit and veg colors/theme are trending in fashion",
+        "Unclear how fruit/veg fashion trend applies to remote control",
+        "Spongy texture is also trending",
+        "Material choice: rubber vs plastic",
+        "Consider spongy/squeezable rubber type"
+      ]
+    },
+    {
+      "tick": 28,
+      "ideas": [
+        "Rubber material should be stress-ball type, not normal rubber",
+        "Material should be spongy"
+      ]
+    },
+    {
+      "tick": 29,
+      "ideas": [
+        "Design should be fancy and technologically innovative",
+        "Remote should look futuristic and different from typical black/white remotes",
+        "Titanium looks cool but is expensive and overkill",
+        "Decide whether to use fruit/veg theme or avoid it entirely",
+        "Research suggested fruit and veg as an option",
+        "Decision on fruit/veg direction is up to interface designer",
+        "If using fruit/veg theme, avoid obvious shapes like apple or kiwi",
+        "Consider alternative shapes like a potato peeler",
+        "Overall priority is that the design looks cool",
+        "Question raised about feasibility of a spongy remote control material",
+        "Note that spongy remotes are unfamiliar, only plastic ones seen before"
+      ]
+    }
+  ]
+}

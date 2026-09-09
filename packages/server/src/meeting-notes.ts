@@ -62,6 +62,7 @@ import {
 } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
@@ -127,6 +128,18 @@ export interface NotesMeetingSummary {
   /** Settled turns no successful compose ever carried. The number the
    *  "the notes skipped chunks" report is about. */
   turnsLost: number;
+  /**
+   * What the NOTES kept, as opposed to what the composer was shown.
+   *
+   * `turnsLost` can be zero while a minute of conversation produced no note
+   * at all — every turn reached a compose and the compose wrote nothing. That
+   * is the failure a reader of the notes actually meets, so it is counted
+   * separately: ideas seen in the settled speech, ideas the notes were found
+   * to carry, ideas re-sent once because the first attempt produced no note,
+   * and ideas still missing after that. See `notes-idea-coverage.ts` for what
+   * an idea is and why the check is lexical.
+   */
+  ideas: IdeaCoverage;
   composeFailures: number;
   refusedTooLong: number;
   /**
@@ -262,6 +275,22 @@ export interface NotesComposeInput {
    * belongs even when the bullets under a topic have scrolled out.
    */
   outline: readonly prose.OutlineEntry[];
+  /**
+   * Sentences said on an EARLIER tick that no note carries yet, offered for a
+   * second look (`notes-idea-coverage.ts`).
+   *
+   * A separate field and not extra entries in `tick.turns`, which is what the
+   * first version did. Two things go wrong when a retry is dressed as new
+   * speech: the mention provenance a tick stamps on its notes gains a turn
+   * nobody spoke in it, and the model is told a sentence it heard a minute ago
+   * has just been said. Kept apart, it can be introduced as what it is —
+   * "this went unrecorded, is it a note or not" — which is a different
+   * question and gets a better answer.
+   *
+   * Absent on most ticks. Each sentence appears at most once in a meeting:
+   * missed twice is counted lost rather than offered a third time.
+   */
+  missed?: readonly NotesTurn[];
   /**
    * The block id of the heading THIS meeting's notes sit under, when the
    * session has opened one. Absent on the first tick of a meeting, and again
@@ -756,6 +785,10 @@ export interface MeetingNotesSession {
     refusedTooLong: number;
     turnsSettled: number;
     turnsComposed: number;
+    /** What the NOTES kept — see `NotesMeetingSummary.ideas`. Mid-meeting it
+     *  lags the speech by a tick, because an idea is judged against the
+     *  outline the next tick reads. */
+    ideas: IdeaCoverage;
   };
 }
 
@@ -931,6 +964,14 @@ export function beginNotesSession(
    */
   const settledTurns = new Set<number>();
   const composedTurns = new Set<number>();
+  /**
+   * The other coverage question, and the one a reader of the notes asks: not
+   * "was this turn shown to the composer" but "did any note come of it".
+   * Settled one tick late by construction — an idea heard now is judged
+   * against the outline the NEXT tick reads, which is the first moment the
+   * notes it should have produced are in the doc.
+   */
+  const ideas = createIdeaLedger();
 
   const lifecycle = (phase: 'composing' | 'written' | 'failed', tick: number, turns: number[]) =>
     deps.onTickLifecycle?.({ docId: ids.docId, meetingId: ids.meetingId, tick, phase, turns });
@@ -1309,10 +1350,35 @@ export function beginNotesSession(
       const humanNotes = outline
         .filter((e) => e.author === undefined && e.kind !== 'heading' && e.text.length > 0)
         .map((e) => e.text);
+      // WHAT THE LAST TICK'S SPEECH SHOULD HAVE PRODUCED, judged now that the
+      // notes it was meant to produce are in the outline. An idea no note
+      // carries goes back into THIS tick's speech, once, in front of a
+      // note-taker that can see what it has already written; a second miss is
+      // counted lost rather than retried forever.
+      const notesSoFar = outline.map((e) => e.text).join('\n');
+      const alreadyHere = new Set(turns.map((t) => t.text.trim().toLowerCase()));
+      const retries: NotesTurn[] = ideas
+        .settle(notesSoFar)
+        // A failed compose carries its own turns forward, so an idea from
+        // that tick is already in `turns`. Sending it twice would spend
+        // prompt on the same sentence and read to the model as repetition,
+        // which is the one thing it is told to cut.
+        .filter((idea) => !alreadyHere.has(idea.text.trim().toLowerCase()))
+        .map((idea) => ({
+          turn: idea.turn,
+          text: idea.text,
+          ...(idea.speaker !== undefined ? { speaker: idea.speaker } : {}),
+          ...(idea.speakerLabel !== undefined ? { speakerLabel: idea.speakerLabel } : {}),
+        }));
+      // AFTER the settle and never before: an idea this tick just heard has
+      // had no chance to reach a note yet, and settling it here would report
+      // every one of them missing on the tick it arrived.
+      ideas.see(turns);
       const input: NotesComposeInput = {
         docId: ids.docId,
         meetingId: ids.meetingId,
         tick: { ...tick, turns },
+        ...(retries.length > 0 ? { missed: retries } : {}),
         outline,
         ...(notesHeadingId !== undefined ? { notesHeadingId } : {}),
         ...(humanNotes.length > 0 ? { humanNotes } : {}),
@@ -1647,6 +1713,34 @@ export function beginNotesSession(
             'notes composes were refused as too long — the notes stopped keeping up',
         );
       }
+      // The last settle of the meeting. Nothing follows it that could retry
+      // an idea, so what the notes do not carry now is lost — including the
+      // ideas of the final pass, which have never been judged before.
+      let finalNotes = '';
+      // Only when there is something to judge. A meeting that settled every
+      // idea as it went would otherwise pay a doc read at the stop and, worse,
+      // EMIT one — the outline read is an observable step that two tests pin
+      // the order of, and a spare one at the end is a behaviour change bought
+      // for nothing.
+      if (ideas.pending > 0) {
+        try {
+          finalNotes = (deps.readOutline?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? [])
+            .map((e) => e.text)
+            .join('\n');
+        } catch (err) {
+          // Same rule as every other outline read: it informs, it never fails
+          // the meeting. With none, every pending idea reads as lost, which is
+          // the honest answer when nobody can say what the notes contain.
+          deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
+        }
+      }
+      ideas.close(finalNotes);
+      // NOT an `onError`. A lost idea is a measurement, not a stage that
+      // threw: the deterministic check is a proxy (`notes-idea-coverage.ts`)
+      // and every caller treats `onError` as "something in the pipeline
+      // broke". It rides the summary line instead, where the meeting's other
+      // coverage numbers are, and `meeting-notes-doc.ts` decides whether that
+      // line is a warning.
       const turnsLost = [...settledTurns].filter((t) => !composedTurns.has(t)).length;
       // Written to the timing file as its last line, and carried into the
       // meeting summary so the one line everybody already reads names the
@@ -1662,6 +1756,7 @@ export function beginNotesSession(
         turnsSettled: settledTurns.size,
         turnsComposed: composedTurns.size,
         turnsLost,
+        ideas: { ...ideas.coverage },
         composeFailures,
         refusedTooLong,
         ...(latencies.length > 0
@@ -1677,6 +1772,7 @@ export function beginNotesSession(
       refusedTooLong,
       turnsSettled: settledTurns.size,
       turnsComposed: composedTurns.size,
+      ideas: { ...ideas.coverage },
     }),
   };
 }
