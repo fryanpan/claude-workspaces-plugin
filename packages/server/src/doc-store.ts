@@ -2027,6 +2027,69 @@ export class DocStore {
   }
 
   /**
+   * Move every doc bound inside a checkout onto another copy, before that
+   * checkout goes away.
+   *
+   * Retiring a checkout used to flush and mark the row removed and stop
+   * there, which left every doc bound to a path that was about to vanish:
+   * the next edit wrote back into a directory `git worktree remove` had
+   * deleted, and nothing said so. Identity is repo plus path now, so there is
+   * usually another copy of the same file — this is where the binding is
+   * moved to it.
+   *
+   * The retiring root is EXCLUDED from the survey rather than left to lose on
+   * mtime. Its copies are all still on disk at this moment, which is the
+   * whole point of announcing the removal first, so a survey that could see
+   * them would pick one and move nothing.
+   *
+   * Three outcomes, and the caller is told all three: moved, still ambiguous
+   * (two other copies edited at once — a person has to pick, and this is not
+   * the moment to guess), and no copy anywhere, which flags the doc with
+   * `bindingLostAt` instead of leaving a silent write-back to a deleted path.
+   */
+  retargetCheckout(root: string): {
+    moved: Array<{ docId: string; to: string }>;
+    ambiguous: string[];
+    lost: string[];
+  } {
+    const moved: Array<{ docId: string; to: string }> = [];
+    const ambiguous: string[] = [];
+    const lost: string[] = [];
+    const under = (path: string | undefined): boolean =>
+      path !== undefined && (path === root || path.startsWith(`${root}/`));
+    const ids = new Set(this.bindings.boundUnder(root).map((b) => b.docId));
+    // An unloaded doc is bound too — its binding is re-established from
+    // `sourceUrl` the moment anything opens it, so the index has to be swept
+    // as well or a doc nobody has opened today keeps the dead path.
+    for (const [docId, entry] of this.docIndex) {
+      if (under(entry.meta.sourceUrl)) ids.add(docId);
+    }
+    for (const docId of ids) {
+      const res = this.resolveLiveCopy(docId, { exclude: [root] });
+      if (!res.ok) {
+        if (res.error === 'ambiguous-copy') ambiguous.push(docId);
+        continue;
+      }
+      const doc = this.get(docId);
+      if (res.live === null) {
+        lost.push(docId);
+        if (doc && doc.meta.bindingLostAt === undefined) {
+          doc.meta.bindingLostAt = Date.now();
+          this.persistMeta(docId);
+        }
+        continue;
+      }
+      moved.push({ docId, to: res.live });
+      this.noteBoundCopy(docId, res.live);
+      if (doc && doc.meta.bindingLostAt !== undefined) {
+        doc.meta.bindingLostAt = undefined;
+        this.persistMeta(docId);
+      }
+    }
+    return { moved, ambiguous, lost };
+  }
+
+  /**
    * Record the copy a doc is actually bound to.
    *
    * A bind names the copy the CALLER can see, and since identity became repo

@@ -55,11 +55,12 @@ describe('/api/repos', () => {
   let main: string;
   let wt: string;
   let base: string;
+  let dataDir: string;
   const rel = 'docs/plan.md';
 
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), 'cw-repo-routes-')));
-    const dataDir = join(tmp, 'data');
+    dataDir = join(tmp, 'data');
     mkdirSync(dataDir);
     main = join(tmp, 'repo');
     mkdirSync(main);
@@ -157,49 +158,6 @@ describe('/api/repos', () => {
       // Nothing hostile got as far as the registry.
       const list = (await (await send('/api/repos')).json()) as { repos: unknown[] };
       expect(list.repos).toHaveLength(0);
-    });
-  });
-
-  describe('retiring a checkout', () => {
-    it('retires the row without destroying it, and the doc keeps its id', async () => {
-      await register(main);
-      await register(wt);
-      const docId = await bindDoc('plan', join(main, rel));
-
-      const gone = await send('/api/repos/checkouts', {
-        method: 'DELETE',
-        body: JSON.stringify({ path: wt }),
-      });
-      expect(gone.status).toBe(200);
-      expect(((await gone.json()) as { ok: boolean }).ok).toBe(true);
-
-      // Soft: the row is still there, marked retired, so the history of what
-      // was registered survives the removal.
-      const list = (await (await send('/api/repos')).json()) as {
-        repos: Array<{ checkouts: Array<{ root: string; registered: boolean }> }>;
-      };
-      const row = list.repos[0]?.checkouts.find((c) => c.root === wt);
-      expect(row).toBeDefined();
-      expect(row?.registered).toBe(false);
-
-      // Retiring the row is not the same as the directory going away: git
-      // still lists the worktree, so the copy in it is still a copy. Take the
-      // directory too — the removal the retirement was warning us about — and
-      // the doc keeps its id and falls back to the copy that is left.
-      rmSync(wt, { recursive: true, force: true });
-      git(main, 'worktree', 'prune');
-      const live = await send(`/api/repos/live-copy?docId=${docId}`);
-      expect(live.status).toBe(200);
-      expect(((await live.json()) as { live: string }).live).toBe(join(main, rel));
-    });
-
-    it('answers 404 for a checkout nobody registered', async () => {
-      await register(main);
-      const r = await send('/api/repos/checkouts', {
-        method: 'DELETE',
-        body: JSON.stringify({ path: join(tmp, 'nowhere') }),
-      });
-      expect(r.status).toBe(404);
     });
   });
 

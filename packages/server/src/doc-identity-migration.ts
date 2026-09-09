@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { listThreads, readDocMeta } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import {
   type DocRow,
@@ -9,7 +10,13 @@ import {
   type PlanIo,
 } from './doc-identity-plan.ts';
 import { gitRenameOf } from './doc-identity-renames.ts';
-import { readAllDocIndexes } from './doc-index.ts';
+import {
+  DOC_INDEX_VERSION,
+  type DocIndexEntry,
+  readAllDocIndexes,
+  readDocIndex,
+  writeDocIndex,
+} from './doc-index.ts';
 import { docKeyForPath } from './doc-key.ts';
 import { type ThreadMergeResult, mergeThreads } from './doc-thread-merge.ts';
 import type { RepoRegistry } from './repo-registry.ts';
@@ -81,6 +88,48 @@ function saveYdoc(dataDir: string, docId: string, doc: Y.Doc): void {
   writeFileSync(path, readFileSync(tmp));
 }
 
+/**
+ * Bring a document's index row back in line with the `.ydoc` this run just
+ * rewrote.
+ *
+ * The `.ydoc` is the durable record and the row is a cache of it, but the
+ * board's badges, `listFromIndex` and a lazy boot all read the row — so a
+ * winner that gained twenty threads would keep reporting its old total until
+ * something unrelated wrote to it, which for a document nobody opens is
+ * never. The counts are recomputed exactly as `indexEntryFor` computes them.
+ *
+ * Only an EXISTING row is refreshed. A document with no row is one no listing
+ * reads, and minting a row for it here would be this script inventing state
+ * rather than repairing it.
+ */
+function refreshIndexRow(dataDir: string, docId: string, doc: Y.Doc): boolean {
+  const existing = readDocIndex(dataDir, docId);
+  if (!existing) return false;
+  const threads = listThreads(doc);
+  let open = 0;
+  let lastThreadActivityAt: number | undefined;
+  for (const t of threads) {
+    if (t.status === 'open') open++;
+    for (const c of t.comments) {
+      if (lastThreadActivityAt === undefined || c.ts > lastThreadActivityAt) {
+        lastThreadActivityAt = c.ts;
+      }
+    }
+  }
+  const entry: DocIndexEntry = {
+    v: DOC_INDEX_VERSION,
+    // The row's own meta, not the `.ydoc`'s: the row carries server-side
+    // fields (`docKey`, `liveCheckout`) that the CRDT meta does not, and a
+    // merge changes none of them.
+    meta: existing.meta ?? readDocMeta(doc),
+    threads: { open, total: threads.length },
+    ...(lastThreadActivityAt !== undefined ? { lastThreadActivityAt } : {}),
+    ...(existing.pendingFileWrite ? { pendingFileWrite: true } : {}),
+  };
+  writeDocIndex(dataDir, docId, entry);
+  return true;
+}
+
 export interface ApplyResult {
   /** Keys this run filed. A second run over the same corpus files none. */
   claimed: number;
@@ -110,6 +159,18 @@ export interface ApplyResult {
   aliasesRefused: number;
   /** Documents whose `.ydoc` could not be read. Nothing is written for one. */
   unreadable: number;
+  /**
+   * Claims NOT filed because the document they would point at cannot be read.
+   *
+   * A key is a promise that it opens a document. Filing one for a `.ydoc`
+   * that is missing or corrupt makes the key a dead end that first-writer-
+   * wins will never let anything else take, so the claim is refused, its
+   * merge is left undone, and the pair is reported by name for a person to
+   * look at.
+   */
+  refusedClaims: Array<{ docKey: string; docId: string }>;
+  /** Index rows brought back in line with a `.ydoc` this run rewrote. */
+  indexRowsRefreshed: number;
   parity: Array<{ docKey: string; before: number; after: number }>;
 }
 
@@ -144,8 +205,30 @@ export function applyPlan(
     threadsOrphaned: 0,
     threadsSkipped: 0,
     unreadable: 0,
+    refusedClaims: [],
+    indexRowsRefreshed: 0,
     parity: [],
   };
+  /** Each document loaded at most once: the validation pass below reads every
+   *  winner, and the merge loop would otherwise read them all again. */
+  const loaded = new Map<string, Y.Doc | null>();
+  const load = (docId: string): Y.Doc | null => {
+    if (!loaded.has(docId)) loaded.set(docId, loadYdoc(dataDir, docId));
+    return loaded.get(docId) ?? null;
+  };
+
+  // Validate BEFORE touching the registry. A claim is filed first-writer-wins
+  // and is never repointed, so filing one for a document that turns out to be
+  // unreadable leaves the key permanently pointing at nothing — and the run
+  // that would notice happens after the write. Reading every winner up front
+  // costs one load each, which the merge loop then reuses.
+  const refused = new Set<string>();
+  for (const claim of plan.claims) {
+    if (load(claim.docId)) continue;
+    refused.add(claim.docKey);
+    out.refusedClaims.push({ docKey: claim.docKey, docId: claim.docId });
+  }
+
   /** Keys this run wrote, and the only ones a revert may take back. */
   const keysFiled: string[] = [];
   /** Who actually holds each key after the claims — not always the plan's pick. */
@@ -154,6 +237,7 @@ export function applyPlan(
   registry.beginBatch();
   try {
     for (const claim of plan.claims) {
+      if (refused.has(claim.docKey)) continue;
       // Read the holder BEFORE claiming: `claim` answers with the docId that
       // ends up holding the key, which is the same answer whether this run
       // filed it or an earlier one did — and telling those apart is what says
@@ -193,14 +277,16 @@ export function applyPlan(
   // between the corpus being read and this run, that doc is what the key
   // opens, so it is the doc every conversation has to end up in — including
   // the planned winner's own.
-  const effective: Merge[] = plan.merges.map((merge) => {
-    const winner = holderOf.get(merge.docKey) ?? merge.winner;
-    return {
-      docKey: merge.docKey,
-      winner,
-      losers: [...merge.losers, merge.winner].filter((id) => id !== winner),
-    };
-  });
+  const effective: Merge[] = plan.merges
+    .filter((merge) => !refused.has(merge.docKey))
+    .map((merge) => {
+      const winner = holderOf.get(merge.docKey) ?? merge.winner;
+      return {
+        docKey: merge.docKey,
+        winner,
+        losers: [...merge.losers, merge.winner].filter((id) => id !== winner),
+      };
+    });
   const planned = new Set(plan.merges.map((m) => m.docKey));
   for (const c of conflicted) {
     // A key with one planned doc and a different holder is not in plan.merges
@@ -211,7 +297,7 @@ export function applyPlan(
 
   const journalMerges: JournalEntry['merges'] = [];
   for (const merge of effective) {
-    const winner = loadYdoc(dataDir, merge.winner);
+    const winner = load(merge.winner);
     if (!winner) {
       out.unreadable++;
       continue;
@@ -220,7 +306,7 @@ export function applyPlan(
     let incoming = 0;
     const totals = { copied: 0, reanchored: 0, orphaned: 0, skipped: 0 };
     for (const loserId of merge.losers) {
-      const loser = loadYdoc(dataDir, loserId);
+      const loser = load(loserId);
       if (!loser) {
         out.unreadable++;
         continue;
@@ -243,6 +329,7 @@ export function applyPlan(
       );
     }
     saveYdoc(dataDir, merge.winner, winner);
+    if (refreshIndexRow(dataDir, merge.winner, winner)) out.indexRowsRefreshed++;
     out.merged++;
     out.threadsCopied += totals.copied;
     out.threadsOrphaned += totals.orphaned;
@@ -374,6 +461,8 @@ export function reportLines(plan: Plan, applied?: ApplyResult): string[] {
       `  landed as outdated           ${applied.threadsOrphaned}`,
       `  already present, skipped     ${applied.threadsSkipped}`,
       `unreadable .ydoc               ${applied.unreadable}`,
+      `claims refused, doc unreadable ${applied.refusedClaims.length}`,
+      `index rows refreshed           ${applied.indexRowsRefreshed}`,
       `parity checks passed           ${applied.parity.length}`,
     );
   }

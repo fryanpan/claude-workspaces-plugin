@@ -137,15 +137,31 @@ export async function handleRepoRoutes(
   // `git worktree remove` nobody mentioned is not, and this cannot pretend
   // otherwise. Nothing here is destructive — the row keeps its dates, and
   // every doc key still resolves to the same document.
+  //
+  // Flush, then MOVE: writing the pending edits out is only half of it. Every
+  // doc bound inside the checkout is still bound to a path the caller is
+  // about to delete, so each one is re-resolved onto another copy of the same
+  // file before this answers. The response says what moved, what needs a
+  // person to pick between two other copies, and what has no copy left
+  // anywhere — the last of which is flagged on the doc rather than left as a
+  // write-back that will fail quietly later.
   if (pathname === '/api/repos/checkouts' && req.method === 'DELETE') {
     const path = readPath(await safeJson(req));
     if (!path) {
       return j(400, { error: 'path must be an absolute filesystem path to a checkout' });
     }
     const flushed = docStore.flushBoundWrites([path]);
+    const retarget = docStore.retargetCheckout(path);
     const res = docStore.repos.unregisterCheckout(path);
     if (!res.ok) return j(404, { error: 'not-registered', path });
-    return j(200, { ok: true, repoKey: res.repoKey, flushed });
+    return j(200, {
+      ok: true,
+      repoKey: res.repoKey,
+      flushed,
+      retargeted: retarget.moved,
+      needsPick: retarget.ambiguous,
+      noCopyLeft: retarget.lost,
+    });
   }
 
   // --- Which copy of a doc is live ---

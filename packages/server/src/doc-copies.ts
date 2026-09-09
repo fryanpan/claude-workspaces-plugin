@@ -146,6 +146,16 @@ export interface SurveyOpts {
   withGitStatus?: boolean;
   /** Override for tests; defaults to `AMBIGUOUS_WINDOW_MS`. */
   windowMs?: number;
+  /**
+   * Checkout roots to leave out of the survey.
+   *
+   * For the one case where a copy exists and still must not be chosen: a
+   * checkout being retired. Its files are all still on disk at the moment the
+   * caller says it is going away — that is the whole point of announcing the
+   * removal first — so without this the survey would pick the copy that is
+   * about to vanish and the binding would be moved nowhere.
+   */
+  exclude?: string[];
 }
 
 /**
@@ -167,7 +177,9 @@ export function surveyCopies(
   const remaining = (): number => Math.max(0, deadline - Date.now());
 
   const copies: CopySighting[] = [];
+  const excluded = new Set(opts.exclude ?? []);
   for (const root of registry.checkoutsFor(repoKey)) {
+    if (excluded.has(root)) continue;
     const path = join(root, relPath);
     const mtimeMs = mtimeOf(path);
     if (mtimeMs === 0) continue; // no copy here

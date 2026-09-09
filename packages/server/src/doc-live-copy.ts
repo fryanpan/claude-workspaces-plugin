@@ -70,6 +70,9 @@ export interface ResolveOpts {
   /** Skip the git-status column. On by default for the same reason the
    *  survey makes it opt-in: it is a subprocess per copy. */
   withGitStatus?: boolean;
+  /** Checkout roots that must not be chosen even though they hold a copy —
+   *  a checkout on its way out. See `SurveyOpts.exclude`. */
+  exclude?: string[];
 }
 
 /**
@@ -104,6 +107,7 @@ export function resolveLiveCopy(
   const lastAt = host.lastFlushAt(docId);
   const surveyOpts: Parameters<typeof surveyCopies>[4] = {};
   if (opts.withGitStatus) surveyOpts.withGitStatus = true;
+  if (opts.exclude && opts.exclude.length > 0) surveyOpts.exclude = opts.exclude;
   if (boundPath !== undefined && lastAt !== undefined) {
     const from = meta.liveCheckout;
     if (from !== undefined) surveyOpts.lastFlush = { root: from, at: lastAt };

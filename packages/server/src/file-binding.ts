@@ -2015,6 +2015,22 @@ export class FileBindings {
   // this file.
   // ---------------------------------------------------------------------
 
+  /**
+   * Every doc bound to a file under `root`, pending write or not.
+   *
+   * `pendingFileWrites` answers a different question — what would be LOST if
+   * this went away now — and a checkout being retired has to reach every doc
+   * bound inside it, including the ones with nothing outstanding, because
+   * their bindings are about to name a path that does not exist.
+   */
+  boundUnder(root: string): { docId: string; path: string }[] {
+    const out: { docId: string; path: string }[] = [];
+    for (const [docId, binding] of this.bindings) {
+      if (isWithinRoot(root, binding.path)) out.push({ docId, path: binding.path });
+    }
+    return out;
+  }
+
   /** Is this doc file-backed right now? */
   has(docId: string): boolean {
     return this.bindings.has(docId);

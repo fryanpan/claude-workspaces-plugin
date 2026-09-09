@@ -4,8 +4,15 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listThreads } from '@claude-workspaces/core';
-import { applyPlan, liveIo, readJournal, revert } from '../src/doc-identity-migration.ts';
+import {
+  applyPlan,
+  liveIo,
+  readJournal,
+  reportLines,
+  revert,
+} from '../src/doc-identity-migration.ts';
 import { planMigration } from '../src/doc-identity-plan.ts';
+import { readDocIndex } from '../src/doc-index.ts';
 import { docKeyForPath } from '../src/doc-key.ts';
 import { DocStore } from '../src/doc-store.ts';
 import { RepoRegistry } from '../src/repo-registry.ts';
@@ -372,6 +379,81 @@ describe('the doc-identity migration', () => {
     const after = new RepoRegistry(dataDir);
     expect(after.docIdFor(oldKey)).toBe('d-occupant');
     expect(after.docIdFor(newKey)).toBe('d-moved');
+  });
+
+  it('files no claim for a document it cannot read, and says which', async () => {
+    // A key is a promise that it opens a document. Filing one for a corrupt
+    // `.ydoc` makes a dead end that first-writer-wins never lets go of, so
+    // the claim is refused before the registry is touched at all.
+    await seedDoc('d-plan', join(main, rel), 'Why at boot?', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const plan = planMigration(liveIo(dataDir));
+    expect(plan.claims).toHaveLength(1);
+    const docKey = plan.claims[0]?.docKey as string;
+    writeFileSync(join(dataDir, 'd-plan.ydoc'), Buffer.from([0xff, 0xff, 0xff, 0xff]));
+
+    const registry = new RepoRegistry(dataDir);
+    const applied = applyPlan(dataDir, plan, registry);
+    expect(applied.claimed).toBe(0);
+    expect(applied.refusedClaims).toEqual([{ docKey, docId: 'd-plan' }]);
+    // The registry is untouched, so the key is still free for the document
+    // that can actually be read once somebody restores it.
+    expect(registry.docIdFor(docKey)).toBeUndefined();
+    expect(reportLines(plan, applied).join('\n')).toContain('claims refused, doc unreadable 1');
+  });
+
+  it('CONTROL: the same plan over a readable document files its claim', async () => {
+    // Without this, the refusal above would pass against an applyPlan that
+    // had simply stopped claiming anything.
+    await seedDoc('d-plan', join(main, rel), 'Why at boot?', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const plan = planMigration(liveIo(dataDir));
+    const registry = new RepoRegistry(dataDir);
+    const applied = applyPlan(dataDir, plan, registry);
+    expect(applied.claimed).toBe(1);
+    expect(applied.refusedClaims).toEqual([]);
+    expect(registry.docIdFor(plan.claims[0]?.docKey as string)).toBe('d-plan');
+  });
+
+  it('leaves a merge undone rather than pointing a key at an unreadable winner', async () => {
+    writeFileSync(join(wt, rel), '# Plan\n\nThe cache is warmed at boot.\n');
+    await seedDoc('d-wt-a', join(wt, rel), 'From the branch', 'cache is warmed');
+    await seedDoc('d-main', join(main, rel), 'From main', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const plan = planMigration(liveIo(dataDir));
+    expect(plan.merges[0]?.winner).toBe('d-main');
+    writeFileSync(join(dataDir, 'd-main.ydoc'), Buffer.from([0x00, 0x01]));
+
+    const applied = applyPlan(dataDir, plan, new RepoRegistry(dataDir));
+    expect(applied.merged).toBe(0);
+    expect(applied.refusedClaims.map((r) => r.docId)).toEqual(['d-main']);
+    // The loser keeps every thread it had: nothing was copied into a document
+    // nobody can open, and nothing was thrown away trying.
+    expect(await commentsOn('d-wt-a')).toEqual(['From the branch']);
+  });
+
+  it('leaves the winner index row reporting what the .ydoc now holds', async () => {
+    // The row is what the board's badges and a lazy boot read. A winner that
+    // gained a conversation used to keep reporting its old total until an
+    // unrelated write, which for a document nobody opens is never.
+    writeFileSync(join(wt, rel), '# Plan\n\nThe cache is warmed at boot.\n');
+    await seedDoc('d-wt-a', join(wt, rel), 'From the branch', 'cache is warmed');
+    await seedDoc('d-main', join(main, rel), 'From main', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const before = readDocIndex(dataDir, 'd-main');
+    expect(before?.threads.total).toBe(1);
+
+    const applied = applyPlan(dataDir, planMigration(liveIo(dataDir)), new RepoRegistry(dataDir));
+    expect(applied.threadsCopied).toBe(1);
+    expect(applied.indexRowsRefreshed).toBe(1);
+    const after = readDocIndex(dataDir, 'd-main');
+    expect(after?.threads.total).toBe(2);
+    expect(after?.threads.open).toBe(2);
+    // The row's own server-side fields survive the refresh — it is repaired,
+    // not rebuilt from the CRDT meta, which does not carry them.
+    expect(after?.meta.sourceUrl).toBe(before?.meta.sourceUrl as string);
+    // CONTROL: the loser was not merged INTO, so its row is untouched.
+    expect(readDocIndex(dataDir, 'd-wt-a')?.threads.total).toBe(1);
   });
 
   it('records what it did, so a person can see it afterwards', async () => {

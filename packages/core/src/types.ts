@@ -188,6 +188,19 @@ export interface DocMeta {
    */
   driftFirings?: number;
   /**
+   * When the server last looked for this doc's file and found no copy in any
+   * checkout it knows — set when a checkout is retired out from under a
+   * binding and nothing else holds the file.
+   *
+   * The doc is not broken: the `.ydoc` is the durable record and every
+   * comment is still there. What is broken is the BINDING, which still names
+   * a path that is about to stop existing, and a write-back to it would fail
+   * silently on a schedule nobody is watching. So the state is recorded
+   * rather than left to be inferred, and cleared the moment a copy is found
+   * again. Private-meta: it names a host path's absence.
+   */
+  bindingLostAt?: number;
+  /**
    * The workspace's own bind-time configuration, replicated onto every
    * member the same way `workspaceRoot` is — there is no workspace registry,
    * so the members ARE the record. `refresh_workspace` reads these back and
