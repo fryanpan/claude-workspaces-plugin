@@ -146,13 +146,15 @@ function main(argv: string[]): number {
   let written = 0;
   let ticks = 0;
   for (const docId of readdirSync(root).sort()) {
-    if (wanted.length > 0 && !wanted.includes(docId)) continue;
     for (const file of meetingFiles(dataDir, docId)) {
       const id =
         file
           .split('/')
           .pop()
           ?.replace(/\.jsonl$/, '') ?? docId;
+      // `--meeting` names the MEETING (the jsonl's stem), as the usage says —
+      // never the doc directory it sits in, which is a different id.
+      if (wanted.length > 0 && !wanted.includes(id)) continue;
       const cut = ticksOfRecord(readTurns(file));
       if (cut.length < MIN_TICKS) continue;
       const fixture: NotesEvalFixture = {

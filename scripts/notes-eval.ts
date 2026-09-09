@@ -728,8 +728,9 @@ async function main(argv: string[]): Promise<number> {
   const corpusAt = argv.indexOf('--corpus');
   const corpusDir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
   // On by default for a full run, because the rate is the point of the corpus;
-  // `--no-ideas` is for a formatting-only pass that must not spend a judge.
-  const ideas = !argv.includes('--no-ideas');
+  // `--no-ideas` is for a formatting-only pass that must not spend a judge, and
+  // `--judge off` means NO model judge at all — the idea judge included.
+  const ideas = !judgeOff && !argv.includes('--no-ideas');
   const fixtures = loadFixtures(
     smoke && corpusDir === FIXTURE_DIR ? ['ES2002a'] : meetings,
     corpusDir,
