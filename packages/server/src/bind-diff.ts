@@ -30,7 +30,7 @@ import {
   findOverlongGroupDetails,
 } from './diff-groups.ts';
 import { isReservedDocId } from './doc-ids.ts';
-import { canonicalRepoRoot } from './doc-origin-repo.ts';
+import { canonicalRepoRoot, findWorktreeRoot } from './doc-origin-repo.ts';
 import { scanFolder } from './fs-scan.ts';
 import {
   type DiffFileEntry,
@@ -163,20 +163,34 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
   }
 
   /**
-   * The path a set id is derived FROM: the repo's main checkout, not the
-   * checkout the caller was standing in.
+   * The path a set id is derived FROM: the CHECKOUT canonicalised, with the
+   * bound folder still hanging off it.
    *
    * Both id derivations hash an absolute path, so browsing a repo through a
    * linked worktree used to mint a whole second review — a different set id,
-   * and `memberDocId` therefore a different doc for every file in it. Hashing
-   * the repo's canonical root instead makes the two binds land on one review,
-   * which is the same rule `doc-key.ts` applies to a single file.
+   * and `memberDocId` therefore a different doc for every file in it.
+   * Canonicalising makes the two binds land on one review, which is the same
+   * rule `doc-key.ts` applies to a single file.
+   *
+   * **Only the checkout half is canonicalised.** Replacing the whole path
+   * with the repo root collapses every folder in a repo onto one id, so
+   * browsing `packages/server` and `packages/widget` would both open the same
+   * review and, with the same base and target, silently share its documents.
+   * The relative path from the checkout is what tells two folders apart, and
+   * it is identical in every worktree, so keeping it costs nothing the fix
+   * was for.
    *
    * A folder that is not a repo has no canonical root and keeps its own path,
    * which is the behaviour it already had.
    */
-  function setIdRootFor(root: string): string {
-    return canonicalRepoRoot(root) ?? root;
+  function setIdRootFor(dir: string): string {
+    const checkout = findWorktreeRoot(dir);
+    const canonical = checkout ? canonicalRepoRoot(checkout) : null;
+    if (!checkout || !canonical) return dir;
+    const rel = relative(checkout, resolvePath(dir));
+    if (rel === '') return canonical;
+    // A path that escapes its own checkout has no repo-relative spelling.
+    return rel.startsWith('..') ? dir : join(canonical, rel);
   }
 
   // BROWSE mode — no base to diff against (plain folder, fresh repo, or the

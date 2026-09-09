@@ -186,3 +186,75 @@ describe('repo + path identity across checkouts', () => {
     expect(readOriginUrl(common)).toBe('git@github.com:example/widgets.git');
   });
 });
+
+/**
+ * A remote that is a path on this machine, not a URL.
+ *
+ * `../remote.git` is what `git clone ../remote.git` writes, and normalising
+ * it as a URL yields `../remote` — a key with no repo in it. Two unrelated
+ * projects that each sit beside a sibling of that name would then share a
+ * repoKey and their same-relative-path files would resolve to one document.
+ */
+describe('a local origin is keyed by where it resolves to', () => {
+  let tmp: string;
+
+  function repoWithLocalOrigin(dir: string, origin: string): string {
+    mkdirSync(dir, { recursive: true });
+    git(dir, 'init', '-b', 'main');
+    git(dir, 'remote', 'add', 'origin', origin);
+    mkdirSync(join(dir, 'docs'));
+    writeFileSync(join(dir, 'docs', 'plan.md'), '# plan\n');
+    return dir;
+  }
+
+  beforeEach(() => {
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), 'cw-localorigin-')));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('CONTROL: the two spellings are identical, so only resolution can separate them', () => {
+    // The bug this replaces, stated as an assertion: read as a URL, the two
+    // origins below are the same string. A key derived from that string alone
+    // cannot tell the repos apart, so the test after this one is meaningful.
+    expect(normalizeRemoteUrl('../remote.git')).toBe(normalizeRemoteUrl('../remote.git'));
+  });
+
+  it('keeps two repos in different parents with the same relative origin apart', () => {
+    const one = repoWithLocalOrigin(join(tmp, 'alpha', 'project'), '../remote.git');
+    const two = repoWithLocalOrigin(join(tmp, 'beta', 'project'), '../remote.git');
+    const a = repoIdentityAt(join(one, 'docs/plan.md'));
+    const b = repoIdentityAt(join(two, 'docs/plan.md'));
+    expect(a?.repoKey.startsWith('file:')).toBe(true);
+    expect(b?.repoKey.startsWith('file:')).toBe(true);
+    expect(b?.repoKey).not.toBe(a?.repoKey as string);
+    // …and therefore neither do their same-relative-path files.
+    expect(docKeyForPath(join(two, 'docs/plan.md'))?.docKey).not.toBe(
+      docKeyForPath(join(one, 'docs/plan.md'))?.docKey as string,
+    );
+  });
+
+  it('still gives two clones of ONE local remote the same key', () => {
+    // The half the fix must not break: resolving is what makes the same
+    // remote match, spelled relatively from one clone and absolutely from
+    // the other.
+    const shared = join(tmp, 'shared', 'remote.git');
+    mkdirSync(shared, { recursive: true });
+    const one = repoWithLocalOrigin(join(tmp, 'shared', 'checkout-a'), '../remote.git');
+    const two = repoWithLocalOrigin(join(tmp, 'elsewhere', 'checkout-b'), shared);
+    expect(repoIdentityAt(join(two, 'docs/plan.md'))?.repoKey).toBe(
+      repoIdentityAt(join(one, 'docs/plan.md'))?.repoKey as string,
+    );
+  });
+
+  it('a URL remote is still keyed as a remote', () => {
+    // The control on the branch above: the local path is a NEW case, not a
+    // replacement for the one that was already right.
+    const dir = repoWithLocalOrigin(join(tmp, 'urly'), 'git@github.com:example/widgets.git');
+    expect(repoIdentityAt(join(dir, 'docs/plan.md'))?.repoKey).toBe(
+      'git:github.com/example/widgets',
+    );
+  });
+});

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { shortHash } from './bind-meta.ts';
 import {
@@ -121,6 +122,52 @@ export function readOriginUrl(commonDir: string): string | null {
 }
 
 /**
+ * Is this remote spelled as a URL, or is it a path on this machine?
+ *
+ * Git's own rule, and the reason this function exists: a remote is remote
+ * only when it carries a `scheme://` or is the scp shorthand
+ * `user@host:path`. **Everything else is a filesystem path** — `../remote.git`,
+ * `/srv/git/widgets.git`, `~/src/widgets`. Those are ordinary: a local
+ * mirror, a bare repo on a NAS, a fixture built by a test.
+ *
+ * Normalising one as if it were a URL produces a CONTEXT-FREE key.
+ * `../remote.git` becomes `../remote`, so two unrelated repos that each
+ * happen to sit beside a sibling of that name share a repoKey, and then their
+ * same-relative-path files resolve to ONE document — a stranger's file
+ * opening under your comments. Detecting the local case is what stops that;
+ * `localRemoteKey` below is what replaces it.
+ */
+function isUrlSpelledRemote(url: string): boolean {
+  const s = url.trim();
+  if (/^file:\/\//i.test(s)) return false;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) return true;
+  return /^[^/:]+@[^/:]+:.+$/.test(s);
+}
+
+/**
+ * The repoKey for a repo whose `origin` is a path on this machine.
+ *
+ * The remote is resolved against the repo's own location first — which is
+ * what git does with a relative remote — and then real-pathed, so two clones
+ * of one local remote still land on one key while the same spelling in two
+ * different parents does not. Keyed `file:` with the same
+ * `<basename>-<hash>` shape as the `dir:` fallback, because it is the same
+ * kind of identity: a place rather than a name, and one that changes if the
+ * remote moves. The registry keeps the old key as an alias when it does.
+ */
+function localRemoteKey(remoteUrl: string, mainRoot: string): string {
+  const spelled = remoteUrl.trim().replace(/^file:\/\//i, '');
+  const expanded = spelled.startsWith('~/') ? join(homedir(), spelled.slice(2)) : spelled;
+  let resolved = resolvePath(mainRoot, expanded);
+  try {
+    resolved = realpathSync(resolved);
+  } catch {}
+  resolved = resolved.replace(/\/+$/, '').replace(/\.git$/, '') || resolved;
+  const base = basename(resolved).replace(/[^a-zA-Z0-9_.\-]/g, '-') || 'repo';
+  return `file:${base}-${shortHash(resolved)}`;
+}
+
+/**
  * Identify the repo containing `pathInRepo` (any checkout of it, main or
  * linked; the path need not exist yet).
  *
@@ -138,9 +185,13 @@ export function repoIdentityAt(pathInRepo: string): RepoIdentity | null {
   const mainRoot = canonicalRepoRoot(worktreeRoot);
   if (!mainRoot) return null;
   const remoteUrl = readOriginUrl(commonDir) ?? undefined;
-  const normalised = remoteUrl ? normalizeRemoteUrl(remoteUrl) : null;
-  if (normalised) {
-    return { repoKey: `git:${normalised}`, mainRoot, commonDir, remoteUrl };
+  if (remoteUrl !== undefined && remoteUrl.trim() !== '') {
+    if (isUrlSpelledRemote(remoteUrl)) {
+      const normalised = normalizeRemoteUrl(remoteUrl);
+      if (normalised) return { repoKey: `git:${normalised}`, mainRoot, commonDir, remoteUrl };
+    } else {
+      return { repoKey: localRemoteKey(remoteUrl, mainRoot), mainRoot, commonDir, remoteUrl };
+    }
   }
   let real = mainRoot;
   try {
