@@ -13,7 +13,7 @@
  * meeting three weeks ago is not the correction anybody is reaching for.
  */
 
-import { type RosterVoice, speakerRoster } from '@claude-workspaces/core';
+import { type RosterVoice, speakerDisplayName, speakerRoster } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 
 interface MeetingSummary {
@@ -28,6 +28,40 @@ export interface DocSpeakers {
   voices: RosterVoice[];
 }
 
+/** One settled turn as the meeting record carries it. */
+interface RecordTurn {
+  text: string;
+  speaker?: string;
+  ts?: number;
+}
+
+interface MeetingRecord {
+  speakers?: Record<string, string>;
+  transcript?: RecordTurn[];
+}
+
+/** The doc's latest meeting, record and all. Null when it has never held one. */
+async function latestMeeting(
+  docId: string,
+  fetchImpl: typeof fetch,
+): Promise<{ summary: MeetingSummary; record: MeetingRecord } | null> {
+  const listed = await fetchImpl(api(`docs/${encodeURIComponent(docId)}/meetings`));
+  if (!listed.ok) throw new Error(`meetings ${listed.status}`);
+  const body = (await listed.json()) as { meetings?: MeetingSummary[] };
+  const meetings = body.meetings ?? [];
+  if (meetings.length === 0) return null;
+  // Latest by start, falling back to the order the index returned when a row
+  // predates `startedAt` — an older record is still a usable roster.
+  const summary = meetings.reduce((best, m) =>
+    (m.startedAt ?? 0) >= (best.startedAt ?? 0) ? m : best,
+  );
+  const detail = await fetchImpl(
+    api(`docs/${encodeURIComponent(docId)}/meetings/${encodeURIComponent(summary.meetingId)}`),
+  );
+  if (!detail.ok) throw new Error(`meeting ${detail.status}`);
+  return { summary, record: (await detail.json()) as MeetingRecord };
+}
+
 /**
  * The voices of this doc's latest meeting — and WHICH meeting, because a
  * rename after the meeting is addressed to it. Null if the doc has never
@@ -37,27 +71,52 @@ export async function loadDocSpeakers(
   docId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<DocSpeakers | null> {
-  const listed = await fetchImpl(api(`docs/${encodeURIComponent(docId)}/meetings`));
-  if (!listed.ok) throw new Error(`meetings ${listed.status}`);
-  const body = (await listed.json()) as { meetings?: MeetingSummary[] };
-  const meetings = body.meetings ?? [];
-  if (meetings.length === 0) return null;
-  // Latest by start, falling back to the order the index returned when a row
-  // predates `startedAt` — an older record is still a usable roster.
-  const latest = meetings.reduce((best, m) =>
-    (m.startedAt ?? 0) >= (best.startedAt ?? 0) ? m : best,
-  );
-  const detail = await fetchImpl(
-    api(`docs/${encodeURIComponent(docId)}/meetings/${encodeURIComponent(latest.meetingId)}`),
-  );
-  if (!detail.ok) throw new Error(`meeting ${detail.status}`);
-  const record = (await detail.json()) as {
-    speakers?: Record<string, string>;
-    transcript?: Array<{ text: string; speaker?: string }>;
-  };
+  const latest = await latestMeeting(docId, fetchImpl);
+  if (!latest) return null;
+  const { summary, record } = latest;
   return {
-    meetingId: latest.meetingId,
-    voices: speakerRoster(record.transcript ?? [], record.speakers ?? latest.speakers ?? {}),
+    meetingId: summary.meetingId,
+    voices: speakerRoster(record.transcript ?? [], record.speakers ?? summary.speakers ?? {}),
+  };
+}
+
+/** The words of this doc's latest meeting, ready to render. */
+export interface DocTranscript {
+  meetingId: string;
+  /** `[HH:MM:SSZ] Rowan Pike: words` — the raw record's own grammar, minus
+   *  its leading bullet, so the panel can render one line per turn. */
+  lines: string[];
+}
+
+/**
+ * WHAT THE MEETING ACTUALLY HEARD, for the panel to offer once it is over.
+ *
+ * The notes are the reviewed record and the doc carries them; this is the
+ * unreviewed one, and until now the only copy a person could reach was the
+ * `-raw-transcript.md` file beside the server's data dir — which is to say,
+ * nowhere, for anyone not on the box. A bot meeting made that plain: the
+ * words went past and left no trace anybody could open.
+ *
+ * Fetched when the panel is opened rather than held from mount, so a meeting
+ * that has just ended is the one it shows.
+ */
+export async function loadDocTranscript(
+  docId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DocTranscript | null> {
+  const latest = await latestMeeting(docId, fetchImpl);
+  if (!latest) return null;
+  const names = latest.record.speakers ?? latest.summary.speakers ?? {};
+  const turns = latest.record.transcript ?? [];
+  return {
+    meetingId: latest.summary.meetingId,
+    lines: turns.map((turn) => {
+      const who =
+        turn.speaker === undefined ? 'Speaker 1' : speakerDisplayName(turn.speaker, names);
+      const clock =
+        turn.ts === undefined ? '' : `[${new Date(turn.ts).toISOString().slice(11, 19)}Z] `;
+      return `${clock}${who}: ${turn.text.replace(/\s*\n\s*/g, ' ').trim()}`;
+    }),
   };
 }
 

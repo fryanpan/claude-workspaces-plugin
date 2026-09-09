@@ -31,7 +31,7 @@ import { othersOnDoc } from '../meeting-solo.ts';
 import { type MeetingStripHandle, mountMeetingStrip } from '../meeting-strip.ts';
 import { wantsLatencyTiming } from '../meeting-timing-client.ts';
 import type { MountScope } from '../mount-scope.ts';
-import { loadDocSpeakers, postSpeakerName } from '../speaker-voices.ts';
+import { loadDocSpeakers, loadDocTranscript, postSpeakerName } from '../speaker-voices.ts';
 
 export interface DocMeetingOptions {
   docId: string;
@@ -157,6 +157,10 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     // meeting's cast on mount, and the HTTP rename for a socket that is
     // gone. Same record the reassign menu below reads.
     loadSpeakers: () => loadDocSpeakers(docId),
+    // The other record: what the meeting HEARD, behind the panel's fold.
+    // Before this it lived only in the `-raw-transcript.md` beside the
+    // server's data dir, which is nowhere for anyone not on that machine.
+    loadTranscript: () => loadDocTranscript(docId),
     postName: (meetingId, speaker, name) => postSpeakerName({ docId, meetingId, speaker, name }),
     liveZone: zone,
   });

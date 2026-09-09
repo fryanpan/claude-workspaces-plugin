@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadDocSpeakers, loadDocVoices, postSpeakerName } from '../src/speaker-voices.ts';
+import {
+  loadDocSpeakers,
+  loadDocTranscript,
+  loadDocVoices,
+  postSpeakerName,
+} from '../src/speaker-voices.ts';
 
 /** The board the page is standing on — every resource route is under it. */
 const WS = 'w-1';
@@ -84,6 +89,51 @@ describe('loadDocSpeakers', () => {
   it('answers null, not an empty cast, for a doc that has never held a meeting', async () => {
     const fetchImpl = vi.fn(async () => ok({ meetings: [] }));
     expect(await loadDocSpeakers('plain', fetchImpl as unknown as typeof fetch)).toBeNull();
+  });
+});
+
+describe('loadDocTranscript', () => {
+  it('renders the latest meeting’s turns in the raw record’s own grammar', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/meetings')) {
+        return ok({
+          meetings: [
+            { meetingId: 'm-old', startedAt: 100 },
+            { meetingId: 'm-new', startedAt: 900 },
+          ],
+        });
+      }
+      return ok({
+        speakers: { p7: 'Rowan Pike' },
+        transcript: [
+          {
+            turn: 0,
+            text: 'So the\n  Riverbend sync.',
+            speaker: 'p7',
+            ts: Date.UTC(2026, 8, 9, 9, 12, 4),
+          },
+          { turn: 1, text: 'Right.', speaker: 'p8', ts: Date.UTC(2026, 8, 9, 9, 12, 9) },
+          // No speaker at all: a solo capture's turns carry none.
+          { turn: 2, text: 'Ending there.', ts: Date.UTC(2026, 8, 9, 9, 12, 20) },
+        ],
+      });
+    });
+    expect(await loadDocTranscript('huddle', fetchImpl as unknown as typeof fetch)).toEqual({
+      meetingId: 'm-new',
+      lines: [
+        '[09:12:04Z] Rowan Pike: So the Riverbend sync.',
+        '[09:12:09Z] Speaker p8: Right.',
+        '[09:12:20Z] Speaker 1: Ending there.',
+      ],
+    });
+    // The LATEST meeting, which after a bot call is the one that just ended.
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('m-new');
+  });
+
+  it('answers null for a doc that has never held a meeting', async () => {
+    const fetchImpl = vi.fn(async () => ok({ meetings: [] }));
+    expect(await loadDocTranscript('plain', fetchImpl as unknown as typeof fetch)).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

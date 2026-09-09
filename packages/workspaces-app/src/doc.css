@@ -1593,6 +1593,33 @@ body.has-set .doc-switcher-caret {
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
+/* What the last meeting HEARD, folded: long by nature, and nobody opens this
+   panel to read a transcript by default. Scrolls inside itself so the fold
+   cannot push Start Recording off a 750px-tall screen. */
+.meeting-pop-transcript {
+  margin: 0 8px 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.meeting-pop-transcript > summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px;
+}
+.meeting-pop-transcript-body {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 6px;
+  color: var(--fg-muted);
+}
+.meeting-pop-transcript-line {
+  padding: 2px 0;
+  line-height: 1.4;
+}
 .meeting-choice-group {
   margin: 0 8px 10px;
 }

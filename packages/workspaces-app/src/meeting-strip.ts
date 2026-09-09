@@ -289,6 +289,13 @@ export interface MeetingStripOpts {
    */
   loadSpeakers?: () => Promise<DocSpeakers | null>;
   /**
+   * The last meeting's words, for the panel's Transcript fold. Read at the
+   * tap rather than at mount, so a meeting that has just ended is the one it
+   * shows — a bot meeting especially, which leaves nothing else behind on
+   * screen.
+   */
+  loadTranscript?: () => Promise<{ lines: string[] } | null>;
+  /**
    * Name a voice on a meeting whose audio socket is gone — the rename
    * channel once capture has stopped. Resolves true when the server recorded
    * it; false is a refusal the strip must not paper over, because a name
@@ -697,6 +704,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     bot,
     advFor,
     cast,
+    ...(opts.loadTranscript ? { loadTranscript: opts.loadTranscript } : {}),
     speakerRow: (label) => menu.speakerRow(label),
     renderPop,
     onStartPressed,
