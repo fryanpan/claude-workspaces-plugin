@@ -524,7 +524,8 @@ async function runMeeting(
     const notes = shot.notes;
     if (process.env.CW_NOTES_EVAL_OPS === '1') {
       console.log(
-        `  [doc] ${fixture.meeting} tick ${i + 1}: ${allBullets(notes).length} bullets after the write`,
+        `  [doc] ${fixture.meeting} tick ${i + 1}: ${allBullets(notes).length} bullets in the ` +
+          `notes section, ${allBullets(shot.markdown).length} in the whole doc`,
       );
     }
     await hooks.after(notes, i + 1, transcript);
