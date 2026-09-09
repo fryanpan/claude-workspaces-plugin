@@ -24,6 +24,7 @@ import { type MarkupMarginHandle, mountMarkupMargin } from '../redline/markup-ma
 import type { ReviewChrome } from '../review-chrome.ts';
 import { mountSuggestionsSummary } from '../suggestions/suggestions-summary.ts';
 import { threadCards } from '../thread-morph.ts';
+import { type FootnoteNotesHandle, mountFootnoteNotes } from './footnote-notes.ts';
 
 export interface DocMarginOptions {
   docId: string;
@@ -57,6 +58,9 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // Same forward declaration for the indicator: the column reserves the band
   // its strips cover, and the strips are placed against the column.
   let hints: CommentHintsHandle | null = null;
+  // The footnote notes place into the same column, for the same reason the
+  // provenance cards do: two layout passes over one column fight.
+  let footnotes: FootnoteNotesHandle | null = null;
   const margin: MarkupMarginHandle = mountMarkupMargin({
     editorEl: editorMount,
     view: editor.editor.view,
@@ -65,7 +69,7 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     chrome,
     getSuggestions: () => suggestOps.listSuggestions(ydoc),
     docId,
-    getNoteCards: () => noteCards?.cards() ?? [],
+    getNoteCards: () => [...(noteCards?.cards() ?? []), ...(footnotes?.cards() ?? [])],
     stripInsets: () => hints?.insets() ?? { top: 0, bottom: 0 },
     scope,
   });
@@ -81,6 +85,17 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   });
   const cards = noteCards;
   scope.onCleanup(() => cards.destroy());
+  // `^[a note]` beside the line it belongs to above 1100px, a tap-to-open
+  // card under the line below it, and a numbered list on paper
+  // (doc/footnote-notes.ts). The notes are read back off the decorations the
+  // editor already drew, so nothing here re-derives where a note is.
+  footnotes = mountFootnoteNotes({
+    prose: editor.editor.view.dom,
+    container: editorMount,
+    marginVisible: balloonMarginVisible,
+    onChange: () => margin.scheduleRelayout(),
+    scope,
+  });
   // Doc-level "N pending suggestions" topbar badge (Accept all / Reject all
   // across every author) — per-suggestion Accept/Reject lives on the
   // balloon/chip card the margin just wired above.
@@ -139,10 +154,12 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     scope,
   });
   const hintsHandle = hints;
+  const footnotesHandle = footnotes;
   const onMarginTransaction = (): void => {
     // A note landing, stepping down or ageing out arrives as a transaction:
     // re-read the tinted set before the column lays out against it.
     cards.tick();
+    footnotesHandle.refresh();
     margin.scheduleRelayout();
     suggestionsSummary.scheduleRefresh();
     hintsHandle.refresh();

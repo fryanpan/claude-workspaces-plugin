@@ -39,11 +39,13 @@
  * voice has actually been heard, and then only where the voice CHANGES — a
  * pill on every few words of one speaker is the engine's turn boundary
  * showing through again. A solo huddle's own name is noise (owner's call,
- * 2026-08-31). It reads through `speakerDisplayName`: a label carries a group.
+ * 2026-08-31). The pill is `meeting-speaker-pill.ts`'s, and it is WHERE A
+ * VOICE IS NAMED: the strip's tappable one is never on screen while this zone
+ * exists, so these were the only pills the iPad showed and they were inert.
  */
 
-import { speakerDisplayName } from '@claude-workspaces/core';
 import { createStreamHold } from './meeting-live-hold.ts';
+import { speakerPill } from './meeting-speaker-pill.ts';
 
 /** One transcript turn as the zone tracks it. */
 export interface LiveZoneTurn {
@@ -149,6 +151,8 @@ export function createMeetingLiveZone(opts: {
    * default; injected by tests, which have no media engine to read.
    */
   reducedMotion?: () => boolean;
+  /** Name this voice — the strip's verb; absent, the pill is a plain label. */
+  nameSpeaker?: (label: string) => void;
 }): MeetingLiveZone {
   const now = opts.now ?? (() => Date.now());
   const scroller = opts.scroller ?? opts.parent;
@@ -253,12 +257,8 @@ export function createMeetingLiveZone(opts: {
   function spanFor(t: ZoneTurn, prev: ZoneTurn | null): HTMLElement {
     const span = document.createElement('span');
     span.className = t.final ? 'lz-turn' : 'lz-turn lz-partial';
-    if (t.speaker !== undefined && voices.size >= 2 && t.speaker !== prev?.speaker) {
-      const pill = document.createElement('span');
-      pill.className = 'lz-speaker';
-      pill.textContent = speakerDisplayName(t.speaker, names);
-      span.append(pill);
-    }
+    const opens = voices.size >= 2 && t.speaker !== prev?.speaker;
+    if (opens && t.speaker) span.append(speakerPill(t.speaker, names, opts.nameSpeaker));
     const parts = t.text.split('\n');
     for (const [i, part] of parts.entries()) {
       if (i > 0) span.append(document.createElement('br'));

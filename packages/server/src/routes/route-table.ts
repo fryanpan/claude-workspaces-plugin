@@ -145,6 +145,7 @@ const EXAMPLE_PARAMS: Readonly<Record<string, string>> = {
   shareId: 'sh-1',
   owner: 'o-1',
   eventId: 'ev-1',
+  fileId: 'f-1',
   token: '0123456789abcdef0123456789abcdef',
 };
 

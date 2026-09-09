@@ -23,6 +23,7 @@ import { liveTuningKeys } from '@claude-workspaces/core';
 import { advancedControls, buildAdvancedSection } from './meeting-advanced.ts';
 import type { AdvancedState } from './meeting-advanced.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
+import { type TranscriptReader, mountTranscriptFold } from './meeting-transcript-panel.ts';
 
 /**
  * The chooser form as it currently stands. Lives on the strip because the
@@ -87,6 +88,15 @@ export interface MeetingChooserDeps {
   advFor(engineId: string): AdvancedState;
   /** The speakers the last recording named, still nameable after it ended. */
   cast(): string[];
+  /**
+   * The last meeting's words, fetched when a person asks for them.
+   *
+   * A function rather than a value because it is READ AT THE TAP: the meeting
+   * whose transcript somebody wants is usually the one that has just ended,
+   * and anything loaded at mount predates it. Absent where the strip was
+   * mounted without one, which is every surface that has no meetings API.
+   */
+  loadTranscript?: TranscriptReader;
   /** One nameable speaker row. */
   speakerRow(label: string): HTMLElement;
   /** Redraw whichever popover is open. */
@@ -157,6 +167,7 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     bot,
     advFor,
     cast,
+    loadTranscript,
     speakerRow,
     renderPop,
     onStartPressed,
@@ -277,6 +288,7 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
       for (const label of idleCast) castWrap.append(speakerRow(label));
       pop.append(castWrap);
     }
+    if (loadTranscript) pop.append(mountTranscriptFold(loadTranscript));
 
     const source = choiceGroup('Source');
     const micChoice = choice({

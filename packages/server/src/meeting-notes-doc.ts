@@ -52,7 +52,7 @@
  * own provenance rather than off the voice.
  */
 
-import { contentKind } from '@claude-workspaces/core';
+import { contentKind, prose as proseNs } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { docLookupUrl } from './meeting-lookup.ts';
@@ -67,6 +67,7 @@ import {
   type NotesReattribution,
   type NotesRelabel,
   type NotesUpdate,
+  type NotesWriteRefusal,
 } from './meeting-notes.ts';
 import {
   type ResearchFiled,
@@ -79,13 +80,16 @@ import {
 } from './meeting-task-capture.ts';
 import { meetingTimingPath } from './meetings.ts';
 import {
+  MEETING_NOTES_HEADING,
   NOTES_AUTHOR_ID,
   type NotesDocStore,
   applyNotesBlockEdits,
   readNotesOutline,
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
+import { guardNotesEdits } from './notes-edit-guard.ts';
 import { type NotesHeadingStore, createNotesHeadingFileStore } from './notes-heading-store.ts';
+import { stripInventedLinks } from './notes-invented-links.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
   dropLegacyTranscriptSection,
@@ -212,6 +216,16 @@ export interface NotesHeadingMemory {
     before: readonly prose.OutlineEntry[],
     after: readonly prose.OutlineEntry[],
   ): void;
+  /**
+   * Take an existing heading as this meeting's section — what
+   * `notesSectionForMeeting` does with an empty one.
+   *
+   * A WRITE, not a return value, and that is the point: one bullet from now
+   * the section is not empty any more, so a next tick that had to re-derive
+   * the same answer would find nothing free and open the twin this exists to
+   * prevent.
+   */
+  adopt(ids: NotesMeetingIds, headingId: string): void;
   /** This meeting is (re)starting: forget whatever it remembered, so it opens
    *  its own section. Another meeting's memory of the same doc is untouched —
    *  that is the whole reason the key carries the meeting id. */
@@ -222,6 +236,75 @@ export interface NotesHeadingMemory {
  *  under it are topics, which the agent also writes and which must never be
  *  mistaken for the section. */
 const NOTES_HEADING_LEVEL = 2;
+
+/**
+ * The section this meeting writes under: the one it remembers, else an
+ * existing EMPTY one it may take over.
+ *
+ * CALL THIS, NOT `headingId`, ANYWHERE THE ANSWER DECIDES WHETHER A SECTION
+ * IS OPENED.
+ *
+ * IT READS ITS OWN OUTLINE FOR THE ADOPTION HALF, and does not judge that off
+ * the `outline` it is handed. Emptiness is invisible in a headings-only
+ * outline — every section looks empty in one — and one of this function's two
+ * callers is a hop away from a reader that asks for exactly that. Trusting
+ * the argument would mean adopting a section full of the last meeting's notes
+ * and writing this meeting's minutes into it. The caller's outline is still
+ * used for the cheap half (is the remembered heading still there), and the
+ * store is read only when nothing is remembered — the first tick of a
+ * meeting, which already pays for a section-open write.
+ */
+export function notesSectionForMeeting(
+  memory: NotesHeadingMemory,
+  ids: NotesMeetingIds,
+  outline: readonly prose.OutlineEntry[],
+  docStore: NotesDocStore,
+): string | undefined {
+  const held = memory.headingId(ids, outline);
+  if (held !== undefined) return held;
+  const free = emptyNotesSection(readNotesOutline(docStore, ids.docId));
+  if (free === undefined) return undefined;
+  memory.adopt(ids, free);
+  return free;
+}
+
+/**
+ * The id of the doc's LAST `Meeting notes` heading when nothing is under it,
+ * else undefined.
+ *
+ * The owner's 2026-08-31 rule — a new recording opens its own section below
+ * whatever the last one wrote — is about never replacing minutes somebody has
+ * read. An EMPTY section holds none, so opening a second one under it leaves
+ * two identical headings with nothing under either, which is what a meeting
+ * whose every tick composed nothing left on a doc on 2026-09-09. The newer
+ * rule is that new minutes reuse a section that fits the topic, and an empty
+ * one fits every topic. A section with a single word in it is left alone.
+ *
+ * THE LAST ONE, because both readers of a notes section take the last heading
+ * with that text (`notesSectionStart` in the client, the finder here) — an
+ * earlier empty section is not where anybody would read the minutes from, so
+ * writing into it would strand them exactly as the eager section-open exists
+ * to prevent.
+ *
+ * A section runs to the next heading at its own level or above; anything at
+ * all inside it — a bullet, a paragraph, a `### Topic` the last recording got
+ * as far as writing — makes it somebody's, and it is left alone.
+ */
+function emptyNotesSection(outline: readonly prose.OutlineEntry[]): string | undefined {
+  let last = -1;
+  for (let i = 0; i < outline.length; i++) {
+    const e = outline[i];
+    if (e?.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING) last = i;
+  }
+  if (last < 0) return undefined;
+  for (let i = last + 1; i < outline.length; i++) {
+    const e = outline[i];
+    if (!e) continue;
+    if (e.kind === 'heading' && (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL) break;
+    return undefined;
+  }
+  return outline[last]?.id;
+}
 
 export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadingMemory {
   // KEYED BY DOC **AND** MEETING. Keyed by doc alone, two recordings into one
@@ -260,6 +343,10 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
       if (present(id, outline)) return id;
       forget(ids);
       return undefined;
+    },
+    adopt(ids, headingId) {
+      byMeeting.set(keyOf(ids), headingId);
+      store?.write(ids, headingId);
     },
     learn(ids, before, after) {
       const held = remembered(ids);
@@ -306,6 +393,33 @@ function noteLegacyKept(docId: string): void {
 }
 
 /**
+ * One line per edit the guard refused.
+ *
+ * NOT DEDUPLICATED, unlike the legacy-transcript line above. A refusal is a
+ * property of ONE TICK's reply, not of the doc: the same model making the
+ * same mistake twice in a meeting is the signal that the prompt rule is not
+ * landing, and collapsing the two lines into one would hide exactly that.
+ */
+function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
+  console.log(`[meeting-notes] ${docId} meeting ${meetingId}: refused ${why}`);
+}
+
+/**
+ * One line per tick that composed a link it was never given.
+ *
+ * ONE LINE WITH A COUNT, not a line per link, and unlike a refusal it says
+ * every URL it dropped: a tick that invents four addresses invented them from
+ * one belief, and the addresses themselves are the evidence for whoever is
+ * reading whether the compose prompt is drifting.
+ */
+function noteInventedLinks(docId: string, meetingId: string, dropped: readonly string[]): void {
+  console.log(
+    `[meeting-notes] ${docId} meeting ${meetingId}: dropped ${dropped.length} invented ` +
+      `link${dropped.length === 1 ? '' : 's'} — ${dropped.join(', ')}`,
+  );
+}
+
+/**
  * Why a tick's edits did not reach the doc.
  *
  * NAMED RATHER THAN COUNTED, because "doc write skipped" was for weeks the
@@ -314,10 +428,18 @@ function noteLegacyKept(docId: string): void {
  * came back empty (an evicted or deleted doc); `not-prose` is a doc that is
  * not a notepad; `store-refused` is the store declining the batch outright;
  * `all-edits-failed` is every edit in the batch naming a block that is no
- * longer there. Only the last two are a compose worth retrying, and no
- * amount of reading the old line could tell them apart.
+ * longer there; `guard-refused` is `notes-edit-guard.ts` emptying the batch
+ * because every edit in it touched the meeting's own section heading. Only
+ * `store-refused` and `all-edits-failed` are a compose worth retrying —
+ * a guarded batch would be refused again — and no amount of reading the old
+ * line could tell them apart.
  */
-export type NotesWriteSkip = 'no-doc' | 'not-prose' | 'store-refused' | 'all-edits-failed';
+export type NotesWriteSkip =
+  | 'no-doc'
+  | 'not-prose'
+  | 'store-refused'
+  | 'all-edits-failed'
+  | 'guard-refused';
 
 /** What a tick's write came to: `null` when it landed, else why it did not. */
 export type NotesWriteResult = null | NotesWriteSkip;
@@ -358,7 +480,57 @@ export function applyNotesUpdate(
   // OPENED from the topic headings it also wrote. Cheap: `headingsOnly` walks
   // the same blocks the batch is about to and returns a handful of entries.
   const before = readNotesOutline(docStore, update.docId, { headingsOnly: true });
-  const res = applyNotesBlockEdits(docStore, update.docId, update.edits);
+  // THE MEMORY IS ASKED AGAINST THE WHOLE OUTLINE, NOT `before`. `before` is
+  // headings only for the `learn` call below; `headingId` checks its
+  // remembered id against the blocks that are actually there, so it needs the
+  // outline the tick itself read.
+  const full = readNotesOutline(docStore, update.docId);
+  const guarded = guardNotesEdits(update.edits, {
+    notesHeadingId: notesSectionForMeeting(
+      heading,
+      { docId: update.docId, meetingId: update.meetingId },
+      full,
+      docStore,
+    ),
+  });
+  for (const why of guarded.refused) {
+    noteGuardRefusal(update.docId, update.meetingId, why);
+  }
+  // THE SECOND DETERMINISTIC REFUSAL ON THIS PATH, and it runs after the
+  // guard for the same reason the guard runs before the store: an edit that
+  // is not going to be applied does not need its links judged.
+  //
+  // Absent sources mean "this caller cannot say what the tick was given", not
+  // "the tick was given nothing" — the section-open write and the tests that
+  // drive this function directly are both in that position, and stripping
+  // every link out of a batch whose inputs are unknown would drop a citation
+  // for having no evidence about it. The compose path always passes them.
+  const linked =
+    update.linkSources === undefined
+      ? { edits: guarded.edits, dropped: [] as string[] }
+      : stripInventedLinks(guarded.edits, {
+          urls: update.linkSources.urls,
+          // THE NOTES THEMSELVES ARE A SOURCE, and leaving them out was the
+          // one way this check could destroy a real citation. A regroup
+          // re-emits a bullet composed ticks ago, carrying the link that
+          // tick was given; the outline the compose reads carries a block's
+          // WORDS and not its links, so nothing else here can see it. Judged
+          // against the doc as it stands, a re-emitted citation is what it
+          // always was — already in the notes, and not this tick's claim.
+          text: [
+            ...update.linkSources.text,
+            proseNs.serializeFragmentToMarkdown(proseNs.getProseFragment(doc.ydoc)),
+          ],
+        });
+  if (linked.dropped.length > 0) noteInventedLinks(update.docId, update.meetingId, linked.dropped);
+  // A batch the guard emptied wrote nothing, and it is not a store failure
+  // or a missing block: it is the composer asking for the one edit the
+  // notes cannot survive. Named on its own so the log can count how often
+  // the model does it, and so a retry loop does not resend it.
+  // `refused` is the evidence, not the empty list: an empty batch answered
+  // `null` above before the guard ever saw it.
+  if (guarded.edits.length === 0 && guarded.refused.length > 0) return 'guard-refused';
+  const res = applyNotesBlockEdits(docStore, update.docId, linked.edits);
   if (!res.ok) return 'store-refused';
   heading.learn(
     { docId: update.docId, meetingId: update.meetingId },
@@ -380,6 +552,9 @@ export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
   }
   if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
   if (skip === 'store-refused') return 'the store refused the batch outright';
+  if (skip === 'guard-refused') {
+    return 'every edit touched the meeting’s own notes heading, which the guard never lets through';
+  }
   return 'every edit named a block that is no longer in the doc';
 }
 
@@ -863,15 +1038,19 @@ export function withServerNotesSinks(
       }
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
-      heading.headingId({ docId, meetingId }, outline),
-    onNotes: (update: NotesUpdate): boolean => {
-      let landed = true;
+      notesSectionForMeeting(heading, { docId, meetingId }, outline, deps.docStore()),
+    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
+      let landed: boolean | NotesWriteRefusal = true;
       try {
         const skip = applyNotesUpdate(deps.docStore(), update, heading, {
           ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
         });
         if (skip !== null) {
-          landed = false;
+          // A GUARD REFUSAL REACHES THE SESSION AS A REFUSAL, not as a failed
+          // write. `guard-refused` already says the batch was declined on
+          // policy; this is what stops the session composing the same tick
+          // again to be declined again.
+          landed = skip === 'guard-refused' ? 'refused' : false;
           // The reason, the doc, the meeting and the tick. The line this
           // replaces named only the doc, so a meeting whose notes stopped
           // could not be told from a doc that had been deleted.

@@ -246,6 +246,8 @@ interface Harness {
   strip: MeetingStripHandle;
   sockets: FakeSocket[];
   tick(): void;
+  /** Run the reconnect that is waiting, as its backoff elapsing would. */
+  fireRetry(): void;
   clock: { at: number };
   /** The Record Audio button in the top bar (root, in these mounts). */
   record(): HTMLButtonElement;
@@ -300,6 +302,8 @@ function mount(
     engine?: 'assemblyai' | 'soniox';
     listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
     loadSpeakers?: () => Promise<DocSpeakers | null>;
+    onMeetingChange?: (meetingId: string | null) => void;
+    loadTranscript?: () => Promise<{ lines: string[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
     botNamePrefill?: string;
@@ -311,6 +315,8 @@ function mount(
   document.body.append(root);
   const sockets: FakeSocket[] = [];
   const clock = { at: 1_000 };
+  /** Retries the reconnect scheduled, newest last; `fireRetry` runs one. */
+  const retries: Array<() => void> = [];
   let ticker: (() => void) | null = null;
   const stop = vi.fn();
   const strip = mountMeetingStrip({
@@ -321,6 +327,13 @@ function mount(
       ticker = fn;
       return () => {
         ticker = null;
+      };
+    },
+    schedule: (fn) => {
+      retries.push(fn);
+      return () => {
+        const at = retries.indexOf(fn);
+        if (at >= 0) retries.splice(at, 1);
       };
     },
     openSocket: () => {
@@ -358,6 +371,11 @@ function mount(
     sockets,
     clock,
     tick: () => ticker?.(),
+    fireRetry: () => {
+      const next = retries.shift();
+      if (!next) throw new Error('no reconnect was scheduled');
+      next();
+    },
     record,
     options: () => root.querySelector('.meeting-record-options') as HTMLButtonElement,
     pop,
@@ -866,7 +884,7 @@ describe('the strip when no words are coming', () => {
     expect(h.note()).toContain('Microphone permission refused');
   });
 
-  it('names a mid-meeting error and a socket that drops', async () => {
+  it('names a mid-meeting error the server reported', async () => {
     const h = mount();
     h.pressStart({ pick: 'Just me' });
     await settle();
@@ -875,15 +893,47 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'error', message: 'the engine hung up' });
     expect(h.root.dataset.state).toBe('error');
     expect(h.note()).toBe('the engine hung up');
+  });
 
-    const h2 = mount();
-    h2.pressStart({ pick: 'Just me' });
+  it('names a dropped connection only once it has stopped trying to come back', async () => {
+    // A drop no longer ends the meeting on its own — the mic stays open and
+    // the same meeting id is offered back until the window is spent. The
+    // reconnect itself is meeting-reconnect.test.ts; what this one keeps is
+    // that the person is still told, in the words they always got, when the
+    // meeting really is over.
+    const h = mount();
+    h.pressStart({ pick: 'Just me' });
     await settle();
-    h2.sockets[0]?.onopen?.();
-    h2.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
-    h2.sockets[0]?.onclose?.();
-    expect(h2.root.dataset.state).toBe('error');
-    expect(h2.note()).toMatch(/connection/i);
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.onclose?.();
+    expect(h.root.dataset.state).toBe('recording');
+    for (let i = 0; i < 40 && h.root.dataset.state === 'recording'; i++) {
+      h.fireRetry();
+      h.clock.at += 10_000;
+      h.sockets[h.sockets.length - 1]?.onclose?.();
+    }
+    expect(h.root.dataset.state).toBe('error');
+    expect(h.note()).toMatch(/connection/i);
+  });
+
+  /**
+   * Whoever holds a roster for this doc has to be told the moment the doc
+   * moves between meetings — otherwise the reassign menu keeps offering the
+   * last meeting's voices as targets for a note being written in this one.
+   * A start says "a meeting, id unknown"; `ready` names it; a stop leaves the
+   * meeting that just ended as the doc's current one.
+   */
+  it('says which meeting the doc is in, at every boundary', async () => {
+    const onMeetingChange = vi.fn();
+    const h = mount(undefined, { onMeetingChange });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null]);
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
+    expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null, 'm2', 'm2']);
   });
 
   it('settles to idle when the server reports the meeting stopped', async () => {
@@ -1143,7 +1193,10 @@ describe('who is speaking', () => {
     const tag = h.root.querySelector('.meeting-speaker') as HTMLButtonElement;
     expect(tag.getAttribute('aria-label')).toBe('Name Speaker A');
     tag.click();
-    expect(asked).toEqual(['Speaker A']);
+    // THE PROMPT OPENS EMPTY on a voice nobody has named. It used to be
+    // seeded with the display name, which is how "Room Speaker C" got saved
+    // as somebody's name (Bryan, 2026-09-09).
+    expect(asked).toEqual(['']);
     expect(h.tags()).toEqual(['Jordan', 'Speaker B', 'Jordan']);
     // A turn that arrives later with the same label reads as Jordan too —
     // and turn 0 has rolled off the three-turn window by then.
@@ -1158,6 +1211,44 @@ describe('who is speaking', () => {
     // The prompt offers the current name next time, so a rename starts from it.
     tag.click();
     expect(asked[1]).toBe('Jordan');
+  });
+
+  it('a named two-stream voice reads as the name alone, and reprompts from it', async () => {
+    // Bryan, 2026-09-09, on a room-plus-remote meeting: the group suffix is
+    // noise once a voice has a name, and seeding the prompt with the display
+    // name is what saved "John (Room)" and then rendered "John (Room) (Room)".
+    const asked: string[] = [];
+    const h = await live((current) => {
+      asked.push(current);
+      return 'John';
+    });
+    h.sockets[0]?.serve({
+      type: 'transcript',
+      turn: 0,
+      text: 'In the room.',
+      final: true,
+      speaker: 'room:A',
+    });
+    h.sockets[0]?.serve({
+      type: 'transcript',
+      turn: 1,
+      text: 'On the call.',
+      final: true,
+      speaker: 'remote:B',
+    });
+    expect(h.tags()).toEqual(['Room Speaker A', 'Remote Speaker B']);
+    const tag = h.root.querySelector('.meeting-speaker') as HTMLButtonElement;
+    tag.click();
+    expect(asked).toEqual(['']);
+    expect(h.tags()).toEqual(['John', 'Remote Speaker B']);
+    // And the second rename starts from the bare name, not from "John (Room)".
+    tag.click();
+    expect(asked[1]).toBe('John');
+    const named = (h.sockets[0]?.sent ?? [])
+      .filter((d): d is string => typeof d === 'string')
+      .map((d) => JSON.parse(d) as { type: string; name?: string })
+      .filter((m) => m.type === 'name_speaker');
+    expect(named[0]).toEqual({ type: 'name_speaker', speaker: 'room:A', name: 'John' });
   });
 
   it('clips a name to the limit the server enforces, so the two never diverge', async () => {
@@ -1278,6 +1369,65 @@ describe('naming a voice after the meeting — the chooser keeps the cast', () =
     expect(h.popNames()).toEqual(['Speaker A', 'Speaker B']);
   });
 
+  it('offers the last meeting’s words behind a fold, fetched at the tap', async () => {
+    // THE OTHER RECORD. The notes are in the doc; what the meeting HEARD used
+    // to live only in the `-raw-transcript.md` beside the server's data dir,
+    // which is nowhere for anyone not on that machine — and a bot meeting
+    // leaves nothing else behind on screen at all.
+    let asked = 0;
+    const h = mount(undefined, {
+      loadTranscript: () => {
+        asked += 1;
+        return Promise.resolve({
+          lines: ['[09:12:04Z] Rowan Pike: So the Riverbend sync.', '[09:12:09Z] Ada Vale: Right.'],
+        });
+      },
+    });
+    await settle();
+    h.record().click();
+    const fold = document.querySelector('.meeting-pop-transcript') as HTMLDetailsElement;
+    expect(fold).toBeTruthy();
+    // READ AT THE TAP, not at mount: the meeting somebody wants the words of
+    // is usually the one that has just ended.
+    expect(asked).toBe(0);
+
+    fold.open = true;
+    fold.dispatchEvent(new Event('toggle'));
+    await settle();
+    expect(asked).toBe(1);
+    expect(
+      [...fold.querySelectorAll('.meeting-pop-transcript-line')].map((el) => el.textContent),
+    ).toEqual(['[09:12:04Z] Rowan Pike: So the Riverbend sync.', '[09:12:09Z] Ada Vale: Right.']);
+
+    // Folded shut and open again asks nothing more.
+    fold.open = false;
+    fold.dispatchEvent(new Event('toggle'));
+    fold.open = true;
+    fold.dispatchEvent(new Event('toggle'));
+    await settle();
+    expect(asked).toBe(1);
+  });
+
+  it('says so when the doc has never held a meeting, and offers nothing without the reader', async () => {
+    const empty = mount(undefined, { loadTranscript: () => Promise.resolve(null) });
+    await settle();
+    empty.record().click();
+    const fold = document.querySelector('.meeting-pop-transcript') as HTMLDetailsElement;
+    fold.open = true;
+    fold.dispatchEvent(new Event('toggle'));
+    await settle();
+    expect(fold.querySelector('.meeting-pop-transcript-body')?.textContent).toBe(
+      'No transcript yet.',
+    );
+
+    // CONTROL: a strip mounted without the reader grows no fold at all.
+    document.body.replaceChildren();
+    const bare = mount();
+    await settle();
+    bare.record().click();
+    expect(document.querySelector('.meeting-pop-transcript')).toBeNull();
+  });
+
   it('a reloaded doc offers its last meeting’s cast, and renames it over HTTP', async () => {
     const postName = vi.fn(() => Promise.resolve(true));
     const h = mount(undefined, {
@@ -1300,6 +1450,82 @@ describe('naming a voice after the meeting — the chooser keeps the cast', () =
     await settle();
     expect(h.popNames()).toEqual(['Devi', 'Priya']);
     expect(postName).toHaveBeenCalledWith('m-9', 'B', 'Priya');
+  });
+
+  /**
+   * The channel the notes' own rename entry uses (speaker-rename ticket,
+   * AC3). It asks for no prompt and answers whether the name was kept, which
+   * is what lets the menu say so — the strip's own pills are gone by then,
+   * along with the strip's row and the live transcript zone.
+   */
+  it('names a voice without a prompt, over HTTP, once the capture has stopped', async () => {
+    const postName = vi.fn(() => Promise.resolve(true));
+    const h = await stopped({ postName, promptName: () => null });
+    await expect(h.strip.renameSpeaker('B', '  Priya  ')).resolves.toBe(true);
+    expect(postName).toHaveBeenCalledWith('m1', 'B', 'Priya');
+    // And the strip agrees with the notes: its own cast reads the new name.
+    h.record().click();
+    expect(h.popNames()).toEqual(['Speaker A', 'Priya']);
+  });
+
+  it('answers false when the server refused, and takes the name back off', async () => {
+    const postName = vi.fn(() => Promise.resolve(false));
+    const h = await stopped({ postName, promptName: () => null });
+    await expect(h.strip.renameSpeaker('B', 'Priya')).resolves.toBe(false);
+    h.record().click();
+    expect(h.popNames()).toEqual(['Speaker A', 'Speaker B']);
+  });
+
+  it('answers false when there is no meeting to address, rather than keeping a name nowhere', async () => {
+    const h = await stopped({ promptName: () => null });
+    await expect(h.strip.renameSpeaker('B', 'Priya')).resolves.toBe(false);
+    h.record().click();
+    expect(h.popNames()).toEqual(['Speaker A', 'Speaker B']);
+  });
+
+  /**
+   * The race Codex found: on a FIRST open the strip's record read and the
+   * notes' own roster read are two requests for the same record, and the
+   * menu's can win. A Rename offered off the menu's answer would then reach a
+   * strip with no meeting id yet — and "that name wasn't saved" is a lie
+   * about a server that refused nothing.
+   *
+   * Ordered menu-first here by holding the strip's read open across the
+   * rename and releasing it afterwards; nothing waits on a clock.
+   */
+  it('a rename asked for while the record is still loading waits for it, and saves', async () => {
+    const postName = vi.fn(() => Promise.resolve(true));
+    let release: (() => void) | undefined;
+    const loaded = new Promise<DocSpeakers | null>((resolve) => {
+      release = () =>
+        resolve({
+          meetingId: 'm-9',
+          voices: [{ label: 'B', name: 'Speaker B', lastSaid: 'Sure.' }],
+        });
+    });
+    const h = mount(undefined, { postName, loadSpeakers: () => loaded });
+    // The menu's own request has already answered; the strip's has not.
+    const asked = h.strip.renameSpeaker('B', 'Priya');
+    let settled: boolean | undefined;
+    void asked.then((v) => {
+      settled = v;
+    });
+    await settle();
+    // Nothing refused and nothing posted: the id is not knowable yet.
+    expect(settled).toBeUndefined();
+    expect(postName).not.toHaveBeenCalled();
+    release?.();
+    await expect(asked).resolves.toBe(true);
+    expect(postName).toHaveBeenCalledWith('m-9', 'B', 'Priya');
+    h.record().click();
+    expect(h.popNames()).toEqual(['Priya']);
+  });
+
+  it('a record that never names a meeting still answers, rather than hanging the rename', async () => {
+    const postName = vi.fn(() => Promise.resolve(true));
+    const h = mount(undefined, { postName, loadSpeakers: () => Promise.resolve(null) });
+    await expect(h.strip.renameSpeaker('B', 'Priya')).resolves.toBe(false);
+    expect(postName).not.toHaveBeenCalled();
   });
 
   it('starting a new capture clears the old cast — labels are per meeting', async () => {

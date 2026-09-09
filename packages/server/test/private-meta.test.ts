@@ -25,7 +25,11 @@ import {
 describe('private meta keys', () => {
   it('names exactly the host-describing fields', () => {
     expect([...PRIVATE_META_KEYS].sort()).toEqual([
+      'bindingLostAt',
       'docHome',
+      'docKey',
+      'driftCheckouts',
+      'liveCheckout',
       'owner',
       'producedBy',
       'sourceUrl',

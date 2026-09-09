@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { COLLAPSE_MS, FADE_MS } from '../src/meeting-live-zone.ts';
+import { COLLAPSE_MS, FADE_MS, createMeetingLiveZone } from '../src/meeting-live-zone.ts';
 import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 /**
@@ -335,6 +335,54 @@ describe('the transcript is readable in a bright room', () => {
     const lines = attach('lz-lines', { parent: zone });
     const pill = attach('lz-speaker', { tag: 'span', parent: lines });
     expect(styleOf(pill).color).toBe(styleOf(lines).color);
+  });
+
+  /**
+   * The pill that can be renamed says so WITHOUT a pointer. `cursor` and
+   * `title` are both hover-only, and the device this was reported on has no
+   * hover — which is the whole of "no ability to edit the speaker names".
+   *
+   * The zone is mounted for real rather than hand-built, so this reads the
+   * rule against the markup the app actually renders. Two of the three cues
+   * are out of happy-dom's reach (`::before`, `:hover`), so what is asserted
+   * here is the dotted underline and the button's own padding; the pencil is
+   * a browser check (`bun run ui:shot`).
+   */
+  it('a nameable pill wears a non-hover cue and a target of its own; a fixed one wears neither', () => {
+    setViewport(IPAD);
+    const host = attach('live-zone-host');
+    const tappable = createMeetingLiveZone({ parent: host, nameSpeaker: () => {} });
+    tappable.begin(0);
+    tappable.onTurn({ turn: 0, text: 'Take it?', final: true, speaker: 'A' });
+    tappable.onTurn({ turn: 1, text: 'Sure.', final: true, speaker: 'B' });
+    const fixedHost = attach('live-zone-host');
+    const fixed = createMeetingLiveZone({ parent: fixedHost });
+    fixed.begin(0);
+    fixed.onTurn({ turn: 0, text: 'Take it?', final: true, speaker: 'A' });
+    fixed.onTurn({ turn: 1, text: 'Sure.', final: true, speaker: 'B' });
+    const inner = (root: Element): Element => {
+      const el = root.querySelector('.lz-speaker .lz-speaker-pill');
+      if (!el) throw new Error('no speaker pill rendered');
+      return el;
+    };
+    const outer = (root: Element): Element => {
+      const el = root.querySelector('.lz-speaker');
+      if (!el) throw new Error('no speaker pill rendered');
+      return el;
+    };
+    expect(styleOf(inner(host)).textDecoration).toContain('dotted');
+    // The control's own cue, and the positive control that says the sheet
+    // reached the other pill at all: it is styled, and it promises nothing.
+    const plain = styleOf(inner(fixedHost));
+    expect(plain.borderRadius).toBe(styleOf(inner(host)).borderRadius);
+    expect(plain.textDecoration === '' || plain.textDecoration === 'none').toBe(true);
+    // The tap target is the button's own padding, cancelled by a matching
+    // negative margin so the line of transcript does not grow for it.
+    const box = styleOf(outer(host));
+    expect(box.paddingTop).toBe('8px');
+    expect(box.marginTop).toBe('-8px');
+    tappable.destroy();
+    fixed.destroy();
   });
 
   it('nothing framed came back for the contrast', () => {

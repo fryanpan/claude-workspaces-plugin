@@ -35,10 +35,30 @@ import * as Y from 'yjs';
 import { type NotesReattribution, extendsWord } from './meeting-notes.ts';
 import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 
-/** The blocks these passes may write into: the note-taker's own, still
+/** The blocks the TEXTUAL passes may write into: the note-taker's own, still
  *  untouched by a person. */
 function ownScope(ydoc: Y.Doc): ReadonlySet<Y.XmlElement> {
   return new Set(prose.blocksAuthoredBy(ydoc, NOTES_AUTHOR_ID));
+}
+
+/**
+ * The scope the RENAME pass runs in: every block in the doc.
+ *
+ * WHY THE RENAME IS NOT SCOPED BY AUTHORSHIP, WHEN THE SWEEP IS. Correcting
+ * a mention is a person's edit, so it hands the block back — and a rename
+ * that only reached the note-taker's own blocks therefore could not touch
+ * the very mention a person had just corrected. Bryan hit exactly that on
+ * 2026-09-09: he retagged a line from one voice to another, named the new
+ * voice, and the tag went on reading the old name for good.
+ *
+ * It is safe here and nowhere else because a tag names the voice by LABEL.
+ * Renaming one is not editing somebody's sentence: it is the same fact the
+ * href already carries, spelled the way it is now spelled. The untagged
+ * sweep keeps `ownScope`, because it matches on WORDS and cannot tell a
+ * person's own sentence about Speaker B from the note-taker's.
+ */
+function everyBlock(ydoc: Y.Doc): ReadonlySet<Y.XmlElement> {
+  return new Set(prose.addressableBlocks(prose.getProseFragment(ydoc)));
 }
 
 /**
@@ -63,7 +83,7 @@ export function retagSpeakerInNotes(
   displayName: string,
 ): { replaced: number } {
   const want = speakerTagText(label, { [label]: displayName });
-  return rewriteSpeakerTagRuns(ydoc, ownScope(ydoc), (tag) =>
+  return rewriteSpeakerTagRuns(ydoc, everyBlock(ydoc), (tag) =>
     // Keyed on the label alone: a rename says what this voice is CALLED, and
     // where the mention came from is none of its business — so the href
     // rides through untouched, provenance and all.

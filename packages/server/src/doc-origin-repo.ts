@@ -158,7 +158,7 @@ export function placementEscapesRoot(root: string, relPath: string): boolean {
  * path was reused by something that is no longer this repo's worktree) is
  * skipped rather than trusted.
  */
-function listWorktrees(common: string): Array<{ root: string; branch: string | null }> {
+export function listRepoWorktrees(common: string): Array<{ root: string; branch: string | null }> {
   const out: Array<{ root: string; branch: string | null }> = [];
   // The main checkout: a non-bare repo's common dir IS its `.git` dir.
   if (basename(common) === '.git') {
@@ -197,7 +197,7 @@ function listWorktrees(common: string): Array<{ root: string; branch: string | n
 export function resolveOriginRepoCheckout(originRepo: DocOriginRepo): OriginRepoPlacement {
   const common = gitCommonDir(originRepo.repoRoot);
   if (!common) return { placed: false, reason: 'repo-missing' };
-  for (const wt of listWorktrees(common)) {
+  for (const wt of listRepoWorktrees(common)) {
     if (wt.branch === originRepo.branch) {
       if (placementEscapesRoot(wt.root, originRepo.relPath)) {
         return { placed: false, reason: 'path-escapes-checkout' };

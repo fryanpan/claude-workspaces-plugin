@@ -289,6 +289,7 @@ export class MeetingRelay {
           msg.tuning,
           msg.participant,
           msg.source,
+          msg.resume,
         ),
       );
       return;
@@ -451,6 +452,7 @@ export class MeetingRelay {
     rawTuning?: Record<string, unknown>,
     participant?: string,
     source?: MeetingCaptureSource,
+    resume?: string,
   ): Promise<void> {
     if (conn.state !== 'idle') return;
     const docId = ws.data.docId;
@@ -492,14 +494,23 @@ export class MeetingRelay {
     // audio frame on this socket wears a stream byte, and it means two billed
     // engine sessions — the mic-plus-Mac-audio meeting's whole cost.
     const streams = streamsForSource(source ?? 'mic');
-    const meeting = this.deps.store.start({
+    const opening = {
       docId,
       engine: engine.name,
       sampleRate,
       mode,
       source: source ?? 'mic',
       ...(participant !== undefined ? { participant } : {}),
-    });
+    };
+    // A client whose socket dropped mid-recording asks for the meeting it was
+    // already in. Taken only for one this server can still find and nobody
+    // else is holding; otherwise a NEW meeting opens and `ready` says the
+    // resume did not happen, which is what the strip turns into a sentence.
+    // Silently starting a new meeting under the old id's name is the one
+    // thing this must never do: the transcript is append-only.
+    const resumed =
+      resume !== undefined ? this.deps.store.resume({ ...opening, meetingId: resume }) : null;
+    const meeting = resumed ?? this.deps.store.start(opening);
     if (!meeting) {
       this.send(ws, {
         type: 'unavailable',
@@ -552,6 +563,10 @@ export class MeetingRelay {
     // turn still deserves a mark.
     const ledger = conn.wantsTiming ? new AudioChunkLedger(sampleRate) : null;
     conn.ledger = ledger;
+    // A local for the same reason `notes` and `ledger` are: `stop()` detaches
+    // the conn's fields before the engine's flush settles the final turn, and
+    // that turn still has to be numbered under this meeting.
+    const turnBase = meeting.turnBase;
 
     let streamSet: MeetingStreamSet;
     try {
@@ -572,9 +587,15 @@ export class MeetingRelay {
           ...(tuning !== undefined && Object.keys(tuning).length > 0 ? { tuning } : {}),
         },
         onTurn: (turn) => {
+          // Above whatever this meeting already recorded. Zero for a fresh
+          // meeting, so every ordinary meeting's frames are byte-for-byte
+          // what they were; on a resumed one it is what keeps the numbering
+          // running on rather than starting again on top of the words
+          // already on disk — see `ActiveMeeting.turnBase`.
+          const turnId = turn.turn + turnBase;
           this.send(ws, {
             type: 'transcript',
-            turn: turn.turn,
+            turn: turnId,
             text: turn.text,
             final: turn.final,
             ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}),
@@ -589,10 +610,12 @@ export class MeetingRelay {
           });
           // Only settled turns reach the file. A partial is a view of a turn
           // still being revised, and the record keeps what the turn became.
-          if (turn.final) meeting.recordTurn(turn.turn, turn.text, turn.speaker);
+          if (turn.final) meeting.recordTurn(turnId, turn.text, turn.speaker);
           // The notes pipeline sees EVERY frame: a partial is speech in
           // progress, which is exactly the evidence that defers a pause tick.
-          notes?.onTurn(turn);
+          // Under the meeting's numbering, not the session's: the ids it
+          // reports back on `notes_progress` are the ones the strip has.
+          notes?.onTurn({ ...turn, turn: turnId });
         },
         onError: (message) => {
           this.send(ws, { type: 'error', message });
@@ -661,6 +684,10 @@ export class MeetingRelay {
       meetingId: meeting.meetingId,
       startedAt: meeting.startedAt,
       engine: engine.name,
+      // Only ever present on a resume that was TAKEN. A client that asked and
+      // reads nothing here knows it is in a new meeting, with a new section,
+      // and says so rather than leaving the split unexplained.
+      ...(resumed ? { resumed: true } : {}),
       // What was actually opened, so the strip reports the session being
       // billed rather than the one it asked for.
       mode,

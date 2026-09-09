@@ -129,6 +129,39 @@ describe('the provisional live zone', () => {
     ).toEqual(['Dana', 'Speaker B']);
   });
 
+  it('the pill is the rename control while a meeting runs — a button, named for a11y', () => {
+    const named: string[] = [];
+    const zone = createMeetingLiveZone({ parent, now, nameSpeaker: (l) => named.push(l) });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'Take it?', final: true, speaker: 'A' });
+    zone.onTurn({ turn: 1, text: 'Sure.', final: true, speaker: 'B' });
+    const pills = [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')];
+    expect(pills.map((p) => p.tagName)).toEqual(['BUTTON', 'BUTTON']);
+    // The pencil is a stylesheet ::before, so the accessible name is given
+    // here or a screen reader hears the name and no verb.
+    expect(pills.map((p) => p.getAttribute('aria-label'))).toEqual([
+      'Name Speaker A',
+      'Name Speaker B',
+    ]);
+    pills[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(named).toEqual(['B']);
+    // And the answer comes back through setNames, on the pill already drawn.
+    zone.setNames({ B: 'Priya' });
+    const after = [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')];
+    expect(after.map((p) => p.textContent)).toEqual(['Speaker A', 'Priya']);
+    expect(after[1]?.getAttribute('aria-label')).toBe('Name Priya');
+  });
+
+  it('with no way to record a name the pill stays a label — no promise it cannot keep', () => {
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'Take it?', final: true, speaker: 'A' });
+    zone.onTurn({ turn: 1, text: 'Sure.', final: true, speaker: 'B' });
+    const pills = [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')];
+    expect(pills.map((p) => p.tagName)).toEqual(['SPAN', 'SPAN']);
+    expect(pills.some((p) => p.hasAttribute('aria-label'))).toBe(false);
+  });
+
   it('a two-stream meeting’s pills say which side of the call a voice is on', () => {
     // Both engines hand out "A", so the pill has to carry the group or the
     // room and the call read as one person talking to themselves.
@@ -139,12 +172,13 @@ describe('the provisional live zone', () => {
     expect(
       [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')].map((p) => p.textContent),
     ).toEqual(['Room Speaker A', 'Remote Speaker A']);
-    // And a name keeps the group beside it, because where somebody is
-    // sitting is the fact the two streams were separated to preserve.
+    // A NAMED VOICE DROPS THE GROUP. It used to keep it — "Dana (Remote)" —
+    // and Bryan asked for that gone on 2026-09-09: the group tells two
+    // anonymous voices apart, and a name already does that job.
     zone.setNames({ 'remote:A': 'Dana' });
     expect(
       [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')].map((p) => p.textContent),
-    ).toEqual(['Room Speaker A', 'Dana (Remote)']);
+    ).toEqual(['Room Speaker A', 'Dana']);
   });
 
   it('composing splits the tick’s lines off with nothing drawn around them, and the rest streams on', () => {

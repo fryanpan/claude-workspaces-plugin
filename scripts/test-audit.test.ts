@@ -18,15 +18,100 @@
  * rather than `.test.ts` on purpose: the sleep check globs
  * `packages/server/test/*.ts`, so a plain `.ts` file qualifies without any
  * runner trying to collect it as a suite.
+ *
+ * Because the fixture is the working tree itself, every path below carries a
+ * per-run suffix and the whole window runs under a cross-process lock — see
+ * `RUN_ID` and the `beforeEach` under it. Without both, two vitest runs in one
+ * checkout delete each other's probes and count each other's sites.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { exclusiveWindow } from './probe-lock.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PROBE_REL = join('packages', 'server', 'test', 'zz-audit-untracked-probe.ts');
+
+/**
+ * Every probe path this file plants carries this, so a run can only ever
+ * delete its own files. The lock below means two runs are never planting at
+ * once anyway; the suffix is what keeps a run that dies mid-window from
+ * taking a live run's fixture with it.
+ */
+const RUN_ID = `${process.pid}-${randomBytes(4).toString('hex')}`;
+
+/**
+ * The plant/measure/clean window is exclusive across processes.
+ *
+ * These tests measure a count over the whole working tree, and two
+ * `bun run test:vitest` runs in one checkout - a lead's `verify` and a
+ * builder's - cannot both do that: one run's probes are counted by the other's
+ * audit, which reads as `source-shape reads 20 baseline 12 OVER`. Unique names
+ * cannot fix that; only exclusion can. CI is unaffected either way, one
+ * checkout per shard.
+ *
+ * One `beforeEach` and one `afterEach`, not two of each, because the ordering
+ * that matters - the probes are gone BEFORE the next run is let in - would
+ * otherwise be a property of the runner's `sequence.hooks` setting rather than
+ * of this file. `exclusiveWindow` owns it instead.
+ */
+const window = exclusiveWindow('test-audit', REPO, {
+  // Holding the lock means nobody else has probes planted, so anything still
+  // here is a leftover from a run that died rather than a live fixture.
+  enter: sweepLeftoverProbes,
+  leave: removeOwnProbes,
+});
+
+beforeEach(() => window.open());
+afterEach(() => window.close());
+
+/**
+ * Removes the three artifacts THIS run planted, and nothing else.
+ *
+ * The narrowness is the point. This used to delete `packages/server/test/dist`
+ * whole, which is a directory a concurrent run's ignored probe also sits in —
+ * so a cleanup could take a live fixture out from under another process. The
+ * directory now goes only when it is empty, and every file is addressed by
+ * this run's own `RUN_ID`.
+ */
+function removeOwnProbes(): void {
+  rmSync(PROBE_ABS, { force: true });
+  rmSync(IGNORED_ABS, { force: true });
+  rmSync(PROBE_DIR_ABS, { force: true, recursive: true });
+  try {
+    rmdirSync(dirname(IGNORED_ABS));
+  } catch {
+    // Somebody else's probe is still in there, or it was never created.
+  }
+}
+
+/** Removes every probe any run of this file has ever planted. */
+function sweepLeftoverProbes(): void {
+  const sweep = (dir: string, prefix: string): void => {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (name.startsWith(prefix)) rmSync(join(dir, name), { force: true, recursive: true });
+    }
+  };
+  sweep(join(REPO, 'packages', 'server', 'test'), 'zz-audit-untracked-probe');
+  sweep(join(REPO, 'packages', 'server', 'test', 'dist'), 'zz-audit-ignored-probe');
+  sweep(join(REPO, 'packages', 'workspaces-app', 'test'), 'zz-audit-source-probe');
+  try {
+    rmdirSync(join(REPO, 'packages', 'server', 'test', 'dist'));
+  } catch {
+    // Not empty, or never existed. Either way not ours to remove.
+  }
+}
+
+const PROBE_REL = join('packages', 'server', 'test', `zz-audit-untracked-probe-${RUN_ID}.ts`);
 const PROBE_ABS = join(REPO, PROBE_REL);
 
 /**
@@ -36,7 +121,13 @@ const PROBE_ABS = join(REPO, PROBE_REL);
  * one place where "the audit stopped listing it" can only mean the ignore
  * rules were honoured, rather than that the pathspec never matched.
  */
-const IGNORED_REL = join('packages', 'server', 'test', 'dist', 'zz-audit-ignored-probe.ts');
+const IGNORED_REL = join(
+  'packages',
+  'server',
+  'test',
+  'dist',
+  `zz-audit-ignored-probe-${RUN_ID}.ts`,
+);
 const IGNORED_ABS = join(REPO, IGNORED_REL);
 
 /**
@@ -77,11 +168,6 @@ function runAudit(...args: string[]): Run {
   });
   return { code: out.status, stdout: out.stdout ?? '', stderr: out.stderr ?? '' };
 }
-
-afterEach(() => {
-  rmSync(PROBE_ABS, { force: true });
-  rmSync(dirname(IGNORED_ABS), { force: true, recursive: true });
-});
 
 describe('the audit enumerates untracked files', () => {
   it('names an untracked test file, and fails on the sleep inside it', () => {
@@ -148,7 +234,7 @@ describe('the audit enumerates untracked files', () => {
  * `vitest run` collects one before `afterEach` removes it, it goes green
  * rather than breaking somebody else's gate.
  */
-const PROBE_DIR_REL = join('packages', 'workspaces-app', 'test', 'zz-audit-source-probe');
+const PROBE_DIR_REL = join('packages', 'workspaces-app', 'test', `zz-audit-source-probe-${RUN_ID}`);
 const PROBE_DIR_ABS = join(REPO, PROBE_DIR_REL);
 
 /** The stylesheet every probe points at: real, so a collected probe passes. */
@@ -533,10 +619,6 @@ function plantSourceProbes(): void {
   writeFileSync(join(PROBE_DIR_ABS, 'fixtures', 'sample.css'), '.probe { color: red; }\n');
 }
 
-afterEach(() => {
-  rmSync(PROBE_DIR_ABS, { force: true, recursive: true });
-});
-
 describe('the audit sees a source read one module away', () => {
   it('counts the eight ways a test reaches source text, and none of the four that do not', () => {
     // CONTROL: nothing from the probe directory is named before it exists, so
@@ -642,5 +724,92 @@ describe('the audit sees a source read one module away', () => {
     expect(listed).toContain(
       `${join('packages', 'workspaces-app', 'test', 'board-nav-widget-clearance-css.test.ts')}:45`,
     );
+  });
+});
+
+/**
+ * The other half of surviving a concurrent run: a cleanup that cannot reach
+ * another process's fixture.
+ *
+ * The lock keeps two runs from planting at the same time, but a run that dies
+ * inside the window leaves files behind, and the run that reclaims the lock
+ * sweeps them. Between those two mechanisms sits the ordinary case this covers
+ * — every path is addressed by `RUN_ID`, and the one shared DIRECTORY, `dist`,
+ * is released only when nothing is left in it.
+ *
+ * Planted inside the test rather than before it, because the `beforeEach`
+ * sweep would otherwise (correctly) remove the stand-in first.
+ */
+describe('a run cleans up its own probes only', () => {
+  const FOREIGN_ID = 'foreign-0000-deadbeef';
+  const foreignProbe = join(
+    REPO,
+    'packages',
+    'server',
+    'test',
+    `zz-audit-untracked-probe-${FOREIGN_ID}.ts`,
+  );
+  const foreignIgnored = join(
+    REPO,
+    'packages',
+    'server',
+    'test',
+    'dist',
+    `zz-audit-ignored-probe-${FOREIGN_ID}.ts`,
+  );
+  const foreignDir = join(
+    REPO,
+    'packages',
+    'workspaces-app',
+    'test',
+    `zz-audit-source-probe-${FOREIGN_ID}`,
+  );
+
+  afterEach(() => {
+    rmSync(foreignProbe, { force: true });
+    rmSync(foreignIgnored, { force: true });
+    rmSync(foreignDir, { force: true, recursive: true });
+  });
+
+  it('leaves a concurrent run’s identically-shaped probes alone', () => {
+    // The names have to differ in the first place, or nothing below can.
+    expect(PROBE_REL).toContain(`${process.pid}-`);
+    expect(PROBE_REL).not.toBe(foreignProbe);
+
+    mkdirSync(dirname(IGNORED_ABS), { recursive: true });
+    mkdirSync(PROBE_DIR_ABS, { recursive: true });
+    writeFileSync(PROBE_ABS, PROBE_SOURCE);
+    writeFileSync(IGNORED_ABS, PROBE_SOURCE);
+    writeFileSync(join(PROBE_DIR_ABS, 'to-be.test.ts'), TO_BE_READER);
+
+    mkdirSync(foreignDir, { recursive: true });
+    writeFileSync(foreignProbe, PROBE_SOURCE);
+    writeFileSync(foreignIgnored, PROBE_SOURCE);
+    writeFileSync(join(foreignDir, 'to-be.test.ts'), TO_BE_READER);
+
+    removeOwnProbes();
+
+    // Ours are gone…
+    expect(existsSync(PROBE_ABS)).toBe(false);
+    expect(existsSync(IGNORED_ABS)).toBe(false);
+    expect(existsSync(PROBE_DIR_ABS)).toBe(false);
+
+    // …and the neighbour's survived, including the file inside the directory
+    // the old cleanup deleted whole.
+    expect(existsSync(foreignProbe)).toBe(true);
+    expect(existsSync(foreignIgnored)).toBe(true);
+    expect(existsSync(join(foreignDir, 'to-be.test.ts'))).toBe(true);
+  });
+
+  it('releases the shared dist directory once nothing is left in it', () => {
+    mkdirSync(dirname(IGNORED_ABS), { recursive: true });
+    writeFileSync(IGNORED_ABS, PROBE_SOURCE);
+
+    removeOwnProbes();
+
+    // The positive control for the assertion above: when no neighbour is
+    // holding it, the directory really does go, so "it survived" up there
+    // means the neighbour kept it rather than that it is never removed.
+    expect(existsSync(dirname(IGNORED_ABS))).toBe(false);
   });
 });

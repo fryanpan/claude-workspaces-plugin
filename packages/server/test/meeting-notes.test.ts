@@ -772,6 +772,30 @@ describe('notes session', () => {
     ]);
   });
 
+  it('gives the composer a two-stream voice by its name alone', async () => {
+    // The server-side composer is the sixth surface AC1 names. An unnamed
+    // voice still says which room it is in — that is what tells two
+    // Speaker As apart — and a named one does not.
+    const schedule = new ManualScheduler();
+    const inputs: NotesComposeInput[] = [];
+    const composer: NotesComposer = {
+      name: 'capture',
+      compose(input) {
+        inputs.push(input);
+        return Promise.resolve(editsSaying('notes'));
+      },
+    };
+    const session = beginNotesSession(
+      { composer, quietMs: 1000, schedule, onNotes: () => {} },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'In the room.', final: true, speaker: 'room:A' });
+    session.onTurn({ turn: 1, text: 'On the call.', final: true, speaker: 'remote:B' });
+    session.nameSpeaker('room:A', 'John');
+    await session.end();
+    expect(inputs.at(-1)?.tick.turns.map((t) => t.speaker)).toEqual(['John', 'Remote Speaker B']);
+  });
+
   it('naming a voice tells the sink exactly what to change, in the composer’s words', async () => {
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
@@ -966,10 +990,12 @@ describe('notes session', () => {
     expect(errors.join(' ')).toContain('only tagged mentions');
   });
 
-  it('an unnamed voice counts as a voice when deciding the name is ambiguous', async () => {
-    // B is unnamed, so it reads as "Speaker B". Someone types "Speaker B" as
-    // A's name, then corrects it: the notes' "Speaker B" is now two voices,
-    // and the `names` map alone would not have noticed.
+  it('refuses a placeholder as a name, so it can never collide with a real voice', async () => {
+    // WHAT CHANGED. This used to name A "Speaker B" — B's own placeholder —
+    // and assert that the ambiguity guard caught the collision. A placeholder
+    // is no longer storable as a name at all (Bryan, 2026-09-09), so the
+    // collision cannot arise: the first call writes nothing and the second
+    // renames from the placeholder A still has.
     const schedule = new ManualScheduler();
     const relabels: NotesRelabel[] = [];
     const errors: string[] = [];
@@ -989,12 +1015,11 @@ describe('notes session', () => {
     session.nameSpeaker('A', 'Speaker B');
     session.nameSpeaker('A', 'Sam');
     await session.end();
-    expect(relabels.map((r) => `${r.from}->${r.to}`)).toEqual([
-      'Speaker A->Speaker B',
-      'Speaker B->Sam',
-    ]);
-    expect(relabels.map((r) => r.rewriteUntagged)).toEqual([true, false]);
-    expect(errors.join(' ')).toContain('only tagged mentions');
+    expect(relabels.map((r) => `${r.from}->${r.to}`)).toEqual(['Speaker A->Sam']);
+    // Nothing was ambiguous, so the untagged sweep is not narrowed and
+    // nothing was reported.
+    expect(relabels.map((r) => r.rewriteUntagged)).toEqual([true]);
+    expect(errors.join(' ')).not.toContain('only tagged mentions');
   });
 
   it('an unrelated named voice does not make a rename ambiguous', async () => {

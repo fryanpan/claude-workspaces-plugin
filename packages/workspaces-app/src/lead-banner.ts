@@ -61,7 +61,10 @@ async function defaultFetchJson(url: string): Promise<unknown> {
 }
 
 function defaultSubscribe(docId: string, onPresence: (p: LeadPresence) => void): () => void {
-  const es = new EventSource(`/events/${encodeURIComponent(docId)}`);
+  // Through `api`, like the GET above — the hand-built form was the doc
+  // channel's pre-cutover address, so this banner heard the first read and
+  // nothing after it. Same one-line failure the bot client carried.
+  const es = new EventSource(api(`docs/${encodeURIComponent(docId)}/events:stream`));
   const onFrame = (ev: MessageEvent): void => {
     const parsed = parseLeadPresence(ev.data);
     if (parsed) onPresence(parsed);

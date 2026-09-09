@@ -17,6 +17,7 @@
  * Builds on `prose-fragment.ts`. Imports no sibling in the family.
  */
 import * as Y from 'yjs';
+import { footnoteEndAt } from './footnotes.ts';
 import { LCS_CELL_BUDGET, lcsKept } from './lcs.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
 import { BLOCK_IDENTITY_ATTRS } from './prose-identity.ts';
@@ -82,6 +83,21 @@ export function inlineMarksToDelta(
         i += close + 1;
         continue;
       }
+    }
+
+    // ^[an inline footnote] — OPAQUE. The body is emitted as one unmarked run
+    // and never re-parsed, because a note is a citation and citations carry
+    // markdown punctuation: `^[_underscored_ term]` read as prose comes back
+    // from the serializer as `^[*underscored* term]`, which is a bound file
+    // changing on disk with nobody having edited it. Sits after the code-span
+    // branch so a `^[…]` inside backticks stays code, and before the link
+    // branch so a note holding a link is still one note.
+    const fnEnd = footnoteEndAt(text, i);
+    if (fnEnd > 0) {
+      flush();
+      out.push({ insert: text.slice(i, fnEnd) });
+      i = fnEnd;
+      continue;
     }
 
     // [text](url) — the label is parsed recursively so `[**b**](u)` (which
