@@ -49,6 +49,7 @@ import {
   beginNotesSession,
   createStubNotesComposer,
 } from '../packages/server/src/meeting-notes.ts';
+import { createNotesTimingLog } from '../packages/server/src/notes-timing.ts';
 import type { EngineTurn } from '../packages/server/src/transcribe.ts';
 
 /** Let the compose chain's microtasks settle without moving the clock. */
@@ -322,6 +323,7 @@ async function run(
   cadenceMs: number,
   endpointLagMs: number,
   endpointConfirmMs: number = DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
+  timingOut?: string,
 ): Promise<RunResult> {
   const clock = new VirtualClock();
   const settledAt = new Map<number, number>();
@@ -337,6 +339,14 @@ async function run(
       cadenceMs,
       endpointConfirmMs,
       schedule: clock,
+      // The timing log is stamped from the VIRTUAL clock, not the wall clock:
+      // a replay composes with a stub in microseconds, so wall-clock waits
+      // would all read zero and the file would say nothing about the
+      // scheduling this script exists to measure.
+      now: () => clock.now,
+      ...(timingOut !== undefined
+        ? { openTiming: () => createNotesTimingLog({ path: timingOut }) }
+        : {}),
       onNotes: (update) => {
         notesWritten++;
         for (const t of update.tick.turns) {
@@ -403,6 +413,18 @@ function stats(result: RunResult) {
   };
 }
 
+/** `--flag value` where the value is a path; absent flag means no path. */
+function argValue(args: readonly string[], flag: string): string | undefined {
+  const at = args.indexOf(flag);
+  if (at < 0) return undefined;
+  const value = args[at + 1];
+  if (value === undefined || value.startsWith('--')) {
+    console.error(`${flag} needs a value`);
+    process.exit(2);
+  }
+  return value;
+}
+
 /** `--flag value` pairs; a flag naming no number keeps its default. */
 function numArg(args: readonly string[], flag: string, fallback: number): number {
   const at = args.indexOf(flag);
@@ -460,10 +482,16 @@ if (replayAt >= 0) {
     { label: '+ ceiling', cadence: cadenceMs, confirm: Number.POSITIVE_INFINITY },
     { label: '+ endpoint window', cadence: cadenceMs, confirm: DEFAULT_NOTES_ENDPOINT_CONFIRM_MS },
   ];
+  // Only the LAST column writes a timing file. The three runs are the same
+  // meeting under three configurations; letting them share one path would
+  // interleave three meetings' ticks into a file that claims to be one.
+  const timingOut = argValue(args, '--timing-out');
   const rows = [];
   for (const c of columns) {
-    rows.push(stats(await run(c.label, script, c.cadence, lagAfter, c.confirm)));
+    const out = c === columns[columns.length - 1] ? timingOut : undefined;
+    rows.push(stats(await run(c.label, script, c.cadence, lagAfter, c.confirm, out)));
   }
+  if (timingOut !== undefined) console.log(`Timing log written to ${timingOut}`);
   if (asJson) {
     console.log(JSON.stringify({ turns: turns.length, minutes: Number(spanMin), rows }, null, 2));
   } else {
