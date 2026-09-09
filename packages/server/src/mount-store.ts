@@ -1,0 +1,410 @@
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
+import { repoIdentityAt } from './doc-key.ts';
+import { findWorktreeRoot } from './doc-origin-repo.ts';
+import { type MountedDir, reconcileProject } from './mount-reconcile.ts';
+import {
+  type FileEntry,
+  type MountRecord,
+  MountRegistry,
+  type ProjectPrivacy,
+  type ProjectRecord,
+  parseFileKey,
+} from './mount-registry.ts';
+import { MAX_FILES_PER_MOUNT, isMountableRelPath, isServableRelPath } from './mount-scan.ts';
+import type { RepoRegistry } from './repo-registry.ts';
+import { isWithinRoot } from './safe-path.ts';
+
+/**
+ * Mounted folders as they exist on disk: which repo a path belongs to, what a
+ * mount currently holds, which address each file answers at, and when a file
+ * that moved between two mounts is the same file.
+ *
+ * Every decision that needs a `stat` is here; `mount-registry.ts` holds the
+ * table and no filesystem at all. A file's address is derived exactly the way
+ * a document's identity is (`doc-key.ts`): the repo it belongs to plus its
+ * path from the repo root — never the checkout it was reached through, so a
+ * folder mounted from a worktree and the same folder in the main checkout are
+ * one mount holding one set of addresses.
+ */
+
+/** How long a reconcile's verdict is trusted before the walk runs again. */
+const RECONCILE_TTL_MS = 5_000;
+
+/** A conventions index is prose. Anything past this is not one, and reading it
+ *  into a response would be a way to pull an arbitrary file through a verb
+ *  that promises a short note. */
+const MAX_CONVENTIONS_BYTES = 64 * 1024;
+
+/** The project a host path belongs to. */
+export interface ProjectLocation {
+  repoKey: string;
+  /** The repo's main checkout — where a mount's relative path is joined. */
+  mainRoot: string;
+  /** The checkout the caller's path was actually in. */
+  checkoutRoot: string;
+  /** POSIX, relative to `checkoutRoot`. `''` for the checkout root itself. */
+  relPath: string;
+}
+
+/** What a project's mounts currently hold, and whether that is all of it. */
+export interface MountListing {
+  files: MountedFile[];
+  /** A mount held more than `MAX_FILES_PER_MOUNT` and the walk stopped there,
+   *  so `files` is a prefix rather than the whole mount. Passed on rather
+   *  than swallowed: a caller told "these are the files" about a partial walk
+   *  would read every file past the cap as deleted. */
+  truncated: boolean;
+}
+
+/** One mounted file, as an answer. */
+export interface MountedFile {
+  fileId: string;
+  mountId: string;
+  /** POSIX, relative to the REPO root. */
+  relPath: string;
+  size: number;
+  mtimeMs: number;
+}
+
+export type MountError =
+  | 'not-a-repo'
+  | 'not-a-directory'
+  | 'refused-path'
+  | 'no-such-mount'
+  | 'no-root';
+
+export class MountStore {
+  readonly registry: MountRegistry;
+  private readonly repos: RepoRegistry;
+  private readonly reconciledAt = new Map<string, number>();
+  /** What the last walk of each project actually saw, and whether it was
+   *  capped. Read by the listing inside the reconcile TTL, so a rate-limited
+   *  answer is the same answer rather than the whole history. */
+  private readonly lastScan = new Map<string, { present: Set<string>; truncated: boolean }>();
+
+  /** The per-mount file ceiling this store walks under. Injected rather than
+   *  read off the constant so the capped path is testable without building a
+   *  twenty-thousand-file fixture; production passes nothing. */
+  private readonly maxFilesPerMount: number;
+
+  constructor(dataDir: string, repos: RepoRegistry, opts: { maxFilesPerMount?: number } = {}) {
+    this.registry = new MountRegistry(dataDir);
+    this.repos = repos;
+    this.maxFilesPerMount = opts.maxFilesPerMount ?? MAX_FILES_PER_MOUNT;
+  }
+
+  /**
+   * Which project a host path belongs to, and how it is spelled inside it.
+   *
+   * The repoKey is canonicalised through the repo registry, so a project that
+   * changed its remote keeps the mounts it had under the old spelling — the
+   * registry's alias table is the only thing that knows about the re-key, and
+   * a mount table keyed on the raw derivation would quietly orphan itself.
+   */
+  locate(absPath: string): ProjectLocation | null {
+    if (!isAbsolute(absPath) || absPath.includes('\u0000')) return null;
+    const abs = resolvePath(absPath);
+    const identity = repoIdentityAt(abs);
+    const checkoutRoot = findWorktreeRoot(abs);
+    if (!identity || !checkoutRoot) return null;
+    const rel = relative(checkoutRoot, abs).split(sep).join('/');
+    if (rel.startsWith('../')) return null;
+    const canonical = this.repos.repoInfo(identity.repoKey);
+    if (canonical) this.foldRetiredKeys(canonical);
+    return {
+      repoKey: canonical?.repoKey ?? identity.repoKey,
+      mainRoot: canonical?.mainRoot ?? identity.mainRoot,
+      checkoutRoot,
+      relPath: rel,
+    };
+  }
+
+  /**
+   * Fold anything still filed under a spelling this repo has retired.
+   *
+   * A renamed remote gives a repo a new key; `repoInfo` finds it under either,
+   * but the mount table is keyed by the string itself. Without this the next
+   * reconcile reads an EMPTY project, mints a second address for every file
+   * in it, and every link written before the rename stops resolving. Done
+   * here, on the path everything else enters through, rather than as a
+   * migration somebody has to remember to run.
+   */
+  private foldRetiredKeys(info: { repoKey: string; aliasKeys: string[] }): void {
+    for (const retired of info.aliasKeys) this.registry.rekeyProject(retired, info.repoKey);
+  }
+
+  /**
+   * The directory a repo's relative paths are joined to.
+   *
+   * The main checkout when it is still there, and otherwise the first live
+   * checkout the repo registry knows — a project whose main clone was moved
+   * or deleted still serves its mounts from a worktree, which is the same
+   * survival rule `resolveLiveCopy` applies to documents.
+   */
+  rootFor(repoKey: string): string | null {
+    const info = this.repos.repoInfo(repoKey);
+    if (info && existsSync(info.mainRoot)) return info.mainRoot;
+    for (const checkout of this.repos.checkoutsFor(repoKey)) {
+      if (existsSync(checkout)) return checkout;
+    }
+    return info?.mainRoot ?? null;
+  }
+
+  /**
+   * The checkout ONE mount's bytes are read from.
+   *
+   * The mount remembers where it was made (`MountRecord.checkoutRoot` says
+   * why), and falls back to `rootFor` when that checkout is gone — a removed
+   * worktree — or was never recorded. Same survival rule documents get: the
+   * project serves from whatever copy is still there rather than going dark.
+   */
+  checkoutRootOf(repoKey: string, mount: MountRecord): string | null {
+    if (mount.checkoutRoot !== undefined && existsSync(mount.checkoutRoot)) {
+      return mount.checkoutRoot;
+    }
+    return this.rootFor(repoKey);
+  }
+
+  // ---- Mount and unmount --------------------------------------------------
+
+  /**
+   * Mount a folder as project storage.
+   *
+   * The folder must be a directory inside a git repo, and its relative path
+   * must be one a mount may serve — `.git`, any dotdir and any
+   * credential-shaped segment are refused HERE as well as at serve time,
+   * because a mount whose whole tree is refused is a mount that silently
+   * serves nothing, and a lead should be told at the moment they ask.
+   */
+  mount(
+    absPath: string,
+  ):
+    | { ok: true; mount: MountRecord; project: ProjectLocation; created: boolean }
+    | { ok: false; error: MountError } {
+    // The repo has to be a repo the registry KNOWS before its mounts mean
+    // anything: `rootFor` asks the repo registry where to join a relative
+    // path, and a repo with no record has no answer. `noteCheckout` records
+    // the place without vouching for it — registering a checkout stays the
+    // lead's own act (`register_worktree`), and mounting a folder is not it.
+    this.repos.noteCheckout(absPath);
+    const at = this.locate(absPath);
+    if (!at) return { ok: false, error: 'not-a-repo' };
+    let isDir = false;
+    try {
+      isDir = statSync(resolvePath(absPath)).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (!isDir) return { ok: false, error: 'not-a-directory' };
+    if (at.relPath !== '' && !isMountableRelPath(at.relPath)) {
+      return { ok: false, error: 'refused-path' };
+    }
+    const { mount, created } = this.registry.mount(at.repoKey, at.relPath, at.checkoutRoot);
+    this.reconciledAt.delete(at.repoKey);
+    this.lastScan.delete(at.repoKey);
+    return { ok: true, mount, project: at, created };
+  }
+
+  /** Retire a mount. Soft: nothing on disk is touched, and every address the
+   *  mount's files hold keeps resolving through the registry. */
+  unmount(repoKey: string, mountId: string): boolean {
+    const done = this.registry.unmount(repoKey, mountId);
+    if (done) {
+      this.reconciledAt.delete(repoKey);
+      this.lastScan.delete(repoKey);
+    }
+    return done;
+  }
+
+  /** The absolute directory a mount names, in the checkout it was made from,
+   *  or null if neither that checkout nor any other is there. */
+  absOfMount(repoKey: string, mount: MountRecord): string | null {
+    const root = this.checkoutRootOf(repoKey, mount);
+    if (!root) return null;
+    return mount.relPath === '' ? root : join(root, mount.relPath);
+  }
+
+  // ---- Listing and reconciling -------------------------------------------
+
+  /**
+   * Bring the registry level with the disk for one project, and answer what
+   * is mounted.
+   *
+   * Rate-limited by `RECONCILE_TTL_MS`, following `fs-scan`'s listing cache
+   * and for the same reason: the walk is the expensive part of every read,
+   * and a hammering caller must not be able to turn one request into one walk.
+   * `force` is for the paths that have just changed the answer themselves — a
+   * fresh mount, and a serve that found its file missing.
+   */
+  reconcile(repoKey: string, force = false): MountListing {
+    const last = this.reconciledAt.get(repoKey) ?? 0;
+    const now = Date.now();
+    const cached = this.lastScan.get(repoKey);
+    if (!force && cached && now - last < RECONCILE_TTL_MS) {
+      return { files: this.recordedFiles(repoKey, cached.present), truncated: cached.truncated };
+    }
+    this.reconciledAt.set(repoKey, now);
+
+    const dirs: MountedDir[] = this.registry.liveMounts(repoKey).map((mount) => ({
+      mountId: mount.mountId,
+      relPath: mount.relPath,
+      abs: this.absOfMount(repoKey, mount),
+    }));
+    const scanned = reconcileProject(this.registry, repoKey, dirs, this.maxFilesPerMount);
+    this.lastScan.set(repoKey, scanned);
+    return { files: this.recordedFiles(repoKey, scanned.present), truncated: scanned.truncated };
+  }
+
+  /**
+   * What the registry records for the files the last scan actually SAW.
+   *
+   * The table is deliberately append-only — a deleted file keeps its address,
+   * a retired mount keeps its rows, and a moved file keeps the key it used to
+   * answer at — because that is what makes a link written a month ago still
+   * open the right file. None of that history belongs in a listing: a caller
+   * asking what is mounted would otherwise be told about deleted files,
+   * files under unmounted folders, and both the old and the new path of every
+   * file that moved, with a count to match. So the listing is the intersection
+   * of the table with the current scan, and the history stays where it is
+   * useful — `resolveFile`, and the alias that carries a move forward.
+   */
+  private recordedFiles(repoKey: string, present: ReadonlySet<string>): MountedFile[] {
+    const out: MountedFile[] = [];
+    for (const { key, entry } of this.registry.keysUnderRepo(repoKey)) {
+      if (!present.has(key)) continue;
+      const parsed = parseFileKey(key);
+      if (!parsed) continue;
+      out.push({
+        fileId: entry.fileId,
+        mountId: entry.mountId,
+        relPath: parsed.relPath,
+        size: entry.size,
+        mtimeMs: entry.mtimeMs,
+      });
+    }
+    out.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
+    return out;
+  }
+
+  /** Files of one project, or of one of its mounts, paged by relative path. */
+  listFiles(
+    repoKey: string,
+    opts: { mountId?: string; limit?: number; after?: string } = {},
+  ): { files: MountedFile[]; nextAfter?: string; truncated: boolean } {
+    const listing = this.reconcile(repoKey);
+    const all = listing.files.filter(
+      (f) =>
+        (opts.mountId === undefined || f.mountId === opts.mountId) &&
+        (opts.after === undefined || f.relPath > opts.after),
+    );
+    const limit = Math.max(1, Math.min(opts.limit ?? 200, 1000));
+    const files = all.slice(0, limit);
+    const last = files[files.length - 1];
+    return all.length > files.length && last
+      ? { files, nextAfter: last.relPath, truncated: listing.truncated }
+      : { files, truncated: listing.truncated };
+  }
+
+  // ---- Addresses ----------------------------------------------------------
+
+  /**
+   * The file an address names, checked all the way to the byte.
+   *
+   * Every one of these tests earns its place, and none of them is implied by
+   * another: the key has to still be recorded, its mount has to still be
+   * live, its spelling has to be one a mount may serve, and the path it
+   * resolves to — after symlinks — has to still be inside that mount. The
+   * last is `isWithinRoot` rather than a string prefix, because a symlink
+   * planted inside a mounted folder is exactly how a lexical check hands out
+   * `~/.ssh/id_rsa`.
+   *
+   * A miss reconciles ONCE and asks again. That is what turns a move into a
+   * redirect rather than a 404: the address was recorded against the old path,
+   * the reconcile aliases it forward, and the second lookup finds the file
+   * where it now lives.
+   */
+  resolveFile(
+    fileId: string,
+    retried = false,
+  ): { file: MountedFile; abs: string; repoKey: string } | null {
+    const key = this.registry.keyOf(fileId);
+    if (!key) return null;
+    const parsed = parseFileKey(key);
+    const entry = this.registry.entryFor(key);
+    if (!parsed || !entry) return null;
+    const { repoKey, relPath } = parsed;
+    const mount = this.registry.mountById(repoKey, entry.mountId);
+    if (!mount || mount.removedAt !== undefined) return null;
+    // The checkout the MOUNT was made from, not the repo's main one: the
+    // address is repo-relative, the bytes are a particular working copy's.
+    const root = this.checkoutRootOf(repoKey, mount);
+    const mountAbs = this.absOfMount(repoKey, mount);
+    if (!root || !mountAbs) return null;
+    const abs = join(root, relPath);
+    const inMount = mount.relPath === '' ? relPath : relative(mount.relPath, relPath);
+    if (!isServableRelPath(relPath) || inMount.startsWith('..')) return null;
+    if (!existsSync(abs) || !isWithinRoot(mountAbs, abs)) {
+      if (retried) return null;
+      this.reconcile(repoKey, true);
+      return this.resolveFile(fileId, true);
+    }
+    let st: import('node:fs').Stats;
+    try {
+      st = statSync(abs);
+    } catch {
+      return null;
+    }
+    if (!st.isFile()) return null;
+    return {
+      file: {
+        fileId,
+        mountId: entry.mountId,
+        relPath,
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+      },
+      abs,
+      repoKey,
+    };
+  }
+
+  // ---- Privacy and conventions -------------------------------------------
+
+  privacyOf(repoKey: string): ProjectPrivacy {
+    return this.registry.privacyOf(repoKey);
+  }
+
+  setPrivacy(repoKey: string, privacy: ProjectPrivacy): ProjectRecord {
+    return this.registry.setPrivacy(repoKey, privacy);
+  }
+
+  /**
+   * The project's conventions index: where it is, and what it says.
+   *
+   * `text` is null when the file is not there — an unwritten index is the
+   * normal state of a project nobody has set one for, not an error, and the
+   * answer still names the path so an agent can write it.
+   */
+  conventions(repoKey: string): { relPath: string; abs: string | null; text: string | null } {
+    const relPath = this.registry.conventionsPathOf(repoKey);
+    const root = this.rootFor(repoKey);
+    if (!root) return { relPath, abs: null, text: null };
+    const abs = join(root, relPath);
+    if (!isWithinRoot(root, abs)) return { relPath, abs: null, text: null };
+    try {
+      if (statSync(abs).size > MAX_CONVENTIONS_BYTES) {
+        return { relPath, abs, text: null };
+      }
+      return { relPath, abs, text: readFileSync(abs, 'utf8') };
+    } catch {
+      return { relPath, abs, text: null };
+    }
+  }
+
+  setConventionsPath(repoKey: string, relPath: string): ProjectRecord {
+    return this.registry.setConventionsPath(repoKey, relPath);
+  }
+}
+
+export type { FileEntry, MountRecord, ProjectPrivacy, ProjectRecord };

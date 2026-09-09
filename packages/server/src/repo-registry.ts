@@ -465,6 +465,24 @@ export class RepoRegistry {
     return liveCheckouts(this.repoFor(repoKey));
   }
 
+  /**
+   * A repo's canonical key and main root, read without cloning the file.
+   *
+   * `listRepos` answers the same question through `snapshot`, which deep-clones
+   * every docKey in the registry — fine for a diagnostic route, far too much
+   * for something asked on a serve path. The mount registry keys its projects
+   * by repoKey and resolves them through this, so a repo that re-keys (a
+   * renamed remote) carries its mounts across on the alias.
+   */
+  repoInfo(
+    repoKey: string,
+  ): { repoKey: string; mainRoot: string; aliasKeys: string[] } | undefined {
+    const record = this.repoFor(repoKey);
+    return record
+      ? { repoKey: record.repoKey, mainRoot: record.mainRoot, aliasKeys: [...record.aliasKeys] }
+      : undefined;
+  }
+
   /** Every repo the registry knows, newest checkout first inside each. */
   listRepos(): RepoRecord[] {
     return this.snapshot().repos;

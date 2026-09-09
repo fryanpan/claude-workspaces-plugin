@@ -567,6 +567,49 @@ export async function handleWorkspaceTool(
       const { path } = a as { path: string };
       return ok(await http('DELETE', '/api/repos/checkouts', { path }));
     }
+    // --- Mounted project folders: this project's attachment storage ---
+    //
+    // Machine verbs beside the checkout ones above, and for the same reason:
+    // every path they carry is a host path that belongs to no workspace, and
+    // the routes behind them are loopback-only.
+    case 'mount_folder': {
+      const { path } = a as { path: string };
+      return ok(await http('POST', '/api/mounts', { path }));
+    }
+    case 'list_mounts': {
+      const { path, mountId, after, limit } = a as {
+        path?: string;
+        mountId?: string;
+        after?: string;
+        limit?: number;
+      };
+      const q = new URLSearchParams();
+      if (path !== undefined) q.set('path', path);
+      if (mountId !== undefined) q.set('mountId', mountId);
+      if (after !== undefined) q.set('after', after);
+      if (limit !== undefined) q.set('limit', String(limit));
+      const qs = q.toString();
+      // One mount's FILES, or the whole table — two answers, and which one
+      // the caller wanted is said by naming a mount.
+      const route = mountId === undefined ? '/api/mounts' : '/api/mounts/files';
+      return ok(await http('GET', qs === '' ? route : `${route}?${qs}`));
+    }
+    case 'unmount_folder': {
+      const { path, mountId } = a as { path: string; mountId: string };
+      return ok(await http('DELETE', '/api/mounts', { path, mountId }));
+    }
+    case 'set_project_privacy': {
+      const { path, privacy } = a as { path: string; privacy: string };
+      return ok(await http('PUT', '/api/mounts/privacy', { path, privacy }));
+    }
+    case 'set_project_conventions': {
+      const { path, conventionsPath } = a as { path: string; conventionsPath: string };
+      return ok(await http('PUT', '/api/mounts/conventions', { path, conventionsPath }));
+    }
+    case 'read_project_conventions': {
+      const { path } = a as { path: string };
+      return ok(await http('GET', `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
+    }
     case 'request_plugin_refresh': {
       // No arguments reach the process this runs — the server's argv is
       // fixed. Nothing a caller can send gets spawned.
