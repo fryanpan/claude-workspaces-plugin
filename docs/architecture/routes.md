@@ -59,6 +59,9 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/push/subscriptions` | POST, DELETE | `routes/ops.ts` | trusted-local |  |
 | `/api/refs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/refs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/repos` | GET | `routes/repos.ts` | loopback-only |  |
+| `/api/repos/checkouts` | POST, DELETE | `routes/repos.ts` | loopback-only |  |
+| `/api/repos/live-copy` | GET | `routes/repos.ts` | loopback-only |  |
 | `/api/review-items` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/review-items/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/reviews` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
