@@ -161,6 +161,9 @@ export interface NotesTickHarnessOptions {
   }>;
   /** The board's other docs, as the lookup would list them. */
   boardDocs?: Array<{ docId: string; title: string; meetingAt?: number }>;
+  /** The board a bad meeting's quality item would be filed on. Absent, the
+   *  end-of-meeting line still carries the counts and files nothing. */
+  qualityBoard?: import('../src/notes-quality-review.ts').NotesQualityBoard;
   /**
    * How long `tick()` waits for the write. The default suits a scripted
    * composer, which answers in microseconds; `notes-eval.ts` drives a REAL
@@ -239,6 +242,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     ...(opts.boundPath !== undefined ? { boundPath: opts.boundPath } : {}),
   });
 
+  const qualityBoard = opts.qualityBoard;
   const schedule = new ManualScheduler();
   const timing = createNotesTimingLog();
   const snapshots: TickSnapshot[] = [];
@@ -286,6 +290,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
         taskLinks.push({ taskId, docId: linkedDocId });
       },
       ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
+      ...(qualityBoard ? { qualityBoard: () => qualityBoard } : {}),
       ...(opts.heading ? { heading: opts.heading } : {}),
     },
   );

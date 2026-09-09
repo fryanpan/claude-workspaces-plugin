@@ -90,6 +90,8 @@ import {
   LEGACY_TRANSCRIPT_HEADING,
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
+import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
+import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import {
@@ -529,6 +531,20 @@ export function withServerNotesSinks(
     /** Tests: a heading memory they can share across two harnesses to model a
      *  second meeting on one doc. */
     heading?: NotesHeadingMemory;
+    /**
+     * The board a bad meeting's review item is filed on — `TaskStore` in the
+     * server. A thunk like `tasks`, for the same reason.
+     *
+     * Absent, a meeting whose notes came out badly still says so in the
+     * end-of-meeting line and still leaves a record for the daily rollup; what
+     * it cannot do is put the finding in front of a person. That is the right
+     * degradation rather than a reason to refuse: an embedded server with no
+     * board is a legitimate way to run this.
+     */
+    qualityBoard?: () => NotesQualityBoard;
+    /** Who a filed quality item is attributed to. Defaults to the note-taker
+     *  itself, which is the hand that wrote the notes being reported on. */
+    qualityActor?: { id: string; name: string; kind?: string };
   },
 ): MeetingNotesDeps {
   const extractor = options.taskExtractor;
@@ -564,6 +580,40 @@ export function withServerNotesSinks(
       spentCues.set(docId, set);
     }
     return set;
+  };
+  /**
+   * Read the notes this meeting produced and act on what they say — never
+   * throwing, because this runs inside the stop and a quality report is worth
+   * strictly less than the flush it would take down with it.
+   *
+   * `null` when the pass itself failed, which the line then simply omits.
+   */
+  const qualityPass = (summary: {
+    docId: string;
+    meetingId: string;
+  }): NotesQualityPassResult | null => {
+    try {
+      const doc = deps.docStore().get(summary.docId);
+      return runNotesQualityPass(
+        {
+          docStore: deps.docStore,
+          ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
+          boardOf,
+          ...(deps.dataDir !== undefined ? { dataDir: deps.dataDir } : {}),
+          headingIdOf: (docId, meetingId) =>
+            heading.headingId({ docId, meetingId }, readNotesOutline(deps.docStore(), docId)),
+          actor: deps.qualityActor ?? { id: NOTES_AUTHOR_ID, name: 'Meeting Assistant' },
+        },
+        {
+          docId: summary.docId,
+          meetingId: summary.meetingId,
+          ...(doc?.meta.title !== undefined ? { docTitle: doc.meta.title } : {}),
+        },
+      );
+    } catch (err) {
+      console.error('[meeting-notes] quality report failed:', err);
+      return null;
+    }
   };
   const captureIntents: MeetingNotesDeps['captureIntents'] =
     options.captureIntents ??
@@ -640,6 +690,14 @@ export function withServerNotesSinks(
     // exactly like a healthy one. This is the coverage, stated at the stop.
     onMeetingSummary: (summary): void => {
       const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
+      // AND WHAT THE NOTES THEMSELVES CAME OUT LIKE. The line above says how
+      // much of the meeting reached a compose, and a meeting once reported
+      // every turn handled while its doc carried dozens of repeated lines,
+      // a subject nobody wrote down and names for voices the room never had.
+      // Turns reaching a compose is a fact about the pipeline; this is the
+      // fact about the notes, and it rides the SAME line so that nobody has
+      // to join two of them to ask the one question.
+      const quality = qualityPass(summary);
       const line =
         `[meeting-notes] ${summary.docId} meeting ${summary.meetingId}: ` +
         `${plural(summary.ticks, 'tick')} over ${plural(summary.turnsSettled, 'settled turn')}, ` +
@@ -651,11 +709,13 @@ export function withServerNotesSinks(
         (summary.latencyMedianMs !== undefined
           ? `, settled-to-written median ${Math.round(summary.latencyMedianMs)}ms / worst ` +
             `${Math.round(summary.latencyWorstMs ?? summary.latencyMedianMs)}ms`
-          : '');
-      // Only a meeting that actually lost words is an error. A clean one is
-      // still logged, because the absence of a line is not evidence that a
-      // meeting went well — it is evidence that nothing was written down.
-      if (summary.turnsLost > 0) console.error(line);
+          : '') +
+        (quality === null ? '' : ` | ${quality.line}`);
+      // Only a meeting that actually lost words — or whose notes went past a
+      // quality bar — is an error. A clean one is still logged, because the
+      // absence of a line is not evidence that a meeting went well; it is
+      // evidence that nothing was written down.
+      if (summary.turnsLost > 0 || (quality?.report.flags.length ?? 0) > 0) console.error(line);
       else console.log(line);
       options.onMeetingSummary?.(summary);
     },
