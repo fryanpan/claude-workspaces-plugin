@@ -1290,6 +1290,14 @@ export function beginNotesSession(
       // row of tests pins, and the one that lets the model choose where the
       // section goes. The eager open is for the case that has somewhere
       // wrong to write.
+      //
+      // AND ONLY WHEN THAT SECTION IS ANOTHER MEETING'S — which is settled
+      // before this line, not here. `notesSectionForMeeting` adopts a
+      // section whose topic fits (`notes-section-fit.ts`) and records it in
+      // the heading memory, so on a doc whose notes section is reusable
+      // `notesHeadingId` is already defined and this never fires. What
+      // reaches here is a doc carrying somebody else's minutes, which is
+      // exactly the case the eager open exists for.
       const strandingRisk =
         notesHeadingId === undefined &&
         outline.some((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);

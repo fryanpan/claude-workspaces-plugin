@@ -144,7 +144,17 @@ describe('a section that did not open is a tick that did not compose', () => {
   const ids = { docId: 'd-strand', meetingId: 'm-strand-1' };
   const foreignOutline: readonly prose.OutlineEntry[] = [
     { id: 'h-theirs', kind: 'heading', level: 2, text: MEETING_NOTES_HEADING, author: 'someone' },
-    { id: 'b-theirs', kind: 'bullet', level: 0, text: HUMAN_LINE, author: undefined },
+    // AUTHORED, which is what marks it as another meeting's record rather
+    // than the doc's own standing section. This session is built with no
+    // heading store, so authorship is the only signal `notes-section-fit.ts`
+    // has here — the durable one is the heading record.
+    {
+      id: 'b-theirs',
+      kind: 'bullet',
+      level: 0,
+      text: 'Maya: the survey lands first',
+      author: AUTHOR,
+    },
   ] as unknown as readonly prose.OutlineEntry[];
 
   function session(open: 'refuse' | 'throw') {

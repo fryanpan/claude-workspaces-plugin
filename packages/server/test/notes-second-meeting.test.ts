@@ -209,18 +209,52 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
     expect(second.notes).toContain('double-charges Harborlight');
   });
 
-  it('CONTROL: a section with notes in it is still left alone', async () => {
-    // The 2026-08-31 rule, unchanged: a recording that finds words under the
-    // last section opens its own below them and neither replaces nor grows
-    // somebody else's minutes.
+  it('CONTROL: a section a PREVIOUS MEETING wrote is still left alone', async () => {
+    // The 2026-08-31 rule, unchanged: a recording that finds a previous
+    // meeting's minutes under the last heading opens its own below them and
+    // neither replaces nor grows them.
+    //
+    // What makes it the previous meeting's is the heading record, not the
+    // words and not the authorship — `releaseNotesAuthorship` drops every
+    // claim when a recording starts, so a stopped meeting's bullets are
+    // authorless by the time this question is asked.
+    const heading = createNotesHeadingMemory();
+    const ydoc = new Y.Doc();
+    const before = createNotesTickHarness({
+      ydoc,
+      heading,
+      meetingId: 'm-prev',
+      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n`,
+      compose: (input) => addNotes(input, '- last week: the tunnel flapped'),
+    });
+    await before.speak('last week the tunnel flapped');
+    await before.end();
+
     const harness = createNotesTickHarness({
-      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n\n- last week: the tunnel flapped\n`,
+      ydoc,
+      heading,
+      meetingId: 'm1',
       compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
     });
     const snap = await harness.speak('the Riverbend import runs twice');
     expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(2);
     expect(snap.markdown).toContain('last week: the tunnel flapped');
     expect(snap.markdown).toContain('the Riverbend import runs twice');
+  });
+
+  it('MUTATION CONTROL: the same words with no meeting behind them are reused', async () => {
+    // Same doc, same bullet under the same heading — but nobody recorded it,
+    // so it is the doc's own standing section and these minutes join it.
+    // Without this pair the check above would be measuring "a section with
+    // words in it" rather than "a section a meeting claimed".
+    const harness = createNotesTickHarness({
+      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n\n- last week: the tunnel flapped\n`,
+      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
+    });
+    const snap = await harness.speak('the Riverbend import runs twice');
+    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
+    expect(snap.notes).toContain('last week: the tunnel flapped');
+    expect(snap.notes).toContain('the Riverbend import runs twice');
   });
 
   it('CONTROL: the empty section it adopts is the LAST one, not the first', async () => {
