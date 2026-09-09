@@ -9,6 +9,8 @@ import { type EditorHandle, createEditor } from '../src/editor.ts';
 import {
   RECENT_NOTE_MS,
   RECENT_NOTE_STEP_MS,
+  noteLines,
+  notesSectionStart,
   recentStep,
   recentTintChanged,
 } from '../src/settle-wash.ts';
@@ -239,5 +241,41 @@ describe('the settle wash', () => {
     const { view, parent } = mountEditor('# Plan\n\nJust prose.\n', { on: true });
     appendNote(view, 'remote words', true);
     expect(washed(parent)).toEqual([]);
+  });
+});
+
+describe('which "Meeting notes" heading the client reads as the section', () => {
+  /**
+   * The client and the server must answer this identically: both take the
+   * LAST heading with that text. A doc carrying a person's own notes heading
+   * plus a meeting's own is the shape where the two rules would diverge, and
+   * a client that took the FIRST would show a reader lines the server has
+   * stopped treating as notes.
+   */
+  const TWO =
+    '## Meeting notes\n\n- a line under the first heading\n\n## Meeting notes\n\n- a line under the second\n';
+
+  it('takes the last one, so the section is what the server says it is', () => {
+    const { view } = mountEditor(TWO, { on: false });
+    const at = notesSectionStart(view.state.doc);
+    expect(at).not.toBeNull();
+    const text = noteLines(view.state.doc)
+      .map((l) => view.state.doc.textBetween(l.from, l.to, ' '))
+      .join(' | ');
+    expect(text).toContain('a line under the second');
+    // The first heading's line is ABOVE the section, so it is not in it.
+    expect(text).not.toContain('a line under the first');
+  });
+
+  it('MUTATION CONTROL: with one heading, that same line IS the section', () => {
+    // Same words, one heading. If this failed too, the assertion above would
+    // be reading a typo rather than the last-heading rule.
+    const { view } = mountEditor('## Meeting notes\n\n- a line under the first heading\n', {
+      on: false,
+    });
+    const text = noteLines(view.state.doc)
+      .map((l) => view.state.doc.textBetween(l.from, l.to, ' '))
+      .join(' | ');
+    expect(text).toContain('a line under the first');
   });
 });
