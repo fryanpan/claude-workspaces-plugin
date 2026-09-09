@@ -164,7 +164,16 @@ export function createTaskBodyEditorHost(deps: TaskBodyEditorDeps): TaskBodyEdit
         // it cannot be typed in. The note lives until the next repaint; the
         // link below the slot is the durable way through.
         slot.classList.remove(BODY_LIVE_CLASS);
-        const note = document.createElement('p');
+        // The slot's OWN document, never the global one. This runs whenever
+        // the chunk fetch loses — including after the page that asked for it
+        // has gone away, which in a test file is the environment being torn
+        // down and in a browser is a bfcache restore or a closed tab. A bare
+        // `document` there is a ReferenceError thrown from inside a catch,
+        // i.e. an unhandled rejection with no test to attach it to; the CI
+        // client shard failed twice on exactly that after all its tests had
+        // passed. `ownerDocument` is the document this element belongs to and
+        // is still there when the global binding is not.
+        const note = slot.ownerDocument.createElement('p');
         note.className = 'board-detail-body-more';
         note.textContent = LOAD_FAILED_TEXT;
         slot.append(note);

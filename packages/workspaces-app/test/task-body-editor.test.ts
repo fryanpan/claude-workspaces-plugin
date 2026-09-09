@@ -256,6 +256,33 @@ describe('createTaskBodyEditorHost', () => {
       expect(slot.textContent).toContain(LOAD_FAILED_TEXT);
     });
 
+    it('still hands the slot back when the page’s document has gone', async () => {
+      // The load can lose AFTER the page that asked for it is gone: a test
+      // file whose environment vitest has torn down, a closed tab, a bfcache
+      // restore. The failure path used to reach for the global `document`,
+      // which is a ReferenceError thrown inside a catch — an unhandled
+      // rejection belonging to no test, which is how CI's client shard went
+      // red twice with every one of its 1599 tests passed. Deleting the
+      // global binding is exactly what the teardown does; the slot and the
+      // document it belongs to are untouched.
+      const { host, h } = harness();
+      host.sync(target('t-1'), slot);
+      const realDocument = globalThis.document;
+      // Removed, not set to undefined: teardown unbinds the name, so a bare
+      // `document` is a ReferenceError rather than a read of undefined, and
+      // that is the error CI reported.
+      Reflect.deleteProperty(globalThis, 'document');
+      try {
+        await h.fail();
+      } finally {
+        Reflect.set(globalThis, 'document', realDocument);
+      }
+
+      expect(slot.classList.contains(BODY_LIVE_CLASS)).toBe(false);
+      expect(slot.textContent).toContain(LOAD_FAILED_TEXT);
+      expect(h.clients[0]?.closed).toBe(true);
+    });
+
     it('does not try again on every repaint', async () => {
       const { host, h } = harness();
       host.sync(target('t-1'), slot);
