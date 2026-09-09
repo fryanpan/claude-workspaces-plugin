@@ -344,6 +344,9 @@ function runMerges(
     }
     const before = threadCount(winner);
     let incoming = 0;
+    // Recorded before anything is copied, and kept in the journal: the check
+    // that runs days later must not have to trust the losers' later contents.
+    const loserThreadIds: string[] = [];
     const totals = { copied: 0, reanchored: 0, orphaned: 0, skipped: 0 };
     for (const loserId of merge.losers) {
       const loser = load(loserId);
@@ -352,6 +355,7 @@ function runMerges(
         continue;
       }
       incoming += threadCount(loser);
+      for (const t of listThreads(loser)) loserThreadIds.push(t.id);
       const res = mergeInto(loser, winner);
       totals.copied += res.copied;
       totals.reanchored += res.reanchored;
@@ -381,7 +385,7 @@ function runMerges(
     out.threadsOrphaned += totals.orphaned;
     out.threadsSkipped += totals.skipped;
     out.parity.push({ docKey: merge.docKey, before: before + incoming, after });
-    journalMerges.push({ ...merge, ...totals });
+    journalMerges.push({ ...merge, ...totals, loserThreadIds });
   }
 }
 

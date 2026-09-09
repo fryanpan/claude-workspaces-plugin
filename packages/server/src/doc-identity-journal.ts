@@ -31,7 +31,28 @@ export interface JournalEntry {
    * direction to fail in.
    */
   keysFiled: string[];
-  merges: Array<Merge & { copied: number; reanchored: number; orphaned: number; skipped: number }>;
+  /**
+   * Each merge, its totals, and the thread ids the losers held AT THE TIME —
+   * evidence, written once and never revised.
+   *
+   * `loserThreadIds` is what makes the after-the-fact check mean anything. It
+   * used to be absent, and `doc-identity-check.ts` rebuilt the expectation by
+   * reading the losers again; an overwrite or a restore that took a thread out
+   * of the loser AND the winner then agreed with itself and passed. A list
+   * written at apply time cannot be walked back by whatever happened later.
+   *
+   * Optional, because a journal written before this field exists and is still
+   * the record of those runs. The check names which source it used.
+   */
+  merges: Array<
+    Merge & {
+      copied: number;
+      reanchored: number;
+      orphaned: number;
+      skipped: number;
+      loserThreadIds?: string[];
+    }
+  >;
   unresolved: string[];
 }
 

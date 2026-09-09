@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts<br/>attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
@@ -218,7 +218,11 @@ claims, copies each losing document's conversation into the winner through
 after, and commits its journal and its claims together — `doc-identity-journal.ts`
 holds that record and the revert that reads it back, because the journal and
 the registry are written at one point and a run that cannot write one must
-file neither. Only `doc-thread-merge.ts`
+file neither. `doc-identity-check.ts` reads that record back long after the
+run and asks whether each merged winner still holds the threads its losers
+hold — read-only, and the only mode of the script that is safe with the server
+up, because a write lost AFTER a run is invisible to the run's own parity
+assertion. Only `doc-thread-merge.ts`
 is reachable from the running server's future; the other two are driven by
 `scripts/migrate-doc-identity.ts`, by hand, because a corpus walk that spawns
 git and hydrates documents is not something a restart should do.
