@@ -2,24 +2,16 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { repoIdentityAt } from './doc-key.ts';
 import { findWorktreeRoot } from './doc-origin-repo.ts';
+import { type MountedDir, reconcileProject } from './mount-reconcile.ts';
 import {
   type FileEntry,
   type MountRecord,
   MountRegistry,
   type ProjectPrivacy,
   type ProjectRecord,
-  makeFileKey,
   parseFileKey,
 } from './mount-registry.ts';
-import {
-  MAX_FILES_PER_MOUNT,
-  type ScannedFile,
-  isMountableRelPath,
-  isServableRelPath,
-  matchMoves,
-  sampleHash,
-  scanMount,
-} from './mount-scan.ts';
+import { MAX_FILES_PER_MOUNT, isMountableRelPath, isServableRelPath } from './mount-scan.ts';
 import type { RepoRegistry } from './repo-registry.ts';
 import { isWithinRoot } from './safe-path.ts';
 
@@ -254,109 +246,14 @@ export class MountStore {
     }
     this.reconciledAt.set(repoKey, now);
 
-    const live = new Map<string, { file: ScannedFile; mountId: string; abs: string }>();
-    let truncated = false;
-    // A scan is COMPLETE only when every live mount was walked to its end. A
-    // capped walk and a mount whose directory is not there both leave files
-    // unseen, and an unseen file is not a removed one.
-    let complete = true;
-    for (const mount of this.registry.liveMounts(repoKey)) {
-      const mountAbs = this.absOfMount(repoKey, mount);
-      if (!mountAbs || !existsSync(mountAbs)) {
-        complete = false;
-        continue;
-      }
-      const scan = scanMount(mountAbs, this.maxFilesPerMount);
-      // A directory the walk could not read leaves files unseen exactly as
-      // the cap does, and an unseen file is not a removed one.
-      if (scan.unreadable) complete = false;
-      if (scan.truncated) {
-        truncated = true;
-        complete = false;
-        console.error(
-          `[mount-store] ${repoKey} mount ${mount.mountId} holds more than ${this.maxFilesPerMount} files; the scan stopped there`,
-        );
-      }
-      for (const file of scan.files) {
-        const abs = join(mountAbs, file.relPath);
-        // Repo-relative, built from the mount's own spelling rather than by
-        // subtracting a checkout root: the mount may be served from a
-        // worktree, and the ADDRESS is the same in every checkout.
-        const repoRel = mount.relPath === '' ? file.relPath : `${mount.relPath}/${file.relPath}`;
-        // A file reachable through two overlapping mounts is ONE file with one
-        // address; the first mount that lists it is recorded as its home.
-        if (!live.has(repoRel)) live.set(repoRel, { file, mountId: mount.mountId, abs });
-      }
-    }
-
-    // Removals and moves are only readable off a COMPLETE scan. Off a capped
-    // one, every file past the cap looks gone — which would hand its address
-    // to whatever unrelated file happened to match its size and fingerprint,
-    // and that alias is not undoable.
-    if (complete) {
-      const recorded = this.registry.keysUnderRepo(repoKey);
-      const gone: Array<{ key: string; size?: number; hash?: string }> = [];
-      for (const { key, entry } of recorded) {
-        const parsed = parseFileKey(key);
-        if (!parsed || live.has(parsed.relPath)) continue;
-        const row: { key: string; size?: number; hash?: string } = { key };
-        if (entry.size !== undefined) row.size = entry.size;
-        if (entry.hash !== undefined) row.hash = entry.hash;
-        gone.push(row);
-      }
-      const fresh: Array<{ key: string; abs: string; size: number }> = [];
-      for (const [repoRel, found] of live) {
-        const key = makeFileKey(repoKey, repoRel);
-        if (this.registry.entryFor(key)) continue;
-        fresh.push({ key, abs: found.abs, size: found.file.size });
-      }
-
-      // Moves first, so a file that moved keeps its address instead of being
-      // minted a second one by the claim pass below.
-      for (const move of matchMoves(gone, fresh)) {
-        const found = live.get(parseFileKey(move.freshKey)?.relPath ?? '');
-        if (!found) continue;
-        const hash = sampleHash(found.abs, found.file.size);
-        const res = this.registry.aliasKey(move.goneKey, move.freshKey, {
-          mountId: found.mountId,
-          size: found.file.size,
-          mtimeMs: found.file.mtimeMs,
-          ...(hash === null ? {} : { hash }),
-        });
-        if (!res.ok) {
-          console.error(
-            `[mount-store] ${move.goneKey} could not follow the move: ${res.fileId} already answers at the new path`,
-          );
-        }
-      }
-    }
-
-    const present = new Set<string>();
-    for (const [repoRel, found] of live) {
-      const key = makeFileKey(repoKey, repoRel);
-      const held = this.registry.entryFor(key);
-      // Only a file whose bytes may have changed is fingerprinted again. A
-      // 23 GB mount that nobody touched costs stats and nothing else.
-      const unchanged =
-        held !== undefined &&
-        held.size === found.file.size &&
-        held.mtimeMs === found.file.mtimeMs &&
-        held.mountId === found.mountId;
-      if (unchanged) {
-        present.add(this.registry.resolveKey(key));
-        continue;
-      }
-      const hash = sampleHash(found.abs, found.file.size);
-      this.registry.claim(key, {
-        mountId: found.mountId,
-        size: found.file.size,
-        mtimeMs: found.file.mtimeMs,
-        ...(hash === null ? {} : { hash }),
-      });
-      present.add(this.registry.resolveKey(key));
-    }
-    this.lastScan.set(repoKey, { present, truncated });
-    return { files: this.recordedFiles(repoKey, present), truncated };
+    const dirs: MountedDir[] = this.registry.liveMounts(repoKey).map((mount) => ({
+      mountId: mount.mountId,
+      relPath: mount.relPath,
+      abs: this.absOfMount(repoKey, mount),
+    }));
+    const scanned = reconcileProject(this.registry, repoKey, dirs, this.maxFilesPerMount);
+    this.lastScan.set(repoKey, scanned);
+    return { files: this.recordedFiles(repoKey, scanned.present), truncated: scanned.truncated };
   }
 
   /**
