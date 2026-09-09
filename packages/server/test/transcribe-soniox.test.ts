@@ -253,10 +253,35 @@ describe('soniox session', () => {
     ]);
     // The next batch REPLACES the tail: "sink" becomes "sync", in place.
     h.fake().tokens([{ text: ' sync', is_final: false, end_ms: 540 }]);
+    // Each partial names the part the engine has already finalized, which is
+    // what a notes ceiling reached inside a long turn is allowed to write.
+    // "sink"/"sync" is outside it in both frames: that is the word still
+    // being revised.
     expect(h.turns).toEqual([
-      { turn: 0, text: 'So the sink', final: false },
-      { turn: 0, text: 'So the sync', final: false },
+      { turn: 0, text: 'So the sink', final: false, settledText: 'So the' },
+      { turn: 0, text: 'So the sync', final: false, settledText: 'So the' },
     ]);
+  });
+
+  it('a settled turn names no already-final prefix — all of it is final', async () => {
+    const h = harness();
+    h.fake().open();
+    await h.opening;
+    h.fake().tokens([
+      { text: 'Measure', is_final: true, end_ms: 100 },
+      { text: ' it.', is_final: true, end_ms: 300 },
+      { text: END_TOKEN, is_final: true },
+    ]);
+    const settled = h.turns.filter((t) => t.final);
+    expect(settled).toEqual([{ turn: 0, text: 'Measure it.', final: true }]);
+  });
+
+  it('a turn whose words are all provisional names no prefix at all', async () => {
+    const h = harness();
+    h.fake().open();
+    await h.opening;
+    h.fake().tokens([{ text: 'maybe', is_final: false, end_ms: 100 }]);
+    expect(h.turns).toEqual([{ turn: 0, text: 'maybe', final: false }]);
   });
 
   it('settles the turn at the <end> token and starts the next one', async () => {
@@ -303,7 +328,7 @@ describe('soniox session', () => {
     ]);
     expect(h.turns).toEqual([
       { turn: 0, text: 'Agreed.', final: true, speaker: 'A' },
-      { turn: 1, text: 'Wait, no', final: false, speaker: 'B' },
+      { turn: 1, text: 'Wait, no', final: false, speaker: 'B', settledText: 'Wait,' },
     ]);
   });
 

@@ -21,6 +21,7 @@ import {
   createAssemblyAiProEngine,
   expiryFrom,
   resolveAssemblyAiKey,
+  settledWordsFromTurn,
   streamingUrl,
 } from '../src/transcribe-assemblyai.ts';
 import type { EngineTurn } from '../src/transcribe.ts';
@@ -272,6 +273,45 @@ describe('assemblyai pro — universal-3-5-pro', () => {
     await h.opening;
     h.fake().deliver({ type: 'Error', error: 'rate limit exceeded' });
     expect(h.errors).toEqual(['assemblyai-pro: rate limit exceeded']);
+  });
+});
+
+describe('the already-final words of a turn in progress', () => {
+  /**
+   * The notes ceiling writes these while somebody is still talking, so what
+   * counts as final has to be exactly what the engine said is final — see
+   * `EngineTurn.settledText`.
+   */
+  const words = (...w: Array<[string, boolean]>) => ({
+    type: 'Turn',
+    words: w.map(([text, word_is_final]) => ({ text, word_is_final })),
+  });
+
+  it('is the leading run of words the engine has finalized', () => {
+    expect(settledWordsFromTurn(words(['measure', true], ['the', true], ['wri', false]))).toBe(
+      'measure the',
+    );
+  });
+
+  it('stops at the first provisional word and never resumes past it', () => {
+    // A `true` after a `false` would be a contract this adapter has never
+    // seen; splicing across the gap would put words in the notes out of
+    // order, so the scan ends rather than skipping.
+    expect(settledWordsFromTurn(words(['ship', true], ['it', false], ['now', true]))).toBe('ship');
+  });
+
+  it('is nothing when the frame carries no words, or none of them are final', () => {
+    expect(settledWordsFromTurn({ type: 'Turn' })).toBeUndefined();
+    expect(settledWordsFromTurn({ type: 'Turn', words: [] })).toBeUndefined();
+    expect(settledWordsFromTurn({ type: 'Turn', words: 'nope' })).toBeUndefined();
+    expect(settledWordsFromTurn(words(['maybe', false]))).toBeUndefined();
+  });
+
+  it('ignores a final word with no readable text rather than inventing one', () => {
+    expect(
+      settledWordsFromTurn({ type: 'Turn', words: [{ word_is_final: true }] }),
+    ).toBeUndefined();
+    expect(settledWordsFromTurn(words(['   ', true], ['real', true]))).toBe('real');
   });
 });
 

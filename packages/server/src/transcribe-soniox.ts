@@ -296,12 +296,18 @@ export function createSonioxEngine(opts: SonioxOptions = {}): TranscriptionEngin
           // the transcript.
           if (text === '') return;
           const audioEndMs = final ? (finalEndMs ?? lastEndMs) : lastEndMs;
+          // The already-final prefix of a turn still in progress — free here,
+          // because assembling it is the only thing this adapter does with
+          // `finalText`. See `EngineTurn.settledText` for why the notes
+          // ceiling needs it.
+          const settled = final ? '' : finalText.trim();
           sessionOpts.onTurn({
             turn,
             text,
             final,
             ...(speaker !== undefined ? { speaker } : {}),
             ...(audioEndMs !== undefined ? { audioEndMs } : {}),
+            ...(settled !== '' ? { settledText: settled } : {}),
             engineMs,
           });
         };

@@ -21,6 +21,7 @@ import {
 } from '@claude-workspaces/core';
 import {
   DEFAULT_NOTES_CADENCE_MS,
+  DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
   DEFAULT_NOTES_QUIET_MS,
   type NotesComposeInput,
   type NotesComposer,
@@ -156,31 +157,50 @@ describe('the notes clocks', () => {
     const schedule = new ManualScheduler();
     const updates: NotesUpdate[] = [];
     const session = beginNotesSession(
-      { composer: createStubNotesComposer(), schedule, onNotes: (u) => updates.push(u) },
+      {
+        composer: createStubNotesComposer(),
+        schedule,
+        onNotes: (u) => {
+          updates.push(u);
+        },
+      },
       { docId: 'doc-clocks', meetingId: 'm-clocks' },
     );
     session.onTurn({ turn: 0, text: 'The sync is the slowest thing on the page.', final: true });
-    // Both clocks are armed, each at the delay it ships with — and at no
+    // All three clocks are armed, each at the delay it ships with — and at no
     // other, which is what a moved default would look like.
+    expect(schedule.armedAt(DEFAULT_NOTES_ENDPOINT_CONFIRM_MS)).toBe(1);
     expect(schedule.armedAt(DEFAULT_NOTES_QUIET_MS)).toBe(1);
     expect(schedule.armedAt(DEFAULT_NOTES_CADENCE_MS)).toBe(1);
-    expect(schedule.armed).toBe(2);
-    // Quiet is the one that fires first in a meeting, so it is the one asked.
-    expect(schedule.fireAt(DEFAULT_NOTES_QUIET_MS)).toBe(1);
+    expect(schedule.armed).toBe(3);
+    // The endpoint window is the one that fires first after a settled turn,
+    // so it is the one asked. Quiet is the fallback behind it.
+    expect(schedule.fireAt(DEFAULT_NOTES_ENDPOINT_CONFIRM_MS)).toBe(1);
     await session.end();
     expect(updates.map((u) => u.tick.reason)).toEqual(['pause']);
+  });
+
+  it('the endpoint window is shorter than the quiet clock it fronts', () => {
+    // Otherwise it could never fire first, and the engine's own endpoint —
+    // the whole reason the window exists — would never be what produced a
+    // note.
+    expect(DEFAULT_NOTES_ENDPOINT_CONFIRM_MS).toBe(1_000);
+    expect(DEFAULT_NOTES_ENDPOINT_CONFIRM_MS).toBeLessThan(DEFAULT_NOTES_QUIET_MS);
   });
 });
 
 describe('pause ticker', () => {
   const QUIET_MS = 1000;
   const CADENCE_MS = 5000;
+  /** Distinct from both, so `fireAt` can name exactly one of the three. */
+  const CONFIRM_MS = 200;
   const setup = (quietMs = QUIET_MS, cadenceMs = CADENCE_MS) => {
     const schedule = new ManualScheduler();
     const ticks: NotesTick[] = [];
     const ticker = createPauseTicker({
       quietMs,
       cadenceMs,
+      endpointConfirmMs: CONFIRM_MS,
       schedule,
       onTick: (t) => ticks.push(t),
     });
@@ -211,12 +231,44 @@ describe('pause ticker', () => {
     ticker.onTurn({ turn: 0, text: 'Done.', final: true });
     const clearedBefore = schedule.cleared;
     ticker.onTurn({ turn: 1, text: 'but', final: false });
-    // The armed quiet timer was replaced, not left running from the final.
-    expect(schedule.cleared).toBe(clearedBefore + 1);
+    // Two clocks are withdrawn by that partial, not one: the quiet countdown
+    // is replaced rather than left running from the final, and the endpoint
+    // window the final opened is closed outright — somebody carried on, so
+    // the engine's "they stopped" has been contradicted.
+    expect(schedule.cleared).toBe(clearedBefore + 2);
     expect(schedule.armedAt(QUIET_MS)).toBe(1);
+    expect(schedule.armedAt(CONFIRM_MS)).toBe(0);
     expect(ticks).toEqual([]);
     schedule.fire();
     expect(ticks.length).toBe(1);
+  });
+
+  it('a settled turn opens the endpoint window, and quiet inside it is a pause', () => {
+    // The engine's endpoint detector already decided the speaker stopped.
+    // The window is only long enough for the next voice to start.
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({ turn: 0, text: 'That is the whole change.', final: true });
+    expect(schedule.armedAt(CONFIRM_MS)).toBe(1);
+    expect(schedule.fireAt(CONFIRM_MS)).toBe(1);
+    expect(ticks.map((t) => t.reason)).toEqual(['pause']);
+    expect(ticks[0]?.turns).toEqual([{ turn: 0, text: 'That is the whole change.' }]);
+    // And the fallback clock it fronted is gone with it, so the same words
+    // cannot produce a second tick four seconds later.
+    expect(schedule.armedAt(QUIET_MS)).toBe(0);
+  });
+
+  it('somebody answering inside the window falls back to the quiet clock', () => {
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({ turn: 0, text: 'Shall we ship it?', final: true });
+    // The next voice starts before the window elapses. That is a handover
+    // inside a conversation, not the end of the exchange.
+    ticker.onTurn({ turn: 1, text: 'not until', final: false });
+    expect(schedule.armedAt(CONFIRM_MS)).toBe(0);
+    expect(schedule.fireAt(CONFIRM_MS)).toBe(0);
+    expect(ticks).toEqual([]);
+    // Four seconds of real quiet still fires, which is what the fallback is.
+    expect(schedule.fireAt(QUIET_MS)).toBe(1);
+    expect(ticks.map((t) => t.reason)).toEqual(['pause']);
   });
 
   it('quiet with no new settled turns emits nothing', () => {
@@ -445,12 +497,86 @@ describe('pause ticker', () => {
     expect(schedule.handlesAt(CADENCE_MS)).not.toEqual([first]);
   });
 
-  it('a partial alone never owes a cadence tick', () => {
+  it('a partial alone arms the ceiling: a WORD is unwritten speech', () => {
+    // This is the inversion the long-turn bug needed. The ceiling used to
+    // wait for a settled turn, so a person talking without stopping — one
+    // turn, minutes long — had no clock running at all, and the ceiling that
+    // exists to bound exactly that wait was unreachable inside it.
     const { schedule, ticker } = setup();
     ticker.onTurn({ turn: 0, text: 'still talking', final: false });
-    // Nothing has settled, so there is no finished sentence to write and no
-    // clock counting down towards an empty tick.
+    expect(schedule.armedAt(CADENCE_MS)).toBe(1);
+  });
+
+  it('an empty partial is not a word, and arms no ceiling', () => {
+    // The control on the test above: it must be the WORDS that arm it, not
+    // the arrival of a frame. An engine that emits an empty keep-alive
+    // partial would otherwise start a clock towards a tick with nothing in
+    // it.
+    const { schedule, ticker } = setup();
+    ticker.onTurn({ turn: 0, text: '   ', final: false });
     expect(schedule.armedAt(CADENCE_MS)).toBe(0);
+  });
+
+  it('a ceiling reached inside one long turn writes the engine-final words', () => {
+    // The whole point of arming on a word. Nothing has settled — one person
+    // is still talking — but the engine has finalized the opening of what
+    // they said, and those words are as unrevisable as a settled turn's.
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({ turn: 0, text: 'so the plan', final: false });
+    ticker.onTurn({
+      turn: 0,
+      text: 'so the plan is to measure the write path first',
+      final: false,
+      settledText: 'so the plan is to measure',
+    });
+    expect(schedule.fireAt(CADENCE_MS)).toBe(1);
+    expect(ticks).toEqual([
+      {
+        tick: 1,
+        reason: 'cadence',
+        turns: [{ turn: 0, text: 'so the plan is to measure', partial: true }],
+      },
+    ]);
+  });
+
+  it('the words a ceiling carried are not written twice when the turn settles', () => {
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({
+      turn: 0,
+      text: 'so the plan is to measure the write',
+      final: false,
+      settledText: 'so the plan is to measure',
+    });
+    schedule.fireAt(CADENCE_MS);
+    // The formatted final re-cases and punctuates the SAME words, which is
+    // why the carry is counted in words rather than characters.
+    ticker.onTurn({
+      turn: 0,
+      text: 'So the plan is to measure the write path first.',
+      final: true,
+    });
+    schedule.fireAt(CONFIRM_MS);
+    expect(ticks[1]?.turns).toEqual([{ turn: 0, text: 'the write path first.', continued: true }]);
+  });
+
+  it('a turn whose settled words are all already carried adds no empty note', () => {
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({ turn: 0, text: 'ship it', final: false, settledText: 'ship it' });
+    schedule.fireAt(CADENCE_MS);
+    expect(ticks).toHaveLength(1);
+    ticker.onTurn({ turn: 0, text: 'Ship it.', final: true });
+    schedule.fire();
+    expect(ticks).toHaveLength(1);
+  });
+
+  it('a ceiling tick without engine-final words still carries settled turns only', () => {
+    // An engine that reports no per-word finality (the mock) is unchanged:
+    // the sentence in progress waits for the next tick, as it always did.
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({ turn: 0, text: 'Ship the fix.', final: true });
+    ticker.onTurn({ turn: 1, text: 'but only once we have', final: false });
+    schedule.fireAt(CADENCE_MS);
+    expect(ticks[0]?.turns).toEqual([{ turn: 0, text: 'Ship the fix.' }]);
   });
 
   it('end() leaves no cadence timer armed', () => {
@@ -923,7 +1049,9 @@ describe('notes session', () => {
         composer,
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
         onError: (m) => errors.push(m),
       },
       ids,
@@ -955,7 +1083,14 @@ describe('notes session', () => {
       },
     };
     const session = beginNotesSession(
-      { composer, quietMs: 1000, schedule, onNotes: (u) => updates.push(u) },
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        onNotes: (u) => {
+          updates.push(u);
+        },
+      },
       ids,
     );
     session.onTurn({ turn: 0, text: 'Almost lost.', final: true });
@@ -1012,7 +1147,9 @@ describe('notes through the audio socket', () => {
         },
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
       },
     });
   });
@@ -1167,10 +1304,14 @@ describe('task capture riding the notes session', () => {
     session.onTurn({ turn: 1, text: 'File a ticket for that one.', final: true, speaker: 'A' });
     schedule.fire();
     await session.end();
-    // Two pause ticks, then the final pass over turn 90 — the partial that
-    // registered the second voice and never settled.
-    expect(passes).toHaveLength(3);
-    expect(passes[2]?.turns).toEqual(['Speaker Z: mm']);
+    // TWO passes, not three, and the reason is the merge: the first pass is
+    // still in flight when the second tick and the stop both fire, so those
+    // two become one tick and one pass. That is the whole point of merging —
+    // words that arrive while the composer is busy go into the NEXT compose
+    // rather than into a queue of composes behind it — and the boundary this
+    // test is about survives it, because the merged pass still sees the
+    // first tick's line as its prior window.
+    expect(passes).toHaveLength(2);
     // Nothing came before the first tick.
     expect(passes[0]?.prior).toEqual([]);
     expect(passes[0]?.turns).toEqual(['Speaker A: That retry loop is the real cost.']);
@@ -1178,7 +1319,9 @@ describe('task capture riding the notes session', () => {
     // that landed in between — raw labels are kept and mapped at use, so the
     // window never reads "Speaker A" beside "Priya" for the same voice.
     expect(passes[1]?.prior).toEqual(['Priya: That retry loop is the real cost.']);
-    expect(passes[1]?.turns).toEqual(['Priya: File a ticket for that one.']);
+    // And it carries both the second tick's settled words and the sentence
+    // that was still in progress at the stop, in that order.
+    expect(passes[1]?.turns).toEqual(['Priya: File a ticket for that one.', 'Speaker Z: mm']);
   });
 
   it('links reach the composer, and a capture failure costs links, not notes', async () => {
@@ -1199,7 +1342,9 @@ describe('task capture riding the notes session', () => {
         composer,
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
         onError: (m) => errors.push(m),
         captureIntents: () => {
           calls++;
@@ -1382,7 +1527,9 @@ describe('the composer reads the LIVE doc, not only its own last answer', () => 
         readOutline: () => {
           throw new Error('doc gone');
         },
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
         onError: (m) => errors.push(m),
       },
       ids,
@@ -1452,7 +1599,9 @@ describe('inline speaker tags', () => {
         ),
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
       },
       ids,
     );
@@ -1482,7 +1631,9 @@ describe('inline speaker tags', () => {
         ),
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
         onError: (m) => errors.push(m),
       },
       ids,
@@ -1518,7 +1669,9 @@ describe('inline speaker tags', () => {
         ),
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
       },
       ids,
     );
@@ -1598,7 +1751,9 @@ describe('inline speaker tags', () => {
         quietMs: 1000,
         schedule,
         readOutline: () => [{ id: 'b-mine', kind: 'listItem', nodeName: 'listItem', text: mine }],
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
       },
       ids,
     );
@@ -1656,7 +1811,9 @@ describe('a tagged meeting through the audio socket', () => {
         composer: taggingComposer,
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
       },
     });
   });
@@ -1794,7 +1951,9 @@ describe('a spoken correction riding the notes session', () => {
         },
         quietMs: 1000,
         schedule,
-        onNotes: () => order.push('write'),
+        onNotes: () => {
+          order.push('write');
+        },
         readOutline: () => {
           order.push('read');
           return [];
@@ -1857,7 +2016,9 @@ describe('a spoken correction riding the notes session', () => {
         composer: createStubNotesComposer(),
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
         onError: (m) => errors.push(m),
         captureIntents: () =>
           Promise.resolve({
@@ -2346,7 +2507,9 @@ describe('speaker tags only in multi-speaker sessions', () => {
         composer,
         quietMs: 1000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
         onError: () => {},
       },
       ids,

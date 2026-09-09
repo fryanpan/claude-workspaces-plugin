@@ -62,6 +62,7 @@ import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-li
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {
   DEFAULT_NOTES_CADENCE_MS,
+  DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
   DEFAULT_NOTES_QUIET_MS,
   type NotesTick,
   type TickScheduler,
@@ -80,9 +81,12 @@ export {
   type PauseTickerOpts,
   type TickScheduler,
   DEFAULT_NOTES_CADENCE_MS,
+  DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
   DEFAULT_NOTES_QUIET_MS,
   createPauseTicker,
   realTickScheduler,
+  wordsAfter,
+  wordsOf,
 } from './pause-ticker.ts';
 
 export type { NoteReference } from './notes-references.ts';
@@ -146,8 +150,21 @@ export interface NotesTurn {
    * carried anyway because the alternative is losing the last thing said —
    * and it is FLAGGED so the composer is told what it is holding rather
    * than reading a fragment as a finished sentence.
+   *
+   * Set on a CEILING tick too, where it means the same thing for the same
+   * reason: the words are the engine's own already-final tokens inside a
+   * sentence nobody has finished saying.
    */
   partial?: boolean;
+  /**
+   * The words before these ones already went out on an earlier tick.
+   *
+   * A ceiling tick carries the finished part of a long turn, so what arrives
+   * later is the REST of a sentence whose opening is already in the notes.
+   * Saying so is what stops a reader of this seam — the timing report, a
+   * future prompt — treating the fragment as the start of a new thought.
+   */
+  continued?: boolean;
 }
 
 /**
@@ -455,6 +472,14 @@ export interface MeetingNotesDeps {
    * two cadences against one script.
    */
   cadenceMs?: number;
+  /**
+   * How long an engine endpoint stands unanswered before it counts as a
+   * pause; defaults to {@link DEFAULT_NOTES_ENDPOINT_CONFIRM_MS}. Pass
+   * `Infinity` to leave `quietMs` as the only pause clock — the latency
+   * harness uses that to measure the endpoint window's contribution on its
+   * own.
+   */
+  endpointConfirmMs?: number;
   schedule?: TickScheduler;
   context?: NotesProjectContext;
   /**
@@ -524,8 +549,26 @@ export interface MeetingNotesDeps {
     meetingId: string;
     outline: readonly prose.OutlineEntry[];
   }) => string | undefined;
-  /** Where composed notes go. The doc-writing stage plugs in here. */
-  onNotes: (update: NotesUpdate) => void;
+  /**
+   * Where composed notes go. The doc-writing stage plugs in here.
+   *
+   * RETURNING `false` MEANS NOTHING REACHED THE DOC, and it is not the same
+   * as throwing: a throw is a broken sink, this is a write the doc refused —
+   * every edit in the batch named a block that is no longer there, say. The
+   * session treats it as a failed tick: the words are carried into the next
+   * one, and the surface showing them is told `failed` rather than `written`,
+   * so the live area keeps a chunk on screen until its note is actually in
+   * the doc. It used to report `written` on the strength of having CALLED
+   * this sink, so a skipped write took the words off the screen and out of
+   * the notes at the same time, silently.
+   *
+   * `void` and `true` both mean written — a sink with nothing to report is
+   * the ordinary case and must not have to say so.
+   */
+  // A sink with nothing to report returns nothing; only an explicit `false`
+  // means the write did not land. The union is the contract, not a slip.
+  // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
+  onNotes: (update: NotesUpdate) => void | boolean;
   /**
    * Where a rename of a voice already written about goes. Optional: a
    * session with no sink for it composes under the new name from the next
@@ -601,7 +644,10 @@ export interface MeetingNotesDeps {
  * caller-supplied `captureIntents` wins over that assembly.
  */
 export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
-  onNotes?: (update: NotesUpdate) => void;
+  // A sink with nothing to report returns nothing; only an explicit `false`
+  // means the write did not land. The union is the contract, not a slip.
+  // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
+  onNotes?: (update: NotesUpdate) => void | boolean;
   taskExtractor?: import('./meeting-task-capture.ts').TaskCaptureExtractor | null;
 };
 
@@ -816,11 +862,52 @@ export function beginNotesSession(
   const lifecycle = (phase: 'composing' | 'written' | 'failed', tick: number, turns: number[]) =>
     deps.onTickLifecycle?.({ docId: ids.docId, meetingId: ids.meetingId, tick, phase, turns });
 
+  /**
+   * The tick waiting behind a compose that is RUNNING, if one is.
+   *
+   * ONE, NOT A QUEUE. Ticks fire on a clock and a compose is a model call, so
+   * a slow reply used to build a line of them: the fourth tick's words were
+   * three composes from the doc, and every tick after it inherited that debt
+   * for the rest of the meeting — the notes never caught up again, because
+   * every tick after the slow one paid for it. Merged instead, so the next
+   * compose sees everything said since the last one and the wait stops
+   * compounding. The turns are simply concatenated — they are disjoint by
+   * construction, each tick carrying the words that arrived after the one
+   * before it.
+   *
+   * ONLY WHILE A COMPOSE IS IN FLIGHT. Ticks that arrive with the composer
+   * idle still each get their own compose: merging those would fold two
+   * separate moments of the meeting into one note for no gain, and the
+   * ceiling exists precisely to produce notes as speech goes on.
+   */
+  let queued: NotesTick | null = null;
+  /** A compose is running, so a new tick merges rather than starting one. */
+  let composing = false;
+  /** The merged tick already has a step on the chain waiting to run it. */
+  let drainScheduled = false;
+  /**
+   * A failed compose has already been given its immediate second attempt.
+   * Reset by any success, so one bad tick retries at once while a composer
+   * that is simply down does not spin.
+   */
+  let retriedFailure = false;
+
+  const mergeTicks = (a: NotesTick, b: NotesTick): NotesTick => ({
+    // The later number and the later reason: what the merged tick IS, is the
+    // most recent moment that asked for notes. An `end` merged into a pause
+    // must stay an `end` — it is the last chance the words have.
+    tick: Math.max(a.tick, b.tick),
+    reason: b.reason,
+    turns: [...a.turns, ...b.turns],
+  });
+
   const composeTick = (tick: NotesTick): void => {
     lastTickNo = Math.max(lastTickNo, tick.tick);
     // Announced when the tick FIRES, not when the chain gets to it: this is
     // the moment the settled words split off from the provisional stream,
-    // which is what the surface showing them wants to draw.
+    // which is what the surface showing them wants to draw. Announced per
+    // FIRING even when two ticks merge, because the split is what the client
+    // is drawing and it happened twice.
     if (tick.turns.length > 0) {
       lifecycle(
         'composing',
@@ -828,7 +915,43 @@ export function beginNotesSession(
         tick.turns.map((t) => t.turn),
       );
     }
+    if (!composing && !drainScheduled) {
+      // The composer is idle. This tick gets its own compose, exactly as
+      // every tick did before merging existed — merging an idle moment would
+      // fold two separate stretches of the meeting into one note for nothing.
+      chain = chain.then(() => guarded(tick));
+      return;
+    }
+    queued = queued === null ? tick : mergeTicks(queued, tick);
+    if (drainScheduled) return;
+    drainScheduled = true;
+    // ONE step on the chain for the whole merge, appended NOW rather than
+    // taken by the running compose when it finishes. The chain is what
+    // orders composes against renames and reattributions, and a compose that
+    // helped itself to the next tick would run ahead of a rename queued
+    // between the two — which is the rename landing under the compose it was
+    // supposed to correct.
     chain = chain.then(async () => {
+      drainScheduled = false;
+      const merged = queued;
+      queued = null;
+      if (merged !== null) await guarded(merged);
+    });
+  };
+
+  /** Run one compose with the in-flight flag held, so ticks that fire during
+   *  it merge instead of queueing behind each other. */
+  const guarded = async (tick: NotesTick): Promise<void> => {
+    composing = true;
+    try {
+      await runCompose(tick);
+    } finally {
+      composing = false;
+    }
+  };
+
+  const runCompose = (tick: NotesTick): Promise<void> => {
+    return (async () => {
       const raw = [...carry, ...tick.turns];
       carry = [];
       if (raw.length === 0) return;
@@ -1021,13 +1144,35 @@ export function beginNotesSession(
             !outline.some((e) => e.text.includes(suggestionLabel(ref.title))),
         );
         const edits = withSuggestions(checked, unseen, input.humanNotes, notesHeadingId);
+        const written =
+          deps.onNotes({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            tick: input.tick,
+            edits,
+          }) !== false;
+        if (!written) {
+          // The compose was fine and the DOC refused it. Same handling as a
+          // failed compose — the words are still unwritten, so they carry —
+          // and the same report to the surface, so the live area holds them.
+          carry = [...raw, ...carry];
+          lifecycle(
+            'failed',
+            tick.tick,
+            raw.map((t) => t.turn),
+          );
+          composeFailures++;
+          deps.onError?.(
+            `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: doc write skipped`,
+          );
+          retryAfterFailure(tick);
+          return;
+        }
+        // A question is only asked once, and it is asked once it has LANDED.
+        // Marking them offered before the write meant a refused write lost
+        // the questions outright — the retry composed without them.
         for (const ref of unseen) offeredSuggestions.add(ref.url);
-        deps.onNotes({
-          docId: ids.docId,
-          meetingId: ids.meetingId,
-          tick: input.tick,
-          edits,
-        });
+        retriedFailure = false;
         for (const t of raw) composedTurns.add(t.turn);
         lifecycle(
           'written',
@@ -1048,8 +1193,58 @@ export function beginNotesSession(
         // max_tokens" in a log with several meetings running says nothing
         // about which meeting stopped keeping up, or how far into it.
         deps.onError?.(`${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: ${reason}`);
+        // Only a size refusal is worth trying again at once; see
+        // `retryAfterFailure`.
+        if (/max_tokens/.test(reason)) retryAfterFailure(tick);
       }
-    });
+    })();
+  };
+
+  /**
+   * Try the carried words again NOW, rather than at whatever the next clock
+   * says.
+   *
+   * A size refusal used to cost a whole tick: the words went into `carry` and
+   * sat there until the next pause or ceiling, so a reply the model would
+   * have managed on a second attempt reached the notes fifteen seconds late —
+   * and the tick that finally carried them was twice the size, which is the
+   * condition that produced the refusal in the first place. Same for a doc
+   * write the store refused: the retry re-reads the outline, which is the
+   * thing that changed.
+   *
+   * ONLY THOSE TWO. A composer that is down, out of quota or unreachable
+   * fails again instantly, and the carry-to-the-next-tick path is the right
+   * one for it — the words are safe, and the next tick is the next chance.
+   * Retrying every failure would also close the window in which a late
+   * speaker revision can re-label a carried turn instead of correcting words
+   * that are already in the doc.
+   *
+   * ONE attempt, and only one: `retriedFailure` is cleared by a success, so
+   * even a repeating refusal costs two composes per tick, never a spin.
+   */
+  const retryAfterFailure = (tick: NotesTick): void => {
+    if (retriedFailure || carry.length === 0) return;
+    retriedFailure = true;
+    composeTick({ tick: ++lastTickNo, reason: tick.reason, turns: [] });
+  };
+
+  /**
+   * Wait until the chain is quiet — nothing composing, nothing queued behind
+   * it.
+   *
+   * One `await chain` is no longer enough, and that is the price of the two
+   * things above it: a drain step can queue another (a tick that fired while
+   * it ran), and a failure schedules its own retry. Bounded rather than
+   * looped forever, because `end()` must return even if something upstream
+   * is producing ticks in a loop; the bound is generous enough that no real
+   * meeting reaches it.
+   */
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 8; i++) {
+      await chain;
+      if (!composing && !drainScheduled && queued === null) return;
+    }
+    await chain;
   };
 
   /**
@@ -1098,6 +1293,7 @@ export function beginNotesSession(
   const ticker = createPauseTicker({
     quietMs: deps.quietMs ?? DEFAULT_NOTES_QUIET_MS,
     cadenceMs: deps.cadenceMs ?? DEFAULT_NOTES_CADENCE_MS,
+    endpointConfirmMs: deps.endpointConfirmMs ?? DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
     ...(deps.schedule ? { schedule: deps.schedule } : {}),
     onTick: composeTick,
     onRevised: ({ turn, speaker }) => {
@@ -1162,13 +1358,13 @@ export function beginNotesSession(
     },
     async end(): Promise<void> {
       ticker.end();
-      await chain;
+      await settle();
       if (carry.length > 0) {
         // The last compose before the end failed and nothing after it could
         // retry. One more attempt; if this one fails too the words stay in
         // the transcript record and the notes go without them.
         composeTick({ tick: lastTickNo + 1, reason: 'end', turns: [] });
-        await chain;
+        await settle();
       }
       if (refusedTooLong > 0) {
         deps.onError?.(
