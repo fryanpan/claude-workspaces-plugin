@@ -24,6 +24,7 @@ import type { MeetingCaptureSource, MeetingGroup } from './meeting-streams.ts';
 import { parseCaptureSource } from './meeting-streams.ts';
 import type { MeetingTimingMark } from './meeting-timing.ts';
 import { MAX_ROOM_SPEAKERS, MIN_ROOM_SPEAKERS, parseRawTuning } from './meeting-tuning.ts';
+import { type NotesMethod, parseNotesMethod } from './notes-method.ts';
 
 /** The audio the capture promises to send: mono, little-endian signed 16-bit. */
 export const MEETING_AUDIO_ENCODING = 'pcm_s16le' as const;
@@ -274,7 +275,17 @@ export type MeetingClientMessage =
    * record, in the notes — reads as the name from then on. Per meeting: the
    * same letter is a different person next time.
    */
-  | { type: 'name_speaker'; speaker: string; name: string };
+  | { type: 'name_speaker'; speaker: string; name: string }
+  /**
+   * "Take the rest of these notes with THIS note-taker."
+   *
+   * Per DOC, not per meeting, and it takes effect on the next tick: nothing
+   * already written is rewritten, and the meeting record keeps who asked and
+   * when. Sent while recording, from the same chooser fold that sets it at
+   * rest, which is why the socket carries it at all — the at-rest case is an
+   * HTTP call and needs no live session.
+   */
+  | { type: 'set_notes_method'; method: NotesMethod; by?: string };
 
 /** Longest name a speaker label can be given. A name, not a bio. */
 export const MAX_SPEAKER_NAME = 60;
@@ -422,6 +433,14 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
     if (typeof m.id !== 'number' || !Number.isFinite(m.id)) return null;
     if (typeof m.clientMs !== 'number' || !Number.isFinite(m.clientMs)) return null;
     return { type: 'timing_ping', id: m.id, clientMs: m.clientMs };
+  }
+  if (m.type === 'set_notes_method') {
+    // An unknown method is dropped rather than defaulted: a client one
+    // version ahead must not silently reset this doc to the original.
+    const method = parseNotesMethod(m.method);
+    if (!method) return null;
+    const by = typeof m.by === 'string' ? m.by.trim().slice(0, MAX_SPEAKER_NAME) : '';
+    return by ? { type: 'set_notes_method', method, by } : { type: 'set_notes_method', method };
   }
   if (m.type === 'name_speaker') {
     const speaker = typeof m.speaker === 'string' ? m.speaker.trim() : '';

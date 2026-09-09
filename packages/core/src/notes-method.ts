@@ -97,3 +97,23 @@ export function parseNotesMethod(raw: unknown): NotesMethod | undefined {
 export function notesMethodUsesLedger(method: NotesMethod): boolean {
   return method === 'ledger-haiku' || method === 'ledger-opus';
 }
+
+/**
+ * The one line a method change writes into the notes.
+ *
+ * "10:38 Note-taker Ledger · Opus — Maya". It is the whole of what the doc
+ * says about methods: the approved design shows nothing method-related in the
+ * notes at rest, so a reader only ever sees the moments somebody changed it,
+ * in the order they happened.
+ *
+ * Here rather than in the server because the strip renders the same sentence
+ * optimistically before the write lands, and two spellings of it would read
+ * as two different events.
+ */
+export function notesMethodTraceLine(label: string, by: string | undefined, at: number): string {
+  const d = new Date(at);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const who = by?.trim();
+  return `${hh}:${mm} Note-taker ${label}${who ? ` — ${who}` : ''}`;
+}

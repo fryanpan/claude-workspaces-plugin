@@ -58,6 +58,7 @@
 import {
   normalizeSpeakerName,
   normalizeSpeakerTags,
+  notesMethodTraceLine,
   speakerDisplayName,
 } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
@@ -781,6 +782,19 @@ export interface MeetingNotesSession {
    * overwritten by it.
    */
   nameSpeaker(speaker: string, name: string): void;
+  /**
+   * "The rest of these notes are taken by a different note-taker."
+   *
+   * Writes ONE line into the meeting's own section saying which one and who
+   * asked, and nothing else: the method itself lives on the doc's record
+   * (`notes-method-store.ts`) and is read by the next compose. Nothing
+   * already written is touched — the owner's rule is that a switch changes
+   * what comes next, not what has been read.
+   *
+   * On the chain like a rename, so the line lands after whatever is
+   * composing rather than inside its write.
+   */
+  noteMethodChange(label: string, by?: string): void;
   /** Flush the tail delta and wait for every compose in flight. */
   end(): Promise<void>;
   /**
@@ -1671,6 +1685,47 @@ export function beginNotesSession(
       // those words are owed is counted from when they were said.
       if (!settledAtOf.has(turn.turn)) settledAtOf.set(turn.turn, clock());
       ticker.onTurn(turn);
+    },
+    noteMethodChange(label, by) {
+      // One line, on the chain, addressed to this meeting's own section.
+      chain = chain.then(() => {
+        let outline: readonly prose.OutlineEntry[] = [];
+        try {
+          outline = deps.readOutline?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? [];
+        } catch {
+          // A trace line is worth less than a compose, and the compose path
+          // already reports an outline it cannot read. With none, the line
+          // goes to the end of the doc, which is where a meeting with no
+          // section of its own writes anyway.
+        }
+        let headingId: string | undefined;
+        try {
+          headingId = deps.notesHeadingId?.({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            outline,
+          });
+        } catch {
+          headingId = undefined;
+        }
+        const markdown = `- ${notesMethodTraceLine(label, by, clock())}`;
+        try {
+          deps.onNotes({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            // Not a tick: no words were said, so a sink that counts what a
+            // tick wrote must not charge the room for this line.
+            tick: { tick: 0, reason: 'end', turns: [] },
+            edits: [
+              headingId === undefined
+                ? { op: 'insert_at_end', markdown }
+                : { op: 'insert_under_heading', headingId, markdown },
+            ],
+          });
+        } catch (err) {
+          deps.onError?.(err instanceof Error ? err.message : 'notes method line not written');
+        }
+      });
     },
     nameSpeaker(speaker, name) {
       // Read the OLD display name before the map moves — that is the string

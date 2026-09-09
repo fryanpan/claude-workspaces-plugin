@@ -44,6 +44,7 @@ import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspa
 import { isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
 import { MountStore } from './mount-store.ts';
 import { spokenLinkRef } from './notes-link-intent.ts';
+import { writeNotesMethod } from './notes-method-store.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import {
@@ -442,6 +443,24 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       : null,
     // Lifecycle only. The words never touch this bus — see meeting-protocol.
     broadcast: (docId, payload) => sse.broadcast(docId, payload),
+    // Which note-taker this doc uses, changed while it is recording. The
+    // same write the at-rest route makes, so the two halves of one choice
+    // cannot disagree about where the answer is kept.
+    setNotesMethod: (change) => {
+      try {
+        writeNotesMethod(dataDir, change.docId, {
+          method: change.method,
+          at: Date.now(),
+          ...(change.by ? { by: change.by } : {}),
+          ...(change.meetingId ? { meetingId: change.meetingId } : {}),
+        });
+      } catch (err) {
+        // The method is a preference, never a dependency of taking notes: a
+        // record that cannot be written leaves the doc on the method it had
+        // and the meeting composing.
+        console.error(`[meeting-notes] notes method not recorded for ${change.docId}:`, err);
+      }
+    },
   });
   /**
    * The bot path into the SAME pipeline. It gets the relay's own notes deps
