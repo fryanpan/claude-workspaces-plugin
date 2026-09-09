@@ -652,6 +652,33 @@ export const VARIANTS: Record<string, Variant> = {
     instructions: swap(DEFAULT_NOTES_INSTRUCTIONS, FLAT_RUN_ANCHOR, NESTED_RULE),
     begin: ledgerHooks,
   },
+  // Round 4. The two the round-3 table pointed at. `opus-nested-ledger` was
+  // the lowest rate measured (11.9%) and `everything` showed that dropping
+  // the compress rule alone buys six points on baseline; this is both at
+  // once, and it is the most expensive thing in the table by design.
+  'opus-nested-ledger-uncompressed': {
+    name: 'opus-nested-ledger-uncompressed',
+    model: 'claude-opus-5',
+    maxTokens: 4_000,
+    effort: 'low',
+    instructions: swap(
+      swap(DEFAULT_NOTES_INSTRUCTIONS, FLAT_RUN_ANCHOR, NESTED_RULE),
+      COMPRESS_ANCHOR,
+      ONE_NOTE_PER_IDEA,
+    ),
+    begin: ledgerHooks,
+  },
+  // The same method on the cheap model, which is the row that decides whether
+  // the ceiling is worth its price: `ledger-sonnet` already beat `ledger` on
+  // Opus-less compose, so the nesting is the only thing untested on Sonnet.
+  'sonnet-nested-ledger': {
+    name: 'sonnet-nested-ledger',
+    model: 'claude-sonnet-5',
+    maxTokens: 4_000,
+    effort: 'low',
+    instructions: swap(DEFAULT_NOTES_INSTRUCTIONS, FLAT_RUN_ANCHOR, NESTED_RULE),
+    begin: ledgerHooks,
+  },
 };
 
 export function resolveVariant(name: string): Variant {
