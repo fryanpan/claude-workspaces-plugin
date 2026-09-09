@@ -267,6 +267,9 @@ export class MountStore {
         continue;
       }
       const scan = scanMount(mountAbs, this.maxFilesPerMount);
+      // A directory the walk could not read leaves files unseen exactly as
+      // the cap does, and an unseen file is not a removed one.
+      if (scan.unreadable) complete = false;
       if (scan.truncated) {
         truncated = true;
         complete = false;

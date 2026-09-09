@@ -56,6 +56,10 @@ export interface MountScan {
   files: ScannedFile[];
   /** True when the walk stopped at `MAX_FILES_PER_MOUNT`. */
   truncated: boolean;
+  /** True when a directory under the mount could not be read, or went away
+   *  while the walk was inside it. What is listed is still correct; what is
+   *  MISSING from it cannot be read as deleted. */
+  unreadable: boolean;
 }
 
 /**
@@ -67,20 +71,39 @@ export interface MountScan {
  * twice would cost a `realpath` per entry on a walk of hundreds of thousands.
  */
 export function scanMount(root: string, maxFiles: number = MAX_FILES_PER_MOUNT): MountScan {
-  const files: ScannedFile[] = [];
-  const truncated = walk(root, root, files, Math.max(1, maxFiles));
-  files.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
-  return { files, truncated };
+  const st: WalkState = {
+    files: [],
+    truncated: false,
+    unreadable: false,
+    maxFiles: Math.max(1, maxFiles),
+  };
+  walk(root, root, st);
+  st.files.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
+  return { files: st.files, truncated: st.truncated, unreadable: st.unreadable };
 }
 
-/** Returns true when the ceiling was hit. */
-function walk(root: string, dir: string, out: ScannedFile[], maxFiles: number): boolean {
+/** The walk's running answer. Both flags mean the same thing to a caller —
+ *  the listing is a subset — and are kept apart because only one of them is
+ *  the mount being too broad. */
+interface WalkState {
+  files: ScannedFile[];
+  truncated: boolean;
+  unreadable: boolean;
+  maxFiles: number;
+}
+
+/** Returns true when the walk should stop: the ceiling was hit. */
+function walk(root: string, dir: string, st: WalkState): boolean {
   let entries: import('node:fs').Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
-    // An unreadable directory is an absent one. A mount that crosses a
-    // permission boundary must still list what it can.
+    // A mount that crosses a permission boundary still lists what it can —
+    // but it says that it did. Silently returning "nothing here" would make
+    // every recorded file under this directory look DELETED to the reconcile,
+    // and a deleted file whose fingerprint matches a newcomer is read as a
+    // move: one unreadable directory would hand its addresses away.
+    st.unreadable = true;
     return false;
   }
   // `readdirSync` promises no order, so an unsorted walk would cap on a
@@ -88,26 +111,32 @@ function walk(root: string, dir: string, out: ScannedFile[], maxFiles: number): 
   // are over the cap" and "some files are missing today".
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
-    if (out.length >= maxFiles) return true;
+    if (st.files.length >= st.maxFiles) {
+      st.truncated = true;
+      return true;
+    }
     const abs = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
-      if (walk(root, abs, out, maxFiles)) return true;
+      if (walk(root, abs, st)) return true;
       continue;
     }
     if (!entry.isFile() && !entry.isSymbolicLink()) continue;
     if (isSecretShapedName(entry.name)) continue;
-    let st: import('node:fs').Stats;
+    let stat: import('node:fs').Stats;
     try {
-      st = statSync(abs);
+      stat = statSync(abs);
     } catch {
+      // A file that vanished between the readdir and the stat. It is not in
+      // the listing, and the listing is not complete.
+      st.unreadable = true;
       continue;
     }
-    if (!st.isFile()) continue;
-    out.push({
+    if (!stat.isFile()) continue;
+    st.files.push({
       relPath: relative(root, abs).split(sep).join('/'),
-      size: st.size,
-      mtimeMs: st.mtimeMs,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
     });
   }
   return false;

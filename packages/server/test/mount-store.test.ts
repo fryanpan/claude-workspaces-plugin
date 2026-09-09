@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -367,6 +368,40 @@ describe('MountStore', () => {
       expect(store.resolveFile(id)?.file.relPath).toBe('docs/mocks/home.png');
       // The old spelling is not a second project sitting beside the new one.
       expect(store.registry.listProjects().map((p) => p.repoKey)).toEqual([after]);
+    });
+  });
+
+  describe('a directory the walk cannot read', () => {
+    /**
+     * Silently listing nothing for an unreadable subdirectory makes every
+     * file under it look DELETED, and a deleted file whose size and
+     * fingerprint match a newcomer is read as a move — so one permission
+     * boundary would hand its addresses to unrelated files.
+     */
+    it('is an incomplete scan, so nothing under it is read as gone or moved', () => {
+      const locked = join(mocks(), 'locked');
+      mkdirSync(locked);
+      writeFileSync(join(locked, 'inner.png'), 'the-shut-away-bytes');
+      mount(mocks());
+      const repoKey = store.locate(repo)?.repoKey ?? '';
+      const inner = idOf('docs/mocks/locked/inner.png');
+
+      chmodSync(locked, 0o000);
+      try {
+        // An unrelated newcomer holding the same bytes: the false move.
+        writeFileSync(join(mocks(), 'newcomer.png'), 'the-shut-away-bytes');
+        const listing = store.reconcile(repoKey, true);
+        expect(listing.files.map((f) => f.relPath)).toEqual([
+          'docs/mocks/home.png',
+          'docs/mocks/newcomer.png',
+        ]);
+        const fresh = listing.files.find((f) => f.relPath === 'docs/mocks/newcomer.png');
+        expect(fresh?.fileId).not.toBe(inner);
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+      // And once the directory is readable again the address is still its own.
+      expect(store.resolveFile(inner)?.file.relPath).toBe('docs/mocks/locked/inner.png');
     });
   });
 });
