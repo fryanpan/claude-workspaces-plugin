@@ -136,6 +136,22 @@ export function isServableRelPath(relPath: string): boolean {
   return !isSecretShapedName(name);
 }
 
+/**
+ * Is this a relative path a mount may be rooted at?
+ *
+ * Narrower than `isServableRelPath`, which judges a FILE. A mount is a
+ * directory, so the whole path is directory segments and every one of them
+ * gets the dotdir rule — mounting `.claude/mocks` would otherwise create a
+ * mount whose every file the walk then refuses.
+ */
+export function isMountableRelPath(relPath: string): boolean {
+  if (relPath === '' || relPath.startsWith('/')) return false;
+  for (const part of relPath.split('/')) {
+    if (part === '' || part === '.' || part === '..' || part.startsWith('.')) return false;
+  }
+  return true;
+}
+
 /** How much of each end of a large file the sample hash reads. */
 const SAMPLE_BYTES = 64 * 1024;
 

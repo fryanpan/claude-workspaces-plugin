@@ -1,7 +1,7 @@
 import { basename, extname } from 'node:path';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
-import { isMountableRelPath } from '../mount-store.ts';
+import { isMountableRelPath } from '../mount-scan.ts';
 import type { MountStore } from '../mount-store.ts';
 
 /**

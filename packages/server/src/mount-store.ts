@@ -14,6 +14,7 @@ import {
 import {
   MAX_FILES_PER_MOUNT,
   type ScannedFile,
+  isMountableRelPath,
   isServableRelPath,
   matchMoves,
   sampleHash,
@@ -146,17 +147,10 @@ export class MountStore {
   /**
    * The checkout ONE mount's bytes are read from.
    *
-   * The mount remembers where it was made, because a folder mounted from a
-   * linked worktree holds that branch's files: joining its repo-relative path
-   * onto the main checkout would serve a different working copy — the wrong
-   * revision for every path that exists in both, and nothing at all for the
-   * branch-only and untracked files that are usually the reason a worktree
-   * was mounted in the first place.
-   *
-   * Falls back to `rootFor` when the recorded checkout is gone (a removed
-   * worktree) or was never recorded (a row written before the field existed).
-   * That is the same survival rule documents get: the project keeps serving
-   * from whatever copy is still there rather than going dark.
+   * The mount remembers where it was made (`MountRecord.checkoutRoot` says
+   * why), and falls back to `rootFor` when that checkout is gone — a removed
+   * worktree — or was never recorded. Same survival rule documents get: the
+   * project serves from whatever copy is still there rather than going dark.
    */
   checkoutRootOf(repoKey: string, mount: MountRecord): string | null {
     if (mount.checkoutRoot !== undefined && existsSync(mount.checkoutRoot)) {
@@ -496,22 +490,6 @@ export class MountStore {
   setConventionsPath(repoKey: string, relPath: string): ProjectRecord {
     return this.registry.setConventionsPath(repoKey, relPath);
   }
-}
-
-/**
- * Is this a relative path a mount may be rooted at?
- *
- * Narrower than `isServableRelPath`, which judges a FILE. A mount is a
- * directory, so the whole path is directory segments and every one of them
- * gets the dotdir rule — mounting `.claude/mocks` would otherwise create a
- * mount whose every file the walk then refuses.
- */
-export function isMountableRelPath(relPath: string): boolean {
-  if (relPath === '' || relPath.startsWith('/')) return false;
-  for (const part of relPath.split('/')) {
-    if (part === '' || part === '.' || part === '..' || part.startsWith('.')) return false;
-  }
-  return true;
 }
 
 export type { FileEntry, MountRecord, ProjectPrivacy, ProjectRecord };

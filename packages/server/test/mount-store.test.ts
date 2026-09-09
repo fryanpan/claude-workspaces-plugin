@@ -18,7 +18,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MountStore, isMountableRelPath } from '../src/mount-store.ts';
+import { isMountableRelPath } from '../src/mount-scan.ts';
+import { MountStore } from '../src/mount-store.ts';
 import { RepoRegistry } from '../src/repo-registry.ts';
 
 function git(cwd: string, ...args: string[]): void {
