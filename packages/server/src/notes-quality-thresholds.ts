@@ -116,6 +116,16 @@ export const MIN_IDEAS_FOR_COVERAGE = 10;
  * itself. Sixty seconds is four of those windows: long enough that ordinary
  * jitter and one slow compose never trip it, short enough that the notes
  * falling a topic behind the room does.
+ *
+ * WHAT THE NUMBER IS MEASURED FROM, which the four-windows reasoning above
+ * understates. `settledToWrittenMs` is charged from the OLDEST turn on a
+ * tick, so a tick carrying three turns is timed from the first of them. It is
+ * therefore "how long the oldest idea went unwritten", not "how long one turn
+ * waited", and it runs higher than a per-turn figure — measured at 21s median
+ * against the same replay's 7.5s per-turn median. That is the right number
+ * for this bar (a reader is waiting on the oldest thing still missing), but
+ * anyone comparing it to a per-turn latency elsewhere is comparing two
+ * denominators.
  */
 export const LATE_NOTE_MS = 60_000;
 
@@ -125,6 +135,16 @@ export const LATE_NOTE_MS = 60_000;
  * One in five. A single late note is one slow call to a model; a fifth of the
  * meeting arriving a minute behind is the notes not keeping up, which is the
  * shape `refusedTooLong` already reports from the other side.
+ *
+ * THE ONE REAL MEASUREMENT SO FAR SITS UNDER IT, and that is worth knowing
+ * before trusting this bar. A replay of a real 169-turn meeting scores nine
+ * late ticks in seventy-one — 13%, under this bar — with a median of 21s and
+ * a worst of 254s (`test/fixtures/notes-timing-replay.jsonl`, asserted in
+ * `notes-tick-timing-real.test.ts`). So this bar catches a meeting that is
+ * late THROUGHOUT and not one that is late in a long tail. Whether a tail
+ * like that deserves its own bar — a median over some ceiling, say — is a
+ * judgement nobody has enough meetings to make yet, and one file is not a
+ * distribution. Deliberately left alone rather than tuned to it.
  */
 export const MAX_LATE_NOTE_SHARE = 0.2;
 
