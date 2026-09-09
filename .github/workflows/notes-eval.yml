@@ -27,9 +27,16 @@ name: Notes eval smoke
 # IT HOLDS NO SECRET. `id-token: write` lets the job ask GitHub for a
 # short-lived token proving which repository, ref and workflow is running;
 # the Console's federation rule trades that for an access token good for
-# this run. The four ids below are configuration, not credentials — they
-# name which rule, org, service account and workspace the exchange lands
-# in, and none of them authenticates anything on its own.
+# this run.
+#
+# The four ids come from repository VARIABLES rather than from this file.
+# They are configuration, not credentials — they name which rule, org,
+# service account and workspace the exchange lands in, and none
+# authenticates anything alone — but this repository is public, and the
+# leak scanner objected to them sitting in the tree. Whether they are safe
+# to publish is not a question this workflow needs anybody to answer, so it
+# does not ask it. Set them once in Settings → Secrets and variables →
+# Actions → Variables.
 #
 # The full run is `bun run notes:eval`, on demand, from somebody's machine.
 
@@ -50,10 +57,10 @@ jobs:
       id-token: write
       contents: read
     env:
-      ANTHROPIC_FEDERATION_RULE_ID: fdrl_013msPwNo3psCS2ktphzuyor
-      ANTHROPIC_ORGANIZATION_ID: be49e552-0cfa-4075-80ea-9f297c05aa18
-      ANTHROPIC_SERVICE_ACCOUNT_ID: svac_017e7raEcSZnhUV6b5v9tenX
-      ANTHROPIC_WORKSPACE_ID: wrkspc_01X9H3UXsUDZNv3LGokWPS5s
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -69,6 +76,25 @@ jobs:
             const jwt = await core.getIDToken('https://api.anthropic.com');
             core.setSecret(jwt);
             core.exportVariable('ANTHROPIC_OIDC_JWT', jwt);
+      - name: Check the four repository variables are set
+        run: |
+          set -euo pipefail
+          # An unset variable expands to the empty string, so without this the
+          # exchange fails with a message about the request rather than about
+          # the setup, and the person reading the log goes looking in the
+          # wrong place. Names only — a value printed here is a value
+          # published, which is the whole reason they live in variables.
+          missing=
+          for name in ANTHROPIC_FEDERATION_RULE_ID ANTHROPIC_ORGANIZATION_ID \
+                      ANTHROPIC_SERVICE_ACCOUNT_ID ANTHROPIC_WORKSPACE_ID; do
+            if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Unset repository variable(s):$missing. Set them under"
+            echo "Settings → Secrets and variables → Actions → Variables. They are"
+            echo "configuration, not secrets, and this job cannot mint a token without them."
+            exit 1
+          fi
       - name: Exchange that identity for a short-lived access token
         run: |
           set -euo pipefail
