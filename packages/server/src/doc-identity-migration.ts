@@ -265,15 +265,18 @@ export interface RevertResult {
 export function revert(dataDir: string, registry: RepoRegistry): RevertResult {
   const journal = readJournal(dataDir);
   const out: RevertResult = { released: 0, runs: journal.runs.length, mergesLeftInPlace: 0 };
+  // Two runs over one corpus record the same claim twice, so count KEYS, not
+  // journal lines: a revert that reported 822 releases of 411 keys reads as
+  // twice the change it made.
+  const released = new Set<string>();
   registry.beginBatch();
   try {
     for (const run of journal.runs) {
       for (const claim of run.claims) {
-        registry.releaseKey(claim.docKey);
-        out.released++;
-        for (const alias of claim.aliasKeys) {
-          registry.releaseKey(alias);
-          out.released++;
+        for (const key of [claim.docKey, ...claim.aliasKeys]) {
+          if (released.has(key)) continue;
+          registry.releaseKey(key);
+          released.add(key);
         }
       }
       out.mergesLeftInPlace += run.merges.length;
@@ -281,6 +284,7 @@ export function revert(dataDir: string, registry: RepoRegistry): RevertResult {
   } finally {
     registry.endBatch();
   }
+  out.released = released.size;
   journal.runs = [];
   writeJournal(dataDir, journal);
   return out;
