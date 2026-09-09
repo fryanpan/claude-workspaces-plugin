@@ -10,6 +10,11 @@ import {
 } from '../../core/src/prose.ts';
 import type { RosterVoice } from '../../core/src/speaker-roster.ts';
 import { mountSpeakerReassign } from '../src/speaker-reassign-menu.ts';
+import { createDocSpeakersCache } from '../src/speaker-voices.ts';
+
+/** A JSON response the roster loader will accept. */
+const okRes = (body: unknown) =>
+  ({ ok: true, status: 200, json: () => Promise.resolve(body) }) as unknown as Response;
 
 const VOICES = [
   // A is still anonymous — `name` is its placeholder and it has no `given`,
@@ -369,6 +374,43 @@ describe('opening on the roster already in hand — Bryan, 2026-09-09: "annoying
     await clickTag(editor);
     await vi.waitFor(() => expect(rows()).toHaveLength(3));
     expect(rows()[2]?.textContent).toContain('Marisol');
+  });
+
+  /**
+   * The menu opens on the cache, so the cache must never hold a meeting the
+   * doc has moved on from. Codex's finding: a doc that starts a second
+   * meeting went on painting the first meeting's voices as clickable
+   * reassignment targets until the refresh landed, and a tap in that window
+   * moved a note onto somebody from a meeting that was already over.
+   */
+  it('offers no voice from the meeting before the one now running', async () => {
+    history.replaceState(null, '', '/workspaces/w-1/docs/d-1');
+    const roster = (id: string, speakers: Record<string, string>) => [
+      okRes({ meetings: [{ meetingId: id, startedAt: 5, speakers }] }),
+      okRes({ speakers, transcript: [{ text: 'Move the gate.', speaker: 'A' }] }),
+    ];
+    const pages = roster('m-1', { A: 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    await cache.load();
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Rowan']);
+
+    // A second meeting starts on this doc. Its id is not known yet.
+    cache.meetingChanged(null);
+    pages.push(...roster('m-2', { A: 'Priya' }));
+
+    const { editor } = mount('- [@Rowan](speaker:A) wants the gate.\n', [], {
+      loadVoices: () => cache.load().then((held) => held?.voices ?? []),
+      cachedVoices: () => cache.peek()?.voices ?? null,
+    });
+    tagEl(editor).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    // Nothing to tap: the old meeting's cast is not an answer to "who is
+    // speaking now", and the menu waits rather than offering it.
+    expect(rows()).toHaveLength(0);
+    expect(document.querySelector('.speaker-menu-list')?.textContent).toContain('Loading');
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows()[0]?.textContent).toContain('Priya');
+    expect(rows().map((r) => r.textContent).join(' ')).not.toContain('Rowan');
   });
 
   it('still opens on a wait when there is no cache to open on', async () => {

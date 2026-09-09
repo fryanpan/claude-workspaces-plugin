@@ -302,6 +302,7 @@ function mount(
     engine?: 'assemblyai' | 'soniox';
     listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
     loadSpeakers?: () => Promise<DocSpeakers | null>;
+    onMeetingChange?: (meetingId: string | null) => void;
     loadTranscript?: () => Promise<{ lines: string[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
@@ -914,6 +915,25 @@ describe('the strip when no words are coming', () => {
     }
     expect(h.root.dataset.state).toBe('error');
     expect(h.note()).toMatch(/connection/i);
+  });
+
+  /**
+   * Whoever holds a roster for this doc has to be told the moment the doc
+   * moves between meetings — otherwise the reassign menu keeps offering the
+   * last meeting's voices as targets for a note being written in this one.
+   * A start says "a meeting, id unknown"; `ready` names it; a stop leaves the
+   * meeting that just ended as the doc's current one.
+   */
+  it('says which meeting the doc is in, at every boundary', async () => {
+    const onMeetingChange = vi.fn();
+    const h = mount(undefined, { onMeetingChange });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null]);
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
+    expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null, 'm2', 'm2']);
   });
 
   it('settles to idle when the server reports the meeting stopped', async () => {
