@@ -67,6 +67,7 @@ import {
   type NotesReattribution,
   type NotesRelabel,
   type NotesUpdate,
+  type NotesWriteRefusal,
 } from './meeting-notes.ts';
 import {
   type ResearchFiled,
@@ -938,14 +939,18 @@ export function withServerNotesSinks(
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
       heading.headingId({ docId, meetingId }, outline),
-    onNotes: (update: NotesUpdate): boolean => {
-      let landed = true;
+    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
+      let landed: boolean | NotesWriteRefusal = true;
       try {
         const skip = applyNotesUpdate(deps.docStore(), update, heading, {
           ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
         });
         if (skip !== null) {
-          landed = false;
+          // A GUARD REFUSAL REACHES THE SESSION AS A REFUSAL, not as a failed
+          // write. `guard-refused` already says the batch was declined on
+          // policy; this is what stops the session composing the same tick
+          // again to be declined again.
+          landed = skip === 'guard-refused' ? 'refused' : false;
           // The reason, the doc, the meeting and the tick. The line this
           // replaces named only the doc, so a meeting whose notes stopped
           // could not be told from a doc that had been deleted.
