@@ -65,10 +65,16 @@ export interface RepoIdentity {
  *     git@github.com:example/widgets.git
  *     ssh://git@github.com/example/widgets/
  *
- * All four normalise to `github.com/example/widgets`. Lowercased, because the
- * hosts that matter treat their paths case-insensitively and a doc that
- * changes identity when somebody types `GitHub.com` is a bug rather than a
- * distinction.
+ * All four normalise to `github.com/example/widgets`.
+ *
+ * **The HOST is lowercased; the path is not.** A host is case-insensitive by
+ * the DNS rules, so a doc that changes identity when somebody types
+ * `GitHub.com` is a bug. A path is not: git serves `host/Team/Widget` and
+ * `host/team/widget` as two repositories on a case-sensitive server, and
+ * folding them together would put two projects' documents on one key. The
+ * hosts most people use happen to be case-insensitive about paths too, and
+ * the cost of being wrong in that direction is only a re-key that the alias
+ * table already absorbs.
  *
  * Returns null for a string that carries no host and no path — an empty
  * remote is not an identity, and keying on it would merge every repo that has
@@ -88,7 +94,9 @@ export function normalizeRemoteUrl(url: string): string | null {
   s = s.replace(/\.git$/, '');
   s = s.replace(/\/+$/, '');
   if (s === '') return null;
-  return s.toLowerCase();
+  const slash = s.indexOf('/');
+  const host = (slash === -1 ? s : s.slice(0, slash)).toLowerCase();
+  return slash === -1 ? host : `${host}${s.slice(slash)}`;
 }
 
 /**

@@ -133,6 +133,116 @@ describe('RepoRegistry', () => {
     expect(reg.docIdFor(after)).toBe('d-first');
   });
 
+  it('a changed origin re-keys the repo it already had, and its docs follow', () => {
+    // Every component of a repoKey is mutable, which is why keys are a lookup
+    // table rather than an address. A `git remote set-url` used to produce a
+    // SECOND repo record with no path from the old key to the new one, and
+    // the next bind of a file that already had a document minted another.
+    reg.registerCheckout(main);
+    reg.claim(keyIn(main), 'd-first');
+    const oldKey = keyIn(main);
+
+    git(main, 'remote', 'set-url', 'origin', 'git@github.com:example/gadgets.git');
+    reg.registerCheckout(main);
+    const newKey = keyIn(main);
+    expect(newKey).not.toBe(oldKey);
+
+    // One record, re-keyed, with the old spelling kept.
+    const repos = reg.listRepos();
+    expect(repos).toHaveLength(1);
+    expect(repos[0]?.repoKey).toBe('git:github.com/example/gadgets');
+    expect(repos[0]?.aliasKeys).toContain('git:github.com/example/widgets');
+    // And the document is reachable under BOTH spellings, which is what stops
+    // the next bind minting a duplicate.
+    expect(reg.docIdFor(newKey)).toBe('d-first');
+    expect(reg.docIdFor(oldKey)).toBe('d-first');
+    // The doc now holds both spellings, and the one it reports is the current
+    // one — a status surface that printed the retired key would send a person
+    // looking for a remote that no longer exists.
+    expect(reg.primaryKeyFor('d-first')).toBe(newKey);
+    expect(reg.docIdForPath(join(main, 'docs/plan.md'))).toBe('d-first');
+    // The worktree resolves through the re-key too — it is the same repo.
+    expect(reg.docIdForPath(join(wt, 'docs/plan.md'))).toBe('d-first');
+  });
+
+  it('CONTROL: a genuinely different repo still gets its own record', () => {
+    // Without this, "always reuse the record" would pass by merging every
+    // repository on the machine into one.
+    reg.registerCheckout(main);
+    const other = join(tmp, 'other-repo');
+    mkdirSync(other);
+    git(other, 'init', '-b', 'main');
+    git(other, 'remote', 'add', 'origin', 'git@github.com:example/gadgets.git');
+    reg.registerCheckout(other);
+    expect(reg.listRepos()).toHaveLength(2);
+  });
+
+  it('a re-key that swings back does not build an alias cycle', () => {
+    // A cycle makes `resolveKey` answer whichever end it was asked from, and
+    // this is the way one gets written: a remote changed and changed back.
+    // The record has to exist under the FIRST spelling, or there is nothing
+    // for the swing back to alias against.
+    reg.registerCheckout(main);
+    reg.claim(keyIn(main), 'd-first');
+    const widgets = keyIn(main);
+    git(main, 'remote', 'set-url', 'origin', 'git@github.com:example/gadgets.git');
+    reg.noteCheckout(join(main, 'docs/plan.md'));
+    git(main, 'remote', 'set-url', 'origin', 'git@github.com:example/widgets.git');
+    reg.noteCheckout(join(main, 'docs/plan.md'));
+    expect(reg.docIdFor(widgets)).toBe('d-first');
+    expect(reg.docIdForPath(join(main, 'docs/plan.md'))).toBe('d-first');
+    expect(reg.listRepos()[0]?.aliasKeys).not.toContain('git:github.com/example/widgets');
+    // The alias graph still terminates. A cycle answers whichever end it was
+    // asked from and only shows up as a "chain too deep" line in a log
+    // nobody is reading, so it is asserted on the table itself.
+    const aliases = reg.snapshot().docKeyAliases;
+    for (const start of Object.keys(aliases)) {
+      const seen = new Set<string>();
+      let key: string | undefined = start;
+      while (key !== undefined && aliases[key] !== undefined) {
+        expect(seen.has(key)).toBe(false);
+        seen.add(key);
+        key = aliases[key];
+      }
+    }
+  });
+
+  it('restore throws away everything a batch changed, without writing', () => {
+    // The rollback the migration commits through: a run refused halfway must
+    // leave no filed key behind, on disk or in memory.
+    reg.claim(keyIn(main), 'd-first');
+    const snapshot = reg.snapshot();
+    reg.beginBatch();
+    reg.claim(`${keyIn(main)}-other`, 'd-second');
+    reg.restore(snapshot);
+    expect(reg.docIdFor(`${keyIn(main)}-other`)).toBeUndefined();
+    // The claim that was already committed is untouched, and a fresh registry
+    // over the same file reads exactly that.
+    expect(reg.docIdFor(keyIn(main))).toBe('d-first');
+    const reopened = new RepoRegistry(dataDir);
+    expect(reopened.docIdFor(keyIn(main))).toBe('d-first');
+    expect(reopened.docIdFor(`${keyIn(main)}-other`)).toBeUndefined();
+  });
+
+  it('keysFor follows a chain to the end, not one hop', () => {
+    // A rename recorded before the doc existed, then another rename. The
+    // middle key holds no doc of its own, so a one-hop scan drops the OLDEST
+    // spelling — the one most likely to be in somebody's saved link — and
+    // whether it does depends on the order the table happens to be in.
+    const first = keyIn(main);
+    git(main, 'mv', 'docs/plan.md', 'docs/interim.md');
+    const middle = docKeyForPath(join(main, 'docs/interim.md'))?.docKey as string;
+    reg.aliasKey(first, middle);
+    git(main, 'mv', 'docs/interim.md', 'docs/final.md');
+    const last = docKeyForPath(join(main, 'docs/final.md'))?.docKey as string;
+    reg.claim(last, 'd-first');
+    reg.aliasKey(middle, last);
+
+    expect(reg.keysFor('d-first').sort()).toEqual([first, middle, last].sort());
+    // CONTROL: a key that leads nowhere near this doc is not swept in.
+    expect(reg.keysFor('d-first')).not.toContain(`${first}-unrelated`);
+  });
+
   it('resolves a key that exists ONLY as an alias, through a chain of them', () => {
     // The rename case above claims the old key first, so it would answer
     // without ever following an alias. This is the shape that cannot: a key

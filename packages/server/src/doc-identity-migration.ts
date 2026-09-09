@@ -2,13 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { listThreads, readDocMeta } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  type DocRow,
-  type KeyClaim,
-  type Merge,
-  type Plan,
-  type PlanIo,
-} from './doc-identity-plan.ts';
+import { type JournalEntry, readJournal, writeJournal } from './doc-identity-journal.ts';
+import { type DocRow, type Merge, type Plan, type PlanIo } from './doc-identity-plan.ts';
 import { gitRenameOf } from './doc-identity-renames.ts';
 import {
   DOC_INDEX_VERSION,
@@ -20,52 +15,6 @@ import {
 import { docKeyForPath } from './doc-key.ts';
 import { type ThreadMergeResult, mergeThreads } from './doc-thread-merge.ts';
 import type { RepoRegistry } from './repo-registry.ts';
-
-export const JOURNAL_FILE = 'doc-identity-migration.json';
-
-export interface JournalEntry {
-  ranAt: number;
-  /** What the plan intended, for a person reading the record. */
-  claims: KeyClaim[];
-  /**
-   * The keys THIS RUN actually wrote — canonical keys it filed and aliases it
-   * recorded, and nothing else.
-   *
-   * `revert` releases exactly these. It used to release everything the plan
-   * named, which meant a revert deleted the identity of any file the live
-   * server had claimed in the meantime, and the next bind from a second
-   * checkout minted the duplicate this whole feature exists to prevent. A
-   * journal from before this field releases nothing, which is the safe
-   * direction to fail in.
-   */
-  keysFiled: string[];
-  merges: Array<Merge & { copied: number; reanchored: number; orphaned: number; skipped: number }>;
-  unresolved: string[];
-}
-
-export interface Journal {
-  version: number;
-  runs: JournalEntry[];
-}
-
-export function readJournal(dataDir: string): Journal {
-  const path = join(dataDir, JOURNAL_FILE);
-  if (!existsSync(path)) return { version: 1, runs: [] };
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Journal;
-    if (!parsed || !Array.isArray(parsed.runs)) return { version: 1, runs: [] };
-    return parsed;
-  } catch {
-    return { version: 1, runs: [] };
-  }
-}
-
-function writeJournal(dataDir: string, journal: Journal): void {
-  const path = join(dataDir, JOURNAL_FILE);
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, JSON.stringify(journal, null, 2), { mode: 0o600 });
-  writeFileSync(path, readFileSync(tmp));
-}
 
 const ydocPath = (dataDir: string, docId: string): string => join(dataDir, `${docId}.ydoc`);
 
@@ -234,6 +183,14 @@ export function applyPlan(
   /** Who actually holds each key after the claims — not always the plan's pick. */
   const holderOf = new Map<string, string>();
   const conflicted: Array<{ docKey: string; planned: string; holder: string }> = [];
+  // ONE commit point for the whole run. The claims used to be persisted the
+  // moment they were filed, so a merge that failed parity left the registry
+  // holding keys the journal never recorded — filed, unrevertable, and
+  // pointing at documents whose conversations had not been copied. The batch
+  // now stays open across the merges: the journal is written first, the
+  // registry is persisted after it, and any throw restores the snapshot below
+  // and writes nothing at all.
+  const before = registry.snapshot();
   registry.beginBatch();
   try {
     for (const claim of plan.claims) {
@@ -269,8 +226,9 @@ export function applyPlan(
         }
       }
     }
-  } finally {
-    registry.endBatch();
+  } catch (err) {
+    registry.restore(before);
+    throw err;
   }
 
   // A merge follows the KEY, not the plan's pick. If a doc claimed the key
@@ -296,6 +254,52 @@ export function applyPlan(
   }
 
   const journalMerges: JournalEntry['merges'] = [];
+  try {
+    runMerges(dataDir, effective, mergeInto, out, journalMerges, load);
+  } catch (err) {
+    // The `.ydoc` merges that already landed stay: copying a conversation is
+    // additive and a re-run skips what is already there, so the corpus is
+    // consistent either way. The registry is what must not survive a refused
+    // run, because a filed key with no journal entry cannot be given back.
+    registry.restore(before);
+    throw err;
+  }
+
+  // The journal write is inside the rollback too: a run whose record cannot
+  // be written must not leave keys filed that nothing can release.
+  try {
+    const journal = readJournal(dataDir);
+    journal.runs.push({
+      ranAt: Date.now(),
+      claims: plan.claims,
+      keysFiled,
+      merges: journalMerges,
+      unresolved: plan.unresolved,
+    });
+    writeJournal(dataDir, journal);
+  } catch (err) {
+    registry.restore(before);
+    throw err;
+  }
+  // Journal FIRST, then the registry. Between the two writes the safe
+  // direction to fail is a journal naming keys that were never filed —
+  // releasing one is a no-op — rather than filed keys nothing can release.
+  registry.endBatch();
+  return out;
+}
+
+/**
+ * The merge half, lifted out so `applyPlan` reads as what it now is: file the
+ * claims, merge, then commit both records together.
+ */
+function runMerges(
+  dataDir: string,
+  effective: Merge[],
+  mergeInto: (from: Y.Doc, into: Y.Doc) => ThreadMergeResult,
+  out: ApplyResult,
+  journalMerges: JournalEntry['merges'],
+  load: (docId: string) => Y.Doc | null,
+): void {
   for (const merge of effective) {
     const winner = load(merge.winner);
     if (!winner) {
@@ -329,7 +333,13 @@ export function applyPlan(
       );
     }
     saveYdoc(dataDir, merge.winner, winner);
-    if (refreshIndexRow(dataDir, merge.winner, winner)) out.indexRowsRefreshed++;
+    try {
+      if (refreshIndexRow(dataDir, merge.winner, winner)) out.indexRowsRefreshed++;
+    } catch (err) {
+      // A row is a cache of the `.ydoc`, which is already written. Failing to
+      // refresh it is worth saying and not worth losing the run over.
+      console.error('[migrate-doc-identity] could not refresh the index row for a winner:', err);
+    }
     out.merged++;
     out.threadsCopied += totals.copied;
     out.threadsOrphaned += totals.orphaned;
@@ -337,69 +347,10 @@ export function applyPlan(
     out.parity.push({ docKey: merge.docKey, before: before + incoming, after });
     journalMerges.push({ ...merge, ...totals });
   }
-
-  const journal = readJournal(dataDir);
-  journal.runs.push({
-    ranAt: Date.now(),
-    claims: plan.claims,
-    keysFiled,
-    merges: journalMerges,
-    unresolved: plan.unresolved,
-  });
-  writeJournal(dataDir, journal);
-  return out;
 }
 
 function threadCount(doc: Y.Doc): number {
   return (doc.getMap('threads') as Y.Map<unknown>).size;
-}
-
-export interface RevertResult {
-  released: number;
-  runs: number;
-  /** Conversations copied into a winner are LEFT there — see below. */
-  mergesLeftInPlace: number;
-}
-
-/**
- * Undo the identity half.
- *
- * Every key this migration claimed is released, so the corpus is back to
- * where it was: ids unchanged, comments unchanged, no key pointing anywhere.
- *
- * The copied conversations are deliberately left. Undoing a copy means
- * DELETING threads, and by then somebody may have replied on one — the reply
- * would be the thing destroyed. The losing document still holds its own
- * originals, so nothing is lost by leaving the copies; re-running the
- * migration skips them by id rather than duplicating them. The journal
- * records which merges those were, so a person can act on any of them by
- * hand.
- */
-export function revert(dataDir: string, registry: RepoRegistry): RevertResult {
-  const journal = readJournal(dataDir);
-  const out: RevertResult = { released: 0, runs: journal.runs.length, mergesLeftInPlace: 0 };
-  // Only the keys a run actually wrote, and each of them once. Releasing what
-  // the PLAN named would delete a claim the live server made in the meantime,
-  // and a document that silently loses its key is a duplicate on the next
-  // bind. Two runs over one corpus name the same key twice, so count keys.
-  const released = new Set<string>();
-  registry.beginBatch();
-  try {
-    for (const run of journal.runs) {
-      for (const key of run.keysFiled ?? []) {
-        if (released.has(key)) continue;
-        registry.releaseKey(key);
-        released.add(key);
-      }
-      out.mergesLeftInPlace += run.merges.length;
-    }
-  } finally {
-    registry.endBatch();
-  }
-  out.released = released.size;
-  journal.runs = [];
-  writeJournal(dataDir, journal);
-  return out;
 }
 
 /** The io the real run uses: the data dir, the filesystem, and git. */

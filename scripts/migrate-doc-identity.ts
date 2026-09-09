@@ -18,12 +18,8 @@
  */
 
 import { existsSync } from 'node:fs';
-import {
-  applyPlan,
-  liveIo,
-  reportLines,
-  revert,
-} from '../packages/server/src/doc-identity-migration.ts';
+import { revert } from '../packages/server/src/doc-identity-journal.ts';
+import { applyPlan, liveIo, reportLines } from '../packages/server/src/doc-identity-migration.ts';
 import { planMigration } from '../packages/server/src/doc-identity-plan.ts';
 import { RepoRegistry } from '../packages/server/src/repo-registry.ts';
 

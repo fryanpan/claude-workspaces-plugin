@@ -1,7 +1,34 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { type DocKeyParts, docKeyForPath, listRepoWorktrees, repoIdentityAt } from './doc-key.ts';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  DOC_KEY_SEP,
+  type DocKeyParts,
+  docKeyForPath,
+  listRepoWorktrees,
+  makeDocKey,
+  parseDocKey,
+  repoIdentityAt,
+} from './doc-key.ts';
 import { findWorktreeRoot, gitCommonDir } from './doc-origin-repo.ts';
+import {
+  REPO_REGISTRY_FILE,
+  type RegisteredCheckout,
+  type RepoRecord,
+  type RepoRegistryFile,
+  readRegistryFile,
+  writeRegistryFile,
+} from './repo-registry-file.ts';
+
+/** Alias chains are followed, so a bounded walk is the guard against a cycle
+ *  written by a hand-edited file. Depth beyond this means the file is wrong. */
+const MAX_ALIAS_HOPS = 8;
+
+export {
+  REPO_REGISTRY_FILE,
+  type RegisteredCheckout,
+  type RepoRecord,
+  type RepoRegistryFile,
+} from './repo-registry-file.ts';
 
 /**
  * Which docId a repo+path key resolves to, and which checkouts of a repo the
@@ -24,50 +51,6 @@ import { findWorktreeRoot, gitCommonDir } from './doc-origin-repo.ts';
  * with a `removedAt`. That is the project-wide soft-delete rule, and it is
  * also what makes the migration reversible.
  */
-
-export const REPO_REGISTRY_FILE = 'repos.json';
-const REGISTRY_VERSION = 1;
-
-/** Alias chains are followed, so a bounded walk is the guard against a cycle
- *  written by a hand-edited file. Depth beyond this means the file is wrong. */
-const MAX_ALIAS_HOPS = 8;
-
-export interface RegisteredCheckout {
-  /** Absolute path to the checkout root. */
-  root: string;
-  addedAt: number;
-  /** Last time we saw this checkout actually exist. */
-  lastSeenAt: number;
-  /** Set when the lead unregistered it, or when it stopped existing. The row
-   *  stays: it is how a doc bound there still names where it came from. */
-  removedAt?: number;
-  /** Did a person register this, or did we learn it from a bind? A registered
-   *  checkout is one the lead vouched for; a learned one is a fact. */
-  registered: boolean;
-}
-
-export interface RepoRecord {
-  repoKey: string;
-  /** Keys this repo has answered to before — a renamed remote, a moved
-   *  no-remote checkout. Reads follow them; writes only ever add. */
-  aliasKeys: string[];
-  mainRoot: string;
-  checkouts: RegisteredCheckout[];
-  remoteUrl?: string;
-}
-
-export interface RepoRegistryFile {
-  version: number;
-  repos: RepoRecord[];
-  /** `<repoKey>NUL<relPath>` → docId. */
-  docKeys: Record<string, string>;
-  /** An old docKey → the docKey that replaced it (a rename, or a re-key). */
-  docKeyAliases: Record<string, string>;
-}
-
-function emptyFile(): RepoRegistryFile {
-  return { version: REGISTRY_VERSION, repos: [], docKeys: {}, docKeyAliases: {} };
-}
 
 export type ClaimResult =
   /** The key was free and now points at this doc. */
@@ -111,53 +94,16 @@ export class RepoRegistry {
 
   constructor(dataDir: string) {
     this.path = join(dataDir, REPO_REGISTRY_FILE);
-    this.data = RepoRegistry.read(this.path);
+    this.data = readRegistryFile(this.path);
   }
 
-  /** Read the file, or start empty. A corrupt file is NOT overwritten on
-   *  sight — it is kept beside the new one, because the alternative is
-   *  silently discarding every doc's identity on one bad parse. */
-  private static read(path: string): RepoRegistryFile {
-    if (!existsSync(path)) return emptyFile();
-    try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<RepoRegistryFile>;
-      return {
-        version: typeof parsed.version === 'number' ? parsed.version : REGISTRY_VERSION,
-        repos: Array.isArray(parsed.repos) ? parsed.repos : [],
-        docKeys: parsed.docKeys && typeof parsed.docKeys === 'object' ? parsed.docKeys : {},
-        docKeyAliases:
-          parsed.docKeyAliases && typeof parsed.docKeyAliases === 'object'
-            ? parsed.docKeyAliases
-            : {},
-      };
-    } catch (err) {
-      const kept = `${path}.corrupt-${Date.now()}`;
-      try {
-        renameSync(path, kept);
-        console.error(`[repo-registry] ${path} did not parse; kept it at ${kept}:`, err);
-      } catch {
-        console.error(`[repo-registry] ${path} did not parse and could not be moved aside:`, err);
-      }
-      return emptyFile();
-    }
-  }
-
-  /** Write temp-then-rename, so a crash mid-write leaves the old file rather
-   *  than half of a new one. Mode 600: it is a map of the host's filesystem. */
+  /** Persist unless a batch is holding writes. */
   private persist(): void {
     if (this.deferred) {
       this.dirty = true;
       return;
     }
-    const tmp = `${this.path}.tmp`;
-    try {
-      mkdirSync(dirname(this.path), { recursive: true });
-      writeFileSync(tmp, `${JSON.stringify(this.data, null, 2)}\n`, { mode: 0o600 });
-      renameSync(tmp, this.path);
-      this.dirty = false;
-    } catch (err) {
-      console.error(`[repo-registry] could not write ${this.path}:`, err);
-    }
+    if (writeRegistryFile(this.path, this.data)) this.dirty = false;
   }
 
   /** Hold writes until `endBatch`. One fsync for a migration over thousands
@@ -169,6 +115,20 @@ export class RepoRegistry {
   endBatch(): void {
     this.deferred = false;
     if (this.dirty) this.persist();
+  }
+
+  /**
+   * Throw away everything a batch changed and go back to a snapshot.
+   *
+   * The rollback half of `beginBatch`. Deferred writes have touched memory
+   * and not the file, so restoring memory and NOT persisting is a true undo —
+   * which is what makes "file the claims, then merge, and keep neither if the
+   * merge is refused" possible. Ends the batch: a rolled-back run is over.
+   */
+  restore(snapshot: RepoRegistryFile): void {
+    this.data = JSON.parse(JSON.stringify(snapshot)) as RepoRegistryFile;
+    this.dirty = false;
+    this.deferred = false;
   }
 
   /** The whole file, for the migration and for tests. Cloned, so a caller
@@ -242,6 +202,11 @@ export class RepoRegistry {
     if (oldKey === newKey) return { ok: true, aliased: false };
     const from = this.resolveKey(oldKey);
     if (from === newKey) return { ok: true, aliased: false };
+    // A key that already resolves BACK to this one would close a cycle, and a
+    // cycle makes `resolveKey` answer whichever end it was asked from. It
+    // happens for real: a repo that changes its remote and changes it back.
+    // The keys already resolve to one document, so there is nothing to add.
+    if (this.resolveKey(newKey) === from) return { ok: true, aliased: false };
     const docId = this.data.docKeys[from];
     const heldByNew = this.data.docKeys[newKey];
     if (docId !== undefined && heldByNew !== undefined && heldByNew !== docId) {
@@ -260,8 +225,13 @@ export class RepoRegistry {
   keysFor(docId: string): string[] {
     const current = Object.keys(this.data.docKeys).filter((k) => this.data.docKeys[k] === docId);
     const set = new Set(current);
-    for (const [from, to] of Object.entries(this.data.docKeyAliases)) {
-      if (set.has(to)) set.add(from);
+    // Follow each alias to the END of its chain, not one hop. A file renamed
+    // twice, or renamed inside a repo that later changed its remote, leaves a
+    // two-hop chain — and the one-hop version silently dropped the oldest
+    // spelling, which is exactly the link most likely to be in somebody's
+    // saved URL.
+    for (const from of Object.keys(this.data.docKeyAliases)) {
+      if (set.has(this.resolveKey(from))) set.add(from);
     }
     return [...set].sort();
   }
@@ -276,10 +246,17 @@ export class RepoRegistry {
    * six thousand documents to say what one table already knows.
    */
   primaryKeyFor(docId: string): string | undefined {
+    let aliased: string | undefined;
     for (const [key, held] of Object.entries(this.data.docKeys)) {
-      if (held === docId) return key;
+      if (held !== docId) continue;
+      // A doc holds both spellings after a re-key. The CURRENT one is the key
+      // that is not itself aliased away; the old one is kept only as a
+      // fallback, so this never answers `undefined` for a doc that holds a
+      // key nobody has re-keyed forward yet.
+      if (this.resolveKey(key) === key) return key;
+      aliased ??= key;
     }
-    return undefined;
+    return aliased;
   }
 
   /** Drop a key claim — the migration's `--revert`, and nothing else. Never
@@ -298,18 +275,77 @@ export class RepoRegistry {
     return this.data.repos.find((r) => r.repoKey === repoKey || r.aliasKeys.includes(repoKey));
   }
 
-  /** The repo record for a key, creating it from a live checkout if we can. */
-  private upsertRepo(parts: Pick<DocKeyParts, 'repoKey' | 'identity'>): RepoRecord {
-    const existing = this.repoFor(parts.repoKey);
-    if (existing) {
-      // A repo whose main checkout moved keeps its record and gains the new
-      // spelling; the old key stays in aliasKeys so old rows still resolve.
-      if (existing.repoKey !== parts.repoKey) {
-        if (!existing.aliasKeys.includes(existing.repoKey)) {
-          existing.aliasKeys.push(existing.repoKey);
-        }
-        existing.repoKey = parts.repoKey;
+  /**
+   * The record for a repo we are standing IN, found by where it is rather
+   * than by what it is called.
+   *
+   * Every component of a repoKey is mutable — that is the premise the whole
+   * feature is built on — so a lookup by key alone misses the case it exists
+   * for. Change a repo's `origin` and the derived key is new, the key lookup
+   * finds nothing, a SECOND record appears, and the next bind of a file that
+   * already has a document mints another one: exactly the duplicate this
+   * feature removes, reintroduced by a `git remote set-url`.
+   *
+   * The place is what stayed the same, so the place is what is matched: the
+   * main checkout, or any checkout row the registry already holds.
+   */
+  private repoAtRoot(mainRoot: string, checkoutRoot?: string): RepoRecord | undefined {
+    return this.data.repos.find(
+      (r) =>
+        r.mainRoot === mainRoot ||
+        r.checkouts.some(
+          (c) => c.root === mainRoot || (checkoutRoot !== undefined && c.root === checkoutRoot),
+        ),
+    );
+  }
+
+  /**
+   * Give an existing record a new canonical key, keeping the old one working.
+   *
+   * Two writes, and the second is the one that matters. The record gains the
+   * new spelling and keeps the old in `aliasKeys`, so a row that still names
+   * the old repoKey resolves. And every docKey filed under the old repoKey is
+   * aliased forward to its spelling under the new one — without that, the
+   * record would be findable while every document in it was not, and the next
+   * bind would mint a duplicate under the new key.
+   */
+  private adoptRepoKey(existing: RepoRecord, newKey: string): void {
+    const oldKey = existing.repoKey;
+    if (oldKey === newKey) return;
+    if (!existing.aliasKeys.includes(oldKey)) existing.aliasKeys.push(oldKey);
+    // The record must not alias its own current key: this repo has been keyed
+    // this way before, and the alias list is what it USED to be called.
+    existing.aliasKeys = existing.aliasKeys.filter((k) => k !== newKey);
+    existing.repoKey = newKey;
+    const prefix = `${oldKey}${DOC_KEY_SEP}`;
+    for (const docKey of Object.keys(this.data.docKeys)) {
+      if (!docKey.startsWith(prefix)) continue;
+      const parsed = parseDocKey(docKey);
+      if (!parsed) continue;
+      const res = this.aliasKey(docKey, makeDocKey(newKey, parsed.relPath));
+      if (!res.ok) {
+        // Two documents, one on each spelling of the key. Refusing is the
+        // same rule `aliasKey` states: a merge is somebody's decision, not a
+        // table write nobody sees.
+        console.error(
+          `[repo-registry] ${docKey} could not follow the re-key: ${res.docId} already holds the new spelling`,
+        );
       }
+    }
+  }
+
+  /** The repo record for a key, creating it from a live checkout if we can. */
+  private upsertRepo(
+    parts: Pick<DocKeyParts, 'repoKey' | 'identity'>,
+    checkoutRoot?: string,
+  ): RepoRecord {
+    const existing =
+      this.repoFor(parts.repoKey) ?? this.repoAtRoot(parts.identity.mainRoot, checkoutRoot);
+    if (existing) {
+      // A repo that re-keyed — a renamed remote, a moved no-remote checkout —
+      // keeps its record, its checkouts and its documents; what changes is
+      // the spelling, and every old spelling keeps resolving.
+      this.adoptRepoKey(existing, parts.repoKey);
       existing.mainRoot = parts.identity.mainRoot;
       if (parts.identity.remoteUrl !== undefined) existing.remoteUrl = parts.identity.remoteUrl;
       return existing;
@@ -337,7 +373,7 @@ export class RepoRegistry {
     const identity = repoIdentityAt(absPathInRepo);
     const checkoutRoot = findWorktreeRoot(absPathInRepo);
     if (!identity || !checkoutRoot) return;
-    const repo = this.upsertRepo({ repoKey: identity.repoKey, identity });
+    const repo = this.upsertRepo({ repoKey: identity.repoKey, identity }, checkoutRoot);
     this.touchCheckout(repo, checkoutRoot, false);
     this.persist();
   }
@@ -370,7 +406,7 @@ export class RepoRegistry {
     const identity = repoIdentityAt(path);
     if (!identity) return { ok: false, error: 'not-a-repo' };
     const checkoutRoot = findWorktreeRoot(path) ?? identity.mainRoot;
-    const repo = this.upsertRepo({ repoKey: identity.repoKey, identity });
+    const repo = this.upsertRepo({ repoKey: identity.repoKey, identity }, checkoutRoot);
     const before = repo.checkouts.find((c) => c.root === checkoutRoot);
     const alreadyKnown = before?.registered === true && before.removedAt === undefined;
     this.touchCheckout(repo, checkoutRoot, true);

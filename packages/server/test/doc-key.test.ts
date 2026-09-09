@@ -50,7 +50,25 @@ describe('normalizeRemoteUrl', () => {
     expect(normalizeRemoteUrl('https://user@github.com/example/widgets')).toBe(want);
     expect(normalizeRemoteUrl('git@github.com:example/widgets.git')).toBe(want);
     expect(normalizeRemoteUrl('ssh://git@github.com/example/widgets/')).toBe(want);
-    expect(normalizeRemoteUrl('  https://GitHub.com/Example/Widgets.git  ')).toBe(want);
+    // The host is case-insensitive by the DNS rules, so it folds; the path
+    // does not, so it is left exactly as written.
+    expect(normalizeRemoteUrl('  https://GitHub.com/example/widgets.git  ')).toBe(want);
+  });
+
+  it('keeps two repository paths that differ only in case apart', () => {
+    // `host/Team/Widget` and `host/team/widget` are two repositories on a
+    // case-sensitive server. Folding the path would put two projects'
+    // documents on one key, which is worse than the re-key that a
+    // case-insensitive host would occasionally cause.
+    expect(normalizeRemoteUrl('git@github.com:Team/Widget.git')).toBe('github.com/Team/Widget');
+    expect(normalizeRemoteUrl('git@github.com:Team/Widget.git')).not.toBe(
+      normalizeRemoteUrl('git@github.com:team/widget.git') as string,
+    );
+    // CONTROL for the same pair: the HOST still folds, so this is a decision
+    // about paths and not a normaliser that stopped normalising.
+    expect(normalizeRemoteUrl('git@GitHub.COM:Team/Widget.git')).toBe(
+      normalizeRemoteUrl('git@github.com:Team/Widget.git') as string,
+    );
   });
 
   it('keeps different repos apart', () => {
