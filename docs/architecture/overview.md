@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
@@ -182,6 +182,25 @@ not),
 pair and are asserted to be inverses, which is what lets the editor show one
 rule as a phrase and as chips without either view being the source
 ([scheduled-tasks](scheduled-tasks.md)).
+
+**A document's identity is the repo and the path, not the checkout.** Four
+server modules hold that, and they sit in the doc-store group beside
+`doc-origin-repo.ts` because they answer the same question one layer up.
+`doc-key.ts` derives the key — the repo's origin URL (or, with no remote, its
+main directory) plus the path from the repo root — reading git's plumbing
+files directly rather than spawning anything. `repo-registry.ts` is the lookup
+table from that key to a doc id, plus the checkouts of each repo somebody has
+registered; it is a table of ALIASES, never a rename, because every component
+of a key can change and a saved link must keep resolving. `doc-copies.ts`
+looks at all the copies one key names and says which is live, which have
+drifted, and when the answer is a question rather than a value;
+`doc-live-copy.ts` is the half that acts on that verdict — moving the binding,
+recording drift, or refusing with a table of candidates for a person to choose
+from. `routes/repos.ts` is the family that exposes the registry and that
+refusal over HTTP, loopback-only for the reason the deploy route is: every
+value in it is a path on this machine. Nothing here changes how a doc id is
+minted — ids are still random and still minted in one place — so the picture
+above is unchanged: this is a lookup in front of it.
 
 **A bound mockup is a live surface, and it keeps its rounds.** A mockup's doc
 holds no content of its own — its surface is somebody's HTML file — so the four
