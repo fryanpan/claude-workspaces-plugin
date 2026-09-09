@@ -27,6 +27,8 @@
  * with a round on it.
  */
 
+import { insertScript } from './mockup-live-scripts.ts';
+
 interface Config {
   docId: string;
   workspaceId: string;
@@ -103,21 +105,6 @@ function isOurs(node: Node): boolean {
   return false;
 }
 
-/**
- * Copy a parsed `<script>` into a live one so it actually runs.
- *
- * `importNode` on a script produces an inert element — the HTML spec marks a
- * parser-created script "already started" and moving it does not restart it.
- * A mockup's own behaviour lives in those scripts, so a swap that dropped them
- * would hand the reviewer a page that looks right and does nothing.
- */
-function reviveScript(src: HTMLScriptElement): HTMLScriptElement {
-  const out = document.createElement('script');
-  for (const a of Array.from(src.attributes)) out.setAttribute(a.name, a.value);
-  out.textContent = src.textContent;
-  return out;
-}
-
 /** True for a head node that belongs to the mock rather than to the server. */
 function isMockHeadNode(node: Element): boolean {
   if (node.tagName === 'STYLE') return true;
@@ -158,13 +145,27 @@ export function swapDocument(html: string): void {
     if (!keep.includes(node)) node.remove();
   }
   const first = document.body.firstChild;
+  // Per node, because one node that will not insert must not cost the reader
+  // the rest of the round. A mock's script can still throw for reasons that
+  // are the mock's own — its round one left something in a bad state, it
+  // reads an API this browser lacks — and inserting a script RUNS it, so the
+  // throw comes out of `insertBefore`. One report at the end, not one per
+  // node: a round with fifty broken nodes is one broken round.
+  const failures: unknown[] = [];
   for (const node of Array.from(next.body.childNodes)) {
     if (isOurs(node)) continue;
-    const copy =
-      node instanceof HTMLScriptElement
-        ? reviveScript(node)
-        : (document.importNode(node, true) as Node);
-    document.body.insertBefore(copy, first);
+    try {
+      if (node instanceof HTMLScriptElement) insertScript(node, first);
+      else document.body.insertBefore(document.importNode(node, true) as Node, first);
+    } catch (err) {
+      failures.push(err);
+    }
+  }
+  if (failures.length > 0) {
+    console.error(
+      `[claude-workspaces] mockup round: ${failures.length} node(s) failed to land`,
+      ...failures,
+    );
   }
   // Body attributes too — a round that changes a class or a theme on <body>
   // would otherwise render against the previous round's.

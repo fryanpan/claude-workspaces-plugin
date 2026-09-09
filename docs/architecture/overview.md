@@ -264,7 +264,14 @@ never writes back, and touches no fragment — and hands each change up as a
 `mockup.updated` frame on the doc's own channels. An open page fetches the
 round it names and swaps its content in place, keeping the reader's scroll and
 letting the widget re-anchor its threads onto the new DOM, so a comment whose
-element is gone becomes an outdated one rather than a lost one. `mockup-capture.ts`
+element is gone becomes an outdated one rather than a lost one. The page-side half of that script is two modules in the widget package rather
+than one: `mockup-live.ts` owns the swap, and `mockup-live-scripts.ts` owns
+what re-inserting the round's own `<script>` elements does — including the
+redeclaration a second round used to die on, which browsers report two
+different ways. It joins no subsystem; it is the swap's other half, split for
+size.
+
+`mockup-capture.ts`
 still keeps the single fallback copy that lets a link outlive its scratch
 directory; `mockup-versions.ts` keeps the history beside it, so the page a
 reviewer was looking at when he commented is still readable at `?v=<n>` after
