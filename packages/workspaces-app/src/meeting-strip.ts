@@ -79,7 +79,7 @@ import {
   speakerGivenName,
 } from '@claude-workspaces/core';
 import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
-import { parseRoomSpeakers } from '@claude-workspaces/core';
+import { DEFAULT_NOTES_METHOD, parseRoomSpeakers } from '@claude-workspaces/core';
 import { currentWorkspaceId } from './doc-path.ts';
 import {
   type AdvancedState,
@@ -102,6 +102,7 @@ import { type ChooserState, createMeetingChooser } from './meeting-chooser.ts';
 import { type MeetingFeed, createMeetingFeed } from './meeting-feed.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import { type MeetingMenu, createMeetingMenu } from './meeting-menu.ts';
+import { clockLabel, fetchNotesMethod, putNotesMethod } from './meeting-notetaker.ts';
 import {
   type TranscriptTurn,
   formatElapsed,
@@ -642,6 +643,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     chooseMode: opts.mode ?? 'conversation',
     chooseEngine: opts.engine,
     advOpen: false,
+    // The doc's own note-taker, replaced by the server's answer as soon as
+    // it arrives. The default is what a doc nobody has chosen for composes
+    // with, so a strip that never reaches the server shows the truth.
+    chooseMethod: DEFAULT_NOTES_METHOD,
+    methodOpen: false,
+    methodSince: '',
     chooseBotUrl: '',
     chooseBotName: opts.botNamePrefill ?? '',
     chooseError: '',
@@ -682,6 +689,15 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     }
     return state;
   }
+
+  // The doc's note-taker, asked for once at mount. Unanswered — an old
+  // server, a share visitor, a failed fetch — the fold keeps the default,
+  // which is what such a server composes with anyway.
+  void fetchNotesMethod(docId).then((method) => {
+    if (disposed || !method || method === choose.chooseMethod) return;
+    choose.chooseMethod = method;
+    if (view === 'chooser') renderPop();
+  });
 
   const listEngines = opts.listEngines ?? defaultListEngines;
   void listEngines().then((info) => {
@@ -724,6 +740,35 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     isChooserView: () => view === 'chooser',
     socketOpen: () => socketOpen,
     sendSocket: (data) => socket?.send(data),
+    onNotesMethodPicked: (method) => {
+      // Optimistic, because the fold is a preference and the sheet must not
+      // sit on a spinner: the row moves now, and the two ways of asking below
+      // are what make it true. A failure puts it back.
+      const previous = choose.chooseMethod;
+      choose.chooseMethod = method;
+      if (socketOpen && socket) {
+        // Recording: over the audio socket, so the live session learns it —
+        // the next tick composes with it and the doc gets its one line.
+        choose.methodSince = clockLabel(Date.now());
+        socket.send(
+          JSON.stringify({
+            type: 'set_notes_method',
+            method,
+            ...(opts.participantName ? { by: opts.participantName } : {}),
+          }),
+        );
+        return;
+      }
+      // At rest: a write on the doc. No meeting is running, so there is no
+      // session to tell and no line to write.
+      choose.methodSince = '';
+      void putNotesMethod(docId, method, opts.participantName).then((ok) => {
+        if (ok) return;
+        choose.chooseMethod = previous;
+        choose.chooseError = 'That note-taker could not be saved.';
+        renderPop();
+      });
+    },
   });
 
   /**

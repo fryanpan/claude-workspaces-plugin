@@ -983,7 +983,13 @@ describe('the strip opened by the Board’s huddle button', () => {
       // One verb, and the same one whichever mode is selected: the room's
       // announcement and its decline button are gone.
       expect(h.startCta().textContent).toBe('● Start Recording');
-      expect(h.pop().querySelectorAll('button')).toHaveLength(1);
+      // ONE VERB — a fold's head is a disclosure, not a verb, so it is
+      // excluded by class rather than by counting a different number.
+      expect(
+        [...h.pop().querySelectorAll('button')].filter(
+          (b) => !b.classList.contains('meeting-adv-head'),
+        ),
+      ).toHaveLength(1);
     });
 
     it('preselects Multiple Speakers, so the choice made on the Board carries', () => {
@@ -1739,10 +1745,15 @@ describe('the engine is not a start-time question', () => {
         }),
     });
     h.record().click();
-    expect(h.pop().querySelector('.meeting-adv-head')).toBeNull();
+    // The ENGINE's fold. The Note-taker fold beside it is not the engine's
+    // and is there whether or not the list ever answers, so the selector has
+    // to say which fold this is about.
+    const advHead = () =>
+      h.pop().querySelector('.meeting-adv:not(.meeting-notetaker) .meeting-adv-head');
+    expect(advHead()).toBeNull();
     resolveList?.({ engines: ['assemblyai', 'soniox'], default: 'assemblyai' });
     await settle();
-    expect(h.pop().querySelector('.meeting-adv-head')).not.toBeNull();
+    expect(advHead()).not.toBeNull();
     // Still no engine row came with it.
     expect(h.pop().querySelector('input[name="meeting-engine"]')).toBeNull();
   });
@@ -2273,12 +2284,24 @@ describe('the consent step is gone', () => {
     // The skip verb was the decline path. It is the button whose absence is
     // the removal, so it is asserted by class as well as by count.
     expect(h.pop().querySelector('.meeting-skip-cta')).toBeNull();
-    expect(h.pop().querySelectorAll('button')).toHaveLength(1);
+    // ONE VERB — a fold's head is a disclosure, not a verb, so it is
+    // excluded by class rather than by counting a different number.
+    expect(
+      [...h.pop().querySelectorAll('button')].filter(
+        (b) => !b.classList.contains('meeting-adv-head'),
+      ),
+    ).toHaveLength(1);
     // Flipping to the solo room used to change both the verb's words and the
     // button count. Now it changes neither.
     h.pick('Just me');
     expect(h.startCta().textContent).toBe('● Start Recording');
-    expect(h.pop().querySelectorAll('button')).toHaveLength(1);
+    // ONE VERB — a fold's head is a disclosure, not a verb, so it is
+    // excluded by class rather than by counting a different number.
+    expect(
+      [...h.pop().querySelectorAll('button')].filter(
+        (b) => !b.classList.contains('meeting-adv-head'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('quotes no sentence for the room to hear', () => {

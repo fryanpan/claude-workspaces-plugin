@@ -1755,6 +1755,12 @@ body.has-set .doc-switcher-caret {
   width: 10px;
   font-size: 10px;
 }
+.meeting-adv-value {
+  margin-left: auto;
+  padding-left: 8px;
+  font: 600 13px var(--sans);
+  color: var(--fg);
+}
 .meeting-adv-moddot,
 .meeting-adv-ctldot {
   flex: none;
