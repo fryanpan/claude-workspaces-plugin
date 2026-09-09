@@ -49,6 +49,20 @@ export interface MountRecord {
    *  one. The empty string is the repo root itself. */
   relPath: string;
   addedAt: number;
+  /** The checkout the folder was mounted FROM, absolute.
+   *
+   *  The address of a file stays repo-relative — that is what lets a link
+   *  survive a move between checkouts — but the BYTES have to come from the
+   *  working copy the lead pointed at. A folder mounted from a linked
+   *  worktree holds that branch's files, and joining `relPath` onto the main
+   *  checkout instead serves a different tree: branch-only files read as
+   *  missing, untracked ones vanish, and every path that does exist in both
+   *  answers with the wrong revision's bytes.
+   *
+   *  Optional because rows written before this field existed do not have it;
+   *  those fall back to the repo's main checkout, which is what they were
+   *  already being served from. */
+  checkoutRoot?: string;
   /** Set when the lead unmounted it. The row STAYS: retention is the
    *  project's, and a row that vanished would take its files' addresses with
    *  it. Nothing on disk is touched either way. */

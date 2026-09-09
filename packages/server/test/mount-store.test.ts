@@ -236,4 +236,33 @@ describe('MountStore', () => {
       expect(last.nextAfter).toBeUndefined();
     });
   });
+  describe('the checkout a mount was made from', () => {
+    /**
+     * A folder mounted from a linked worktree holds THAT branch's files. The
+     * address stays repo-relative — that is what lets a link survive between
+     * checkouts — but the bytes have to come from the working copy the lead
+     * pointed at, or a branch-only file reads as missing and every shared
+     * path answers with the main checkout's revision.
+     */
+    it("serves the worktree's own files, not the main checkout's", () => {
+      const wt = join(tmp, 'wt-feature');
+      git(repo, 'worktree', 'add', wt, '-b', 'feature');
+      const wtMocks = join(wt, 'docs', 'mocks');
+      writeFileSync(join(wtMocks, 'checkout.png'), 'branch-only-bytes');
+      writeFileSync(join(wtMocks, 'home.png'), 'worktree-home-bytes-differ');
+
+      mount(wtMocks);
+      const repoKey = store.locate(repo)?.repoKey ?? '';
+      const listed = store.reconcile(repoKey, true);
+      expect(listed.map((f) => f.relPath)).toEqual([
+        'docs/mocks/checkout.png',
+        'docs/mocks/home.png',
+      ]);
+
+      const home = listed.find((f) => f.relPath === 'docs/mocks/home.png');
+      const served = store.resolveFile(home?.fileId ?? '');
+      expect(served?.abs).toBe(join(wtMocks, 'home.png'));
+      expect(served?.file.size).toBe('worktree-home-bytes-differ'.length);
+    });
+  });
 });

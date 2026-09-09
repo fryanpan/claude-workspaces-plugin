@@ -122,6 +122,28 @@ export class MountStore {
     return info?.mainRoot ?? null;
   }
 
+  /**
+   * The checkout ONE mount's bytes are read from.
+   *
+   * The mount remembers where it was made, because a folder mounted from a
+   * linked worktree holds that branch's files: joining its repo-relative path
+   * onto the main checkout would serve a different working copy — the wrong
+   * revision for every path that exists in both, and nothing at all for the
+   * branch-only and untracked files that are usually the reason a worktree
+   * was mounted in the first place.
+   *
+   * Falls back to `rootFor` when the recorded checkout is gone (a removed
+   * worktree) or was never recorded (a row written before the field existed).
+   * That is the same survival rule documents get: the project keeps serving
+   * from whatever copy is still there rather than going dark.
+   */
+  checkoutRootOf(repoKey: string, mount: MountRecord): string | null {
+    if (mount.checkoutRoot !== undefined && existsSync(mount.checkoutRoot)) {
+      return mount.checkoutRoot;
+    }
+    return this.rootFor(repoKey);
+  }
+
   // ---- Mount and unmount --------------------------------------------------
 
   /**
@@ -156,7 +178,7 @@ export class MountStore {
     if (at.relPath !== '' && !isMountableRelPath(at.relPath)) {
       return { ok: false, error: 'refused-path' };
     }
-    const { mount, created } = this.registry.mount(at.repoKey, at.relPath);
+    const { mount, created } = this.registry.mount(at.repoKey, at.relPath, at.checkoutRoot);
     this.reconciledAt.delete(at.repoKey);
     return { ok: true, mount, project: at, created };
   }
@@ -169,9 +191,10 @@ export class MountStore {
     return done;
   }
 
-  /** The absolute directory a mount names, or null if its repo has no root. */
+  /** The absolute directory a mount names, in the checkout it was made from,
+   *  or null if neither that checkout nor any other is there. */
   absOfMount(repoKey: string, mount: MountRecord): string | null {
-    const root = this.rootFor(repoKey);
+    const root = this.checkoutRootOf(repoKey, mount);
     if (!root) return null;
     return mount.relPath === '' ? root : join(root, mount.relPath);
   }
@@ -194,16 +217,18 @@ export class MountStore {
     if (!force && now - last < RECONCILE_TTL_MS) return this.recordedFiles(repoKey);
     this.reconciledAt.set(repoKey, now);
 
-    const root = this.rootFor(repoKey);
-    if (!root) return [];
+    // A project whose every checkout is gone serves nothing.
+    if (!this.rootFor(repoKey)) return [];
     const live = new Map<string, { file: ScannedFile; mountId: string; abs: string }>();
     for (const mount of this.registry.liveMounts(repoKey)) {
       const mountAbs = this.absOfMount(repoKey, mount);
       if (!mountAbs || !existsSync(mountAbs)) continue;
       for (const file of scanMount(mountAbs).files) {
         const abs = join(mountAbs, file.relPath);
-        const repoRel = relative(root, abs).split(sep).join('/');
-        if (repoRel.startsWith('../')) continue;
+        // Repo-relative, built from the mount's own spelling rather than by
+        // subtracting a checkout root: the mount may be served from a
+        // worktree, and the ADDRESS is the same in every checkout.
+        const repoRel = mount.relPath === '' ? file.relPath : `${mount.relPath}/${file.relPath}`;
         // A file reachable through two overlapping mounts is ONE file with one
         // address; the first mount that lists it is recorded as its home.
         if (!live.has(repoRel)) live.set(repoRel, { file, mountId: mount.mountId, abs });
@@ -331,10 +356,12 @@ export class MountStore {
     if (!parsed || !entry) return null;
     const { repoKey, relPath } = parsed;
     const mount = this.registry.mountById(repoKey, entry.mountId);
-    const root = this.rootFor(repoKey);
-    if (!root || !mount || mount.removedAt !== undefined) return null;
+    if (!mount || mount.removedAt !== undefined) return null;
+    // The checkout the MOUNT was made from, not the repo's main one: the
+    // address is repo-relative, the bytes are a particular working copy's.
+    const root = this.checkoutRootOf(repoKey, mount);
     const mountAbs = this.absOfMount(repoKey, mount);
-    if (!mountAbs) return null;
+    if (!root || !mountAbs) return null;
     const abs = join(root, relPath);
     const inMount = mount.relPath === '' ? relPath : relative(mount.relPath, relPath);
     if (!isServableRelPath(relPath) || inMount.startsWith('..')) return null;

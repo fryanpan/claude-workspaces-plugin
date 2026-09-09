@@ -180,7 +180,11 @@ export class MountRegistry {
    * address. Re-mounting an unmounted folder clears its `removedAt` and keeps
    * its `mountId`, so every address inside it survives the round trip.
    */
-  mount(repoKey: string, relPath: string): { mount: MountRecord; created: boolean } {
+  mount(
+    repoKey: string,
+    relPath: string,
+    checkoutRoot?: string,
+  ): { mount: MountRecord; created: boolean } {
     const project = this.ensureProject(repoKey);
     const index = project.mounts.findIndex((m) => m.relPath === relPath);
     const existing = index === -1 ? undefined : project.mounts[index];
@@ -190,16 +194,27 @@ export class MountRegistry {
       // object deoptimises it, and an `undefined` left in place would be
       // written back as an absent key by `JSON.stringify` anyway — so the
       // shape on disk is the same and the shape in memory stays monomorphic.
+      //
+      // A re-mount from a DIFFERENT checkout moves the row's checkoutRoot:
+      // the address set is the same either way, and the lead pointing at a
+      // working copy is them saying which one they mean.
+      const nextRoot = checkoutRoot ?? existing.checkoutRoot;
       const revivedMount: MountRecord = {
         mountId: existing.mountId,
         relPath: existing.relPath,
         addedAt: existing.addedAt,
+        ...(nextRoot === undefined ? {} : { checkoutRoot: nextRoot }),
       };
       project.mounts[index] = revivedMount;
       this.persist();
       return { mount: revivedMount, created: revived };
     }
-    const mount: MountRecord = { mountId: newMountId(), relPath, addedAt: Date.now() };
+    const mount: MountRecord = {
+      mountId: newMountId(),
+      relPath,
+      addedAt: Date.now(),
+      ...(checkoutRoot === undefined ? {} : { checkoutRoot }),
+    };
     project.mounts.push(mount);
     this.persist();
     return { mount, created: true };

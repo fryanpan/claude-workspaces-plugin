@@ -138,6 +138,7 @@ export async function handleMountRoutes(
           relPath: m.relPath,
           addedAt: m.addedAt,
           removedAt: m.removedAt,
+          checkoutRoot: m.checkoutRoot,
           fileCount:
             m.removedAt === undefined
               ? mounts.reconcile(p.repoKey).filter((f) => f.mountId === m.mountId).length
