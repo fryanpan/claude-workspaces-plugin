@@ -187,3 +187,47 @@ describe('the one transaction listener', () => {
     expect(suggestionCount()).toBe('0');
   });
 });
+
+describe('footnote notes in the same column', () => {
+  const FOOTED = [
+    'A permit takes 94 days^[Annual report, 2025, table 4.] on paper,',
+    'and a third of that waits^[Three applicant interviews. Unconfirmed.].',
+  ].join(' ');
+
+  it('places a caption per note beside the prose', async () => {
+    const { editor } = mount(FOOTED);
+    transaction(editor);
+    await vi.waitFor(() =>
+      expect([...document.querySelectorAll('.markup-margin .cw-fn-note')]).toHaveLength(2),
+    );
+    expect(
+      [...document.querySelectorAll('.markup-margin .cw-fn-note')].map((el) => el.textContent),
+    ).toEqual(['Annual report, 2025, table 4.', 'Three applicant interviews. Unconfirmed.']);
+  });
+
+  it('draws each note its own leader, dashed for the unconfirmed one', async () => {
+    const { editor } = mount(FOOTED);
+    transaction(editor);
+    await vi.waitFor(() =>
+      expect([...document.querySelectorAll('.cw-leader-overlay line')]).toHaveLength(2),
+    );
+    const classes = [...document.querySelectorAll('.cw-leader-overlay line')].map((l) =>
+      l.getAttribute('class'),
+    );
+    expect(classes).toEqual(['cw-leader cw-leader-fn', 'cw-leader cw-leader-fn-unsure']);
+  });
+
+  it('stacks a note against a comment rather than over it', async () => {
+    const { ydoc, editor } = mount(FOOTED);
+    openThreadAt(ydoc, editor, { from: 1, to: 8 }, 't-1');
+    transaction(editor);
+    await vi.waitFor(() => expect(balloons()).toHaveLength(1));
+    // One column, one layout pass: the comment balloon and both captions are
+    // all placed, and no two share a `top`.
+    const tops = [...document.querySelectorAll<HTMLElement>('.markup-margin > *')]
+      .filter((el) => el.style.top !== '')
+      .map((el) => el.style.top);
+    expect(tops.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(tops).size).toBe(tops.length);
+  });
+});

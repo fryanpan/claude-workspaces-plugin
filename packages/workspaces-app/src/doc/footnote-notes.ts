@@ -109,7 +109,7 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
       key: `fn:${f.n}`,
       el,
       anchor: f.anchor,
-      leaderClass: f.unsure ? 'cw-leader-unsure' : undefined,
+      leaderClass: f.unsure ? 'cw-leader-fn-unsure' : 'cw-leader-fn',
     };
     cards.set(f.n, { card, note: f.note, unsure: f.unsure });
     return card;
@@ -137,11 +137,17 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     for (const el of prose.querySelectorAll('.cw-fn-on')) el.classList.remove('cw-fn-on');
   }
 
-  /** Place the card under the tapped superscript, across the prose column.
-   *  Content-space coordinates, so it stays put while the reader scrolls. */
+  /**
+   * Place the card under the PARAGRAPH the tapped note sits in, across the
+   * prose column. Under the note's own line instead would cover the rest of
+   * the sentence the reader is in the middle of; under the block covers only
+   * what comes after it. Content-space coordinates, so the card stays with
+   * the text while the reader scrolls.
+   */
   function placePop(anchor: HTMLElement): void {
     const box = container.getBoundingClientRect();
-    const a = anchor.getBoundingClientRect();
+    const block = anchor.closest('p, li, blockquote, h1, h2, h3, h4') ?? anchor;
+    const a = block.getBoundingClientRect();
     const p = prose.getBoundingClientRect();
     pop.style.top = `${a.bottom - box.top + container.scrollTop + 4}px`;
     pop.style.left = `${p.left - box.left + container.scrollLeft}px`;

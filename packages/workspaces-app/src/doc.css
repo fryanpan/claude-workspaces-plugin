@@ -3843,7 +3843,20 @@ body.redline-mode #toggle-suggest-mode {
   font: 400 12px / 1.4 var(--sans);
   color: var(--fg-muted);
 }
-.cw-leader-unsure {
+/* A footnote's leader is GREY, not the red every markup leader inherits: the
+   red says "something was deleted here", and a note is not a change. Dashed
+   for a note the author has not confirmed, matching its underline.
+
+   Written as a COMPOUND selector on purpose. `.cw-leader` is re-declared in
+   the dark-scheme block at the end of this file, which sits after these
+   rules, so a single class would tie on specificity and lose on order — the
+   note's leader came out red in dark mode and only there. */
+.cw-leader.cw-leader-fn,
+.cw-leader.cw-leader-fn-unsure {
+  stroke: var(--border-strong);
+  opacity: 0.7;
+}
+.cw-leader.cw-leader-fn-unsure {
   stroke-dasharray: 2 3;
 }
 

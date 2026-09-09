@@ -87,7 +87,10 @@ describe('notes in the margin', () => {
 
   it('asks for a dotted leader on the note the author did not confirm', () => {
     const { notes } = mount({ marginVisible: true });
-    expect(notes.cards().map((c) => c.leaderClass)).toEqual([undefined, 'cw-leader-unsure']);
+    expect(notes.cards().map((c) => c.leaderClass)).toEqual([
+      'cw-leader-fn',
+      'cw-leader-fn-unsure',
+    ]);
   });
 
   it('offers no cards at all when the column is off screen', () => {
