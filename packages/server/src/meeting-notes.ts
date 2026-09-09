@@ -379,6 +379,22 @@ export interface NotesUpdate {
 }
 
 /**
+ * The doc declined this batch on policy, and would decline it again.
+ *
+ * Its own value rather than a `false`, because the two want opposite
+ * handling. A `false` write earns an immediate second compose: it failed
+ * against an outline, and re-reading the outline is exactly what the retry
+ * does. A refusal has nothing to re-read — `notes-edit-guard.ts` refuses a
+ * batch for what the edits ARE, so composing the same tick again buys a
+ * second refusal and nothing else. The words still carry to the next tick,
+ * which composes against a doc that has moved on.
+ *
+ * The guard is the only rule that answers this today; the type is the seam
+ * for any later one.
+ */
+export type NotesWriteRefusal = 'refused';
+
+/**
  * "Every place the notes say `from`, they should say `to`" — a rename
  * reaching notes already written.
  *
@@ -597,11 +613,15 @@ export interface MeetingNotesDeps {
    *
    * `void` and `true` both mean written — a sink with nothing to report is
    * the ordinary case and must not have to say so.
+   *
+   * `'refused'` is the third answer and the one that must not be retried:
+   * see {@link NotesWriteRefusal}.
    */
   // A sink with nothing to report returns nothing; only an explicit `false`
-  // means the write did not land. The union is the contract, not a slip.
+  // or `'refused'` means the write did not land. The union is the contract,
+  // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes: (update: NotesUpdate) => void | boolean;
+  onNotes: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
   /**
    * Where a rename of a voice already written about goes. Optional: a
    * session with no sink for it composes under the new name from the next
@@ -678,9 +698,10 @@ export interface MeetingNotesDeps {
  */
 export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
   // A sink with nothing to report returns nothing; only an explicit `false`
-  // means the write did not land. The union is the contract, not a slip.
+  // or `'refused'` means the write did not land. The union is the contract,
+  // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes?: (update: NotesUpdate) => void | boolean;
+  onNotes?: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
   taskExtractor?: import('./meeting-task-capture.ts').TaskCaptureExtractor | null;
 };
 
@@ -1203,18 +1224,22 @@ export function beginNotesSession(
         outline.some((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
       if (strandingRisk && deps.readOutline && deps.notesHeadingId) {
         let opened: boolean;
+        // Kept beside `opened` so the refusal branch below can tell a doc
+        // that refused this open from one that failed it.
+        let openRefused = false;
         try {
-          opened =
-            deps.onNotes({
-              docId: ids.docId,
-              meetingId: ids.meetingId,
-              // The tick this write belongs to, carrying no turns: it is the
-              // section being opened, not any speech being noted, and a sink
-              // that reports what a tick wrote must not attribute these words
-              // to the room.
-              tick: { ...tick, turns: [] },
-              edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
-            }) !== false;
+          const answer = deps.onNotes({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            // The tick this write belongs to, carrying no turns: it is the
+            // section being opened, not any speech being noted, and a sink
+            // that reports what a tick wrote must not attribute these words
+            // to the room.
+            tick: { ...tick, turns: [] },
+            edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
+          });
+          openRefused = answer === 'refused';
+          opened = answer !== false && !openRefused;
         } catch (err) {
           opened = false;
           deps.onError?.(err instanceof Error ? err.message : 'notes section open failed');
@@ -1238,7 +1263,10 @@ export function beginNotesSession(
             `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: notes section not opened`,
           );
           report('failed', []);
-          retryAfterFailure(tick);
+          // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. An open
+          // the doc refused would be refused again this tick, and the words
+          // are already carried.
+          if (!openRefused) retryAfterFailure(tick);
           return;
         }
         try {
@@ -1339,13 +1367,13 @@ export function beginNotesSession(
         );
         const edits = withSuggestions(checked, unseen, input.humanNotes, notesHeadingId);
         const applyStart = clock();
-        const written =
-          deps.onNotes({
-            docId: ids.docId,
-            meetingId: ids.meetingId,
-            tick: input.tick,
-            edits,
-          }) !== false;
+        const answer = deps.onNotes({
+          docId: ids.docId,
+          meetingId: ids.meetingId,
+          tick: input.tick,
+          edits,
+        });
+        const written = answer !== false && answer !== 'refused';
         applyMs = clock() - applyStart;
         if (!written) {
           // The compose was fine and the DOC refused it. Same handling as a
@@ -1362,7 +1390,10 @@ export function beginNotesSession(
             `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: doc write skipped`,
           );
           report('failed', edits);
-          retryAfterFailure(tick);
+          // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. This is
+          // the case the guard produces: the same edits refused a second
+          // time, one tick's compose spent to learn nothing.
+          if (answer !== 'refused') retryAfterFailure(tick);
           return;
         }
         // A question is only asked once, and it is asked once it has LANDED.
