@@ -101,6 +101,15 @@ export function meetingTranscriptPath(dataDir: string, docId: string, meetingId:
   return join(meetingDirPath(dataDir, docId), `${safeSegment(meetingId)}.jsonl`);
 }
 
+/**
+ * Where this meeting's per-tick timing lines go — beside its transcript, and
+ * named after it, so the timings and the words they measure are found
+ * together and are deleted together.
+ */
+export function meetingTimingPath(dataDir: string, docId: string, meetingId: string): string {
+  return join(meetingDirPath(dataDir, docId), `${safeSegment(meetingId)}-timing.jsonl`);
+}
+
 /** Where the doc's enumerable list of meetings lives. */
 export function meetingIndexPath(dataDir: string, docId: string): string {
   return join(meetingDirPath(dataDir, docId), 'meetings.jsonl');

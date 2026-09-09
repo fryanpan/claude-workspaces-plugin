@@ -178,7 +178,9 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
         composer: createStubNotesComposer(),
         quietMs: 1_000,
         schedule,
-        onNotes: (u) => updates.push(u),
+        onNotes: (u) => {
+          updates.push(u);
+        },
       },
     });
     base = `http://localhost:${handle.port}`;
