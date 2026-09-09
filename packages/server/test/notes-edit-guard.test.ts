@@ -15,17 +15,20 @@ import { describe, expect, test } from 'bun:test';
 import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import {
+  type NotesHeadingMemory,
   applyNotesUpdate,
   createNotesHeadingMemory,
   notesWriteSkipDetail,
+  withServerNotesSinks,
 } from '../src/meeting-notes-doc.ts';
 import {
   type NotesComposer,
   type NotesUpdate,
   type TickScheduler,
   beginNotesSession,
+  createStubNotesComposer,
 } from '../src/meeting-notes.ts';
-import { NOTES_AUTHOR_ID, type NotesDocStore } from '../src/notes-doc-access.ts';
+import type { NotesDocStore } from '../src/notes-doc-access.ts';
 import { guardNotesEdits } from '../src/notes-edit-guard.ts';
 import { oneDocStore } from './notes-doc-helpers.ts';
 
@@ -170,89 +173,99 @@ describe('what the guard deliberately leaves alone', () => {
   });
 });
 
-/**
- * A refusal is not a failure, and the difference is worth a name.
- *
- * Before this, a batch the guard emptied came back as `all-edits-failed`,
- * whose detail line told whoever read the log that every block had gone from
- * the doc. Nothing had gone: the doc was intact and the edits were declined.
- * The caller read the same verdict and did what that verdict earns — composed
- * the identical tick again, to be refused again. Both halves are asserted
- * here, each against the answer the old code gave.
- */
-describe('a guard refusal is reported as a refusal, not as a lost block', () => {
-  /** The doc store the applier writes through, holding one prose doc.
-   *  Re-claimed for the id the SERVER writes under, so a replace stays a
-   *  direct edit rather than turning into a suggestion — which is what the
-   *  traced tick was. */
-  function storeFor(ydoc: Y.Doc): NotesDocStore {
-    for (const el of prose.addressableBlocks(prose.getProseFragment(ydoc))) {
-      prose.claimSubtree(el, NOTES_AUTHOR_ID);
-    }
-    return oneDocStore(DOC, { ydoc, meta: { type: 'markdown' as DocType } });
-  }
+/** One tick's worth of edits, addressed to `docId`'s meeting. */
+const tick = (docId: string, edits: prose.BlockEdit[]): NotesUpdate => ({
+  docId,
+  meetingId: `m-${docId}`,
+  tick: { tick: 1, reason: 'pause', turns: [{ turn: 0, text: 'hi' }] },
+  edits,
+});
 
-  const DOC = 'd-refusal';
-  const MEETING = 'm-refusal';
+/** A doc whose meeting has opened its own section, and a memory that knows
+ *  which heading that is — the state a meeting is in from its second tick. */
+function meetingWithSection(): {
+  store: NotesDocStore;
+  memory: NotesHeadingMemory;
+  headingId: string;
+} {
+  const ydoc = new Y.Doc();
+  prose.applyMarkdownToFragment(prose.getProseFragment(ydoc), '# Huddle\n');
+  const store = oneDocStore('d', { ydoc, meta: { type: 'markdown' as DocType } });
+  const memory = createNotesHeadingMemory();
+  expect(
+    applyNotesUpdate(
+      store,
+      tick('d', [{ op: 'insert_at_end', markdown: '## Meeting notes\n\n- a first point' }]),
+      memory,
+    ),
+  ).toBe(null);
+  const headingId = memory.headingId(
+    { docId: 'd', meetingId: 'm-d' },
+    store.readOutline('d')?.blocks ?? [],
+  );
+  if (!headingId) throw new Error('the memory did not learn the section it opened');
+  return { store, memory, headingId };
+}
 
-  /** A heading memory that already remembers `headingId` for this meeting,
-   *  which is the state a meeting is in from its second tick on. */
-  function memoryHolding(headingId: string): ReturnType<typeof createNotesHeadingMemory> {
-    return createNotesHeadingMemory({
-      read: () => headingId,
-      write: () => {},
-      clear: () => {},
-    });
-  }
-
-  const replaceHeading = (headingId: string): NotesUpdate => ({
-    docId: DOC,
-    meetingId: MEETING,
-    tick: { tick: 30, reason: 'pause', turns: [] },
-    edits: [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting notes' }],
+describe('a batch the guard empties is reported under its own name', () => {
+  // `all-edits-failed` is a compose worth retrying — the block a person
+  // deleted mid-compose is gone and the next tick will address what is there.
+  // A guarded batch is not: the same edit would be refused again. The log
+  // could not tell the two apart while they shared a name.
+  test('replacing the meeting’s own heading is guard-refused, not all-edits-failed', () => {
+    const { store, memory, headingId } = meetingWithSection();
+    expect(
+      applyNotesUpdate(
+        store,
+        tick('d', [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting notes' }]),
+        memory,
+      ),
+    ).toBe('guard-refused');
+    expect(notesWriteSkipDetail('guard-refused')).toContain('guard');
   });
 
-  test('CONTROL: with no memory of its heading the same batch lands and the section is gone', () => {
-    const { doc, headingId } = docWithNotes(12);
-    const skip = applyNotesUpdate(
-      storeFor(doc),
-      replaceHeading(headingId),
-      createNotesHeadingMemory(),
-    );
-    // Nothing refused it, so it wrote — and the id the meeting was writing
-    // under is no longer in the doc.
-    expect(skip).toBeNull();
-    expect(prose.readOutline(doc).some((e) => e.id === headingId)).toBe(false);
-  });
-
-  test('the batch is refused, the doc is untouched, and the reason says so', () => {
-    const { doc, headingId } = docWithNotes(12);
-    const before = prose.readOutline(doc).length;
-    const skip = applyNotesUpdate(
-      storeFor(doc),
-      replaceHeading(headingId),
-      memoryHolding(headingId),
-    );
-    expect(skip).toBe('guard-refused');
-    // Not `all-edits-failed`: the blocks are all still there.
-    expect(prose.readOutline(doc).some((e) => e.id === headingId)).toBe(true);
-    expect(prose.readOutline(doc)).toHaveLength(before);
-  });
-
-  test('the detail line names a policy refusal rather than blocks that are gone', () => {
-    expect(notesWriteSkipDetail('guard-refused')).toContain('policy refusal');
-    // Control: the reason it used to be reported as still says the old thing,
-    // which is true of that reason and was never true of this one.
-    expect(notesWriteSkipDetail('all-edits-failed')).toContain('no longer in the doc');
+  test('CONTROL: a batch naming a block that is gone is still all-edits-failed', () => {
+    const { store, memory } = meetingWithSection();
+    expect(
+      applyNotesUpdate(
+        store,
+        tick('d', [{ op: 'replace_block', blockId: 'blk-not-there', markdown: '- moved' }]),
+        memory,
+      ),
+    ).toBe('all-edits-failed');
   });
 });
 
 /**
- * The retry path. `retryAfterFailure` composes the carried words again at
- * once, which is right for a store refusal — the retry re-reads the outline,
- * and the outline is what failed. A policy refusal has nothing to re-read.
+ * And what the session does with that name.
+ *
+ * Naming the refusal in the log fixed the report; this is the half that fixes
+ * the behaviour. The doc sink answers the session `'refused'` rather than
+ * `false`, and `retryAfterFailure` — which exists because a store refusal is
+ * usually a stale outline the retry re-reads — leaves it alone. Both tests
+ * are pairs against the answer a store failure still gets.
  */
 describe('a refused write is carried rather than composed again', () => {
+  test('the doc sink answers the session `refused`, not `false`', () => {
+    const { store, memory, headingId } = meetingWithSection();
+    const sinks = withServerNotesSinks(
+      { composer: createStubNotesComposer() },
+      { docStore: () => store, tasks: () => ({ listTasks: () => [] }), heading: memory },
+    );
+    expect(
+      sinks.onNotes(
+        tick('d', [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting notes' }]),
+      ),
+    ).toBe('refused');
+    // CONTROL: a batch the doc merely failed still answers `false`, which is
+    // what earns it the immediate retry below.
+    expect(
+      sinks.onNotes(tick('d', [{ op: 'replace_block', blockId: 'blk-gone', markdown: '- x' }])),
+    ).toBe(false);
+  });
+
+  /** A scheduler the test fires by hand: the session arms its quiet timer
+   *  through this and nothing runs until `fire()`. */
   class Timers implements TickScheduler {
     private fns = new Map<number, () => void>();
     private n = 0;
@@ -271,12 +284,11 @@ describe('a refused write is carried rather than composed again', () => {
     }
   }
 
-  /** One tick through a session whose doc sink answers `verdict`, counting
-   *  the composes it cost. */
+  /** One tick through a session whose doc sink answers `verdict`, counting the
+   *  composes it cost. Counted BEFORE `end()`, because ending the meeting
+   *  drains the carried words through one more compose either way, and what is
+   *  under test is the tick's own retry rather than the drain. */
   async function composesUnder(verdict: false | 'refused'): Promise<number> {
-    // Counted BEFORE `end()`, because ending the meeting drains the carried
-    // words through one more compose in both cases. What is under test is
-    // the tick's own retry, not the drain.
     let composes = 0;
     const composer: NotesComposer = {
       name: 'counting',
@@ -290,13 +302,13 @@ describe('a refused write is carried rather than composed again', () => {
     const schedule = new Timers();
     const session = beginNotesSession(
       { composer, quietMs: 1000, schedule, onNotes: () => verdict, onError: () => {} },
-      { docId: DOC_ID, meetingId: MEETING_ID },
+      { docId: 'd-retry', meetingId: 'm-retry' },
     );
     session.onTurn({ turn: 0, text: 'The export dialog is too big.', final: true });
     schedule.fire();
-    // Poll until the count stops moving rather than sleeping a guessed
-    // interval: the retry is a compose queued behind the failed one, so the
-    // observable being waited on is "nothing more is coming".
+    // Polled until the count stops moving rather than slept: the retry is a
+    // compose queued behind the failed one, so the observable being waited on
+    // is that nothing more is coming.
     let last = -1;
     for (let i = 0; i < 50 && composes !== last; i++) {
       last = composes;
@@ -306,9 +318,6 @@ describe('a refused write is carried rather than composed again', () => {
     await session.end();
     return duringTick;
   }
-
-  const DOC_ID = 'd-retry';
-  const MEETING_ID = 'm-retry';
 
   test('CONTROL: a write the store failed is composed a second time at once', async () => {
     expect(await composesUnder(false)).toBe(2);

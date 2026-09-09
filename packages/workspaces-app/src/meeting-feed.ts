@@ -63,6 +63,14 @@ export interface MeetingFeedDeps {
    * meeting, which is what leaves the consent line exactly where it was.
    */
   startNote(): string;
+  /**
+   * A sentence that stands over the words rather than instead of them: the
+   * socket is reconnecting, or the meeting it tried to resume was gone. It
+   * outlives the arrival of a turn — which is exactly what separates it from
+   * `startNote` — because both facts stay true while the meeting talks on.
+   * Empty for every meeting that never lost its connection.
+   */
+  standingNote(): string;
   /** Engine label → what the person calls that voice. */
   names(): Record<string, string>;
   /** The bot's status while it will still act, or null. */
@@ -149,8 +157,10 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
     const turns = deps.turns();
     if (state.kind !== 'idle' && state.kind !== 'recording') return;
     // A note and a transcript share the line, so the reason the last attempt
-    // gave has to go when words start arriving.
-    line.querySelector('.meeting-note')?.remove();
+    // gave has to go when words start arriving. Every one of them: a standing
+    // note can sit beside another, and removing only the first would leave
+    // one behind on the next pass.
+    for (const stale of line.querySelectorAll('.meeting-note')) stale.remove();
     if (state.kind === 'idle') {
       // An idle strip with a live bot shows the bot's words once there are
       // any, and narrates its state until then; with a farewell, the
@@ -199,9 +209,29 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
       const note = deps.startNote();
       if (note) showNote(note, 'meeting-consent-note');
       else if (deps.mode() !== 'solo') showNote(RECORDING_CONSENT_NOTE, 'meeting-consent-note');
+      standing();
       return;
     }
     renderTurns(true);
+    standing();
+  }
+
+  /**
+   * The reconnect sentence, at the head of the line and ahead of the words.
+   *
+   * Prepended after the turns are drawn rather than written into the same
+   * slot: the words are what the person is here for, and a connection note
+   * that replaced them would look like the transcript had stopped. A meeting
+   * with the doc's live zone renders no turns on this line at all, so the
+   * sentence has it to itself.
+   */
+  function standing(): void {
+    const text = deps.standingNote();
+    if (!text || deps.state().kind !== 'recording') return;
+    const note = document.createElement('span');
+    note.className = 'meeting-note meeting-consent-note';
+    note.textContent = text;
+    line.prepend(note);
   }
 
   /**

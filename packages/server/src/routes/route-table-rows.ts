@@ -364,6 +364,34 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/suggestions/:sid/reject', 'POST'],
   ]),
 
+  // Every value the repo registry reads and writes is a HOST PATH — a
+  // checkout root, a repo's main directory, the absolute path of a copy — so
+  // the family sits behind `offBox`, the gate `POST /api/deploy` uses:
+  // loopback socket address, no `cf-ray`, no share or collab visitor, and no
+  // browser on this machine either.
+  ...family('routes/repos.ts', [
+    ['loopback-only', '/api/repos', 'GET'],
+    ['loopback-only', '/api/repos/checkouts', 'POST DELETE'],
+    ['loopback-only', '/api/repos/live-copy', 'GET'],
+  ]),
+
+  // The lead's mount table sits behind `offBox`, which is the gate
+  // `POST /api/deploy` uses: loopback socket address, no `cf-ray`, no share
+  // or collab visitor, no browser. Host paths go in and come out of it.
+  ...family('routes/mounts.ts', [
+    ['loopback-only', '/api/mounts', 'GET POST DELETE'],
+    ['loopback-only', '/api/mounts/files', 'GET'],
+    ['loopback-only', '/api/mounts/privacy', 'PUT'],
+    ['loopback-only', '/api/mounts/conventions', 'GET PUT'],
+    // The bytes themselves are member-facing rather than lead-only, so they
+    // are not behind `offBox` — but `shareScopeAllows` does not name
+    // `/mounts/…`, so a share visitor never reaches them, and the handler
+    // refuses one anyway. A project marked `local-only` narrows these two
+    // further, to the box, at serve time.
+    ['trusted-local', '/mounts/:fileId', 'GET HEAD'],
+    ['trusted-local', '/mounts/:fileId/raw', 'GET HEAD'],
+  ]),
+
   ...family('routes/shell-static.ts', [
     ['share-scope', '/app/*', 'GET'],
     ['share-scope', '/widget/*', 'GET'],

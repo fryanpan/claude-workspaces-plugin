@@ -22,7 +22,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type CaptureMode, parseCaptureMode } from '@claude-workspaces/core';
+import { type CaptureMode, normalizeSpeakerName, parseCaptureMode } from '@claude-workspaces/core';
 import {
   AudioSink,
   type DocInfoResolver,
@@ -80,6 +80,14 @@ export interface MeetingRecord {
    * unlabelled turn is attributed to in the raw transcript.
    */
   participant?: string;
+  /**
+   * Every time this meeting was picked up again after its socket dropped,
+   * oldest first. A resume is a second START of one recording — same id, same
+   * transcript file, same notes section — so it cannot be an `endedAt`, and
+   * the index says so in its own append-only line rather than by rewriting
+   * anything. Absent on every meeting that ran to its end in one go.
+   */
+  resumedAt?: number[];
 }
 
 /**
@@ -186,6 +194,13 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
       });
       continue;
     }
+    // A resume UNDOES an end: the meeting the last line said was over is
+    // recording again, under the same id. Read in order, so the stop line the
+    // resumed leg eventually writes puts the end back.
+    if (typeof row.resumedAt === 'number') {
+      existing.endedAt = null;
+      existing.resumedAt = [...(existing.resumedAt ?? []), row.resumedAt];
+    }
     if (typeof row.endedAt === 'number') existing.endedAt = row.endedAt;
     if (typeof row.turns === 'number') existing.turns = row.turns;
     // One line per naming, merged in order: a rename is a later line for
@@ -255,6 +270,18 @@ export interface ActiveMeeting {
   readonly meetingId: string;
   readonly docId: string;
   readonly startedAt: number;
+  /**
+   * The first turn number this LEG of the meeting may use.
+   *
+   * Zero for every meeting that starts fresh. A resumed meeting opens a new
+   * engine session, and an engine numbers its turns from zero — so without an
+   * offset the resumed leg's first turn would name the turn the meeting
+   * opened with, and the append-only transcript reads a second line for a
+   * turn as a REVISION of it. The relay adds this to every turn id the engine
+   * hands it, which is what makes the numbering continue across the outage
+   * instead of starting again on top of the words already recorded.
+   */
+  readonly turnBase: number;
   /**
    * Append a settled turn. Repeats of a turn already written are ignored —
    * except a repeat with a DIFFERENT speaker label, which appends a relabel
@@ -330,12 +357,11 @@ export class MeetingStore {
     participant?: string;
     now?: number;
   }): ActiveMeeting | null {
-    const { docId, engine, sampleRate, mode } = args;
+    const { docId } = args;
     if (this.live.has(docId)) return null;
     const startedAt = args.now ?? Date.now();
     const dataDir = this.dataDir;
     const source: MeetingSource = args.source ?? 'mic';
-    const participant = args.participant;
     // This recording's ordinal on the doc: the `## Segment N` it will be
     // written under and the number its audio files carry. Counted before
     // this meeting's own index line lands.
@@ -355,17 +381,118 @@ export class MeetingStore {
       meetingId,
       docId,
       startedAt,
-      engine,
-      sampleRate,
-      mode,
+      engine: args.engine,
+      sampleRate: args.sampleRate,
+      mode: args.mode,
       segment,
       source,
-      ...(participant !== undefined ? { participant } : {}),
+      ...(args.participant !== undefined ? { participant: args.participant } : {}),
     });
     // Create the file at start so a meeting nobody spoke in still reads back
     // as an empty transcript rather than a missing one.
     mkdirSync(dirname(transcriptPath), { recursive: true });
     appendFileSync(transcriptPath, '');
+    return this.open({
+      docId,
+      meetingId,
+      startedAt,
+      segment,
+      engine: args.engine,
+      sampleRate: args.sampleRate,
+      mode: args.mode,
+      source,
+      ...(args.participant !== undefined ? { participant: args.participant } : {}),
+      seed: [],
+    });
+  }
+
+  /**
+   * Pick a meeting back up: the SAME recording, after its socket dropped.
+   *
+   * The words either side of a dropped connection are one conversation, so
+   * they belong in one transcript file, under one notes section, with one
+   * unbroken run of turn numbers — which is what reusing the id buys, since
+   * every file this subsystem writes is named after it and the notes heading
+   * memory is keyed by it.
+   *
+   * Null — never a new meeting — when the id names nothing this doc has held,
+   * or when the doc is recording already. The caller decides what to do with
+   * that, and what it does is start a fresh meeting and SAY so; a resume that
+   * silently became a new recording would split a conversation in two with
+   * nothing on screen to explain the second section.
+   */
+  resume(args: {
+    docId: string;
+    meetingId: string;
+    engine: string;
+    sampleRate: number;
+    mode: CaptureMode;
+    source?: MeetingSource;
+    participant?: string;
+    now?: number;
+  }): ActiveMeeting | null {
+    const { docId, meetingId } = args;
+    if (this.live.has(docId)) return null;
+    const dataDir = this.dataDir;
+    const records = listMeetings(dataDir, docId);
+    const at = records.findIndex((m) => m.meetingId === meetingId);
+    const record = records[at];
+    if (!record) return null;
+    // The index knowing the id is not enough: the transcript file is what the
+    // resumed leg appends to, and a folder somebody moved or a data dir that
+    // is not the one that recorded it must read as "gone" rather than as an
+    // empty meeting that quietly loses its first half.
+    if (!existsSync(meetingTranscriptPath(dataDir, docId, meetingId))) return null;
+    const resumedAt = args.now ?? Date.now();
+    // Append-only, like every other fact here: the meeting is recording
+    // again, which `listMeetings` reads as undoing the end its last stop
+    // wrote. Nothing already on disk is touched.
+    appendLine(meetingIndexPath(dataDir, docId), { meetingId, resumedAt });
+    return this.open({
+      docId,
+      meetingId,
+      // The original start, so the elapsed clock and the record both count
+      // the meeting rather than the leg.
+      startedAt: record.startedAt,
+      // Same segment: the resumed leg's audio appends to the files this
+      // recording already opened (`AudioSink` opens with `a`).
+      segment: record.segment ?? at + 1,
+      engine: args.engine,
+      sampleRate: args.sampleRate,
+      mode: args.mode,
+      source: args.source ?? record.source ?? 'mic',
+      ...(args.participant !== undefined ? { participant: args.participant } : {}),
+      // What is already written: the turn numbers this leg must start ABOVE,
+      // and the dedupe map that keeps a re-settled turn from doubling.
+      seed: readTranscript(dataDir, docId, meetingId),
+      resumedAt,
+    });
+  }
+
+  /**
+   * The live handle itself, shared by a fresh start and a resume. Everything
+   * that differs between them — the id, the ordinal, what is already on disk
+   * — is decided by the caller and arrives here settled.
+   */
+  private open(args: {
+    docId: string;
+    meetingId: string;
+    startedAt: number;
+    segment: number;
+    engine: string;
+    sampleRate: number;
+    mode: CaptureMode;
+    source: MeetingSource;
+    participant?: string;
+    /** Turns this meeting already recorded, empty for a fresh one. */
+    seed: readonly TranscriptTurn[];
+    /** When this leg picked the meeting up; absent on a fresh meeting. */
+    resumedAt?: number;
+  }): ActiveMeeting {
+    const { docId, meetingId, startedAt, segment, engine, sampleRate, mode, source } = args;
+    const participant = args.participant;
+    const dataDir = this.dataDir;
+    const transcriptPath = meetingTranscriptPath(dataDir, docId, meetingId);
     // The tie back to the doc, written before a word arrives: a folder whose
     // meeting never reaches stop still says which doc it belongs to.
     const info = this.infoFor(docId);
@@ -378,6 +505,10 @@ export class MeetingStore {
     const sinks = new Map<string, AudioSink>();
     /** Turn → the words and label it was last written with. */
     const written = new Map<number, { text: string; speaker: string | undefined }>();
+    for (const turn of args.seed)
+      written.set(turn.turn, { text: turn.text, speaker: turn.speaker });
+    // Above everything already recorded, never on top of it — see `turnBase`.
+    const turnBase = args.seed.reduce((top, t) => Math.max(top, t.turn + 1), 0);
     const speakers: Record<string, string> = {};
     let stopped = false;
     const live = this.live;
@@ -387,6 +518,7 @@ export class MeetingStore {
       meetingId,
       docId,
       startedAt,
+      turnBase,
       recordTurn(turn: number, text: string, speaker?: string): void {
         if (stopped) return;
         const prior = written.get(turn);
@@ -417,8 +549,14 @@ export class MeetingStore {
       },
       nameSpeaker(speaker: string, name: string): void {
         if (stopped) return;
-        speakers[speaker] = name;
-        appendLine(meetingIndexPath(dataDir, docId), { meetingId, speakers: { [speaker]: name } });
+        // NORMALISED ON THE WAY IN. A client that sends a display name — the
+        // group suffix still on it, or the placeholder it was seeded with —
+        // is naming nothing, and writing that down is what put
+        // "Room Speaker C" in a record as somebody's name.
+        const given = normalizeSpeakerName(name);
+        if (given === undefined) return;
+        speakers[speaker] = given;
+        appendLine(meetingIndexPath(dataDir, docId), { meetingId, speakers: { [speaker]: given } });
       },
       recordAudio(chunk: Uint8Array, stream = 'mic'): void {
         if (stopped || chunk.byteLength === 0) return;
@@ -472,7 +610,18 @@ export class MeetingStore {
             docId,
             info: store.infoFor(docId),
             liveMeetingIds: new Set([...live.values()].map((m) => m.meetingId)),
-            ended: { meetingId, audio },
+            ended: {
+              meetingId,
+              audio,
+              // A resumed leg's words would otherwise never reach the raw
+              // companion: the segment for this meeting id may already be in
+              // `meeting.json` from the leg that ran before the restart, and
+              // a written segment is skipped. Told where this leg started,
+              // the flush appends the continuation instead of nothing.
+              ...(args.resumedAt !== undefined
+                ? { resumedFrom: turnBase, resumedAt: args.resumedAt }
+                : {}),
+            },
           });
         } catch (err) {
           console.error(`[meeting] raw transcript for ${docId} not written:`, err);
@@ -511,11 +660,13 @@ export class MeetingStore {
     name: string;
   }):
     | { ok: true; priorNames: Record<string, string>; speakers: Record<string, string> }
-    | { ok: false; reason: 'unknown_meeting' | 'recording' | 'unknown_speaker' } {
+    | { ok: false; reason: 'unknown_meeting' | 'recording' | 'unknown_speaker' | 'not_a_name' } {
     const { docId, meetingId, speaker, name } = args;
     const record = this.list(docId).find((m) => m.meetingId === meetingId);
     if (!record) return { ok: false, reason: 'unknown_meeting' };
     if (this.active(docId)?.meetingId === meetingId) return { ok: false, reason: 'recording' };
+    const given = normalizeSpeakerName(name);
+    if (given === undefined) return { ok: false, reason: 'not_a_name' };
     const priorNames = { ...(record.speakers ?? {}) };
     // A name attaches to a voice the meeting HAD: one that spoke, or one that
     // was named live before it ever did. Anything else is a typo becoming a
@@ -523,8 +674,11 @@ export class MeetingStore {
     const carried =
       speaker in priorNames || this.transcript(docId, meetingId).some((t) => t.speaker === speaker);
     if (!carried) return { ok: false, reason: 'unknown_speaker' };
-    appendLine(meetingIndexPath(this.dataDir, docId), { meetingId, speakers: { [speaker]: name } });
-    return { ok: true, priorNames, speakers: { ...priorNames, [speaker]: name } };
+    appendLine(meetingIndexPath(this.dataDir, docId), {
+      meetingId,
+      speakers: { [speaker]: given },
+    });
+    return { ok: true, priorNames, speakers: { ...priorNames, [speaker]: given } };
   }
 
   /** One meeting's settled turns. */

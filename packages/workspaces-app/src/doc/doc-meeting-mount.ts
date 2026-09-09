@@ -28,10 +28,15 @@ import { mountLeadBanner } from '../lead-banner.ts';
 import { createMeetingBotClient } from '../meeting-bot-client.ts';
 import { type MeetingLiveZone, createMeetingLiveZone } from '../meeting-live-zone.ts';
 import { othersOnDoc } from '../meeting-solo.ts';
-import { mountMeetingStrip } from '../meeting-strip.ts';
+import { type MeetingStripHandle, mountMeetingStrip } from '../meeting-strip.ts';
 import { wantsLatencyTiming } from '../meeting-timing-client.ts';
 import type { MountScope } from '../mount-scope.ts';
-import { loadDocSpeakers, postSpeakerName } from '../speaker-voices.ts';
+import {
+  type DocSpeakersCache,
+  createDocSpeakersCache,
+  loadDocTranscript,
+  postSpeakerName,
+} from '../speaker-voices.ts';
 
 export interface DocMeetingOptions {
   docId: string;
@@ -52,6 +57,18 @@ export interface DocMeetingOptions {
 export interface DocMeetingMount {
   liveZone?: MeetingLiveZone;
   watchLeadPresence?: LeadBanner['watch'];
+  /**
+   * Name a voice for the whole meeting — the strip's verb, handed up so the
+   * notes' own rename entry can use the one channel that knows whether a
+   * capture is still running. Absent on a doc that mounts no meeting.
+   */
+  renameSpeaker?: (label: string, name: string) => Promise<boolean>;
+  /**
+   * The doc's roster, already loaded for the strip. Handed up so the notes'
+   * reassign menu opens on it instead of paying for the same two requests
+   * again at the moment of the tap.
+   */
+  speakers?: DocSpeakersCache;
 }
 
 export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
@@ -78,6 +95,10 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
       withoutHuddleStart(location.pathname + location.search + location.hash),
     );
   }
+  // Who this doc's last meeting heard, loaded once and shared: the strip
+  // asks for it at mount, and the notes' reassign menu opens on the same
+  // answer instead of fetching it again under the person's finger.
+  const speakers = createDocSpeakersCache(docId);
   // `?timing=1` measures this meeting's stage latencies and shows the
   // running numbers. Left in the address on purpose, unlike the huddle
   // flag: a reload should keep measuring, and it opens no mic by itself —
@@ -92,7 +113,18 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
   // The provisional zone at the end of the doc: the live transcript, the
   // splitting-off card, and (via the wash extension declared on the editor
   // above) the settle highlight on each freshly written note.
-  const liveZone = createMeetingLiveZone({ parent: editorMount, prose: editor.editor.view.dom });
+  // The zone owns the only speaker pills on screen during a capture (the
+  // strip renders none while it exists), so it is where a voice is named —
+  // and the strip is what knows which channel a name travels on. The two
+  // point at each other, so one of them is reached through a holder: the
+  // strip, because the zone is built first and the strip takes it as an
+  // option.
+  const mounted: { strip?: MeetingStripHandle } = {};
+  const liveZone = createMeetingLiveZone({
+    parent: editorMount,
+    prose: editor.editor.view.dom,
+    nameSpeaker: (label) => mounted.strip?.nameSpeaker(label),
+  });
   const zone = liveZone;
   scope.onCleanup(() => zone.destroy());
   // Nothing here counts the tinted notes any more: the new-content
@@ -139,10 +171,20 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     // The rename surface a finished meeting leaves behind: the last
     // meeting's cast on mount, and the HTTP rename for a socket that is
     // gone. Same record the reassign menu below reads.
-    loadSpeakers: () => loadDocSpeakers(docId),
+    loadSpeakers: () => speakers.load(),
+    // The cache is keyed by the meeting it came from, and the strip is what
+    // knows when the doc moves between meetings — so the menu below cannot
+    // go on offering the last meeting's cast as targets for a note being
+    // written in this one.
+    onMeetingChange: (meetingId) => speakers.meetingChanged(meetingId),
+    // The other record: what the meeting HEARD, behind the panel's fold.
+    // Before this it lived only in the `-raw-transcript.md` beside the
+    // server's data dir, which is nowhere for anyone not on that machine.
+    loadTranscript: () => loadDocTranscript(docId),
     postName: (meetingId, speaker, name) => postSpeakerName({ docId, meetingId, speaker, name }),
     liveZone: zone,
   });
+  mounted.strip = strip;
   scope.onCleanup(() => strip.destroy());
   // The standing line for an empty lead seat — huddle docs only, because
   // a huddle is the doc whose every ask addresses that seat (the floats
@@ -154,5 +196,10 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     watchLeadPresence = (onChange) => banner.watch(onChange);
     scope.onCleanup(() => banner.destroy());
   }
-  return { liveZone, ...(watchLeadPresence ? { watchLeadPresence } : {}) };
+  return {
+    liveZone,
+    speakers,
+    renameSpeaker: (label, name) => strip.renameSpeaker(label, name),
+    ...(watchLeadPresence ? { watchLeadPresence } : {}),
+  };
 }

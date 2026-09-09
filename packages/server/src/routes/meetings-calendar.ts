@@ -192,6 +192,12 @@ export async function handleMeetingCalendarRoutes(
       if (result.reason === 'recording') {
         return j(409, { error: 'meeting is live — rename it over the audio socket' });
       }
+      // A placeholder is not a name: "Room Speaker C" is what this voice is
+      // called when nobody has named it, and saving it as an answer is how
+      // that string came back as somebody's name.
+      if (result.reason === 'not_a_name') {
+        return j(400, { error: 'that is a placeholder, not a name' });
+      }
       return j(400, { error: 'that speaker is not in this meeting' });
     }
     // The rename reaches backwards, exactly as a live one does — same

@@ -93,7 +93,13 @@ async function defaultFetchJson(url: string, init?: RequestInit): Promise<unknow
 }
 
 function defaultSubscribe(docId: string, handlers: MeetingBotStreamHandlers): () => void {
-  const es = new EventSource(`/events/${encodeURIComponent(docId)}`);
+  // THROUGH `api`, NOT BY HAND. This read `/events/<docId>` — the channel's
+  // pre-cutover address, deleted when the doc id moved into the board's path
+  // — so the EventSource 404'd and a bot meeting showed a person nothing at
+  // all: no state on the record button, no words in the strip. Every test of
+  // this client injects the `subscribe` seam, which is why the one line that
+  // is not exercised is the one that broke.
+  const es = new EventSource(api(`docs/${encodeURIComponent(docId)}/events:stream`));
   const onStatus = (ev: MessageEvent): void => {
     try {
       handlers.onStatus(JSON.parse(ev.data) as MeetingBotStatus);

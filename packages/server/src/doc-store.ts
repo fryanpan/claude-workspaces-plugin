@@ -96,6 +96,8 @@ import {
   unstageDocIndex,
   writeDocIndex,
 } from './doc-index.ts';
+import { docKeyForPath } from './doc-key.ts';
+import { type LiveCopyResult, type ResolveOpts, resolveLiveCopy } from './doc-live-copy.ts';
 import { resolveOriginRepoCheckout } from './doc-origin-repo.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import {
@@ -111,6 +113,7 @@ import {
   readPrivateMeta,
   writePrivateMeta,
 } from './private-meta.ts';
+import { RepoRegistry } from './repo-registry.ts';
 import { type ArchivedDoc, type ArchivedReview } from './review-archive.ts';
 import { boundFiles, redactBoundPath } from './slow-fs.ts';
 import type { SseBus } from './sse.ts';
@@ -851,8 +854,18 @@ export class DocStore {
    */
   private docIndex = new Map<string, DocIndexEntry>();
 
+  /**
+   * Repo+path identity for every doc that has a repo.
+   *
+   * Public because the bind flows, the route family and the migration all
+   * ask it the same question, and a second instance over the same file would
+   * be a second answer. One store, one registry.
+   */
+  readonly repos: RepoRegistry;
+
   constructor(private cfg: DocStoreConfig) {
     if (!existsSync(cfg.dataDir)) mkdirSync(cfg.dataDir, { recursive: true });
+    this.repos = new RepoRegistry(cfg.dataDir);
     // The index IS the boot. Nothing is hydrated here: a start now costs one
     // read per doc of a small JSON row instead of decoding every CRDT ever
     // written, and a doc enters memory when somebody reaches for it.
@@ -1346,6 +1359,13 @@ export class DocStore {
   purgePersisted(docId: string): boolean {
     this.activityMtime.delete(docId);
     this.docIndex.delete(docId);
+    // The one place a repo+path key is given up. A purge is the caller that
+    // asked for the bytes to be gone, and leaving the key claimed would make
+    // the next bind of that file re-establish an address whose document the
+    // operator destroyed on purpose. Archiving does NOT come through here —
+    // an archived doc keeps its key, which is what lets unarchiving put it
+    // back where every link already points.
+    for (const key of this.repos.keysFor(docId)) this.repos.releaseKey(key);
     try {
       const p = this.pathFor(docId);
       if (existsSync(p)) rmSync(p);
@@ -1971,6 +1991,140 @@ export class DocStore {
     return this.bindings.pathOf(target);
   }
 
+  /**
+   * Which copy of a repo+path doc is live, recorded onto the doc, with the
+   * binding moved there.
+   *
+   * The refusal is the interesting return. Two checkouts edited within the
+   * same window with different bytes is not a tie to be broken by whichever
+   * mtime is larger — see `doc-live-copy.ts` — so the caller gets a candidate
+   * table and asks, and passes the answer back as `checkout`.
+   *
+   * Not called from the flush path: this hashes every copy of the file, and
+   * `originRepoGuard` is the guard that has to be cheap enough to run before
+   * every write. This runs where a decision is being made — a bind, a status
+   * read, a checkout being retired — and leaves a binding the flush path then
+   * uses unchanged.
+   */
+  resolveLiveCopy(docId: string, opts?: ResolveOpts): LiveCopyResult {
+    const target = this.get(docId)?.docId ?? docId;
+    return resolveLiveCopy(
+      {
+        registry: this.repos,
+        meta: (id) => this.get(id)?.meta,
+        boundPath: (id) => this.bindings.pathOf(id),
+        retarget: (id, absPath) => {
+          const doc = this.get(id);
+          if (doc) this.bindings.retargetHomeBinding(doc, absPath);
+        },
+        persistMeta: (id) => this.persistMeta(id),
+        lastFlushAt: (id) => this.bindings.lastWriteBackAt(id),
+        now: () => Date.now(),
+      },
+      target,
+      opts,
+    );
+  }
+
+  /**
+   * Move every doc bound inside a checkout onto another copy, before that
+   * checkout goes away.
+   *
+   * Retiring a checkout used to flush and mark the row removed and stop
+   * there, which left every doc bound to a path that was about to vanish:
+   * the next edit wrote back into a directory `git worktree remove` had
+   * deleted, and nothing said so. Identity is repo plus path now, so there is
+   * usually another copy of the same file — this is where the binding is
+   * moved to it.
+   *
+   * The retiring root is EXCLUDED from the survey rather than left to lose on
+   * mtime. Its copies are all still on disk at this moment, which is the
+   * whole point of announcing the removal first, so a survey that could see
+   * them would pick one and move nothing.
+   *
+   * Three outcomes, and the caller is told all three: moved, still ambiguous
+   * (two other copies edited at once — a person has to pick, and this is not
+   * the moment to guess), and no copy anywhere, which flags the doc with
+   * `bindingLostAt` instead of leaving a silent write-back to a deleted path.
+   */
+  retargetCheckout(root: string): {
+    moved: Array<{ docId: string; to: string }>;
+    ambiguous: string[];
+    lost: string[];
+  } {
+    const moved: Array<{ docId: string; to: string }> = [];
+    const ambiguous: string[] = [];
+    const lost: string[] = [];
+    const under = (path: string | undefined): boolean =>
+      path !== undefined && (path === root || path.startsWith(`${root}/`));
+    const ids = new Set(this.bindings.boundUnder(root).map((b) => b.docId));
+    // An unloaded doc is bound too — its binding is re-established from
+    // `sourceUrl` the moment anything opens it, so the index has to be swept
+    // as well or a doc nobody has opened today keeps the dead path.
+    for (const [docId, entry] of this.docIndex) {
+      if (under(entry.meta.sourceUrl)) ids.add(docId);
+    }
+    for (const docId of ids) {
+      const res = this.resolveLiveCopy(docId, { exclude: [root] });
+      if (!res.ok) {
+        if (res.error === 'ambiguous-copy') ambiguous.push(docId);
+        continue;
+      }
+      const doc = this.get(docId);
+      if (res.live === null) {
+        lost.push(docId);
+        if (doc && doc.meta.bindingLostAt === undefined) {
+          doc.meta.bindingLostAt = Date.now();
+          this.persistMeta(docId);
+        }
+        continue;
+      }
+      moved.push({ docId, to: res.live });
+      this.noteBoundCopy(docId, res.live);
+      if (doc && doc.meta.bindingLostAt !== undefined) {
+        doc.meta.bindingLostAt = undefined;
+        this.persistMeta(docId);
+      }
+    }
+    return { moved, ambiguous, lost };
+  }
+
+  /**
+   * Record the copy a doc is actually bound to.
+   *
+   * A bind names the copy the CALLER can see, and since identity became repo
+   * plus path that is a pointer rather than an address — the doc may end up
+   * bound to a different checkout's copy of the same file. `sourceUrl` is
+   * what every later reader (the flush guard, the migration, a status
+   * screen) treats as "where this doc lives", so it has to name the copy
+   * that was chosen rather than the one that was asked for.
+   */
+  noteBoundCopy(docId: string, absPath: string): void {
+    const doc = this.get(docId);
+    if (!doc || doc.meta.sourceUrl === absPath) return;
+    doc.meta.sourceUrl = absPath;
+    this.persistMeta(docId);
+  }
+
+  /**
+   * Flush a doc's pending write-back NOW, before a checkout it lives in goes
+   * away.
+   *
+   * The bind flushes before a removal it can SEE — an unregister, a worktree
+   * we are told about — which is the whole reason those verbs exist rather
+   * than leaving people to `git worktree remove` unannounced. It cannot help
+   * with a removal nobody mentioned, and does not pretend to.
+   */
+  flushBoundWrites(roots: string[]): number {
+    let flushed = 0;
+    for (const { docId, path } of this.bindings.pendingFileWrites()) {
+      if (!roots.some((root) => path === root || path.startsWith(`${root}/`))) continue;
+      this.bindings.flushWrite(docId, this.get(docId));
+      flushed++;
+    }
+    return flushed;
+  }
+
   peekMeta(docId: string): DocMeta | undefined {
     const resident = this.peek(docId);
     if (resident) return resident.meta;
@@ -2054,8 +2208,43 @@ export class DocStore {
       // before — but under its OWN id, never the name it was asked by.
       return { ok: true, doc: this.getOrCreate(existing.docId, init), minted: false };
     }
+    // The name resolves to nothing, so ask the FILE who it is before minting.
+    // A bind from a second checkout of the same repo arrives here with a
+    // different absolute path and a different readable name, and used to mint
+    // a second document — two comment sets on one file, and a removed
+    // worktree stranding one of them. The key does not know about checkouts.
+    const key = init?.sourceUrl ? docKeyForPath(init.sourceUrl) : null;
+    if (key) {
+      this.repos.noteCheckout(init?.sourceUrl as string);
+      const held = this.repos.docIdFor(key.docKey);
+      if (held !== undefined) {
+        // `getOrCreate`, not `get`: the key says this file IS document
+        // `held`, and that stays true even if the document's bytes are not
+        // on disk — a doc created but never written, or a `.ydoc` lost. The
+        // right repair is to re-establish the ADDRESS every saved link
+        // points at, not to mint a second one beside it. A doc that was
+        // genuinely destroyed released its key in `purgePersisted`, so it
+        // never reaches here.
+        return { ok: true, doc: this.getOrCreate(held, init), minted: false };
+      }
+    }
     const docId = newDocId();
+    if (key) {
+      // Claim BEFORE creating. The registry is the authority on which
+      // document a file is, so asking it after minting would mean creating a
+      // doc that then loses the claim and is left behind as litter with the
+      // caller's readable name attached to it. Claiming first makes the
+      // loser's id a number nobody ever saw.
+      const claim = this.repos.claim(key.docKey, docId);
+      if (claim.docId !== docId) {
+        return { ok: true, doc: this.getOrCreate(claim.docId, init), minted: false };
+      }
+    }
     const doc = this.getOrCreate(docId, { ...init, alias: requested });
+    if (key) {
+      doc.meta.docKey = key.docKey;
+      this.persistMeta(docId);
+    }
     return { ok: true, doc, minted: true };
   }
 

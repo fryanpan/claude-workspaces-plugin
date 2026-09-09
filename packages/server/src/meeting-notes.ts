@@ -55,10 +55,15 @@
  * writes them into the doc decides delivery (the CRDT, not the event bus).
  */
 
-import { normalizeSpeakerTags, speakerDisplayName } from '@claude-workspaces/core';
+import {
+  normalizeSpeakerName,
+  normalizeSpeakerTags,
+  speakerDisplayName,
+} from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
+import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {
@@ -417,17 +422,34 @@ export interface NotesUpdate {
   /** The tick as composed — includes any words carried from a failed tick. */
   tick: NotesTick;
   edits: readonly prose.BlockEdit[];
+  /**
+   * Every URL this tick was GIVEN, and the text it could have read one out
+   * of, so the applier can drop a citation the composer invented
+   * (`notes-invented-links.ts`).
+   *
+   * IT RIDES THE UPDATE BECAUSE ONLY THE TICK KNOWS IT. The applier sees a
+   * list of edits and a doc; what the model was handed — the matched rows,
+   * the captured tasks, the resolved lookups, the suggestions about to be
+   * appended — is assembled here and nowhere else. Optional, and absent means
+   * "unknown" rather than "none": a sink that cannot say what the tick was
+   * given must not have every link in the batch judged as invented.
+   */
+  linkSources?: NotesLinkSources;
 }
 
 /**
  * The doc declined this batch on policy, and would decline it again.
  *
- * Its own value rather than a `false` because the two want opposite
- * handling: a `false` write is retried at once (the outline it failed
- * against is the thing that changes), and a refusal is not, because nothing
- * about the doc or the words has moved. Only the notes-heading guard answers
- * this today; the type is the seam for any later rule that refuses a batch
- * for what it IS rather than for what the doc happens to hold.
+ * Its own value rather than a `false`, because the two want opposite
+ * handling. A `false` write earns an immediate second compose: it failed
+ * against an outline, and re-reading the outline is exactly what the retry
+ * does. A refusal has nothing to re-read — `notes-edit-guard.ts` refuses a
+ * batch for what the edits ARE, so composing the same tick again buys a
+ * second refusal and nothing else. The words still carry to the next tick,
+ * which composes against a doc that has moved on.
+ *
+ * The guard is the only rule that answers this today; the type is the seam
+ * for any later one.
  */
 export type NotesWriteRefusal = 'refused';
 
@@ -651,12 +673,8 @@ export interface MeetingNotesDeps {
    * `void` and `true` both mean written — a sink with nothing to report is
    * the ordinary case and must not have to say so.
    *
-   * `'refused'` is the third answer, and it is a write that did not land AND
-   * must not be tried again with the same words: the doc declined the batch
-   * on policy, not on a block that had moved. `false` earns an immediate
-   * second compose because re-reading the outline is exactly what fixes it;
-   * a policy refusal would refuse the retry too, so it says so instead of
-   * spending a compose to find out.
+   * `'refused'` is the third answer and the one that must not be retried:
+   * see {@link NotesWriteRefusal}.
    */
   // A sink with nothing to report returns nothing; only an explicit `false`
   // or `'refused'` means the write did not land. The union is the contract,
@@ -1276,30 +1294,64 @@ export function beginNotesSession(
         notesHeadingId === undefined &&
         outline.some((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
       if (strandingRisk && deps.readOutline && deps.notesHeadingId) {
-        const opened = deps.onNotes({
-          docId: ids.docId,
-          meetingId: ids.meetingId,
-          // The tick this write belongs to, carrying no turns: it is the
-          // section being opened, not any speech being noted, and a sink
-          // that reports what a tick wrote must not attribute these words
-          // to the room.
-          tick: { ...tick, turns: [] },
-          edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
-        });
-        if (opened !== false && opened !== 'refused') {
-          try {
-            outline = deps.readOutline({ docId: ids.docId, meetingId: ids.meetingId });
-            notesHeadingId = deps.notesHeadingId({
-              docId: ids.docId,
-              meetingId: ids.meetingId,
-              outline,
-            });
-          } catch (err) {
-            // Same rule as every other outline read: it informs, it never
-            // fails the tick. With no heading the compose behaves exactly as
-            // it did before this block existed.
-            deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
-          }
+        let opened: boolean;
+        // Kept beside `opened` so the refusal branch below can tell a doc
+        // that refused this open from one that failed it.
+        let openRefused = false;
+        try {
+          const answer = deps.onNotes({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            // The tick this write belongs to, carrying no turns: it is the
+            // section being opened, not any speech being noted, and a sink
+            // that reports what a tick wrote must not attribute these words
+            // to the room.
+            tick: { ...tick, turns: [] },
+            edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
+          });
+          openRefused = answer === 'refused';
+          opened = answer !== false && !openRefused;
+        } catch (err) {
+          opened = false;
+          deps.onError?.(err instanceof Error ? err.message : 'notes section open failed');
+        }
+        if (!opened) {
+          // THE SECTION DID NOT OPEN, SO NOTHING IS COMPOSED THIS TICK. A
+          // compose that went ahead would write under the section that IS
+          // there — somebody else's — which is the exact window this block
+          // exists to close. Same handling as a refused final write: the
+          // words carry, the surface is told, and a size-independent retry
+          // is scheduled. A sink that threw is a refusal too, and it must
+          // not reject the tick chain that every later tick waits on.
+          carry = [...raw, ...carry];
+          lifecycle(
+            'failed',
+            tick.tick,
+            raw.map((t) => t.turn),
+          );
+          composeFailures++;
+          deps.onError?.(
+            `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: notes section not opened`,
+          );
+          report('failed', []);
+          // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. An open
+          // the doc refused would be refused again this tick, and the words
+          // are already carried.
+          if (!openRefused) retryAfterFailure(tick);
+          return;
+        }
+        try {
+          outline = deps.readOutline({ docId: ids.docId, meetingId: ids.meetingId });
+          notesHeadingId = deps.notesHeadingId({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            outline,
+          });
+        } catch (err) {
+          // Same rule as every other outline read: it informs, it never
+          // fails the tick. With no heading the compose behaves exactly as
+          // it did before this block existed.
+          deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
         }
       }
       // DERIVED FROM THE OUTLINE, not from a section read: a block carrying no
@@ -1411,13 +1463,24 @@ export function beginNotesSession(
         );
         const edits = withSuggestions(checked, unseen, input.humanNotes, notesHeadingId);
         const applyStart = clock();
-        const verdict = deps.onNotes({
+        const answer = deps.onNotes({
           docId: ids.docId,
           meetingId: ids.meetingId,
           tick: input.tick,
           edits,
+          // Collected from the SAME `input` the compose was given: a link
+          // is a citation only if this tick could have read the address
+          // somewhere.
+          //
+          // ALL OF `input.suggestions`, NOT THE `unseen` SUBSET. A question
+          // asked on an earlier tick is not asked again, but the row behind
+          // it is still handed to this tick — so a note citing it is citing
+          // something this tick was given, and narrowing the sources to what
+          // is about to be WRITTEN would strip it the moment the doc no
+          // longer carried the earlier question.
+          linkSources: notesLinkSources({ ...input, ...input.tick }),
         });
-        const written = verdict !== false && verdict !== 'refused';
+        const written = answer !== false && answer !== 'refused';
         applyMs = clock() - applyStart;
         if (!written) {
           // The compose was fine and the DOC refused it. Same handling as a
@@ -1434,14 +1497,10 @@ export function beginNotesSession(
             `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: doc write skipped`,
           );
           report('failed', edits);
-          // A REFUSAL IS NOT RETRIED. `retryAfterFailure` exists because a
-          // store refusal is usually a stale outline, and the retry re-reads
-          // it. A doc that refused these edits on policy — the guard on the
-          // meeting's own notes heading — refuses the same edits again, so
-          // the retry buys a second compose and a second refusal. The words
-          // still carry to the next tick, which composes against a doc that
-          // has moved on.
-          if (verdict !== 'refused') retryAfterFailure(tick);
+          // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. This is
+          // the case the guard produces: the same edits refused a second
+          // time, one tick's compose spent to learn nothing.
+          if (answer !== 'refused') retryAfterFailure(tick);
           return;
         }
         // A question is only asked once, and it is asked once it has LANDED.
@@ -1610,7 +1669,12 @@ export function beginNotesSession(
       // the composer actually wrote, whether it was "Speaker B" or an
       // earlier name being corrected.
       const from = speakerDisplayName(speaker, names);
-      names[speaker] = name;
+      // The map holds the NAME, never a display string: a placeholder or a
+      // group suffix arriving from a client is not an answer, and storing it
+      // is what made the composer write "@John (Room) (Room)".
+      const given = normalizeSpeakerName(name);
+      if (given === undefined) return;
+      names[speaker] = given;
       const to = speakerDisplayName(speaker, names);
       if (from === to) return;
       // Two voices can be called the same thing — two people named Alex, or

@@ -770,8 +770,10 @@ body.has-set .doc-switcher-caret {
 }
 .speaker-menu-voice:hover,
 .speaker-menu-nobody:hover,
+.speaker-menu-rename:hover,
 .speaker-menu-voice:focus-visible,
-.speaker-menu-nobody:focus-visible {
+.speaker-menu-nobody:focus-visible,
+.speaker-menu-rename:focus-visible {
   background: var(--chip-bg, rgba(127, 127, 127, 0.12));
 }
 .speaker-menu-who {
@@ -802,6 +804,27 @@ body.has-set .doc-switcher-caret {
 .speaker-menu-nobody {
   border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
   color: var(--fg-muted, #6b7280);
+}
+/* And the one row that is not about this mention at all: it names the VOICE,
+   for every mention of it. Below its own rule for the same reason, and
+   sharing the rows' shape so nothing here reads as a stray browser button.
+   It is the rename surface that outlives the capture — the transcript zone
+   and the strip's row are both gone by then. */
+.speaker-menu-rename {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  font: inherit;
+  color: var(--fg, #111827);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.speaker-menu-rename:disabled {
+  color: var(--fg-muted, #6b7280);
+  cursor: default;
 }
 /* A menu anchored to a word works next to a cursor. Under a thumb it lands
    half off-screen, on top of the sentence being read — so at phone width it
@@ -1570,6 +1593,33 @@ body.has-set .doc-switcher-caret {
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
+/* What the last meeting HEARD, folded: long by nature, and nobody opens this
+   panel to read a transcript by default. Scrolls inside itself so the fold
+   cannot push Start Recording off a 750px-tall screen. */
+.meeting-pop-transcript {
+  margin: 0 8px 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.meeting-pop-transcript > summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px;
+}
+.meeting-pop-transcript-body {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 6px;
+  color: var(--fg-muted);
+}
+.meeting-pop-transcript-line {
+  padding: 2px 0;
+  line-height: 1.4;
+}
 .meeting-choice-group {
   margin: 0 8px 10px;
 }
@@ -2254,16 +2304,53 @@ body.is-reading-width #editor > .live-zone {
 .lz-turn {
   display: inline;
 }
+/* Who is speaking, and — where the zone was given a way to record one — the
+   tap that names them. Two elements for the same reason the strip's pill is
+   two (see `.meeting-speaker`): the OUTER is the tap target and carries
+   padding and nothing else, the INNER carries every visual. The outer's
+   vertical padding is cancelled by a matching negative margin, so the target
+   is 34px tall in a line of transcript that never grows for it.
+
+   The tag is a `<span>` when the zone has no rename handler and a `<button>`
+   when it has, and the button-only rules below are what keep the promise
+   honest: only the tappable one wears the pencil and the dotted underline. */
 .lz-speaker {
+  display: inline-block;
+  padding: 8px 0;
+  margin: -8px 0.35em -8px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--lz-fg);
+  vertical-align: baseline;
+}
+.lz-speaker-pill {
+  display: inline-block;
   font-size: 0.78em;
   font-weight: 550;
   letter-spacing: 0.01em;
   padding: 0.1em 0.5em;
-  margin-right: 0.35em;
   border-radius: var(--radius-pill);
   background: rgba(127, 127, 127, 0.12);
-  color: var(--lz-fg);
+  color: inherit;
   white-space: nowrap;
+}
+button.lz-speaker {
+  cursor: pointer;
+}
+/* At rest it has to LOOK like a control: `cursor` and `title` are hover-only
+   and the iPad has no hover, which is exactly how a real two-voice capture
+   ended with "no ability to edit the speaker names". Same pencil and same
+   dotted underline the strip's pill wears, so the two read as one gesture. */
+button.lz-speaker .lz-speaker-pill {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+button.lz-speaker .lz-speaker-pill::before {
+  content: "✎ ";
+}
+button.lz-speaker:hover .lz-speaker-pill {
+  background: rgba(127, 127, 127, 0.22);
 }
 .lz-partial::after {
   content: "";
@@ -3772,6 +3859,164 @@ body.redline-mode #toggle-suggest-mode {
    `.cw-leader-comment` already makes). */
 .cw-leader-suggestion {
   stroke: var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+   INLINE FOOTNOTES (doc/footnote-decorations.ts + doc/footnote-notes.ts)
+
+   `^[a note]` typed into the prose. The characters stay in the file and in
+   the document; everything below is how they are DRAWN, which is three
+   different things at three different widths:
+
+     in the margin the raw run is hidden entirely, the fact it supports is
+                   underlined, and the note is plain grey text beside the line
+                   with a leader across the gutter — the same overlay the
+                   comment balloons draw into. Needs the balloon placement,
+                   which needs both a column and the reader's own choice.
+     everywhere    there is no column to carry the note, so the run folds to
+     else          a small grey superscript number and a tap opens a card
+                   UNDER the line. Absolutely positioned: the paragraph must
+                   not move, or the reader loses their place mid-sentence.
+     on paper      the notes print as a numbered "Sources" list at the end.
+
+   Certainty is carried by the STROKE, never by colour: solid for a note the
+   author confirmed, dotted for one whose text says "Unconfirmed".
+   --------------------------------------------------------------------------- */
+
+/* The raw `^[…]` run. Folded to nothing on a wide screen (the margin has the
+   note) and to a superscript number below the breakpoint. Revealed in full
+   while the caret is inside it, so a note can be edited where it lives. */
+.cw-fn {
+  font-size: 0;
+  letter-spacing: 0;
+}
+.cw-fn::after {
+  content: attr(data-cw-fn);
+  display: var(--cw-fn-sup, inline);
+  font: 400 10px / 0 var(--sans);
+  vertical-align: super;
+  color: var(--fg-muted);
+  padding: 0 2px;
+  cursor: pointer;
+}
+/* The margin already carries every note, so the number in the text would be
+   noise — and ONLY there. Two conditions, and both are needed.
+
+   `body[data-cards]` is the reader's stored placement, never a width: a
+   reader who chose inline cards on a 1180px screen has no margin column, and
+   a number hidden by a media query left that note with no way to reach it at
+   all. It is the same predicate the module asks (`balloonMarginVisible` in
+   card-placement.ts), so the two halves cannot disagree.
+
+   `.cw-fn-margined` is the editor that actually mounts footnote-notes.ts.
+   Every `createEditor` draws these decorations — a task body, a live
+   redline — and only the document editor has a margin, so without this the
+   citation simply vanished in the others. */
+body[data-cards="balloon"] .cw-fn-margined .cw-fn {
+  --cw-fn-sup: none;
+}
+.cw-fn-on::after {
+  background: var(--bg-hover);
+  border-radius: 3px;
+}
+.cw-fn-open {
+  font-size: inherit;
+  letter-spacing: inherit;
+  color: var(--fg-muted);
+}
+.cw-fn-open::after {
+  content: none;
+}
+
+/* The fact the note supports: a hairline under the words, dotted when the
+   author has not confirmed them. */
+.cw-fn-fact {
+  border-bottom: 1px solid var(--border-strong);
+  text-decoration: none;
+}
+.cw-fn-fact-unsure {
+  border-bottom-style: dotted;
+}
+
+/* The margin note. A caption, not a card: no box, no fill, no colour — the
+   column already says "this is about the line beside it". */
+.cw-fn-note {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  padding-left: 6px;
+  font: 400 12px / 1.4 var(--sans);
+  color: var(--fg-muted);
+}
+/* A footnote's leader is GREY, not the red every markup leader inherits: the
+   red says "something was deleted here", and a note is not a change. Dashed
+   for a note the author has not confirmed, matching its underline.
+
+   Written as a COMPOUND selector on purpose. `.cw-leader` is re-declared in
+   the dark-scheme block at the end of this file, which sits after these
+   rules, so a single class would tie on specificity and lose on order — the
+   note's leader came out red in dark mode and only there. */
+.cw-leader.cw-leader-fn,
+.cw-leader.cw-leader-fn-unsure {
+  stroke: var(--border-strong);
+  opacity: 0.7;
+}
+.cw-leader.cw-leader-fn-unsure {
+  stroke-dasharray: 2 3;
+}
+
+/* The phone's card, opened by a tap on the superscript. */
+.cw-fn-pop {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  max-width: 420px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
+  font: 400 13px / 1.45 var(--sans);
+  color: var(--fg-muted);
+}
+.cw-fn-pop-unsure {
+  border-style: dashed;
+}
+
+/* Paper only. Hidden on screen at every width — on a wide screen the margin
+   carries the notes and on a phone the popover does, so a list at the end
+   would be a third copy of the same sentences. */
+.cw-fn-sources {
+  display: none;
+}
+
+@media print {
+  .cw-fn-sources {
+    display: block;
+    margin-top: 34px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font: 400 13px / 1.5 var(--sans);
+    color: var(--fg-muted);
+  }
+  .cw-fn-sources h2 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0;
+  }
+  .cw-fn-sources ol {
+    padding-left: 22px;
+    margin: 6px 0 0;
+  }
+  /* On paper the number is the only way back to the line it came from, so it
+     comes back even for a reader whose screen placement hid it. */
+  .cw-fn {
+    --cw-fn-sup: inline;
+  }
+  .cw-fn-pop,
+  .cw-fn-note {
+    display: none;
+  }
 }
 
 /* Suggestion balloon (redline-suggestions Phase 2, commit 5) — a THIRD kind

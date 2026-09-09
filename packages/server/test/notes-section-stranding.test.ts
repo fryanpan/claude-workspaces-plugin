@@ -20,8 +20,10 @@ import { describe, expect, test } from 'bun:test';
  */
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import { type NotesUpdate, beginNotesSession } from '../src/meeting-notes.ts';
 import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
 import { sectionBody } from './notes-doc-helpers.ts';
+import { ManualScheduler } from './notes-tick-harness.ts';
 
 const AUTHOR = 'notes-agent';
 const WHO = {
@@ -131,4 +133,69 @@ describe('a meeting that writes before it opens its own section', () => {
       .filter((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
     expect(sections).toHaveLength(2);
   });
+});
+
+describe('a section that did not open is a tick that did not compose', () => {
+  // The eager open is only worth having if a refusal of it stops the
+  // compose: a compose that went ahead would write under the section that IS
+  // there — the previous meeting's — which is the window the open exists to
+  // close. And a sink that THROWS on the open must not reject the tick chain
+  // every later tick waits on.
+  const ids = { docId: 'd-strand', meetingId: 'm-strand-1' };
+  const foreignOutline: readonly prose.OutlineEntry[] = [
+    { id: 'h-theirs', kind: 'heading', level: 2, text: MEETING_NOTES_HEADING, author: 'someone' },
+    { id: 'b-theirs', kind: 'bullet', level: 0, text: HUMAN_LINE, author: undefined },
+  ] as unknown as readonly prose.OutlineEntry[];
+
+  function session(open: 'refuse' | 'throw') {
+    const schedule = new ManualScheduler();
+    const errors: string[] = [];
+    let composes = 0;
+    const writes: NotesUpdate[] = [];
+    const s = beginNotesSession(
+      {
+        composer: {
+          name: 'counting',
+          compose() {
+            composes++;
+            return Promise.resolve([{ op: 'insert_at_end', markdown: '- a bullet' }]);
+          },
+        },
+        quietMs: 1000,
+        schedule,
+        now: () => 1_000,
+        readOutline: () => foreignOutline,
+        notesHeadingId: () => undefined,
+        onNotes: (u) => {
+          writes.push(u);
+          if (open === 'throw') throw new Error('sink down');
+          return false;
+        },
+        onError: (m) => {
+          errors.push(m);
+        },
+      },
+      ids,
+    );
+    return { s, schedule, errors, writes, composes: () => composes };
+  }
+
+  for (const mode of ['refuse', 'throw'] as const) {
+    test(`an open the sink ${mode}s carries the words and composes nothing`, async () => {
+      const h = session(mode);
+      h.s.onTurn({ turn: 0, text: 'One.', final: true });
+      h.schedule.fire();
+      await h.s.end();
+      // Every write the sink saw was the section being opened — never a bullet.
+      expect(h.writes.length).toBeGreaterThan(0);
+      for (const w of h.writes) {
+        expect(w.edits.map((e) => e.op)).toEqual(['insert_at_end']);
+        expect(w.edits[0] && 'markdown' in w.edits[0] ? w.edits[0].markdown : '').toBe(
+          `## ${MEETING_NOTES_HEADING}`,
+        );
+      }
+      expect(h.composes()).toBe(0);
+      expect(h.errors.some((m) => m.includes('notes section not opened'))).toBe(true);
+    });
+  }
 });

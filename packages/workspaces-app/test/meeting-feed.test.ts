@@ -23,6 +23,7 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     turns: [] as TranscriptTurn[],
     mode: 'conversation' as CaptureMode,
     startNote: '' as string,
+    standingNote: '' as string,
     names: {} as Record<string, string>,
     liveBot: null as MeetingBotStatus | null,
     farewell: null as string | null,
@@ -39,6 +40,7 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     turns: () => h.turns,
     mode: () => h.mode,
     startNote: () => h.startNote,
+    standingNote: () => h.standingNote,
     names: () => h.names,
     liveBot: () => h.liveBot,
     botFarewell: () => h.farewell,
@@ -56,6 +58,7 @@ interface Harness {
   turns: TranscriptTurn[];
   mode: CaptureMode;
   startNote: string;
+  standingNote: string;
   names: Record<string, string>;
   liveBot: MeetingBotStatus | null;
   farewell: string | null;

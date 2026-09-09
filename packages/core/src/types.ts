@@ -149,6 +149,58 @@ export interface DocMeta {
    */
   docHome?: DocOriginRepo;
   /**
+   * The doc's repo+path identity — `<repoKey>\0<path from the repo root>`,
+   * as `doc-key.ts` derives it.
+   *
+   * Recorded so a doc can name its own key without a reverse walk of the
+   * registry, and so the migration's revert pass can tell a key it wrote from
+   * one that was already there. Private-meta: both halves name the host — the
+   * repo the machine holds and where in it the file sits.
+   *
+   * Absent for a doc bound outside any repo, which keeps exactly the old
+   * behaviour: a minted id bound to one path.
+   */
+  docKey?: string;
+  /**
+   * The checkout whose copy of this file the server is treating as live: the
+   * one edited most recently, counting our own last write-back as an edit.
+   *
+   * Recorded rather than merely computed so a person can be TOLD which copy
+   * their comment landed against. Private-meta, like every other host path.
+   */
+  liveCheckout?: string;
+  /**
+   * Checkouts holding a copy that differs from the live one, with the moment
+   * each was first seen to differ.
+   *
+   * Advisory and never blocking: copies of a file on two branches are
+   * SUPPOSED to differ, and this exists so a reviewer is told rather than
+   * surprised. Cleared when the difference goes away.
+   */
+  driftCheckouts?: Array<{ root: string; firstSeenAt: number }>;
+  /**
+   * How many times this doc has ENTERED a drifted state.
+   *
+   * A count of transitions, not of observations: "this file is constantly
+   * being edited in two places" and "this happened once in August" are
+   * different facts, and a gauge that only says "drifted" cannot tell them
+   * apart. Never reset; it is a lifetime counter.
+   */
+  driftFirings?: number;
+  /**
+   * When the server last looked for this doc's file and found no copy in any
+   * checkout it knows — set when a checkout is retired out from under a
+   * binding and nothing else holds the file.
+   *
+   * The doc is not broken: the `.ydoc` is the durable record and every
+   * comment is still there. What is broken is the BINDING, which still names
+   * a path that is about to stop existing, and a write-back to it would fail
+   * silently on a schedule nobody is watching. So the state is recorded
+   * rather than left to be inferred, and cleared the moment a copy is found
+   * again. Private-meta: it names a host path's absence.
+   */
+  bindingLostAt?: number;
+  /**
    * The workspace's own bind-time configuration, replicated onto every
    * member the same way `workspaceRoot` is — there is no workspace registry,
    * so the members ARE the record. `refresh_workspace` reads these back and

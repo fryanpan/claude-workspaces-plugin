@@ -13,7 +13,7 @@
  * meeting three weeks ago is not the correction anybody is reaching for.
  */
 
-import { type RosterVoice, speakerRoster } from '@claude-workspaces/core';
+import { type RosterVoice, speakerDisplayName, speakerRoster } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 
 interface MeetingSummary {
@@ -28,6 +28,40 @@ export interface DocSpeakers {
   voices: RosterVoice[];
 }
 
+/** One settled turn as the meeting record carries it. */
+interface RecordTurn {
+  text: string;
+  speaker?: string;
+  ts?: number;
+}
+
+interface MeetingRecord {
+  speakers?: Record<string, string>;
+  transcript?: RecordTurn[];
+}
+
+/** The doc's latest meeting, record and all. Null when it has never held one. */
+async function latestMeeting(
+  docId: string,
+  fetchImpl: typeof fetch,
+): Promise<{ summary: MeetingSummary; record: MeetingRecord } | null> {
+  const listed = await fetchImpl(api(`docs/${encodeURIComponent(docId)}/meetings`));
+  if (!listed.ok) throw new Error(`meetings ${listed.status}`);
+  const body = (await listed.json()) as { meetings?: MeetingSummary[] };
+  const meetings = body.meetings ?? [];
+  if (meetings.length === 0) return null;
+  // Latest by start, falling back to the order the index returned when a row
+  // predates `startedAt` — an older record is still a usable roster.
+  const summary = meetings.reduce((best, m) =>
+    (m.startedAt ?? 0) >= (best.startedAt ?? 0) ? m : best,
+  );
+  const detail = await fetchImpl(
+    api(`docs/${encodeURIComponent(docId)}/meetings/${encodeURIComponent(summary.meetingId)}`),
+  );
+  if (!detail.ok) throw new Error(`meeting ${detail.status}`);
+  return { summary, record: (await detail.json()) as MeetingRecord };
+}
+
 /**
  * The voices of this doc's latest meeting — and WHICH meeting, because a
  * rename after the meeting is addressed to it. Null if the doc has never
@@ -37,27 +71,130 @@ export async function loadDocSpeakers(
   docId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<DocSpeakers | null> {
-  const listed = await fetchImpl(api(`docs/${encodeURIComponent(docId)}/meetings`));
-  if (!listed.ok) throw new Error(`meetings ${listed.status}`);
-  const body = (await listed.json()) as { meetings?: MeetingSummary[] };
-  const meetings = body.meetings ?? [];
-  if (meetings.length === 0) return null;
-  // Latest by start, falling back to the order the index returned when a row
-  // predates `startedAt` — an older record is still a usable roster.
-  const latest = meetings.reduce((best, m) =>
-    (m.startedAt ?? 0) >= (best.startedAt ?? 0) ? m : best,
-  );
-  const detail = await fetchImpl(
-    api(`docs/${encodeURIComponent(docId)}/meetings/${encodeURIComponent(latest.meetingId)}`),
-  );
-  if (!detail.ok) throw new Error(`meeting ${detail.status}`);
-  const record = (await detail.json()) as {
-    speakers?: Record<string, string>;
-    transcript?: Array<{ text: string; speaker?: string }>;
-  };
+  const latest = await latestMeeting(docId, fetchImpl);
+  if (!latest) return null;
+  const { summary, record } = latest;
   return {
-    meetingId: latest.meetingId,
-    voices: speakerRoster(record.transcript ?? [], record.speakers ?? latest.speakers ?? {}),
+    meetingId: summary.meetingId,
+    voices: speakerRoster(record.transcript ?? [], record.speakers ?? summary.speakers ?? {}),
+  };
+}
+
+/**
+ * The doc's roster, held so a tap does not have to wait for it.
+ *
+ * WHY A CACHE AT ALL. `loadDocSpeakers` is two sequential requests — list the
+ * doc's meetings, then fetch the latest meeting's whole record, transcript
+ * and all — and the reassign menu used to make both of them at the moment the
+ * person tapped a name. That is a menu with a wait in it every time it opens,
+ * on an answer that is already in memory: the strip loads exactly the same
+ * roster when the doc mounts.
+ *
+ * So the cache is shared between them. `peek` is what the menu paints on the
+ * tap; `load` is the refresh behind it, and it is deduped, so a menu opened
+ * during the mount's own load rides that request rather than starting a
+ * second one. A failed refresh leaves the last good answer in place: what is
+ * on screen came from the same server a moment ago.
+ */
+export interface DocSpeakersCache {
+  peek(): DocSpeakers | null;
+  load(): Promise<DocSpeakers | null>;
+  /**
+   * Which meeting the doc is in NOW — the strip knows, because it is the
+   * thing that starts and stops them. `null` says a boundary has passed and
+   * the new meeting has not named itself yet, which is a reason to hold
+   * nothing rather than a reason to keep what was there.
+   */
+  meetingChanged(meetingId: string | null): void;
+}
+
+export function createDocSpeakersCache(
+  docId: string,
+  fetchImpl: typeof fetch = fetch,
+): DocSpeakersCache {
+  let held: DocSpeakers | null = null;
+  let inFlight: Promise<DocSpeakers | null> | null = null;
+  /** The meeting the doc is in, once something has said. Null until then —
+   *  and on a freshly opened doc that is exactly right: whatever the server
+   *  calls the latest meeting is the one this page is about. */
+  let current: string | null = null;
+  /** A boundary has passed whose meeting has no id yet. Nothing is current,
+   *  so nothing may be served: this is the window Codex found, where the
+   *  previous meeting's cast was still on offer under the finger. */
+  let unknown = false;
+  /** Which meeting a load was asked on behalf of. An answer that arrives
+   *  after the boundary is about the meeting before it. */
+  let era = 0;
+  return {
+    peek: () => {
+      if (held === null || unknown) return null;
+      return current === null || held.meetingId === current ? held : null;
+    },
+    load(): Promise<DocSpeakers | null> {
+      if (inFlight) return inFlight;
+      const mine = era;
+      const run = loadDocSpeakers(docId, fetchImpl)
+        .then((fresh) => {
+          // A doc that has never held a meeting answers null, and that is an
+          // answer: it replaces whatever was held.
+          if (mine === era) held = fresh;
+          return fresh;
+        })
+        .finally(() => {
+          if (inFlight === run) inFlight = null;
+        });
+      inFlight = run;
+      return run;
+    },
+    meetingChanged(meetingId: string | null): void {
+      era += 1;
+      // Whatever is in flight belongs to the era that just ended; the next
+      // ask starts a request of its own rather than riding that one.
+      inFlight = null;
+      current = meetingId;
+      unknown = meetingId === null;
+      if (held !== null && held.meetingId !== meetingId) held = null;
+    },
+  };
+}
+
+/** The words of this doc's latest meeting, ready to render. */
+export interface DocTranscript {
+  meetingId: string;
+  /** `[HH:MM:SSZ] Rowan Pike: words` — the raw record's own grammar, minus
+   *  its leading bullet, so the panel can render one line per turn. */
+  lines: string[];
+}
+
+/**
+ * WHAT THE MEETING ACTUALLY HEARD, for the panel to offer once it is over.
+ *
+ * The notes are the reviewed record and the doc carries them; this is the
+ * unreviewed one, and until now the only copy a person could reach was the
+ * `-raw-transcript.md` file beside the server's data dir — which is to say,
+ * nowhere, for anyone not on the box. A bot meeting made that plain: the
+ * words went past and left no trace anybody could open.
+ *
+ * Fetched when the panel is opened rather than held from mount, so a meeting
+ * that has just ended is the one it shows.
+ */
+export async function loadDocTranscript(
+  docId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DocTranscript | null> {
+  const latest = await latestMeeting(docId, fetchImpl);
+  if (!latest) return null;
+  const names = latest.record.speakers ?? latest.summary.speakers ?? {};
+  const turns = latest.record.transcript ?? [];
+  return {
+    meetingId: latest.summary.meetingId,
+    lines: turns.map((turn) => {
+      const who =
+        turn.speaker === undefined ? 'Speaker 1' : speakerDisplayName(turn.speaker, names);
+      const clock =
+        turn.ts === undefined ? '' : `[${new Date(turn.ts).toISOString().slice(11, 19)}Z] `;
+      return `${clock}${who}: ${turn.text.replace(/\s*\n\s*/g, ' ').trim()}`;
+    }),
   };
 }
 

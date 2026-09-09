@@ -52,9 +52,9 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
-    meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
+    meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
@@ -183,6 +183,75 @@ pair and are asserted to be inverses, which is what lets the editor show one
 rule as a phrase and as chips without either view being the source
 ([scheduled-tasks](scheduled-tasks.md)).
 
+**A document's identity is the repo and the path, not the checkout.** Four
+server modules hold that, and they sit in the doc-store group beside
+`doc-origin-repo.ts` because they answer the same question one layer up.
+`doc-key.ts` derives the key — the repo's origin URL (or, with no remote, its
+main directory) plus the path from the repo root — reading git's plumbing
+files directly rather than spawning anything. `repo-registry.ts` is the lookup
+table from that key to a doc id, plus the checkouts of each repo somebody has
+registered; it is a table of ALIASES, never a rename, because every component
+of a key can change and a saved link must keep resolving; its file half —
+the shape on disk, the atomic write, and the refusal to overwrite a registry
+that did not parse — is `repo-registry-file.ts`, and its checkout rows — adding
+one, retiring one softly, and listing the checkouts that exist right now — are
+`repo-registry-checkouts.ts`, so the class beside them holds only the
+decisions about when to write. `doc-copies.ts`
+looks at all the copies one key names and says which is live, which have
+drifted, and when the answer is a question rather than a value;
+`doc-live-copy.ts` is the half that acts on that verdict — moving the binding,
+recording drift, or refusing with a table of candidates for a person to choose
+from. `routes/repos.ts` is the family that exposes the registry and that
+refusal over HTTP, loopback-only for the reason the deploy route is: every
+value in it is a path on this machine. Nothing here changes how a doc id is
+minted — ids are still random and still minted in one place — so the picture
+above is unchanged: this is a lookup in front of it.
+
+**A project's mounted folders reuse that identity for files that are not
+documents.** `mount-registry.ts` is the table — which subfolders of a repo the
+lead mounted, the `f-` address each file in them answers at, whether the
+project's files may leave the machine, and where its conventions index lives —
+with `mount-registry-file.ts` as its shape on disk. It keeps its own
+`mounts.json` beside `repos.json` rather than living inside it: the repo
+registry is written on every bind, and a mount table changes for unrelated
+reasons; the two are joined by `repoKey` through `RepoRegistry.repoInfo`, so a
+repo that re-keys carries its mounts across. `mount-scan.ts` is the walk and
+the move fingerprint — a `stat` pass over folders measured in tens of
+gigabytes, so nothing is read whole and only files that vanished or appeared
+are ever hashed. `mount-store.ts` is every decision that needs a filesystem:
+where a relative path is joined, what a mount currently holds, and the
+reconcile that turns a rename into an alias so an address and its comments
+follow the file. `routes/mounts.ts` carries two gates in one family — the
+lead's table is loopback-only like `routes/repos.ts`, and a file's address is
+member-facing but absent from `shareScopeAllows`, narrowed further to
+on-the-box callers when the project is marked local-only. Retention is the
+project's throughout: unmounting is soft and nothing under a mount is ever
+deleted.
+
+Three more modules put the documents that already exist onto that identity,
+and none of them runs on the server's own clock. `doc-identity-plan.ts` is a
+pure planner — it takes the corpus as an io parameter and says which key each
+document would claim, which documents would collapse onto one, and which it
+cannot place — so the dry run is the same code as the run.
+`doc-identity-migration.ts` is the half that touches disk: it files the
+claims, copies each losing document's conversation into the winner through
+`doc-thread-merge.ts`, asserts that the thread count before equals the count
+after, and commits its journal and its claims together — `doc-identity-journal.ts`
+holds that record and the revert that reads it back, because the journal and
+the registry are written at one point and a run that cannot write one must
+file neither. `doc-identity-check.ts` reads that record back long after the
+run and asks whether each merged winner still holds the threads its losers
+hold — read-only, and the only mode of the script that is safe with the server
+up, because a write lost AFTER a run is invisible to the run's own parity
+assertion. Only `doc-thread-merge.ts`
+is reachable from the running server's future; the other two are driven by
+`scripts/migrate-doc-identity.ts`, by hand, because a corpus walk that spawns
+git and hydrates documents is not something a restart should do.
+`doc-identity-renames.ts` is the fourth, split off because it is the only part
+that runs a subprocess and the only part holding state between calls: one
+`git log` per repository, memoized, because a corpus of thousands of documents
+cannot afford one per document.
+
 **A bound mockup is a live surface, and it keeps its rounds.** A mockup's doc
 holds no content of its own — its surface is somebody's HTML file — so the four
 `mockup-*.ts` modules are what make that file behave like an attachment.
@@ -195,7 +264,14 @@ never writes back, and touches no fragment — and hands each change up as a
 `mockup.updated` frame on the doc's own channels. An open page fetches the
 round it names and swaps its content in place, keeping the reader's scroll and
 letting the widget re-anchor its threads onto the new DOM, so a comment whose
-element is gone becomes an outdated one rather than a lost one. `mockup-capture.ts`
+element is gone becomes an outdated one rather than a lost one. The page-side half of that script is two modules in the widget package rather
+than one: `mockup-live.ts` owns the swap, and `mockup-live-scripts.ts` owns
+what re-inserting the round's own `<script>` elements does — including the
+redeclaration a second round used to die on, which browsers report two
+different ways. It joins no subsystem; it is the swap's other half, split for
+size.
+
+`mockup-capture.ts`
 still keeps the single fallback copy that lets a link outlive its scratch
 directory; `mockup-versions.ts` keeps the history beside it, so the page a
 reviewer was looking at when he commented is still readable at `?v=<n>` after
@@ -268,6 +344,14 @@ two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
 
+`notes-invented-links.ts` sits in the Meetings box beside `notes-edit-guard.ts`
+and is the second deterministic refusal on the applier path: the guard says
+which edits may touch the section, this says which links inside them the tick
+was actually given, and `applyNotesUpdate` runs both before the store sees a
+batch. Pure like the parser — a list of edits and a list of sources in,
+rewritten edits and dropped URLs out — so `scripts/notes-eval.ts` counts the
+same rule to report how often the composer invents an address.
+
 The `notes-quality-*` family joins the same services tier and adds no new box
 to the picture: `notes-quality-report.ts` and `notes-quality-thresholds.ts`
 are pure (they read a markdown string and a transcript and answer counts, so
@@ -279,6 +363,7 @@ meeting's stop runs — read the notes, judge them, store the reading, file a
 bad one on the row the doc belongs to. Nothing under `routes/` is added: the
 week's rollup rides the existing `GET /api/metrics` reply, for the reason
 `uptimeSec` does.
+
 `notes-edit-guard.ts` joins the DOMAIN tier below as well, and it moves no
 boundary either: it is one function over values — a tick's edit list and the
 block id of the section this meeting writes under, in; the edits that may be
@@ -296,7 +381,8 @@ whether the notes carry them out — plus a per-meeting ledger the notes session
 owns. It is named here only because it is the answer to a question the picture
 did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-invented-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
@@ -327,7 +413,18 @@ board's task-body editor, neither of which mounts a redline module. `new-indicat
 changes none of the picture: it is one screenful of geometry that
 `meeting-live-zone.ts` owned until the zone crossed 500 lines, holding the
 live transcript still across the frame a settled chunk splits off on. Nothing
-but the zone imports it. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `meeting-capture-set.ts` joins that family for the meeting that opens BOTH: it is the tier above one capture, opening each stream in turn and deciding what a meeting runs on when only one of the two doors was answered. It changes no layer — it is a view-tier module calling the same `startMeetingCapture` a single-source meeting always did — and it is named here because the strip now talks to it rather than to the capture directly. `notes-link-affordance.ts` joins the editor tier beside
+but the zone imports it. `meeting-speaker-pill.ts` joins it in the same tier
+for the same reason — the zone is back on the 500-line bar — and holds one
+decision that is not the zone's: a speaker pill is a rename BUTTON where
+somebody handed in a way to record a name and the plain span it always was
+where nobody did. Nothing but the zone imports it either, today; the strip's
+own pill (`meeting-feed.ts`) is the obvious second caller. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `meeting-capture-set.ts` joins that family for the meeting that opens BOTH: it is the tier above one capture, opening each stream in turn and deciding what a meeting runs on when only one of the two doors was answered. It changes no layer — it is a view-tier module calling the same `startMeetingCapture` a single-source meeting always did — and it is named here because the strip now talks to it rather than to the capture directly. `meeting-reconnect.ts` joins the same family one tier below the strip and changes no layer either: it is the policy a dropped audio socket is retried under — how long to wait, when to stop waiting, and the two sentences the strip shows while it happens — with no DOM, no socket and no timer in it, so `meeting-strip.ts` owns the doing and this owns the deciding. `meeting-transcript-panel.ts` joins the same family in the view tier and
+changes none of the picture either: it is the Transcript fold the start panel
+grows once a meeting has ended, split out of `meeting-chooser.ts` — which sits
+on the 500-line bar — because that panel is where every billed choice for the
+NEXT recording is made and this is a report on the last one. It reads the
+meetings route the cast list already reads, at the tap rather than at mount.
+`notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing
 a link edits the stored doc and calls the board. `core` is three tiers: wire types, the document model (`prose-*.ts`,
@@ -342,6 +439,22 @@ is there for the usual core reason: a two-stream meeting's group names and
 namespaced speaker labels are rendered by the browser, written by the server
 and read back by the notes composer, so one spelling has to serve three
 processes.
+
+`speaker-name.ts` sits in that same wire-types tier, and joins the picture
+without changing it: what a voice is CALLED — the placeholder until somebody
+names it, and the normalisation that keeps a stale display string from being
+read back as a name — was a function inside `meeting.ts` until the rules
+outgrew it. Four processes render it (strip, notes editor, notes composer, raw
+transcript), which is the same reason `meeting-streams.ts` is here.
+
+`footnotes.ts` belongs to that document-model tier too and does not move the
+picture: it is the grammar of a `^[a note]` inline footnote — where the notes
+are in a line, whether the author wrote "Unconfirmed", and which words a note
+is about. Nothing about a footnote is stored, so this is a pure text question
+asked at parse time (the inline parser skips a note's body rather than reading
+citation punctuation as emphasis) and again at render time by the editor's
+decoration plugin, which is why the answer lives in `core` rather than in
+either caller.
 
 `prose-integrity.ts` belongs to that document-model tier and does not move the
 picture: it is the check the server runs after a write, asserting the live doc

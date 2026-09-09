@@ -160,6 +160,8 @@ interface RenderedNoteCard {
   key: string;
   anchor: Element;
   el: HTMLElement;
+  /** The card's own leader class, when it asked for one. */
+  leaderClass?: string;
 }
 
 interface RenderedSuggestionBalloon {
@@ -399,7 +401,13 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
         else if (r.kind === 'comment') r.thread = openThreads[ci++] ?? r.thread;
         // A re-band rebuilds the tinted block, so the card's anchor node goes
         // stale even when nothing about the card itself changed.
-        else if (r.kind === 'note') r.anchor = notes[ni++]?.anchor ?? r.anchor;
+        else if (r.kind === 'note') {
+          const n = notes[ni++];
+          if (n) {
+            r.anchor = n.anchor;
+            r.leaderClass = n.leaderClass;
+          }
+        }
       }
       return;
     }
@@ -445,7 +453,13 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     // Placed, never built: the element belongs to `recent-note-cards.ts`.
     const nextNotes: RenderedNoteCard[] = notes.map((n, i) => {
       marginEl.appendChild(n.el);
-      return { kind: 'note', key: noteKeys[i], anchor: n.anchor, el: n.el };
+      return {
+        kind: 'note',
+        key: noteKeys[i],
+        anchor: n.anchor,
+        el: n.el,
+        leaderClass: n.leaderClass,
+      };
     });
     rendered = [...nextDel, ...nextComments, ...nextSuggestions, ...nextNotes];
     // A card's folding slots have no intrinsic height — measure them now the
@@ -561,22 +575,21 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
       rendered[i].el.style.top = `${y - marginOffsetY}px`;
       maxBottom = Math.max(maxBottom, y + items[i].height);
 
-      const leaderKind = rendered[i].kind;
+      const card = rendered[i];
       const line = document.createElementNS(SVG_NS, 'line');
-      const classes =
-        leaderKind === 'comment'
-          ? ['cw-leader', 'cw-leader-comment']
-          : leaderKind === 'suggestion'
-            ? ['cw-leader', 'cw-leader-suggestion']
-            : ['cw-leader'];
+      const classes = ['cw-leader'];
+      // A placed card may ask for a stroke of its own — an unconfirmed
+      // footnote draws a dotted line to match its dotted underline.
+      if (card.kind === 'comment') classes.push('cw-leader-comment');
+      else if (card.kind === 'suggestion') classes.push('cw-leader-suggestion');
+      else if (card.kind === 'note' && card.leaderClass) classes.push(card.leaderClass);
       // Word's rule: tapping a balloon brings it forward and pushes the rest
       // back, and its leader comes with it. The CARDS dim in CSS (the margin
       // reads `:has(.thread.active)`), but a line in a detached SVG overlay
       // has no ancestor that knows which thread is selected — so the emphasis
       // is written here, on the pass that draws them.
-      const b = rendered[i];
-      if (selectedId !== null && b.kind === 'comment') {
-        classes.push(b.thread.id === selectedId ? 'cw-leader-on' : 'cw-leader-dim');
+      if (selectedId !== null && card.kind === 'comment') {
+        classes.push(card.thread.id === selectedId ? 'cw-leader-on' : 'cw-leader-dim');
       }
       line.setAttribute('class', classes.join(' '));
       // The visible leg starts where the PROSE ends, never inside it: `anchorX`

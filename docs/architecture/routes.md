@@ -46,6 +46,10 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/goals/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/api/metrics` | GET | `routes/ops.ts` | trusted-local |  |
+| `/api/mounts` | GET, POST, DELETE | `routes/mounts.ts` | loopback-only |  |
+| `/api/mounts/conventions` | GET, PUT | `routes/mounts.ts` | loopback-only |  |
+| `/api/mounts/files` | GET | `routes/mounts.ts` | loopback-only |  |
+| `/api/mounts/privacy` | PUT | `routes/mounts.ts` | loopback-only |  |
 | `/api/next` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/next/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/plugin/refresh` | GET | `routes/ops.ts` | trusted-local |  |
@@ -55,6 +59,9 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/push/subscriptions` | POST, DELETE | `routes/ops.ts` | trusted-local |  |
 | `/api/refs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/refs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/repos` | GET | `routes/repos.ts` | loopback-only |  |
+| `/api/repos/checkouts` | POST, DELETE | `routes/repos.ts` | loopback-only |  |
+| `/api/repos/live-copy` | GET | `routes/repos.ts` | loopback-only |  |
 | `/api/review-items` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/review-items/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/reviews` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
@@ -85,6 +92,8 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/icon-512.png` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/icon.svg` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/manifest.webmanifest` | GET | `routes/shell-static.ts` | share-scope |  |
+| `/mounts/:fileId` | GET, HEAD | `routes/mounts.ts` | trusted-local |  |
+| `/mounts/:fileId/raw` | GET, HEAD | `routes/mounts.ts` | trusted-local |  |
 | `/projects/:owner` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/recall/:token` | GET | `routes/upgrade-stream.ts` | recall-callback |  |
 | `/recall/status` | POST | `routes/recall-webhook.ts` | recall-callback |  |

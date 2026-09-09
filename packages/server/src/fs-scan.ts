@@ -109,7 +109,7 @@ function isCredentialShapedName(name: string): boolean {
  * as one missing row in a tree — a visible, harmless failure — while a false
  * admission is a credential leaving the box.
  */
-function isSecretShapedName(name: string): boolean {
+export function isSecretShapedName(name: string): boolean {
   // Every dotfile. `.env`, `.env.local`, `.npmrc`, `.netrc`, `.pgpass`,
   // `.aws/…` (its directory is skipped anyway) — one rule instead of a list
   // that stops being complete.

@@ -52,6 +52,19 @@ describe('raw transcript formatting', () => {
     expect(speakerLineName(undefined, {}, undefined)).toBe('Speaker 1');
   });
 
+  it('writes a two-stream voice as its name alone, and a stale record clean', () => {
+    // The raw transcript is one of the six surfaces AC1 covers; it reads the
+    // same display function, so a record still carrying the old spelling
+    // renders without it rather than needing a migration.
+    expect(speakerLineName('room:A', { 'room:A': 'John' }, undefined)).toBe('John');
+    expect(speakerLineName('room:A', { 'room:A': 'John (Room)' }, undefined)).toBe('John');
+    expect(speakerLineName('room:C', { 'room:C': 'Room Speaker C' }, undefined)).toBe(
+      'Room Speaker C',
+    );
+    // The anonymous voices keep the group, which is what tells two of them apart.
+    expect(speakerLineName('remote:A', {}, undefined)).toBe('Remote Speaker A');
+  });
+
   it('names audio files by segment and stream', () => {
     expect(segmentAudioFileName(3, 'mic')).toBe('segment-3-mic.pcm');
     expect(segmentAudioFileName(1, 'p7/../x')).toBe('segment-1-p7_.._x.pcm');

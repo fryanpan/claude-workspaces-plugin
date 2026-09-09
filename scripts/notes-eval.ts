@@ -67,8 +67,13 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { prose } from '../packages/core/src/index.ts';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NoteReference, NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
+import {
+  findInventedLinks,
+  notesLinkSources,
+} from '../packages/server/src/notes-invented-links.ts';
 import {
   MAX_FLAT_RUN_BULLETS,
   allBullets,
@@ -138,11 +143,40 @@ const HUMAN_LINE = 'my own note: check this against the brief before we commit';
 
 /* ===== The behaviours, and what counts as an example of each ===== */
 
-interface Verdict {
+export interface Verdict {
   /** Did this tick satisfy the behaviour? */
   ok: boolean;
   /** Why not — printed for the failures, never for the passes. */
   detail?: string;
+}
+
+/**
+ * Did this tick cite anything it was not given?
+ *
+ * COUNTED ON WHAT THE MODEL WROTE, not on what the doc ended up with. The
+ * applier strips an invented link before it lands
+ * (`notes-invented-links.ts`), so reading the notes afterwards would report a
+ * flawless run no matter how often the composer invented an address — the
+ * repair would hide the fault it exists to answer. This asks the composed
+ * edits, with the same rule the applier uses and the same sources it is
+ * given, plus the notes as they stood: a bullet regrouped from an earlier
+ * tick carries that tick's citation, and it was legitimate then.
+ *
+ * A tick that composed no link at all is not an example of anything.
+ */
+export function inventedLinkVerdict(
+  shot: { input?: NotesComposeInput; composed: readonly prose.BlockEdit[] },
+  notesBefore: string,
+): Verdict | null {
+  const input = shot.input;
+  if (!input) return null;
+  if (!shot.composed.some((e) => 'markdown' in e && e.markdown.includes(']('))) return null;
+  const given = notesLinkSources({ ...input, ...input.tick });
+  const invented = findInventedLinks(shot.composed, {
+    urls: given.urls,
+    text: [...given.text, notesBefore],
+  });
+  return { ok: invented.length === 0, detail: invented.join(', ') };
 }
 
 /** One behaviour's tally across the run. */
@@ -595,6 +629,7 @@ async function runMeeting(
           })(),
       where,
     );
+    behaviours.inventedLinks!.see(inventedLinkVerdict(shot, before), where);
     const unattributed = decisionsWithoutSpeaker(notes);
     behaviours.speakers!.see(
       { ok: unattributed.length === 0, detail: unattributed[0]?.slice(0, 80) },
@@ -841,6 +876,7 @@ async function main(argv: string[]): Promise<number> {
     flatRuns: new Behaviour('1.3', `No topic runs past ${MAX_FLAT_RUN_BULLETS} flat bullets`),
     topicChange: new Behaviour('1.3', 'A new heading means a new topic'),
     links: new Behaviour('1.4', 'A named board row is linked'),
+    inventedLinks: new Behaviour('1.4', 'No link the tick was not given'),
     speakers: new Behaviour('1.4', 'Decisions and questions keep a speaker'),
     unconfirmed: new Behaviour('1.4', 'Uncertain points marked unconfirmed'),
   };

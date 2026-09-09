@@ -13,7 +13,7 @@ describe('speakerRoster — who the reassign popover can offer', () => {
 
   it('names every voice that spoke, with the last thing it said', () => {
     expect(speakerRoster(turns, { A: 'Devi' })).toEqual([
-      { label: 'A', name: 'Devi', lastSaid: 'Then Monday.' },
+      { label: 'A', name: 'Devi', given: 'Devi', lastSaid: 'Then Monday.' },
       { label: 'B', name: 'Speaker B', lastSaid: 'Not before Friday.' },
     ]);
   });
@@ -24,7 +24,7 @@ describe('speakerRoster — who the reassign popover can offer', () => {
     // unable to reassign to somebody they had just named.
     const roster = speakerRoster(turns, { C: 'Marisol' });
     expect(roster.map((v) => v.label)).toEqual(['A', 'B', 'C']);
-    expect(roster[2]).toEqual({ label: 'C', name: 'Marisol', lastSaid: '' });
+    expect(roster[2]).toEqual({ label: 'C', name: 'Marisol', given: 'Marisol', lastSaid: '' });
   });
 
   it('ignores turns nobody was labelled for — a solo capture offers nothing', () => {
@@ -45,5 +45,21 @@ describe('speakerRoster — who the reassign popover can offer', () => {
       { text: 'ok', speaker: 'A' },
     ];
     expect(speakerRoster(spoken, {})[0]?.lastSaid).toBe('ok');
+  });
+
+  it('carries the bare saved name a rename prompt starts from, and nothing else', () => {
+    // An unnamed voice offers no seed at all, so its prompt opens empty
+    // rather than pre-filled with the placeholder somebody would press OK on.
+    const roster = speakerRoster([{ text: 'hi', speaker: 'room:A' }], {
+      'room:A': 'Rowan (Room)',
+      'room:B': 'Room Speaker B',
+    });
+    expect(roster.find((v) => v.label === 'room:A')).toMatchObject({
+      name: 'Rowan',
+      given: 'Rowan',
+    });
+    const anonymous = roster.find((v) => v.label === 'room:B');
+    expect(anonymous?.name).toBe('Room Speaker B');
+    expect(anonymous?.given).toBeUndefined();
   });
 });

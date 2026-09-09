@@ -42,6 +42,7 @@ import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
 import { isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
+import { MountStore } from './mount-store.ts';
 import { spokenLinkRef } from './notes-link-intent.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
@@ -86,6 +87,7 @@ import {
   type MeetingCalendarRoutesContext,
   handleMeetingCalendarRoutes,
 } from './routes/meetings-calendar.ts';
+import { type MountRoutesContext, handleMountRoutes } from './routes/mounts.ts';
 import {
   type OpsRoutesContext,
   handleOpsMetricsRoute,
@@ -98,6 +100,7 @@ import {
   type RecallWebhookRoutesContext,
   handleRecallWebhookRoute,
 } from './routes/recall-webhook.ts';
+import { type RepoRoutesContext, handleRepoRoutes } from './routes/repos.ts';
 import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/review-files.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
@@ -1738,6 +1741,32 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** The words this server's prompts run on — the settings page's data. */
   const promptRoutesCtx: PromptRoutesContext = { promptStore, j, safeJson };
 
+  /**
+   * The repo registry — checkouts of a project, and which copy of a doc is
+   * live. Loopback-only, for the same reason the deploy route is: every value
+   * it hands back is a path on this machine.
+   */
+  const repoRoutesCtx: RepoRoutesContext = {
+    docStore,
+    j,
+    safeJson,
+    requestAddress: (req) => server.requestIP(req)?.address,
+  };
+
+  /**
+   * Mounted project folders — the lead's mount table and the address every
+   * file in it answers at. Built on the doc store's repo registry, because a
+   * mounted file's address is derived the same way a document's identity is:
+   * the repo plus the path from its root.
+   */
+  const mountStore = new MountStore(dataDir, docStore.repos);
+  const mountRoutesCtx: MountRoutesContext = {
+    mounts: mountStore,
+    j,
+    safeJson,
+    requestAddress: (req) => server.requestIP(req)?.address,
+  };
+
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
   const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
 
@@ -2387,6 +2416,33 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           pathname,
           visitor,
           authorFor,
+        });
+        if (handled) return handled;
+      }
+      // --- The repo registry: checkouts, and which copy is live ---
+      // ./routes/repos.ts. Placed beside the operator routes because it
+      // shares their gate: loopback only, no edge, no visitor. Order is not
+      // load-bearing — no other family claims `/api/repos`.
+      {
+        const handled = await handleRepoRoutes(repoRoutesCtx, {
+          req,
+          pathname,
+          url,
+          visitor,
+        });
+        if (handled) return handled;
+      }
+      // --- Mounted project folders: the mount table, and a file's address ---
+      // ./routes/mounts.ts. Two gates in one family — `/api/mounts` shares the
+      // loopback-only gate above, and `/mounts/<fileId>` is the member-facing
+      // address. Order is not load-bearing: no other family claims either
+      // prefix.
+      {
+        const handled = await handleMountRoutes(mountRoutesCtx, {
+          req,
+          pathname,
+          url,
+          visitor,
         });
         if (handled) return handled;
       }

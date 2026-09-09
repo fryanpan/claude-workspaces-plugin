@@ -125,6 +125,10 @@ export function parseMeetingServerMessage(raw: unknown): MeetingServerMessage | 
         // asked for — those differ if a server built before modes existed
         // answers, and the one that is billed is this one.
         mode: parseCaptureMode(m.mode),
+        // Only the literal `true` counts as a resume taken. Absent is what an
+        // older server sends and what a refused resume sends, and both mean
+        // the same thing: this is a new meeting.
+        ...(m.resumed === true ? { resumed: true } : {}),
       };
     case 'unavailable': {
       const reason = m.reason;

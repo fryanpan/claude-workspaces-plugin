@@ -63,6 +63,13 @@ export interface NoteCard {
   key: string;
   el: HTMLElement;
   anchor: Element;
+  /**
+   * An extra class for this card's leader line, when the card wants one —
+   * a footnote whose author wrote "Unconfirmed" draws a dotted leader
+   * (`doc/footnote-notes.ts`). Omit and the line is the plain `cw-leader`
+   * every provenance card has always drawn.
+   */
+  leaderClass?: string;
 }
 
 export interface RecentNoteCardsOpts {
