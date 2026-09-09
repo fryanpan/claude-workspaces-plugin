@@ -458,7 +458,18 @@ async function runMeeting(
     tickTimeoutMs: 60_000,
     compose: async (input: NotesComposeInput) => {
       const extra = await hooks.before(input, tickNumber, tickTranscript);
-      return composer.compose({ ...input, ...extra });
+      const edits = await composer.compose({ ...input, ...extra });
+      // CW_NOTES_EVAL_OPS=1 prints the op mix per tick. A meeting whose notes
+      // end EMPTY after fifty ticks is not a note-taker that wrote nothing —
+      // it is one that wrote and then deleted, and the two look identical in
+      // every other number this run prints.
+      if (process.env.CW_NOTES_EVAL_OPS === '1') {
+        const mix = edits.map((e) => e.op).join(',');
+        console.log(
+          `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ${mix || '(none)'}`,
+        );
+      }
+      return edits;
     },
   });
 

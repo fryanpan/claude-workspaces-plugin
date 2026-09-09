@@ -444,6 +444,13 @@ export const VARIANTS: Record<string, Variant> = {
     judgeExpanded: true,
     begin: anchoredHooks,
   },
+  // The combination the first sweep pointed at: the shape that never collapsed
+  // (nested) carrying the enumeration that produced the lowest floor (ledger).
+  'nested-ledger': {
+    name: 'nested-ledger',
+    instructions: swap(DEFAULT_NOTES_INSTRUCTIONS, FLAT_RUN_ANCHOR, NESTED_RULE),
+    begin: ledgerHooks,
+  },
   sonnet: {
     name: 'sonnet',
     model: 'claude-sonnet-5',
