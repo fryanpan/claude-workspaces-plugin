@@ -85,6 +85,7 @@ import {
   readNotesOutline,
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
+import { guardNotesEdits } from './notes-edit-guard.ts';
 import { type NotesHeadingStore, createNotesHeadingFileStore } from './notes-heading-store.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
@@ -306,6 +307,18 @@ function noteLegacyKept(docId: string): void {
 }
 
 /**
+ * One line per edit the guard refused.
+ *
+ * NOT DEDUPLICATED, unlike the legacy-transcript line above. A refusal is a
+ * property of ONE TICK's reply, not of the doc: the same model making the
+ * same mistake twice in a meeting is the signal that the prompt rule is not
+ * landing, and collapsing the two lines into one would hide exactly that.
+ */
+function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
+  console.log(`[meeting-notes] ${docId} meeting ${meetingId}: refused ${why}`);
+}
+
+/**
  * Why a tick's edits did not reach the doc.
  *
  * NAMED RATHER THAN COUNTED, because "doc write skipped" was for weeks the
@@ -314,10 +327,18 @@ function noteLegacyKept(docId: string): void {
  * came back empty (an evicted or deleted doc); `not-prose` is a doc that is
  * not a notepad; `store-refused` is the store declining the batch outright;
  * `all-edits-failed` is every edit in the batch naming a block that is no
- * longer there. Only the last two are a compose worth retrying, and no
- * amount of reading the old line could tell them apart.
+ * longer there; `guard-refused` is `notes-edit-guard.ts` emptying the batch
+ * because every edit in it touched the meeting's own section heading. Only
+ * `store-refused` and `all-edits-failed` are a compose worth retrying —
+ * a guarded batch would be refused again — and no amount of reading the old
+ * line could tell them apart.
  */
-export type NotesWriteSkip = 'no-doc' | 'not-prose' | 'store-refused' | 'all-edits-failed';
+export type NotesWriteSkip =
+  | 'no-doc'
+  | 'not-prose'
+  | 'store-refused'
+  | 'all-edits-failed'
+  | 'guard-refused';
 
 /** What a tick's write came to: `null` when it landed, else why it did not. */
 export type NotesWriteResult = null | NotesWriteSkip;
@@ -358,7 +379,25 @@ export function applyNotesUpdate(
   // OPENED from the topic headings it also wrote. Cheap: `headingsOnly` walks
   // the same blocks the batch is about to and returns a handful of entries.
   const before = readNotesOutline(docStore, update.docId, { headingsOnly: true });
-  const res = applyNotesBlockEdits(docStore, update.docId, update.edits);
+  // THE MEMORY IS ASKED AGAINST THE WHOLE OUTLINE, NOT `before`. `before` is
+  // headings only for the `learn` call below; `headingId` checks its
+  // remembered id against the blocks that are actually there, so it needs the
+  // outline the tick itself read.
+  const full = readNotesOutline(docStore, update.docId);
+  const guarded = guardNotesEdits(update.edits, {
+    notesHeadingId: heading.headingId({ docId: update.docId, meetingId: update.meetingId }, full),
+  });
+  for (const why of guarded.refused) {
+    noteGuardRefusal(update.docId, update.meetingId, why);
+  }
+  // A batch the guard emptied wrote nothing, and it is not a store failure
+  // or a missing block: it is the composer asking for the one edit the
+  // notes cannot survive. Named on its own so the log can count how often
+  // the model does it, and so a retry loop does not resend it.
+  // `refused` is the evidence, not the empty list: an empty batch answered
+  // `null` above before the guard ever saw it.
+  if (guarded.edits.length === 0 && guarded.refused.length > 0) return 'guard-refused';
+  const res = applyNotesBlockEdits(docStore, update.docId, guarded.edits);
   if (!res.ok) return 'store-refused';
   heading.learn(
     { docId: update.docId, meetingId: update.meetingId },
@@ -380,6 +419,9 @@ export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
   }
   if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
   if (skip === 'store-refused') return 'the store refused the batch outright';
+  if (skip === 'guard-refused') {
+    return 'every edit touched the meeting’s own notes heading, which the guard never lets through';
+  }
   return 'every edit named a block that is no longer in the doc';
 }
 

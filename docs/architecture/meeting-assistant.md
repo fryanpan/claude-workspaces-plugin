@@ -2268,7 +2268,9 @@ at) · `packages/server/src/meeting-notes.ts` + `meeting-notes-doc.ts` (composer
 (the two clocks, in `createPauseTicker`) ·
 `packages/server/src/meeting-notes-composer.ts` (the Haiku call and the
 outline it puts in the prompt) + `notes-edit-parse.ts` (a reply read as edits,
-strictly) + `notes-doc-access.ts` (who the note-taker is, and the one
+strictly) + `notes-edit-guard.ts` (the edits the applier refuses whatever the
+reply said: a replace against the meeting's own section heading, which is
+what strands every earlier bullet above a second heading) + `notes-doc-access.ts` (who the note-taker is, and the one
 doc-store slice every notes writer goes through) + `notes-speaker-tags.ts`
 (the in-place renaming passes) + `notes-research-placeholder.ts` (the section
 a spoken "can you research X" leaves behind) ·
