@@ -127,6 +127,18 @@ describe('ui-shot Chrome binary resolution', () => {
     expect(resolveChromeBin(undefined, {}, exists([DEFAULT_CHROME_BIN]))).toBe(DEFAULT_CHROME_BIN);
   });
 
+  it('falls back through the Linux candidates when nobody named a binary', () => {
+    // The CI runner has no /Applications. Without this, `check:client-boot`
+    // would need a CW_CHROME_BIN in the workflow, and a workflow that names a
+    // path is a workflow that breaks when the image moves it.
+    expect(resolveChromeBin(undefined, {}, exists(['/usr/bin/google-chrome']))).toBe(
+      '/usr/bin/google-chrome',
+    );
+    // The control: the same call with nothing installed must still throw, and
+    // the message must name the list so the reader knows what was tried.
+    expect(() => resolveChromeBin(undefined, {}, exists([]))).toThrow(/CW_CHROME_BIN/);
+  });
+
   it('an explicit path that is missing fails loudly instead of falling through', () => {
     expect(() => resolveChromeBin('/nope', { CW_CHROME_BIN: '/env' }, exists(['/env']))).toThrow(
       /--chrome/,

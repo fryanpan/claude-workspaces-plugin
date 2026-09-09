@@ -1,79 +1,62 @@
 /**
- * Where composed meeting notes LAND: a named section inside the meeting's
- * own doc, plus the server-side glue that joins the composer to the doc and
- * the project to the composer.
+ * Where composed meeting notes LAND: the block-addressed edits a tick
+ * produced, applied to the meeting's own doc, plus the server-side glue that
+ * joins the composer to the doc and the project to the composer.
  *
- * THE WRITE GOES THROUGH THE FRAGMENT, NEVER THE FILESYSTEM. A meeting doc
- * is a live bound doc: a file write would be clobbered by the next flush
- * (see the editing-review-docs contract), while a Yjs transaction is an
- * ordinary agent edit — every open browser sees it within a tick, and the
- * write-back observer flushes it to disk like any other.
+ * THE WRITE GOES THROUGH `DocStore.applyBlockEdits`, THE SAME VERB EVERY OTHER
+ * AGENT USES. Not the filesystem — a meeting doc is a live bound doc and a
+ * file write would be clobbered by the next flush — and no longer a private
+ * merge of its own either. The note-taker is an agent editing a doc with the
+ * operations the MCP block tools and the HTTP edit routes call; it has no
+ * pathway nobody else has.
  *
- * THE SECTION IS FOUND BY ITS HEADING, EVERY TIME. The composer returns the
- * whole notes, so each update must revise the previous section rather than
- * grow the doc — and an anchor or offset would rot the moment a human edits
- * around it. The heading is re-located per write, so the section survives
- * being moved.
+ * THE SECTION IS NOT FOUND BY ITS HEADING TEXT ANY MORE, AND THAT IS THE FIX.
+ * It used to be re-located per write by searching for a heading reading
+ * "Meeting notes". A person renaming that heading orphaned the section, so the
+ * next tick found none and opened a SECOND one below the first — one of the
+ * four failures a real meeting produced. The session remembers the BLOCK ID of
+ * the heading it opened, learned from the outline after its first batch lands.
+ * An id survives a rename, so the rename is now a non-event.
  *
- * WHAT REACHES THE DOC IS A MERGE, NOT A REPLACE. `replaceNotesSection`
- * below deletes the section and re-inserts the composed string; run every
- * pause tick, that is the note-taker destroying what the person typed while
- * it was composing, which is exactly what the owner reported. The live sink
- * goes through `mergeNotesSection` instead: it changes only the items the
- * agent itself last wrote, and where the composer wants different words in a
- * person's line it proposes them as a suggestion. `replaceNotesSection` is
- * kept for the first write of a section and for callers that own the whole
- * span; see `meeting-notes-merge.ts` for the invariant and its reasoning.
+ * Authorship, not a ledger, decides what may be replaced. `applyBlockEdits`
+ * writes directly into a block still marked as this agent's, and turns an edit
+ * naming anything else into a suggestion — including one of the agent's own
+ * blocks that a person has since touched, because the doc clears the mark the
+ * moment they do (`clearAuthorshipOnPersonEdit`). The ownership ledger, the
+ * merge planner and the ledger's file on disk all existed to answer that
+ * question from beside the doc, and could lose track of a block the browser
+ * re-created. They are gone.
  *
  * A RENAME REWRITES THE NOTES ALREADY WRITTEN, and does it as a TARGETED
- * replacement rather than a section rewrite (owner, 2026-08-29: "rewrite
- * them" — he does not want the same person reading as "Speaker B" above a
- * rename and by name below it). `relabelNotesSection` replaces only the
- * exact token the composer put there ("Speaker B"), only inside the notes
- * section, and touches nothing else in the doc.
- *
- * It deliberately does NOT go through `replaceNotesSection`, for the same
- * reason the notes sink no longer does: that path replaces the whole section
- * with a string this module composed, discarding whatever the human had
- * typed into it. A rename is a two-word correction and must cost no more
- * than two words. It edits IN PLACE, under the agent's hand, so the sink
- * hands it `reclaimAfterInPlaceEdit` — the ledger has to learn the new
- * wording of its own lines, or the rename would hand every line it touched
- * to the person and the notes would freeze there.
+ * replacement rather than a re-compose (owner, 2026-08-29: "rewrite them" — he
+ * does not want the same person reading as "Speaker B" above a rename and by
+ * name below it). `relabelNotesSection` and `retagSpeakerInNotes` in
+ * `notes-speaker-tags.ts` change only the tokens this agent wrote, in place,
+ * in blocks it still owns. A two-word correction must cost no more than two
+ * words: expressed as block edits it would re-create every bullet it touched
+ * and take the reader's comment anchors with them.
  *
  * A SPOKEN CORRECTION IS THE SAME SHAPE AND A DIFFERENT SUBJECT. "No, I said
  * Thursday" fixes the WORDS of a note rather than the name of a voice, and it
  * arrives from the capture pass rather than from a gesture — but it is the
- * same two-phrase, in-place, ledger-reclaiming edit, so it runs the same way
- * (`applyNotesCorrection`). What it adds is the question a rename never has
- * to ask: whose note is this? A rename can safely sweep everybody's text
- * because it is fixing a name the agent itself wrote; a correction is
- * changing what a note SAYS, so it may rewrite only the agent's own and must
- * propose on anybody else's. That resolution lives in
- * `meeting-notes-correction.ts`.
+ * same targeted in-place edit (`applyNotesCorrection`). What it adds is the
+ * question a rename never has to ask: whose note is this? A rename sweeps only
+ * names the agent itself wrote; a correction changes what a note SAYS, so it
+ * may rewrite only the agent's own and must propose on anybody else's. That
+ * resolution lives in `meeting-notes-correction.ts`.
  *
  * AND THE ENGINE'S OWN LATE CORRECTION IS A THIRD KIND OF EDIT.
  * `reattributeNotesSection` does not change a name; it moves a MENTION from
  * one voice to another, because AssemblyAI's end-of-session pass decided a
  * turn belonged to somebody else. Which mentions move is read off each tag's
- * own provenance rather than off the voice, and — unlike a rename — the walk
- * is scoped to the items the LEDGER still claims. What a voice is called is
- * true wherever it is written; a second thought about who spoke does not get
- * to edit a sentence a person has taken over.
+ * own provenance rather than off the voice.
  */
 
-import { type DocType, contentKind } from '@claude-workspaces/core';
-import * as Y from 'yjs';
+import { contentKind } from '@claude-workspaces/core';
+import type { prose } from '@claude-workspaces/core';
 import { docLookupUrl } from './meeting-lookup.ts';
+import { NOTES_OUTLINE_RECENT_BLOCKS } from './meeting-notes-composer.ts';
 import { correctNotesSection } from './meeting-notes-correction.ts';
-import {
-  type NotesOwnership,
-  agentOwnedElements,
-  createNotesOwnership,
-  mergeNotesSection,
-  readNotesSection,
-  reclaimAfterInPlaceEdit,
-} from './meeting-notes-merge.ts';
 import {
   type MeetingNotesDeps,
   type MeetingNotesOptions,
@@ -82,7 +65,6 @@ import {
   type NotesProjectContext,
   type NotesReattribution,
   type NotesRelabel,
-  type NotesSectionState,
   type NotesUpdate,
 } from './meeting-notes.ts';
 import {
@@ -95,26 +77,32 @@ import {
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
 import {
-  type NotesLedgerRecord,
-  type NotesLedgerStore,
-  continuesSitting,
-  createNotesLedgerStore,
-} from './notes-ledger-store.ts';
-import { dropLegacyTranscriptSection } from './notes-legacy-transcript.ts';
-import { type NoteReference, referenceDate } from './notes-references.ts';
+  NOTES_AUTHOR_ID,
+  type NotesDocStore,
+  applyNotesBlockEdits,
+  readNotesOutline,
+  releaseNotesAuthorship,
+} from './notes-doc-access.ts';
 import {
-  MEETING_NOTES_HEADINGS,
-  appendResearchPlaceholder,
+  LEGACY_TRANSCRIPT_HEADING,
+  dropLegacyTranscriptSection,
+} from './notes-legacy-transcript.ts';
+import { type NoteReference, referenceDate } from './notes-references.ts';
+import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
+import {
   reattributeNotesSection,
   relabelNotesSection,
   retagSpeakerInNotes,
-} from './notes-section-write.ts';
-import { LEGACY_TRANSCRIPT_HEADING } from './notes-section.ts';
+} from './notes-speaker-tags.ts';
 
-/**
- * The section writers moved to `notes-section-write.ts`; the names stay on
- * this module's surface, so no caller and no test moved with them.
- */
+export { type NotesDocStore, MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+export {
+  type RelabelNotesResult,
+  reattributeNotesSection,
+  relabelNotesSection,
+  retagSpeakerInNotes,
+} from './notes-speaker-tags.ts';
+export { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 /** Enough names to inform the composer; few enough that a thousand-row board
  *  cannot flood the prompt. */
 const MAX_CONTEXT_TASKS = 30;
@@ -141,31 +129,6 @@ const MAX_REFERENCE_ROWS = 500;
  */
 const MAX_REFERENCE_BODY_CHARS = 1_000;
 
-export {
-  type RelabelNotesResult,
-  type ReplaceNotesResult,
-  MEETING_NOTES_HEADING,
-  MEETING_NOTES_HEADINGS,
-  appendResearchPlaceholder,
-  reattributeNotesSection,
-  relabelNotesSection,
-  replaceNotesSection,
-  retagSpeakerInNotes,
-} from './notes-section-write.ts';
-
-/** The slice of `DocStore` the notes sink needs — narrow so the tests hand in a
- *  map instead of a server. */
-export interface NotesDocStore {
-  get(
-    docId: string,
-  ): { ydoc: Y.Doc; meta: { type: DocType; title?: string; setId?: string } } | undefined;
-  /** The file this doc is bound to, when it is bound to one. Read only by the
-   *  legacy-transcript removal, which must not touch a `Raw transcript`
-   *  heading in a doc the old writer could never have written in. Optional so
-   *  a test can hand in a map; absent reads as unbound. */
-  boundPathOf?(docId: string): string | undefined;
-}
-
 /** The slice of `TaskStore` the context gatherer needs. `id` is here for the
  *  reference catalogue, which needs a URL and not only a name. */
 export interface NotesContextTasks {
@@ -182,118 +145,107 @@ export interface NotesContextTasks {
 }
 
 /**
- * One ownership record per meeting doc — what the agent wrote into that
- * doc's notes section, and the ONLY thing separating the agent's own bullets
- * from a person's writing.
+ * Which heading each meeting doc's notes are under, by BLOCK ID.
  *
- * Per DOC, but its CLAIMS live per meeting: `beginMeeting` releases them when
- * a new session starts on the doc. The ledger used to outlive a meeting so a
- * second meeting could revise the first one's notes — and that is exactly the
- * stop-and-restart data loss the owner reported ("recording replaces all
- * existing notes"): the new session's first tick composes from scratch, so
- * the merge deleted every prior-meeting item the ledger still claimed. Once
- * a recording stops, its notes are written; the next one appends after them
- * and may only SUGGEST on them (owner's call, 2026-08-31: "a stop-and-restart
- * never replaces what is already written").
+ * THIS IS THE WHOLE OF WHAT REPLACED THE OWNERSHIP LEDGER'S SECTION HALF, and
+ * it is one map from a meeting's ids to a block id. The ledger existed to answer "which
+ * section is mine, and which lines in it may I replace"; the second half is an
+ * attribute on the block now, and the first is this.
  *
- * WHAT MAY BE REPLACED IS IN MEMORY ONLY, so a restarted server claims
- * nothing — which the merge reads as "everything in this section is somebody
- * else's". That is the safe direction: after a restart the note-taker adds and
- * stops replacing, rather than guessing that prose it has never seen is its
- * own.
+ * WHY A REMEMBERED ID AND NOT A LOOKUP. Every other way of finding the section
+ * again is a guess a person can invalidate. Heading TEXT was the shipped
+ * answer, and a person renaming the heading made the next tick open a second
+ * "Meeting notes" below theirs. AUTHORSHIP cannot do it either — precisely
+ * because a rename CLEARS `cwAuthor` on the heading, so the heading a person
+ * has just retitled stops being marked as the agent's while remaining the
+ * section the agent is writing into. A block id changes under neither, so the
+ * memory of it is what makes a rename a non-event.
  *
- * WHICH SECTION THE NOTES ARE IN IS NOT THAT QUESTION, and it is the one a
- * restart used to get wrong. A tick extends the "Meeting notes" it recognises
- * as its own and otherwise opens a second one, so an empty ledger put the
- * doc's twinning back every time a deploy landed mid-meeting: a Research
- * placeholder or a heading a person typed below the notes is enough. So the
- * TEXT of the items written is kept in a store beside the doc's meetings
- * (`notes-ledger-store.ts`) and read back at the next recording's first turn.
- * Recognising a section grants nothing inside it — the element-keyed half is
- * still empty, so the restarted server can only add and suggest there.
- *
- * The store is optional: with none, a ledger behaves exactly as it did when
- * it was memory alone.
+ * PER DOC **AND** PER MEETING. A new recording opens its own section below
+ * whatever the last one wrote — the owner's 2026-08-31 rule that a
+ * stop-and-restart never replaces what is already written. It is memory only:
+ * a restarted server remembers no heading, opens a new section on its first
+ * tick, and can still only suggest on the previous one's bullets, which is the
+ * safe direction.
  */
-export interface NotesLedger {
-  forDoc(docId: string): NotesOwnership;
-  /**
-   * A new meeting is starting on this doc: drop every claim on what may be
-   * REPLACED, so nothing a previous recording wrote can be overwritten by
-   * this one.
-   *
-   * The section claim is re-read from the store here and kept only when the
-   * recording it belongs to was going on moments ago — a restart, or a stop
-   * and start in the same sitting. A meeting that opens on a doc whose notes
-   * were written long ago claims no section and starts its own at the end,
-   * which is the owner's 2026-09-01 rule.
-   *
-   * THE WINDOW IS NOT RESTART-ONLY, AND THAT IS THE INTENT. A boot id would
-   * make it restart-only, and was considered and rejected: it would leave a
-   * stop-and-start in the same sitting falling back to the position test,
-   * which is the twinning #637 exists to prevent. Note what that fallback
-   * actually does — with nothing under the notes it extends the same section
-   * anyway, and only a heading landing below (a Research placeholder, a line
-   * a person typed) makes it open a second one. So restart-only would not
-   * give "a new recording gets a new section"; it would give "a new
-   * recording gets a new section IF something happens to sit below the
-   * notes", which is the arbitrary rule, not the safe one. Continuing the
-   * sitting is the same answer in both cases.
-   *
-   * What bounds it is the sitting rather than the process, because the
-   * sitting is what the person experiences: they are still at the same
-   * table, still on the same subject. Half an hour later they are not, and
-   * the claim lapses.
-   */
-  beginMeeting(docId: string, meetingId?: string, now?: number): void;
+/** What a heading memory is keyed by. Both halves are load-bearing — see the
+ *  `NotesHeadingMemory` note on cross-wiring. */
+export interface NotesMeetingIds {
+  docId: string;
+  meetingId: string;
 }
 
-export function createNotesLedger(store?: NotesLedgerStore): NotesLedger {
-  const byDoc = new Map<string, NotesOwnership>();
-  const meetings = new Map<string, string>();
+export interface NotesHeadingMemory {
+  /**
+   * The heading this meeting is writing under, or `undefined` when it has
+   * none yet — a meeting that has not ticked, or one whose heading a person
+   * has DELETED, which are the two cases that should open a section.
+   *
+   * Checked against the outline every time rather than trusted: a remembered
+   * id whose block is gone is worse than no memory, because every edit
+   * addressed to it would fail with `unknown-block` for the rest of the
+   * meeting.
+   */
+  headingId(ids: NotesMeetingIds, outline: readonly prose.OutlineEntry[]): string | undefined;
+  /**
+   * Learn the heading a batch just opened: the one heading in `after` that was
+   * not in `before` and that this agent wrote.
+   *
+   * Level-capped at 2, because the topic headings a tick writes under the
+   * section (`### Export dialog`) are the agent's own and new as well. The
+   * section heading is the level-2 one.
+   */
+  learn(
+    ids: NotesMeetingIds,
+    before: readonly prose.OutlineEntry[],
+    after: readonly prose.OutlineEntry[],
+  ): void;
+  /** This meeting is (re)starting: forget whatever it remembered, so it opens
+   *  its own section. Another meeting's memory of the same doc is untouched —
+   *  that is the whole reason the key carries the meeting id. */
+  beginMeeting(ids: NotesMeetingIds): void;
+}
 
-  /** A doc's ownership, seeded with the section claim when the record the
-   *  caller already read is the sitting still going on. Taking the record as
-   *  an argument rather than re-reading it is not only a saved file read:
-   *  it is what makes the freshness verdict and the claim it admits come
-   *  from the same reading of the file. */
-  const build = (docId: string, prior: NotesLedgerRecord | null, now: number): NotesOwnership => {
-    const adopt = continuesSitting(prior, now);
-    const created = createNotesOwnership({
-      ...(adopt && prior ? { written: prior.items } : {}),
-      ...(store
-        ? {
-            onWrite: (written) =>
-              store.write(docId, {
-                meetingId: meetings.get(docId) ?? prior?.meetingId ?? '',
-                writtenAt: Date.now(),
-                items: [...written],
-              }),
-          }
-        : {}),
-    });
-    byDoc.set(docId, created);
-    return created;
-  };
+/** The level a meeting's own section heading is written at. Deeper headings
+ *  under it are topics, which the agent also writes and which must never be
+ *  mistaken for the section. */
+const NOTES_HEADING_LEVEL = 2;
 
+export function createNotesHeadingMemory(): NotesHeadingMemory {
+  // KEYED BY DOC **AND** MEETING. Keyed by doc alone, two recordings into one
+  // doc cross-wired: the second one's `beginMeeting` wiped the first one's
+  // memory, so the first one's next tick either adopted the second's heading
+  // or opened a third section under a doc that already had two.
+  const byMeeting = new Map<string, string>();
+  const keyOf = ({ docId, meetingId }: NotesMeetingIds): string => `${docId}::${meetingId}`;
+  const present = (id: string, outline: readonly prose.OutlineEntry[]): boolean =>
+    outline.some((e) => e.id === id && e.kind === 'heading');
   return {
-    forDoc(docId) {
-      const existing = byDoc.get(docId);
-      if (existing) return existing;
-      // No meeting has begun on this doc in this process — the notes tools
-      // and the tests that write one update. Read the claim under the same
-      // freshness rule a recording would.
-      return build(docId, store?.read(docId) ?? null, Date.now());
+    headingId(ids, outline) {
+      const key = keyOf(ids);
+      const id = byMeeting.get(key);
+      if (id === undefined) return undefined;
+      if (present(id, outline)) return id;
+      byMeeting.delete(key);
+      return undefined;
     },
-    beginMeeting(docId, meetingId, now = Date.now()) {
-      // Released AND rebuilt, and both are needed. The release reaches an
-      // ownership object a caller took out of `forDoc` before this call and
-      // is still holding; the rebuild is how the TEXT claim gets seeded,
-      // since that half is read once at construction and is exactly what
-      // must not carry into a meeting that does not continue the last one.
-      if (meetingId !== undefined) meetings.set(docId, meetingId);
-      byDoc.get(docId)?.release();
-      build(docId, store?.read(docId) ?? null, now);
+    learn(ids, before, after) {
+      const key = keyOf(ids);
+      const held = byMeeting.get(key);
+      if (held !== undefined && present(held, after)) return;
+      const known = new Set(before.map((e) => e.id));
+      const opened = after.find(
+        (e) =>
+          e.kind === 'heading' &&
+          !known.has(e.id) &&
+          e.author === NOTES_AUTHOR_ID &&
+          (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL,
+      );
+      if (opened) byMeeting.set(key, opened.id);
+      else if (held !== undefined) byMeeting.delete(key);
+    },
+    beginMeeting(ids) {
+      byMeeting.delete(keyOf(ids));
     },
   };
 }
@@ -315,15 +267,15 @@ function noteLegacyKept(docId: string): void {
 }
 
 /**
- * Write one composed update into its meeting doc, keeping every item the
- * agent did not write. False — never a throw — when the doc is gone or is
- * not prose: a meeting on a vanished doc still has its transcript file, and
- * a flat doc is not a notepad.
+ * Write one tick's edits into its meeting doc, through the shared
+ * `applyBlockEdits` verb. False — never a throw — when the doc is gone, is not
+ * prose, or the whole batch failed: a meeting on a vanished doc still has its
+ * transcript file, and a flat doc is not a notepad.
  */
 export function applyNotesUpdate(
   docStore: NotesDocStore,
   update: NotesUpdate,
-  ledger: NotesLedger,
+  heading: NotesHeadingMemory,
   opts: { dataDir?: string } = {},
 ): boolean {
   const doc = docStore.get(update.docId);
@@ -345,22 +297,32 @@ export function applyNotesUpdate(
     dataDir: opts.dataDir,
   });
   if (legacy === 'kept') noteLegacyKept(update.docId);
-  return mergeNotesSection(doc.ydoc, update.notes, MEETING_NOTES_HEADINGS, {
-    ownership: ledger.forDoc(update.docId),
-    ...(update.basedOn ? { basedOn: update.basedOn } : {}),
-  }).ok;
+  if (update.edits.length === 0) return true;
+  // Headings before and after, so the memory can tell the section this batch
+  // OPENED from the topic headings it also wrote. Cheap: `headingsOnly` walks
+  // the same blocks the batch is about to and returns a handful of entries.
+  const before = readNotesOutline(docStore, update.docId, { headingsOnly: true });
+  const res = applyNotesBlockEdits(docStore, update.docId, update.edits);
+  if (!res.ok) return false;
+  heading.learn(
+    { docId: update.docId, meetingId: update.meetingId },
+    before,
+    readNotesOutline(docStore, update.docId, { headingsOnly: true }),
+  );
+  // A batch every one of whose edits failed wrote nothing, and saying so is
+  // what puts the "doc write skipped" line in the log. A batch that landed
+  // some of its edits is a success: the rest reported `unknown-block`, which
+  // is the ordinary answer for a block a person deleted mid-compose.
+  return res.applied + res.suggested > 0;
 }
 
-/** The notes section as it currently reads, for the composer's `previous`. */
-export function readNotesState(
+/** The doc as the composer addresses it, capped so a tick's prompt is the size
+ *  of the recent conversation rather than of the meeting. */
+export function readNotesOutlineForTick(
   docStore: NotesDocStore,
-  ids: { docId: string; meetingId: string },
-  ledger: NotesLedger,
-): NotesSectionState | null {
-  const doc = docStore.get(ids.docId);
-  if (!doc) return null;
-  if (contentKind(doc.meta.type) !== 'prose') return null;
-  return readNotesSection(doc.ydoc, MEETING_NOTES_HEADINGS, ledger.forDoc(ids.docId));
+  docId: string,
+): readonly prose.OutlineEntry[] {
+  return readNotesOutline(docStore, docId, { recentBlocks: NOTES_OUTLINE_RECENT_BLOCKS });
 }
 
 /**
@@ -379,37 +341,29 @@ export function readNotesState(
  * old way, so the sweep has nothing left to find there and cannot touch it
  * twice.
  */
-export function applyNotesRelabel(
-  docStore: NotesDocStore,
-  relabel: NotesRelabel,
-  ledger: NotesLedger,
-): number {
+export function applyNotesRelabel(docStore: NotesDocStore, relabel: NotesRelabel): number {
   const doc = docStore.get(relabel.docId);
   if (!doc) return 0;
   if (contentKind(doc.meta.type) !== 'prose') return 0;
-  // Through the reclaim wrapper, not straight at the doc: the rename edits
-  // the agent's own lines in place, and the ledger has to come out the other
-  // side still recognising them. See `reclaimAfterInPlaceEdit`.
-  return reclaimAfterInPlaceEdit(
-    doc.ydoc,
-    MEETING_NOTES_HEADINGS,
-    ledger.forDoc(relabel.docId),
-    () => {
-      // The untagged sweep runs FIRST, and the order is load-bearing. It
-      // looks for the old display name on word boundaries, and an extension
-      // rename leaves that name inside the new one — retag first and the
-      // sweep finds "Devi" inside the "@Devi Raman" it has just written, and
-      // makes it "@Devi Raman Raman". Sweeping first, the sweep sees only the
-      // old spelling everywhere it appears, and the retag that follows
-      // canonicalises every tag for this voice — including any the sweep had
-      // no way to reach, and including the ones it has just corrected, where
-      // it finds the right text already there and does nothing.
-      const swept = relabel.rewriteUntagged
-        ? relabelNotesSection(doc.ydoc, relabel.from, relabel.to).replaced
-        : 0;
-      return swept + retagSpeakerInNotes(doc.ydoc, relabel.label, relabel.to).replaced;
-    },
-  );
+  // NO RECLAIM WRAPPER ANY MORE, AND NONE IS NEEDED. The ledger recorded a
+  // line's WORDING, so an in-place rewrite of those words made it stop
+  // recognising its own line unless something re-recorded it. Authorship is on
+  // the ELEMENT: the rename changes the text inside it and the block is still
+  // the agent's afterwards, with no bookkeeping in between.
+  //
+  // The untagged sweep runs FIRST, and the order is load-bearing. It looks for
+  // the old display name on word boundaries, and an extension rename leaves
+  // that name inside the new one — retag first and the sweep finds "Devi"
+  // inside the "@Devi Raman" it has just written, and makes it "@Devi Raman
+  // Raman". Sweeping first, the sweep sees only the old spelling everywhere it
+  // appears, and the retag that follows canonicalises every tag for this voice
+  // — including any the sweep had no way to reach, and including the ones it
+  // has just corrected, where it finds the right text already there and does
+  // nothing.
+  const swept = relabel.rewriteUntagged
+    ? relabelNotesSection(doc.ydoc, relabel.from, relabel.to).replaced
+    : 0;
+  return swept + retagSpeakerInNotes(doc.ydoc, relabel.label, relabel.to).replaced;
 }
 
 /**
@@ -420,26 +374,23 @@ export function applyNotesRelabel(
  * notes are somewhere this cannot reach. `'none'` covers all of those and the
  * ordinary case besides — a correction whose words are in no note.
  *
- * THROUGH THE RECLAIM WRAPPER, for the reason the rename is: the revision
- * edits the agent's own bullet IN PLACE, so the ledger's record of that
- * bullet's wording goes stale the moment it lands. Without the wrapper the
- * correction would hand every note it fixed to the person — the next tick
- * could only propose on it — and the notes would freeze at the correction.
- * The wrapper re-records only lines the ledger ALREADY claimed, so a note the
- * person had made theirs stays theirs.
+ * NO RECLAIM WRAPPER AND NO LEDGER — both are gone, and this comment used to
+ * describe them. The ledger recorded a line's WORDING, so a correction that
+ * rewrote those words in place made the agent stop recognising its own note
+ * unless a wrapper re-recorded it. Authorship is an attribute on the ELEMENT
+ * now: the correction changes the text inside a block the agent owns and the
+ * block is still the agent's afterwards, with no bookkeeping in between.
+ * Whose note it is stays the question that decides direct-vs-proposed, and
+ * `meeting-notes-correction.ts` answers it from `cwAuthor`.
  */
 export function applyNotesCorrection(
   docStore: NotesDocStore,
   correction: NotesCorrection,
-  ledger: NotesLedger,
 ): NotesCorrectionResult {
   const doc = docStore.get(correction.docId);
   if (!doc) return 'none';
   if (contentKind(doc.meta.type) !== 'prose') return 'none';
-  const ownership = ledger.forDoc(correction.docId);
-  const outcome = reclaimAfterInPlaceEdit(doc.ydoc, MEETING_NOTES_HEADINGS, ownership, () =>
-    correctNotesSection(doc.ydoc, MEETING_NOTES_HEADINGS, ownership, correction),
-  );
+  const outcome = correctNotesSection(doc.ydoc, correction);
   if (outcome.applied === 'revised') return 'revised';
   if (outcome.applied === 'suggested') return 'suggested';
   return 'none';
@@ -447,31 +398,18 @@ export function applyNotesCorrection(
 
 /**
  * Carry the engine's late correction of who spoke into the meeting's doc.
- * Same tolerances as `applyNotesRelabel`, and the same reclaim wrapper: this
- * edits the agent's own lines in place, so the ledger has to come out the
- * other side still recognising them.
+ * Same tolerances as `applyNotesRelabel`, and — like it — no reclaim wrapper:
+ * the pass edits text inside blocks the agent owns, and owning a block is an
+ * attribute on the block rather than a record of its wording.
  */
 export function applyNotesReattribution(
   docStore: NotesDocStore,
   reattribution: NotesReattribution,
-  ledger: NotesLedger,
 ): number {
   const doc = docStore.get(reattribution.docId);
   if (!doc) return 0;
   if (contentKind(doc.meta.type) !== 'prose') return 0;
-  const ownership = ledger.forDoc(reattribution.docId);
-  // Read BEFORE the edit, for the same reason `reclaimAfterInPlaceEdit`
-  // snapshots there: ownership is element AND text, and the edit changes the
-  // text. Afterwards the ledger would no longer claim the very lines this is
-  // allowed to touch.
-  const owned = agentOwnedElements(doc.ydoc, MEETING_NOTES_HEADINGS, ownership);
-  if (owned.size === 0) return 0;
-  return reclaimAfterInPlaceEdit(
-    doc.ydoc,
-    MEETING_NOTES_HEADINGS,
-    ownership,
-    () => reattributeNotesSection(doc.ydoc, reattribution, owned).replaced,
-  );
+  return reattributeNotesSection(doc.ydoc, reattribution).replaced;
 }
 
 /**
@@ -523,17 +461,16 @@ export function withServerNotesSinks(
      * its citation into the notes and the row simply gains no backlink.
      */
     linkTaskToDoc?: (taskId: string, docId: string) => void;
-    /** Tests: an ownership ledger they can seed or read back. */
-    ledger?: NotesLedger;
+    /** Tests: a heading memory they can share across two harnesses to model a
+     *  second meeting on one doc. */
+    heading?: NotesHeadingMemory;
   },
 ): MeetingNotesDeps {
   const extractor = options.taskExtractor;
   const captureBoard = deps.captureBoard;
-  // One ledger per wiring, i.e. per server: it is keyed by doc and meeting,
-  // and a meeting is the life of one notes section.
-  const ledger =
-    deps.ledger ??
-    createNotesLedger(deps.dataDir ? createNotesLedgerStore(deps.dataDir) : undefined);
+  // One heading memory per wiring, i.e. per server: it is keyed by doc, and a
+  // meeting is the life of one notes section.
+  const heading = deps.heading ?? createNotesHeadingMemory();
   const boardOf = (docId: string): string | undefined => {
     const doc = deps.docStore().get(docId);
     return doc?.meta.setId ?? deps.boardOf?.(docId);
@@ -572,12 +509,14 @@ export function withServerNotesSinks(
               ...(deps.lookup ? { lookup: deps.lookup } : {}),
               ...(deps.onTaskReady ? { onTaskReady: deps.onTaskReady } : {}),
               onResearchFiled: (filed) => {
-                const target = deps.docStore().get(filed.docId);
-                if (target) {
-                  const wrote = appendResearchPlaceholder(target.ydoc, filed.title, filed.url);
-                  if (!wrote.ok) {
-                    console.error(`[meeting-tasks] research placeholder failed: ${wrote.error}`);
-                  }
+                const wrote = appendResearchPlaceholder(
+                  deps.docStore(),
+                  filed.docId,
+                  filed.title,
+                  filed.url,
+                );
+                if (!wrote.ok && wrote.error !== 'not-found') {
+                  console.error(`[meeting-tasks] research placeholder failed: ${wrote.error}`);
                 }
                 deps.onResearchFiled?.(filed);
               },
@@ -645,9 +584,27 @@ export function withServerNotesSinks(
     },
     onSessionStart: (ids): void => {
       // A new recording on this doc: whatever the previous one wrote is
-      // finished writing. Releasing the claims is what makes stop-and-restart
-      // append instead of replace — the reported data-loss bug.
-      ledger.beginMeeting(ids.docId, ids.meetingId);
+      // FINISHED, and this recording may not rewrite it.
+      //
+      // Two things make that true, and forgetting the heading id was only the
+      // first. `NOTES_AUTHOR_ID` is one constant for every meeting, so without
+      // the release meeting two reads meeting one's bullets as its own — the
+      // note-taking prompt explicitly invites deleting your own bullets when
+      // regrouping a topic, and `applyBlockEdits` applies that directly. That
+      // is a hard delete of notes a person has already read, against the
+      // project-wide never-hard-delete rule. Releasing the claim leaves the
+      // blocks exactly where they are and turns any edit naming one into a
+      // SUGGESTION, which is the reviewable form.
+      //
+      // Per DOC, deliberately: the claim is per author and the author id is
+      // shared, so there is nothing meeting-shaped to release. The heading
+      // memory below is per meeting because a section IS meeting-shaped. Two
+      // concurrent recordings on one doc therefore keep separate sections
+      // while each loses direct-edit rights on its own bullets when the other
+      // starts — the safe direction, and the same one a restarted server
+      // lands in.
+      releaseNotesAuthorship(deps.docStore(), ids.docId);
+      heading.beginMeeting(ids);
       reviewAsked.delete(ids.docId);
       spentCues.delete(ids.docId);
       options.onSessionStart?.(ids);
@@ -730,20 +687,22 @@ export function withServerNotesSinks(
       }
       return out;
     },
-    readSection: (ids: { docId: string; meetingId: string }): NotesSectionState | null => {
+    readOutline: (ids: { docId: string; meetingId: string }): readonly prose.OutlineEntry[] => {
       try {
-        return readNotesState(deps.docStore(), ids, ledger);
+        return readNotesOutlineForTick(deps.docStore(), ids.docId);
       } catch (err) {
-        // A section we cannot read costs the compose its awareness of the
-        // person's writing, never its notes.
-        console.error('[meeting-notes] section read failed:', err);
-        return null;
+        // An outline we cannot read costs the compose its awareness of the
+        // doc, never its notes: it opens a section and appends.
+        console.error('[meeting-notes] outline read failed:', err);
+        return [];
       }
     },
+    notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
+      heading.headingId({ docId, meetingId }, outline),
     onNotes: (update: NotesUpdate): void => {
       try {
         if (
-          !applyNotesUpdate(deps.docStore(), update, ledger, {
+          !applyNotesUpdate(deps.docStore(), update, heading, {
             ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
           })
         ) {
@@ -758,7 +717,7 @@ export function withServerNotesSinks(
     },
     onRelabel: (relabel: NotesRelabel): void => {
       try {
-        applyNotesRelabel(deps.docStore(), relabel, ledger);
+        applyNotesRelabel(deps.docStore(), relabel);
       } catch (err) {
         // A rename that cannot reach the doc leaves a stale label, which is
         // a blemish; letting it reach the compose chain as a rejection would
@@ -769,7 +728,7 @@ export function withServerNotesSinks(
     },
     onCorrection: (correction: NotesCorrection): NotesCorrectionResult => {
       try {
-        const result = applyNotesCorrection(deps.docStore(), correction, ledger);
+        const result = applyNotesCorrection(deps.docStore(), correction);
         options.onCorrection?.(correction);
         return result;
       } catch (err) {
@@ -794,7 +753,7 @@ export function withServerNotesSinks(
     },
     onReattribute: (reattribution: NotesReattribution): void => {
       try {
-        applyNotesReattribution(deps.docStore(), reattribution, ledger);
+        applyNotesReattribution(deps.docStore(), reattribution);
       } catch (err) {
         // Same containment as the relabel above: an attribution left stale
         // is a blemish, and a rejection reaching the compose chain would

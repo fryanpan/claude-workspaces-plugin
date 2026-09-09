@@ -31,6 +31,8 @@
     "check:hooks": "bash scripts/check-hooks.sh",
     "check:architecture": "bun run scripts/architecture-freshness.ts",
     "check:imports": "bun run scripts/import-direction.ts",
+    "check:import-cycles": "bun run scripts/import-cycles.ts",
+    "check:client-boot": "bun run scripts/client-boot-check.ts",
     "test:audit": "bun run scripts/test-audit.ts",
     "coverage": "bun run scripts/coverage.ts",
     "loc:audit": "bun run scripts/loc-audit.ts",

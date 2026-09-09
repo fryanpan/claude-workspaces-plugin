@@ -33,7 +33,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { createNotesTickHarness } from './notes-tick-harness.ts';
+import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 const WORKSPACE = 'w-recorder';
 const DOC = 'd-standup';
@@ -184,8 +184,8 @@ const CONTROLS: readonly string[] = [
 ];
 
 /** The scripted composer: one bullet per turn, the shape the real one returns. */
-const bullets = (input: NotesComposeInput): string =>
-  ['## Meeting notes', '', ...input.tick.turns.map((t) => `- ${t.text}`)].join('\n');
+const bullets = (input: NotesComposeInput) =>
+  addNotes(input, input.tick.turns.map((t) => `- ${t.text}`).join('\n'));
 
 function meeting(): ReturnType<typeof createNotesTickHarness> {
   return createNotesTickHarness({

@@ -33,7 +33,7 @@ const input: NotesComposeInput = {
   docId: 'd1',
   meetingId: 'm1',
   tick: { tick: 1, reason: 'pause', turns: [{ turn: 0, text: 'We should measure first.' }] },
-  previous: null,
+  outline: [],
 };
 
 /**
@@ -113,7 +113,11 @@ describe('what the model actually receives', () => {
     const impl = (async (_url: string, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return new Response(
-        JSON.stringify({ content: [{ text: '## Meeting notes\n\n- measure first' }] }),
+        JSON.stringify({
+          content: [
+            { text: '[{"op":"insert_at_end","markdown":"## Meeting notes\\n\\n- measure first"}]' },
+          ],
+        }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     }) as unknown as typeof fetch;
