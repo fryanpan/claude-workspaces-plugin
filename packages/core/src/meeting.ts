@@ -21,7 +21,7 @@
  */
 
 import type { MeetingCaptureSource, MeetingGroup } from './meeting-streams.ts';
-import { groupLabel, parseCaptureSource, parseNamespacedSpeaker } from './meeting-streams.ts';
+import { parseCaptureSource } from './meeting-streams.ts';
 import type { MeetingTimingMark } from './meeting-timing.ts';
 import { MAX_ROOM_SPEAKERS, MIN_ROOM_SPEAKERS, parseRawTuning } from './meeting-tuning.ts';
 
@@ -279,24 +279,16 @@ export type MeetingClientMessage =
 /** Longest name a speaker label can be given. A name, not a bio. */
 export const MAX_SPEAKER_NAME = 60;
 
-/**
- * What a turn's speaker is called: the name the person gave that label, or
- * the label itself with "Speaker" in front until they do. One function, so
- * the strip, the record and the notes never disagree about it.
- */
-export function speakerDisplayName(label: string, names: Readonly<Record<string, string>>): string {
-  const named = names[label];
-  // A bare label is a single-stream meeting's, and reads exactly as it always
-  // did — which is every meeting recorded before two streams existed.
-  const ns = parseNamespacedSpeaker(label);
-  if (!ns) return named ?? `Speaker ${label}`;
-  // A two-stream meeting keeps the group on the name even after the voice has
-  // one, because WHERE somebody is sitting is the fact the two streams were
-  // separated to preserve: "Dana (Remote)" is what makes a transcript line
-  // answer Bryan's question about who is in the room.
-  const where = groupLabel(ns.group);
-  return named ? `${named} (${where})` : `${where} Speaker ${ns.base}`;
-}
+// What a voice is CALLED — the placeholder, the normalisation of a saved
+// name, and the display string — is `speaker-name.ts`, re-exported here
+// because every caller of this module asks for it in the same breath as the
+// protocol it belongs to.
+export {
+  normalizeSpeakerName,
+  speakerDisplayName,
+  speakerGivenName,
+  speakerPlaceholderName,
+} from './speaker-name.ts';
 
 /**
  * Why a meeting cannot be transcribed. Separated from a generic error because

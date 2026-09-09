@@ -75,7 +75,8 @@ import {
   type MeetingUnavailableReason,
   type TranscriptionEngineName,
   describeBotState,
-  speakerDisplayName,
+  normalizeSpeakerName,
+  speakerGivenName,
 } from '@claude-workspaces/core';
 import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
 import { parseRoomSpeakers } from '@claude-workspaces/core';
@@ -319,6 +320,16 @@ export interface MeetingStripOpts {
    * else: the button, the clock, the announcement, the states.
    */
   liveZone?: MeetingLiveZone;
+  /**
+   * Which meeting this doc is in, told to whoever holds something keyed to
+   * it — today the roster cache the reassign menu opens on. `null` means a
+   * boundary has just passed and the new meeting has not named itself yet,
+   * which is the window where the LAST meeting's cast is the most misleading
+   * answer available: it is a plausible list of the wrong people.
+   *
+   * The same boundaries the live zone is told about, for the same reason.
+   */
+  onMeetingChange?: (meetingId: string | null) => void;
 }
 
 /**
@@ -757,7 +768,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   });
 
   function nameSpeaker(label: string): void {
-    const current = speakerDisplayName(label, names);
+    // SEEDED WITH THE SAVED NAME, NOT THE DISPLAY NAME. Seeding the display
+    // name put the placeholder ("Room Speaker C") and the old group suffix
+    // ("John (Room)") into the box, and whatever is in the box is what gets
+    // saved when somebody presses OK — which is how a doc ended up reading
+    // "@John (Room) (Room)". An unnamed voice starts from an empty field.
+    const current = speakerGivenName(label, names) ?? '';
     const answer = promptName(current)?.trim() ?? '';
     if (!answer) return;
     void renameSpeaker(label, answer);
@@ -784,8 +800,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * this whole path exists to close.
    */
   function renameSpeaker(label: string, name: string): Promise<boolean> {
-    const current = speakerDisplayName(label, names);
-    const answer = clipSpeakerName(name.trim());
+    const current = names[label];
+    // Normalised on the way out as well as on the way in: a name typed with
+    // the group suffix still on it, or one that is only a placeholder, is
+    // not what gets written down.
+    const answer = clipSpeakerName(normalizeSpeakerName(name) ?? '');
     // Nothing asked for is nothing refused: the caller's name already stands.
     if (!answer || answer === current) return Promise.resolve(true);
     const hadName = label in names;
@@ -799,7 +818,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       if (disposed) return;
       // Only undo THIS answer: a newer rename may already be in flight.
       if (names[label] !== answer) return;
-      if (hadName) names[label] = current;
+      if (hadName && current !== undefined) names[label] = current;
       else delete names[label];
       paintNames(label);
     };
@@ -1034,6 +1053,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         resuming = false;
         reconnect.succeeded();
         if (msg.meetingId) liveMeetingId = msg.meetingId;
+        // The meeting now has a name, so anything keyed to one can hold
+        // this meeting's roster rather than nothing.
+        opts.onMeetingChange?.(msg.meetingId ?? null);
         if (wasResuming && state.kind === 'recording') {
           if (msg.resumed) {
             // Same meeting, same transcript, same section: nothing to say.
@@ -1127,6 +1149,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         releaseAudio();
         closeSocket();
         opts.liveZone?.end();
+        opts.onMeetingChange?.(lastMeetingId);
         setState({ kind: 'unavailable', reason: msg.reason, message: msg.message });
         break;
       case 'stopped':
@@ -1134,6 +1157,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         releaseAudio();
         closeSocket();
         opts.liveZone?.end();
+        // The meeting that just ended is the doc's current one: its cast is
+        // the right answer again, and it is the record a late rename lands on.
+        opts.onMeetingChange?.(lastMeetingId);
         setState({ kind: 'idle' });
         break;
       case 'error':
@@ -1141,6 +1167,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         releaseAudio();
         closeSocket();
         opts.liveZone?.end();
+        opts.onMeetingChange?.(lastMeetingId);
         setState({ kind: 'error', message: msg.message || 'The meeting ended unexpectedly.' });
         break;
     }
@@ -1160,6 +1187,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // reconnect is called off, and the backoff starts from the top.
     cancelReconnect();
     liveMeetingId = null;
+    // A meeting is beginning and nothing knows its id yet. Whatever is keyed
+    // to the last one is about people this meeting has not heard from.
+    opts.onMeetingChange?.(null);
     standingNote = '';
     tapToStart = false;
     setState({ kind: 'requesting' });
@@ -1398,6 +1428,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // The zone follows the same boundary: a bot meeting ending clears it
       // (it began on the bot's first word), and one starting begins fresh.
       if (!live && state.kind === 'idle') opts.liveZone?.end();
+      // And so does anything keyed to the meeting: null while the new bot
+      // meeting is unnamed, the ended one's id once it has left.
+      opts.onMeetingChange?.(lastMeetingId);
     }
     render();
   });
@@ -1409,7 +1442,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    */
   const offBotWords = bot?.onTranscript((frame: MeetingTranscriptEvent) => {
     if (disposed || state.kind !== 'idle' || !liveBot()) return;
-    if (frame.meetingId) lastMeetingId = frame.meetingId;
+    if (frame.meetingId && frame.meetingId !== lastMeetingId) {
+      lastMeetingId = frame.meetingId;
+      // The bot's meeting names itself in its words rather than in a `ready`.
+      opts.onMeetingChange?.(lastMeetingId);
+    }
     if (frame.speaker !== undefined) {
       const grew = !seen.has(frame.speaker);
       seen.add(frame.speaker);
@@ -1465,7 +1502,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         lastMeetingId = cast.meetingId;
         for (const voice of cast.voices) {
           seen.add(voice.label);
-          if (voice.name !== speakerDisplayName(voice.label, {})) names[voice.label] = voice.name;
+          // The roster's `name` is a DISPLAY name — a placeholder when the
+          // voice is unnamed — so what is kept here is the given name or
+          // nothing at all.
+          const given = normalizeSpeakerName(voice.name);
+          if (given !== undefined) names[voice.label] = given;
         }
         if (view === 'chooser') renderPop();
       })

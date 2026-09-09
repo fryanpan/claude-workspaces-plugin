@@ -172,12 +172,13 @@ describe('the provisional live zone', () => {
     expect(
       [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')].map((p) => p.textContent),
     ).toEqual(['Room Speaker A', 'Remote Speaker A']);
-    // And a name keeps the group beside it, because where somebody is
-    // sitting is the fact the two streams were separated to preserve.
+    // A NAMED VOICE DROPS THE GROUP. It used to keep it — "Dana (Remote)" —
+    // and Bryan asked for that gone on 2026-09-09: the group tells two
+    // anonymous voices apart, and a name already does that job.
     zone.setNames({ 'remote:A': 'Dana' });
     expect(
       [...zoneEl().querySelectorAll<HTMLElement>('.lz-speaker')].map((p) => p.textContent),
-    ).toEqual(['Room Speaker A', 'Dana (Remote)']);
+    ).toEqual(['Room Speaker A', 'Dana']);
   });
 
   it('composing splits the tick’s lines off with nothing drawn around them, and the rest streams on', () => {

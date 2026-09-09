@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createDocSpeakersCache,
   loadDocSpeakers,
   loadDocTranscript,
   loadDocVoices,
@@ -38,7 +39,7 @@ describe('loadDocVoices', () => {
     });
     const voices = await loadDocVoices('huddle', fetchImpl as unknown as typeof fetch);
     expect(voices).toEqual([
-      { label: 'A', name: 'Devi', lastSaid: 'Move the gate.' },
+      { label: 'A', name: 'Devi', given: 'Devi', lastSaid: 'Move the gate.' },
       { label: 'B', name: 'Speaker B', lastSaid: 'Not before Friday.' },
     ]);
     // The LATEST meeting, not the first the index happened to list.
@@ -162,5 +163,104 @@ describe('postSpeakerName', () => {
         fetchImpl as unknown as typeof fetch,
       ),
     ).toBe(false);
+  });
+});
+
+describe('createDocSpeakersCache — the roster the menu opens on', () => {
+  const record = (speakers: Record<string, string>) => [
+    ok({ meetings: [{ meetingId: 'm-1', startedAt: 5, speakers }] }),
+    ok({ speakers, transcript: [{ text: 'Move the gate.', speaker: 'room:A' }] }),
+  ];
+
+  it('is empty until asked, and holds the answer afterwards', async () => {
+    const pages = record({ 'room:A': 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    expect(cache.peek()).toBeNull();
+    await cache.load();
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Rowan']);
+  });
+
+  it('serves two overlapping loads from one pair of requests', async () => {
+    const pages = record({ 'room:A': 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    // What the mount and a tap in the same moment do: the second must ride
+    // the first rather than start a second pair of round trips.
+    const [a, b] = await Promise.all([cache.load(), cache.load()]);
+    expect(a).toBe(b);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds the last good answer when a later load throws', async () => {
+    const pages = record({ 'room:A': 'Rowan' });
+    let fail = false;
+    const fetchImpl = vi.fn(async () => {
+      if (fail) throw new Error('offline');
+      return pages.shift() as Response;
+    });
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    await cache.load();
+    fail = true;
+    await expect(cache.load()).rejects.toThrow('offline');
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Rowan']);
+  });
+
+  /**
+   * The cache is keyed by the meeting it came from, because a doc holds more
+   * than one and the roster of the last one is a list of the WRONG people to
+   * offer. Codex caught it on the menu: a doc that starts a second meeting
+   * kept painting the first one's voices as reassignment targets until the
+   * refresh landed, so a tap in that window moved a note onto a voice that
+   * belongs to a meeting that is over.
+   */
+  const meeting = (id: string, speakers: Record<string, string>) => [
+    ok({ meetings: [{ meetingId: id, startedAt: 5, speakers }] }),
+    ok({ speakers, transcript: [{ text: 'Move the gate.', speaker: 'room:A' }] }),
+  ];
+
+  it('serves nothing once a meeting has started that it holds no roster for', async () => {
+    const pages = meeting('m-1', { 'room:A': 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    await cache.load();
+    expect(cache.peek()).not.toBeNull();
+    // A capture has begun; the server has not said which meeting it is yet.
+    cache.meetingChanged(null);
+    expect(cache.peek()).toBeNull();
+  });
+
+  it('serves the new meeting once its own load lands', async () => {
+    const pages = [...meeting('m-1', { 'room:A': 'Rowan' })];
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    await cache.load();
+    cache.meetingChanged('m-2');
+    expect(cache.peek()).toBeNull();
+    pages.push(...meeting('m-2', { 'room:A': 'Priya' }));
+    await cache.load();
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Priya']);
+  });
+
+  it('refuses an answer for the meeting that was current when it was asked', async () => {
+    const pages = [...meeting('m-1', { 'room:A': 'Rowan' })];
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    // The load is in flight when the boundary passes: its answer is about the
+    // meeting before it, so it must not become what the next tap paints.
+    const inFlight = cache.load();
+    cache.meetingChanged('m-2');
+    await inFlight;
+    expect(cache.peek()).toBeNull();
+  });
+
+  it('keeps a roster the boundary named as the current meeting', async () => {
+    const pages = meeting('m-1', { 'room:A': 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    await cache.load();
+    // The meeting that just stopped IS the doc's latest: nothing to discard.
+    cache.meetingChanged('m-1');
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Rowan']);
   });
 });

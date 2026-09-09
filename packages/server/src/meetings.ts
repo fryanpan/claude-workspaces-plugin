@@ -22,7 +22,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type CaptureMode, parseCaptureMode } from '@claude-workspaces/core';
+import { type CaptureMode, normalizeSpeakerName, parseCaptureMode } from '@claude-workspaces/core';
 import {
   AudioSink,
   type DocInfoResolver,
@@ -549,8 +549,14 @@ export class MeetingStore {
       },
       nameSpeaker(speaker: string, name: string): void {
         if (stopped) return;
-        speakers[speaker] = name;
-        appendLine(meetingIndexPath(dataDir, docId), { meetingId, speakers: { [speaker]: name } });
+        // NORMALISED ON THE WAY IN. A client that sends a display name — the
+        // group suffix still on it, or the placeholder it was seeded with —
+        // is naming nothing, and writing that down is what put
+        // "Room Speaker C" in a record as somebody's name.
+        const given = normalizeSpeakerName(name);
+        if (given === undefined) return;
+        speakers[speaker] = given;
+        appendLine(meetingIndexPath(dataDir, docId), { meetingId, speakers: { [speaker]: given } });
       },
       recordAudio(chunk: Uint8Array, stream = 'mic'): void {
         if (stopped || chunk.byteLength === 0) return;
@@ -654,11 +660,13 @@ export class MeetingStore {
     name: string;
   }):
     | { ok: true; priorNames: Record<string, string>; speakers: Record<string, string> }
-    | { ok: false; reason: 'unknown_meeting' | 'recording' | 'unknown_speaker' } {
+    | { ok: false; reason: 'unknown_meeting' | 'recording' | 'unknown_speaker' | 'not_a_name' } {
     const { docId, meetingId, speaker, name } = args;
     const record = this.list(docId).find((m) => m.meetingId === meetingId);
     if (!record) return { ok: false, reason: 'unknown_meeting' };
     if (this.active(docId)?.meetingId === meetingId) return { ok: false, reason: 'recording' };
+    const given = normalizeSpeakerName(name);
+    if (given === undefined) return { ok: false, reason: 'not_a_name' };
     const priorNames = { ...(record.speakers ?? {}) };
     // A name attaches to a voice the meeting HAD: one that spoke, or one that
     // was named live before it ever did. Anything else is a typo becoming a
@@ -666,8 +674,11 @@ export class MeetingStore {
     const carried =
       speaker in priorNames || this.transcript(docId, meetingId).some((t) => t.speaker === speaker);
     if (!carried) return { ok: false, reason: 'unknown_speaker' };
-    appendLine(meetingIndexPath(this.dataDir, docId), { meetingId, speakers: { [speaker]: name } });
-    return { ok: true, priorNames, speakers: { ...priorNames, [speaker]: name } };
+    appendLine(meetingIndexPath(this.dataDir, docId), {
+      meetingId,
+      speakers: { [speaker]: given },
+    });
+    return { ok: true, priorNames, speakers: { ...priorNames, [speaker]: given } };
   }
 
   /** One meeting's settled turns. */

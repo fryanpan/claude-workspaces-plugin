@@ -369,6 +369,52 @@ describe('meeting store: who said it', () => {
     meeting.nameSpeaker('C', 'Late');
     expect(listMeetings(dataDir, 'named')[0]?.speakers).toEqual({ A: 'Jordan Lee', B: 'Sam' });
   });
+
+  it('writes down a name, never a display string a client sent back', () => {
+    // The record is what every later reader renders from, so a placeholder or
+    // a group suffix arriving from a client stops here rather than becoming
+    // somebody's durable name (Bryan, 2026-09-09: "@John (Room) (Room)").
+    const store = new MeetingStore(dataDir);
+    const meeting = store.start({
+      docId: 'two-stream',
+      engine: 'mock',
+      sampleRate: 16_000,
+      mode: 'conversation',
+    });
+    if (!meeting) throw new Error('expected a meeting');
+    meeting.nameSpeaker('room:A', 'John (Room)');
+    meeting.nameSpeaker('room:C', 'Room Speaker C');
+    meeting.nameSpeaker('remote:B', 'Dana');
+    expect(listMeetings(dataDir, 'two-stream')[0]?.speakers).toEqual({
+      'room:A': 'John',
+      'remote:B': 'Dana',
+    });
+    meeting.stop();
+  });
+
+  it('refuses a placeholder over the after-the-fact rename route', () => {
+    const store = new MeetingStore(dataDir);
+    const meeting = store.start({
+      docId: 'later',
+      engine: 'mock',
+      sampleRate: 16_000,
+      mode: 'conversation',
+    });
+    if (!meeting) throw new Error('expected a meeting');
+    meeting.recordTurn(0, 'In the room.', 'room:C');
+    const { meetingId } = meeting;
+    meeting.stop();
+    const args = { docId: 'later', meetingId, speaker: 'room:C' };
+    expect(store.nameSpeakerLater({ ...args, name: 'Room Speaker C' })).toEqual({
+      ok: false,
+      reason: 'not_a_name',
+    });
+    // The positive control: a real name over the same call is kept, and
+    // kept BARE.
+    const took = store.nameSpeakerLater({ ...args, name: 'Chipmunk (Room)' });
+    expect(took.ok).toBe(true);
+    expect(listMeetings(dataDir, 'later')[0]?.speakers).toEqual({ 'room:C': 'Chipmunk' });
+  });
 });
 
 /**

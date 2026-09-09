@@ -8,11 +8,19 @@ import {
   parseMarkdownBlocks,
   serializeFragmentToMarkdown,
 } from '../../core/src/prose.ts';
+import type { RosterVoice } from '../../core/src/speaker-roster.ts';
 import { mountSpeakerReassign } from '../src/speaker-reassign-menu.ts';
+import { createDocSpeakersCache } from '../src/speaker-voices.ts';
+
+/** A JSON response the roster loader will accept. */
+const okRes = (body: unknown) =>
+  ({ ok: true, status: 200, json: () => Promise.resolve(body) }) as unknown as Response;
 
 const VOICES = [
+  // A is still anonymous — `name` is its placeholder and it has no `given`,
+  // which is what makes its rename prompt open empty.
   { label: 'A', name: 'Speaker A', lastSaid: 'Move the gate.' },
-  { label: 'B', name: 'Devi', lastSaid: 'Not before Friday.' },
+  { label: 'B', name: 'Devi', given: 'Devi', lastSaid: 'Not before Friday.' },
 ];
 
 let teardown: Array<() => void> = [];
@@ -30,6 +38,8 @@ function mount(
     canWrite?: () => boolean;
     renameSpeaker?: (label: string, name: string) => Promise<boolean>;
     promptName?: (current: string) => string | null;
+    cachedVoices?: () => readonly RosterVoice[] | null;
+    loadVoices?: () => Promise<RosterVoice[]>;
   } = {},
 ) {
   const ydoc = new Y.Doc();
@@ -46,7 +56,7 @@ function mount(
       Collaboration.configure({ document: ydoc, field: 'prose' }),
     ],
   });
-  const loadVoices = vi.fn(() => Promise.resolve(voices));
+  const loadVoices = vi.fn(over.loadVoices ?? (() => Promise.resolve(voices)));
   const handle = mountSpeakerReassign({ editor, loadVoices, ...over });
   teardown.push(() => {
     handle.destroy();
@@ -256,6 +266,26 @@ describe('renaming the voice from the notes', () => {
     expect(rename()?.disabled).toBe(false);
   });
 
+  it('opens an empty box on a voice nobody has named', async () => {
+    // The row still SAYS "Rename Speaker A" — that is what the person
+    // tapped — but the box it opens is empty. Seeding it with those words
+    // is how "Room Speaker C" became somebody's saved name.
+    const asked: string[] = [];
+    const renameSpeaker = vi.fn(() => Promise.resolve(true));
+    const { editor } = mount('- [@Speaker A](speaker:A) wants the gate moved.\n', VOICES, {
+      renameSpeaker,
+      promptName: (current) => {
+        asked.push(current);
+        return 'Chipmunk';
+      },
+    });
+    await clickTag(editor);
+    expect(rename()?.textContent).toBe('Rename Speaker A');
+    rename()?.click();
+    expect(asked).toEqual(['']);
+    await vi.waitFor(() => expect(renameSpeaker).toHaveBeenCalledWith('A', 'Chipmunk'));
+  });
+
   it('a cancelled or unchanged answer asks for nothing', async () => {
     const renameSpeaker = vi.fn(() => Promise.resolve(true));
     let answer: string | null = null;
@@ -278,5 +308,119 @@ describe('renaming the voice from the notes', () => {
     expect(rename()).toBeNull();
     // Positive control: the menu did render, it just has nowhere to keep a name.
     expect(document.querySelector('.speaker-menu-nobody')).not.toBeNull();
+  });
+});
+
+describe('opening on the roster already in hand — Bryan, 2026-09-09: "annoyingly slow"', () => {
+  /** A load that never settles: the menu must not be waiting on it. */
+  function neverSettles(): { loadVoices: () => Promise<RosterVoice[]> } {
+    return { loadVoices: () => new Promise<RosterVoice[]>(() => {}) };
+  }
+
+  it('paints the voices in the same turn as the tap, with the fetch still in flight', () => {
+    const ydoc = new Y.Doc();
+    getProseFragment(ydoc).push(parseMarkdownBlocks('- [@Devi](speaker:B) wants the gate.\n'));
+    const host = document.createElement('div');
+    document.body.append(host);
+    const editor = new Editor({
+      element: host,
+      extensions: [
+        StarterKit.configure({
+          undoRedo: false,
+          link: { openOnClick: false, autolink: true, protocols: ['speaker'] },
+        }),
+        Collaboration.configure({ document: ydoc, field: 'prose' }),
+      ],
+    });
+    const handle = mountSpeakerReassign({
+      editor,
+      ...neverSettles(),
+      cachedVoices: () => VOICES,
+    });
+    teardown.push(() => {
+      handle.destroy();
+      editor.destroy();
+      host.remove();
+    });
+    // NO `await` ANYWHERE. The rows exist the instant the click handler
+    // returns, which is the whole of what "no perceptible wait" means here:
+    // one synchronous paint rather than a round trip under the finger.
+    tagEl(editor).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(menu()).not.toBeNull();
+    expect(rows().map((r) => r.textContent)).toEqual([
+      expect.stringContaining('Speaker A'),
+      expect.stringContaining('Devi'),
+    ]);
+    expect(document.querySelector('.speaker-menu-list')?.textContent).not.toContain('Loading');
+  });
+
+  it('leaves the cached rows alone when the refresh says the same thing', async () => {
+    const { editor, loadVoices } = mount('- [@Devi](speaker:B) wants the gate.\n', VOICES, {
+      cachedVoices: () => VOICES,
+    });
+    await clickTag(editor);
+    const first = rows()[0];
+    await vi.waitFor(() => expect(loadVoices).toHaveBeenCalled());
+    // The same element object, so nothing was rebuilt under a finger that
+    // was already on it.
+    expect(rows()[0]).toBe(first);
+  });
+
+  it('repaints when the refresh brings a voice the cache did not have', async () => {
+    const fresh = [...VOICES, { label: 'C', name: 'Marisol', given: 'Marisol', lastSaid: 'Late.' }];
+    const { editor } = mount('- [@Devi](speaker:B) wants the gate.\n', fresh, {
+      cachedVoices: () => VOICES,
+    });
+    await clickTag(editor);
+    await vi.waitFor(() => expect(rows()).toHaveLength(3));
+    expect(rows()[2]?.textContent).toContain('Marisol');
+  });
+
+  /**
+   * The menu opens on the cache, so the cache must never hold a meeting the
+   * doc has moved on from. Codex's finding: a doc that starts a second
+   * meeting went on painting the first meeting's voices as clickable
+   * reassignment targets until the refresh landed, and a tap in that window
+   * moved a note onto somebody from a meeting that was already over.
+   */
+  it('offers no voice from the meeting before the one now running', async () => {
+    history.replaceState(null, '', '/workspaces/w-1/docs/d-1');
+    const roster = (id: string, speakers: Record<string, string>) => [
+      okRes({ meetings: [{ meetingId: id, startedAt: 5, speakers }] }),
+      okRes({ speakers, transcript: [{ text: 'Move the gate.', speaker: 'A' }] }),
+    ];
+    const pages = roster('m-1', { A: 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    await cache.load();
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Rowan']);
+
+    // A second meeting starts on this doc. Its id is not known yet.
+    cache.meetingChanged(null);
+    pages.push(...roster('m-2', { A: 'Priya' }));
+
+    const { editor } = mount('- [@Rowan](speaker:A) wants the gate.\n', [], {
+      loadVoices: () => cache.load().then((held) => held?.voices ?? []),
+      cachedVoices: () => cache.peek()?.voices ?? null,
+    });
+    tagEl(editor).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    // Nothing to tap: the old meeting's cast is not an answer to "who is
+    // speaking now", and the menu waits rather than offering it.
+    expect(rows()).toHaveLength(0);
+    expect(document.querySelector('.speaker-menu-list')?.textContent).toContain('Loading');
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows()[0]?.textContent).toContain('Priya');
+    expect(
+      rows()
+        .map((r) => r.textContent)
+        .join(' '),
+    ).not.toContain('Rowan');
+  });
+
+  it('still opens on a wait when there is no cache to open on', async () => {
+    const { editor } = mount('- [@Devi](speaker:B) wants the gate.\n');
+    tagEl(editor).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(document.querySelector('.speaker-menu-list')?.textContent).toContain('Loading');
+    await vi.waitFor(() => expect(rows()).toHaveLength(2));
   });
 });

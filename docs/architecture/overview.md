@@ -421,6 +421,13 @@ namespaced speaker labels are rendered by the browser, written by the server
 and read back by the notes composer, so one spelling has to serve three
 processes.
 
+`speaker-name.ts` sits in that same wire-types tier, and joins the picture
+without changing it: what a voice is CALLED — the placeholder until somebody
+names it, and the normalisation that keeps a stale display string from being
+read back as a name — was a function inside `meeting.ts` until the rules
+outgrew it. Four processes render it (strip, notes editor, notes composer, raw
+transcript), which is the same reason `meeting-streams.ts` is here.
+
 `footnotes.ts` belongs to that document-model tier too and does not move the
 picture: it is the grammar of a `^[a note]` inline footnote — where the notes
 are in a line, whether the author wrote "Unconfirmed", and which words a note

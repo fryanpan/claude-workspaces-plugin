@@ -29,7 +29,7 @@
  * menu does not touch the document for it.
  */
 
-import type { RosterVoice } from '@claude-workspaces/core';
+import { type RosterVoice, normalizeSpeakerName } from '@claude-workspaces/core';
 import type { Editor } from '@tiptap/core';
 import { type SpeakerTagRange, applyReassign, findSpeakerTagAt } from './speaker-reassign.ts';
 
@@ -37,10 +37,22 @@ export interface SpeakerReassignOpts {
   editor: Editor;
   /**
    * The voices to offer. A function rather than a list because a meeting is
-   * still going while its notes are being read: the roster is fetched when
+   * still going while its notes are being read: the roster is refreshed when
    * the menu opens, so a voice that arrived a minute ago is on it.
    */
   loadVoices: () => Promise<RosterVoice[]>;
+  /**
+   * The roster ALREADY IN HAND, if there is one — rendered on the tap, with
+   * `loadVoices` refreshing behind it.
+   *
+   * The menu used to open on "Loading…" and wait for two sequential
+   * requests: list the doc's meetings, then fetch the latest meeting's whole
+   * record, transcript included. That is a menu with a wait in it every
+   * single time, and Bryan (2026-09-09) called it annoyingly slow. Nothing
+   * about the answer needs to be fetched at the moment of the tap: the same
+   * roster is already loaded for the strip when the doc mounts.
+   */
+  cachedVoices?: () => readonly RosterVoice[] | null;
   /**
    * Whether this reader may write to this doc. NOT the same question as
    * whether the editor is currently editable: view mode is a one-tap UI
@@ -136,7 +148,12 @@ export function mountSpeakerReassign(opts: SpeakerReassignOpts): SpeakerReassign
     menu.append(heading);
     const list = document.createElement('div');
     list.className = 'speaker-menu-list';
-    list.textContent = 'Loading…';
+    // The cached roster paints before the menu is even in the document, so
+    // the first frame the person sees is the finished menu rather than a
+    // spinner that resolves into one.
+    const cached = opts.cachedVoices?.() ?? null;
+    if (cached) renderVoices(list, [...cached], tag);
+    else list.textContent = 'Loading…';
     menu.append(list);
     root.append(scrim, menu);
     anchor.setAttribute('aria-expanded', 'true');
@@ -146,12 +163,37 @@ export function mountSpeakerReassign(opts: SpeakerReassignOpts): SpeakerReassign
     loadVoices().then(
       (voices) => {
         if (mine !== opened) return;
+        // A refresh that says the same thing must not repaint: a row
+        // rebuilt under a finger that is already on it is a mis-tap.
+        if (cached && sameVoices(cached, voices)) return;
         renderVoices(list, voices, tag);
+        place(menu, anchor);
       },
       () => {
         if (mine !== opened) return;
+        // A refresh that fails over a roster already on screen leaves it
+        // alone: what is shown came from the same server a moment ago.
+        if (cached) return;
         list.textContent = "Couldn't load the voices for this meeting.";
       },
+    );
+  }
+
+  /** Whether a refreshed roster says anything new. Compared on what the menu
+   *  actually renders, so an unchanged answer costs no repaint. */
+  function sameVoices(a: readonly RosterVoice[], b: readonly RosterVoice[]): boolean {
+    return (
+      a.length === b.length &&
+      a.every((voice, i) => {
+        const other = b[i];
+        return (
+          other !== undefined &&
+          voice.label === other.label &&
+          voice.name === other.name &&
+          voice.given === other.given &&
+          voice.lastSaid === other.lastSaid
+        );
+      })
     );
   }
 
@@ -211,15 +253,21 @@ export function mountSpeakerReassign(opts: SpeakerReassignOpts): SpeakerReassign
    * answer is what says whether it was kept.
    */
   function renameRow(list: HTMLElement, voices: RosterVoice[], tag: SpeakerTagRange): HTMLElement {
-    const current = voices.find((v) => v.label === tag.label)?.name ?? tag.text.replace(/^@/, '');
+    const voice = voices.find((v) => v.label === tag.label);
+    const shown = voice?.name ?? tag.text.replace(/^@/, '');
+    // WHAT THE PROMPT STARTS FROM IS THE SAVED NAME, NOT THE SHOWN ONE. An
+    // anonymous voice starts from an empty box rather than from the words
+    // "Room Speaker C", which is what somebody pressing OK used to save as
+    // that voice's name — and what then read back as its own placeholder.
+    const seed = voice ? (voice.given ?? '') : (normalizeSpeakerName(shown) ?? '');
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'speaker-menu-rename';
     row.setAttribute('role', 'menuitem');
-    row.textContent = `Rename ${current}`;
+    row.textContent = `Rename ${shown}`;
     row.addEventListener('click', () => {
-      const answer = promptName(current)?.trim() ?? '';
-      if (!answer || answer === current) return;
+      const answer = promptName(seed)?.trim() ?? '';
+      if (!answer || answer === seed) return;
       row.disabled = true;
       const mine = opened;
       void (renameSpeaker?.(tag.label, answer) ?? Promise.resolve(false)).then(

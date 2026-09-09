@@ -15,6 +15,7 @@ export * from './attachment.ts';
 export * from './review-item.ts';
 export * from './review-item-id.ts';
 export * from './review-judge-prompt.ts';
+export * from './speaker-name.ts';
 export * from './speaker-roster.ts';
 export * from './speaker-tags.ts';
 export * from './suggest.ts';

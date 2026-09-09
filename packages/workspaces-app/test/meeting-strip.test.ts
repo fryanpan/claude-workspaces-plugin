@@ -302,6 +302,7 @@ function mount(
     engine?: 'assemblyai' | 'soniox';
     listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
     loadSpeakers?: () => Promise<DocSpeakers | null>;
+    onMeetingChange?: (meetingId: string | null) => void;
     loadTranscript?: () => Promise<{ lines: string[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
@@ -916,6 +917,25 @@ describe('the strip when no words are coming', () => {
     expect(h.note()).toMatch(/connection/i);
   });
 
+  /**
+   * Whoever holds a roster for this doc has to be told the moment the doc
+   * moves between meetings — otherwise the reassign menu keeps offering the
+   * last meeting's voices as targets for a note being written in this one.
+   * A start says "a meeting, id unknown"; `ready` names it; a stop leaves the
+   * meeting that just ended as the doc's current one.
+   */
+  it('says which meeting the doc is in, at every boundary', async () => {
+    const onMeetingChange = vi.fn();
+    const h = mount(undefined, { onMeetingChange });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null]);
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
+    expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null, 'm2', 'm2']);
+  });
+
   it('settles to idle when the server reports the meeting stopped', async () => {
     const h = mount();
     h.pressStart({ pick: 'Just me' });
@@ -1173,7 +1193,10 @@ describe('who is speaking', () => {
     const tag = h.root.querySelector('.meeting-speaker') as HTMLButtonElement;
     expect(tag.getAttribute('aria-label')).toBe('Name Speaker A');
     tag.click();
-    expect(asked).toEqual(['Speaker A']);
+    // THE PROMPT OPENS EMPTY on a voice nobody has named. It used to be
+    // seeded with the display name, which is how "Room Speaker C" got saved
+    // as somebody's name (Bryan, 2026-09-09).
+    expect(asked).toEqual(['']);
     expect(h.tags()).toEqual(['Jordan', 'Speaker B', 'Jordan']);
     // A turn that arrives later with the same label reads as Jordan too —
     // and turn 0 has rolled off the three-turn window by then.
@@ -1188,6 +1211,44 @@ describe('who is speaking', () => {
     // The prompt offers the current name next time, so a rename starts from it.
     tag.click();
     expect(asked[1]).toBe('Jordan');
+  });
+
+  it('a named two-stream voice reads as the name alone, and reprompts from it', async () => {
+    // Bryan, 2026-09-09, on a room-plus-remote meeting: the group suffix is
+    // noise once a voice has a name, and seeding the prompt with the display
+    // name is what saved "John (Room)" and then rendered "John (Room) (Room)".
+    const asked: string[] = [];
+    const h = await live((current) => {
+      asked.push(current);
+      return 'John';
+    });
+    h.sockets[0]?.serve({
+      type: 'transcript',
+      turn: 0,
+      text: 'In the room.',
+      final: true,
+      speaker: 'room:A',
+    });
+    h.sockets[0]?.serve({
+      type: 'transcript',
+      turn: 1,
+      text: 'On the call.',
+      final: true,
+      speaker: 'remote:B',
+    });
+    expect(h.tags()).toEqual(['Room Speaker A', 'Remote Speaker B']);
+    const tag = h.root.querySelector('.meeting-speaker') as HTMLButtonElement;
+    tag.click();
+    expect(asked).toEqual(['']);
+    expect(h.tags()).toEqual(['John', 'Remote Speaker B']);
+    // And the second rename starts from the bare name, not from "John (Room)".
+    tag.click();
+    expect(asked[1]).toBe('John');
+    const named = (h.sockets[0]?.sent ?? [])
+      .filter((d): d is string => typeof d === 'string')
+      .map((d) => JSON.parse(d) as { type: string; name?: string })
+      .filter((m) => m.type === 'name_speaker');
+    expect(named[0]).toEqual({ type: 'name_speaker', speaker: 'room:A', name: 'John' });
   });
 
   it('clips a name to the limit the server enforces, so the two never diverge', async () => {

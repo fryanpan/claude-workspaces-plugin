@@ -14,6 +14,7 @@ import { mountPointerPillLayer } from './doc/doc-pointer-pill.ts';
 import { wireDocReady } from './doc/doc-ready.ts';
 import { mountDocSaveState } from './doc/doc-save-state.ts';
 import { mountDocSetNav } from './doc/doc-set-nav.ts';
+import { mountDocSpeakerMenu } from './doc/doc-speaker-menu.ts';
 import { createNotesLinkRefs } from './doc/notes-link-refs.ts';
 import { wireEditViewport } from './edit-viewport.ts';
 import { type EditorHandle, createEditor } from './editor.ts';
@@ -27,8 +28,6 @@ import { mountRedline } from './redline/redline-app.ts';
 import { type ReviewChrome, mountReviewChrome } from './review-chrome.ts';
 import { navigateTo, startRouter } from './router.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
-import { mountSpeakerReassign } from './speaker-reassign-menu.ts';
-import { loadDocVoices } from './speaker-voices.ts';
 import { installStaleClientNotice } from './stale-client.ts';
 import { registerMarkdownMount } from './surface-registry.ts';
 
@@ -360,21 +359,13 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
     });
   }
 
-  // Tapping a speaker tag in the notes offers the voices this doc's meetings
-  // had. Mounted whatever the doc type, and independent of the strip: notes
-  // outlive the meeting that produced them, and correcting an attribution a
-  // week later is the ordinary case rather than the exotic one.
-  const reassign = mountSpeakerReassign({
-    editor: editor.editor,
-    loadVoices: () => loadDocVoices(docId),
-    // Permission, not mode: a reader in view mode may still fix an
-    // attribution, and a reader without write access may not.
+  mountDocSpeakerMenu({
+    docId,
+    editor,
+    scope,
     canWrite: () => canWrite,
-    // And the one entry about the VOICE rather than this mention: naming
-    // Speaker A from the notes, after every other pill on the page has gone.
-    ...(meeting?.renameSpeaker ? { renameSpeaker: meeting.renameSpeaker } : {}),
+    ...(meeting ? { meeting } : {}),
   });
-  scope.onCleanup(() => reassign.destroy());
 
   // Editing under an on-screen keyboard: the meeting strip gives its grid row
   // back while a phone-width editor has focus, and the caret is kept above

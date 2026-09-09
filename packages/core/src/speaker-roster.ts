@@ -12,7 +12,7 @@
  * that would be a third thing to keep true.
  */
 
-import { speakerDisplayName } from './meeting.ts';
+import { speakerDisplayName, speakerGivenName } from './meeting.ts';
 
 /** As much of a settled turn as the roster reads. */
 export interface RosterTurn {
@@ -27,6 +27,12 @@ export interface RosterVoice {
   label: string;
   /** What the reader sees, named or not. */
   name: string;
+  /**
+   * The name a person actually gave this voice, absent while it is still
+   * anonymous. What a rename prompt starts from: seeding it with `name`
+   * put the placeholder into the box and saved it back as a name.
+   */
+  given?: string;
   /** The last thing this voice said, or '' if it has been named but has
    *  not spoken yet. Empty is a real state, not a missing value. */
   lastSaid: string;
@@ -58,9 +64,13 @@ export function speakerRoster(
   const labels = new Set([...lastSaid.keys(), ...Object.keys(names)]);
   return [...labels]
     .sort((a, b) => a.localeCompare(b))
-    .map((label) => ({
-      label,
-      name: speakerDisplayName(label, names),
-      lastSaid: lastSaid.get(label) ?? '',
-    }));
+    .map((label) => {
+      const given = speakerGivenName(label, names);
+      return {
+        label,
+        name: speakerDisplayName(label, names),
+        ...(given !== undefined ? { given } : {}),
+        lastSaid: lastSaid.get(label) ?? '',
+      };
+    });
 }
