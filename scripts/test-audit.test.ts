@@ -31,7 +31,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { type ProbeLock, acquireProbeLock } from './probe-lock.ts';
+import { exclusiveWindow } from './probe-lock.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -47,33 +47,26 @@ const RUN_ID = `${process.pid}-${randomBytes(4).toString('hex')}`;
  * The plant/measure/clean window is exclusive across processes.
  *
  * These tests measure a count over the whole working tree, and two
- * `bun run test:vitest` runs in one checkout — a lead's `verify` and a
- * builder's — cannot both do that: one run's probes are counted by the other's
+ * `bun run test:vitest` runs in one checkout - a lead's `verify` and a
+ * builder's - cannot both do that: one run's probes are counted by the other's
  * audit, which reads as `source-shape reads 20 baseline 12 OVER`. Unique names
  * cannot fix that; only exclusion can. CI is unaffected either way, one
  * checkout per shard.
  *
- * Registered before every other hook in the file so the lock is taken first
- * and released last — vitest runs `afterEach` in reverse registration order,
- * so the per-describe cleanups below still run while it is held.
+ * One `beforeEach` and one `afterEach`, not two of each, because the ordering
+ * that matters - the probes are gone BEFORE the next run is let in - would
+ * otherwise be a property of the runner's `sequence.hooks` setting rather than
+ * of this file. `exclusiveWindow` owns it instead.
  */
-let lock: ProbeLock | undefined;
-
-beforeEach(async () => {
-  lock = await acquireProbeLock('test-audit', REPO);
+const window = exclusiveWindow('test-audit', REPO, {
   // Holding the lock means nobody else has probes planted, so anything still
   // here is a leftover from a run that died rather than a live fixture.
-  sweepLeftoverProbes();
+  enter: sweepLeftoverProbes,
+  leave: removeOwnProbes,
 });
 
-afterEach(() => {
-  lock?.release();
-  lock = undefined;
-});
-
-// Registered after the lock hook, so it runs BEFORE the release: vitest runs
-// `afterEach` in reverse registration order.
-afterEach(removeOwnProbes);
+beforeEach(() => window.open());
+afterEach(() => window.close());
 
 /**
  * Removes the three artifacts THIS run planted, and nothing else.
