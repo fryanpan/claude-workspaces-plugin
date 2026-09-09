@@ -11,11 +11,16 @@
  * scored with the checker in `notes-quality-report.ts` before these were
  * chosen, and the shape of that corpus is the argument: healthy meetings sit
  * at or very near zero on every count, so a bar just above the healthy
- * maximum separates "a meeting went wrong" from "notes are notes". The
- * failure that motivated the work — a meeting whose notes carried dozens of
- * repeated lines, a topic that never reached them and speakers the room never
- * had — sits an order of magnitude above every bar here, which is the margin
- * that says these bars are not tuned to one incident.
+ * maximum separates "a meeting went wrong" from "notes are notes".
+ *
+ * THE MEETING THAT MOTIVATED THE WORK IS NOT IN THAT CORPUS, and the bars are
+ * not derived from it. It was described as a doc carrying 33 duplicate lines,
+ * a lost topic and invented speakers; the worst duplicate count any RECORDED
+ * meeting scores is one, and the doc in the corpus that does carry a hundred
+ * or so repeated lines has no meeting record beside it at all, so nothing
+ * here can be checked against it. What the bars are derived from is the
+ * distribution of the meetings that were recorded — which is a weaker claim
+ * than "these bars would have caught that meeting", and is stated as one.
  *
  * COUNTING IS ALWAYS ON; THESE ARE ONLY THE REPORTING BARS. The report counts
  * every defect it can see whatever these say. What a threshold decides is the
@@ -28,10 +33,10 @@
  * Repeated bullets — the same line written twice — a meeting may carry before
  * it is reported.
  *
- * Three. Across the whole recorded corpus, the worst healthy meeting carried
- * ONE repeated bullet and every other carried none, so three is comfortably
- * above the noise; the incident that asked for this check carried dozens, so
- * it is comfortably below the failure. A repeat is counted as an extra LINE,
+ * Three. Across the whole recorded corpus the worst meeting carried ONE
+ * repeated bullet and every other carried none, so three sits clear of the
+ * noise; the failure the ticket describes was dozens, which is far above it.
+ * A repeat is counted as an extra LINE,
  * not as a group: a bullet written four times is three repeats, because three
  * is what a reader has to skip past.
  */
@@ -65,8 +70,9 @@ export const MAX_LONG_FLAT_RUNS = 1;
  * ZERO, and it is the only zero here. Every other count on this page is a
  * matter of degree; a name attached to a voice that never spoke is a
  * fabrication, and one is as bad as ten because a reader who finds one
- * stops believing the other attributions. The one meeting in the corpus that
- * did this attached three such names in a three-minute conversation.
+ * stops believing the other attributions. Six meetings in the corpus do it,
+ * one or two invented names each, and the worst is a nineteen-turn
+ * conversation whose notes name two voices the transcript never had.
  */
 export const MAX_UNKNOWN_SPEAKERS = 0;
 
