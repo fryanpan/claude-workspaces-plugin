@@ -322,9 +322,9 @@ export function latenessFrom(waits: readonly NoteWait[]): NotesLateness {
       missing:
         'no per-tick timing record for this meeting, so how long a turn waited for its ' +
         'note is not known — the meeting record carries when the meeting started and ' +
-        'stopped, and nothing about when any one note was written. The record is ' +
-        'written only when the server was booted with notes timing switched on, so an ' +
-        'absent one is ordinary rather than a fault',
+        'stopped, and nothing about when any one note was written. A meeting held ' +
+        'before the timing record existed has none and never will, and an operator can ' +
+        'switch the record off, so an absent one is ordinary rather than a fault',
     };
   }
   const sorted = [...waits].map((w) => w.waitMs).sort((a, b) => a - b);

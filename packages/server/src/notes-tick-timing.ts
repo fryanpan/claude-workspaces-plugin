@@ -23,11 +23,13 @@
  * and it skips the summary object the log appends at the end of a meeting,
  * which carries neither field.
  *
- * AN ABSENT FILE IS THE NORMAL CASE, NOT A FAULT. The log is written only
- * when the operator booted the server with `CW_NOTES_TIMING=1`, so most
- * meetings will never have one, and a reader that treated absence as an
- * error would report a fault on almost every meeting. Absence reads as an
- * unknown lateness and nothing else.
+ * AN ABSENT FILE IS ORDINARY, NOT A FAULT — for two reasons, neither of
+ * which is a bug. The log starts at the first meeting recorded on the code
+ * that writes it and is not backfilled, so every meeting recorded before that
+ * has none and always will. And it is written for every meeting unless an
+ * operator turns it off with `CW_NOTES_TIMING=0`, which they may. A reader
+ * that treated either as an error would report a fault on the whole existing
+ * corpus, so absence reads as an unknown lateness and nothing else.
  *
  * ONE MEASUREMENT, NAMED. `settledToWrittenMs` counts from the moment the
  * oldest words in a tick stopped changing to the moment the note was in the
