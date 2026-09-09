@@ -1,0 +1,242 @@
+import { describe, expect, test } from 'bun:test';
+import type { NotesMethod } from '@claude-workspaces/core';
+import type { NotesComposeInput } from '../src/meeting-notes.ts';
+import { createNotesMethodComposer } from '../src/notes-method-composer.ts';
+
+/** What one call to the model was: which model, and the prompt it carried. */
+interface Seen {
+  model: string;
+  system: string;
+  user: string;
+  tool?: string;
+}
+
+/**
+ * One fetch standing in for BOTH calls the ledger path makes — the extract
+ * and the compose — told apart by the tool the request asks for. The compose
+ * answers an empty edit list, which is a legitimate answer and keeps the test
+ * about dispatch rather than about parsing.
+ */
+function harness(points: string[] = ['Maya (A): survey the boardwalk']): {
+  impl: typeof fetch;
+  seen: Seen[];
+} {
+  const seen: Seen[] = [];
+  const impl = (async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as {
+      model: string;
+      system: string;
+      tools?: Array<{ name: string }>;
+      messages: Array<{ content: string }>;
+    };
+    const tool = body.tools?.[0]?.name;
+    seen.push({
+      model: body.model,
+      system: body.system,
+      user: body.messages[0]?.content ?? '',
+      ...(tool ? { tool } : {}),
+    });
+    if (tool === 'record_points') {
+      return new Response(
+        JSON.stringify({
+          content: [{ type: 'tool_use', name: 'record_points', input: { points } }],
+        }),
+        { status: 200 },
+      );
+    }
+    return new Response(JSON.stringify({ content: [{ type: 'text', text: '[]' }] }), {
+      status: 200,
+    });
+  }) as unknown as typeof fetch;
+  return { impl, seen };
+}
+
+const input = (docId = 'd1'): NotesComposeInput => ({
+  docId,
+  meetingId: 'm-1',
+  tick: {
+    tick: 1,
+    reason: 'pause',
+    turns: [{ turn: 1, text: 'the boardwalk needs a survey', speaker: 'Maya Okonkwo' }],
+  },
+  outline: [],
+});
+
+function composerFor(method: NotesMethod | ((docId: string) => NotesMethod), h = harness()) {
+  const composer = createNotesMethodComposer({
+    methodFor: typeof method === 'function' ? method : () => method,
+    apiKey: 'k-test',
+    composerOpts: { apiKey: 'k-test', fetchImpl: h.impl },
+    ledgerFetch: h.impl,
+  });
+  if (!composer) throw new Error('no composer built');
+  return { composer, seen: h.seen };
+}
+
+/** The calls that were the note-taker writing, not the ledger enumerating. */
+const composes = (seen: Seen[]): Seen[] => seen.filter((s) => s.tool !== 'record_points');
+const extracts = (seen: Seen[]): Seen[] => seen.filter((s) => s.tool === 'record_points');
+
+describe('the original runs no extract', () => {
+  test('one call, and it is the compose', async () => {
+    const { composer, seen } = composerFor('original');
+    await composer.compose(input());
+    expect(extracts(seen)).toHaveLength(0);
+    expect(composes(seen)).toHaveLength(1);
+  });
+
+  test('it composes on Haiku', async () => {
+    const { composer, seen } = composerFor('original');
+    await composer.compose(input());
+    expect(composes(seen)[0]?.model).toContain('haiku');
+  });
+
+  test('the compose carries no checklist', async () => {
+    const { composer, seen } = composerFor('original');
+    await composer.compose(input());
+    expect(composes(seen)[0]?.user).not.toContain('A FIRST PASS ALREADY READ');
+  });
+});
+
+describe('a ledger method extracts first, then composes against the list', () => {
+  test.each([['ledger-haiku'], ['ledger-opus']] as const)(
+    '%s runs both calls, extract before compose',
+    async (method) => {
+      const { composer, seen } = composerFor(method);
+      await composer.compose(input());
+      expect(extracts(seen)).toHaveLength(1);
+      expect(composes(seen)).toHaveLength(1);
+      // ON THE CRITICAL PATH: the extract is call one, so this tick composes
+      // against THIS tick's points rather than the previous tick's.
+      expect(seen[0]?.tool).toBe('record_points');
+    },
+  );
+
+  test('the extracted points reach the compose prompt', async () => {
+    const { composer, seen } = composerFor('ledger-haiku');
+    await composer.compose(input());
+    expect(composes(seen)[0]?.user).toContain('Maya (A): survey the boardwalk');
+  });
+
+  test('the extract runs on Haiku even when Opus composes', async () => {
+    const { composer, seen } = composerFor('ledger-opus');
+    await composer.compose(input());
+    // A ledger that paid the big model for its own bookkeeping would be a
+    // bigger bill rather than a better note-taker.
+    expect(extracts(seen)[0]?.model).toContain('haiku');
+  });
+});
+
+describe('which model writes the notes', () => {
+  test('ledger-haiku writes on Haiku', async () => {
+    const { composer, seen } = composerFor('ledger-haiku');
+    await composer.compose(input());
+    expect(composes(seen)[0]?.model).toContain('haiku');
+  });
+
+  test('ledger-opus writes on Opus', async () => {
+    const { composer, seen } = composerFor('ledger-opus');
+    await composer.compose(input());
+    expect(composes(seen)[0]?.model).toBe('claude-opus-5');
+  });
+});
+
+describe('the method is read per tick, not per session', () => {
+  test('a change between ticks changes what the next tick does', async () => {
+    let method: NotesMethod = 'original';
+    const { composer, seen } = composerFor(() => method);
+    await composer.compose(input());
+    method = 'ledger-opus';
+    await composer.compose(input());
+    // The first tick is one call on Haiku; the second is an extract plus a
+    // compose on Opus. Nothing was rewired in between.
+    expect(extracts(seen)).toHaveLength(1);
+    expect(composes(seen).map((c) => c.model)).toEqual([
+      expect.stringContaining('haiku'),
+      'claude-opus-5',
+    ]);
+  });
+
+  test('switching back to the original stops the extract', async () => {
+    let method: NotesMethod = 'ledger-opus';
+    const { composer, seen } = composerFor(() => method);
+    await composer.compose(input());
+    method = 'original';
+    await composer.compose(input());
+    expect(extracts(seen)).toHaveLength(1);
+  });
+});
+
+describe('the doc decides, not the meeting', () => {
+  test('two docs composing on one composer get their own methods', async () => {
+    const { composer, seen } = composerFor((docId) =>
+      docId === 'd-ledger' ? 'ledger-opus' : 'original',
+    );
+    await composer.compose(input('d-plain'));
+    await composer.compose(input('d-ledger'));
+    expect(extracts(seen)).toHaveLength(1);
+    expect(composes(seen).map((c) => c.model)).toEqual([
+      expect.stringContaining('haiku'),
+      'claude-opus-5',
+    ]);
+  });
+});
+
+describe('an unreadable preference is the default, not a failed tick', () => {
+  test('a store that throws still composes, on the original', async () => {
+    const errors: string[] = [];
+    const h = harness();
+    const composer = createNotesMethodComposer({
+      methodFor: () => {
+        throw new Error('preference file is a directory');
+      },
+      apiKey: 'k-test',
+      composerOpts: { apiKey: 'k-test', fetchImpl: h.impl },
+      ledgerFetch: h.impl,
+      onError: (m) => errors.push(m),
+    });
+    if (!composer) throw new Error('no composer built');
+    await expect(composer.compose(input())).resolves.toEqual([]);
+    expect(composes(h.seen)).toHaveLength(1);
+    expect(extracts(h.seen)).toHaveLength(0);
+    expect(errors.join('\n')).toContain('notes method unreadable');
+  });
+});
+
+describe('no key is the whole feature off, as it always was', () => {
+  test('null, so the caller keeps its "notes stay off" path', () => {
+    expect(
+      createNotesMethodComposer({
+        methodFor: () => 'original',
+        composerOpts: { apiKey: null },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('a ledger with no key composes as the original', () => {
+  test('the extract is skipped rather than called without a key', async () => {
+    const h = harness();
+    const composer = createNotesMethodComposer({
+      methodFor: () => 'ledger-opus',
+      // The compose has a key of its own; the ledger is given none.
+      apiKey: null,
+      composerOpts: { apiKey: 'k-test', fetchImpl: h.impl },
+      ledgerFetch: h.impl,
+    });
+    if (!composer) throw new Error('no composer built');
+    await composer.compose(input());
+    expect(extracts(h.seen)).toHaveLength(0);
+    // Still the method's model: it is the ledger that could not run, not the
+    // choice that was ignored.
+    expect(composes(h.seen)[0]?.model).toBe('claude-opus-5');
+  });
+});
+
+describe('an extract that returns nothing composes exactly as the original would', () => {
+  test('no points is no checklist in the prompt', async () => {
+    const { composer, seen } = composerFor('ledger-haiku', harness([]));
+    await composer.compose(input());
+    expect(composes(seen)[0]?.user).not.toContain('A FIRST PASS ALREADY READ');
+  });
+});
