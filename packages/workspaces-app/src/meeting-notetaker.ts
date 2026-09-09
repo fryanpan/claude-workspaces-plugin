@@ -27,8 +27,8 @@
  */
 
 import {
-  NOTES_METHODS,
   type NotesMethod,
+  OFFERED_NOTES_METHODS,
   notesMethodInfo,
   parseNotesMethod,
 } from '@claude-workspaces/core';
@@ -52,6 +52,15 @@ export interface NotetakerFoldOpts {
    *  what the server does with a repeat is the server's rule, not the
    *  sheet's. */
   onPick(method: NotesMethod): void;
+  /**
+   * The rows to offer, defaulting to the ones that ship.
+   *
+   * A parameter rather than a straight read of the constant so the tests can
+   * drive the fold with every method in the vocabulary: the surface has to
+   * stay proven while the shipping list is short, or the day a method is
+   * added would be the first day anybody found out the rows still render.
+   */
+  offered?: readonly NotesMethod[];
 }
 
 /** The fold, ready to append to the chooser. */
@@ -84,7 +93,7 @@ export function buildNotetakerFold(opts: NotetakerFoldOpts): HTMLElement {
 
   const body = document.createElement('div');
   body.className = 'meeting-adv-body';
-  for (const id of NOTES_METHODS) {
+  for (const id of opts.offered ?? OFFERED_NOTES_METHODS) {
     const info = notesMethodInfo(id);
     const current = id === opts.method;
     const label = document.createElement('label');
@@ -135,10 +144,17 @@ export interface NotetakerFoldState {
 export function appendNotetakerFold(
   pop: HTMLElement,
   state: NotetakerFoldState,
-  deps: { renderPop(): void; onPick(method: NotesMethod): void },
+  deps: { renderPop(): void; onPick(method: NotesMethod): void; offered?: readonly NotesMethod[] },
 ): void {
+  // A chooser with one row is a control that does nothing, so the fold is not
+  // drawn at all while only one note-taker is offered. Everything else —
+  // the route, the socket frame, the composer, the trace line — still works,
+  // which is what lets a held method be measured before it is offered.
+  const offered = deps.offered ?? OFFERED_NOTES_METHODS;
+  if (offered.length < 2) return;
   pop.append(
     buildNotetakerFold({
+      offered,
       method: state.chooseMethod,
       open: state.methodOpen,
       ...(state.methodSince ? { since: state.methodSince } : {}),

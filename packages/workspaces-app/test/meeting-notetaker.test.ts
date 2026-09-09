@@ -6,7 +6,12 @@
  * default with the current note-taker on the head line, three rows carrying
  * the price, "since" only on the row that is on.
  */
-import { DEFAULT_NOTES_METHOD, NOTES_METHODS, notesMethodInfo } from '@claude-workspaces/core';
+import {
+  DEFAULT_NOTES_METHOD,
+  NOTES_METHODS,
+  OFFERED_NOTES_METHODS,
+  notesMethodInfo,
+} from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { appendNotetakerFold, buildNotetakerFold, clockLabel } from '../src/meeting-notetaker.ts';
 
@@ -20,6 +25,8 @@ function mount(opts: Parameters<typeof buildNotetakerFold>[0]): HTMLElement {
   document.body.append(el);
   return el;
 }
+
+const ALL = { offered: NOTES_METHODS };
 
 const noop = {
   onToggleOpen: () => {},
@@ -50,7 +57,7 @@ describe('the fold when it is shut', () => {
 
 describe('the fold when it is open', () => {
   it('offers every note-taker, each with its price, and marks the one that is on', () => {
-    const el = mount({ method: 'ledger-haiku', open: true, ...noop });
+    const el = mount({ method: 'ledger-haiku', open: true, ...ALL, ...noop });
     const rows = [...el.querySelectorAll('.meeting-choice')];
     expect(rows).toHaveLength(NOTES_METHODS.length);
     for (const [i, id] of NOTES_METHODS.entries()) {
@@ -68,7 +75,7 @@ describe('the fold when it is open', () => {
   });
 
   it('hangs "since" on the row that is on, and on no other', () => {
-    const el = mount({ method: 'ledger-opus', open: true, since: '10:38', ...noop });
+    const el = mount({ method: 'ledger-opus', open: true, since: '10:38', ...ALL, ...noop });
     const withSince = [...el.querySelectorAll('.meeting-choice-detail')].filter((d) =>
       d.textContent?.includes('since 10:38'),
     );
@@ -77,7 +84,7 @@ describe('the fold when it is open', () => {
   });
 
   it('MUTATION CONTROL: with nothing to date, no row claims a time', () => {
-    const el = mount({ method: 'ledger-opus', open: true, ...noop });
+    const el = mount({ method: 'ledger-opus', open: true, ...ALL, ...noop });
     for (const d of el.querySelectorAll('.meeting-choice-detail')) {
       expect(d.textContent).not.toContain('since');
     }
@@ -85,7 +92,13 @@ describe('the fold when it is open', () => {
 
   it('reports the row that was picked', () => {
     const onPick = vi.fn();
-    const el = mount({ method: 'original', open: true, onToggleOpen: () => {}, onPick });
+    const el = mount({
+      method: 'original',
+      open: true,
+      offered: NOTES_METHODS,
+      onToggleOpen: () => {},
+      onPick,
+    });
     const rows = el.querySelectorAll<HTMLLabelElement>('.meeting-choice');
     rows[2]?.click();
     expect(onPick).toHaveBeenCalledWith(NOTES_METHODS[2]);
@@ -99,7 +112,7 @@ describe('the fold on the sheet', () => {
     const state = { chooseMethod: DEFAULT_NOTES_METHOD, methodOpen: false, methodSince: '' };
     const renderPop = vi.fn();
     const onPick = vi.fn();
-    appendNotetakerFold(pop, state, { renderPop, onPick });
+    appendNotetakerFold(pop, state, { renderPop, onPick, offered: NOTES_METHODS });
     pop.querySelector<HTMLButtonElement>('.meeting-adv-head')?.click();
     expect(state.methodOpen).toBe(true);
     expect(renderPop).toHaveBeenCalledTimes(1);
@@ -107,7 +120,7 @@ describe('the fold on the sheet', () => {
     // Redrawn open, a pick goes out and the sheet is asked to redraw again —
     // which is what puts the row's tick where the person tapped.
     pop.replaceChildren();
-    appendNotetakerFold(pop, state, { renderPop, onPick });
+    appendNotetakerFold(pop, state, { renderPop, onPick, offered: NOTES_METHODS });
     pop.querySelectorAll<HTMLLabelElement>('.meeting-choice')[1]?.click();
     expect(onPick).toHaveBeenCalledWith(NOTES_METHODS[1]);
     expect(renderPop).toHaveBeenCalledTimes(2);
@@ -118,5 +131,39 @@ describe('the clock the trace line reads as', () => {
   it('is zero-padded local time', () => {
     expect(clockLabel(new Date(2026, 8, 9, 9, 5).getTime())).toBe('09:05');
     expect(clockLabel(new Date(2026, 8, 9, 22, 40).getTime())).toBe('22:40');
+  });
+});
+
+describe('what the sheet actually offers today', () => {
+  it('draws no fold at all while only one note-taker is offered', () => {
+    // A chooser with one row is a control that does nothing. The rest of the
+    // machinery — the route, the socket frame, the composer — is untouched
+    // by this, which is what lets a held method be measured before it is
+    // offered.
+    const pop = document.createElement('div');
+    document.body.append(pop);
+    appendNotetakerFold(
+      pop,
+      { chooseMethod: DEFAULT_NOTES_METHOD, methodOpen: false, methodSince: '' },
+      { renderPop: () => {}, onPick: () => {} },
+    );
+    expect(OFFERED_NOTES_METHODS).toHaveLength(1);
+    expect(pop.querySelector('.meeting-notetaker')).toBeNull();
+  });
+
+  it('MUTATION CONTROL: given two, it draws the fold and both rows', () => {
+    // The same call with a longer offer list. Without this the assertion
+    // above would pass just as well against a fold that never renders.
+    const el = mount({
+      method: 'original',
+      open: true,
+      offered: ['original', 'ledger-haiku'],
+      ...noop,
+    });
+    expect(el.querySelectorAll('.meeting-choice')).toHaveLength(2);
+  });
+
+  it('every offered method is one the vocabulary has', () => {
+    for (const id of OFFERED_NOTES_METHODS) expect(NOTES_METHODS).toContain(id);
   });
 });

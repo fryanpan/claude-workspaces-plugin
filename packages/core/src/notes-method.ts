@@ -38,6 +38,30 @@ export type NotesMethod = (typeof NOTES_METHODS)[number];
  */
 export const DEFAULT_NOTES_METHOD: NotesMethod = 'original';
 
+/**
+ * The methods the CHOOSER OFFERS, which is deliberately not every method that
+ * works.
+ *
+ * A method reaches this list when the eval has measured it over the AMI
+ * corpus, behaviour judges on, twice, and it held every bar the original
+ * holds — the shipping bar the owner set. Everything else here is built,
+ * tested, reachable over the API and the socket, and simply not offered:
+ * holding an unmeasured note-taker out of a person's list costs nothing,
+ * while offering one and finding out later that it drops speakers costs the
+ * notes of whoever picked it.
+ *
+ * TODAY THAT IS THE ORIGINAL ALONE, and the reason is a measurement that
+ * could not be finished rather than a method that failed. The eval's key
+ * reached its monthly usage limit on 2026-09-09 with one complete run of the
+ * original and none of either ledger method on the shipped prompt; it regains
+ * access on 2026-10-01. Adding the two ledger ids back is this one line, once
+ * two clean runs of each exist.
+ *
+ * The FOLD HIDES ITSELF when this holds fewer than two methods, because a
+ * chooser with one row is a control that does nothing.
+ */
+export const OFFERED_NOTES_METHODS: readonly NotesMethod[] = ['original'];
+
 /** One row of the chooser: the id, what it is called, and what it costs. */
 export interface NotesMethodInfo {
   id: NotesMethod;
