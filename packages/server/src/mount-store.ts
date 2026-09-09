@@ -119,12 +119,27 @@ export class MountStore {
     const rel = relative(checkoutRoot, abs).split(sep).join('/');
     if (rel.startsWith('../')) return null;
     const canonical = this.repos.repoInfo(identity.repoKey);
+    if (canonical) this.foldRetiredKeys(canonical);
     return {
       repoKey: canonical?.repoKey ?? identity.repoKey,
       mainRoot: canonical?.mainRoot ?? identity.mainRoot,
       checkoutRoot,
       relPath: rel,
     };
+  }
+
+  /**
+   * Fold anything still filed under a spelling this repo has retired.
+   *
+   * A renamed remote gives a repo a new key; `repoInfo` finds it under either,
+   * but the mount table is keyed by the string itself. Without this the next
+   * reconcile reads an EMPTY project, mints a second address for every file
+   * in it, and every link written before the rename stops resolving. Done
+   * here, on the path everything else enters through, rather than as a
+   * migration somebody has to remember to run.
+   */
+  private foldRetiredKeys(info: { repoKey: string; aliasKeys: string[] }): void {
+    for (const retired of info.aliasKeys) this.registry.rekeyProject(retired, info.repoKey);
   }
 
   /**

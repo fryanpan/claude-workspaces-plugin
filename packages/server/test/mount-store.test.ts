@@ -340,4 +340,33 @@ describe('MountStore', () => {
       expect(fresh?.fileId).not.toBe(beyond);
     });
   });
+  describe('a repo that re-keys', () => {
+    /**
+     * A renamed remote gives the repo a new key. The repo registry adopts it
+     * and keeps the old spelling as an alias — but the mount table is keyed
+     * by the string, so without a fold every mount and every address stays
+     * filed under a key nobody looks up again: an empty project, a second
+     * address minted for every file, and every link written before the rename
+     * pointing at nothing.
+     */
+    it('carries its mounts and every address across the rename', () => {
+      mount(mocks());
+      const before = store.locate(repo)?.repoKey ?? '';
+      const id = idOf('docs/mocks/home.png');
+
+      git(repo, 'remote', 'set-url', 'origin', 'git@github.example:example/widgets-renamed.git');
+      // Noting the checkout is what makes the repo registry adopt the new key.
+      store.mount(mocks());
+      const after = store.locate(repo)?.repoKey ?? '';
+      expect(after).not.toBe(before);
+
+      // One mount, one file, and the SAME address as before the rename.
+      const listing = store.reconcile(after, true);
+      expect(listing.files.map((f) => f.relPath)).toEqual(['docs/mocks/home.png']);
+      expect(listing.files[0]?.fileId).toBe(id);
+      expect(store.resolveFile(id)?.file.relPath).toBe('docs/mocks/home.png');
+      // The old spelling is not a second project sitting beside the new one.
+      expect(store.registry.listProjects().map((p) => p.repoKey)).toEqual([after]);
+    });
+  });
 });

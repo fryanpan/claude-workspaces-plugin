@@ -180,4 +180,35 @@ describe('MountRegistry', () => {
       expect(new MountRegistry(dir).privacyOf(REPO)).toBe('local-only');
     });
   });
+  describe('re-filing a project under a new repo key', () => {
+    it('keeps every fileId and answers at the old spelling too', () => {
+      const NEW = 'git:github.example/widgets-renamed';
+      const { mount } = registry.mount(REPO, 'docs/mocks');
+      const key = makeFileKey(REPO, 'docs/mocks/home.png');
+      const id = registry.claim(key, seen(mount.mountId, 15, 'abc')).fileId;
+
+      expect(registry.rekeyProject(REPO, NEW)).toBe(true);
+
+      expect(registry.listProjects().map((p) => p.repoKey)).toEqual([NEW]);
+      expect(registry.liveMounts(NEW).map((m) => m.mountId)).toEqual([mount.mountId]);
+      // One address, reachable by either spelling.
+      expect(registry.fileIdFor(makeFileKey(NEW, 'docs/mocks/home.png'))).toBe(id);
+      expect(registry.fileIdFor(key)).toBe(id);
+      expect(registry.keyOf(id)).toBe(makeFileKey(NEW, 'docs/mocks/home.png'));
+    });
+
+    it('leaves a key whose new spelling another file already holds', () => {
+      const NEW = 'git:github.example/widgets-renamed';
+      const { mount } = registry.mount(REPO, 'docs/mocks');
+      const old = registry.claim(makeFileKey(REPO, 'docs/mocks/home.png'), seen(mount.mountId, 15));
+      const held = registry.claim(makeFileKey(NEW, 'docs/mocks/home.png'), seen(mount.mountId, 22));
+
+      registry.rekeyProject(REPO, NEW);
+
+      // Repointing an address is the one thing this table never does, and a
+      // re-key is not a reason to start.
+      expect(registry.fileIdFor(makeFileKey(NEW, 'docs/mocks/home.png'))).toBe(held.fileId);
+      expect(registry.fileIdFor(makeFileKey(REPO, 'docs/mocks/home.png'))).toBe(old.fileId);
+    });
+  });
 });

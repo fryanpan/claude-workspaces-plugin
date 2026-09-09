@@ -135,6 +135,68 @@ export class MountRegistry {
     return record;
   }
 
+  /**
+   * Re-file everything under `oldKey` as `newKey` — a repo that re-keyed.
+   *
+   * The mirror of `RepoRegistry.adoptRepoKey`, and it exists for the reason
+   * that one gives: without it the REPO is findable under its new spelling
+   * while every mount and every file address inside it is not, so the next
+   * reconcile sees an empty project, mints a second address for every file,
+   * and the links written before the rename stop opening anything.
+   *
+   * Nothing is dropped and no fileId moves. A project row is renamed (or, if
+   * the repo already has a row under the new key, its mounts are folded in by
+   * relative path, first row winning). Each file key is re-spelled and the old
+   * spelling is aliased forward, so an address handed out under the old key
+   * still resolves. A key whose new spelling is already held by a DIFFERENT
+   * file is left where it is: repointing an address is the one thing this
+   * table never does, and a re-key is not a reason to start.
+   */
+  rekeyProject(oldKey: string, newKey: string): boolean {
+    if (oldKey === newKey) return false;
+    const from = this.projectFor(oldKey);
+    const oldPrefix = `${oldKey}${FILE_KEY_SEP}`;
+    const hasKeys = Object.keys(this.data.fileKeys).some((k) => k.startsWith(oldPrefix));
+    if (!from && !hasKeys) return false;
+    if (from) {
+      const into = this.projectFor(newKey);
+      if (!into) {
+        from.repoKey = newKey;
+      } else {
+        for (const mount of from.mounts) {
+          if (!into.mounts.some((m) => m.relPath === mount.relPath)) into.mounts.push(mount);
+        }
+        this.data.projects = this.data.projects.filter((p) => p !== from);
+      }
+    }
+    for (const key of Object.keys(this.data.fileKeys)) {
+      if (!key.startsWith(oldPrefix)) continue;
+      const parsed = parseFileKey(key);
+      const entry = this.data.fileKeys[key];
+      if (!parsed || !entry) continue;
+      const moved = makeFileKey(newKey, parsed.relPath);
+      const held = this.data.fileKeys[moved];
+      if (held && held.fileId !== entry.fileId) {
+        console.error(
+          `[mount-registry] ${key} cannot re-key: ${moved} already answers as ${held.fileId}`,
+        );
+        continue;
+      }
+      if (!held) this.data.fileKeys[moved] = entry;
+      delete this.data.fileKeys[key];
+      this.data.fileKeyAliases[key] = moved;
+    }
+    // An alias whose TARGET was re-spelled has to follow it, or the chain
+    // ends at a key that no longer holds anything.
+    for (const [from_, to] of Object.entries(this.data.fileKeyAliases)) {
+      if (!to.startsWith(oldPrefix)) continue;
+      const parsed = parseFileKey(to);
+      if (parsed) this.data.fileKeyAliases[from_] = makeFileKey(newKey, parsed.relPath);
+    }
+    this.persist();
+    return true;
+  }
+
   listProjects(): ProjectRecord[] {
     return this.snapshot().projects;
   }

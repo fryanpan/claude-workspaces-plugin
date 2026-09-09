@@ -474,9 +474,13 @@ export class RepoRegistry {
    * by repoKey and resolves them through this, so a repo that re-keys (a
    * renamed remote) carries its mounts across on the alias.
    */
-  repoInfo(repoKey: string): { repoKey: string; mainRoot: string } | undefined {
+  repoInfo(
+    repoKey: string,
+  ): { repoKey: string; mainRoot: string; aliasKeys: string[] } | undefined {
     const record = this.repoFor(repoKey);
-    return record ? { repoKey: record.repoKey, mainRoot: record.mainRoot } : undefined;
+    return record
+      ? { repoKey: record.repoKey, mainRoot: record.mainRoot, aliasKeys: [...record.aliasKeys] }
+      : undefined;
   }
 
   /** Every repo the registry knows, newest checkout first inside each. */
