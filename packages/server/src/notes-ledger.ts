@@ -278,31 +278,40 @@ export const LEDGER_FLAT_RUN_ANCHOR = [
  * because the detail is one layer DOWN, and the exploration measured that
  * pairing (`nested-ledger`) as the lowest lost-idea rate of the sweep. The
  * twenty-word cap is unchanged and still counted per bullet.
+ *
+ * THE LEAD BULLETS CARRY NO WORD CEILING OF THEIR OWN, and that is a measured
+ * decision rather than a looser rule. With one, the writer met it by cutting
+ * the speaker tag off the front of a lead bullet, and a single untagged
+ * bullet survives every later tick — so one dropped tag cost the whole
+ * "decisions and questions keep a speaker" column, which the original holds
+ * at 100%.
  */
 export const LEDGER_NESTED_RULE = [
   '- TWO LAYERS, ALWAYS. The top layer is what a person reads at a glance:',
-  '  short LEAD bullets, at most 12 words each, one per point the room',
-  '  worked on. Under each lead bullet sit its SUB-BULLETS, indented two',
+  '  short LEAD bullets, one per point the room worked on, each as short as',
+  '  the point can be said in. Under each lead bullet sit its SUB-BULLETS, indented two',
   '  spaces, one per proposition the speech carried about that point — an',
   '  option, a number, an objection, a reason, a decision, who said it.',
   '  Like this:',
   '      - Remote has to survive the couch',
   '        - [@Dana](speaker:B) says people lose it between the cushions weekly',
-  '        - Option: a locator beep triggered by a whistle',
+  '        - [@Rowan](speaker:C) offers a locator beep triggered by a whistle',
   '        - Cost of the beeper is not known yet (unconfirmed)',
   '- THE SPEAKER TAG RIDES WHICHEVER LAYER THE POINT IS ON, in the same',
-  '  `[@Name](speaker:LABEL)` form as everywhere else. A decision or an open',
-  '  question keeps its tag whether it is a lead bullet or a sub-bullet — who',
-  '  decided, and who is asking, is part of what those notes say, and being',
-  '  the short glance layer buys a lead bullet no exemption from it.',
+  '  `[@Name](speaker:LABEL)` form as everywhere else. A decision, an open',
+  '  question, a doubt and a claim all keep their tag whether they are a lead',
+  '  bullet or a sub-bullet — who decided, who is asking and who is unsure is',
+  '  part of what those notes say, and being the short glance layer buys a',
+  '  lead bullet no exemption from it. Only a note that is the ROOM rather',
+  '  than anybody in it goes untagged, like the last line above.',
   '- SO NOTHING IS EVER DROPPED FOR LENGTH. The glance layer stays short',
   '  because the detail is one layer DOWN, not because it was cut. If a',
   '  proposition does not fit in the lead bullet, it becomes a sub-bullet;',
   '  it never becomes nothing.',
   '- ONE POINT PER BULLET, AT MOST 20 WORDS — count them, lead bullets and',
   '  sub-bullets alike. A longer thought is two bullets. The speaker tag',
-  "  does not count towards the twenty, nor towards a lead bullet's twelve:",
-  '  dropping a tag to fit a limit is never the right way to make room.',
+  '  does not count towards the twenty, and no lead bullet is ever shortened',
+  '  by dropping one: the tag is not packaging, it is who said the thing.',
 ].join('\n');
 
 /**

@@ -229,14 +229,14 @@ describe('the nested rule keeps the speaker where the flat one had it', () => {
     expect(nested).toContain('](speaker:B)');
   });
 
-  test('a lead bullet is told the tag does not count towards its twelve', () => {
-    expect(nested).toContain("nor towards a lead bullet's twelve");
+  test('no lead bullet may be shortened by dropping a tag', () => {
+    expect(nested).toContain('no lead bullet is ever shortened');
   });
 
   test('MUTATION CONTROL: the instructions it replaced said neither', () => {
     // Same source, no swap. If these passed either way the two above would
     // be reading the shipped prompt rather than the rule this module adds.
     expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain('](speaker:B)');
-    expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain("nor towards a lead bullet's twelve");
+    expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain('no lead bullet is ever shortened');
   });
 });
