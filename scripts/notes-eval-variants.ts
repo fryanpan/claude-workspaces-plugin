@@ -353,6 +353,65 @@ function ledgerHooks(ctx: VariantContext): MeetingHooks {
 }
 
 /**
+ * Variant D: the same ledger, off the critical path.
+ *
+ * `ledgerHooks` awaits the extract before the compose starts, so every tick
+ * pays a Haiku round trip before the note-taker begins writing. This one
+ * starts the extract for THIS tick's speech and does not wait: the compose
+ * runs on the points extracted from the PREVIOUS tick, which finished while
+ * the room was still talking.
+ *
+ * WHAT IT TRADES. A tick's own points reach the notes one tick late, so a
+ * point raised and never mentioned again is written on the following update
+ * rather than this one. In exchange the extract costs no latency at all. The
+ * eval prints compose-to-written median beside the lost-idea rate, which is
+ * where the two halves of that trade show up.
+ *
+ * THE LAST TICK'S EXTRACT IS NEVER READ, because there is no tick after it to
+ * read it. Its points are the ones the meeting's final update would have
+ * carried; whether that matters is what the rate says.
+ */
+function pipelinedLedgerHooks(ctx: VariantContext): MeetingHooks {
+  let carried: Array<{ text: string; age: number }> = [];
+  let inFlight: Promise<string[]> | null = null;
+  let offered: string[] = [];
+  return {
+    async before(_input, _tick, transcript) {
+      // Resolved long ago in the ordinary case: it was started one tick back
+      // and the compose in between took seconds. Awaiting it is how a slow
+      // extract still cannot be skipped, only overtaken.
+      const ready = inFlight ? await inFlight : [];
+      inFlight = extractPoints(ctx, transcript);
+      offered = ready;
+      const items = [...carried.map((c) => c.text), ...ready];
+      if (items.length === 0) return {};
+      return {
+        extraPrompt: [
+          'A FIRST PASS ALREADY READ THE SPEECH JUST BEFORE THIS ONE AND LISTED',
+          'WHAT IT PUT ON THE TABLE. The notes must end up carrying every line',
+          'below, in your own compressed words, under the heading it belongs',
+          'to. Work down the list: a line with no note is a dropped idea, and',
+          'dropping one is the single thing this note-taker is not allowed to',
+          'do. Skip a line only when the notes above already say it.',
+          ...items.map((p) => `- ${p}`),
+        ].join('\n'),
+      };
+    },
+    async after(notes) {
+      const next: Array<{ text: string; age: number }> = [];
+      for (const entry of [...carried, ...offered.map((text) => ({ text, age: 0 }))]) {
+        const keywords = contentWords(entry.text);
+        const done = ideaCarried({ turn: 0, text: entry.text, keywords }, notes);
+        if (done || entry.age >= 2) continue;
+        next.push({ text: entry.text, age: entry.age + 1 });
+      }
+      carried = next.slice(-MAX_CARRIED);
+      offered = [];
+    },
+  };
+}
+
+/**
  * `selfcheck`: the lost-idea question, asked live, every tick.
  *
  * The sentences this tick actually contained are checked against the notes by
@@ -509,6 +568,8 @@ export const VARIANTS: Record<string, Variant> = {
     instructions: swap(DEFAULT_NOTES_INSTRUCTIONS, COMPRESS_ANCHOR, ONE_NOTE_PER_IDEA),
     begin: passthrough,
   },
+  // Round 2. The ledger with its extract taken off the critical path.
+  'ledger-pipelined': { name: 'ledger-pipelined', begin: pipelinedLedgerHooks },
   // Round 2. The best method on the best model, to price the ceiling.
   'opus-nested-ledger': {
     name: 'opus-nested-ledger',
