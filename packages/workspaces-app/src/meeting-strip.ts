@@ -120,6 +120,7 @@ import {
   systemAudioOffered,
 } from './meeting-source.ts';
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
+import type { TranscriptReader } from './meeting-transcript-panel.ts';
 import type { DocSpeakers } from './speaker-voices.ts';
 
 /** How often the elapsed clock is redrawn. Twice a second: a second-resolution
@@ -288,6 +289,13 @@ export interface MeetingStripOpts {
    * the doc has never held one. Absent, a reloaded chooser starts bare.
    */
   loadSpeakers?: () => Promise<DocSpeakers | null>;
+  /**
+   * The last meeting's words, for the panel's Transcript fold. Read at the
+   * tap rather than at mount, so a meeting that has just ended is the one it
+   * shows — a bot meeting especially, which leaves nothing else behind on
+   * screen.
+   */
+  loadTranscript?: TranscriptReader;
   /**
    * Name a voice on a meeting whose audio socket is gone — the rename
    * channel once capture has stopped. Resolves true when the server recorded
@@ -697,6 +705,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     bot,
     advFor,
     cast,
+    ...(opts.loadTranscript ? { loadTranscript: opts.loadTranscript } : {}),
     speakerRow: (label) => menu.speakerRow(label),
     renderPop,
     onStartPressed,

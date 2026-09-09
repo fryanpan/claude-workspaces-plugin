@@ -302,6 +302,7 @@ function mount(
     engine?: 'assemblyai' | 'soniox';
     listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
     loadSpeakers?: () => Promise<DocSpeakers | null>;
+    loadTranscript?: () => Promise<{ lines: string[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
     botNamePrefill?: string;
@@ -1305,6 +1306,65 @@ describe('naming a voice after the meeting — the chooser keeps the cast', () =
     h.renameButtons()[1]?.click();
     await settle();
     expect(h.popNames()).toEqual(['Speaker A', 'Speaker B']);
+  });
+
+  it('offers the last meeting’s words behind a fold, fetched at the tap', async () => {
+    // THE OTHER RECORD. The notes are in the doc; what the meeting HEARD used
+    // to live only in the `-raw-transcript.md` beside the server's data dir,
+    // which is nowhere for anyone not on that machine — and a bot meeting
+    // leaves nothing else behind on screen at all.
+    let asked = 0;
+    const h = mount(undefined, {
+      loadTranscript: () => {
+        asked += 1;
+        return Promise.resolve({
+          lines: ['[09:12:04Z] Rowan Pike: So the Riverbend sync.', '[09:12:09Z] Ada Vale: Right.'],
+        });
+      },
+    });
+    await settle();
+    h.record().click();
+    const fold = document.querySelector('.meeting-pop-transcript') as HTMLDetailsElement;
+    expect(fold).toBeTruthy();
+    // READ AT THE TAP, not at mount: the meeting somebody wants the words of
+    // is usually the one that has just ended.
+    expect(asked).toBe(0);
+
+    fold.open = true;
+    fold.dispatchEvent(new Event('toggle'));
+    await settle();
+    expect(asked).toBe(1);
+    expect(
+      [...fold.querySelectorAll('.meeting-pop-transcript-line')].map((el) => el.textContent),
+    ).toEqual(['[09:12:04Z] Rowan Pike: So the Riverbend sync.', '[09:12:09Z] Ada Vale: Right.']);
+
+    // Folded shut and open again asks nothing more.
+    fold.open = false;
+    fold.dispatchEvent(new Event('toggle'));
+    fold.open = true;
+    fold.dispatchEvent(new Event('toggle'));
+    await settle();
+    expect(asked).toBe(1);
+  });
+
+  it('says so when the doc has never held a meeting, and offers nothing without the reader', async () => {
+    const empty = mount(undefined, { loadTranscript: () => Promise.resolve(null) });
+    await settle();
+    empty.record().click();
+    const fold = document.querySelector('.meeting-pop-transcript') as HTMLDetailsElement;
+    fold.open = true;
+    fold.dispatchEvent(new Event('toggle'));
+    await settle();
+    expect(fold.querySelector('.meeting-pop-transcript-body')?.textContent).toBe(
+      'No transcript yet.',
+    );
+
+    // CONTROL: a strip mounted without the reader grows no fold at all.
+    document.body.replaceChildren();
+    const bare = mount();
+    await settle();
+    bare.record().click();
+    expect(document.querySelector('.meeting-pop-transcript')).toBeNull();
   });
 
   it('a reloaded doc offers its last meeting’s cast, and renames it over HTTP', async () => {
