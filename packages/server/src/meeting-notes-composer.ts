@@ -144,6 +144,7 @@ export function buildNotesPrompt(
     );
   }
 
+  if (input.extraPrompt) parts.push(input.extraPrompt);
   parts.push(renderOutline(input));
   parts.push(
     `New transcript since the last update:\n${input.tick.turns
@@ -292,6 +293,18 @@ export interface HaikuNotesComposerOpts {
   /** Tests: the HTTP seam. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /**
+   * A model other than Haiku. `scripts/notes-eval.ts --variant sonnet|opus`
+   * is the only caller: the server always composes on `NOTES_MODEL`, and the
+   * question the variant asks is what the same prompt costs and keeps on a
+   * bigger model.
+   */
+  model?: string;
+  /** Raised with `model`: a thinking model spends part of the ceiling before
+   *  it writes an edit, and a truncated edit list is refused. */
+  maxTokens?: number;
+  /** `output_config.effort` for a thinking model. Absent, nothing is sent. */
+  effort?: string;
+  /**
    * The note-taking instructions for this tick — `createNotesPromptStore`'s
    * `read` in the server, which re-reads the operator's file every call.
    * Absent, the built-in default: a composer constructed without a data dir
@@ -313,6 +326,8 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
   const key = resolveKeyFrom(opts.apiKey, readKeychainPassword);
   if (!key) return null;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const model = opts.model ?? NOTES_MODEL;
+  const maxTokens = opts.maxTokens ?? MAX_TOKENS;
 
   return {
     name: 'haiku',
@@ -330,7 +345,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
       // times out is exactly the one whose prompt size matters, and a report
       // after the await would never reach the log. There is no first-token
       // number to give — this is a single non-streaming request.
-      input.measure?.({ promptChars: system.length + user.length, model: NOTES_MODEL });
+      input.measure?.({ promptChars: system.length + user.length, model });
       const ctl = new AbortController();
       const timeout = setTimeout(() => ctl.abort(), TIMEOUT_MS);
       try {
@@ -342,10 +357,11 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: NOTES_MODEL,
-            max_tokens: MAX_TOKENS,
+            model,
+            max_tokens: maxTokens,
             system,
             messages: [{ role: 'user', content: user }],
+            ...(opts.effort ? { output_config: { effort: opts.effort } } : {}),
           }),
           signal: ctl.signal,
         });

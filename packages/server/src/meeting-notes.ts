@@ -287,6 +287,18 @@ export interface NotesComposeInput {
    */
   missed?: readonly NotesTurn[];
   /**
+   * An extra block of instruction for THIS tick, rendered into the prompt just
+   * before the outline.
+   *
+   * It exists for `scripts/notes-eval.ts --variant`: the exploration of how to
+   * reach a 5% lost-idea rate needs to try a per-tick checklist, or a per-tick
+   * anchor label, against the same corpus and the same judge, and the only
+   * honest way to do that is to put the words where the real prompt puts them.
+   * Nothing in the server sets it — the live pipeline leaves it undefined and
+   * the prompt is byte-identical to what it was.
+   */
+  extraPrompt?: string;
+  /**
    * The block id of the heading THIS meeting's notes sit under, when the
    * session has opened one. Absent on the first tick of a meeting, and again
    * if somebody deletes the heading — both of which mean "open a section".

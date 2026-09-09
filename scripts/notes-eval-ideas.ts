@@ -107,6 +107,21 @@ interface ToolSpec {
   input_schema: { type: 'object'; properties: Record<string, unknown>; required: string[] };
 }
 
+/**
+ * The fetch these calls go through.
+ *
+ * `notes-eval.ts` swaps in its counting wrapper so the idea judge's spend
+ * lands in the run's own Spend table. It used to call the global directly,
+ * which meant a run reported what the NOTE-TAKER cost and silently omitted
+ * what MEASURING it cost — and the second number is most of the bill on a
+ * variant sweep, where the same judge is paid over and over.
+ */
+let judgeFetch: typeof fetch = globalThis.fetch;
+
+export function useIdeaJudgeFetch(impl: typeof fetch): void {
+  judgeFetch = impl;
+}
+
 async function callTool(
   key: string,
   system: string,
@@ -114,7 +129,7 @@ async function callTool(
   tool: ToolSpec,
   maxTokens: number,
 ): Promise<Record<string, unknown> | null> {
-  const res = await fetch(API_URL, {
+  const res = await judgeFetch(API_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
