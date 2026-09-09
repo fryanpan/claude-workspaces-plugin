@@ -1744,6 +1744,56 @@ describe('mountMarkupMargin — fit-to-fold keeps the composer reachable', () =>
     // anchor so the footer (composer + Answer) sits inside the fold.
     expect(Number.parseFloat(balloon.style.top)).toBe(232);
   });
+
+  it('reserves the band the new-content strips cover, so no card lies under one', async () => {
+    const { parent, surface, ydoc, chrome, scope } = mountRedlineWithChrome(
+      'Alpha.\n\nBravo.\n',
+      'Alpha.\n\nBravo.\n',
+    );
+    await tick();
+    const thread = openThreadAt(
+      ydoc,
+      surface.handle.editor,
+      () => surface.getSelectionRel(),
+      { from: 1, to: 6 },
+      'A comment anchored under the bottom strip.',
+    );
+    const span = parent.querySelector(`[data-thread-id="${thread.id}"]`) as HTMLElement;
+    vi.spyOn(span, 'getBoundingClientRect').mockReturnValue({
+      top: 600,
+      bottom: 610,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 10,
+      x: 0,
+      y: 600,
+      toJSON() {},
+    } as DOMRect);
+    Object.defineProperty(parent, 'clientHeight', { value: 800, configurable: true });
+
+    const margin = mountMarkupMargin({
+      editorEl: parent,
+      view: surface.handle.editor.view,
+      getDeletions: () => surface.getDeletions(),
+      threads: () => chrome.collectThreads(),
+      chrome,
+      // The bottom pill plus the seated dock cover the last 120px of the
+      // column; the top strip covers the first 40.
+      stripInsets: () => ({ top: 40, bottom: 120 }),
+      scope,
+    });
+    margin.relayout();
+
+    const balloon = parent.querySelector('.cw-balloon-comment') as HTMLElement;
+    Object.defineProperty(balloon, 'offsetHeight', { value: 560, configurable: true });
+    parent.dispatchEvent(new Event('scroll'));
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Without the reservation this card sits at 232 and its last 120px lie
+    // under the strip. The fold it fits inside now ends 120px higher.
+    expect(Number.parseFloat(balloon.style.top)).toBe(112);
+  });
 });
 
 /**

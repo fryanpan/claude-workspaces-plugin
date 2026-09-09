@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutBalloons } from '../src/redline/balloon-layout.ts';
+import { foldWithStrips, layoutBalloons } from '../src/redline/balloon-layout.ts';
 
 describe('layoutBalloons', () => {
   it('returns an empty array for an empty list', () => {
@@ -165,5 +165,58 @@ describe('layoutBalloons — fit-to-viewport shift-up', () => {
       { anchorY: 900, height: 100 },
     ];
     expect(layoutBalloons(items, 8)).toEqual([600, 1168]);
+  });
+});
+
+describe('layoutBalloons — the band the new-content strips reserve', () => {
+  // The strips and the seated dock are drawn over the column, so the caller
+  // pulls `bottom` up by what they cover and keeps the true fold in
+  // `visibleBottom`. No card may come to rest in that band.
+  const reserved = { top: 40, bottom: 700, visibleBottom: 800 };
+
+  it('lifts a card anchored in the reserved band clear of the strip', () => {
+    // At the anchor its bottom would be 760, under the strip that starts at
+    // 700; it lifts to 700 - 200.
+    expect(layoutBalloons([{ anchorY: 560, height: 200 }], 8, reserved)).toEqual([500]);
+  });
+
+  it('lifts a card anchored BELOW the reserved bottom but still on screen', () => {
+    // 760 is past the reserved bottom and inside the fold: the old rule read
+    // it as off-screen content and left it sitting under the strip.
+    expect(layoutBalloons([{ anchorY: 760, height: 100 }], 8, reserved)).toEqual([600]);
+  });
+
+  it('still leaves a card anchored past the true fold at its anchor', () => {
+    expect(layoutBalloons([{ anchorY: 900, height: 100 }], 8, reserved)).toEqual([900]);
+  });
+});
+
+describe('foldWithStrips', () => {
+  const m = { scrollTop: 1000, clientHeight: 800, gap: 8, minY: 0 };
+
+  it('pulls the fit-to-fold ceiling up by the bottom strip, keeping the true fold', () => {
+    const r = foldWithStrips({ ...m, band: { top: 0, bottom: 120 } });
+    expect(r.viewport.bottom).toBe(1672);
+    expect(r.viewport.visibleBottom).toBe(1792);
+  });
+
+  it('floors the anchors below the top strip, which the lift alone cannot do', () => {
+    // The lift never moves a card already above the viewport top, so the top
+    // band is reserved by raising the floor every anchor is clamped to.
+    const r = foldWithStrips({ ...m, band: { top: 60, bottom: 0 } });
+    expect(r.floorY).toBe(1060);
+    expect(
+      layoutBalloons([{ anchorY: Math.max(r.floorY, 1010), height: 100 }], 8, r.viewport),
+    ).toEqual([1060]);
+  });
+
+  it('keeps the toggle clearance when it is the lower bound', () => {
+    expect(foldWithStrips({ ...m, minY: 1200, band: { top: 10, bottom: 0 } }).floorY).toBe(1200);
+  });
+
+  it('reserves nothing at an empty band', () => {
+    const r = foldWithStrips({ ...m, band: { top: 0, bottom: 0 } });
+    expect(r.floorY).toBe(0);
+    expect(r.viewport.bottom).toBe(r.viewport.visibleBottom);
   });
 });

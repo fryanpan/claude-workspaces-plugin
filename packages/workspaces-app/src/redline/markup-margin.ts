@@ -6,10 +6,11 @@ import { api } from '../doc-path.ts';
 import { showToast } from '../doc/chrome-dom.ts';
 import { COMPOSER_MOUNTED_EVENT } from '../md-composer.ts';
 import type { MountScope } from '../mount-scope.ts';
+import type { NoteCard } from '../recent-note-cards.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
 import { MORPH_MS, isFoldingTap, sizeThreadSlots } from '../thread-morph.ts';
 import { createBalloonCards } from './balloon-cards.ts';
-import { layoutBalloons } from './balloon-layout.ts';
+import { foldWithStrips, layoutBalloons } from './balloon-layout.ts';
 import {
   type DeletionGroup,
   type RedlineDeletion,
@@ -92,6 +93,15 @@ export interface MarkupMarginOpts {
   getSuggestions?: () => suggestOps.SuggestionSummary[];
   /** Doc id for the suggestion accept/reject fetch calls. */
   docId?: string;
+  /** The note-provenance cards ("Notes agent added notes 30s ago"), built and
+   *  aged elsewhere (`recent-note-cards.ts`) and merely PLACED here, so the
+   *  column stacks them against the comment balloons instead of two layout
+   *  passes fighting over the same column. Their elements are owned by the
+   *  caller: this module never rebuilds one. */
+  getNoteCards?: () => NoteCard[];
+  /** The band at each end of the column the new-content strips cover, which
+   *  the card stack must stay clear of (`new-indicator.ts` measures it). */
+  stripInsets?: () => { top: number; bottom: number };
   scope: MountScope;
 }
 
@@ -145,6 +155,13 @@ interface RenderedCommentBalloon {
   el: HTMLElement;
 }
 
+interface RenderedNoteCard {
+  kind: 'note';
+  key: string;
+  anchor: Element;
+  el: HTMLElement;
+}
+
 interface RenderedSuggestionBalloon {
   kind: 'suggestion';
   key: string;
@@ -152,7 +169,11 @@ interface RenderedSuggestionBalloon {
   el: HTMLElement;
 }
 
-type RenderedBalloon = RenderedDelBalloon | RenderedCommentBalloon | RenderedSuggestionBalloon;
+type RenderedBalloon =
+  | RenderedDelBalloon
+  | RenderedCommentBalloon
+  | RenderedSuggestionBalloon
+  | RenderedNoteCard;
 
 export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
   const { editorEl, view, getDeletions, scope } = opts;
@@ -341,6 +362,7 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     delGroups: DeletionGroup[],
     openThreads: Thread[],
     suggestions: suggestOps.SuggestionSummary[],
+    notes: NoteCard[],
   ): void {
     // Expanded state is part of the render key for deletions and suggestions,
     // which still swap between two builders, so toggling rebuilds those cards.
@@ -359,7 +381,11 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     const suggestionKeys = suggestions.map(
       (s) => `suggest|${s.sid}|${s.kind}|${isExpanded(`s:${s.sid}`)}`,
     );
-    const keys = [...delKeys, ...commentKeys, ...suggestionKeys];
+    // A note card's key does not carry its age text: the card ages in place
+    // (a one-second crossfade every fifteen seconds), and rebuilding it on
+    // every step would destroy the very node that is fading.
+    const noteKeys = notes.map((n) => `note|${n.key}`);
+    const keys = [...delKeys, ...commentKeys, ...suggestionKeys, ...noteKeys];
     if (keys.length === rendered.length && keys.every((k, i) => k === rendered[i].key)) {
       // Nothing display-relevant changed — refresh the live refs (an anchor
       // position may have moved) without touching any DOM. Both kinds that
@@ -367,9 +393,13 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
       // does, and anything reading `r.thread` later would get old data.
       let di = 0;
       let ci = 0;
+      let ni = 0;
       for (const r of rendered) {
         if (r.kind === 'del') r.group = delGroups[di++];
         else if (r.kind === 'comment') r.thread = openThreads[ci++] ?? r.thread;
+        // A re-band rebuilds the tinted block, so the card's anchor node goes
+        // stale even when nothing about the card itself changed.
+        else if (r.kind === 'note') r.anchor = notes[ni++]?.anchor ?? r.anchor;
       }
       return;
     }
@@ -412,7 +442,12 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
       marginEl.appendChild(el);
       return { kind: 'suggestion', key: suggestionKeys[i], summary, el };
     });
-    rendered = [...nextDel, ...nextComments, ...nextSuggestions];
+    // Placed, never built: the element belongs to `recent-note-cards.ts`.
+    const nextNotes: RenderedNoteCard[] = notes.map((n, i) => {
+      marginEl.appendChild(n.el);
+      return { kind: 'note', key: noteKeys[i], anchor: n.anchor, el: n.el };
+    });
+    rendered = [...nextDel, ...nextComments, ...nextSuggestions, ...nextNotes];
     // A card's folding slots have no intrinsic height — measure them now the
     // balloons are in the document, BEFORE layoutBalloons reads `offsetHeight`
     // off the cards, or every comment balloon stacks as a header and a footer.
@@ -461,6 +496,8 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
         } else if (b.kind === 'comment') {
           const span = threadSpan(b.thread.id);
           if (span) anchorY = contentY(span.getBoundingClientRect().top, editorRect);
+        } else if (b.kind === 'note') {
+          anchorY = contentY(b.anchor.getBoundingClientRect().top, editorRect);
         } else {
           const span = suggestionSpan(b.summary.sid);
           if (span) anchorY = contentY(span.getBoundingClientRect().top, editorRect);
@@ -480,17 +517,28 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     // scrolling the document — the CSS height clamp bounds the card, this
     // bounds its position. clientHeight of 0 means no real layout (tests,
     // hidden pane): skip the bound rather than fit to a degenerate viewport.
-    const viewport =
+    // The new-content strips and the action dock are drawn OVER this column,
+    // so the fold the cards fit inside stops short of them at both ends: no
+    // card may come to rest under a strip at any scroll position (Bryan, on
+    // round 2 of the mock). `visibleBottom` keeps the true fold, so a card
+    // anchored inside the reserved band is lifted rather than read as
+    // off-screen content and left where it is.
+    const band = opts.stripInsets?.() ?? { top: 0, bottom: 0 };
+    const reserved =
       editorEl.clientHeight > 0
-        ? {
-            top: Math.max(editorEl.scrollTop, minY),
-            bottom: editorEl.scrollTop + editorEl.clientHeight - GAP,
-          }
-        : undefined;
+        ? foldWithStrips({
+            scrollTop: editorEl.scrollTop,
+            clientHeight: editorEl.clientHeight,
+            gap: GAP,
+            minY,
+            band,
+          })
+        : null;
+    const floorY = reserved?.floorY ?? minY;
     const ys = layoutBalloons(
-      items.map((it) => ({ anchorY: Math.max(minY, it.anchorY), height: it.height })),
+      items.map((it) => ({ anchorY: Math.max(floorY, it.anchorY), height: it.height })),
       GAP,
-      viewport,
+      reserved?.viewport,
     );
 
     // Size the overlay to the scrolled content so lines aren't clipped.
@@ -552,6 +600,7 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
       groupDeletions(getDeletions(), blockKeyForPos),
       eligibleThreads(),
       eligibleSuggestions(),
+      opts.getNoteCards?.() ?? [],
     );
     positionBalloons();
   }

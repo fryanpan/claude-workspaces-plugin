@@ -1,28 +1,29 @@
 import type { Thread } from '@claude-workspaces/core';
 import type { MountScope } from './mount-scope.ts';
-import { type ThreadGlyph, type ThreadKind, threadKind } from './thread-kind.ts';
+import {
+  type NewCount,
+  type NewDirection,
+  type NewIndicatorHandle,
+  type StripInsets,
+  mountNewIndicator,
+} from './new-indicator.ts';
+import { type ThreadKind, threadKind } from './thread-kind.ts';
 
 /**
- * Information scent for comments the reader cannot see.
+ * The measurement behind the new-content indicator: what has been written
+ * that the reader cannot see, and which way it lies.
  *
- * Two hints, one at the top of the comment column and one at the bottom, each
- * saying how many threads sit off-screen in that direction and what they are
- * — "4 comments & 1 question above" — and a chip in the top bar saying how
- * many questions are waiting on the reader anywhere in the doc. Tapping a
- * hint jumps to the nearest off-screen thread in that direction; tapping the
- * chip jumps to the first open question. Approved design: comments mock 3
- * (2026-09-01).
+ * One pass over the document's anchors feeds one pair of pills
+ * (`new-indicator.ts` draws them). A thread counts when it is an open
+ * question addressed to the reader, or when a reply landed on it since the
+ * reader last looked; a note block counts while it is still tinted — the
+ * tint (settle-wash.ts) IS "written since you last read here". Tapping a
+ * pill goes to the NEAREST of the two kinds in that direction, because the
+ * reader asked for the next thing, not the next thread.
  *
- * Above 1100px the hints live INSIDE the balloon margin, sticky to the
- * scroller's top and bottom edges, so they read as part of the column. At
- * phone widths the margin is gone and the hints float over the prose instead
- * — a second pair of elements, because the margin is `display: none` there
- * and nothing inside it can be shown. One render feeds both pairs.
- *
- * "New" rides along: a thread that arrived since the reader last looked
- * (`comment-seen.ts`) is counted on the hint in its direction, and once it has
- * sat in the viewport for `SEEN_DWELL_MS` it stops being new — on the hint, on
- * its glyph and on its highlight, which the caller repaints via `onSeen`.
+ * "New" wears off here too: once a thread has sat in the viewport for
+ * `SEEN_DWELL_MS` it stops being new — on the pill, on its glyph and on its
+ * highlight, which the caller repaints via `onSeen`.
  */
 
 export const SEEN_DWELL_MS = 1500;
@@ -43,6 +44,9 @@ export interface Tally {
   questions: number;
   /** How many of the above are new since the reader last looked. */
   fresh: number;
+  /** New threads that are NOT open questions — the pill's "N new" half, with
+   *  the questions counted once in their own word rather than twice. */
+  freshComments: number;
 }
 
 export interface OffscreenSplit {
@@ -56,11 +60,17 @@ export interface OffscreenSplit {
 }
 
 function emptyTally(): Tally {
-  return { comments: 0, questions: 0, fresh: 0 };
+  return { comments: 0, questions: 0, fresh: 0, freshComments: 0 };
 }
 
 export function tallyTotal(t: Tally): number {
   return t.comments + t.questions;
+}
+
+/** What one direction's pill says, from that direction's thread tally and
+ *  the number of freshly written note blocks lying that way. */
+export function pillCount(t: Tally, notes: number): NewCount {
+  return { questions: t.questions, fresh: t.freshComments + notes };
 }
 
 /**
@@ -93,62 +103,12 @@ export function splitOffscreen(
     }
     if (it.kind === 'question') target.questions += 1;
     else target.comments += 1;
-    if (it.isNew) target.fresh += 1;
+    if (it.isNew) {
+      target.fresh += 1;
+      if (it.kind !== 'question') target.freshComments += 1;
+    }
   }
   return { above, below, inView, nearestAbove, nearestBelow };
-}
-
-/**
- * The hint's words, as parts a renderer can show or hide by width: the full
- * sentence on a wide screen, icon + count only on a phone. Empty when there is
- * nothing in that direction.
- */
-export interface HintPart {
-  glyph: ThreadGlyph;
-  count: number;
-  /** The noun, for the wide rendering. */
-  word: string;
-  /** Carries the red dot: new comments are counted, not itemised. */
-  fresh: boolean;
-}
-
-export function hintParts(t: Tally): HintPart[] {
-  const parts: HintPart[] = [];
-  if (t.comments)
-    parts.push({
-      glyph: 'comment',
-      count: t.comments,
-      word: t.comments === 1 ? 'comment' : 'comments',
-      fresh: t.fresh > 0,
-    });
-  if (t.questions)
-    parts.push({
-      glyph: 'question',
-      count: t.questions,
-      word: t.questions === 1 ? 'question' : 'questions',
-      fresh: false,
-    });
-  return parts;
-}
-
-/** The full sentence, for the wide screen and for assistive tech. */
-export function hintSentence(t: Tally, dir: 'above' | 'below'): string {
-  const parts = hintParts(t).map((p) => `${p.count} ${p.word}`);
-  if (parts.length === 0) return '';
-  const fresh = t.fresh > 0 ? ` · ${t.fresh} new` : '';
-  return `${parts.join(' & ')} ${dir}${fresh}`;
-}
-
-/** The top-bar chip's words.
- *
- * "N waiting on you", not "N questions for you" (Bryan, 2026-09-04, on mock
- * round 4). The chip counts questions AND decisions under one glyph, so
- * naming one of the two kinds was both wrong and a kind-chip in the top bar —
- * the same marking the cards themselves dropped. What the reader needs from
- * it is the count and the fact that it is theirs. */
-export function chipSentence(questions: number): string {
-  if (questions === 0) return 'Nothing waiting on you';
-  return `${questions} waiting on you`;
 }
 
 export function threadHintItem(
@@ -159,20 +119,46 @@ export function threadHintItem(
   return { id: t.id, kind: threadKind(t), isNew, top: rect.top, bottom: rect.bottom };
 }
 
+/** A freshly written note block off screen: how far out, and which element. */
+interface NoteEdge {
+  el: HTMLElement;
+  top: number;
+  bottom: number;
+}
+
+interface NoteSplit {
+  above: number;
+  below: number;
+  nearestAbove: NoteEdge | null;
+  nearestBelow: NoteEdge | null;
+}
+
+/** The tinted note blocks each side of the viewport. Same edge rule the
+ *  threads follow: wholly out, or it is on screen. */
+export function splitNotes(edges: NoteEdge[], view: { top: number; bottom: number }): NoteSplit {
+  const out: NoteSplit = { above: 0, below: 0, nearestAbove: null, nearestBelow: null };
+  for (const e of edges) {
+    if (e.bottom < view.top) {
+      out.above += 1;
+      if (!out.nearestAbove || e.bottom > out.nearestAbove.bottom) out.nearestAbove = e;
+    } else if (e.top > view.bottom) {
+      out.below += 1;
+      if (!out.nearestBelow || e.top < out.nearestBelow.top) out.nearestBelow = e;
+    }
+  }
+  return out;
+}
+
 // --- the mount -------------------------------------------------------------
 
 export interface CommentHintsOpts {
   /** The doc's scroll container — the viewport the counts are against. */
   scroller: HTMLElement;
-  /** The balloon column; on a wide screen the hints line up over it. Null
-   *  when the surface has no margin (the hints then sit at the pane's edges
-   *  at every width). */
+  /** The balloon column; on a wide screen the pills line up over it. Null
+   *  when the surface has no margin. */
   marginEl: HTMLElement | null;
-  /** Where the hints attach — the editor pane (`position: relative`), which
-   *  does not scroll; the doc scrolls inside it. */
+  /** The editor pane (`position: relative`) the strips are hung in. */
   floatParent: HTMLElement;
-  /** The top-bar "N questions for you" chip, if the page has one. */
-  chipEl: HTMLElement | null;
   threads: () => Thread[];
   /** The thread's rendered highlight, or null when it has none. */
   spanFor: (id: string) => Element | null;
@@ -186,102 +172,52 @@ export interface CommentHintsOpts {
   markSeen: (t: Thread) => boolean;
   /** A thread stopped being new — repaint its glyph and highlight. */
   onSeen: (id: string) => void;
+  /** The strips changed how much of the column they cover: the card stack
+   *  has to be laid out again against the new reserved band. */
+  onInsets?: () => void;
   onJump: (id: string) => void;
-  /** The floating action dock the bottom hint must stay clear of. */
+  /** The floating action dock the bottom strip must stay clear of. */
   dockEl?: () => HTMLElement | null;
   scope: MountScope;
   dwellMs?: number;
-  /** Is the balloon margin showing at this width? Decides where the pair
-   *  sits: over the margin column, or at the pane's corners. */
+  /** Is the balloon margin showing at this width? Decides whether the strips
+   *  take the column's footprint or become rows of the pane. */
   marginVisible: () => boolean;
+  /** Smooth-scroll preference; read from the media query by default. */
+  reducedMotion?: () => boolean;
 }
 
 export interface CommentHintsHandle {
   /** Re-measure and re-render — call when threads change. */
   refresh: () => void;
-  /** The last split, for tests and for the chip. */
+  /** The band each strip covers, for the column to reserve. */
+  insets: () => StripInsets;
+  /** The last split, for tests. */
   last: () => OffscreenSplit | null;
-}
-
-function glyphEl(glyph: ThreadGlyph, fresh: boolean): HTMLElement {
-  const i = document.createElement('i');
-  i.className = `cw-ic cw-ic-${glyph}${fresh ? ' is-new' : ''}`;
-  i.setAttribute('aria-hidden', 'true');
-  return i;
-}
-
-function renderHint(el: HTMLElement, t: Tally, dir: 'above' | 'below'): void {
-  const total = tallyTotal(t);
-  el.dataset.n = String(total);
-  el.dataset.new = String(t.fresh);
-  el.hidden = total === 0;
-  el.textContent = '';
-  const sentence = hintSentence(t, dir);
-  el.setAttribute('aria-label', sentence ? `${sentence} — jump to the nearest` : '');
-  el.title = sentence;
-  if (total === 0) return;
-  const parts = hintParts(t);
-  parts.forEach((p, i) => {
-    if (i > 0) {
-      const amp = document.createElement('span');
-      amp.className = 'w';
-      amp.textContent = ' & ';
-      el.appendChild(amp);
-    }
-    el.appendChild(glyphEl(p.glyph, p.fresh));
-    const b = document.createElement('b');
-    b.textContent = String(p.count);
-    el.appendChild(b);
-    const w = document.createElement('span');
-    w.className = 'w';
-    w.textContent = ` ${p.word}`;
-    el.appendChild(w);
-  });
-  const dirEl = document.createElement('span');
-  dirEl.className = 'w';
-  dirEl.textContent = ` ${dir}`;
-  el.appendChild(dirEl);
-  if (t.fresh > 0) {
-    const fresh = document.createElement('span');
-    fresh.className = 'w cw-offscreen-new';
-    fresh.textContent = ` · ${t.fresh} new`;
-    el.appendChild(fresh);
-  }
-  const arrow = document.createElement('span');
-  arrow.className = 'm';
-  arrow.textContent = dir === 'above' ? '▲' : '▼';
-  el.appendChild(arrow);
-}
-
-function makeHint(dir: 'above' | 'below'): HTMLButtonElement {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = `cw-offscreen cw-offscreen-${dir === 'above' ? 'top' : 'bottom'}`;
-  b.dataset.n = '0';
-  b.hidden = true;
-  return b;
 }
 
 export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
   const { scroller, scope } = opts;
   const dwell = opts.dwellMs ?? SEEN_DWELL_MS;
-
-  // One pair, absolutely positioned in the pane (which does not scroll), so
-  // a balloon — itself absolutely positioned inside the scrolling margin —
-  // can never sit on top of a hint, and a hint never joins the balloon flow.
-  // A sticky hint inside the margin was tried first: it stuck to the wrong
-  // edge and the balloons overlapped it.
-  const floatTop = makeHint('above');
-  const floatBot = makeHint('below');
-  opts.floatParent.append(floatTop, floatBot);
+  const reduced =
+    opts.reducedMotion ??
+    (() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 
   let last: OffscreenSplit | null = null;
+  let lastNotes: NoteSplit | null = null;
+  let lastItems: HintItem[] = [];
   let lastVisible = new Set<string>();
-  let lastQuestions = -1;
-  let doneTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The ask the chip last took the reader to — where the next tap starts. */
-  let askCursor: string | null = null;
   const dwellTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const indicator: NewIndicatorHandle = mountNewIndicator({
+    pane: opts.floatParent,
+    scroller,
+    marginEl: opts.marginEl,
+    marginVisible: opts.marginVisible,
+    ...(opts.dockEl ? { dockEl: opts.dockEl } : {}),
+    onJump: (dir) => jump(dir),
+    scope,
+  });
 
   function items(): { list: HintItem[]; byId: Map<string, Thread> } {
     const viewRect = scroller.getBoundingClientRect();
@@ -305,28 +241,15 @@ export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
     return { list: withPos.map((x) => x.item), byId };
   }
 
-  function placeFloats(wide: boolean): void {
-    const pane = opts.floatParent.getBoundingClientRect();
-    const r = scroller.getBoundingClientRect();
-    floatTop.style.top = `${Math.max(0, r.top - pane.top) + 8}px`;
-    // Clear of the action dock (Make Plan and friends) when it is showing;
-    // otherwise sit just above the scroller's bottom edge.
-    const dock = opts.dockEl?.() ?? null;
-    const dockRect = dock && !dock.hidden ? dock.getBoundingClientRect() : null;
-    const clearFrom = dockRect && dockRect.height > 0 ? dockRect.top - 8 : r.bottom - 12;
-    floatBot.style.bottom = `${Math.max(0, pane.bottom - clearFrom)}px`;
-    // Over the balloon column on a wide screen; at the pane's corners (the
-    // stylesheet's insets) on a phone, where there is no column.
-    const m = wide && opts.marginEl ? opts.marginEl.getBoundingClientRect() : null;
-    for (const el of [floatTop, floatBot]) {
-      if (m && m.width > 0) {
-        el.style.left = `${m.left - pane.left + 6}px`;
-        el.style.right = `${pane.right - m.right + 6}px`;
-      } else {
-        el.style.left = '';
-        el.style.right = '';
-      }
+  /** The tinted note blocks, in the scroller's coordinate space. */
+  function noteEdges(): NoteEdge[] {
+    const viewRect = scroller.getBoundingClientRect();
+    const out: NoteEdge[] = [];
+    for (const el of scroller.querySelectorAll<HTMLElement>('.recent-note')) {
+      const r = el.getBoundingClientRect();
+      out.push({ el, top: r.top - viewRect.top, bottom: r.bottom - viewRect.top });
     }
+    return out;
   }
 
   function armDwell(id: string, t: Thread): void {
@@ -352,60 +275,26 @@ export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
     }
   }
 
-  function renderChip(questions: number): void {
-    const chip = opts.chipEl;
-    if (!chip) return;
-    if (questions > 0) {
-      if (doneTimer) clearTimeout(doneTimer);
-      doneTimer = null;
-      chip.hidden = false;
-      chip.classList.remove('is-done');
-      chip.textContent = '';
-      chip.appendChild(glyphEl('question', false));
-      const b = document.createElement('b');
-      b.textContent = String(questions);
-      chip.appendChild(b);
-      const w = document.createElement('span');
-      w.className = 'w';
-      w.textContent = ' waiting on you';
-      chip.appendChild(w);
-      chip.title = chipSentence(questions);
-      chip.setAttribute(
-        'aria-label',
-        `${chipSentence(questions)} — ${questions === 1 ? 'jump to it' : 'step through them'}`,
-      );
-    } else if (lastQuestions > 0) {
-      // The last one was just answered: say so, briefly. A permanent "nothing
-      // waiting" chip is metadata the reader cannot act on.
-      chip.hidden = false;
-      chip.classList.add('is-done');
-      chip.textContent = '';
-      chip.appendChild(glyphEl('done', false));
-      const w = document.createElement('span');
-      w.className = 'w';
-      w.textContent = ` ${chipSentence(0)}`;
-      chip.appendChild(w);
-      chip.title = chipSentence(0);
-      chip.setAttribute('aria-label', chipSentence(0));
-      if (doneTimer) clearTimeout(doneTimer);
-      doneTimer = setTimeout(() => {
-        doneTimer = null;
-        chip.hidden = true;
-      }, 4000);
-    } else if (!doneTimer) {
-      chip.hidden = true;
-    }
-    lastQuestions = questions;
-  }
+  let lastBand = '';
 
   function refresh(): void {
     if (scope.disposed) return;
     const { list, byId } = items();
-    const split = splitOffscreen(list, { top: 4, bottom: scroller.clientHeight - 4 });
+    const view = { top: 4, bottom: scroller.clientHeight - 4 };
+    const split = splitOffscreen(list, view);
+    const notes = splitNotes(noteEdges(), view);
     last = split;
-    renderHint(floatTop, split.above, 'above');
-    renderHint(floatBot, split.below, 'below');
-    placeFloats(opts.marginVisible());
+    lastNotes = notes;
+    lastItems = list;
+    indicator.render(pillCount(split.above, notes.above), pillCount(split.below, notes.below));
+    // A pill that just appeared or left changed the band the column must keep
+    // clear, so the cards are stacked again against the new one.
+    const ins = indicator.insets();
+    const band = `${Math.round(ins.top)}/${Math.round(ins.bottom)}`;
+    if (band !== lastBand) {
+      lastBand = band;
+      opts.onInsets?.();
+    }
     // New threads in view start their dwell; ones that left it stop. A card
     // in view is as good as the sentence in view.
     const visible = new Set(split.inView);
@@ -430,57 +319,35 @@ export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
       const t = byId.get(it.id);
       if (t) armDwell(it.id, t);
     }
-    // The chip counts every open ask on the doc, anchored or not.
-    let questions = 0;
-    for (const t of opts.threads()) if (threadKind(t) === 'question') questions += 1;
-    renderChip(questions);
-  }
-
-  function jump(dir: 'above' | 'below'): void {
-    refresh();
-    const id = dir === 'above' ? last?.nearestAbove : last?.nearestBelow;
-    if (id) opts.onJump(id);
-  }
-
-  /** Every open ask, in the order the reader would meet them: anchored ones
-   *  down the page, then the subject-anchored ones that have no highlight to
-   *  scroll to but still need answering. */
-  function openAsks(): string[] {
-    const anchored = items()
-      .list.filter((it) => it.kind === 'question')
-      .map((it) => it.id);
-    const seen = new Set(anchored);
-    const rest = opts
-      .threads()
-      .filter((t) => threadKind(t) === 'question' && !seen.has(t.id))
-      .map((t) => t.id);
-    return [...anchored, ...rest];
   }
 
   /**
-   * The chip STEPS: each tap moves to the next open ask and the last one wraps
-   * to the first (Bryan, 2026-09-04). It used to jump to the first every time,
-   * which meant a reader with four asks could reach exactly one of them from
-   * the top bar and had to hunt for the other three — the count told them
-   * there was more and the control could not take them there.
-   *
-   * The cursor is the ask last jumped to, not an index: asks get answered and
-   * arrive while the reader works, and an index would silently point at a
-   * different thread the moment the list moved under it. An unrecognised
-   * cursor (answered, or a first tap) starts the walk at the top of the doc.
+   * The nearest new thing that way — a thread's sentence or a freshly written
+   * note block, whichever is closer to the edge the reader is looking at.
+   * The pill counts both kinds in one number, so it has to be able to reach
+   * both; taking the reader to the nearest THREAD past a note they were told
+   * about is the bug this chooses against.
    */
-  function stepAsks(): void {
-    const asks = openAsks();
-    if (asks.length === 0) return;
-    const at = askCursor === null ? -1 : asks.indexOf(askCursor);
-    const next = asks[(at + 1) % asks.length] as string;
-    askCursor = next;
-    opts.onJump(next);
+  function jump(dir: NewDirection): void {
+    refresh();
+    const threadId = dir === 'above' ? last?.nearestAbove : last?.nearestBelow;
+    const note = dir === 'above' ? lastNotes?.nearestAbove : lastNotes?.nearestBelow;
+    const item = threadId ? lastItems.find((it) => it.id === threadId) : undefined;
+    if (item && note) {
+      const threadWins = dir === 'above' ? item.bottom >= note.bottom : item.top <= note.top;
+      if (threadWins) {
+        opts.onJump(item.id);
+        return;
+      }
+      note.el.scrollIntoView({ block: 'center', behavior: reduced() ? 'auto' : 'smooth' });
+      return;
+    }
+    if (item) {
+      opts.onJump(item.id);
+      return;
+    }
+    if (note) note.el.scrollIntoView({ block: 'center', behavior: reduced() ? 'auto' : 'smooth' });
   }
-
-  scope.listen(floatTop, 'click', () => jump('above'));
-  scope.listen(floatBot, 'click', () => jump('below'));
-  if (opts.chipEl) scope.listen(opts.chipEl, 'click', stepAsks);
 
   // Scroll is the hot path: one measurement per frame at most, and a settle
   // pass afterwards so the last position always gets counted.
@@ -497,14 +364,9 @@ export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
   scope.onCleanup(() => {
     if (raf != null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
     raf = null;
-    if (doneTimer) clearTimeout(doneTimer);
-    doneTimer = null;
     for (const id of Array.from(dwellTimers.keys())) disarm(id);
-    floatTop.remove();
-    floatBot.remove();
-    if (opts.chipEl) opts.chipEl.hidden = true;
   });
 
   refresh();
-  return { refresh, last: () => last };
+  return { refresh, insets: () => indicator.insets(), last: () => last };
 }

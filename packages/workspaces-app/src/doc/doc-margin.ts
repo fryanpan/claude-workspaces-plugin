@@ -16,9 +16,10 @@
 import { suggestOps } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { balloonMarginVisible } from '../card-placement.ts';
-import { mountCommentHints } from '../comment-hints.ts';
+import { type CommentHintsHandle, mountCommentHints } from '../comment-hints.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
+import { type RecentNoteCardsHandle, mountRecentNoteCards } from '../recent-note-cards.ts';
 import { type MarkupMarginHandle, mountMarkupMargin } from '../redline/markup-margin.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
 import { mountSuggestionsSummary } from '../suggestions/suggestions-summary.ts';
@@ -50,6 +51,12 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // Mounted unconditionally; the `#editor.redline-layout` grid and the
   // `.markup-margin` column both collapse via CSS below 1100px, so this
   // never introduces horizontal scroll on mobile.
+  // Declared first so the column can ASK for the note cards while the module
+  // that ages them still needs the column's relayout to place them.
+  let noteCards: RecentNoteCardsHandle | null = null;
+  // Same forward declaration for the indicator: the column reserves the band
+  // its strips cover, and the strips are placed against the column.
+  let hints: CommentHintsHandle | null = null;
   const margin: MarkupMarginHandle = mountMarkupMargin({
     editorEl: editorMount,
     view: editor.editor.view,
@@ -58,16 +65,31 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     chrome,
     getSuggestions: () => suggestOps.listSuggestions(ydoc),
     docId,
+    getNoteCards: () => noteCards?.cards() ?? [],
+    stripInsets: () => hints?.insets() ?? { top: 0, bottom: 0 },
     scope,
   });
+  // "Notes agent added notes 30s ago" beside each block the note-taker just
+  // wrote — the wide layout's half of the tint. There is no column at phone
+  // width, so `balloonMarginVisible` is also the gate that keeps the cards
+  // off a phone entirely.
+  noteCards = mountRecentNoteCards({
+    prose: editor.editor.view.dom,
+    visible: balloonMarginVisible,
+    onChange: () => margin.scheduleRelayout(),
+    scope,
+  });
+  const cards = noteCards;
+  scope.onCleanup(() => cards.destroy());
   // Doc-level "N pending suggestions" topbar badge (Accept all / Reject all
   // across every author) — per-suggestion Accept/Reject lives on the
   // balloon/chip card the margin just wired above.
   const suggestionsSummary = mountSuggestionsSummary({ docId, ydoc, scope });
-  // Off-screen comment counts + the "N waiting on you" chip — the
-  // information scent for what the reader cannot see (comment-hints.ts).
-  // Jumping goes the same route a tap on the highlight takes: scroll, pulse,
-  // and open the card where it lives (balloon above 1100px, inline below).
+  // The new-content indicator's measurement: what has been written that the
+  // reader cannot see, above and below (comment-hints.ts, drawn by
+  // new-indicator.ts). Jumping goes the same route a tap on the highlight
+  // takes: scroll, pulse, and open the card where it lives (balloon above
+  // 1100px, inline below).
   const spanFor = (id: string): HTMLElement | null =>
     editor.editor.view.dom.querySelector<HTMLElement>(
       `.thread-range[data-thread-id="${CSS.escape(id)}"]`,
@@ -97,29 +119,33 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     }
     chrome.revealThread(id);
   };
-  const hints = mountCommentHints({
+  hints = mountCommentHints({
     scroller: editorMount,
     marginEl: margin.marginEl,
     floatParent:
       editorMount.closest<HTMLElement>('#editor-pane') ??
       editorMount.parentElement ??
       document.body,
-    chipEl: document.getElementById('doc-asks'),
     threads: () => chrome.collectThreads(),
     spanFor,
     cardsFor: (id) => threadCards(id),
     isNew: (t) => chrome.seen.isNew(t),
     markSeen: (t) => chrome.markSeen(t.id),
     onSeen: () => margin.scheduleRelayout(),
+    onInsets: () => margin.scheduleRelayout(),
     onJump: jumpToThread,
     dockEl: () => document.querySelector<HTMLElement>('#editor-pane .plan-float'),
     marginVisible: balloonMarginVisible,
     scope,
   });
+  const hintsHandle = hints;
   const onMarginTransaction = (): void => {
+    // A note landing, stepping down or ageing out arrives as a transaction:
+    // re-read the tinted set before the column lays out against it.
+    cards.tick();
     margin.scheduleRelayout();
     suggestionsSummary.scheduleRefresh();
-    hints.refresh();
+    hintsHandle.refresh();
   };
   editor.editor.on('transaction', onMarginTransaction);
   scope.onCleanup(() => editor.editor.off('transaction', onMarginTransaction));
