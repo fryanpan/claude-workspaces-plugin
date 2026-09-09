@@ -196,6 +196,14 @@ export function speakerLineName(
 export interface RawSegmentInput {
   n: number;
   startedAt: number;
+  /**
+   * When set, this block is the CONTINUATION of a segment already in the
+   * file: the meeting's socket dropped, the same recording came back, and
+   * the turns since then have nowhere else to go. The heading says so and
+   * carries this moment rather than the meeting's own start, so the two
+   * blocks read in the order they were spoken.
+   */
+  resumedAt?: number;
   endedAt: number | null;
   engine: string;
   mode: string;
@@ -229,7 +237,9 @@ export function formatRawSegment(seg: RawSegmentInput): string {
     );
   }
   const lines = [
-    `## Segment ${seg.n} — ${new Date(seg.startedAt).toISOString()}`,
+    seg.resumedAt !== undefined
+      ? `## Segment ${seg.n} (resumed) — ${new Date(seg.resumedAt).toISOString()}`
+      : `## Segment ${seg.n} — ${new Date(seg.startedAt).toISOString()}`,
     '',
     facts.join(' · '),
     '',
@@ -403,7 +413,21 @@ export function flushRawSegments(args: {
   /** Meetings still recording in THIS process — not ready to be written. */
   liveMeetingIds: ReadonlySet<string>;
   /** The meeting that just stopped, with the audio its sinks closed on. */
-  ended?: { meetingId: string; audio: MeetingJsonAudio[] };
+  ended?: {
+    meetingId: string;
+    audio: MeetingJsonAudio[];
+    /**
+     * The first turn number the leg that just stopped recorded, when this
+     * meeting was RESUMED. Its segment may already be in `meeting.json` from
+     * the leg before the outage, and a written segment is otherwise skipped —
+     * which would drop the second half of the meeting from the companion
+     * a person reads. Given it, the flush appends a continuation block
+     * holding exactly the turns from here on.
+     */
+    resumedFrom?: number;
+    /** When that leg picked the meeting up — the continuation's heading. */
+    resumedAt?: number;
+  };
 }): void {
   const { dataDir, docId, info } = args;
   const docName = docNameFor(docId, info);
@@ -420,7 +444,47 @@ export function flushRawSegments(args: {
   const records: MeetingRecord[] = listMeetings(dataDir, docId);
   let appended = '';
   records.forEach((record, i) => {
-    if (written.has(record.meetingId)) return;
+    if (written.has(record.meetingId)) {
+      const ended = args.ended;
+      if (
+        ended?.meetingId !== record.meetingId ||
+        ended.resumedFrom === undefined ||
+        ended.resumedAt === undefined
+      ) {
+        return;
+      }
+      // The same recording, picked up again after its socket dropped. The
+      // block already in the file holds the turns from before the outage, so
+      // this one holds the rest and says in its heading that it is a
+      // continuation rather than a second recording.
+      const n = record.segment ?? i + 1;
+      const rest = readTranscript(dataDir, docId, record.meetingId).filter(
+        (t) => t.turn >= (ended.resumedFrom as number),
+      );
+      if (rest.length === 0) return;
+      const source: MeetingSource = parseMeetingSource(record.source) ?? 'mic';
+      appended += formatRawSegment({
+        n,
+        startedAt: record.startedAt,
+        resumedAt: ended.resumedAt,
+        endedAt: record.endedAt,
+        engine: record.engine,
+        mode: record.mode,
+        source,
+        // Read off the files rather than from the sinks: a resumed leg's own
+        // sink counts only the bytes IT appended, and the file holds both.
+        audio: audioOnDisk(dir, n, record.sampleRate),
+        turns: rest,
+        names: record.speakers ?? {},
+        ...(record.participant !== undefined ? { participant: record.participant } : {}),
+      });
+      const stored = json.segments.find((sg) => sg.meetingId === record.meetingId);
+      if (stored) {
+        stored.endedAt = record.endedAt;
+        stored.audio = audioOnDisk(dir, n, record.sampleRate);
+      }
+      return;
+    }
     if (args.liveMeetingIds.has(record.meetingId) && record.meetingId !== args.ended?.meetingId) {
       return;
     }

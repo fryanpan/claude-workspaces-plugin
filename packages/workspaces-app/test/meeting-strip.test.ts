@@ -246,6 +246,8 @@ interface Harness {
   strip: MeetingStripHandle;
   sockets: FakeSocket[];
   tick(): void;
+  /** Run the reconnect that is waiting, as its backoff elapsing would. */
+  fireRetry(): void;
   clock: { at: number };
   /** The Record Audio button in the top bar (root, in these mounts). */
   record(): HTMLButtonElement;
@@ -311,6 +313,8 @@ function mount(
   document.body.append(root);
   const sockets: FakeSocket[] = [];
   const clock = { at: 1_000 };
+  /** Retries the reconnect scheduled, newest last; `fireRetry` runs one. */
+  const retries: Array<() => void> = [];
   let ticker: (() => void) | null = null;
   const stop = vi.fn();
   const strip = mountMeetingStrip({
@@ -321,6 +325,13 @@ function mount(
       ticker = fn;
       return () => {
         ticker = null;
+      };
+    },
+    schedule: (fn) => {
+      retries.push(fn);
+      return () => {
+        const at = retries.indexOf(fn);
+        if (at >= 0) retries.splice(at, 1);
       };
     },
     openSocket: () => {
@@ -358,6 +369,11 @@ function mount(
     sockets,
     clock,
     tick: () => ticker?.(),
+    fireRetry: () => {
+      const next = retries.shift();
+      if (!next) throw new Error('no reconnect was scheduled');
+      next();
+    },
     record,
     options: () => root.querySelector('.meeting-record-options') as HTMLButtonElement,
     pop,
@@ -866,7 +882,7 @@ describe('the strip when no words are coming', () => {
     expect(h.note()).toContain('Microphone permission refused');
   });
 
-  it('names a mid-meeting error and a socket that drops', async () => {
+  it('names a mid-meeting error the server reported', async () => {
     const h = mount();
     h.pressStart({ pick: 'Just me' });
     await settle();
@@ -875,15 +891,28 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'error', message: 'the engine hung up' });
     expect(h.root.dataset.state).toBe('error');
     expect(h.note()).toBe('the engine hung up');
+  });
 
-    const h2 = mount();
-    h2.pressStart({ pick: 'Just me' });
+  it('names a dropped connection only once it has stopped trying to come back', async () => {
+    // A drop no longer ends the meeting on its own — the mic stays open and
+    // the same meeting id is offered back until the window is spent. The
+    // reconnect itself is meeting-reconnect.test.ts; what this one keeps is
+    // that the person is still told, in the words they always got, when the
+    // meeting really is over.
+    const h = mount();
+    h.pressStart({ pick: 'Just me' });
     await settle();
-    h2.sockets[0]?.onopen?.();
-    h2.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
-    h2.sockets[0]?.onclose?.();
-    expect(h2.root.dataset.state).toBe('error');
-    expect(h2.note()).toMatch(/connection/i);
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.onclose?.();
+    expect(h.root.dataset.state).toBe('recording');
+    for (let i = 0; i < 40 && h.root.dataset.state === 'recording'; i++) {
+      h.fireRetry();
+      h.clock.at += 10_000;
+      h.sockets[h.sockets.length - 1]?.onclose?.();
+    }
+    expect(h.root.dataset.state).toBe('error');
+    expect(h.note()).toMatch(/connection/i);
   });
 
   it('settles to idle when the server reports the meeting stopped', async () => {
