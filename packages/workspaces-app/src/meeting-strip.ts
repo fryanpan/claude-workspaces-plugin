@@ -337,6 +337,19 @@ export interface MeetingStripHandle {
   state(): StripState;
   /** What the next (or current) capture listens for. */
   mode(): CaptureMode;
+  /**
+   * Ask the person what to call this voice, then record it. The pill's own
+   * tap, handed out so the live transcript zone — the only surface showing
+   * pills while a meeting runs — can offer the same gesture.
+   */
+  nameSpeaker(label: string): void;
+  /**
+   * Record a name a person has already typed somewhere else: the notes' own
+   * rename entry, which asks inside its popover rather than through a
+   * prompt. Resolves false when nothing recorded it, which the caller must
+   * surface — a name that only ever lands on screen reads as saved.
+   */
+  renameSpeaker(label: string, name: string): Promise<boolean>;
 }
 
 /** What to say when the server sends an `unavailable` with no message. */
@@ -732,35 +745,66 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
 
   function nameSpeaker(label: string): void {
     const current = speakerDisplayName(label, names);
-    const answer = clipSpeakerName(promptName(current)?.trim() ?? '');
-    if (!answer || answer === current) return;
-    const hadName = label in names;
-    names[label] = answer;
+    const answer = promptName(current)?.trim() ?? '';
+    if (!answer) return;
+    void renameSpeaker(label, answer);
+  }
+
+  /** Every surface the label→name map is written on, repainted together. A
+   *  rename lands in four places and a revert has to undo all four, so
+   *  neither may grow a fifth without the other. */
+  function paintNames(label: string): void {
     transcript.retagSpeaker(label);
     opts.liveZone?.setNames({ ...names });
     transcript.renderFeed();
     renderPop();
+  }
+
+  /**
+   * The rename itself, with the asking left to the caller.
+   *
+   * The name goes up on screen first and comes back off if nothing recorded
+   * it, because the two channels answer at different speeds: the live socket
+   * takes it silently and the HTTP route on a meeting that has ended answers
+   * a round trip later. Waiting for the slower one would make a live rename
+   * feel broken; not reverting the refused one is the shown-but-unsaved bug
+   * this whole path exists to close.
+   */
+  function renameSpeaker(label: string, name: string): Promise<boolean> {
+    const current = speakerDisplayName(label, names);
+    const answer = clipSpeakerName(name.trim());
+    // Nothing asked for is nothing refused: the caller's name already stands.
+    if (!answer || answer === current) return Promise.resolve(true);
+    const hadName = label in names;
+    names[label] = answer;
+    paintNames(label);
     if (socketOpen) {
       socket?.send(JSON.stringify({ type: 'name_speaker', speaker: label, name: answer }));
-    } else if (lastMeetingId && opts.postName) {
-      // The socket died with the capture; the rename rides HTTP to the
-      // meeting it belongs to. A refusal takes the name back off the screen —
-      // shown-but-unsaved is the bug this channel exists to close.
-      void opts
-        .postName(lastMeetingId, label, answer)
-        .catch(() => false)
-        .then((tookIt) => {
-          if (disposed || tookIt) return;
-          // Only undo THIS answer: a newer rename may already be in flight.
-          if (names[label] !== answer) return;
-          if (hadName) names[label] = current;
-          else delete names[label];
-          transcript.retagSpeaker(label);
-          opts.liveZone?.setNames({ ...names });
-          transcript.renderFeed();
-          renderPop();
-        });
+      return Promise.resolve(true);
     }
+    const revert = (): void => {
+      if (disposed) return;
+      // Only undo THIS answer: a newer rename may already be in flight.
+      if (names[label] !== answer) return;
+      if (hadName) names[label] = current;
+      else delete names[label];
+      paintNames(label);
+    };
+    if (!lastMeetingId || !opts.postName) {
+      // No socket and no meeting to address: there is nowhere for this name
+      // to be kept, and a pill that keeps it anyway is lying.
+      revert();
+      return Promise.resolve(false);
+    }
+    // The socket died with the capture; the rename rides HTTP to the meeting
+    // it belongs to.
+    return opts
+      .postName(lastMeetingId, label, answer)
+      .catch(() => false)
+      .then((tookIt) => {
+        if (!tookIt) revert();
+        return tookIt;
+      });
   }
 
   /** The cast so far: every voice this meeting (or the last one) has shown. */
@@ -1409,6 +1453,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   return {
     state: () => state,
     mode: () => mode,
+    nameSpeaker: (label) => nameSpeaker(label),
+    renameSpeaker: (label, name) => renameSpeaker(label, name),
     destroy: () => {
       disposed = true;
       generation += 1;
