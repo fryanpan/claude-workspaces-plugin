@@ -67,6 +67,30 @@ export interface EngineTurn {
    * number in the budget — it must not absorb our own mapping cost.
    */
   engineMs?: number;
+  /**
+   * The leading part of `text` the engine has ALREADY FINALIZED, on a frame
+   * that is not itself final.
+   *
+   * WHY THE SEAM CARRIES IT. A turn is one person talking until they stop,
+   * and somebody making an argument talks for a minute. Everything
+   * downstream used to treat "the turn settled" as the only moment words
+   * become writable, so a minute of continuous speech was a minute with
+   * nothing to write — the ceiling that exists to bound that wait had
+   * nothing to put in a tick. But both engines behind this seam finalize
+   * WITHIN a turn: Soniox appends final tokens that are never re-sent, and
+   * AssemblyAI marks `word_is_final` per word. Those words are as settled as
+   * a settled turn's; only the sentence they are part of is unfinished.
+   *
+   * So this is the prefix a ceiling tick may carry. It is still UNFORMATTED
+   * — punctuation and sentence casing arrive with the turn — which is why a
+   * consumer flags what it carries as `partial` rather than passing it off
+   * as a finished sentence.
+   *
+   * Absent on a final frame (the whole text is settled), on an engine that
+   * reports no per-word finality (the mock), and while a turn's opening
+   * words are all still provisional. Never longer in words than `text`.
+   */
+  settledText?: string;
 }
 
 export interface TranscriptionOpenOpts {

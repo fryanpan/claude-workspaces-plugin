@@ -54,6 +54,7 @@
 
 import { contentKind } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
+import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { docLookupUrl } from './meeting-lookup.ts';
 import { NOTES_OUTLINE_RECENT_BLOCKS } from './meeting-notes-composer.ts';
 import { correctNotesSection } from './meeting-notes-correction.ts';
@@ -76,6 +77,7 @@ import {
   runTaskCapture,
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
+import { meetingTimingPath } from './meetings.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -96,6 +98,7 @@ import {
   relabelNotesSection,
   retagSpeakerInNotes,
 } from './notes-speaker-tags.ts';
+import { createNotesTimingLog } from './notes-timing.ts';
 
 export { type NotesDocStore, MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 export {
@@ -269,20 +272,37 @@ function noteLegacyKept(docId: string): void {
 }
 
 /**
+ * Why a tick's edits did not reach the doc.
+ *
+ * NAMED RATHER THAN COUNTED, because "doc write skipped" was for weeks the
+ * only thing production said about a meeting whose notes stopped growing —
+ * and it covered four unrelated failures at once. `no-doc` is a lookup that
+ * came back empty (an evicted or deleted doc); `not-prose` is a doc that is
+ * not a notepad; `store-refused` is the store declining the batch outright;
+ * `all-edits-failed` is every edit in the batch naming a block that is no
+ * longer there. Only the last two are a compose worth retrying, and no
+ * amount of reading the old line could tell them apart.
+ */
+export type NotesWriteSkip = 'no-doc' | 'not-prose' | 'store-refused' | 'all-edits-failed';
+
+/** What a tick's write came to: `null` when it landed, else why it did not. */
+export type NotesWriteResult = null | NotesWriteSkip;
+
+/**
  * Write one tick's edits into its meeting doc, through the shared
- * `applyBlockEdits` verb. False — never a throw — when the doc is gone, is not
- * prose, or the whole batch failed: a meeting on a vanished doc still has its
- * transcript file, and a flat doc is not a notepad.
+ * `applyBlockEdits` verb. A skip reason — never a throw — when the doc is
+ * gone, is not prose, or the whole batch failed: a meeting on a vanished doc
+ * still has its transcript file, and a flat doc is not a notepad.
  */
 export function applyNotesUpdate(
   docStore: NotesDocStore,
   update: NotesUpdate,
   heading: NotesHeadingMemory,
   opts: { dataDir?: string } = {},
-): boolean {
+): NotesWriteResult {
   const doc = docStore.get(update.docId);
-  if (!doc) return false;
-  if (contentKind(doc.meta.type) !== 'prose') return false;
+  if (!doc) return 'no-doc';
+  if (contentKind(doc.meta.type) !== 'prose') return 'not-prose';
   // NO TRANSCRIPT IN THIS DOC (owner, 2026-09-03). A tick used to append the
   // meeting's own words here under `## Raw transcript`. It does not any more:
   // the notes are the shorter record a person has reviewed and edited, and
@@ -299,23 +319,34 @@ export function applyNotesUpdate(
     dataDir: opts.dataDir,
   });
   if (legacy === 'kept') noteLegacyKept(update.docId);
-  if (update.edits.length === 0) return true;
+  if (update.edits.length === 0) return null;
   // Headings before and after, so the memory can tell the section this batch
   // OPENED from the topic headings it also wrote. Cheap: `headingsOnly` walks
   // the same blocks the batch is about to and returns a handful of entries.
   const before = readNotesOutline(docStore, update.docId, { headingsOnly: true });
   const res = applyNotesBlockEdits(docStore, update.docId, update.edits);
-  if (!res.ok) return false;
+  if (!res.ok) return 'store-refused';
   heading.learn(
     { docId: update.docId, meetingId: update.meetingId },
     before,
     readNotesOutline(docStore, update.docId, { headingsOnly: true }),
   );
   // A batch every one of whose edits failed wrote nothing, and saying so is
-  // what puts the "doc write skipped" line in the log. A batch that landed
-  // some of its edits is a success: the rest reported `unknown-block`, which
-  // is the ordinary answer for a block a person deleted mid-compose.
-  return res.applied + res.suggested > 0;
+  // what reports the skip. A batch that landed some of its edits is a
+  // success: the rest reported `unknown-block`, which is the ordinary answer
+  // for a block a person deleted mid-compose.
+  return res.applied + res.suggested > 0 ? null : 'all-edits-failed';
+}
+
+/** What the log says about a skip, beyond its name — the detail whoever is
+ *  reading it needs next. Empty when the name is the whole answer. */
+export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
+  if (skip === 'no-doc') {
+    return 'the doc store had no such doc — it was deleted, or evicted while the meeting ran';
+  }
+  if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
+  if (skip === 'store-refused') return 'the store refused the batch outright';
+  return 'every edit named a block that is no longer in the doc';
 }
 
 /** The doc as the composer addresses it, capped so a tick's prompt is the size
@@ -633,6 +664,11 @@ export function withServerNotesSinks(
         (summary.composeFailures > 0
           ? `, ${plural(summary.composeFailures, 'failed compose')}`
           : '') +
+        // The number Bryan actually feels, when the meeting was measured.
+        (summary.latencyMedianMs !== undefined
+          ? `, settled-to-written median ${Math.round(summary.latencyMedianMs)}ms / worst ` +
+            `${Math.round(summary.latencyWorstMs ?? summary.latencyMedianMs)}ms`
+          : '') +
         (quality === null ? '' : ` | ${quality.line}`);
       // Only a meeting that actually lost words — or whose notes went past a
       // quality bar — is an error. A clean one is still logged, because the
@@ -642,6 +678,23 @@ export function withServerNotesSinks(
       else console.log(line);
       options.onMeetingSummary?.(summary);
     },
+    // TIMING IS ON WHENEVER THERE IS A DATA DIR TO WRITE IT IN. It was
+    // opt-in, on the reasoning that a measurement nobody asked for is still a
+    // file in Bryan's data dir — but the file has a reader now (the at-stop
+    // quality report scores how late the notes landed from it), and a
+    // measurement that is only there when somebody remembered to ask for it
+    // cannot be read by anything. It holds counts and durations and no words,
+    // so it is as private as the empty directory it sits in.
+    // `CW_NOTES_TIMING=0` turns it off; the replay harness and the tick
+    // harness pass their own log instead.
+    ...(readRenamedEnv(process.env, 'CW_NOTES_TIMING') !== '0' && deps.dataDir !== undefined
+      ? {
+          openTiming: (ids: { docId: string; meetingId: string }) =>
+            createNotesTimingLog({
+              path: meetingTimingPath(deps.dataDir ?? '', ids.docId, ids.meetingId),
+            }),
+        }
+      : {}),
     onSessionStart: (ids): void => {
       // A new recording on this doc: whatever the previous one wrote is
       // FINISHED, and this recording may not rewrite it.
@@ -759,21 +812,32 @@ export function withServerNotesSinks(
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
       heading.headingId({ docId, meetingId }, outline),
-    onNotes: (update: NotesUpdate): void => {
+    onNotes: (update: NotesUpdate): boolean => {
+      let landed = true;
       try {
-        if (
-          !applyNotesUpdate(deps.docStore(), update, heading, {
-            ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
-          })
-        ) {
-          console.error(`[meeting-notes] doc write skipped for ${update.docId}`);
+        const skip = applyNotesUpdate(deps.docStore(), update, heading, {
+          ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+        });
+        if (skip !== null) {
+          landed = false;
+          // The reason, the doc, the meeting and the tick. The line this
+          // replaces named only the doc, so a meeting whose notes stopped
+          // could not be told from a doc that had been deleted.
+          console.error(
+            `[meeting-notes] doc write skipped for ${update.docId} meeting ` +
+              `${update.meetingId} tick ${update.tick.tick} (${update.edits.length} ` +
+              `edit${update.edits.length === 1 ? '' : 's'}): ${skip} — ${notesWriteSkipDetail(skip)}`,
+          );
         }
       } catch (err) {
-        // The session chain treats an onNotes throw as a failed compose and
-        // carries the words — wrong for notes that DID compose. Contain it.
+        // A throw is a broken sink rather than a refused write, and the words
+        // DID compose. Contained, and reported as a skip so the tick's words
+        // are carried instead of vanishing.
+        landed = false;
         console.error('[meeting-notes] doc write failed:', err);
       }
       options.onNotes?.(update);
+      return landed;
     },
     onRelabel: (relabel: NotesRelabel): void => {
       try {

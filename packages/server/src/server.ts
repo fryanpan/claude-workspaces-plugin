@@ -354,7 +354,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const deployer = opts.deployer ?? null;
   // Same opt-in seam: no engine here means no socket can start a billed
   // streaming session. See ServerOptions.transcription.
-  const meetingStore = new MeetingStore(dataDir, {
+  const meetingStore: MeetingStore = new MeetingStore(dataDir, {
     // The raw companion's tie back to the doc: bound path and title as they
     // are at meeting start and stop. A thunk over `docStore`, which is
     // constructed below; a meeting can only start long after it exists.
@@ -500,12 +500,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // projection it needs. Nothing can fire through it until a doc exists,
   // which is after both.
   let onLiveDocEvent: ((docId: string, payload: WebhookPayload) => void) | null = null;
-  const docStore = new DocStore({
+  const docStore: DocStore = new DocStore({
     dataDir,
     sse,
     webhooks,
     decorateDocMeta: withReviewUrl,
     onDocEvent: (docId, payload) => onLiveDocEvent?.(docId, payload),
+    // A doc being recorded into stays resident: the notes reach it by a door
+    // no other eviction hold can see. See `DocStoreConfig.isRecording`.
+    isRecording: (docId) => meetingStore.active(docId) !== undefined,
     ...(summarizer ? { summarizer } : {}),
   });
   // Materialize the shared board-feedback doc at startup rather than letting

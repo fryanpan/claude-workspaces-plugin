@@ -248,6 +248,12 @@ debounced snapshot of it.
 | **HTTP** | `server.ts`, `routes/**`, `middleware/**`, `shells.ts`, `request-admission.ts`, `request-attribution.ts`, `socket-handlers.ts` | The only code that knows about HTTP. Parse, admit, call one service, format. |
 | **Services / stores** | `doc-store.ts`, `tasks.ts` and the `task-*` stores, `review-items/**`, `home-pane.ts`, `share/**`, `auth/**`, the `meeting-*` and `notes-*` families, `sse.ts`, `activity.ts` | Owns durable state and orchestrates one change across stores and adapters. |
 
+`notes-timing.ts` joins the same `notes-*` family in the services tier and
+changes none of the picture: it is where one meeting's per-tick latency is
+recorded, opened only when the operator turns timing on. It holds no meeting
+content — sizes, counts and durations — so it sits beside the notes modules
+rather than with the stores that own durable text.
+
 `meeting-stream-set.ts` joins that services tier inside the `meeting-*`
 family and moves nothing in the picture: it is the fan-out one level below
 `meeting-protocol.ts`, opening an engine session per audio stream and folding

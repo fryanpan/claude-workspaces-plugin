@@ -29,6 +29,7 @@ import {
   beginNotesSession,
 } from '../src/meeting-notes.ts';
 import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+import { type NotesTimingLog, createNotesTimingLog } from '../src/notes-timing.ts';
 import { headingsOf, noteLines, oneDocStore, sectionBody } from './notes-doc-helpers.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -207,6 +208,16 @@ export interface NotesTickHarness {
   readonly errors: readonly string[];
   /** What the meeting came to, once `end()` has run. Null before that. */
   summary(): NotesMeetingSummary | null;
+  /**
+   * Per-tick timings for the run so far.
+   *
+   * The scheduler here is manual, so these do NOT include the wait on the
+   * clocks — a script fires its own ticks. What they DO measure is the half a
+   * script cannot fake: the compose, the write, and how far a tick's words
+   * had to travel behind another tick. `scripts/notes-latency-check.ts` is
+   * where the clocks are measured, on a virtual clock that has them.
+   */
+  timing(): NotesTimingLog;
   readonly ydoc: Y.Doc;
   markdown(): string;
   notes(): string;
@@ -233,6 +244,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
 
   const qualityBoard = opts.qualityBoard;
   const schedule = new ManualScheduler();
+  const timing = createNotesTimingLog();
   const snapshots: TickSnapshot[] = [];
   const errors: string[] = [];
   const taskLinks: Array<{ taskId: string; docId: string }> = [];
@@ -260,6 +272,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
       // turn a script's third tick into somebody else's second.
       cadenceMs: Number.POSITIVE_INFINITY,
       schedule,
+      openTiming: () => timing,
       onError: (message) => errors.push(message),
       onMeetingSummary: (s) => {
         summary = s;
@@ -305,6 +318,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     errors,
     taskLinks,
     summary: () => summary,
+    timing: () => timing,
     ydoc,
     markdown,
     notes: () => sectionBody(ydoc, MEETING_NOTES_HEADING),

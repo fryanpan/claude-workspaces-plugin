@@ -22,7 +22,7 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
-import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-notes.ts';
+import type { NotesComposeInput, NotesComposer, NotesTick, NotesTurn } from './meeting-notes.ts';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
@@ -133,7 +133,7 @@ export function buildNotesPrompt(
   parts.push(renderOutline(input));
   parts.push(
     `New transcript since the last update:\n${input.tick.turns
-      .map((t) => `- ${speakerPrefix(t)}${t.text}${t.partial ? PARTIAL_SUFFIX : ''}`)
+      .map((t) => `- ${speakerPrefix(t)}${t.text}${turnSuffix(t, input.tick.reason)}`)
       .join('\n')}`,
   );
   return { system, user: parts.join('\n\n') };
@@ -193,15 +193,42 @@ function renderOutline(input: NotesComposeInput): string {
 }
 
 /**
- * How the last, unfinished sentence of a meeting is presented.
+ * How an unfinished sentence is presented, and what makes it unfinished.
  *
- * It reaches the composer only on the final tick, where it is the engine's
- * raw partial — no punctuation, no sentence casing, sometimes cut mid-word.
- * Saying so is what stops the note-taker rendering a fragment as a finished
- * point: the instructions already ask it to end a note it is unsure of with
- * `(unconfirmed)`, and this is that case named on the wire.
+ * Two things reach the composer as fragments now, and they are not the same
+ * fact. The last sentence of a MEETING is cut off because the recording
+ * stopped; a sentence carried by a ceiling tick is cut off because the
+ * speaker is still saying it. A composer told the recording stopped, in the
+ * middle of a meeting that is still going, is being misinformed — it was one
+ * string when only the final tick could carry a fragment.
+ *
+ * Either way it is the engine's raw text: no punctuation, no sentence
+ * casing, sometimes cut mid-word. Saying so is what stops the note-taker
+ * rendering a fragment as a finished point — the instructions already ask it
+ * to end a note it is unsure of with `(unconfirmed)`, and this is that case
+ * named on the wire.
  */
 const PARTIAL_SUFFIX = ' [unfinished — the recording stopped mid-sentence]';
+const STILL_SPEAKING_SUFFIX = ' [unfinished — they are still saying it]';
+
+/**
+ * And how the REST of a sentence is presented, once its earlier words have
+ * already been written.
+ *
+ * A ceiling tick hands over as much of a long turn as the engine has
+ * committed to, and the remainder arrives on a later tick. Without this the
+ * remainder reads as a new thought and the note-taker opens a second point
+ * for the second half of one sentence — which is the whole reason the ticker
+ * marks it.
+ */
+const CONTINUED_SUFFIX = ' [continues a sentence already in the notes]';
+
+/** The markers one transcript line carries, in reading order. */
+function turnSuffix(t: NotesTurn, reason: NotesTick['reason']): string {
+  const continued = t.continued ? CONTINUED_SUFFIX : '';
+  if (!t.partial) return continued;
+  return `${continued}${reason === 'end' ? PARTIAL_SUFFIX : STILL_SPEAKING_SUFFIX}`;
+}
 
 /**
  * "Devi (B): " — the name to write and the label to tag with, in the one
@@ -284,6 +311,12 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
         );
       }
       const { system, user } = buildNotesPrompt(input, opts.instructions?.());
+      // Sizes and the model name, so a slow tick can be read back against
+      // what it actually asked for. Reported BEFORE the call: a tick that
+      // times out is exactly the one whose prompt size matters, and a report
+      // after the await would never reach the log. There is no first-token
+      // number to give — this is a single non-streaming request.
+      input.measure?.({ promptChars: system.length + user.length, model: NOTES_MODEL });
       const ctl = new AbortController();
       const timeout = setTimeout(() => ctl.abort(), TIMEOUT_MS);
       try {
@@ -313,6 +346,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
         }
         const text = body.content?.map((b) => b.text ?? '').join('') ?? '';
         if (!text.trim()) throw new Error('notes compose returned an empty reply');
+        input.measure?.({ replyChars: text.length });
         return readNotesEdits(text);
       } finally {
         clearTimeout(timeout);
