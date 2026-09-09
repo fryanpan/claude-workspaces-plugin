@@ -24,7 +24,13 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
  * that is what the printed sources list is numbered by.
  */
 
-export const footnoteDecorationsKey = new PluginKey<DecorationSet>('footnote-decorations');
+/** The decoration set, plus the editability it was built for. */
+export interface FootnoteDecoState {
+  set: DecorationSet;
+  editable: boolean;
+}
+
+export const footnoteDecorationsKey = new PluginKey<FootnoteDecoState>('footnote-decorations');
 
 /** One note, located in the document. */
 export interface FootnoteRun {
@@ -40,14 +46,6 @@ export interface FootnoteRun {
   unsure: boolean;
 }
 
-/**
- * Every footnote in the document, in order.
- *
- * Offsets inside a text block map to positions one-for-one as long as the
- * block's non-text leaves each count as one character, which is what the
- * `￼` placeholder passed to `textBetween` buys: without it an inline
- * image would shift every note after it in the same paragraph.
- */
 /**
  * The offsets inside a textblock that carry the `code` mark.
  *
@@ -71,6 +69,14 @@ function codeRanges(node: ProseNode): Array<[number, number]> {
   return out;
 }
 
+/**
+ * Every footnote in the document, in order.
+ *
+ * Offsets inside a text block map to positions one-for-one as long as the
+ * block's non-text leaves each count as one character, which is what the
+ * `￼` placeholder passed to `textBetween` buys: without it an inline
+ * image would shift every note after it in the same paragraph.
+ */
 export function footnoteRuns(doc: ProseNode): FootnoteRun[] {
   const out: FootnoteRun[] = [];
   doc.descendants((node, pos) => {
@@ -124,21 +130,40 @@ export const FootnoteDecorations = Extension.create({
   name: 'footnoteDecorations',
   addProseMirrorPlugins() {
     const editable = () => this.editor.isEditable;
+    const derive = (state: { doc: ProseNode; selection: { from: number } }): FootnoteDecoState => ({
+      set: build(state.doc, state.selection.from, editable()),
+      editable: editable(),
+    });
     return [
-      new Plugin<DecorationSet>({
+      new Plugin<FootnoteDecoState>({
         key: footnoteDecorationsKey,
         state: {
-          init: (_config, state) => build(state.doc, state.selection.from, editable()),
-          // Re-derived whenever the text or the caret moves. Both matter: the
-          // text decides where the notes are, and the caret decides whether
-          // the one it is inside shows its raw characters.
+          init: (_config, state) => derive(state),
+          // Re-derived whenever the text or the caret moves, or the doc stops
+          // being editable. All three matter: the text decides where the
+          // notes are, the caret decides whether the one it is inside shows
+          // its raw characters, and a read-only doc reveals nothing at all.
           apply: (tr, value, oldState, newState) =>
-            tr.docChanged || !oldState.selection.eq(newState.selection)
-              ? build(newState.doc, newState.selection.from, editable())
+            tr.docChanged ||
+            !oldState.selection.eq(newState.selection) ||
+            value.editable !== editable()
+              ? derive(newState)
               : value,
         },
         props: {
-          decorations: (state) => footnoteDecorationsKey.getState(state),
+          /**
+           * `setEditable` reaches the view through `updateState`, NOT through
+           * a transaction, so `apply` above never runs for it and the stored
+           * set can outlive the editability it was built for — leaving the
+           * raw `^[…]` characters of the note the caret was in exposed to a
+           * reader who can no longer edit them. Rebuilding here closes that
+           * window; the stored set catches up on the next transaction.
+           */
+          decorations: (state) => {
+            const value = footnoteDecorationsKey.getState(state);
+            if (!value) return null;
+            return value.editable === editable() ? value.set : derive(state).set;
+          },
         },
       }),
     ];

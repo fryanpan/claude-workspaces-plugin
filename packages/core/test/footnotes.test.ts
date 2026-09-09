@@ -84,6 +84,22 @@ describe('the fact a note is about', () => {
   });
 });
 
+describe('a caret the author escaped', () => {
+  it('is not a note opener, so the syntax can be written down', () => {
+    expect(findFootnotes('Type \\^[a note] to add one.')).toEqual([]);
+  });
+
+  it('leaves the unescaped one beside it a note (control)', () => {
+    const notes = findFootnotes('Type \\^[a note] like x^[the real one] here.');
+    expect(notes.map((f) => f.note)).toEqual(['the real one']);
+  });
+
+  it('counts the backslashes: an escaped backslash still leaves a real note', () => {
+    const notes = findFootnotes('Ends in x\\\\^[a real note] here.');
+    expect(notes.map((f) => f.note)).toEqual(['a real note']);
+  });
+});
+
 describe('a bracket the author escaped', () => {
   it('does not close the note it sits in', () => {
     const notes = findFootnotes('Filed under x^[Form 3\\] of the appendix.] today.');

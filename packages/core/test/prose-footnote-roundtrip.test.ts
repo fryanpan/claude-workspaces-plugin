@@ -113,6 +113,15 @@ const CASES: Array<{ name: string; md: string; ops?: Op[] }> = [
     ],
   },
   {
+    name: 'an escaped caret writes the syntax down without using it',
+    md: 'Type \\^[a note] where you want one, as in x^[the real thing] here.',
+    ops: [
+      ['Type \\^[a note] where you want one, as in x', undefined],
+      ['^[the real thing]', undefined],
+      [' here.', undefined],
+    ],
+  },
+  {
     // Control: an unterminated caret is not a footnote, and the line still
     // has to survive untouched — otherwise "opaque" would just mean "eaten".
     name: 'an unterminated caret (control)',

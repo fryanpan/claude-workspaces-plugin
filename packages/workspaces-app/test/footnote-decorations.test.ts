@@ -96,6 +96,21 @@ describe('a footnote in the editor', () => {
     expect(notes()[0]?.classList.contains('cw-fn-open')).toBe(false);
   });
 
+  it('folds the raw note away when the doc goes read-only with the caret inside it', () => {
+    const { editor } = mount(DOC);
+    const el = notes()[0];
+    if (!el) throw new Error('no footnote rendered');
+    const from = editor.editor.view.posAtDOM(el.firstChild ?? el, 0);
+    editor.editor.commands.setTextSelection(from + 3);
+    expect(notes()[0]?.classList.contains('cw-fn-open')).toBe(true);
+    // A reader cannot fix what they cannot edit, so the raw characters have
+    // no reason to be on screen — and `setEditable` dispatches no transaction.
+    editor.editor.setEditable(false);
+    expect(notes()[0]?.classList.contains('cw-fn-open')).toBe(false);
+    editor.editor.setEditable(true);
+    expect(notes()[0]?.classList.contains('cw-fn-open')).toBe(true);
+  });
+
   it('leaves a `^[…]` inside a code span alone — it is documentation, not a note', () => {
     mount('Write `^[a note]` to add one, and the characters stay text.');
     expect(notes()).toHaveLength(0);

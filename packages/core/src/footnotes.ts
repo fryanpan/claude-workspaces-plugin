@@ -68,8 +68,26 @@ export function findFootnotes(text: string): FootnoteSpan[] {
  */
 export function footnoteEndAt(text: string, i: number): number {
   if (text[i] !== '^' || text[i + 1] !== '[') return -1;
+  // `\\^[not a note]` is how an author writes the syntax down without using
+  // it, the same escape that keeps a literal `*` from opening emphasis. A
+  // doc explaining footnotes is full of them, and reading one as a note both
+  // hides the characters the sentence is about and folds the explanation into
+  // a margin caption.
+  if (isEscaped(text, i)) return -1;
   const close = closingBracket(text, i + 1);
   return close < 0 ? -1 : close + 1;
+}
+
+/**
+ * Is the character at `i` escaped?
+ *
+ * An ODD run of backslashes before it, because each pair is itself an escaped
+ * backslash: `\\\\^[a note]` ends in a literal backslash and then a real note.
+ */
+function isEscaped(text: string, i: number): boolean {
+  let n = 0;
+  for (let j = i - 1; j >= 0 && text[j] === '\\'; j--) n++;
+  return n % 2 === 1;
 }
 
 /**
