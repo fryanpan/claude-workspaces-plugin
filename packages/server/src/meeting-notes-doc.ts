@@ -327,10 +327,18 @@ function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
  * came back empty (an evicted or deleted doc); `not-prose` is a doc that is
  * not a notepad; `store-refused` is the store declining the batch outright;
  * `all-edits-failed` is every edit in the batch naming a block that is no
- * longer there. Only the last two are a compose worth retrying, and no
- * amount of reading the old line could tell them apart.
+ * longer there; `guard-refused` is `notes-edit-guard.ts` emptying the batch
+ * because every edit in it touched the meeting's own section heading. Only
+ * `store-refused` and `all-edits-failed` are a compose worth retrying —
+ * a guarded batch would be refused again — and no amount of reading the old
+ * line could tell them apart.
  */
-export type NotesWriteSkip = 'no-doc' | 'not-prose' | 'store-refused' | 'all-edits-failed';
+export type NotesWriteSkip =
+  | 'no-doc'
+  | 'not-prose'
+  | 'store-refused'
+  | 'all-edits-failed'
+  | 'guard-refused';
 
 /** What a tick's write came to: `null` when it landed, else why it did not. */
 export type NotesWriteResult = null | NotesWriteSkip;
@@ -382,10 +390,11 @@ export function applyNotesUpdate(
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);
   }
-  // A batch the guard emptied wrote nothing, and it is not a store failure:
-  // it is the same outcome as a batch whose every edit named a missing block,
-  // which the caller already knows how to log and to retry.
-  if (guarded.edits.length === 0) return 'all-edits-failed';
+  // A batch the guard emptied wrote nothing, and it is not a store failure
+  // or a missing block: it is the composer asking for the one edit the
+  // notes cannot survive. Named on its own so the log can count how often
+  // the model does it, and so a retry loop does not resend it.
+  if (guarded.edits.length === 0) return 'guard-refused';
   const res = applyNotesBlockEdits(docStore, update.docId, guarded.edits);
   if (!res.ok) return 'store-refused';
   heading.learn(
@@ -408,6 +417,9 @@ export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
   }
   if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
   if (skip === 'store-refused') return 'the store refused the batch outright';
+  if (skip === 'guard-refused') {
+    return 'every edit touched the meeting’s own notes heading, which the guard never lets through';
+  }
   return 'every edit named a block that is no longer in the doc';
 }
 

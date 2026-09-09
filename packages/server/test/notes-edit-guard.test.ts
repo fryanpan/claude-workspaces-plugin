@@ -12,9 +12,18 @@ import { describe, expect, test } from 'bun:test';
  * heading, and for the thirteen ticks that followed the doc's outline grew
  * from 55 entries to 76 while the notes section stayed frozen at 21 bullets.
  */
-import { prose } from '@claude-workspaces/core';
+import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import {
+  type NotesHeadingMemory,
+  applyNotesUpdate,
+  createNotesHeadingMemory,
+  notesWriteSkipDetail,
+} from '../src/meeting-notes-doc.ts';
+import type { NotesUpdate } from '../src/meeting-notes.ts';
+import type { NotesDocStore } from '../src/notes-doc-access.ts';
 import { guardNotesEdits } from '../src/notes-edit-guard.ts';
+import { oneDocStore } from './notes-doc-helpers.ts';
 
 const AUTHOR = 'notes-agent';
 const WHO = {
@@ -154,5 +163,65 @@ describe('what the guard deliberately leaves alone', () => {
     const { bulletIds } = docWithNotes(3);
     const guarded = guardNotesEdits([{ op: 'delete_block', blockId: bulletIds[0]! }], {});
     expect(guarded.edits).toHaveLength(1);
+  });
+});
+
+describe('a batch the guard empties is reported under its own name', () => {
+  // `all-edits-failed` is a compose worth retrying — the block a person
+  // deleted mid-compose is gone and the next tick will address what is there.
+  // A guarded batch is not: the same edit would be refused again. The log
+  // could not tell the two apart while they shared a name.
+  const tick = (docId: string, edits: prose.BlockEdit[]): NotesUpdate => ({
+    docId,
+    meetingId: `m-${docId}`,
+    tick: { tick: 1, reason: 'pause', turns: [{ turn: 0, text: 'hi' }] },
+    edits,
+  });
+
+  function meetingWithSection(): {
+    store: NotesDocStore;
+    memory: NotesHeadingMemory;
+    headingId: string;
+  } {
+    const ydoc = new Y.Doc();
+    prose.applyMarkdownToFragment(prose.getProseFragment(ydoc), '# Huddle\n');
+    const store = oneDocStore('d', { ydoc, meta: { type: 'markdown' as DocType } });
+    const memory = createNotesHeadingMemory();
+    expect(
+      applyNotesUpdate(
+        store,
+        tick('d', [{ op: 'insert_at_end', markdown: '## Meeting notes\n\n- a first point' }]),
+        memory,
+      ),
+    ).toBe(null);
+    const headingId = memory.headingId(
+      { docId: 'd', meetingId: 'm-d' },
+      store.readOutline('d')?.blocks ?? [],
+    );
+    if (!headingId) throw new Error('the memory did not learn the section it opened');
+    return { store, memory, headingId };
+  }
+
+  test('replacing the meeting’s own heading is guard-refused, not all-edits-failed', () => {
+    const { store, memory, headingId } = meetingWithSection();
+    expect(
+      applyNotesUpdate(
+        store,
+        tick('d', [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting notes' }]),
+        memory,
+      ),
+    ).toBe('guard-refused');
+    expect(notesWriteSkipDetail('guard-refused')).toContain('guard');
+  });
+
+  test('CONTROL: a batch naming a block that is gone is still all-edits-failed', () => {
+    const { store, memory } = meetingWithSection();
+    expect(
+      applyNotesUpdate(
+        store,
+        tick('d', [{ op: 'replace_block', blockId: 'blk-not-there', markdown: '- moved' }]),
+        memory,
+      ),
+    ).toBe('all-edits-failed');
   });
 });
