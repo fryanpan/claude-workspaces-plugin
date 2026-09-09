@@ -17187,6 +17187,114 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "mount_folder",
+      description: "Mount a subfolder of a project as the project's attachment storage. Every file under it gets ONE address that keeps working: a new version overwrites the old under the same link and the comments on it stay put, a server restart changes nothing, and moving the file to another mounted folder of the same project is detected — the address and its comments follow it. Mount as many folders as the project wants (mocks, screenshots, analysis outputs, PDFs, transcripts); the files stay where they are and nothing is copied. Idempotent: mounting a folder twice is one mount, and re-mounting one you unmounted revives it with every address intact. Dotfiles, .env*, *.pem, *.key, id_* and every other credential-shaped name are never listed and never served, whatever is mounted. Machine-scoped, like register_worktree: it names host paths, so it takes no workspaceId and only works from the box.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute path to the folder. It must be inside a git checkout — the repo is what gives its files an address that survives a move between checkouts. Dot-directories are refused: every file under one is refused at serve time, so the mount would hold nothing."
+          }
+        },
+        required: ["path"]
+      }
+    },
+    {
+      name: "list_mounts",
+      description: "Read a project's mount table: which folders are mounted, how many files each holds, whether the project is local-only, and where its conventions index lives. Pass `mountId` to page through one mount's files with their addresses instead. Call it before writing an attachment, to see which folder it belongs in. Machine-scoped: no workspaceId, and it answers only from the box.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute path anywhere inside the project. Omit to read every project this machine knows."
+          },
+          mountId: {
+            type: "string",
+            description: "One mount's id, to list its files rather than the table. Requires `path`."
+          },
+          after: {
+            type: "string",
+            description: "Page cursor: the `nextAfter` from the previous answer. Files come back sorted by their path from the repo root."
+          },
+          limit: {
+            type: "number",
+            description: "Files per page, 1-1000. Defaults to 200."
+          }
+        }
+      }
+    },
+    {
+      name: "unmount_folder",
+      description: "Stop serving a mounted folder. Nothing on disk is touched and no address is dropped — retention is the project's, and workspaces deletes nothing it did not create. The row keeps its dates, and re-mounting the same folder revives it with every file at the address it already had. Machine-scoped: no workspaceId.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute path anywhere inside the project."
+          },
+          mountId: {
+            type: "string",
+            description: "The mount to retire, from list_mounts or mount_folder."
+          }
+        },
+        required: ["path", "mountId"]
+      }
+    },
+    {
+      name: "set_project_privacy",
+      description: "Set whether this project's mounted files may leave the machine. Set on the PROJECT, over all its mounts at once — the thing a person knows is that a project is sensitive, and a per-folder switch is a place for one folder to be forgotten. `local-only` serves the files to callers on the box alone: not over the tunnel, not over the tailnet, not to a share or collab visitor. `workspace` is the default and means what a board already means — everyone in the workspace sees it. Machine-scoped: no workspaceId.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute path anywhere inside the project."
+          },
+          privacy: {
+            type: "string",
+            enum: ["workspace", "local-only"],
+            description: "'local-only' for material that must not leave this machine; 'workspace' otherwise."
+          }
+        },
+        required: ["path", "privacy"]
+      }
+    },
+    {
+      name: "set_project_conventions",
+      description: "Point the project's conventions index at a file. The index is a short note in the project's own words — put plans here, meeting notes here, make folders as needed — and agents read it before writing a doc. Defaults to WORKSPACES.md at the repo root; set it elsewhere if the project keeps its conventions somewhere else. This records WHERE the index is; write the file itself with your ordinary editing tools. Machine-scoped: no workspaceId.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute path anywhere inside the project."
+          },
+          conventionsPath: {
+            type: "string",
+            description: 'Path to the index from the repo root, e.g. "docs/workspaces.md". No "..", no dot-directory.'
+          }
+        },
+        required: ["path", "conventionsPath"]
+      }
+    },
+    {
+      name: "read_project_conventions",
+      description: "Read the project's conventions index — where it lives and what it says. Call it BEFORE writing a plan, a meeting note or an attachment into a project, so the file lands where that project keeps such things. `text: null` means no index has been written yet; the answer still names the path, so you can write one there.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute path anywhere inside the project."
+          }
+        },
+        required: ["path"]
+      }
+    },
+    {
       name: "request_plugin_refresh",
       description: "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces — the update rewrites a version-keyed cache, so nothing running is interrupted and each session picks it up at its next restart. changed: false with matching versions means the cache was already current.",
       inputSchema: {
@@ -18914,6 +19022,41 @@ async function handleWorkspaceTool(name, a, ctx) {
       const { path } = a;
       return ok2(await http("DELETE", "/api/repos/checkouts", { path }));
     }
+    case "mount_folder": {
+      const { path } = a;
+      return ok2(await http("POST", "/api/mounts", { path }));
+    }
+    case "list_mounts": {
+      const { path, mountId, after, limit } = a;
+      const q = new URLSearchParams;
+      if (path !== undefined)
+        q.set("path", path);
+      if (mountId !== undefined)
+        q.set("mountId", mountId);
+      if (after !== undefined)
+        q.set("after", after);
+      if (limit !== undefined)
+        q.set("limit", String(limit));
+      const qs = q.toString();
+      const route = mountId === undefined ? "/api/mounts" : "/api/mounts/files";
+      return ok2(await http("GET", qs === "" ? route : `${route}?${qs}`));
+    }
+    case "unmount_folder": {
+      const { path, mountId } = a;
+      return ok2(await http("DELETE", "/api/mounts", { path, mountId }));
+    }
+    case "set_project_privacy": {
+      const { path, privacy } = a;
+      return ok2(await http("PUT", "/api/mounts/privacy", { path, privacy }));
+    }
+    case "set_project_conventions": {
+      const { path, conventionsPath } = a;
+      return ok2(await http("PUT", "/api/mounts/conventions", { path, conventionsPath }));
+    }
+    case "read_project_conventions": {
+      const { path } = a;
+      return ok2(await http("GET", `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
+    }
     case "request_plugin_refresh": {
       return ok2(await http("POST", "/api/plugin/refresh"));
     }
@@ -19272,7 +19415,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.196";
+var PLUGIN_VERSION = "0.1.197";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
