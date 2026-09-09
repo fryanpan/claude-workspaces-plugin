@@ -81,8 +81,16 @@ export interface SpokenTurn {
 export interface MeetingVoices {
   /** Every engine label the transcript carries. */
   labels: readonly string[];
-  /** The names a person gave those labels, and the participant name the
-   *  client supplied. Compared case-insensitively. */
+  /**
+   * Label to the name a person gave THAT label, kept as a mapping rather than
+   * flattened into `names`, because which voice a name belongs to is the
+   * thing being checked. Absent when no meeting record could be read, which
+   * leaves every label unassigned and every name in `names` acceptable on it.
+   */
+  assigned?: Readonly<Record<string, string>>;
+  /** Every name the record gives — the assigned ones and the participant name
+   *  the client supplied. Compared case-insensitively. This is the pool a
+   *  label NOBODY named may draw from. */
   names: readonly string[];
 }
 
@@ -241,6 +249,19 @@ const PLACEHOLDER_NAME = /^speaker\s+\S+$/i;
  * but whose NAME nobody gave it is the more common failure: a plausible name
  * attached to a voice that only ever had a placeholder.
  *
+ * THE NAME IS CHECKED AGAINST ITS OWN LABEL, not against a pool. The rule has
+ * two halves:
+ *
+ * - A label somebody NAMED must carry that name, or the placeholder. With
+ *   A named Priya and B named Wren, a tag reading Priya on `speaker:B` is
+ *   reported — both names are real and both labels are real, and the pairing
+ *   is still a sentence attributed to the person who did not say it. Pooling
+ *   the names accepted it, which is the bug this half exists to close.
+ * - A label NOBODY named may carry any name the record gives, the participant
+ *   included. Nothing says which of them that voice is, so reporting one
+ *   would be a false alarm on the ordinary two-person meeting where only one
+ *   voice got a name.
+ *
  * The placeholder itself is never wrong. `Speaker B` is what the notes are
  * instructed to write until somebody names the voice, so a tag showing it is
  * obeying the instructions rather than inventing anything.
@@ -248,13 +269,23 @@ const PLACEHOLDER_NAME = /^speaker\s+\S+$/i;
 export function unknownVoices(notes: string, voices: MeetingVoices): UnknownVoice[] {
   const labels = new Set(voices.labels);
   const names = new Set(voices.names.map((n) => n.trim().toLowerCase()).filter(Boolean));
+  const assigned = new Map<string, string>();
+  for (const [label, name] of Object.entries(voices.assigned ?? {})) {
+    const own = name.trim().toLowerCase();
+    if (own) assigned.set(label, own);
+  }
   const out: UnknownVoice[] = [];
   const reported = new Set<string>();
   for (const tag of findSpeakerTags(notes)) {
     const name = tag.text.replace(/^@/, '').trim();
+    // The name this label was given, if it was given one. `undefined` and a
+    // name are different states: unassigned draws on every name the record
+    // gives, assigned accepts only its own.
+    const own = assigned.get(tag.label);
+    const nameFits = own === undefined ? names.has(name.toLowerCase()) : own === name.toLowerCase();
     const why: UnknownVoice['why'] | null = !labels.has(tag.label)
       ? 'label'
-      : PLACEHOLDER_NAME.test(name) || names.has(name.toLowerCase())
+      : PLACEHOLDER_NAME.test(name) || nameFits
         ? null
         : 'name';
     if (why === null) continue;

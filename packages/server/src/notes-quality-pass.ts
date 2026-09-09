@@ -98,6 +98,9 @@ export function voicesOf(
 ): MeetingVoices {
   const labels = new Set<string>();
   const names: string[] = [];
+  // Which voice each name belongs to, kept rather than flattened: a name on
+  // the wrong label is the failure `unknownVoices` cannot see without it.
+  const assigned: Record<string, string> = {};
   for (const turn of transcript) if (turn.speaker) labels.add(turn.speaker);
   if (dataDir !== undefined) {
     try {
@@ -106,6 +109,7 @@ export function voicesOf(
         for (const [label, name] of Object.entries(record.speakers ?? {})) {
           labels.add(label);
           names.push(name);
+          assigned[label] = name;
         }
         if (record.participant) names.push(record.participant);
       }
@@ -115,7 +119,7 @@ export function voicesOf(
       // than under-reporting them, which is the error worth making.
     }
   }
-  return { labels: [...labels], names };
+  return { labels: [...labels], assigned, names };
 }
 
 /** What this pass needs, all of it optional except the doc it reads. */

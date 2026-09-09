@@ -14,13 +14,14 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import * as Y from 'yjs';
+import { meetingDirPath, meetingIndexPath } from '../src/meetings.ts';
 import type { NotesDocStore } from '../src/notes-doc-access.ts';
 import { readSectionMarkdown, runNotesQualityPass } from '../src/notes-quality-pass.ts';
 import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
@@ -146,6 +147,41 @@ describe('the whole pass', () => {
     expect(board.filed).toEqual([]);
     expect(result.line).toContain('repeated bullets');
     expect(readNotesQuality(dataDir, 'd-harbour', 'm-1')?.at).toBe(5_000);
+  });
+
+  it('carries each voice’s own name through, so a name on the wrong voice is caught', () => {
+    // The wiring this covers: the meeting record maps A to one name and B to
+    // another, and the pass has to hand `unknownVoices` that MAPPING rather
+    // than a pool of both names. Pooled, a tag reading Priya on B is accepted
+    // because Priya is a real name in the room — and the notes have put a
+    // sentence in the mouth of the person who did not say it.
+    const dataDir = freshDir();
+    const { store } = docStoreFrom(
+      ['## Meeting notes', '- [@Priya Raman](speaker:B) wants the winter crew kept'].join('\n'),
+    );
+    mkdirSync(meetingDirPath(dataDir, 'd-harbour'), { recursive: true });
+    writeFileSync(
+      meetingIndexPath(dataDir, 'd-harbour'),
+      // Two lines, as the relay writes them: the meeting opens, and a later
+      // line names its voices.
+      `${JSON.stringify({ meetingId: 'm-1', startedAt: 1_000 })}\n${JSON.stringify({
+        meetingId: 'm-1',
+        speakers: { A: 'Priya Raman', B: 'Wren Alvi' },
+      })}\n`,
+    );
+    const result = runNotesQualityPass(
+      {
+        docStore: () => store,
+        dataDir,
+        headingIdOf: () => headingIdAt(store, 0),
+        actor: ACTOR,
+        now: () => 5_000,
+      },
+      { docId: 'd-harbour', meetingId: 'm-1' },
+    );
+    expect(result.report.unknownVoices).toHaveLength(1);
+    expect(result.report.unknownVoices[0]?.label).toBe('B');
+    expect(result.report.unknownVoices[0]?.why).toBe('name');
   });
 
   it('files on the doc’s row and says so in the line when the notes went badly', () => {

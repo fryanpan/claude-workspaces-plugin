@@ -103,6 +103,49 @@ describe('unknown voices', () => {
     expect(unknownVoices(notes, voices)).toEqual([]);
   });
 
+  it('reports a real name written against the wrong voice', () => {
+    // Codex, PR 823: the check used to pool every assigned name into one set,
+    // so a name that belonged to A passed on a tag labelled B. Both names are
+    // real and both labels are real; only the pairing is wrong, and that is a
+    // sentence attributed to the person who did not say it.
+    // `names` carries both, exactly as the meeting record's own reader
+    // produces it — which is what made the pooled check accept either name
+    // against either label.
+    const assigned = {
+      labels: ['A', 'B'],
+      assigned: { A: 'Priya Raman', B: 'Wren Alvi' },
+      names: ['Priya Raman', 'Wren Alvi'],
+    };
+    const notes = '- [@Priya Raman](speaker:B) wants the winter crew kept';
+    const found = unknownVoices(notes, assigned);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.why).toBe('name');
+    expect(found[0]?.label).toBe('B');
+  });
+
+  it('leaves an assigned name alone on the voice it was assigned to', () => {
+    const assigned = {
+      labels: ['A', 'B'],
+      assigned: { A: 'Priya Raman', B: 'Wren Alvi' },
+      names: ['Priya Raman', 'Wren Alvi'],
+    };
+    const notes = [
+      '- [@Priya Raman](speaker:A) wants the winter crew kept',
+      '- [@Wren Alvi](speaker:B) will write to the harbour office',
+    ].join('\n');
+    expect(unknownVoices(notes, assigned)).toEqual([]);
+  });
+
+  it('lets a voice nobody named carry any name the record gives', () => {
+    // B was never assigned a name, so the record's own names — the other
+    // voice's, and the participant the client supplied — are all the evidence
+    // there is. Reporting one of those would be a false alarm on the common
+    // case of a two-person meeting where only one voice got named.
+    const partly = { labels: ['A', 'B'], assigned: { A: 'Priya Raman' }, names: ['Wren Alvi'] };
+    const notes = '- [@Wren Alvi](speaker:B) wants the winter crew kept';
+    expect(unknownVoices(notes, partly)).toEqual([]);
+  });
+
   it('reports one invented name once however often it is written', () => {
     const notes = [
       '- [@Devon Marsh](speaker:B) wants the winter crew kept',
