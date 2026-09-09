@@ -66,15 +66,15 @@ export interface MountScan {
  * (`isWithinRoot`), which is the check that has to be right, and doing it
  * twice would cost a `realpath` per entry on a walk of hundreds of thousands.
  */
-export function scanMount(root: string): MountScan {
+export function scanMount(root: string, maxFiles: number = MAX_FILES_PER_MOUNT): MountScan {
   const files: ScannedFile[] = [];
-  const truncated = walk(root, root, files);
+  const truncated = walk(root, root, files, Math.max(1, maxFiles));
   files.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
   return { files, truncated };
 }
 
 /** Returns true when the ceiling was hit. */
-function walk(root: string, dir: string, out: ScannedFile[]): boolean {
+function walk(root: string, dir: string, out: ScannedFile[], maxFiles: number): boolean {
   let entries: import('node:fs').Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -83,12 +83,16 @@ function walk(root: string, dir: string, out: ScannedFile[]): boolean {
     // permission boundary must still list what it can.
     return false;
   }
+  // `readdirSync` promises no order, so an unsorted walk would cap on a
+  // different subset each run — which is the difference between "these files
+  // are over the cap" and "some files are missing today".
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
-    if (out.length >= MAX_FILES_PER_MOUNT) return true;
+    if (out.length >= maxFiles) return true;
     const abs = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
-      if (walk(root, abs, out)) return true;
+      if (walk(root, abs, out, maxFiles)) return true;
       continue;
     }
     if (!entry.isFile() && !entry.isSymbolicLink()) continue;

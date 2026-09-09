@@ -128,23 +128,31 @@ export async function handleMountRoutes(
     if (path && !only) return j(400, { error: 'not-a-repo', path });
     const projects = mounts.registry.listProjects().filter((p) => !only || p.repoKey === only);
     return j(200, {
-      projects: projects.map((p) => ({
-        repoKey: p.repoKey,
-        root: mounts.rootFor(p.repoKey),
-        privacy: p.privacy,
-        conventionsPath: p.conventionsPath,
-        mounts: p.mounts.map((m) => ({
-          mountId: m.mountId,
-          relPath: m.relPath,
-          addedAt: m.addedAt,
-          removedAt: m.removedAt,
-          checkoutRoot: m.checkoutRoot,
-          fileCount:
-            m.removedAt === undefined
-              ? mounts.reconcile(p.repoKey).filter((f) => f.mountId === m.mountId).length
-              : 0,
-        })),
-      })),
+      projects: projects.map((p) => {
+        // One walk per project, not one per mount: the counts below are all
+        // slices of the same listing, and that listing is what says which
+        // files are there NOW — the table also holds every address the
+        // project has ever handed out, and those are not rows to report.
+        const listing = mounts.reconcile(p.repoKey);
+        return {
+          repoKey: p.repoKey,
+          root: mounts.rootFor(p.repoKey),
+          privacy: p.privacy,
+          conventionsPath: p.conventionsPath,
+          truncated: listing.truncated,
+          mounts: p.mounts.map((m) => ({
+            mountId: m.mountId,
+            relPath: m.relPath,
+            addedAt: m.addedAt,
+            removedAt: m.removedAt,
+            checkoutRoot: m.checkoutRoot,
+            fileCount:
+              m.removedAt === undefined
+                ? listing.files.filter((f) => f.mountId === m.mountId).length
+                : 0,
+          })),
+        };
+      }),
     });
   }
 
@@ -181,7 +189,7 @@ export async function handleMountRoutes(
               : 'that path is not a directory',
       });
     }
-    const files = mounts.reconcile(res.project.repoKey, true);
+    const listing = mounts.reconcile(res.project.repoKey, true);
     return j(200, {
       ok: true,
       mountId: res.mount.mountId,
@@ -189,7 +197,9 @@ export async function handleMountRoutes(
       relPath: res.mount.relPath,
       created: res.created,
       privacy: mounts.privacyOf(res.project.repoKey),
-      fileCount: files.filter((f) => f.mountId === res.mount.mountId).length,
+      fileCount: listing.files.filter((f) => f.mountId === res.mount.mountId).length,
+      // A capped walk is said out loud: the count is a floor, not a total.
+      truncated: listing.truncated,
     });
   }
 

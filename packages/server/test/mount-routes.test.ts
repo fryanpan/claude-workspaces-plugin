@@ -328,7 +328,7 @@ describe('mount routes', () => {
       const mounted = store.mount(mocks());
       expect(mounted.ok).toBe(true);
       const repoKey = store.locate(repo)?.repoKey ?? '';
-      const id = store.reconcile(repoKey, true).find((f) => f.relPath.endsWith('home.png'))
+      const id = store.reconcile(repoKey, true).files.find((f) => f.relPath.endsWith('home.png'))
         ?.fileId as string;
 
       const ask = () =>
@@ -351,7 +351,7 @@ describe('mount routes', () => {
       const { ctx, store } = ctxFor('127.0.0.1');
       store.mount(mocks());
       const repoKey = store.locate(repo)?.repoKey ?? '';
-      const id = store.reconcile(repoKey, true).find((f) => f.relPath.endsWith('home.png'))
+      const id = store.reconcile(repoKey, true).files.find((f) => f.relPath.endsWith('home.png'))
         ?.fileId as string;
       const ask = () =>
         handleMountRoutes(ctx, {
@@ -375,7 +375,7 @@ describe('mount routes', () => {
       const { ctx, store } = ctxFor('127.0.0.1');
       store.mount(mocks());
       const repoKey = store.locate(repo)?.repoKey ?? '';
-      const id = store.reconcile(repoKey, true).find((f) => f.relPath.endsWith('home.png'))
+      const id = store.reconcile(repoKey, true).files.find((f) => f.relPath.endsWith('home.png'))
         ?.fileId as string;
       const visitor = { workspaceId: 'w-other' } as ShareTarget;
 

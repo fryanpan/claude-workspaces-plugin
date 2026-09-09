@@ -70,7 +70,7 @@ describe('MountStore', () => {
   const idOf = (relFromRepo: string): string => {
     const found = store
       .reconcile(store.locate(repo)?.repoKey ?? '', true)
-      .find((f) => f.relPath === relFromRepo);
+      .files.find((f) => f.relPath === relFromRepo);
     if (!found) throw new Error(`no address for ${relFromRepo}`);
     return found.fileId;
   };
@@ -113,7 +113,9 @@ describe('MountStore', () => {
       writeFileSync(join(mocks(), '.env'), 'SAMPLE_TOKEN=not-a-real-value\n');
       writeFileSync(join(mocks(), 'deploy.key'), 'placeholder\n');
       mount(mocks());
-      const listed = store.reconcile(store.locate(repo)?.repoKey ?? '', true).map((f) => f.relPath);
+      const listed = store
+        .reconcile(store.locate(repo)?.repoKey ?? '', true)
+        .files.map((f) => f.relPath);
       expect(listed).toEqual(['docs/mocks/home.png']);
     });
   });
@@ -253,7 +255,7 @@ describe('MountStore', () => {
 
       mount(wtMocks);
       const repoKey = store.locate(repo)?.repoKey ?? '';
-      const listed = store.reconcile(repoKey, true);
+      const listed = store.reconcile(repoKey, true).files;
       expect(listed.map((f) => f.relPath)).toEqual([
         'docs/mocks/checkout.png',
         'docs/mocks/home.png',
@@ -263,6 +265,78 @@ describe('MountStore', () => {
       const served = store.resolveFile(home?.fileId ?? '');
       expect(served?.abs).toBe(join(wtMocks, 'home.png'));
       expect(served?.file.size).toBe('worktree-home-bytes-differ'.length);
+    });
+  });
+
+  describe('what a listing reports', () => {
+    /**
+     * The table is append-only on purpose: a deleted file keeps its address
+     * and a moved file keeps the spelling it used to answer at, so a link
+     * written a month ago still opens the right thing. None of that history
+     * is a row in a listing.
+     */
+    it('shows the current scan only, while the old addresses still resolve', () => {
+      mount(mocks());
+      mount(shipped());
+      writeFileSync(join(mocks(), 'about.png'), 'about-byte');
+      const home = idOf('docs/mocks/home.png');
+      const about = idOf('docs/mocks/about.png');
+
+      renameSync(join(mocks(), 'home.png'), join(shipped(), 'home.png'));
+      rmSync(join(mocks(), 'about.png'));
+
+      const repoKey = store.locate(repo)?.repoKey ?? '';
+      const listing = store.reconcile(repoKey, true);
+      // One row: not the deleted file, and not both spellings of the move.
+      expect(listing.files.map((f) => f.relPath)).toEqual(['docs/shipped/home.png']);
+      expect(listing.truncated).toBe(false);
+      expect(store.listFiles(repoKey).files).toHaveLength(1);
+
+      // The history is still there, doing the job it exists for.
+      expect(store.resolveFile(home)?.file.relPath).toBe('docs/shipped/home.png');
+      expect(store.resolveFile(about)).toBeNull();
+    });
+
+    it('leaves out the files of a retired mount', () => {
+      const id = mount(mocks());
+      const repoKey = store.locate(repo)?.repoKey ?? '';
+      expect(store.reconcile(repoKey, true).files).toHaveLength(1);
+      store.unmount(repoKey, id);
+      expect(store.reconcile(repoKey, true).files).toEqual([]);
+      // Retention is the project's: nothing on disk was touched.
+      expect(existsSync(join(mocks(), 'home.png'))).toBe(true);
+    });
+  });
+
+  describe('a mount bigger than the walk ceiling', () => {
+    /**
+     * A capped walk is not a complete one. Treating it as complete makes
+     * every file past the cap look deleted — and a deleted file whose size
+     * and fingerprint match a newly-appeared one is read as a MOVE, which
+     * hands its address to an unrelated file and cannot be undone.
+     */
+    it('says so, and does not read the files past the cap as gone', () => {
+      mount(mocks());
+      const repoKey = store.locate(repo)?.repoKey ?? '';
+      // Sorted walk order in this folder is aaa.txt, home.png, zzz.txt.
+      writeFileSync(join(mocks(), 'zzz.txt'), 'the-file-past-the-cap');
+      const beyond = idOf('docs/mocks/zzz.txt');
+      // An unrelated new file that happens to hold the same bytes. Off a
+      // capped scan this is exactly the false move.
+      writeFileSync(join(mocks(), 'aaa.txt'), 'the-file-past-the-cap');
+
+      const capped = new MountStore(dataDir, new RepoRegistry(dataDir), { maxFilesPerMount: 2 });
+      const listing = capped.reconcile(repoKey, true);
+      expect(listing.truncated).toBe(true);
+      expect(listing.files.map((f) => f.relPath)).toEqual([
+        'docs/mocks/aaa.txt',
+        'docs/mocks/home.png',
+      ]);
+      // The address past the cap still names its own file...
+      expect(capped.resolveFile(beyond)?.file.relPath).toBe('docs/mocks/zzz.txt');
+      // ...and the newcomer got an address of its own rather than that one.
+      const fresh = listing.files.find((f) => f.relPath === 'docs/mocks/aaa.txt');
+      expect(fresh?.fileId).not.toBe(beyond);
     });
   });
 });

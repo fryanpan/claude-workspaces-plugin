@@ -12,6 +12,7 @@ import {
   parseFileKey,
 } from './mount-registry.ts';
 import {
+  MAX_FILES_PER_MOUNT,
   type ScannedFile,
   isServableRelPath,
   matchMoves,
@@ -53,6 +54,16 @@ export interface ProjectLocation {
   relPath: string;
 }
 
+/** What a project's mounts currently hold, and whether that is all of it. */
+export interface MountListing {
+  files: MountedFile[];
+  /** A mount held more than `MAX_FILES_PER_MOUNT` and the walk stopped there,
+   *  so `files` is a prefix rather than the whole mount. Passed on rather
+   *  than swallowed: a caller told "these are the files" about a partial walk
+   *  would read every file past the cap as deleted. */
+  truncated: boolean;
+}
+
 /** One mounted file, as an answer. */
 export interface MountedFile {
   fileId: string;
@@ -74,10 +85,20 @@ export class MountStore {
   readonly registry: MountRegistry;
   private readonly repos: RepoRegistry;
   private readonly reconciledAt = new Map<string, number>();
+  /** What the last walk of each project actually saw, and whether it was
+   *  capped. Read by the listing inside the reconcile TTL, so a rate-limited
+   *  answer is the same answer rather than the whole history. */
+  private readonly lastScan = new Map<string, { present: Set<string>; truncated: boolean }>();
 
-  constructor(dataDir: string, repos: RepoRegistry) {
+  /** The per-mount file ceiling this store walks under. Injected rather than
+   *  read off the constant so the capped path is testable without building a
+   *  twenty-thousand-file fixture; production passes nothing. */
+  private readonly maxFilesPerMount: number;
+
+  constructor(dataDir: string, repos: RepoRegistry, opts: { maxFilesPerMount?: number } = {}) {
     this.registry = new MountRegistry(dataDir);
     this.repos = repos;
+    this.maxFilesPerMount = opts.maxFilesPerMount ?? MAX_FILES_PER_MOUNT;
   }
 
   /**
@@ -180,6 +201,7 @@ export class MountStore {
     }
     const { mount, created } = this.registry.mount(at.repoKey, at.relPath, at.checkoutRoot);
     this.reconciledAt.delete(at.repoKey);
+    this.lastScan.delete(at.repoKey);
     return { ok: true, mount, project: at, created };
   }
 
@@ -187,7 +209,10 @@ export class MountStore {
    *  mount's files hold keeps resolving through the registry. */
   unmount(repoKey: string, mountId: string): boolean {
     const done = this.registry.unmount(repoKey, mountId);
-    if (done) this.reconciledAt.delete(repoKey);
+    if (done) {
+      this.reconciledAt.delete(repoKey);
+      this.lastScan.delete(repoKey);
+    }
     return done;
   }
 
@@ -211,19 +236,36 @@ export class MountStore {
    * `force` is for the paths that have just changed the answer themselves — a
    * fresh mount, and a serve that found its file missing.
    */
-  reconcile(repoKey: string, force = false): MountedFile[] {
+  reconcile(repoKey: string, force = false): MountListing {
     const last = this.reconciledAt.get(repoKey) ?? 0;
     const now = Date.now();
-    if (!force && now - last < RECONCILE_TTL_MS) return this.recordedFiles(repoKey);
+    const cached = this.lastScan.get(repoKey);
+    if (!force && cached && now - last < RECONCILE_TTL_MS) {
+      return { files: this.recordedFiles(repoKey, cached.present), truncated: cached.truncated };
+    }
     this.reconciledAt.set(repoKey, now);
 
-    // A project whose every checkout is gone serves nothing.
-    if (!this.rootFor(repoKey)) return [];
     const live = new Map<string, { file: ScannedFile; mountId: string; abs: string }>();
+    let truncated = false;
+    // A scan is COMPLETE only when every live mount was walked to its end. A
+    // capped walk and a mount whose directory is not there both leave files
+    // unseen, and an unseen file is not a removed one.
+    let complete = true;
     for (const mount of this.registry.liveMounts(repoKey)) {
       const mountAbs = this.absOfMount(repoKey, mount);
-      if (!mountAbs || !existsSync(mountAbs)) continue;
-      for (const file of scanMount(mountAbs).files) {
+      if (!mountAbs || !existsSync(mountAbs)) {
+        complete = false;
+        continue;
+      }
+      const scan = scanMount(mountAbs, this.maxFilesPerMount);
+      if (scan.truncated) {
+        truncated = true;
+        complete = false;
+        console.error(
+          `[mount-store] ${repoKey} mount ${mount.mountId} holds more than ${this.maxFilesPerMount} files; the scan stopped there`,
+        );
+      }
+      for (const file of scan.files) {
         const abs = join(mountAbs, file.relPath);
         // Repo-relative, built from the mount's own spelling rather than by
         // subtracting a checkout root: the mount may be served from a
@@ -235,42 +277,49 @@ export class MountStore {
       }
     }
 
-    const recorded = this.registry.keysUnderRepo(repoKey);
-    const gone: Array<{ key: string; size?: number; hash?: string }> = [];
-    for (const { key, entry } of recorded) {
-      const parsed = parseFileKey(key);
-      if (!parsed || live.has(parsed.relPath)) continue;
-      const row: { key: string; size?: number; hash?: string } = { key };
-      if (entry.size !== undefined) row.size = entry.size;
-      if (entry.hash !== undefined) row.hash = entry.hash;
-      gone.push(row);
-    }
-    const fresh: Array<{ key: string; abs: string; size: number }> = [];
-    for (const [repoRel, found] of live) {
-      const key = makeFileKey(repoKey, repoRel);
-      if (this.registry.entryFor(key)) continue;
-      fresh.push({ key, abs: found.abs, size: found.file.size });
-    }
+    // Removals and moves are only readable off a COMPLETE scan. Off a capped
+    // one, every file past the cap looks gone — which would hand its address
+    // to whatever unrelated file happened to match its size and fingerprint,
+    // and that alias is not undoable.
+    if (complete) {
+      const recorded = this.registry.keysUnderRepo(repoKey);
+      const gone: Array<{ key: string; size?: number; hash?: string }> = [];
+      for (const { key, entry } of recorded) {
+        const parsed = parseFileKey(key);
+        if (!parsed || live.has(parsed.relPath)) continue;
+        const row: { key: string; size?: number; hash?: string } = { key };
+        if (entry.size !== undefined) row.size = entry.size;
+        if (entry.hash !== undefined) row.hash = entry.hash;
+        gone.push(row);
+      }
+      const fresh: Array<{ key: string; abs: string; size: number }> = [];
+      for (const [repoRel, found] of live) {
+        const key = makeFileKey(repoKey, repoRel);
+        if (this.registry.entryFor(key)) continue;
+        fresh.push({ key, abs: found.abs, size: found.file.size });
+      }
 
-    // Moves first, so a file that moved keeps its address instead of being
-    // minted a second one by the claim pass below.
-    for (const move of matchMoves(gone, fresh)) {
-      const found = live.get(parseFileKey(move.freshKey)?.relPath ?? '');
-      if (!found) continue;
-      const hash = sampleHash(found.abs, found.file.size);
-      const res = this.registry.aliasKey(move.goneKey, move.freshKey, {
-        mountId: found.mountId,
-        size: found.file.size,
-        mtimeMs: found.file.mtimeMs,
-        ...(hash === null ? {} : { hash }),
-      });
-      if (!res.ok) {
-        console.error(
-          `[mount-store] ${move.goneKey} could not follow the move: ${res.fileId} already answers at the new path`,
-        );
+      // Moves first, so a file that moved keeps its address instead of being
+      // minted a second one by the claim pass below.
+      for (const move of matchMoves(gone, fresh)) {
+        const found = live.get(parseFileKey(move.freshKey)?.relPath ?? '');
+        if (!found) continue;
+        const hash = sampleHash(found.abs, found.file.size);
+        const res = this.registry.aliasKey(move.goneKey, move.freshKey, {
+          mountId: found.mountId,
+          size: found.file.size,
+          mtimeMs: found.file.mtimeMs,
+          ...(hash === null ? {} : { hash }),
+        });
+        if (!res.ok) {
+          console.error(
+            `[mount-store] ${move.goneKey} could not follow the move: ${res.fileId} already answers at the new path`,
+          );
+        }
       }
     }
 
+    const present = new Set<string>();
     for (const [repoRel, found] of live) {
       const key = makeFileKey(repoKey, repoRel);
       const held = this.registry.entryFor(key);
@@ -281,7 +330,10 @@ export class MountStore {
         held.size === found.file.size &&
         held.mtimeMs === found.file.mtimeMs &&
         held.mountId === found.mountId;
-      if (unchanged) continue;
+      if (unchanged) {
+        present.add(this.registry.resolveKey(key));
+        continue;
+      }
       const hash = sampleHash(found.abs, found.file.size);
       this.registry.claim(key, {
         mountId: found.mountId,
@@ -289,14 +341,29 @@ export class MountStore {
         mtimeMs: found.file.mtimeMs,
         ...(hash === null ? {} : { hash }),
       });
+      present.add(this.registry.resolveKey(key));
     }
-    return this.recordedFiles(repoKey);
+    this.lastScan.set(repoKey, { present, truncated });
+    return { files: this.recordedFiles(repoKey, present), truncated };
   }
 
-  /** What the registry currently records for a project, without walking. */
-  private recordedFiles(repoKey: string): MountedFile[] {
+  /**
+   * What the registry records for the files the last scan actually SAW.
+   *
+   * The table is deliberately append-only — a deleted file keeps its address,
+   * a retired mount keeps its rows, and a moved file keeps the key it used to
+   * answer at — because that is what makes a link written a month ago still
+   * open the right file. None of that history belongs in a listing: a caller
+   * asking what is mounted would otherwise be told about deleted files,
+   * files under unmounted folders, and both the old and the new path of every
+   * file that moved, with a count to match. So the listing is the intersection
+   * of the table with the current scan, and the history stays where it is
+   * useful — `resolveFile`, and the alias that carries a move forward.
+   */
+  private recordedFiles(repoKey: string, present: ReadonlySet<string>): MountedFile[] {
     const out: MountedFile[] = [];
     for (const { key, entry } of this.registry.keysUnderRepo(repoKey)) {
+      if (!present.has(key)) continue;
       const parsed = parseFileKey(key);
       if (!parsed) continue;
       out.push({
@@ -315,8 +382,9 @@ export class MountStore {
   listFiles(
     repoKey: string,
     opts: { mountId?: string; limit?: number; after?: string } = {},
-  ): { files: MountedFile[]; nextAfter?: string } {
-    const all = this.reconcile(repoKey).filter(
+  ): { files: MountedFile[]; nextAfter?: string; truncated: boolean } {
+    const listing = this.reconcile(repoKey);
+    const all = listing.files.filter(
       (f) =>
         (opts.mountId === undefined || f.mountId === opts.mountId) &&
         (opts.after === undefined || f.relPath > opts.after),
@@ -324,7 +392,9 @@ export class MountStore {
     const limit = Math.max(1, Math.min(opts.limit ?? 200, 1000));
     const files = all.slice(0, limit);
     const last = files[files.length - 1];
-    return all.length > files.length && last ? { files, nextAfter: last.relPath } : { files };
+    return all.length > files.length && last
+      ? { files, nextAfter: last.relPath, truncated: listing.truncated }
+      : { files, truncated: listing.truncated };
   }
 
   // ---- Addresses ----------------------------------------------------------
