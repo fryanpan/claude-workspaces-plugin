@@ -23,6 +23,18 @@
  * and it skips the summary object the log appends at the end of a meeting,
  * which carries neither field.
  *
+ * AN ABSENT FILE IS THE NORMAL CASE, NOT A FAULT. The log is written only
+ * when the operator booted the server with `CW_NOTES_TIMING=1`, so most
+ * meetings will never have one, and a reader that treated absence as an
+ * error would report a fault on almost every meeting. Absence reads as an
+ * unknown lateness and nothing else.
+ *
+ * ONE MEASUREMENT, NAMED. `settledToWrittenMs` counts from the moment the
+ * oldest words in a tick stopped changing to the moment the note was in the
+ * doc. It is NOT the gap between ticks and NOT the compose call, both of
+ * which that file also carries; anything this report says about lateness
+ * means this number.
+ *
  * WHAT IT WILL NOT DO. It will not infer a wait from the meeting record. The
  * record carries when the meeting started, when it stopped and how many turns
  * it settled, and none of those says when any one note was written — so a
