@@ -394,7 +394,9 @@ export function applyNotesUpdate(
   // or a missing block: it is the composer asking for the one edit the
   // notes cannot survive. Named on its own so the log can count how often
   // the model does it, and so a retry loop does not resend it.
-  if (guarded.edits.length === 0) return 'guard-refused';
+  // `refused` is the evidence, not the empty list: an empty batch answered
+  // `null` above before the guard ever saw it.
+  if (guarded.edits.length === 0 && guarded.refused.length > 0) return 'guard-refused';
   const res = applyNotesBlockEdits(docStore, update.docId, guarded.edits);
   if (!res.ok) return 'store-refused';
   heading.learn(
