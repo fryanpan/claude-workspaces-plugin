@@ -1,42 +1,3 @@
-/**
- * Put the documents that already exist onto repo-and-path identity.
- *
- * WHAT THIS IS FOR. A document's identity is now its repo plus its path from
- * the repo root, held as a claim in the registry (`repos.json`). Documents
- * minted before that have ids and comments and no claim, so a bind from a
- * second checkout would mint a SECOND document for a file that already has
- * one. This walks the corpus and files the claims.
- *
- * WHY IT IS A SCRIPT AND NOT A BOOT STEP. It reads every index row, spawns
- * git for the renames, and hydrates documents to merge conversations. A boot
- * that did that would turn a restart into a corpus walk, and a bug in it
- * would be a bug nobody could stop. It runs by hand, dry by default, and the
- * server never calls it.
- *
- * WHAT IT NEVER DOES. It deletes nothing. A document that loses a key claim
- * keeps its id, its content and every comment on it, and stays reachable at
- * the link somebody saved. A losing document's threads are COPIED into the
- * winner, not moved. Threads whose text is not in the winner land in the
- * outdated-comments flow rather than being dropped, and the count before
- * equals the count after — winner plus orphans (`doc-thread-merge.ts`).
- *
- * WHICH DOCUMENTS CLAIM A KEY. Prose documents — `markdown` and `code` — are
- * the ones whose identity IS a file. A `diff` document is a member of a
- * review set: twenty reviews of one file are twenty documents on purpose, and
- * collapsing them onto one key would destroy nineteen reviews. A `mockup`'s
- * source is an HTML file that is usually outside any repo. Both are counted
- * and reported, and neither claims. This is narrower than "every document
- * with a sourceUrl" and the difference is the whole reason the report prints
- * the classes.
- *
- * The CLI that drives this is `scripts/migrate-doc-identity.ts`; everything
- * here takes its io as a parameter, so importing this module migrates
- * nothing. `--apply` is the only thing that writes, and a second `--apply`
- * changes nothing: the claims are already held, and a thread already present
- * under its own id is skipped.
- */
-
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as Y from 'yjs';
@@ -47,6 +8,7 @@ import {
   type Plan,
   type PlanIo,
 } from './doc-identity-plan.ts';
+import { gitRenameOf } from './doc-identity-renames.ts';
 import { readAllDocIndexes } from './doc-index.ts';
 import { docKeyForPath } from './doc-key.ts';
 import { type ThreadMergeResult, mergeThreads } from './doc-thread-merge.ts';
@@ -54,17 +16,22 @@ import type { RepoRegistry } from './repo-registry.ts';
 
 export const JOURNAL_FILE = 'doc-identity-migration.json';
 
-/**
- * How far back a rename scan reads. Deep enough for a file renamed years ago
- * and shallow enough that a repository with a hundred thousand commits does
- * not stall the migration; a rename older than this leaves its document
- * unresolved, which costs the document nothing but a key claim.
- */
-const RENAME_SCAN_COMMITS = 20_000;
-
 export interface JournalEntry {
   ranAt: number;
+  /** What the plan intended, for a person reading the record. */
   claims: KeyClaim[];
+  /**
+   * The keys THIS RUN actually wrote — canonical keys it filed and aliases it
+   * recorded, and nothing else.
+   *
+   * `revert` releases exactly these. It used to release everything the plan
+   * named, which meant a revert deleted the identity of any file the live
+   * server had claimed in the meantime, and the next bind from a second
+   * checkout minted the duplicate this whole feature exists to prevent. A
+   * journal from before this field releases nothing, which is the safe
+   * direction to fail in.
+   */
+  keysFiled: string[];
   merges: Array<Merge & { copied: number; reanchored: number; orphaned: number; skipped: number }>;
   unresolved: string[];
 }
@@ -128,6 +95,19 @@ export interface ApplyResult {
   threadsCopied: number;
   threadsOrphaned: number;
   threadsSkipped: number;
+  /**
+   * Keys the plan meant for one doc that another doc already held — a bind
+   * that happened between the corpus being read and the run. The key stays
+   * with its holder, and the planned doc's conversation is merged INTO the
+   * holder, so the document the key opens is never the one without the
+   * comments.
+   */
+  conflicts: number;
+  /**
+   * Aliases refused because the old and new keys belong to different docs.
+   * Recording one would repoint every link saved against the old key.
+   */
+  aliasesRefused: number;
   /** Documents whose `.ydoc` could not be read. Nothing is written for one. */
   unreadable: number;
   parity: Array<{ docKey: string; before: number; after: number }>;
@@ -157,6 +137,8 @@ export function applyPlan(
     claimed: 0,
     alreadyHeld: 0,
     aliased: 0,
+    conflicts: 0,
+    aliasesRefused: 0,
     merged: 0,
     threadsCopied: 0,
     threadsOrphaned: 0,
@@ -164,28 +146,71 @@ export function applyPlan(
     unreadable: 0,
     parity: [],
   };
+  /** Keys this run wrote, and the only ones a revert may take back. */
+  const keysFiled: string[] = [];
+  /** Who actually holds each key after the claims — not always the plan's pick. */
+  const holderOf = new Map<string, string>();
+  const conflicted: Array<{ docKey: string; planned: string; holder: string }> = [];
   registry.beginBatch();
   try {
     for (const claim of plan.claims) {
       // Read the holder BEFORE claiming: `claim` answers with the docId that
       // ends up holding the key, which is the same answer whether this run
-      // filed it or an earlier one did — and telling those apart is the whole
-      // evidence that a second run changes nothing.
+      // filed it or an earlier one did — and telling those apart is what says
+      // a second run changed nothing, and what keeps a revert off a claim
+      // this run did not make.
       const holder = registry.docIdFor(claim.docKey);
-      registry.claim(claim.docKey, claim.docId);
-      if (holder === undefined) out.claimed++;
-      else out.alreadyHeld++;
+      if (holder === undefined) {
+        registry.claim(claim.docKey, claim.docId);
+        keysFiled.push(claim.docKey);
+        holderOf.set(claim.docKey, claim.docId);
+        out.claimed++;
+      } else {
+        holderOf.set(claim.docKey, holder);
+        out.alreadyHeld++;
+        if (holder !== claim.docId) {
+          out.conflicts++;
+          conflicted.push({ docKey: claim.docKey, planned: claim.docId, holder });
+        }
+      }
       for (const old of claim.aliasKeys) {
-        registry.aliasKey(old, claim.docKey);
-        out.aliased++;
+        const res = registry.aliasKey(old, claim.docKey);
+        if (!res.ok) {
+          out.aliasesRefused++;
+          continue;
+        }
+        if (res.aliased) {
+          keysFiled.push(old);
+          out.aliased++;
+        }
       }
     }
   } finally {
     registry.endBatch();
   }
 
+  // A merge follows the KEY, not the plan's pick. If a doc claimed the key
+  // between the corpus being read and this run, that doc is what the key
+  // opens, so it is the doc every conversation has to end up in — including
+  // the planned winner's own.
+  const effective: Merge[] = plan.merges.map((merge) => {
+    const winner = holderOf.get(merge.docKey) ?? merge.winner;
+    return {
+      docKey: merge.docKey,
+      winner,
+      losers: [...merge.losers, merge.winner].filter((id) => id !== winner),
+    };
+  });
+  const planned = new Set(plan.merges.map((m) => m.docKey));
+  for (const c of conflicted) {
+    // A key with one planned doc and a different holder is not in plan.merges
+    // — the planner saw one document for it — but it is a merge now.
+    if (planned.has(c.docKey)) continue;
+    effective.push({ docKey: c.docKey, winner: c.holder, losers: [c.planned] });
+  }
+
   const journalMerges: JournalEntry['merges'] = [];
-  for (const merge of plan.merges) {
+  for (const merge of effective) {
     const winner = loadYdoc(dataDir, merge.winner);
     if (!winner) {
       out.unreadable++;
@@ -230,6 +255,7 @@ export function applyPlan(
   journal.runs.push({
     ranAt: Date.now(),
     claims: plan.claims,
+    keysFiled,
     merges: journalMerges,
     unresolved: plan.unresolved,
   });
@@ -265,19 +291,18 @@ export interface RevertResult {
 export function revert(dataDir: string, registry: RepoRegistry): RevertResult {
   const journal = readJournal(dataDir);
   const out: RevertResult = { released: 0, runs: journal.runs.length, mergesLeftInPlace: 0 };
-  // Two runs over one corpus record the same claim twice, so count KEYS, not
-  // journal lines: a revert that reported 822 releases of 411 keys reads as
-  // twice the change it made.
+  // Only the keys a run actually wrote, and each of them once. Releasing what
+  // the PLAN named would delete a claim the live server made in the meantime,
+  // and a document that silently loses its key is a duplicate on the next
+  // bind. Two runs over one corpus name the same key twice, so count keys.
   const released = new Set<string>();
   registry.beginBatch();
   try {
     for (const run of journal.runs) {
-      for (const claim of run.claims) {
-        for (const key of [claim.docKey, ...claim.aliasKeys]) {
-          if (released.has(key)) continue;
-          registry.releaseKey(key);
-          released.add(key);
-        }
+      for (const key of run.keysFiled ?? []) {
+        if (released.has(key)) continue;
+        registry.releaseKey(key);
+        released.add(key);
       }
       out.mergesLeftInPlace += run.merges.length;
     }
@@ -323,96 +348,6 @@ export function liveIo(dataDir: string): PlanIo {
   };
 }
 
-/**
- * Every rename this checkout's history records, oldest first, memoized per
- * checkout root.
- *
- * One scan per repository rather than one per document: the corpus holds
- * thousands of rows and spawning git for each of them is the difference
- * between a migration that runs and one nobody waits for. The window is
- * bounded, and so is the wait — a corpus walk cannot afford one repository
- * to hang it.
- */
-const renameScans = new Map<string, Map<string, string>>();
-
-/** Forget the memoized scans. For a caller that renames and then asks again. */
-export function clearRenameScans(): void {
-  renameScans.clear();
-}
-
-function renameScanOf(checkoutRoot: string): Map<string, string> {
-  const cached = renameScans.get(checkoutRoot);
-  if (cached) return cached;
-  const map = new Map<string, string>();
-  renameScans.set(checkoutRoot, map);
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_') && v !== undefined) env[k] = v;
-  }
-  let stdout = '';
-  try {
-    const res = spawnSync(
-      'git',
-      [
-        'log',
-        '--diff-filter=R',
-        '--name-status',
-        '--format=',
-        '-M',
-        `--max-count=${RENAME_SCAN_COMMITS}`,
-      ],
-      {
-        cwd: checkoutRoot,
-        env,
-        encoding: 'utf8',
-        timeout: 30_000,
-        killSignal: 'SIGKILL',
-        maxBuffer: 32 * 1024 * 1024,
-      },
-    );
-    if (res.status !== 0 || typeof res.stdout !== 'string') return map;
-    stdout = res.stdout;
-  } catch {
-    return map;
-  }
-  // Lines read `R097<TAB>old/path<TAB>new/path`, newest commit first. Read
-  // them oldest first so a path renamed twice ends up mapped by its OLDEST
-  // name too, and the walk below follows the chain to today's name.
-  const lines = stdout.split('\n').reverse();
-  for (const line of lines) {
-    if (!line.startsWith('R')) continue;
-    const [, from, to] = line.split('\t');
-    if (from && to && from !== to) map.set(from, to);
-  }
-  return map;
-}
-
-/**
- * Ask git where a file went.
- *
- * NOT `git log --follow -- <old path>`: a pathspec limits the diff to that
- * one path, which breaks the rename PAIR — git sees a deletion and reports
- * nothing, with `--follow` or without it. Measured on a two-commit fixture
- * while writing the test. The whole-tree scan above is what actually sees a
- * rename, and the chain walk is what survives a file renamed twice.
- */
-export function gitRenameOf(absPath: string, relPath: string): string | null {
-  const parts = docKeyForPath(absPath);
-  if (!parts) return null;
-  const renames = renameScanOf(parts.checkoutRoot);
-  let current = relPath;
-  const seen = new Set([current]);
-  for (;;) {
-    const next = renames.get(current);
-    // A rename cycle is not something git records, but a corrupt or crafted
-    // history could describe one, and an unguarded walk would spin forever.
-    if (!next || seen.has(next)) break;
-    seen.add(next);
-    current = next;
-  }
-  return current === relPath ? null : current;
-}
-
 export function reportLines(plan: Plan, applied?: ApplyResult): string[] {
   const c = plan.counts;
   const lines = [
@@ -432,6 +367,8 @@ export function reportLines(plan: Plan, applied?: ApplyResult): string[] {
       `claims filed                   ${applied.claimed}`,
       `keys already held              ${applied.alreadyHeld}`,
       `rename aliases                 ${applied.aliased}`,
+      `  refused, keys held apart     ${applied.aliasesRefused}`,
+      `keys held by another doc       ${applied.conflicts} (merged into the holder)`,
       `documents merged into          ${applied.merged}`,
       `threads copied                 ${applied.threadsCopied}`,
       `  landed as outdated           ${applied.threadsOrphaned}`,

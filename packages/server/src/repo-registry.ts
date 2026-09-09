@@ -76,6 +76,21 @@ export type ClaimResult =
    *  gets the doc that holds it; a claim NEVER repoints a key. */
   | { ok: true; docId: string; claimed: false };
 
+/**
+ * What `aliasKey` did. `aliased: false` means there was nothing to record —
+ * the two keys were already the same key.
+ */
+export type AliasResult =
+  | { ok: true; aliased: boolean }
+  | {
+      ok: false;
+      error: 'held-by-other';
+      /** The doc that already holds the NEW key, and keeps it. */
+      docId: string;
+      /** The doc that holds the old key, and keeps that. */
+      otherDocId: string;
+    };
+
 export type RegisterResult =
   | { ok: true; repoKey: string; mainRoot: string; checkouts: string[]; alreadyKnown: boolean }
   | { ok: false; error: 'not-a-repo' };
@@ -214,17 +229,30 @@ export class RepoRegistry {
    * The docId does not move. If the new key is free it inherits the old key's
    * doc, and the old key stays resolving through the alias, so a link written
    * before the rename still opens the same document with the same comments.
+   *
+   * **It refuses when the two keys belong to different documents.** Writing
+   * the alias anyway would repoint every link saved against the old key at
+   * somebody else's document — the silent repoint `claim` exists to refuse,
+   * arriving through the back door. Two documents each holding one of the
+   * keys is a real state (one bound before a rename, one after), and the
+   * answer to it is a merge somebody decides on, not a table write nobody
+   * sees. Both docs are named in the result so the caller can report it.
    */
-  aliasKey(oldKey: string, newKey: string): void {
-    if (oldKey === newKey) return;
+  aliasKey(oldKey: string, newKey: string): AliasResult {
+    if (oldKey === newKey) return { ok: true, aliased: false };
     const from = this.resolveKey(oldKey);
-    if (from === newKey) return;
+    if (from === newKey) return { ok: true, aliased: false };
     const docId = this.data.docKeys[from];
+    const heldByNew = this.data.docKeys[newKey];
+    if (docId !== undefined && heldByNew !== undefined && heldByNew !== docId) {
+      return { ok: false, error: 'held-by-other', docId: heldByNew, otherDocId: docId };
+    }
     this.data.docKeyAliases[from] = newKey;
-    if (docId !== undefined && this.data.docKeys[newKey] === undefined) {
+    if (docId !== undefined && heldByNew === undefined) {
       this.data.docKeys[newKey] = docId;
     }
     this.persist();
+    return { ok: true, aliased: true };
   }
 
   /** Every key currently pointing at this doc, current and aliased. Used by

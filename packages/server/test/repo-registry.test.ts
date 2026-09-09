@@ -102,6 +102,37 @@ describe('RepoRegistry', () => {
     expect(reg.keysFor('d-first')).toContain(before);
   });
 
+  it('refuses a rename alias when the two keys belong to different docs', () => {
+    // Both keys are spoken for — one document bound before the rename, one
+    // after. Writing the alias would point every link saved against the old
+    // key at the other document, which is the silent repoint `claim` refuses.
+    const before = keyIn(main);
+    reg.claim(before, 'd-first');
+    git(main, 'mv', 'docs/plan.md', 'docs/roadmap.md');
+    const after = docKeyForPath(join(main, 'docs/roadmap.md'))?.docKey as string;
+    reg.claim(after, 'd-second');
+
+    const res = reg.aliasKey(before, after);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res).toMatchObject({ error: 'held-by-other', docId: 'd-second', otherDocId: 'd-first' });
+    // Nothing moved: each key still opens the document that claimed it.
+    expect(reg.docIdFor(before)).toBe('d-first');
+    expect(reg.docIdFor(after)).toBe('d-second');
+  });
+
+  it('records the alias when the new key is free — the case the refusal must not eat', () => {
+    // CONTROL for the refusal above. Without it, a registry that refused
+    // every alias would pass that test and break every rename.
+    const before = keyIn(main);
+    reg.claim(before, 'd-first');
+    git(main, 'mv', 'docs/plan.md', 'docs/roadmap.md');
+    const after = docKeyForPath(join(main, 'docs/roadmap.md'))?.docKey as string;
+    expect(reg.aliasKey(before, after)).toEqual({ ok: true, aliased: true });
+    expect(reg.docIdFor(before)).toBe('d-first');
+    expect(reg.docIdFor(after)).toBe('d-first');
+  });
+
   it('resolves a key that exists ONLY as an alias, through a chain of them', () => {
     // The rename case above claims the old key first, so it would answer
     // without ever following an alias. This is the shape that cannot: a key

@@ -4,14 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listThreads } from '@claude-workspaces/core';
-import {
-  applyPlan,
-  clearRenameScans,
-  gitRenameOf,
-  liveIo,
-  readJournal,
-  revert,
-} from '../src/doc-identity-migration.ts';
+import { applyPlan, liveIo, readJournal, revert } from '../src/doc-identity-migration.ts';
 import { planMigration } from '../src/doc-identity-plan.ts';
 import { docKeyForPath } from '../src/doc-key.ts';
 import { DocStore } from '../src/doc-store.ts';
@@ -300,6 +293,87 @@ describe('the doc-identity migration', () => {
     expect((await commentsOn('d-main')).sort()).toEqual(['From main', 'From the branch']);
   });
 
+  it('leaves a claim it did not make, and merges into the doc that holds it', async () => {
+    // The live server bound this file from the worktree while the corpus was
+    // being read, so the key is already spoken for when the run starts. The
+    // key does not move, the conversation goes to the doc the key opens, and
+    // a revert afterwards must not take somebody else's identity with it.
+    writeFileSync(join(wt, rel), '# Plan\n\nThe cache is warmed at boot.\n');
+    await seedDoc('d-wt-a', join(wt, rel), 'From the branch', 'cache is warmed');
+    await seedDoc('d-main', join(main, rel), 'From main', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const plan = planMigration(liveIo(dataDir));
+    // The plan picked the newer doc; the live server had already claimed the
+    // key for the older one.
+    expect(plan.claims[0]?.docId).toBe('d-main');
+    const docKey = docKeyForPath(join(main, rel))?.docKey as string;
+    const live = new RepoRegistry(dataDir);
+    live.claim(docKey, 'd-wt-a');
+
+    const applied = applyPlan(dataDir, plan, new RepoRegistry(dataDir));
+    expect(applied.claimed).toBe(0);
+    expect(applied.alreadyHeld).toBe(1);
+    expect(applied.conflicts).toBe(1);
+    // The key still opens the doc that held it, and that doc now carries both
+    // conversations — the canonical document is never the one without them.
+    expect(new RepoRegistry(dataDir).docIdFor(docKey)).toBe('d-wt-a');
+    expect((await commentsOn('d-wt-a')).sort()).toEqual(['From main', 'From the branch']);
+
+    const res = revert(dataDir, new RepoRegistry(dataDir));
+    expect(res.released).toBe(0);
+    // CONTROL: the pre-existing claim survived the revert. Releasing it would
+    // leave the file with no identity, and the next bind would mint a second
+    // document for it.
+    expect(new RepoRegistry(dataDir).docIdFor(docKey)).toBe('d-wt-a');
+  });
+
+  it('merges into a holder the corpus walk never saw', async () => {
+    // Same conflict, without a merge in the plan: one document for the key,
+    // and a different document already holding it.
+    await seedDoc('d-main', join(main, rel), 'From main', 'cache is warmed');
+    await seedDoc('d-other', join(wt, rel), 'From elsewhere', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    rmSync(join(wt, rel));
+    const plan = planMigration(liveIo(dataDir));
+    expect(plan.merges).toEqual([]);
+    expect(plan.claims.map((c) => c.docId)).toEqual(['d-main']);
+
+    const docKey = docKeyForPath(join(main, rel))?.docKey as string;
+    new RepoRegistry(dataDir).claim(docKey, 'd-other');
+    const applied = applyPlan(dataDir, plan, new RepoRegistry(dataDir));
+    expect(applied.conflicts).toBe(1);
+    expect(applied.merged).toBe(1);
+    expect((await commentsOn('d-other')).sort()).toEqual(['From elsewhere', 'From main']);
+    expect(await commentsOn('d-main')).toEqual(['From main']);
+  });
+
+  it('refuses a rename alias when another doc already holds the new path', async () => {
+    // The file moved, and something else has already claimed where it moved
+    // to. Recording the alias would point every link saved against the old
+    // path at that other document.
+    await seedDoc('d-moved', join(main, rel), 'Before the move', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    git(main, 'mv', rel, 'docs/roadmap.md');
+    git(main, 'commit', '-m', 'rename');
+    rmSync(wt, { recursive: true, force: true });
+    git(main, 'worktree', 'prune');
+
+    const plan = planMigration(liveIo(dataDir));
+    expect(plan.counts.byRename).toBe(1);
+    const oldKey = plan.claims[0]?.aliasKeys[0] as string;
+    const newKey = plan.claims[0]?.docKey as string;
+    const registry = new RepoRegistry(dataDir);
+    registry.claim(oldKey, 'd-occupant');
+
+    const applied = applyPlan(dataDir, plan, new RepoRegistry(dataDir));
+    expect(applied.aliasesRefused).toBe(1);
+    expect(applied.aliased).toBe(0);
+    // Both keys keep their own document. Nothing was silently repointed.
+    const after = new RepoRegistry(dataDir);
+    expect(after.docIdFor(oldKey)).toBe('d-occupant');
+    expect(after.docIdFor(newKey)).toBe('d-moved');
+  });
+
   it('records what it did, so a person can see it afterwards', async () => {
     await seedDoc('d-plan', join(main, rel), 'Why at boot?', 'cache is warmed');
     rmSync(join(dataDir, 'repos.json'), { force: true });
@@ -307,18 +381,5 @@ describe('the doc-identity migration', () => {
     const journal = readJournal(dataDir);
     expect(journal.runs).toHaveLength(1);
     expect(journal.runs[0]?.claims.map((c) => c.docId)).toEqual(['d-plan']);
-  });
-
-  it('gitRenameOf answers null for a file that never moved', () => {
-    // The negative half of the rename path, with a positive control beside
-    // it: a resolver that always answered would pass the rename test alone.
-    expect(gitRenameOf(join(main, rel), rel)).toBeNull();
-    git(main, 'mv', rel, 'docs/roadmap.md');
-    git(main, 'commit', '-m', 'rename');
-    // The scan is memoized per checkout, so a rename made after one has run
-    // is invisible until it is dropped. A migration run sees each repo once;
-    // this test is the caller that does not.
-    clearRenameScans();
-    expect(gitRenameOf(join(main, rel), rel)).toBe('docs/roadmap.md');
   });
 });
