@@ -109,6 +109,12 @@ import {
   rollTranscript,
 } from './meeting-protocol.ts';
 import {
+  RECONNECTING_NOTE,
+  RESUME_FAILED_NOTE,
+  type ReconnectPlan,
+  createReconnectPlan,
+} from './meeting-reconnect.ts';
+import {
   COMBINED_ECHO_NOTE,
   type MeetingAudioSource,
   systemAudioOffered,
@@ -184,6 +190,12 @@ export interface MeetingStripOpts {
   /** Run `fn` every `ms`; returns a canceller. Injectable so the clock is
    *  deterministic in tests. */
   interval?: (fn: () => void, ms: number) => () => void;
+  /**
+   * Run `fn` ONCE after `ms`; returns a canceller. The reconnect backoff's
+   * only clock, injectable for the same reason `interval` is: a test drives
+   * a two-minute window without waiting two minutes.
+   */
+  schedule?: (fn: () => void, ms: number) => () => void;
   openSocket?: (url: string) => MeetingSocket;
   /**
    * How ONE stream is opened. A mic + Mac-audio meeting calls it twice — see
@@ -350,6 +362,11 @@ function defaultInterval(fn: () => void, ms: number): () => void {
   return () => clearInterval(id);
 }
 
+function defaultSchedule(fn: () => void, ms: number): () => void {
+  const id = setTimeout(fn, ms);
+  return () => clearTimeout(id);
+}
+
 function defaultPromptName(current: string): string | null {
   return window.prompt('Who is this?', current);
 }
@@ -384,6 +401,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const now = opts.now ?? Date.now;
   const interval = opts.interval ?? defaultInterval;
   const openSocket = opts.openSocket ?? defaultOpenSocket;
+  const schedule = opts.schedule ?? defaultSchedule;
   const startCapture = opts.startCapture ?? startMeetingCapture;
   const promptName = opts.promptName ?? defaultPromptName;
   const bot = opts.bot;
@@ -523,6 +541,27 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * capture opens or the last meeting's record loads.
    */
   let lastMeetingId: string | null = null;
+  /**
+   * The meeting a dropped socket asks to be let back into. Set from `ready`
+   * and cleared the moment the meeting ends, which is what keeps it different
+   * from `lastMeetingId`: that one survives a stop on purpose (a late rename
+   * is addressed to it) and is also seeded from the LAST meeting on a doc
+   * opened after one ended. Resuming either of those would append this
+   * conversation to a recording that is over.
+   */
+  let liveMeetingId: string | null = null;
+  /** The reconnect backoff, reset by every landed connection. */
+  const reconnect: ReconnectPlan = createReconnectPlan({ now });
+  /** Cancels the retry that is waiting, or null when none is. */
+  let cancelRetry: (() => void) | null = null;
+  /** Whether the socket now open sent a `start` asking to resume. */
+  let resuming = false;
+  /**
+   * The one sentence the strip carries over the words: reconnecting, or the
+   * resume that could not be taken. Cleared when the meeting ends and when a
+   * resume lands.
+   */
+  let standingNote = '';
 
   // ---- bot presence ---------------------------------------------------------
   /** Whether this mount has seen the bot alive — a terminal state found
@@ -663,6 +702,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     turns: () => turns,
     mode: () => mode,
     startNote: () => startNote,
+    standingNote: () => standingNote,
     names: () => names,
     liveBot,
     botFarewell,
@@ -868,6 +908,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     } else {
       stopClock?.();
       stopClock = null;
+      // Nothing is reconnecting to a meeting that is over, and the sentence
+      // saying so must not outlive it.
+      standingNote = '';
+      liveMeetingId = null;
       // However the meeting ended, there is no live session left to tune —
       // the menu's Advanced panel and its "Applied." notes end with it. The
       // tuned VALUES stay in `advStates`, which is the point: they are what
@@ -889,6 +933,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     const sock = socket;
     socket = null;
     socketOpen = false;
+    resuming = false;
     if (!sock) return;
     // Handlers first: closing is a deliberate end, and an onclose that still
     // fired would report it as a dropped connection.
@@ -902,7 +947,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   function handle(msg: MeetingServerMessage | null, recvMs: number): void {
     if (!msg) return;
     switch (msg.type) {
-      case 'ready':
+      case 'ready': {
         // What the server opened, which is what is being billed. A server
         // built before modes existed says `solo` for a session that
         // diarizes; showing its answer is still better than showing a claim
@@ -915,14 +960,49 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         staleKeys.clear();
         // Where a rename lands once this meeting's socket is gone.
         if (msg.meetingId) lastMeetingId = msg.meetingId;
-        {
-          const startedAt = now();
-          // Same clock reading for the state and the zone, so the strip's
-          // elapsed readout and the zone's per-line stamps agree.
-          opts.liveZone?.begin(startedAt);
-          setState({ kind: 'recording', startedAt });
+        // A `ready` that answers a RETRY: the meeting never stopped as far as
+        // the person is concerned, so the clock, the state and the zone are
+        // left exactly as they are. Only the words the server could not carry
+        // on are dealt with here.
+        const wasResuming = resuming;
+        resuming = false;
+        reconnect.succeeded();
+        if (msg.meetingId) liveMeetingId = msg.meetingId;
+        if (wasResuming && state.kind === 'recording') {
+          if (msg.resumed) {
+            // Same meeting, same transcript, same section: nothing to say.
+            standingNote = '';
+          } else {
+            // The server could not take it, so this is a new recording and
+            // the strip says so. The rolling window empties with the meeting
+            // it belonged to — the new session numbers its turns from zero,
+            // and `rollTranscript` would drop them as older than the newest.
+            standingNote = RESUME_FAILED_NOTE;
+            turns = [];
+            names = {};
+            seen = new Set();
+            // And the clock restarts with it. This IS a new meeting — its own
+            // id, its own transcript, its own notes section — so an elapsed
+            // readout still counting from the old one would put a length on
+            // this recording that no file of it holds.
+            const restartedAt = now();
+            opts.liveZone?.end();
+            opts.liveZone?.begin(restartedAt);
+            // Carries the note through, because `setState` only clears it
+            // when the meeting is over.
+            setState({ kind: 'recording', startedAt: restartedAt });
+            break;
+          }
+          render();
+          break;
         }
+        const startedAt = now();
+        // Same clock reading for the state and the zone, so the strip's
+        // elapsed readout and the zone's per-line stamps agree.
+        opts.liveZone?.begin(startedAt);
+        setState({ kind: 'recording', startedAt });
         break;
+      }
       case 'transcript':
         // Noted before the render and closed after it, so the DOM leg is the
         // strip's own work and nothing else.
@@ -966,20 +1046,32 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         if (view === 'menu') renderPop();
         break;
       case 'unavailable':
+        // A retry that arrived before the server had finished tearing the old
+        // socket's meeting down. That teardown flushes an engine session, so
+        // it can outlast the drop by a moment — and the doc is locked until
+        // it lands. Waiting is the whole point of the backoff; the mic stays
+        // open and the next attempt asks again.
+        if (resuming && msg.reason === 'already_recording' && state.kind === 'recording') {
+          retryConnection();
+          break;
+        }
         // The words are never coming, so the mic goes back rather than sitting
         // open behind a settled state.
+        cancelReconnect();
         releaseAudio();
         closeSocket();
         opts.liveZone?.end();
         setState({ kind: 'unavailable', reason: msg.reason, message: msg.message });
         break;
       case 'stopped':
+        cancelReconnect();
         releaseAudio();
         closeSocket();
         opts.liveZone?.end();
         setState({ kind: 'idle' });
         break;
       case 'error':
+        cancelReconnect();
         releaseAudio();
         closeSocket();
         opts.liveZone?.end();
@@ -998,6 +1090,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // meeting that is over.
     seen = new Set();
     lastMeetingId = null;
+    // A new meeting is never a retry of the last one: whatever was waiting to
+    // reconnect is called off, and the backoff starts from the top.
+    cancelReconnect();
+    liveMeetingId = null;
+    standingNote = '';
     tapToStart = false;
     setState({ kind: 'requesting' });
     startNote = '';
@@ -1042,12 +1139,27 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         started.refusals,
         started.captures.map((c) => c.stream),
       ) || (started.source === 'mic+system' ? COMBINED_ECHO_NOTE : '');
+    connect();
+  }
+
+  /**
+   * Open the audio socket and start (or resume) the meeting on it.
+   *
+   * Called once per meeting from `start`, and once per retry from the
+   * reconnect below — which is the whole reason it is not inline there. The
+   * capture is already running when this is called and stays running across a
+   * retry: the microphone is what makes the two halves of an interrupted
+   * meeting one recording, and closing it would put a permission prompt
+   * between the person and their own sentence.
+   */
+  function connect(resume?: string): void {
     // The board this surface is on. Reading it from the URL rather than
     // taking it as a prop keeps it the same board every other request from
     // this page names — the strip is mounted on a doc page, which is always
     // under one.
     const sock = openSocket(meetingSocketUrl(currentWorkspaceId() ?? '', docId));
     socket = sock;
+    resuming = resume !== undefined;
     sock.onopen = () => {
       socketOpen = true;
       // Opening the socket IS starting the meeting; this frame only tells the
@@ -1083,6 +1195,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
             ? { tuning: tuningPayload(choose.chooseEngine, advFor(choose.chooseEngine)) }
             : {}),
           ...(timing ? { timing: true } : {}),
+          // Only on a retry, and only ever the meeting this mount is still
+          // in. Absent is a new recording, which is what every first start
+          // is — see the field's note in the wire contract.
+          ...(resume !== undefined ? { resume } : {}),
         }),
       );
       // After the start frame: the server reads the flag off it, and a ping
@@ -1097,6 +1213,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     };
     sock.onclose = () => {
       socketOpen = false;
+      // A deliberate close detaches these handlers first, so reaching here at
+      // all means the connection went away on its own.
+      if (state.kind === 'recording' && liveMeetingId) {
+        retryConnection();
+        return;
+      }
       releaseAudio();
       opts.liveZone?.end();
       setState({ kind: 'error', message: 'The connection to the meeting was lost.' });
@@ -1106,7 +1228,46 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     sock.onerror = null;
   }
 
+  /**
+   * The connection went away under a live meeting: keep the microphone, wait,
+   * and offer the same meeting id back.
+   *
+   * AUDIO SPOKEN DURING THE OUTAGE IS DROPPED, and the strip says so in the
+   * same sentence that says it is reconnecting. Holding it would mean pushing
+   * a minute of speech into a streaming session that has just opened and is
+   * priced by the second it is open; the server's own pre-handshake buffer
+   * stops at a few seconds for the same reason. A gap in the words is
+   * recoverable — the audio file and the raw transcript both show it — where
+   * a burst replayed out of time is a transcript nobody can trust.
+   */
+  function retryConnection(): void {
+    closeSocket();
+    const step = reconnect.dropped();
+    if (step.kind === 'give-up') {
+      releaseAudio();
+      opts.liveZone?.end();
+      setState({ kind: 'error', message: 'The connection to the meeting was lost.' });
+      return;
+    }
+    standingNote = RECONNECTING_NOTE;
+    render();
+    const resume = liveMeetingId ?? undefined;
+    cancelRetry = schedule(() => {
+      cancelRetry = null;
+      if (disposed || state.kind !== 'recording') return;
+      connect(resume);
+    }, step.delayMs);
+  }
+
+  /** Whatever retry is waiting, called off — a stop, a dispose, a new start. */
+  function cancelReconnect(): void {
+    cancelRetry?.();
+    cancelRetry = null;
+    reconnect.succeeded();
+  }
+
   function stop(): void {
+    cancelReconnect();
     if (socketOpen) socket?.send(JSON.stringify({ type: 'stop' }));
     releaseAudio();
     closeSocket();
@@ -1251,6 +1412,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     destroy: () => {
       disposed = true;
       generation += 1;
+      cancelReconnect();
       record.removeEventListener('click', onRecordClick);
       options.removeEventListener('click', onOptionsClick);
       scrim.removeEventListener('click', onScrim);

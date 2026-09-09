@@ -236,6 +236,21 @@ export type MeetingClientMessage =
        * on the strip.
        */
       participant?: string;
+      /**
+       * Continue the meeting this id names instead of starting a new one.
+       *
+       * Sent only by a client whose socket DROPPED while it was recording:
+       * the microphone stayed open, so the words either side of the outage
+       * belong to one meeting, one transcript file and one notes section. The
+       * server accepts it only for a meeting it can still find on disk and
+       * that no other socket is holding; anything else opens a new meeting,
+       * and `ready` says which happened (`resumed`).
+       *
+       * Absent on every first `start`, which is what a resume must never be
+       * mistaken for: a fresh recording gets its own id, its own section and
+       * its own bill.
+       */
+      resume?: string;
     }
   | { type: 'stop' }
   /**
@@ -303,7 +318,23 @@ export type MeetingServerMessage =
    * echoed back so the strip reports the session that is actually running
    * (and being billed) rather than the one the client asked for.
    */
-  | { type: 'ready'; meetingId: string; startedAt: number; engine: string; mode: CaptureMode }
+  | {
+      type: 'ready';
+      meetingId: string;
+      startedAt: number;
+      engine: string;
+      mode: CaptureMode;
+      /**
+       * True only when this `ready` answers a `start` that asked to RESUME
+       * and the server took it: same meeting id, same transcript, same notes
+       * section, and `startedAt` is the original recording's.
+       *
+       * Absent — never `false` from an older server — is a new meeting, so a
+       * client that asked to resume and reads nothing here knows the fallback
+       * happened and can say so.
+       */
+      resumed?: boolean;
+    }
   /** No words will follow. The socket stays open so the strip can say why. */
   | { type: 'unavailable'; reason: MeetingUnavailableReason; message: string }
   /**
@@ -363,6 +394,20 @@ export type MeetingServerMessage =
   /** Something went wrong mid-meeting. Distinct from `unavailable`. */
   | { type: 'error'; message: string };
 
+/**
+ * A meeting id as the store writes them (`m-<docId>-<ms>`), or nothing.
+ *
+ * The value reaches a FILE NAME on the server, so the shape is checked here
+ * rather than sanitized there: `meetings.ts` maps anything outside this set to
+ * an underscore, which would let two different ids name one transcript. The
+ * bound is generous — a doc id is part of the id — and anything else is
+ * dropped, which reads downstream as a resume the server could not honour.
+ */
+export function parseMeetingId(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  return /^[A-Za-z0-9._-]{1,200}$/.test(raw) ? raw : undefined;
+}
+
 /** Parse a client frame, returning null for anything malformed. */
 export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | null {
   if (typeof raw !== 'string') return null;
@@ -394,6 +439,7 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
   }
   if (m.type === 'start') {
     const rate = m.sampleRate;
+    const resume = parseMeetingId(m.resume);
     // A rate the engine cannot be told about is worse than no meeting: the
     // audio would transcribe as noise and look like a bad microphone.
     if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 8000 || rate > 48_000) {
@@ -434,6 +480,10 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       // A value this build knows, or nothing — and nothing is the microphone,
       // which is what absent has always meant.
       ...(source !== undefined && source !== 'mic' ? { source } : {}),
+      // Dropped rather than refused, like every other unreadable field on
+      // this frame: a resume id the server could never match is a new
+      // meeting, which is exactly the fallback a failed resume takes anyway.
+      ...(resume !== undefined ? { resume } : {}),
     };
   }
   return null;

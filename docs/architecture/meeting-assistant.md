@@ -30,7 +30,8 @@ flowchart LR
 - **The audio socket IS the meeting's lifecycle.** Every way the socket can
   end — clean stop, tab close, network drop — ends the meeting exactly once.
   `opening`/`ending` are real states because both ends of a meeting are round
-  trips.
+  trips. A SOCKET that ends is no longer a MEETING that ends, though: see
+  "Resume on reconnect" below.
 - **Nothing word-rate enters the SSE replay buffer.** Microphone transcript
   frames return on the audio socket; only `meeting.started`/`meeting.stopped`
   broadcast to the doc channel. The SSE bus keeps 200 events for reconnect
@@ -77,6 +78,56 @@ flowchart LR
   per SESSION: the
   same letter is a different person next meeting, so the name map lives on
   the meeting's index line, never on the doc.
+
+## Resume on reconnect (2026-09-08)
+
+A dropped connection used to end the recording. The mic closed, the strip said
+the connection was lost, and pressing Record again opened a meeting with a new
+id — so a deploy in the middle of a conversation left two transcript files and
+two `## Meeting notes` sections under one conversation, which is precisely the
+split PR 824 closed on the server side.
+
+The client now keeps the microphone and asks to be let back into the SAME
+meeting: `start` carries `resume: <meetingId>`, and `ready` answers `resumed:
+true` when the server took it.
+
+- **What "took it" means.** `MeetingStore.resume` accepts an id this doc's
+  index knows AND whose transcript file is still on disk, on a doc nothing
+  else is recording. Anything else returns null and the relay opens a NEW
+  meeting — never one under the old id, because the transcript is append-only
+  and a wrong id cannot be taken back. The strip says so in one sentence and
+  keeps recording; that is the documented fallback, not a failure state.
+- **Turn numbers continue.** An engine session numbers its turns from zero, and
+  a second line for a turn already written is a REVISION in this format — so a
+  resumed leg starting at zero would overwrite the meeting's opening words.
+  `ActiveMeeting.turnBase` is the highest turn already recorded plus one, and
+  the relay adds it to every turn id before the frame, the record and the
+  notes pipeline see it. Zero on a fresh meeting, so nothing else changed.
+- **Everything named after the meeting comes back with it**: the transcript
+  JSONL, `<meetingId>-timing.jsonl`, and `<meetingId>-section.json` — which is
+  why the notes land under the section the meeting opened rather than a second
+  one (`beginMeeting` clears only the in-memory cache, deliberately).
+- **The index gains one line kind**: `{meetingId, resumedAt}`. A resume UNDOES
+  the end the shutdown wrote, so the fold sets `endedAt` back to null and the
+  later stop line puts it back. `MeetingRecord.resumedAt` is the list of them.
+- **The raw companion gets a continuation.** A graceful shutdown flushes the
+  meeting's `## Segment N` before the resume happens, and a written segment is
+  skipped — so the resumed leg's words would have vanished from the file a
+  person reads. `flushRawSegments` takes the leg's first turn number and
+  appends `## Segment N (resumed) — <ISO>` holding exactly the turns from
+  there. Same segment number, same `.pcm` files (the sink opens with `a`).
+- **Audio spoken during the outage is DROPPED, and the strip says so** in the
+  same sentence that says it is reconnecting. Buffering it would mean pushing a
+  minute of speech into a streaming session priced by the second it is open,
+  out of time with the words around it; the server's own pre-handshake buffer
+  stops at a few seconds for the same reason. A gap is visible in the record;
+  a burst replayed out of order is a transcript nobody can trust.
+- **The backoff is 1s, 2s, 4s, 8s, then 15s, giving up after two minutes**
+  (`meeting-reconnect.ts`, which holds the policy and nothing else). An
+  `already_recording` refusal DURING a resume is retried rather than reported:
+  the dropped socket's teardown flushes an engine session and can still hold
+  the doc's lock for a moment. Past the window the strip lands exactly where it
+  used to — "The connection to the meeting was lost", mic released.
 
 ## Engine choice
 
