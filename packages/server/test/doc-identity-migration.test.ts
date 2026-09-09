@@ -78,6 +78,10 @@ describe('the doc-identity migration', () => {
       listThreads(s.getOrCreate(docId, {}).ydoc).map((t) => t.comments[0]?.text ?? ''),
     );
 
+  /** The thread ids on a document, as the corpus holds them. */
+  const threadIdsOf = (docId: string): Promise<string[]> =>
+    withStore((s) => listThreads(s.getOrCreate(docId, {}).ydoc).map((t) => t.id));
+
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), 'cw-migrate-')));
     dataDir = join(tmp, 'data');
@@ -357,5 +361,22 @@ describe('the doc-identity migration', () => {
     const journal = readJournal(dataDir);
     expect(journal.runs).toHaveLength(1);
     expect(journal.runs[0]?.claims.map((c) => c.docId)).toEqual(['d-plan']);
+  });
+  it("records the losers' thread ids, so a later check needs no trust in the losers", async () => {
+    // Written at apply time and never revised: it is the only evidence that
+    // survives something overwriting the loser and the winner alike later.
+    writeFileSync(join(wt, rel), '# Plan\n\nThe cache is warmed at boot.\n');
+    await seedDoc('d-wt-a', join(wt, rel), 'From the branch', 'cache is warmed');
+    await seedDoc('d-main', join(main, rel), 'From main', 'cache is warmed');
+    rmSync(join(dataDir, 'repos.json'), { force: true });
+    const applied = applyPlan(dataDir, planMigration(liveIo(dataDir)), new RepoRegistry(dataDir));
+    expect(applied.merged).toBe(1);
+
+    const merge = readJournal(dataDir).runs[0]?.merges[0];
+    expect(merge?.winner).toBe('d-main');
+    expect(merge?.loserThreadIds).toHaveLength(1);
+    // The id it recorded is the one the loser actually holds, not a placeholder.
+    const loserThreads = await threadIdsOf('d-wt-a');
+    expect(merge?.loserThreadIds).toEqual(loserThreads);
   });
 });

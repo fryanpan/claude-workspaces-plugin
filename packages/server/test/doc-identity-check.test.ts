@@ -34,7 +34,7 @@ function writeDoc(dataDir: string, docId: string, threadIds: string[]): void {
 
 function writeJournalWith(
   dataDir: string,
-  merges: Array<{ winner: string; losers: string[] }>,
+  merges: Array<{ winner: string; losers: string[]; loserThreadIds?: string[] }>,
 ): void {
   const journal: Journal = {
     version: 1,
@@ -51,6 +51,7 @@ function writeJournalWith(
           reanchored: 0,
           orphaned: 0,
           skipped: 0,
+          ...(m.loserThreadIds ? { loserThreadIds: m.loserThreadIds } : {}),
         })),
         unresolved: [],
       },
@@ -129,6 +130,47 @@ describe('checkMerges', () => {
       const res = checkMerges(dir);
       expect(res).toMatchObject({ runs: 0, expected: 0, present: 0, ok: true });
       expect(checkLines(res)[0]).toBe('0 merged winner(s) across 0 run(s).');
+    });
+  });
+  it('catches a thread removed from the winner AND the loser, from what the run recorded', () => {
+    withDataDir((dir) => {
+      // The failure the journalled ids exist for: something wrote over both
+      // documents after the run — a restore, an editor, a late flush — so the
+      // corpus agrees with itself and only the run's own record disagrees.
+      writeDoc(dir, 'd-winner', ['t-own']);
+      writeDoc(dir, 'd-loser-a', []);
+      writeJournalWith(dir, [
+        { winner: 'd-winner', losers: ['d-loser-a'], loserThreadIds: ['t-from-a'] },
+      ]);
+
+      const res = checkMerges(dir);
+      expect(res.ok).toBe(false);
+      expect(res.winners[0]?.missing).toEqual(['t-from-a']);
+      expect(res.winners[0]?.source).toBe('journal');
+      expect(res).toMatchObject({ fromJournal: 1, fromLosers: 0 });
+      // The losers are never opened when the run recorded the ids, so an
+      // emptied loser is not even reported as unreadable.
+      expect(res.winners[0]?.unreadable).toEqual([]);
+    });
+  });
+
+  it('CONTROL: the same corpus passes on the legacy fallback, which is the weaker mode', () => {
+    withDataDir((dir) => {
+      // Byte-for-byte the corpus above, journalled without the ids. It passes,
+      // which is exactly why the fallback is named in the report rather than
+      // trusted silently.
+      writeDoc(dir, 'd-winner', ['t-own']);
+      writeDoc(dir, 'd-loser-a', []);
+      writeJournalWith(dir, [{ winner: 'd-winner', losers: ['d-loser-a'] }]);
+
+      const res = checkMerges(dir);
+      expect(res.ok).toBe(true);
+      expect(res.expected).toBe(0);
+      expect(res.winners[0]?.source).toBe('losers');
+      expect(res).toMatchObject({ fromJournal: 0, fromLosers: 1 });
+      const text = checkLines(res).join('\n');
+      expect(text).toContain('re-read from the losers');
+      expect(text).toContain('weaker check');
     });
   });
 });
