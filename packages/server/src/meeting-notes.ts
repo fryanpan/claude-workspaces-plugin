@@ -1065,6 +1065,10 @@ export function beginNotesSession(
         turn: t.turn,
         text: t.text,
         ...(t.partial ? { partial: true } : {}),
+        // `continued` survives the solo path for the same reason `partial`
+        // does: whether these words finish a sentence already in the notes
+        // is a fact about the WORDS, not about who said them.
+        ...(t.continued ? { continued: true } : {}),
       });
       const turns = multi ? raw.map(withNames) : raw.map(bare);
       let taskLinks: readonly NoteTaskLink[] = [];

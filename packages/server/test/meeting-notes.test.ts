@@ -2536,6 +2536,85 @@ describe('session start and tick lifecycle', () => {
   });
 });
 
+describe('the rest of a sentence the ceiling already carried', () => {
+  const ids = { docId: 'doc-continued', meetingId: 'm-continued' };
+
+  /** Drive a ceiling tick mid-turn, then settle the turn, capturing composes. */
+  const runSplitTurn = async (speaker?: string) => {
+    const schedule = new ManualScheduler();
+    const seen: NotesComposeInput[] = [];
+    const composer: NotesComposer = {
+      name: 'watcher',
+      compose(input) {
+        seen.push(input);
+        return Promise.resolve([]);
+      },
+    };
+    const session = beginNotesSession(
+      { composer, quietMs: QUIET, cadenceMs: CADENCE, schedule, onNotes: () => {} },
+      ids,
+    );
+    const voice = speaker !== undefined ? { speaker } : {};
+    if (speaker !== undefined) {
+      // A SECOND voice, because the speaker-name path only switches on once
+      // the meeting has heard two. With one voice a session is solo however
+      // many labels it carries, and the test would run the same code as the
+      // one above it while claiming to run the other.
+      session.onTurn({ turn: 90, text: 'Go ahead.', final: true, speaker: 'Z' });
+      schedule.fire();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    session.onTurn({
+      turn: 0,
+      text: 'so the second thing we should look at is the write',
+      final: false,
+      settledText: 'so the second thing we should look at',
+      ...voice,
+    });
+    schedule.fireAt(CADENCE);
+    await new Promise((r) => setTimeout(r, 0));
+    session.onTurn({
+      turn: 0,
+      text: 'So the second thing we should look at is the write path.',
+      final: true,
+      ...voice,
+    });
+    schedule.fire();
+    await session.end();
+    return seen;
+  };
+  const QUIET = 1000;
+  const CADENCE = 5000;
+
+  it('reaches the composer flagged, in a meeting with one voice', async () => {
+    // The solo path rebuilds each turn field by field rather than spreading
+    // it, so a flag that is not named there is silently dropped — which is
+    // where this one was being lost.
+    const seen = await runSplitTurn();
+    const carried = seen
+      .flatMap((i) => i.tick.turns)
+      .find((t) => t.text.startsWith('path') || t.text.includes('path.'));
+    expect(carried).toBeDefined();
+    expect(carried?.continued).toBe(true);
+    // Control: the FIRST half is not marked — nothing preceded it.
+    const first = seen[0]?.tick.turns[0];
+    expect(first?.text).toContain('so the second thing');
+    expect(first?.continued).toBeUndefined();
+  });
+
+  it('reaches the composer flagged when the meeting has names on it', async () => {
+    // The other mapper. This one spreads the turn, so it keeps the flag by
+    // construction — which is worth a test precisely because that is an
+    // accident of how it is written and the solo path proves it can be lost.
+    const seen = await runSplitTurn('A');
+    // Control: the speaker path really is on, or this runs the mapper above.
+    expect(seen.some((i) => i.tick.turns.some((t) => t.speaker !== undefined))).toBe(true);
+    const carried = seen.flatMap((i) => i.tick.turns).find((t) => t.continued === true);
+    expect(carried).toBeDefined();
+    expect(carried?.text).not.toContain('so the second thing');
+  });
+});
+
 describe('what the timing log records about a meeting', () => {
   const ids = { docId: 'doc-timing', meetingId: 'm-timing' };
 

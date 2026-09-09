@@ -83,6 +83,76 @@ describe('notes prompt', () => {
     expect(user).toContain('/repo/planning');
   });
 
+  it('marks the rest of a sentence whose earlier words are already noted', () => {
+    // A ceiling tick hands over as much of a long turn as the engine has
+    // committed to; the remainder arrives on a later tick. Unmarked it reads
+    // as a new thought, and the note-taker opens a second point for the
+    // second half of one sentence.
+    const { user } = buildNotesPrompt({
+      ...input,
+      tick: {
+        tick: 3,
+        reason: 'pause',
+        turns: [{ turn: 4, text: 'path first.', continued: true }],
+      },
+    });
+    expect(user).toContain('- path first. [continues a sentence already in the notes]');
+  });
+
+  it('says WHY a fragment is a fragment: still being said, or the recording stopped', () => {
+    // One string used to serve both, because only the final tick could carry
+    // a fragment. A ceiling tick carries them mid-meeting now, and telling
+    // the composer the recording stopped while the meeting is still going is
+    // telling it something false.
+    const mid = buildNotesPrompt({
+      ...input,
+      tick: {
+        tick: 3,
+        reason: 'cadence',
+        turns: [{ turn: 4, text: 'so the second thing', partial: true }],
+      },
+    }).user;
+    expect(mid).toContain('so the second thing [unfinished — they are still saying it]');
+    expect(mid).not.toContain('the recording stopped');
+
+    const stopped = buildNotesPrompt({
+      ...input,
+      tick: {
+        tick: 9,
+        reason: 'end',
+        turns: [{ turn: 4, text: 'and the one thing I still want', partial: true }],
+      },
+    }).user;
+    expect(stopped).toContain(
+      'and the one thing I still want [unfinished — the recording stopped mid-sentence]',
+    );
+    expect(stopped).not.toContain('still saying it');
+  });
+
+  it('a turn that is both carried on and unfinished says both, in that order', () => {
+    const { user } = buildNotesPrompt({
+      ...input,
+      tick: {
+        tick: 3,
+        reason: 'cadence',
+        turns: [{ turn: 4, text: 'we should look at', partial: true, continued: true }],
+      },
+    });
+    expect(user).toContain(
+      '- we should look at [continues a sentence already in the notes] ' +
+        '[unfinished — they are still saying it]',
+    );
+  });
+
+  it('an ordinary settled turn carries no marker at all', () => {
+    // The control: markers must be the exception, or every line carries
+    // noise and none of them means anything.
+    const { user } = buildNotesPrompt(input);
+    expect(user).toContain('- The sync is the bottleneck.\n');
+    expect(user).not.toContain('[continues');
+    expect(user).not.toContain('[unfinished');
+  });
+
   it('names which heading is this meeting’s, so a bullet has an id to go under', () => {
     const { user } = buildNotesPrompt(input);
     expect(user).toContain('notes are under heading h1.');
