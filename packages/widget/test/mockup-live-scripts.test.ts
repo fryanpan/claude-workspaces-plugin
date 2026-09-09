@@ -44,12 +44,28 @@ interface Page {
   globals: Record<string, unknown>;
   /** Run a source in it, the way an inline `on*=` handler is run. */
   run: (source: string) => unknown;
+  /** The error events nothing called `preventDefault()` on. */
+  unhandled: () => ErrorEvent[];
   restore: () => void;
 }
 
-/** Make script insertion execute, and throw, the way a browser's does. */
-function browserLikeScripts(): Page {
+/**
+ * How the browser under test reports a script's evaluation error.
+ *
+ * `throw` is Chrome, which rethrows out of the insert — the shape the Sentry
+ * event that opened this ticket has. `event` is WebKit and Firefox, which
+ * report only through the global error-reporting mechanism: the insert returns
+ * normally and an `error` event fires synchronously during evaluation. Bryan
+ * reviews mockups on an iPad, so `event` is the shape his device has.
+ */
+type Reporting = 'throw' | 'event';
+
+/** Make script insertion execute, and report, the way a browser's does. */
+function browserLikeScripts(reporting: Reporting = 'throw'): Page {
   const context = vm.createContext({});
+  // Every error event this page raised, so a test can ask what a listener —
+  // Sentry's, in production — would have been told.
+  const uncaught: ErrorEvent[] = [];
   const realInsert = document.body.insertBefore.bind(document.body);
   document.body.insertBefore = ((node: Node, ref: Node | null) => {
     const out = realInsert(node, ref);
@@ -58,15 +74,27 @@ function browserLikeScripts(): Page {
       // A module has its own scope and a data block is not code; neither runs
       // in the page's global scope, so neither is this harness's business.
       if (type === '' || type === 'text/javascript') {
-        // The browser leaves the failed element in the document and lets the
-        // error out of the insert; taking it back out is the module's job.
-        vm.runInContext(node.textContent ?? '', context);
+        // The browser leaves the failed element in the document; taking it
+        // back out is the module's job.
+        try {
+          vm.runInContext(node.textContent ?? '', context);
+        } catch (err) {
+          if (reporting === 'throw') throw err;
+          const ev = new ErrorEvent('error', {
+            cancelable: true,
+            message: `${(err as Error).name}: ${(err as Error).message}`,
+            error: err,
+          });
+          window.dispatchEvent(ev);
+          uncaught.push(ev);
+        }
       }
     }
     return out;
   }) as typeof document.body.insertBefore;
   return {
     globals: context as Record<string, unknown>,
+    unhandled: () => uncaught.filter((ev) => !ev.defaultPrevented),
     run: (source: string) => vm.runInContext(source, context),
     restore: () => {
       document.body.insertBefore = realInsert as typeof document.body.insertBefore;
@@ -143,6 +171,27 @@ describe("a mock's scripts across rounds", () => {
     expect(typeof page.globals.currentLabel).toBe('function');
     expect(page.globals.lastRound).toBe(3);
     expect(page.run('currentLabel()')).toBe('round 3');
+  });
+
+  it('recovers a round on a browser that reports the collision as an event', async () => {
+    const { swapDocument } = await importLive();
+    // WebKit's shape, which is what Bryan's iPad has: nothing comes out of the
+    // insert, and the only sign is an `error` event fired while the script was
+    // being evaluated. Detecting the throw alone leaves this browser with the
+    // round-two failure the ticket is about.
+    page = browserLikeScripts('event');
+    paintRoundOne();
+
+    swapDocument(declaringRound(1));
+    swapDocument(declaringRound(2));
+
+    expect(page.globals.onScreen).toBe('round 2');
+    expect(document.querySelector('#hero')?.textContent).toBe('Round 2');
+    // The round recovered, so the event is marked handled and the browser's
+    // own default reporting of it is suppressed. (A page-level listener
+    // installed before the swap still HEARS the event; `preventDefault` was
+    // never able to unregister anyone.)
+    expect(page.unhandled()).toEqual([]);
   });
 
   it('leaves a module script, an external script and a data block as written', async () => {
