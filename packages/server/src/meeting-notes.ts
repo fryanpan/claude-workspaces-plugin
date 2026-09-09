@@ -1202,30 +1202,57 @@ export function beginNotesSession(
         notesHeadingId === undefined &&
         outline.some((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
       if (strandingRisk && deps.readOutline && deps.notesHeadingId) {
-        const opened = deps.onNotes({
-          docId: ids.docId,
-          meetingId: ids.meetingId,
-          // The tick this write belongs to, carrying no turns: it is the
-          // section being opened, not any speech being noted, and a sink
-          // that reports what a tick wrote must not attribute these words
-          // to the room.
-          tick: { ...tick, turns: [] },
-          edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
-        });
-        if (opened !== false) {
-          try {
-            outline = deps.readOutline({ docId: ids.docId, meetingId: ids.meetingId });
-            notesHeadingId = deps.notesHeadingId({
+        let opened: boolean;
+        try {
+          opened =
+            deps.onNotes({
               docId: ids.docId,
               meetingId: ids.meetingId,
-              outline,
-            });
-          } catch (err) {
-            // Same rule as every other outline read: it informs, it never
-            // fails the tick. With no heading the compose behaves exactly as
-            // it did before this block existed.
-            deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
-          }
+              // The tick this write belongs to, carrying no turns: it is the
+              // section being opened, not any speech being noted, and a sink
+              // that reports what a tick wrote must not attribute these words
+              // to the room.
+              tick: { ...tick, turns: [] },
+              edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
+            }) !== false;
+        } catch (err) {
+          opened = false;
+          deps.onError?.(err instanceof Error ? err.message : 'notes section open failed');
+        }
+        if (!opened) {
+          // THE SECTION DID NOT OPEN, SO NOTHING IS COMPOSED THIS TICK. A
+          // compose that went ahead would write under the section that IS
+          // there — somebody else's — which is the exact window this block
+          // exists to close. Same handling as a refused final write: the
+          // words carry, the surface is told, and a size-independent retry
+          // is scheduled. A sink that threw is a refusal too, and it must
+          // not reject the tick chain that every later tick waits on.
+          carry = [...raw, ...carry];
+          lifecycle(
+            'failed',
+            tick.tick,
+            raw.map((t) => t.turn),
+          );
+          composeFailures++;
+          deps.onError?.(
+            `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: notes section not opened`,
+          );
+          report('failed', []);
+          retryAfterFailure(tick);
+          return;
+        }
+        try {
+          outline = deps.readOutline({ docId: ids.docId, meetingId: ids.meetingId });
+          notesHeadingId = deps.notesHeadingId({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            outline,
+          });
+        } catch (err) {
+          // Same rule as every other outline read: it informs, it never
+          // fails the tick. With no heading the compose behaves exactly as
+          // it did before this block existed.
+          deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
         }
       }
       // DERIVED FROM THE OUTLINE, not from a section read: a block carrying no
