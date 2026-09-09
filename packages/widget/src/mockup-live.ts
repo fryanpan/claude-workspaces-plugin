@@ -103,6 +103,72 @@ function isOurs(node: Node): boolean {
   return false;
 }
 
+/** Script types the browser runs as a CLASSIC script, in the global scope. */
+const CLASSIC_TYPES = new Set([
+  '',
+  'text/javascript',
+  'application/javascript',
+  'text/ecmascript',
+  'application/ecmascript',
+  'text/jscript',
+  'text/livescript',
+]);
+
+/**
+ * Does this element carry inline source the browser runs in the page's ONE
+ * global scope?
+ *
+ * `src` scripts carry no source of ours to touch. `type="module"` already has
+ * a scope per script, which is why a module never had this problem. Any other
+ * type — `application/json`, `text/x-template` — is a data block the page
+ * reads as text, and rewriting it would corrupt the mock's own data.
+ */
+function isClassicInline(el: HTMLScriptElement): boolean {
+  if (el.hasAttribute('src')) return false;
+  const type = (el.getAttribute('type') ?? '').split(';')[0].trim().toLowerCase();
+  return CLASSIC_TYPES.has(type);
+}
+
+/** True when the source opens with a `"use strict"` directive prologue. */
+function isStrictSource(source: string): boolean {
+  const head = source.replace(/^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*/, '');
+  return /^(['"])use strict\1\s*;?/.test(head);
+}
+
+/**
+ * The source to give a revived classic script, wrapped so re-running it is
+ * clean.
+ *
+ * A classic script's top-level `const`, `let` and `class` are bindings of the
+ * page's global lexical scope, and that scope survives a swap because the page
+ * does. So round two's `const METHODS` met round one's and threw
+ * `Identifier 'METHODS' has already been declared` — inside `insertBefore`,
+ * which aborted the rest of the swap, so the round neither ran nor finished
+ * landing (Sentry CLAUDE-WORKSPACES-8). Most mocks declare a top-level
+ * `const`, so live reload was broken on round two for almost all of them.
+ *
+ * Wrapping the source in a block is what makes those three re-runnable: in a
+ * block they are block-scoped and go away with the round, while the two things
+ * the mock's own markup depends on stay exactly where they were. `var` is
+ * still function-scoped, so still global; and a top-level function declaration
+ * in a block is still hoisted to the global in sloppy mode (Annex B), which is
+ * what an inline `onclick="doThing()"` looks up. So a mock's handlers keep
+ * working across rounds.
+ *
+ * Annex B is the part a `"use strict"` script does not get: under strict mode
+ * a function declared in a block stays in the block, so wrapping such a script
+ * would take its handlers away. Those are left unwrapped and keep colliding —
+ * a strict mock that redeclares is a narrower bug than the one this fixes, and
+ * the swap now survives it either way rather than aborting.
+ */
+export function reviveSource(el: HTMLScriptElement): string {
+  const source = el.textContent ?? '';
+  if (!isClassicInline(el) || isStrictSource(source)) return source;
+  // The newlines matter: a source ending in a `// line comment` would
+  // otherwise swallow the closing brace.
+  return `{\n${source}\n}`;
+}
+
 /**
  * Copy a parsed `<script>` into a live one so it actually runs.
  *
@@ -114,7 +180,7 @@ function isOurs(node: Node): boolean {
 function reviveScript(src: HTMLScriptElement): HTMLScriptElement {
   const out = document.createElement('script');
   for (const a of Array.from(src.attributes)) out.setAttribute(a.name, a.value);
-  out.textContent = src.textContent;
+  out.textContent = reviveSource(src);
   return out;
 }
 
@@ -158,13 +224,30 @@ export function swapDocument(html: string): void {
     if (!keep.includes(node)) node.remove();
   }
   const first = document.body.firstChild;
+  // Per node, because one node that will not insert must not cost the reader
+  // the rest of the round. A mock's script can still throw for reasons that
+  // are the mock's own — its round one left something in a bad state, it
+  // reads an API this browser lacks — and inserting a script RUNS it, so the
+  // throw comes out of `insertBefore`. One report at the end, not one per
+  // node: a round with fifty broken nodes is one broken round.
+  const failures: unknown[] = [];
   for (const node of Array.from(next.body.childNodes)) {
     if (isOurs(node)) continue;
-    const copy =
-      node instanceof HTMLScriptElement
-        ? reviveScript(node)
-        : (document.importNode(node, true) as Node);
-    document.body.insertBefore(copy, first);
+    try {
+      const copy =
+        node instanceof HTMLScriptElement
+          ? reviveScript(node)
+          : (document.importNode(node, true) as Node);
+      document.body.insertBefore(copy, first);
+    } catch (err) {
+      failures.push(err);
+    }
+  }
+  if (failures.length > 0) {
+    console.error(
+      `[claude-workspaces] mockup round: ${failures.length} node(s) failed to land`,
+      ...failures,
+    );
   }
   // Body attributes too — a round that changes a class or a theme on <body>
   // would otherwise render against the previous round's.
