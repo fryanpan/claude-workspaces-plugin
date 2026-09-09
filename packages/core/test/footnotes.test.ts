@@ -106,6 +106,39 @@ describe('a word that merely starts like a conjunction', () => {
   });
 });
 
+describe('a code span inside a note', () => {
+  it('does not end the note at a bracket in the backticks', () => {
+    const notes = findFootnotes('Claim^[Use the `foo]bar` option.] holds.');
+    expect(notes.map((f) => f.note)).toEqual(['Use the `foo]bar` option.']);
+  });
+
+  it('leaves a lone backtick an ordinary character (control)', () => {
+    const notes = findFootnotes('Claim^[a ` tick] holds.');
+    expect(notes.map((f) => f.note)).toEqual(['a ` tick']);
+  });
+});
+
+describe('a sentence that ends inside a quotation', () => {
+  const factOf = (text: string) => {
+    const f = findFootnotes(text)[0];
+    if (!f) throw new Error('no footnote');
+    const r = factRange(text, f.start);
+    return text.slice(r.start, r.end);
+  };
+
+  it('is a boundary, so the underline starts on the new sentence', () => {
+    expect(factOf('He said "It works." The next claim^[source] holds.')).toBe('The next claim');
+  });
+
+  it('is a boundary through a closing bracket too', () => {
+    expect(factOf('It shipped (late.) The next claim^[source] holds.')).toBe('The next claim');
+  });
+
+  it('still ends a plain sentence at the stop (control)', () => {
+    expect(factOf('It shipped late. The next claim^[source] holds.')).toBe('The next claim');
+  });
+});
+
 describe('a caret the author escaped', () => {
   it('is not a note opener, so the syntax can be written down', () => {
     expect(findFootnotes('Type \\^[a note] to add one.')).toEqual([]);

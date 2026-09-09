@@ -122,6 +122,15 @@ const CASES: Array<{ name: string; md: string; ops?: Op[] }> = [
     ],
   },
   {
+    name: 'a note holding a code span with a bracket in it',
+    md: 'Claim^[Use the `foo]bar` option, page 12.] holds today.',
+    ops: [
+      ['Claim', undefined],
+      ['^[Use the `foo]bar` option, page 12.]', undefined],
+      [' holds today.', undefined],
+    ],
+  },
+  {
     // Control: an unterminated caret is not a footnote, and the line still
     // has to survive untouched — otherwise "opaque" would just mean "eaten".
     name: 'an unterminated caret (control)',

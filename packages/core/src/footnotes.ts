@@ -107,11 +107,40 @@ function closingBracket(text: string, open: number): number {
       j++;
       continue;
     }
+    // A code span is characters, not structure, for the same reason an escape
+    // is: ^[Use the `foo]bar` option.] is one note about a flag whose name
+    // holds a bracket. Only a COMPLETE span is skipped — a lone backtick is
+    // an ordinary character and must not swallow the rest of the note.
+    if (c === '`') {
+      const span = codeSpanEnd(text, j);
+      if (span >= 0) {
+        j = span;
+        continue;
+      }
+    }
     if (c === '[') depth++;
     else if (c === ']') {
       depth--;
       if (depth === 0) return j;
     }
+  }
+  return -1;
+}
+
+/**
+ * The last backtick of the span opened at `open`, or -1 when nothing closes
+ * it. A run of N backticks is closed by the next run of exactly N, which is
+ * how a span holds a backtick of its own.
+ */
+function codeSpanEnd(text: string, open: number): number {
+  let fence = 0;
+  while (text[open + fence] === '`') fence++;
+  for (let j = open + fence; j < text.length; j++) {
+    if (text[j] !== '`') continue;
+    let run = 0;
+    while (text[j + run] === '`') run++;
+    if (run === fence) return j + run - 1;
+    j += run - 1;
   }
   return -1;
 }
@@ -142,7 +171,11 @@ export function isUnsureNote(note: string): boolean {
 export function factRange(text: string, footnoteStart: number): FactRange {
   const before = text.slice(0, footnoteStart);
   let start = 0;
-  const sentence = /[.?!]\s/g;
+  // A sentence may end inside a quotation or a parenthesis — `He said "It
+  // works." The next claim` — so the closing marks come between the stop and
+  // the space. Without them no boundary is found at all and the underline
+  // starts back in the previous sentence.
+  const sentence = /[.?!]["'”’)\]]*\s/g;
   for (let m = sentence.exec(before); m; m = sentence.exec(before)) {
     start = m.index + m[0].length;
   }
