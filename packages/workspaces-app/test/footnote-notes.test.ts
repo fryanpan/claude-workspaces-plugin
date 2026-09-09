@@ -29,6 +29,7 @@ afterEach(() => {
   for (const f of open.splice(0).reverse()) f();
   uninstall?.();
   uninstall = null;
+  document.body.removeAttribute('data-cards');
   document.body.innerHTML = '';
 });
 
@@ -180,6 +181,34 @@ describe('the printed sources list', () => {
   it('holds nothing at all for a doc with no notes (control)', () => {
     const { container } = mount({ marginVisible: true, md: 'A permit takes 94 days on paper.' });
     expect(container.querySelector('.cw-fn-sources')?.textContent).toBe('');
+  });
+});
+
+describe('a reader who put the cards inline on a wide screen', () => {
+  /**
+   * The state the first cut got wrong. `balloonMarginVisible` is a STORED
+   * preference, not a width test, so at 1180px with cards set to inline
+   * there is no margin column and no margin note — and the superscript used
+   * to be hidden by a `(min-width: 1101px)` media query anyway, which left
+   * the note with no surface at all. Both halves now ask `body[data-cards]`.
+   */
+  it('still shows the number in the text, and hides it only where the margin has the note', () => {
+    const { container } = mount({ marginVisible: false });
+    const sup = supFor(container, '1');
+    document.body.dataset.cards = 'inline';
+    expect(styleOf(sup).getPropertyValue('--cw-fn-sup').trim()).toBe('');
+    document.body.dataset.cards = 'balloon';
+    expect(styleOf(sup).getPropertyValue('--cw-fn-sup').trim()).toBe('none');
+  });
+
+  it('opens the note on a tap at iPad width, because nothing else is showing it', () => {
+    document.body.dataset.cards = 'inline';
+    const { container } = mount({ marginVisible: false });
+    tap(supFor(container, '1'));
+    expect(popover(container)?.hidden).toBe(false);
+    expect(popover(container)?.textContent).toBe(
+      'Planning Department annual report, 2025, table 4.',
+    );
   });
 });
 

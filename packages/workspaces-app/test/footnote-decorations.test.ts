@@ -96,6 +96,17 @@ describe('a footnote in the editor', () => {
     expect(notes()[0]?.classList.contains('cw-fn-open')).toBe(false);
   });
 
+  it('leaves a `^[…]` inside a code span alone — it is documentation, not a note', () => {
+    mount('Write `^[a note]` to add one, and the characters stay text.');
+    expect(notes()).toHaveLength(0);
+    expect(facts()).toHaveLength(0);
+  });
+
+  it('reads the same characters outside a code span as a real note (control)', () => {
+    mount('Write ^[a note] to add one, and the characters stay text.');
+    expect(notes().map((el) => el.dataset.cwFnNote)).toEqual(['a note']);
+  });
+
   it('draws nothing for prose with no notes (control)', () => {
     mount('A permit takes 94 days on paper, and nobody has measured the rest.');
     expect(notes()).toHaveLength(0);

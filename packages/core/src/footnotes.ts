@@ -72,12 +72,25 @@ export function footnoteEndAt(text: string, i: number): number {
   return close < 0 ? -1 : close + 1;
 }
 
-/** Index of the `]` that closes the `[` at `open`, or -1 when there is none. */
+/**
+ * Index of the `]` that closes the `[` at `open`, or -1 when there is none.
+ *
+ * A backslash makes the next character literal, exactly as it does everywhere
+ * else in markdown, and a literal bracket is not structure: `^[Form 3\] of
+ * the appendix]` is ONE note whose text holds a `]`. Reading that escape as
+ * the terminator truncated the note at the bracket and left ` of the
+ * appendix]` sitting in the prose as unstyled text.
+ */
 function closingBracket(text: string, open: number): number {
   let depth = 0;
   for (let j = open; j < text.length; j++) {
-    if (text[j] === '[') depth++;
-    else if (text[j] === ']') {
+    const c = text[j];
+    if (c === '\\') {
+      j++;
+      continue;
+    }
+    if (c === '[') depth++;
+    else if (c === ']') {
       depth--;
       if (depth === 0) return j;
     }

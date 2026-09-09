@@ -83,3 +83,20 @@ describe('the fact a note is about', () => {
     expect(factOf('Is it slow? Yes, by 94 days^[report].')).toBe('Yes, by 94 days');
   });
 });
+
+describe('a bracket the author escaped', () => {
+  it('does not close the note it sits in', () => {
+    const notes = findFootnotes('Filed under x^[Form 3\\] of the appendix.] today.');
+    expect(notes.map((f) => f.note)).toEqual(['Form 3\\] of the appendix.']);
+  });
+
+  it('does not open one either, so a lone escaped `[` cannot swallow the note', () => {
+    const notes = findFootnotes('See x^[the \\[draft sheet] now.');
+    expect(notes.map((f) => f.note)).toEqual(['the \\[draft sheet']);
+  });
+
+  it('leaves a real nested bracket counting as before (control)', () => {
+    const notes = findFootnotes('See x^[the [draft](u) sheet] now.');
+    expect(notes.map((f) => f.note)).toEqual(['the [draft](u) sheet']);
+  });
+});

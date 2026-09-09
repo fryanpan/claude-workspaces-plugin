@@ -3781,14 +3781,15 @@ body.redline-mode #toggle-suggest-mode {
    the document; everything below is how they are DRAWN, which is three
    different things at three different widths:
 
-     above 1100px  the raw run is hidden entirely, the fact it supports is
-                   underlined, and the note is plain grey text in the margin
-                   column with a leader across the gutter — the same overlay
-                   the comment balloons draw into.
-     at or below   there is no column, so the run folds to a small grey
-                   superscript number and a tap opens a card UNDER the line.
-                   Absolutely positioned: the paragraph must not move, or the
-                   reader loses their place mid-sentence.
+     in the margin the raw run is hidden entirely, the fact it supports is
+                   underlined, and the note is plain grey text beside the line
+                   with a leader across the gutter — the same overlay the
+                   comment balloons draw into. Needs the balloon placement,
+                   which needs both a column and the reader's own choice.
+     everywhere    there is no column to carry the note, so the run folds to
+     else          a small grey superscript number and a tap opens a card
+                   UNDER the line. Absolutely positioned: the paragraph must
+                   not move, or the reader loses their place mid-sentence.
      on paper      the notes print as a numbered "Sources" list at the end.
 
    Certainty is carried by the STROKE, never by colour: solid for a note the
@@ -3804,11 +3805,22 @@ body.redline-mode #toggle-suggest-mode {
 }
 .cw-fn::after {
   content: attr(data-cw-fn);
+  display: var(--cw-fn-sup, inline);
   font: 400 10px / 0 var(--sans);
   vertical-align: super;
   color: var(--fg-muted);
   padding: 0 2px;
   cursor: pointer;
+}
+/* The margin already carries every note, so the number in the text would be
+   noise — and ONLY there. Keyed on `body[data-cards]`, the reader's stored
+   placement, never on width: a reader who chose inline cards on a 1180px
+   screen has no margin column, and a number hidden by a media query left
+   that note with no way to reach it at all. Same predicate the module's
+   `marginVisible` asks (balloonMarginVisible in card-placement.ts), so the
+   two halves cannot disagree. */
+body[data-cards="balloon"] .cw-fn {
+  --cw-fn-sup: none;
 }
 .cw-fn-on::after {
   background: var(--bg-hover);
@@ -3885,13 +3897,6 @@ body.redline-mode #toggle-suggest-mode {
   display: none;
 }
 
-@media (min-width: 1101px) {
-  /* The margin has the note, so the number in the text would be noise. */
-  .cw-fn::after {
-    content: none;
-  }
-}
-
 @media print {
   .cw-fn-sources {
     display: block;
@@ -3910,9 +3915,10 @@ body.redline-mode #toggle-suggest-mode {
     padding-left: 22px;
     margin: 6px 0 0;
   }
-  /* On paper the number is the only way back to the line it came from. */
-  .cw-fn::after {
-    content: attr(data-cw-fn);
+  /* On paper the number is the only way back to the line it came from, so it
+     comes back even for a reader whose screen placement hid it. */
+  .cw-fn {
+    --cw-fn-sup: inline;
   }
   .cw-fn-pop,
   .cw-fn-note {

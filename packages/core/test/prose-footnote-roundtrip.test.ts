@@ -104,6 +104,15 @@ const CASES: Array<{ name: string; md: string; ops?: Op[] }> = [
     ],
   },
   {
+    name: 'a note whose text holds an escaped bracket',
+    md: 'Filed under x^[Form 3\\] of the appendix; see also \\[draft\\].] today.',
+    ops: [
+      ['Filed under x', undefined],
+      ['^[Form 3\\] of the appendix; see also \\[draft\\].]', undefined],
+      [' today.', undefined],
+    ],
+  },
+  {
     // Control: an unterminated caret is not a footnote, and the line still
     // has to survive untouched — otherwise "opaque" would just mean "eaten".
     name: 'an unterminated caret (control)',

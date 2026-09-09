@@ -48,13 +48,38 @@ export interface FootnoteRun {
  * `￼` placeholder passed to `textBetween` buys: without it an inline
  * image would shift every note after it in the same paragraph.
  */
+/**
+ * The offsets inside a textblock that carry the `code` mark.
+ *
+ * `textBetween` flattens marks away, so `Write \`^[a note]\` to add one` reads
+ * as a plain sentence holding a note — and drawing one there would contradict
+ * the parser, which keeps a `^[…]` in backticks as code and says so in
+ * `prose-footnote-roundtrip.test.ts`. A code span is documentation ABOUT the
+ * syntax, so the characters must stay characters.
+ *
+ * Child sizes, not text lengths, because that is the unit the placeholder
+ * passed to `textBetween` also counts an inline leaf in.
+ */
+function codeRanges(node: ProseNode): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let off = 0;
+  node.forEach((child) => {
+    const size = child.nodeSize;
+    if (child.marks.some((m) => m.type.name === 'code')) out.push([off, off + size]);
+    off += size;
+  });
+  return out;
+}
+
 export function footnoteRuns(doc: ProseNode): FootnoteRun[] {
   const out: FootnoteRun[] = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
     const text = node.textBetween(0, node.content.size, undefined, '￼');
+    const code = codeRanges(node);
     const base = pos + 1;
     for (const f of findFootnotes(text)) {
+      if (code.some(([a, b]) => f.start < b && f.end > a)) continue;
       const fact = factRange(text, f.start);
       out.push({
         n: out.length + 1,
