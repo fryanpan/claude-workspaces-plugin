@@ -37,7 +37,11 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
+import {
+  type SummaryCredential,
+  authHeader,
+  resolveCredentialFrom,
+} from '../packages/server/src/summarize.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,7 +112,7 @@ interface ToolSpec {
 }
 
 async function callTool(
-  key: string,
+  key: SummaryCredential,
   system: string,
   user: string,
   tool: ToolSpec,
@@ -118,7 +122,7 @@ async function callTool(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': key,
+      ...authHeader(key),
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -145,7 +149,10 @@ async function callTool(
 }
 
 /** List one tick's ideas. Null when the model could not be read. */
-export async function listIdeas(key: string, transcript: string): Promise<string[] | null> {
+export async function listIdeas(
+  key: SummaryCredential,
+  transcript: string,
+): Promise<string[] | null> {
   const out = await callTool(
     key,
     LIST_SYSTEM,
@@ -199,7 +206,7 @@ const CARRY_TOOL: ToolSpec = {
  * because a judge that would not answer is not evidence about the notes.
  */
 export async function judgeCarried(
-  key: string,
+  key: SummaryCredential,
   ideas: readonly string[],
   notes: string,
 ): Promise<boolean[] | null> {
@@ -388,7 +395,11 @@ export function reportIdeaRates(
 
 /* ===== Building the ground truth ===== */
 
-async function build(dir: string, only: readonly string[], key: string): Promise<number> {
+async function build(
+  dir: string,
+  only: readonly string[],
+  key: SummaryCredential,
+): Promise<number> {
   const files = readdirSync(dir)
     .filter((f) => f.endsWith('.json') && !f.endsWith('.ideas.json'))
     .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as NotesEvalFixture)
@@ -442,9 +453,12 @@ if (import.meta.main) {
   const at = argv.indexOf('--meeting');
   const corpusAt = argv.indexOf('--corpus');
   const dir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
-  const key = resolveKeyFrom(undefined, readKeychainPassword);
+  const key = resolveCredentialFrom(undefined, readKeychainPassword, process.env);
   if (!key) {
-    console.error('No dedicated key. Set CW_SUMMARY_API_KEY or use the Keychain entry.');
+    console.error(
+      'No credential. Set CW_SUMMARY_ACCESS_TOKEN, set CW_SUMMARY_API_KEY, or use the ' +
+        'Keychain entry.',
+    );
     process.exit(2);
   }
   if (!argv.includes('--build')) {

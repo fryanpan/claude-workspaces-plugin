@@ -192,9 +192,11 @@ export const MEMBERS: Member[] = [
 export const NON_GATE_JOBS: Record<string, string> = {
   'notes-eval-smoke':
     'spends money and reaches the network, so it runs only on a diff that moves the ' +
-    "note-taking surface and never on a builder's machine. It DOES gate now — a missing " +
-    'CW_SUMMARY_API_KEY secret fails it rather than passing green as a skip — which is why ' +
-    'it is listed here as a hole rather than as a member: `bun run verify` cannot run it.',
+    "note-taking surface and never on a builder's machine. It DOES gate — a token " +
+    'exchange that returns nothing fails it rather than passing green as a skip. It holds ' +
+    'no repository secret: the job proves its identity with a GitHub OIDC token and trades ' +
+    'that for an access token good for one run, which is also why `bun run verify` cannot ' +
+    'run it here — there is no identity to prove off a runner.',
 };
 
 /**

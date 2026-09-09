@@ -83,7 +83,11 @@ import {
 } from '../packages/server/src/notes-quality.ts';
 import { median } from '../packages/server/src/notes-timing.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
+import {
+  type SummaryCredential,
+  authHeader,
+  resolveCredentialFrom,
+} from '../packages/server/src/summarize.ts';
 import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
 import {
@@ -284,7 +288,7 @@ interface JudgedField {
 }
 
 async function judge(
-  key: string,
+  key: SummaryCredential,
   before: string,
   after: string,
   transcript: string,
@@ -303,7 +307,7 @@ async function judge(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': key,
+      ...authHeader(key),
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -363,7 +367,7 @@ interface Options {
   smoke: boolean;
   meetings: string[];
   judgePerMeeting: number;
-  key: string;
+  key: SummaryCredential;
   /** Where the fixtures live. `--corpus <dir>` points it at a corpus that is
    *  NOT in this repo — real meetings are private and never committed. */
   corpusDir: string;
@@ -396,7 +400,7 @@ async function runMeeting(
   ticksWanted: number,
 ): Promise<MeetingIdeaRate | null> {
   const composer = createHaikuNotesComposer({
-    apiKey: opts.key,
+    apiKey: opts.key.kind === 'key' ? opts.key.value : undefined,
     fetchImpl: countingFetch(NOTES_MODEL),
   });
   if (!composer) throw new Error('no composer: the dedicated key did not resolve');
@@ -700,11 +704,17 @@ async function main(argv: string[]): Promise<number> {
   const keyAt = argv.indexOf('--api-key');
   const judgeAt = argv.indexOf('--judge');
   const judgeOff = judgeAt >= 0 && argv[judgeAt + 1] === 'off';
-  const key = resolveKeyFrom(keyAt >= 0 ? argv[keyAt + 1] : undefined, readKeychainPassword);
+  const key = resolveCredentialFrom(
+    keyAt >= 0 ? argv[keyAt + 1] : undefined,
+    readKeychainPassword,
+    process.env,
+  );
   if (!key) {
     console.error(
-      'No dedicated key. Set CW_SUMMARY_API_KEY, put one in the Keychain as\n' +
-        'claude-workspaces-summary-api-key, or pass --api-key. Nothing was run.',
+      'No credential. Set CW_SUMMARY_ACCESS_TOKEN (an already-exchanged access\n' +
+        'token, which is how CI runs), set CW_SUMMARY_API_KEY, put a key in the\n' +
+        'Keychain as claude-workspaces-summary-api-key, or pass --api-key.\n' +
+        'Nothing was run.',
     );
     return 2;
   }
