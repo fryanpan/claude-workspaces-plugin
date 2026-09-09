@@ -10,6 +10,7 @@
 import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep } from 'node:path';
 import { type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
+import { canonicalRepoRoot } from './doc-origin-repo.ts';
 import {
   type BindHost,
   DEFAULT_MAX_FILES,
@@ -161,13 +162,30 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     };
   }
 
+/**
+ * The path a set id is derived FROM: the repo's main checkout, not the
+ * checkout the caller was standing in.
+ *
+ * Both id derivations hash an absolute path, so browsing a repo through a
+ * linked worktree used to mint a whole second review — a different set id,
+ * and `memberDocId` therefore a different doc for every file in it. Hashing
+ * the repo's canonical root instead makes the two binds land on one review,
+ * which is the same rule `doc-key.ts` applies to a single file.
+ *
+ * A folder that is not a repo has no canonical root and keeps its own path,
+ * which is the behaviour it already had.
+ */
+function setIdRootFor(root: string): string {
+  return canonicalRepoRoot(root) ?? root;
+}
+
   // BROWSE mode — no base to diff against (plain folder, fresh repo, or the
   // caller just wants to look around). No eager per-file binds: files open
   // lazily from the all-files sidebar (openContextFile), which removes the
   // maxFiles ceiling and the per-file pollers. One ENTRY doc is opened
   // eagerly so the workspace exists and there's a page to land on.
   if (opts.base === undefined) {
-    const reviewId = opts.reviewId ?? deriveWorkspaceId(root);
+    const reviewId = opts.reviewId ?? deriveWorkspaceId(setIdRootFor(root));
     const excludes = normalizeExcludes(opts.exclude);
     const scanned = scanFolder(root)
       .map((abs) => relative(root, abs).split(sep).join('/'))
@@ -239,7 +257,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
   if (!listed.ok) return { ok: false, error: 'diff-failed', detail: listed.error };
   if (listed.files.length === 0) return { ok: false, error: 'empty-diff' };
 
-  const reviewId = opts.reviewId ?? deriveDiffReviewId(root, base, target);
+  const reviewId = opts.reviewId ?? deriveDiffReviewId(setIdRootFor(root), base, target);
 
   // A review id is pinned to its range: threads anchor into that content,
   // so silently re-seeding a different range would corrupt them. (In

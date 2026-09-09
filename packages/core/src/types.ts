@@ -149,6 +149,19 @@ export interface DocMeta {
    */
   docHome?: DocOriginRepo;
   /**
+   * The doc's repo+path identity — `<repoKey>\0<path from the repo root>`,
+   * as `doc-key.ts` derives it.
+   *
+   * Recorded so a doc can name its own key without a reverse walk of the
+   * registry, and so the migration's revert pass can tell a key it wrote from
+   * one that was already there. Private-meta: both halves name the host — the
+   * repo the machine holds and where in it the file sits.
+   *
+   * Absent for a doc bound outside any repo, which keeps exactly the old
+   * behaviour: a minted id bound to one path.
+   */
+  docKey?: string;
+  /**
    * The workspace's own bind-time configuration, replicated onto every
    * member the same way `workspaceRoot` is — there is no workspace registry,
    * so the members ARE the record. `refresh_workspace` reads these back and

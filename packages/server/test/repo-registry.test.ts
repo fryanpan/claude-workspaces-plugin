@@ -150,10 +150,15 @@ describe('RepoRegistry', () => {
   });
 
   it('registering is idempotent and un-retires a checkout', () => {
-    expect(reg.registerCheckout(wt).alreadyKnown).toBe(false);
-    expect(reg.registerCheckout(wt).alreadyKnown).toBe(true);
+    const register = (): boolean => {
+      const res = reg.registerCheckout(wt);
+      if (!res.ok) throw new Error(`expected the worktree to register: ${res.error}`);
+      return res.alreadyKnown;
+    };
+    expect(register()).toBe(false);
+    expect(register()).toBe(true);
     reg.unregisterCheckout(wt);
-    expect(reg.registerCheckout(wt).alreadyKnown).toBe(false);
+    expect(register()).toBe(false);
     const row = reg.checkoutRows('git:github.com/example/widgets').find((c) => c.root === wt);
     expect(row?.removedAt).toBeUndefined();
     expect(row?.registered).toBe(true);

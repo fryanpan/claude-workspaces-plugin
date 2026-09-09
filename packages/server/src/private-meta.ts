@@ -26,6 +26,7 @@ export const PRIVATE_META_KEYS = [
   'workspaceRoot',
   'producedBy',
   'docHome',
+  'docKey',
 ] as const;
 
 export type PrivateMetaKey = (typeof PRIVATE_META_KEYS)[number];

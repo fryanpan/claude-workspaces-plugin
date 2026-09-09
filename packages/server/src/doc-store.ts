@@ -85,6 +85,8 @@ import {
   isReservedDocId,
   newDocId,
 } from './doc-ids.ts';
+import { docKeyForPath } from './doc-key.ts';
+import { RepoRegistry } from './repo-registry.ts';
 import {
   DOC_INDEX_VERSION,
   type DocIndexEntry,
@@ -851,8 +853,18 @@ export class DocStore {
    */
   private docIndex = new Map<string, DocIndexEntry>();
 
+  /**
+   * Repo+path identity for every doc that has a repo.
+   *
+   * Public because the bind flows, the route family and the migration all
+   * ask it the same question, and a second instance over the same file would
+   * be a second answer. One store, one registry.
+   */
+  readonly repos: RepoRegistry;
+
   constructor(private cfg: DocStoreConfig) {
     if (!existsSync(cfg.dataDir)) mkdirSync(cfg.dataDir, { recursive: true });
+    this.repos = new RepoRegistry(cfg.dataDir);
     // The index IS the boot. Nothing is hydrated here: a start now costs one
     // read per doc of a small JSON row instead of decoding every CRDT ever
     // written, and a doc enters memory when somebody reaches for it.
@@ -1346,6 +1358,13 @@ export class DocStore {
   purgePersisted(docId: string): boolean {
     this.activityMtime.delete(docId);
     this.docIndex.delete(docId);
+    // The one place a repo+path key is given up. A purge is the caller that
+    // asked for the bytes to be gone, and leaving the key claimed would make
+    // the next bind of that file re-establish an address whose document the
+    // operator destroyed on purpose. Archiving does NOT come through here —
+    // an archived doc keeps its key, which is what lets unarchiving put it
+    // back where every link already points.
+    for (const key of this.repos.keysFor(docId)) this.repos.releaseKey(key);
     try {
       const p = this.pathFor(docId);
       if (existsSync(p)) rmSync(p);
@@ -2054,8 +2073,43 @@ export class DocStore {
       // before — but under its OWN id, never the name it was asked by.
       return { ok: true, doc: this.getOrCreate(existing.docId, init), minted: false };
     }
+    // The name resolves to nothing, so ask the FILE who it is before minting.
+    // A bind from a second checkout of the same repo arrives here with a
+    // different absolute path and a different readable name, and used to mint
+    // a second document — two comment sets on one file, and a removed
+    // worktree stranding one of them. The key does not know about checkouts.
+    const key = init?.sourceUrl ? docKeyForPath(init.sourceUrl) : null;
+    if (key) {
+      this.repos.noteCheckout(init?.sourceUrl as string);
+      const held = this.repos.docIdFor(key.docKey);
+      if (held !== undefined) {
+        // `getOrCreate`, not `get`: the key says this file IS document
+        // `held`, and that stays true even if the document's bytes are not
+        // on disk — a doc created but never written, or a `.ydoc` lost. The
+        // right repair is to re-establish the ADDRESS every saved link
+        // points at, not to mint a second one beside it. A doc that was
+        // genuinely destroyed released its key in `purgePersisted`, so it
+        // never reaches here.
+        return { ok: true, doc: this.getOrCreate(held, init), minted: false };
+      }
+    }
     const docId = newDocId();
+    if (key) {
+      // Claim BEFORE creating. The registry is the authority on which
+      // document a file is, so asking it after minting would mean creating a
+      // doc that then loses the claim and is left behind as litter with the
+      // caller's readable name attached to it. Claiming first makes the
+      // loser's id a number nobody ever saw.
+      const claim = this.repos.claim(key.docKey, docId);
+      if (claim.docId !== docId) {
+        return { ok: true, doc: this.getOrCreate(claim.docId, init), minted: false };
+      }
+    }
     const doc = this.getOrCreate(docId, { ...init, alias: requested });
+    if (key) {
+      doc.meta.docKey = key.docKey;
+      this.persistMeta(docId);
+    }
     return { ok: true, doc, minted: true };
   }
 
