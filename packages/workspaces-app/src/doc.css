@@ -770,8 +770,10 @@ body.has-set .doc-switcher-caret {
 }
 .speaker-menu-voice:hover,
 .speaker-menu-nobody:hover,
+.speaker-menu-rename:hover,
 .speaker-menu-voice:focus-visible,
-.speaker-menu-nobody:focus-visible {
+.speaker-menu-nobody:focus-visible,
+.speaker-menu-rename:focus-visible {
   background: var(--chip-bg, rgba(127, 127, 127, 0.12));
 }
 .speaker-menu-who {
@@ -802,6 +804,27 @@ body.has-set .doc-switcher-caret {
 .speaker-menu-nobody {
   border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
   color: var(--fg-muted, #6b7280);
+}
+/* And the one row that is not about this mention at all: it names the VOICE,
+   for every mention of it. Below its own rule for the same reason, and
+   sharing the rows' shape so nothing here reads as a stray browser button.
+   It is the rename surface that outlives the capture — the transcript zone
+   and the strip's row are both gone by then. */
+.speaker-menu-rename {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  font: inherit;
+  color: var(--fg, #111827);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.speaker-menu-rename:disabled {
+  color: var(--fg-muted, #6b7280);
+  cursor: default;
 }
 /* A menu anchored to a word works next to a cursor. Under a thumb it lands
    half off-screen, on top of the sentence being read — so at phone width it

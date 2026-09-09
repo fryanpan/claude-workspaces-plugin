@@ -1219,6 +1219,31 @@ still reports through `onError`, now saying the rename reached only tagged
 mentions. The forward mapping always held: that voice's later turns compose
 under the new name.
 
+**The pill a person actually sees is the live zone's, and until 2026-09-09 it
+was inert.** The strip's tag has been a rename button since 2026-08-31, but
+the strip renders NO turns while the provisional zone exists (`renderTurns`
+bails on `liveZone` — the same words in two places read as two meetings), and
+the zone is mounted on every markdown doc. So on the iPad the only pills on
+screen were the zone's plain spans: the affordance was real and sitting on the
+surface nobody was looking at, which is the second half of "no ability to edit
+the speaker names". The zone's pill is now the same two-element control the
+strip's is — a button whose padding is the target, a span carrying the pencil
+and the dotted underline — given a `nameSpeaker`, and the span it always was
+without one (a bot meeting, or any mount with no rename channel). It renames
+through the strip, because which channel a name travels on is the strip's
+question, not the zone's.
+
+**And the notes' own tag menu renames the voice**, which is the only rename
+surface that outlives the capture: the zone is gone with the meeting and the
+strip's row with it, so a tag in the notes is where a person meets a voice
+still called Speaker A. "Rename <name>" sits below a rule under *Nobody* —
+the rows above answer "who said this", it answers "what is this person
+called" — and hands the answer to `MeetingStripHandle.renameSpeaker`, which is
+the socket while one is open and the HTTP route once it is not. The menu
+rewrites nothing in the document for it; the server's relabel does that, for
+every mention of the label. A refusal is said in the menu rather than
+swallowed.
+
 **A rename works after the meeting too, and the strip keeps a surface for
 it** (2026-08-31; from a real two-voice test: labels arrived, and Bryan found
 "no ability to edit the speaker names"). The socket is the live rename
