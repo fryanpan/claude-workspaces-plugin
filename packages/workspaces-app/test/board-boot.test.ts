@@ -29,6 +29,22 @@ import {
   settle,
 } from './boot-harness.ts';
 
+/**
+ * The description editor's chunk, stubbed.
+ *
+ * A deep-linked ticket opens the detail panel, and the panel asks for
+ * `task-body-editor-chunk.ts` — the real Tiptap/ProseMirror stack — through a
+ * dynamic import nothing in this file awaits. Whether that import wins or
+ * loses is a race against the end of the file: the load settling after
+ * vitest has torn the environment down is what turned CI's client shard red
+ * twice with all 1599 tests passed. None of the assertions below are about
+ * the editor, so the stub is what this file actually means: a chunk that
+ * lands immediately, in this process, mounting nothing.
+ */
+vi.mock('../src/board/task-body-editor-chunk.ts', () => ({
+  createEditor: () => ({ destroy: () => {} }),
+}));
+
 const server: FakeServer = installFakeServer();
 installFakeEventSource();
 installFakeBeacon();
