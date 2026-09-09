@@ -191,8 +191,47 @@ const EXTRACT_TOOL: ToolSpec = {
   },
 };
 
-async function extractPoints(ctx: VariantContext, transcript: string): Promise<string[]> {
-  const out = await callTool(ctx, EXTRACT_SYSTEM, `The speech:\n${transcript}`, EXTRACT_TOOL, 700);
+/**
+ * The same first pass with every ceiling on its output taken off.
+ *
+ * Three of them, and each is a cap on IDEAS and not only on words: the
+ * twelve-word line limit, the warning that a padded list is worse than a
+ * short one, and the 700-token reply budget that a long tick can actually
+ * reach. The variant exists to find out whether the ledger's remaining loss
+ * is the writer dropping points or the enumerator never listing them.
+ */
+const WIDE_EXTRACT_SYSTEM = [
+  'You are the first of two passes over a live meeting. Your only job is to',
+  'catch everything, so the second pass — which writes the notes — cannot',
+  'quietly lose any of it.',
+  '',
+  'Read the speech and write down each separate thing it put on the table:',
+  'a point somebody argued, a proposal, a worry, a constraint, a figure, a',
+  'choice made, a job somebody took on, something left unanswered.',
+  '',
+  'THERE IS NO LIMIT ON HOW MANY LINES YOU WRITE. A tick that put thirty',
+  'things on the table takes thirty lines. If you are unsure whether',
+  'something counts, write it: a line the second pass skips costs nothing,',
+  'and a thing you left out is gone.',
+  '',
+  'Rules: one thing per line, in plain words. Say who when it matters. Skip',
+  'pure social noise and abandoned half-sentences.',
+  '',
+  'Answer with the record_points tool.',
+].join('\n');
+
+async function extractPoints(
+  ctx: VariantContext,
+  transcript: string,
+  wide = false,
+): Promise<string[]> {
+  const out = await callTool(
+    ctx,
+    wide ? WIDE_EXTRACT_SYSTEM : EXTRACT_SYSTEM,
+    `The speech:\n${transcript}`,
+    EXTRACT_TOOL,
+    wide ? 2_000 : 700,
+  );
   const points = out?.points;
   if (!Array.isArray(points)) return [];
   return points.filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
@@ -315,12 +354,30 @@ const MAX_CARRIED = 12;
  * rather than forever — a point the note-taker has declined three times with
  * the notes in front of it is a point it is declining on purpose.
  */
-function ledgerHooks(ctx: VariantContext): MeetingHooks {
+/**
+ * What a ledger variant may change without becoming a different method.
+ *
+ * `maxCarried` and `maxAge` are the carry window: how many unplaced points
+ * ride to the next tick, and how many ticks they keep riding. `wide` swaps
+ * the extract for one with no practical ceiling on how many points a tick may
+ * produce — the shipped extract asks for twelve words a line and says a
+ * padded list is worse than a short one, and both are caps on ideas as much
+ * as on length.
+ */
+interface LedgerOpts {
+  maxCarried?: number;
+  maxAge?: number;
+  wide?: boolean;
+}
+
+function ledgerHooks(ctx: VariantContext, opts: LedgerOpts = {}): MeetingHooks {
+  const maxCarried = opts.maxCarried ?? MAX_CARRIED;
+  const maxAge = opts.maxAge ?? 2;
   let carried: Array<{ text: string; age: number }> = [];
   let thisTick: string[] = [];
   return {
     async before(_input, _tick, transcript) {
-      thisTick = await extractPoints(ctx, transcript);
+      thisTick = await extractPoints(ctx, transcript, opts.wide === true);
       const items = [...carried.map((c) => c.text), ...thisTick];
       if (items.length === 0) return {};
       return {
@@ -343,10 +400,10 @@ function ledgerHooks(ctx: VariantContext): MeetingHooks {
       for (const entry of [...carried, ...thisTick.map((text) => ({ text, age: 0 }))]) {
         const keywords = contentWords(entry.text);
         const done = ideaCarried({ turn: 0, text: entry.text, keywords }, notes);
-        if (done || entry.age >= 2) continue;
+        if (done || entry.age >= maxAge) continue;
         next.push({ text: entry.text, age: entry.age + 1 });
       }
-      carried = next.slice(-MAX_CARRIED);
+      carried = next.slice(-maxCarried);
       thisTick = [];
     },
   };
@@ -567,6 +624,22 @@ export const VARIANTS: Record<string, Variant> = {
     name: 'everything',
     instructions: swap(DEFAULT_NOTES_INSTRUCTIONS, COMPRESS_ANCHOR, ONE_NOTE_PER_IDEA),
     begin: passthrough,
+  },
+  // Round 3. The three ledger knobs, one at a time.
+  'ledger-wide-carry': {
+    name: 'ledger-wide-carry',
+    begin: (ctx) => ledgerHooks(ctx, { maxCarried: 30, maxAge: 5 }),
+  },
+  'ledger-uncapped': {
+    name: 'ledger-uncapped',
+    begin: (ctx) => ledgerHooks(ctx, { wide: true }),
+  },
+  'ledger-sonnet': {
+    name: 'ledger-sonnet',
+    model: 'claude-sonnet-5',
+    maxTokens: 4_000,
+    effort: 'low',
+    begin: ledgerHooks,
   },
   // Round 2. The ledger with its extract taken off the critical path.
   'ledger-pipelined': { name: 'ledger-pipelined', begin: pipelinedLedgerHooks },
