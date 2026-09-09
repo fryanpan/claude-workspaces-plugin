@@ -269,6 +269,44 @@ export async function handleDocCreateListRoutes(
     // outside a workspace.
     const boardWorkspaceId = fileUnderBoardWorkspace(canonicalId, scope?.workspaceId);
     let attached: ReturnType<typeof docStore.attachFile> | undefined;
+    /**
+     * One file, several checkouts: bind to the copy that is actually live.
+     *
+     * The caller names the copy IT can see, which is the one in whatever
+     * checkout that session is working in. Since a doc's identity became the
+     * repo plus the path, that is a pointer to the document rather than the
+     * document's address — a second checkout's bind lands on the same doc, and
+     * this is where we decide which copy that doc reads and writes.
+     *
+     * When two checkouts hold copies edited at once with different bytes, this
+     * REFUSES. Picking the larger mtime would be right most of the time, and
+     * being right most of the time is what makes the wrong answer expensive:
+     * whoever loses never finds out they were guessed at. The 409 carries the
+     * candidate table so the caller can re-post naming a checkout.
+     */
+    if ((type === 'markdown' || type === 'code') && sourceUrl) {
+      const verdict = docStore.resolveLiveCopy(canonicalId, {
+        withGitStatus: true,
+        ...(typeof body?.checkout === 'string' ? { checkout: body.checkout } : {}),
+      });
+      if (!verdict.ok && verdict.error === 'ambiguous-copy') {
+        return j(409, {
+          error: 'ambiguous-copy',
+          docId: canonicalId,
+          candidates: verdict.candidates,
+          hint: 'Two checkouts hold different, recently-edited copies of this file. Re-post with checkout: "<checkout root>" naming the one to treat as live.',
+        });
+      }
+      // A doc with no repo identity (a file outside any checkout) answers
+      // `no-key`, and its one copy is the path the caller named.
+      if (verdict.ok && verdict.live) {
+        sourceUrl = verdict.live;
+        // Say where it landed. A doc whose recorded source names a copy it is
+        // not bound to is the exact shape the migration below has to
+        // untangle, and there is no reason to create more of it.
+        docStore.noteBoundCopy(canonicalId, verdict.live);
+      }
+    }
     if (type === 'markdown' && sourceUrl) {
       attached = await docStore.attachFileAsync(canonicalId, sourceUrl);
       if (!attached.ok) return j(409, { error: 'attach_failed', attached });

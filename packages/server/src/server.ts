@@ -98,6 +98,7 @@ import {
   type RecallWebhookRoutesContext,
   handleRecallWebhookRoute,
 } from './routes/recall-webhook.ts';
+import { type RepoRoutesContext, handleRepoRoutes } from './routes/repos.ts';
 import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/review-files.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
@@ -1738,6 +1739,18 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** The words this server's prompts run on — the settings page's data. */
   const promptRoutesCtx: PromptRoutesContext = { promptStore, j, safeJson };
 
+  /**
+   * The repo registry — checkouts of a project, and which copy of a doc is
+   * live. Loopback-only, for the same reason the deploy route is: every value
+   * it hands back is a path on this machine.
+   */
+  const repoRoutesCtx: RepoRoutesContext = {
+    docStore,
+    j,
+    safeJson,
+    requestAddress: (req) => server.requestIP(req)?.address,
+  };
+
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
   const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
 
@@ -2387,6 +2400,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           pathname,
           visitor,
           authorFor,
+        });
+        if (handled) return handled;
+      }
+      // --- The repo registry: checkouts, and which copy is live ---
+      // ./routes/repos.ts. Placed beside the operator routes because it
+      // shares their gate: loopback only, no edge, no visitor. Order is not
+      // load-bearing — no other family claims `/api/repos`.
+      {
+        const handled = await handleRepoRoutes(repoRoutesCtx, {
+          req,
+          pathname,
+          url,
+          visitor,
         });
         if (handled) return handled;
       }

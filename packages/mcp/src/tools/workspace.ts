@@ -549,6 +549,24 @@ export async function handleWorkspaceTool(
         lastChange: res.lastChange,
       });
     }
+    // --- The repo registry: this machine's checkouts of a project ---
+    //
+    // Machine verbs, not board verbs, and deliberately without a
+    // workspaceId: a checkout is a fact about this box, the same class as
+    // `request_plugin_refresh`, and every path they carry is a host path
+    // that never belongs to a workspace. The routes behind them are
+    // loopback-only for that reason.
+    case 'register_worktree': {
+      const { path } = a as { path: string };
+      return ok(await http('POST', '/api/repos/checkouts', { path }));
+    }
+    case 'list_worktrees': {
+      return ok(await http('GET', '/api/repos'));
+    }
+    case 'unregister_worktree': {
+      const { path } = a as { path: string };
+      return ok(await http('DELETE', '/api/repos/checkouts', { path }));
+    }
     case 'request_plugin_refresh': {
       // No arguments reach the process this runs — the server's argv is
       // fixed. Nothing a caller can send gets spawned.

@@ -2418,6 +2418,46 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'register_worktree',
+      description:
+        "Tell this machine that a directory is a checkout of a repo it already knows — a git worktree, a second clone, anywhere the same files live. A document's identity is its repo plus its path from the repo root, so a doc opened in a registered checkout is the SAME doc as in the main one, with the same id and the same comments; without the registration the server only knows the checkouts git itself lists. Register a worktree when you create it. Answers with the repo it joined and every checkout now known, and alreadyKnown: true if it was already registered. Machine-scoped, like request_plugin_refresh: it names host paths, so it takes no workspaceId and only works from the box.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description:
+              'Absolute path to the checkout — its root, or any path inside it. Must be a git checkout; anything else is refused rather than recorded.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'list_worktrees',
+      description:
+        "Read the repos this machine knows and the checkouts of each: what was registered, when it was last seen, and which ones exist right now (`live` — git's own worktree list plus the registered directories still on disk). Call it when a doc is writing to a copy you did not expect, or before removing a checkout, to see what else holds the same files. Machine-scoped: no workspaceId, and it answers only from the box.",
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'unregister_worktree',
+      description:
+        'Retire a checkout before it goes away. Any document with unsaved edits in it is written out FIRST — which is the whole reason to call this rather than deleting the directory and hoping — and the answer says how many were flushed. Nothing is destroyed: the row stays with its dates, every doc keeps its id and its comments, and a doc bound to that checkout falls back to another copy of the same file. Call it just before `git worktree remove`. Machine-scoped: no workspaceId.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Absolute path to the checkout being retired.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+    {
       name: 'request_plugin_refresh',
       description:
         "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces — the update rewrites a version-keyed cache, so nothing running is interrupted and each session picks it up at its next restart. changed: false with matching versions means the cache was already current.",

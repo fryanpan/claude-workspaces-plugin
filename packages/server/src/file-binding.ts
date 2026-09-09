@@ -354,6 +354,15 @@ export class FileBindings {
    */
   private failedWrites = new Set<string>();
 
+  /** When we last wrote each doc's bound file ourselves, in epoch ms. Read
+   *  by the live-copy rule; see the write-back that sets it. */
+  private readonly writeBackAt = new Map<string, number>();
+
+  /** When we last wrote this doc's file ourselves, if we ever have. */
+  lastWriteBackAt(docId: string): number | undefined {
+    return this.writeBackAt.get(docId);
+  }
+
   constructor(private readonly p: FileBindingHost) {}
 
   /**
@@ -1733,6 +1742,12 @@ export class FileBindings {
             // write-back as an external edit and schedule a redundant reconcile.
             if (res.exists) {
               binding.lastMtimeMs = res.mtimeMs;
+              // Our own write, as opposed to the mtimes we merely READ. The
+              // live-copy rule needs the difference: a `git checkout` in
+              // another worktree bumps an mtime with nobody having edited
+              // anything, and the copy we ourselves last wrote should not
+              // lose to it.
+              this.writeBackAt.set(doc.docId, res.mtimeMs);
               binding.lastSize = res.size;
             }
             this.failedWrites.delete(doc.docId);
@@ -1999,6 +2014,22 @@ export class FileBindings {
   // reach into the binding map from `doc-store.ts`; the map itself never leaves
   // this file.
   // ---------------------------------------------------------------------
+
+  /**
+   * Every doc bound to a file under `root`, pending write or not.
+   *
+   * `pendingFileWrites` answers a different question — what would be LOST if
+   * this went away now — and a checkout being retired has to reach every doc
+   * bound inside it, including the ones with nothing outstanding, because
+   * their bindings are about to name a path that does not exist.
+   */
+  boundUnder(root: string): { docId: string; path: string }[] {
+    const out: { docId: string; path: string }[] = [];
+    for (const [docId, binding] of this.bindings) {
+      if (isWithinRoot(root, binding.path)) out.push({ docId, path: binding.path });
+    }
+    return out;
+  }
 
   /** Is this doc file-backed right now? */
   has(docId: string): boolean {
