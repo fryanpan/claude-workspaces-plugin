@@ -870,7 +870,7 @@ synthetic script with a ten-second threshold, run nightly.
 
 **And per tick, when the operator asks.** `CW_NOTES_TIMING=1` opens a
 `<meetingId>-timing.jsonl` beside the transcript: one line per tick carrying
-when its words settled, when the tick fired and why, how long it waited
+the turn numbers it composed, when its words settled, when the tick fired and why, how long it waited
 behind the previous tick, the compose's prompt and reply sizes and model, the
 apply time, the edit and block counts, how many ticks merged into it, and the
 settled-to-written total — plus the hypothesis that line's shape settles. It

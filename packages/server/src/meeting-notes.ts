@@ -1035,6 +1035,7 @@ export function beginNotesSession(
         timing.record({
           tick: tick.tick,
           reason: tick.reason,
+          turns: raw.map((t) => t.turn),
           settledAt,
           startedAt,
           waitedMs: composeStart - startedAt,

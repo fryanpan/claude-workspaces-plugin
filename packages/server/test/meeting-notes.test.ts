@@ -2581,6 +2581,9 @@ describe('what the timing log records about a meeting', () => {
     // 4,000 waiting for the clock + 900 composing + 20 writing.
     expect(first?.settledToWrittenMs).toBe(4_920);
     expect(first?.merged).toBe(1);
+    // The turn numbers, so a reader can join this row to the transcript
+    // beside it without the row ever carrying a word.
+    expect(first?.turns).toEqual([0]);
   });
 
   it('names the wait behind a slow compose, and counts the ticks that merged', async () => {
@@ -2626,6 +2629,7 @@ describe('what the timing log records about a meeting', () => {
 
     const rows = timing.rows();
     expect(rows.map((r) => r.merged)).toEqual([1, 2]);
+    expect(rows.map((r) => r.turns)).toEqual([[0], [1, 2]]);
     // The second row's words had been waiting since the earlier of the two
     // ticks that made it, through the whole of the first compose.
     expect(rows[1]?.waitedMs).toBe(3_000);
@@ -2659,6 +2663,48 @@ describe('what the timing log records about a meeting', () => {
     expect(rows.every((r) => r.settledToWrittenMs === null)).toBe(true);
     // A meeting that wrote nothing has no latency verdict to give.
     expect(timing.summary()).toBeNull();
+  });
+
+  it('names the carried turns on the tick that finally composed them', async () => {
+    // A composer that is simply down carries its words to the NEXT tick
+    // rather than retrying at once, so that tick's row has to name the older
+    // turn beside the new one. A row naming only the tick's own turns would
+    // send a reader of this file to the wrong words in the transcript.
+    const now = 1_000;
+    const schedule = new ManualScheduler();
+    const timing = createNotesTimingLog();
+    let calls = 0;
+    const composer: NotesComposer = {
+      name: 'down-then-up',
+      compose(input) {
+        calls++;
+        if (calls === 1) return Promise.reject(new Error('over capacity'));
+        return Promise.resolve(editsSaying(`- ${input.tick.turns.length} turn(s)`));
+      },
+    };
+    const session = beginNotesSession(
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        now: () => now,
+        openTiming: () => timing,
+        onNotes: () => {},
+        onError: () => {},
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'One.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    session.onTurn({ turn: 1, text: 'Two.', final: true });
+    schedule.fire();
+    await session.end();
+
+    expect(timing.rows().map((r) => [r.outcome, [...r.turns]])).toEqual([
+      ['failed', [0]],
+      ['written', [0, 1]],
+    ]);
   });
 });
 

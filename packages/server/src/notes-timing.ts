@@ -38,6 +38,13 @@ export type NotesTimingOutcome = 'written' | 'failed' | 'empty';
 export interface NotesTickTiming {
   tick: number;
   reason: NotesTimingReason;
+  /**
+   * The turn numbers this tick carried, in the order the compose saw them —
+   * carried words from a failed earlier tick first. Turn numbers, never
+   * words: they index the transcript beside this file, which is where the
+   * words already are, so a reader that wants both can join on them.
+   */
+  turns: readonly number[];
   /** Epoch ms at which the OLDEST words in this tick stopped changing. */
   settledAt: number | null;
   /** Epoch ms at which the tick fired. */

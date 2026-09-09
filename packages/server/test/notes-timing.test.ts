@@ -21,6 +21,7 @@ import {
 const row = (over: Partial<NotesTickTiming> = {}): NotesTickTiming => ({
   tick: 1,
   reason: 'pause',
+  turns: [0],
   settledAt: 1000,
   startedAt: 1200,
   waitedMs: 0,
@@ -87,6 +88,7 @@ describe('the per-tick timing log', () => {
       expect(lines).toHaveLength(3); // two ticks and the summary
       const first = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
       expect(first.tick).toBe(1);
+      expect(first.turns).toEqual([0]);
       expect(first.promptChars).toBe(4000);
       expect(first.hypothesis).toBe('H2 endpoint became a pause');
       // Every value is a number, a boolean, or one of the small vocabulary
