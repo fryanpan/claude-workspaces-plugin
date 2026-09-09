@@ -1173,7 +1173,10 @@ describe('who is speaking', () => {
     const tag = h.root.querySelector('.meeting-speaker') as HTMLButtonElement;
     expect(tag.getAttribute('aria-label')).toBe('Name Speaker A');
     tag.click();
-    expect(asked).toEqual(['Speaker A']);
+    // THE PROMPT OPENS EMPTY on a voice nobody has named. It used to be
+    // seeded with the display name, which is how "Room Speaker C" got saved
+    // as somebody's name (Bryan, 2026-09-09).
+    expect(asked).toEqual(['']);
     expect(h.tags()).toEqual(['Jordan', 'Speaker B', 'Jordan']);
     // A turn that arrives later with the same label reads as Jordan too —
     // and turn 0 has rolled off the three-turn window by then.
@@ -1188,6 +1191,44 @@ describe('who is speaking', () => {
     // The prompt offers the current name next time, so a rename starts from it.
     tag.click();
     expect(asked[1]).toBe('Jordan');
+  });
+
+  it('a named two-stream voice reads as the name alone, and reprompts from it', async () => {
+    // Bryan, 2026-09-09, on a room-plus-remote meeting: the group suffix is
+    // noise once a voice has a name, and seeding the prompt with the display
+    // name is what saved "John (Room)" and then rendered "John (Room) (Room)".
+    const asked: string[] = [];
+    const h = await live((current) => {
+      asked.push(current);
+      return 'John';
+    });
+    h.sockets[0]?.serve({
+      type: 'transcript',
+      turn: 0,
+      text: 'In the room.',
+      final: true,
+      speaker: 'room:A',
+    });
+    h.sockets[0]?.serve({
+      type: 'transcript',
+      turn: 1,
+      text: 'On the call.',
+      final: true,
+      speaker: 'remote:B',
+    });
+    expect(h.tags()).toEqual(['Room Speaker A', 'Remote Speaker B']);
+    const tag = h.root.querySelector('.meeting-speaker') as HTMLButtonElement;
+    tag.click();
+    expect(asked).toEqual(['']);
+    expect(h.tags()).toEqual(['John', 'Remote Speaker B']);
+    // And the second rename starts from the bare name, not from "John (Room)".
+    tag.click();
+    expect(asked[1]).toBe('John');
+    const named = (h.sockets[0]?.sent ?? [])
+      .filter((d): d is string => typeof d === 'string')
+      .map((d) => JSON.parse(d) as { type: string; name?: string })
+      .filter((m) => m.type === 'name_speaker');
+    expect(named[0]).toEqual({ type: 'name_speaker', speaker: 'room:A', name: 'John' });
   });
 
   it('clips a name to the limit the server enforces, so the two never diverge', async () => {

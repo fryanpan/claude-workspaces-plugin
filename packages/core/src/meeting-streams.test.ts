@@ -14,7 +14,12 @@ import {
   tagAudioFrame,
   untagAudioFrame,
 } from './meeting-streams.ts';
-import { parseMeetingClientMessage, speakerDisplayName } from './meeting.ts';
+import {
+  normalizeSpeakerName,
+  parseMeetingClientMessage,
+  speakerDisplayName,
+  speakerGivenName,
+} from './meeting.ts';
 import { parseSpeakerTagHref, renderSpeakerTag } from './speaker-tags.ts';
 
 describe('capture sources', () => {
@@ -77,9 +82,39 @@ describe('speaker namespacing', () => {
     expect(speakerDisplayName(namespacedSpeaker('system', 'A'), {})).toBe('Remote Speaker A');
   });
 
-  it('keeps the group beside a voice the person has named', () => {
+  it('reads a named voice as the name alone, with no group suffix', () => {
     const remote = namespacedSpeaker('system', 'A');
-    expect(speakerDisplayName(remote, { [remote]: 'Dana' })).toBe('Dana (Remote)');
+    const room = namespacedSpeaker('mic', 'B');
+    expect(speakerDisplayName(remote, { [remote]: 'Dana' })).toBe('Dana');
+    expect(speakerDisplayName(room, { [room]: 'Rowan Pike' })).toBe('Rowan Pike');
+  });
+
+  it('renders a name already saved with the old group suffix clean', () => {
+    const room = namespacedSpeaker('mic', 'A');
+    expect(speakerDisplayName(room, { [room]: 'Rowan (Room)' })).toBe('Rowan');
+    // The shape Bryan's doc actually carried: display appended a suffix to a
+    // saved name that already had one.
+    expect(speakerDisplayName(room, { [room]: 'Rowan (Room) (Room)' })).toBe('Rowan');
+  });
+
+  it('treats a saved name that is only a placeholder as no name at all', () => {
+    const room = namespacedSpeaker('mic', 'C');
+    expect(speakerDisplayName(room, { [room]: 'Room Speaker C' })).toBe('Room Speaker C');
+    // Even when the placeholder saved was another voice's.
+    expect(speakerDisplayName(room, { [room]: 'Room Speaker A' })).toBe('Room Speaker C');
+    expect(speakerDisplayName('A', { A: 'Speaker A' })).toBe('Speaker A');
+    expect(speakerGivenName(room, { [room]: 'Room Speaker C' })).toBeUndefined();
+  });
+
+  it('hands back the bare saved name a rename prompt should start from', () => {
+    const room = namespacedSpeaker('mic', 'A');
+    expect(speakerGivenName(room, { [room]: 'Rowan (Room)' })).toBe('Rowan');
+    expect(speakerGivenName(room, {})).toBeUndefined();
+    expect(normalizeSpeakerName('  Rowan  ')).toBe('Rowan');
+    expect(normalizeSpeakerName('(Remote)')).toBeUndefined();
+    // A name that merely CONTAINS the word is a name: only a whole
+    // placeholder is a non-answer.
+    expect(normalizeSpeakerName('Speaker of the House')).toBe('Speaker of the House');
   });
 
   it('leaves an old single-stream label reading exactly as it did', () => {

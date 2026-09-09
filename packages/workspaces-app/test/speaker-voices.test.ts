@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createDocSpeakersCache,
   loadDocSpeakers,
   loadDocTranscript,
   loadDocVoices,
@@ -38,7 +39,7 @@ describe('loadDocVoices', () => {
     });
     const voices = await loadDocVoices('huddle', fetchImpl as unknown as typeof fetch);
     expect(voices).toEqual([
-      { label: 'A', name: 'Devi', lastSaid: 'Move the gate.' },
+      { label: 'A', name: 'Devi', given: 'Devi', lastSaid: 'Move the gate.' },
       { label: 'B', name: 'Speaker B', lastSaid: 'Not before Friday.' },
     ]);
     // The LATEST meeting, not the first the index happened to list.
@@ -162,5 +163,46 @@ describe('postSpeakerName', () => {
         fetchImpl as unknown as typeof fetch,
       ),
     ).toBe(false);
+  });
+});
+
+describe('createDocSpeakersCache — the roster the menu opens on', () => {
+  const record = (speakers: Record<string, string>) => [
+    ok({ meetings: [{ meetingId: 'm-1', startedAt: 5, speakers }] }),
+    ok({ speakers, transcript: [{ text: 'Move the gate.', speaker: 'room:A' }] }),
+  ];
+
+  it('is empty until asked, and holds the answer afterwards', async () => {
+    const pages = record({ 'room:A': 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    expect(cache.peek()).toBeNull();
+    await cache.load();
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Rowan']);
+  });
+
+  it('serves two overlapping loads from one pair of requests', async () => {
+    const pages = record({ 'room:A': 'Rowan' });
+    const fetchImpl = vi.fn(async () => pages.shift() as Response);
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    // What the mount and a tap in the same moment do: the second must ride
+    // the first rather than start a second pair of round trips.
+    const [a, b] = await Promise.all([cache.load(), cache.load()]);
+    expect(a).toBe(b);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds the last good answer when a later load throws', async () => {
+    const pages = record({ 'room:A': 'Rowan' });
+    let fail = false;
+    const fetchImpl = vi.fn(async () => {
+      if (fail) throw new Error('offline');
+      return pages.shift() as Response;
+    });
+    const cache = createDocSpeakersCache('d-1', fetchImpl as unknown as typeof fetch);
+    await cache.load();
+    fail = true;
+    await expect(cache.load()).rejects.toThrow('offline');
+    expect(cache.peek()?.voices.map((v) => v.name)).toEqual(['Rowan']);
   });
 });
