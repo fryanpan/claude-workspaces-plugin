@@ -364,6 +364,17 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/suggestions/:sid/reject', 'POST'],
   ]),
 
+  // Every value the repo registry reads and writes is a HOST PATH — a
+  // checkout root, a repo's main directory, the absolute path of a copy — so
+  // the family sits behind `offBox`, the gate `POST /api/deploy` uses:
+  // loopback socket address, no `cf-ray`, no share or collab visitor, and no
+  // browser on this machine either.
+  ...family('routes/repos.ts', [
+    ['loopback-only', '/api/repos', 'GET'],
+    ['loopback-only', '/api/repos/checkouts', 'POST DELETE'],
+    ['loopback-only', '/api/repos/live-copy', 'GET'],
+  ]),
+
   // The lead's mount table sits behind `offBox`, which is the gate
   // `POST /api/deploy` uses: loopback socket address, no `cf-ray`, no share
   // or collab visitor, no browser. Host paths go in and come out of it.
