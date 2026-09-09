@@ -16,7 +16,7 @@
 import { suggestOps } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { balloonMarginVisible } from '../card-placement.ts';
-import { mountCommentHints } from '../comment-hints.ts';
+import { type CommentHintsHandle, mountCommentHints } from '../comment-hints.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { type RecentNoteCardsHandle, mountRecentNoteCards } from '../recent-note-cards.ts';
@@ -54,6 +54,9 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // Declared first so the column can ASK for the note cards while the module
   // that ages them still needs the column's relayout to place them.
   let noteCards: RecentNoteCardsHandle | null = null;
+  // Same forward declaration for the indicator: the column reserves the band
+  // its strips cover, and the strips are placed against the column.
+  let hints: CommentHintsHandle | null = null;
   const margin: MarkupMarginHandle = mountMarkupMargin({
     editorEl: editorMount,
     view: editor.editor.view,
@@ -63,6 +66,7 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     getSuggestions: () => suggestOps.listSuggestions(ydoc),
     docId,
     getNoteCards: () => noteCards?.cards() ?? [],
+    stripInsets: () => hints?.insets() ?? { top: 0, bottom: 0 },
     scope,
   });
   // "Notes agent added notes 30s ago" beside each block the note-taker just
@@ -115,7 +119,7 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     }
     chrome.revealThread(id);
   };
-  const hints = mountCommentHints({
+  hints = mountCommentHints({
     scroller: editorMount,
     marginEl: margin.marginEl,
     floatParent:
@@ -128,18 +132,20 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     isNew: (t) => chrome.seen.isNew(t),
     markSeen: (t) => chrome.markSeen(t.id),
     onSeen: () => margin.scheduleRelayout(),
+    onInsets: () => margin.scheduleRelayout(),
     onJump: jumpToThread,
     dockEl: () => document.querySelector<HTMLElement>('#editor-pane .plan-float'),
     marginVisible: balloonMarginVisible,
     scope,
   });
+  const hintsHandle = hints;
   const onMarginTransaction = (): void => {
     // A note landing, stepping down or ageing out arrives as a transaction:
     // re-read the tinted set before the column lays out against it.
     cards.tick();
     margin.scheduleRelayout();
     suggestionsSummary.scheduleRefresh();
-    hints.refresh();
+    hintsHandle.refresh();
   };
   editor.editor.on('transaction', onMarginTransaction);
   scope.onCleanup(() => editor.editor.off('transaction', onMarginTransaction));

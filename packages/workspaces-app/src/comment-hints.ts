@@ -4,6 +4,7 @@ import {
   type NewCount,
   type NewDirection,
   type NewIndicatorHandle,
+  type StripInsets,
   mountNewIndicator,
 } from './new-indicator.ts';
 import { type ThreadKind, threadKind } from './thread-kind.ts';
@@ -171,6 +172,9 @@ export interface CommentHintsOpts {
   markSeen: (t: Thread) => boolean;
   /** A thread stopped being new — repaint its glyph and highlight. */
   onSeen: (id: string) => void;
+  /** The strips changed how much of the column they cover: the card stack
+   *  has to be laid out again against the new reserved band. */
+  onInsets?: () => void;
   onJump: (id: string) => void;
   /** The floating action dock the bottom strip must stay clear of. */
   dockEl?: () => HTMLElement | null;
@@ -186,6 +190,8 @@ export interface CommentHintsOpts {
 export interface CommentHintsHandle {
   /** Re-measure and re-render — call when threads change. */
   refresh: () => void;
+  /** The band each strip covers, for the column to reserve. */
+  insets: () => StripInsets;
   /** The last split, for tests. */
   last: () => OffscreenSplit | null;
 }
@@ -269,6 +275,8 @@ export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
     }
   }
 
+  let lastBand = '';
+
   function refresh(): void {
     if (scope.disposed) return;
     const { list, byId } = items();
@@ -279,6 +287,14 @@ export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
     lastNotes = notes;
     lastItems = list;
     indicator.render(pillCount(split.above, notes.above), pillCount(split.below, notes.below));
+    // A pill that just appeared or left changed the band the column must keep
+    // clear, so the cards are stacked again against the new one.
+    const ins = indicator.insets();
+    const band = `${Math.round(ins.top)}/${Math.round(ins.bottom)}`;
+    if (band !== lastBand) {
+      lastBand = band;
+      opts.onInsets?.();
+    }
     // New threads in view start their dwell; ones that left it stop. A card
     // in view is as good as the sentence in view.
     const visible = new Set(split.inView);
@@ -352,5 +368,5 @@ export function mountCommentHints(opts: CommentHintsOpts): CommentHintsHandle {
   });
 
   refresh();
-  return { refresh, last: () => last };
+  return { refresh, insets: () => indicator.insets(), last: () => last };
 }

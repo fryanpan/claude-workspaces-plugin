@@ -184,4 +184,47 @@ describe('mountNewIndicator', () => {
     for (const f of cleanups.splice(0)) f();
     expect(h.pane.querySelector('.edge-strip')).toBe(null);
   });
+
+  it('reports the band each strip covers, so no card lies under one', () => {
+    // The strips are drawn OVER the column; the column reserves what they
+    // cover. Real rects, because this is a measurement.
+    const h = harness({ dock: 60 });
+    const top = strip(h.pane, 'top');
+    const bot = strip(h.pane, 'bottom');
+    top.getBoundingClientRect = () => ({ top: 50, bottom: 90, height: 40 }) as DOMRect;
+    bot.getBoundingClientRect = () => ({ top: 560, bottom: 600, height: 40 }) as DOMRect;
+    h.row.getBoundingClientRect = () => ({ top: 600, bottom: 660, height: 60 }) as DOMRect;
+    h.handle.render({ questions: 0, fresh: 2 }, { questions: 1, fresh: 1 });
+    const ins = h.handle.insets();
+    // Scroller runs 40..640: the top strip reaches 50px into it, the bottom
+    // strip 80 — and the seated dock is measured with it, since it sits in
+    // the same column.
+    expect(ins.top).toBe(58);
+    expect(ins.bottom).toBe(88);
+  });
+
+  it('reserves nothing where the strips are ordinary rows', () => {
+    // No column: the strips take their own height out of the flow, so a card
+    // cannot be under one and the column must not be shrunk twice.
+    const h = harness({ wide: false, dock: 60 });
+    h.handle.render({ questions: 0, fresh: 2 }, { questions: 0, fresh: 2 });
+    expect(h.handle.insets()).toEqual({ top: 0, bottom: 0 });
+  });
+
+  it('reserves nothing for a pill that is not shown', () => {
+    const h = harness();
+    const bot = strip(h.pane, 'bottom');
+    bot.getBoundingClientRect = () => ({ top: 560, bottom: 600, height: 40 }) as DOMRect;
+    h.handle.render({ questions: 0, fresh: 1 }, { questions: 0, fresh: 0 });
+    expect(h.handle.insets().bottom).toBe(0);
+  });
+
+  it('still reserves the seated dock when the pill beside it is hidden', () => {
+    // The dock is in the same column: a card may not slide under it just
+    // because there is nothing new below.
+    const h = harness({ dock: 60 });
+    h.row.getBoundingClientRect = () => ({ top: 580, bottom: 640, height: 60 }) as DOMRect;
+    h.handle.render({ questions: 0, fresh: 1 }, { questions: 0, fresh: 0 });
+    expect(h.handle.insets().bottom).toBe(68);
+  });
 });

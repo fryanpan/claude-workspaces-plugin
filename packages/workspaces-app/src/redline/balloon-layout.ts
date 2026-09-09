@@ -22,6 +22,15 @@ export interface BalloonViewport {
   top: number;
   /** Content-space y of the visible region's bottom edge. */
   bottom: number;
+  /**
+   * The fold itself, when the bottom edge above has been pulled up to
+   * reserve room for something drawn over the column (the new-content
+   * strip and the action dock). A card anchored between the two is still
+   * ON screen — it must be lifted, not left at its anchor under the strip
+   * — so the "off-screen, leave it alone" test reads this and the lift
+   * reads `bottom`. Defaults to `bottom`, which is the unreserved case.
+   */
+  visibleBottom?: number;
 }
 
 export function layoutBalloons(
@@ -52,10 +61,11 @@ export function layoutBalloons(
   // the balloon below it. min() means a balloon that already fits does not
   // move; the floor means a balloon is never lifted above the viewport top,
   // and one already above it stays put.
+  const fold = viewport.visibleBottom ?? viewport.bottom;
   let ceiling = viewport.bottom;
   for (let i = order.length - 1; i >= 0; i--) {
     const { item, index } = order[i];
-    if (item.anchorY > viewport.bottom) continue;
+    if (item.anchorY > fold) continue;
     const y = result[index];
     const lifted = Math.min(y, ceiling - item.height);
     result[index] = Math.max(lifted, Math.min(y, viewport.top));
@@ -76,4 +86,39 @@ export function layoutBalloons(
   }
 
   return result;
+}
+
+/** The band a strip drawn over the column covers, at each end. */
+export interface StripBand {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Where the card stack may live once the new-content strips and the action
+ * dock have taken their band at each end of the column. Nothing may come to
+ * rest under a strip at any scroll position (Bryan, on round 2 of the mock),
+ * and the two ends need different mechanisms: the bottom is a ceiling the
+ * lift pass pulls cards up to, while the top is a FLOOR under the anchors,
+ * because the lift deliberately never moves a card that already sits above
+ * the viewport top.
+ */
+export function foldWithStrips(m: {
+  scrollTop: number;
+  clientHeight: number;
+  gap: number;
+  /** The existing floor (the floating toggle's clearance). */
+  minY: number;
+  band: StripBand;
+}): { floorY: number; viewport: BalloonViewport } {
+  const fold = m.scrollTop + m.clientHeight - m.gap;
+  const top = Math.max(m.minY, m.scrollTop + m.band.top);
+  // With no strip over the column the floor stays what it always was: the
+  // toggle's clearance. Flooring at the scroll position instead would drag
+  // every card the reader has scrolled past down with the fold.
+  const floorY = m.band.top > 0 ? top : m.minY;
+  return {
+    floorY,
+    viewport: { top, bottom: fold - m.band.bottom, visibleBottom: fold },
+  };
 }

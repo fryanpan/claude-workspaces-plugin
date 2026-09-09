@@ -89,16 +89,33 @@ export interface NewIndicatorOpts {
   scope: MountScope;
 }
 
+/** How much of the column each strip has taken, measured, in pixels. */
+export interface StripInsets {
+  top: number;
+  bottom: number;
+}
+
 export interface NewIndicatorHandle {
   /** Paint both pills. */
   render: (above: NewCount, below: NewCount) => void;
   /** Re-seat the strips against the column and the dock. */
   place: () => void;
+  /**
+   * The band at each end of the column that the strips (and the seated dock)
+   * are now covering. The column reserves it, so no comment card can come to
+   * rest underneath one — Bryan, on round 2 of the mock. Zero on a layout
+   * with no column, where the strips are ordinary rows that already take
+   * their own height out of the flow.
+   */
+  insets: () => StripInsets;
   destroy: () => void;
 }
 
 /** Gap between the bottom strip and the dock below it. */
 const DOCK_GAP = 10;
+
+/** Breathing room between a card and the strip above or below it. */
+const STRIP_GAP = 8;
 
 function buildPill(dir: NewDirection): HTMLButtonElement {
   const b = document.createElement('button');
@@ -229,6 +246,29 @@ export function mountNewIndicator(opts: NewIndicatorOpts): NewIndicatorHandle {
     }
   }
 
+  /** The reserved band at each end — see `NewIndicatorHandle.insets`. */
+  function insets(): StripInsets {
+    // Only a floated strip lies OVER the column; a row takes its height out
+    // of the flow already, so it reserves itself.
+    if (!botStrip.classList.contains('is-floating')) return { top: 0, bottom: 0 };
+    const s = scroller.getBoundingClientRect();
+    if (s.height === 0) return { top: 0, bottom: 0 };
+    const band = (el: HTMLElement | null | undefined, from: 'top' | 'bottom'): number => {
+      if (!el || el.hidden) return 0;
+      const r = el.getBoundingClientRect();
+      if (r.height === 0) return 0;
+      return Math.max(0, from === 'top' ? r.bottom - s.top : s.bottom - r.top);
+    };
+    // The dock is seated in the same column, below the bottom pill, so the
+    // bottom band is whichever of the two reaches higher.
+    const bottom = Math.max(band(botStrip, 'bottom'), band(dockRow(), 'bottom'));
+    const top = band(topStrip, 'top');
+    return {
+      top: top > 0 ? top + STRIP_GAP : 0,
+      bottom: bottom > 0 ? bottom + STRIP_GAP : 0,
+    };
+  }
+
   function render(above: NewCount, below: NewCount): void {
     renderNewPill(topPill, above, 'above');
     renderNewPill(botPill, below, 'below');
@@ -245,6 +285,7 @@ export function mountNewIndicator(opts: NewIndicatorOpts): NewIndicatorHandle {
   return {
     render,
     place,
+    insets,
     destroy: () => {
       topStrip.remove();
       botStrip.remove();

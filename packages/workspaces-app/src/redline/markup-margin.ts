@@ -10,7 +10,7 @@ import type { NoteCard } from '../recent-note-cards.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
 import { MORPH_MS, isFoldingTap, sizeThreadSlots } from '../thread-morph.ts';
 import { createBalloonCards } from './balloon-cards.ts';
-import { layoutBalloons } from './balloon-layout.ts';
+import { foldWithStrips, layoutBalloons } from './balloon-layout.ts';
 import {
   type DeletionGroup,
   type RedlineDeletion,
@@ -99,6 +99,9 @@ export interface MarkupMarginOpts {
    *  passes fighting over the same column. Their elements are owned by the
    *  caller: this module never rebuilds one. */
   getNoteCards?: () => NoteCard[];
+  /** The band at each end of the column the new-content strips cover, which
+   *  the card stack must stay clear of (`new-indicator.ts` measures it). */
+  stripInsets?: () => { top: number; bottom: number };
   scope: MountScope;
 }
 
@@ -514,17 +517,28 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     // scrolling the document — the CSS height clamp bounds the card, this
     // bounds its position. clientHeight of 0 means no real layout (tests,
     // hidden pane): skip the bound rather than fit to a degenerate viewport.
-    const viewport =
+    // The new-content strips and the action dock are drawn OVER this column,
+    // so the fold the cards fit inside stops short of them at both ends: no
+    // card may come to rest under a strip at any scroll position (Bryan, on
+    // round 2 of the mock). `visibleBottom` keeps the true fold, so a card
+    // anchored inside the reserved band is lifted rather than read as
+    // off-screen content and left where it is.
+    const band = opts.stripInsets?.() ?? { top: 0, bottom: 0 };
+    const reserved =
       editorEl.clientHeight > 0
-        ? {
-            top: Math.max(editorEl.scrollTop, minY),
-            bottom: editorEl.scrollTop + editorEl.clientHeight - GAP,
-          }
-        : undefined;
+        ? foldWithStrips({
+            scrollTop: editorEl.scrollTop,
+            clientHeight: editorEl.clientHeight,
+            gap: GAP,
+            minY,
+            band,
+          })
+        : null;
+    const floorY = reserved?.floorY ?? minY;
     const ys = layoutBalloons(
-      items.map((it) => ({ anchorY: Math.max(minY, it.anchorY), height: it.height })),
+      items.map((it) => ({ anchorY: Math.max(floorY, it.anchorY), height: it.height })),
       GAP,
-      viewport,
+      reserved?.viewport,
     );
 
     // Size the overlay to the scrolled content so lines aren't clipped.
