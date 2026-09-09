@@ -23,6 +23,7 @@ import type { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { BlockIdentity } from './block-identity.ts';
 import { workspaceIdFromPath } from './doc-path.ts';
+import { FootnoteDecorations } from './doc/footnote-decorations.ts';
 import { resolveDocLink, safeLinkHref } from './link-open.ts';
 import { ListBehavior } from './list-behavior.ts';
 import { MermaidCodeBlock } from './mermaid-code-block.ts';
@@ -175,6 +176,11 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       // never written into the fragment. In the base list because every
       // prose surface may hold a task link (meeting notes are the driver).
       TaskLinkChips,
+      // `^[a note]` in the prose, drawn as a margin note beside the line or a
+      // superscript on a phone (doc/footnote-decorations.ts). Render-time
+      // only — the note is the literal text and stays that way — and in the
+      // base list because a footnote is prose, so any surface may hold one.
+      FootnoteDecorations,
       // Accept a suggested link, or take a wrong one back off. Configured or
       // it installs no plugin at all, so it costs the redline and task-body
       // surfaces nothing.
