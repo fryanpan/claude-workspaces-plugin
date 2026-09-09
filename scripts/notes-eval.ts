@@ -446,6 +446,16 @@ async function runMeeting(
   );
 
   const harness = createNotesTickHarness({
+    // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
+    // ('d-meeting', 'm1'), which was harmless while meetings ran one at a
+    // time and is not once `--jobs` runs four at once: four sessions sharing
+    // one doc id share every log line and every piece of state keyed on it.
+    // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately. It is
+    // the positive control for the finding: without it, "the collapse stopped
+    // happening" is a claim about a run that also changed nothing else.
+    ...(process.env.CW_NOTES_EVAL_SHARED_IDS === '1'
+      ? {}
+      : { docId: `d-${fixture.meeting}`, meetingId: `m-${fixture.meeting}` }),
     doc: `## Meeting notes\n\n- ${HUMAN_LINE}\n`,
     docTitle: `${fixture.meeting} (AMI)`,
     workspaceId: 'w-eval',
@@ -464,9 +474,22 @@ async function runMeeting(
       // it is one that wrote and then deleted, and the two look identical in
       // every other number this run prints.
       if (process.env.CW_NOTES_EVAL_OPS === '1') {
-        const mix = edits.map((e) => e.op).join(',');
+        // The ids an edit names, and — for a delete — the words it is about to
+        // remove. A tick that took the notes from forty bullets to none is
+        // only legible if the log says WHAT it deleted, not just that it
+        // deleted something.
+        const byId = new Map(input.outline.map((e) => [e.id, e]));
+        const mix = edits
+          .map((e) => {
+            const id = 'blockId' in e ? e.blockId : 'headingId' in e ? e.headingId : undefined;
+            if (e.op !== 'delete_block') return `${e.op}(${id ?? '-'})`;
+            const gone = byId.get(id as string);
+            return `delete_block(${id}: ${gone?.kind ?? '?'} "${(gone?.text ?? '?').slice(0, 40)}")`;
+          })
+          .join(' ');
         console.log(
-          `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ${mix || '(none)'}`,
+          `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ` +
+            `heading=${input.notesHeadingId ?? 'none'} :: ${mix || '(none)'}`,
         );
       }
       return edits;
@@ -499,6 +522,11 @@ async function runMeeting(
       continue;
     }
     const notes = shot.notes;
+    if (process.env.CW_NOTES_EVAL_OPS === '1') {
+      console.log(
+        `  [doc] ${fixture.meeting} tick ${i + 1}: ${allBullets(notes).length} bullets after the write`,
+      );
+    }
     await hooks.after(notes, i + 1, transcript);
     const where = `${fixture.meeting} tick ${i + 1}`;
     if (!shot.input) uncomposed++;
