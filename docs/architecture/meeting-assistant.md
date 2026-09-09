@@ -1242,7 +1242,11 @@ called" — and hands the answer to `MeetingStripHandle.renameSpeaker`, which is
 the socket while one is open and the HTTP route once it is not. The menu
 rewrites nothing in the document for it; the server's relabel does that, for
 every mention of the label. A refusal is said in the menu rather than
-swallowed.
+swallowed — which is why the strip **waits for its own read of the meeting
+record** before deciding it has no meeting to address. On a first open the
+strip and the menu are two requests for that one record, the menu's can
+answer first, and a rename refused because an id had not landed yet would
+report a refusal the server never made.
 
 **A rename works after the meeting too, and the strip keeps a surface for
 it** (2026-08-31; from a real two-voice test: labels arrived, and Bryan found

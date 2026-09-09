@@ -554,6 +554,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * capture opens or the last meeting's record loads.
    */
   let lastMeetingId: string | null = null;
+  /** The mount's one read of that record, while it is still in flight. A
+   *  rename asked for before it lands waits on it rather than reporting a
+   *  refusal nobody made. Null where the mount was given nothing to load. */
+  let castLoad: Promise<void> | null = null;
   /**
    * The meeting a dropped socket asks to be let back into. Set from `ready`
    * and cleared the moment the meeting ends, which is what keeps it different
@@ -790,21 +794,30 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       else delete names[label];
       paintNames(label);
     };
-    if (!lastMeetingId || !opts.postName) {
-      // No socket and no meeting to address: there is nowhere for this name
-      // to be kept, and a pill that keeps it anyway is lying.
-      revert();
-      return Promise.resolve(false);
-    }
-    // The socket died with the capture; the rename rides HTTP to the meeting
-    // it belongs to.
-    return opts
-      .postName(lastMeetingId, label, answer)
-      .catch(() => false)
-      .then((tookIt) => {
-        if (!tookIt) revert();
-        return tookIt;
-      });
+    // WAIT FOR THE RECORD FIRST. Which meeting this doc last held arrives
+    // asynchronously at mount, and the notes' rename entry is fed by its own
+    // request for the same record — so on a first open it can offer a Rename
+    // and be answered before this strip has an id to address. Reporting "not
+    // saved" there would be a lie about the server: nothing was refused, the
+    // id had simply not landed. The load already swallows its own failure, so
+    // this settles either way.
+    return (castLoad ?? Promise.resolve()).then(() => {
+      if (!lastMeetingId || !opts.postName) {
+        // No socket and no meeting to address: there is nowhere for this name
+        // to be kept, and a pill that keeps it anyway is lying.
+        revert();
+        return false;
+      }
+      // The socket died with the capture; the rename rides HTTP to the
+      // meeting it belongs to.
+      return opts
+        .postName(lastMeetingId, label, answer)
+        .catch(() => false)
+        .then((tookIt) => {
+          if (!tookIt) revert();
+          return tookIt;
+        });
+    });
   }
 
   /** The cast so far: every voice this meeting (or the last one) has shown. */
@@ -1433,8 +1446,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // the cast comes back off the record, and a tap renames over HTTP. A
     // capture started before the answer arrives outranks it — that meeting's
     // labels are new people — which is what the generation check drops.
+    // `renameSpeaker` waits on this promise before deciding it has no meeting
+    // to address, so a rename asked for during the load is not refused.
     const attempt = generation;
-    void opts
+    castLoad = opts
       .loadSpeakers()
       .then((cast) => {
         if (disposed || attempt !== generation || !cast || state.kind !== 'idle') return;
