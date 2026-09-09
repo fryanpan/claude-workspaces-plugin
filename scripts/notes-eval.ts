@@ -180,7 +180,7 @@ export function inventedLinkVerdict(
 }
 
 /** One behaviour's tally across the run. */
-class Behaviour {
+export class Behaviour {
   examples = 0;
   passes = 0;
   readonly failures: string[] = [];
@@ -199,6 +199,23 @@ class Behaviour {
   }
   get rate(): number {
     return this.examples === 0 ? 0 : this.passes / this.examples;
+  }
+  /**
+   * How many DIFFERENT things failed, as against how many ticks a failure was
+   * visible on.
+   *
+   * The decidable checks read the NOTES at each tick, so one bad bullet
+   * written on tick one fails every tick it survives — forty failures can be
+   * one line. The rate is still the honest answer to "are the notes good
+   * right now", but it is a terrible answer to "how often did the writer
+   * err", and a table comparing two methods on the rate alone reads a single
+   * unlucky bullet as a systematic gap. So both numbers print.
+   */
+  get distinctFailures(): number {
+    // The meeting and the text, without the tick: the same bullet failing on
+    // twelve ticks of one meeting is one thing, and the same wording in two
+    // different meetings is two.
+    return new Set(this.failures.map((f) => f.replace(/ tick \d+:/, ':'))).size;
   }
 }
 
@@ -765,15 +782,20 @@ function report(
   quote: boolean,
   ratchet = false,
 ): number {
-  console.log('\nBehaviour                                  examples   pass rate');
-  console.log('-'.repeat(66));
+  console.log(
+    '\nBehaviour                                  examples   pass rate   distinct misses',
+  );
+  console.log('-'.repeat(83));
   let thin = 0;
   for (const b of Object.values(behaviours)) {
     const rate = b.examples === 0 ? '     —' : `${(b.rate * 100).toFixed(0).padStart(5)}%`;
-    console.log(`${b.what.padEnd(42)} ${String(b.examples).padStart(8)}   ${rate}`);
+    const distinct = b.failures.length === 0 ? '' : `${b.distinctFailures} of ${b.failures.length}`;
+    console.log(
+      `${b.what.padEnd(42)} ${String(b.examples).padStart(8)}   ${rate}   ${distinct.padStart(15)}`,
+    );
     if (b.examples < 25) thin++;
   }
-  console.log('-'.repeat(66));
+  console.log('-'.repeat(83));
   // A failure line quotes the bullet that failed, and a bullet is the meeting
   // restated. Off-repo corpora are private meetings, so they get the count
   // and nothing else.
