@@ -3,6 +3,7 @@ export * from './schema.ts';
 export * from './identity.ts';
 export * from './lcs.ts';
 export * from './markdown-blocks.ts';
+export * from './meeting-parse.ts';
 export * from './meeting.ts';
 export * from './meeting-streams.ts';
 export * from './meeting-tuning.ts';

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseMeetingClientMessage } from './meeting-parse.ts';
 import {
   COMBINED_SOURCE,
   MeetingTurnMerger,
@@ -14,12 +15,7 @@ import {
   tagAudioFrame,
   untagAudioFrame,
 } from './meeting-streams.ts';
-import {
-  normalizeSpeakerName,
-  parseMeetingClientMessage,
-  speakerDisplayName,
-  speakerGivenName,
-} from './meeting.ts';
+import { normalizeSpeakerName, speakerDisplayName, speakerGivenName } from './meeting.ts';
 import { parseSpeakerTagHref, renderSpeakerTag } from './speaker-tags.ts';
 
 describe('capture sources', () => {

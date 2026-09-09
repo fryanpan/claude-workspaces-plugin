@@ -464,6 +464,14 @@ namespaced speaker labels are rendered by the browser, written by the server
 and read back by the notes composer, so one spelling has to serve three
 processes.
 
+`meeting-parse.ts` joins that tier too and moves the boundary rather than the
+picture: `meeting.ts` keeps the VOCABULARY — the frame shapes, the capture
+modes, the engine names, the bounds — and this holds the reading of an
+untrusted frame against it, which is a different job under a different rule.
+It imports from `meeting.ts` and never the other way, because both sides of
+the socket use the types and only the server reads the frames. It was split
+out when a new frame took `meeting.ts` past the 500-line bar.
+
 `speaker-name.ts` sits in that same wire-types tier, and joins the picture
 without changing it: what a voice is CALLED — the placeholder until somebody
 names it, and the normalisation that keeps a stale display string from being
