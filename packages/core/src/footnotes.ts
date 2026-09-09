@@ -149,7 +149,11 @@ export function factRange(text: string, footnoteStart: number): FactRange {
   for (const f of findFootnotes(before)) {
     if (f.end > start) start = f.end;
   }
-  const lead = /^[\s,;:—–-]*(?:and|but|or|so|yet|nor)?\s*/i.exec(before.slice(start));
+  // The conjunction needs a boundary after it, or the group eats the first
+  // syllable of an ordinary word: "And" out of "Android", "or" out of
+  // "order", "but" out of "button", each leaving the underline starting
+  // mid-word.
+  const lead = /^[\s,;:—–-]*(?:(?:and|but|or|so|yet|nor)(?=\s|$))?\s*/i.exec(before.slice(start));
   start += lead?.[0].length ?? 0;
   let end = footnoteStart;
   while (end > start && /\s/.test(text[end - 1] ?? '')) end--;

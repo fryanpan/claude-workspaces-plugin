@@ -3813,13 +3813,19 @@ body.redline-mode #toggle-suggest-mode {
   cursor: pointer;
 }
 /* The margin already carries every note, so the number in the text would be
-   noise — and ONLY there. Keyed on `body[data-cards]`, the reader's stored
-   placement, never on width: a reader who chose inline cards on a 1180px
-   screen has no margin column, and a number hidden by a media query left
-   that note with no way to reach it at all. Same predicate the module's
-   `marginVisible` asks (balloonMarginVisible in card-placement.ts), so the
-   two halves cannot disagree. */
-body[data-cards="balloon"] .cw-fn {
+   noise — and ONLY there. Two conditions, and both are needed.
+
+   `body[data-cards]` is the reader's stored placement, never a width: a
+   reader who chose inline cards on a 1180px screen has no margin column, and
+   a number hidden by a media query left that note with no way to reach it at
+   all. It is the same predicate the module asks (`balloonMarginVisible` in
+   card-placement.ts), so the two halves cannot disagree.
+
+   `.cw-fn-margined` is the editor that actually mounts footnote-notes.ts.
+   Every `createEditor` draws these decorations — a task body, a live
+   redline — and only the document editor has a margin, so without this the
+   citation simply vanished in the others. */
+body[data-cards="balloon"] .cw-fn-margined .cw-fn {
   --cw-fn-sup: none;
 }
 .cw-fn-on::after {

@@ -84,6 +84,28 @@ describe('the fact a note is about', () => {
   });
 });
 
+describe('a word that merely starts like a conjunction', () => {
+  const factOf = (text: string) => {
+    const f = findFootnotes(text)[0];
+    if (!f) throw new Error('no footnote');
+    const r = factRange(text, f.start);
+    return text.slice(r.start, r.end);
+  };
+
+  it('keeps "Android" whole', () => {
+    expect(factOf('Nothing here. Android adoption rose^[report].')).toBe('Android adoption rose');
+  });
+
+  it('keeps "order" and "button" whole', () => {
+    expect(factOf('Nothing here. Orders shipped late^[report].')).toBe('Orders shipped late');
+    expect(factOf('Nothing here. Buttons moved down^[report].')).toBe('Buttons moved down');
+  });
+
+  it('still drops a real conjunction (control)', () => {
+    expect(factOf('It was slow. And a third of it waits^[report].')).toBe('a third of it waits');
+  });
+});
+
 describe('a caret the author escaped', () => {
   it('is not a note opener, so the syntax can be written down', () => {
     expect(findFootnotes('Type \\^[a note] to add one.')).toEqual([]);

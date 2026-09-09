@@ -159,6 +159,61 @@ describe('the popover on a phone', () => {
   });
 });
 
+describe('an open card while the text underneath changes', () => {
+  it('stays on its own note, re-lit and re-placed, when a later edit rebuilds the spans', () => {
+    const { container, notes, editor } = mount({ marginVisible: false });
+    tap(supFor(container, '1'));
+    // An edit far from the note: same notes, same numbering, new DOM spans.
+    editor.editor.commands.insertContentAt(1, 'Filed in March. ');
+    notes.refresh();
+    expect(popover(container)?.hidden).toBe(false);
+    expect(popover(container)?.textContent).toBe(
+      'Planning Department annual report, 2025, table 4.',
+    );
+    expect(supFor(container, '1').classList.contains('cw-fn-on')).toBe(true);
+  });
+
+  it('closes rather than silently showing another note under the same number', () => {
+    const { container, notes, editor } = mount({ marginVisible: false });
+    tap(supFor(container, '2'));
+    // A note inserted BEFORE it: `2` now means a sentence the reader never
+    // tapped, so the card must not simply repaint itself.
+    editor.editor.commands.insertContentAt(1, 'Filed in March^[Intake log, 2025.]. ');
+    notes.refresh();
+    expect(popover(container)?.hidden).toBe(true);
+    expect(container.querySelectorAll('.cw-fn-on')).toHaveLength(0);
+  });
+
+  it('closes when the author edits the words the card is showing', () => {
+    const { container, notes, editor } = mount({ marginVisible: false });
+    tap(supFor(container, '1'));
+    editor.editor.commands.setContent(
+      'A permit takes 94 days^[Planning Department annual report, 2026, table 9.].',
+    );
+    notes.refresh();
+    expect(popover(container)?.hidden).toBe(true);
+  });
+});
+
+describe('an editor with no margin of its own', () => {
+  /**
+   * Every `createEditor` draws `.cw-fn` decorations — a task body, a live
+   * redline — and only the document editor mounts this module. The rule that
+   * hides the number where the margin carries the note is keyed on the class
+   * this module adds, so those other editors keep the citation on screen.
+   */
+  it('keeps its superscript under balloon placement, where the doc editor hides it', () => {
+    document.body.dataset.cards = 'balloon';
+    const { container, scope } = mount({ marginVisible: true });
+    const sup = supFor(container, '1');
+    expect(styleOf(sup).getPropertyValue('--cw-fn-sup').trim()).toBe('none');
+    // Unmounting the notes module is the same DOM an editor that never
+    // mounted it has.
+    scope.dispose();
+    expect(styleOf(sup).getPropertyValue('--cw-fn-sup').trim()).toBe('');
+  });
+});
+
 describe('the printed sources list', () => {
   it('numbers the notes in document order', () => {
     const { container } = mount({ marginVisible: true });

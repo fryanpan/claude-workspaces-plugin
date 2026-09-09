@@ -78,6 +78,18 @@ function found(prose: HTMLElement): FoundNote[] {
 export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHandle {
   const { prose, container, marginVisible, onChange, scope } = opts;
 
+  // Marks THIS editor as one whose notes have a margin to go to. Every
+  // `createEditor` draws the same `.cw-fn` decorations — a task body, a live
+  // redline — and only the document editor mounts this module, so a rule that
+  // hid the superscript on `.cw-fn` alone took the citation off screen in the
+  // editors that have no margin to put it in instead.
+  //
+  // On the CONTAINER, not on the prose root: ProseMirror owns the class
+  // attribute of its own DOM node and rewrites it wholesale whenever the
+  // view's attribute props change, which would drop this one without a word.
+  container.classList.add('cw-fn-margined');
+  scope.onCleanup(() => container.classList.remove('cw-fn-margined'));
+
   const cards = new Map<string, { card: NoteCard; note: string; unsure: boolean }>();
 
   const sources = document.createElement('section');
@@ -90,6 +102,9 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   pop.hidden = true;
   container.appendChild(pop);
   let openN: string | null = null;
+  /** The words the open card is showing, so a refresh can tell whether the
+   *  number still means the note the reader tapped. */
+  let openNote = '';
 
   scope.onCleanup(() => {
     sources.remove();
@@ -133,8 +148,17 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   function closePop(): void {
     if (openN === null) return;
     openN = null;
+    openNote = '';
     pop.hidden = true;
     for (const el of prose.querySelectorAll('.cw-fn-on')) el.classList.remove('cw-fn-on');
+  }
+
+  /** Light the one note the card belongs to, and nothing else. The decoration
+   *  plugin replaces these spans on every rebuild, so the class has to be put
+   *  back on the NEW element rather than assumed to have survived. */
+  function lightOnly(anchor: HTMLElement): void {
+    for (const el of prose.querySelectorAll('.cw-fn-on')) el.classList.remove('cw-fn-on');
+    anchor.classList.add('cw-fn-on');
   }
 
   /**
@@ -166,8 +190,23 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
       held.card.el.remove();
       cards.delete(n);
     }
-    if (openN !== null && !live.has(openN)) closePop();
     for (const f of notes) cardFor(f);
+    // The open card has to be re-decided, not left standing. Its span was
+    // just replaced, the paragraph under it may have moved, and the NUMBER is
+    // not an identity: inserting a note earlier in the doc renumbers every
+    // one after it, so `2` can come back meaning a different sentence. Same
+    // number and same words is the note the reader tapped — re-light and
+    // re-place it; anything else closes, because silently swapping the text
+    // under their finger is the one outcome they cannot detect.
+    if (openN !== null) {
+      const still = notes.find((f) => f.n === openN);
+      if (!still || still.note !== openNote) closePop();
+      else {
+        pop.classList.toggle('cw-fn-pop-unsure', still.unsure);
+        lightOnly(still.anchor);
+        placePop(still.anchor);
+      }
+    }
     onChange();
   }
 
@@ -186,10 +225,11 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     const f = notes.find((x) => x.n === n);
     if (!f) return;
     openN = n;
+    openNote = f.note;
     pop.textContent = f.note;
     pop.classList.toggle('cw-fn-pop-unsure', f.unsure);
     pop.hidden = false;
-    target.classList.add('cw-fn-on');
+    lightOnly(target);
     placePop(target);
   });
   // A tap anywhere else — including on the prose, handled above — closes it.
