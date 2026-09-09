@@ -10,6 +10,8 @@ interface Seen {
   system: string;
   user: string;
   tool?: string;
+  /** How much of the ceiling a thinking model may think for, as sent. */
+  effort?: string;
 }
 
 /**
@@ -29,6 +31,7 @@ function harness(points: string[] = ['Maya (A): survey the boardwalk']): {
       system: string;
       tools?: Array<{ name: string }>;
       messages: Array<{ content: string }>;
+      output_config?: { effort?: string };
     };
     const tool = body.tools?.[0]?.name;
     seen.push({
@@ -36,6 +39,7 @@ function harness(points: string[] = ['Maya (A): survey the boardwalk']): {
       system: body.system,
       user: body.messages[0]?.content ?? '',
       ...(tool ? { tool } : {}),
+      ...(body.output_config?.effort ? { effort: body.output_config.effort } : {}),
     });
     if (tool === 'record_points') {
       return new Response(
@@ -139,6 +143,23 @@ describe('which model writes the notes', () => {
     const { composer, seen } = composerFor('ledger-opus');
     await composer.compose(input());
     expect(composes(seen)[0]?.model).toBe('claude-opus-5');
+  });
+
+  test('Opus thinks at the effort the exploration priced it at', async () => {
+    // Every Opus figure in the shipping table — lost ideas AND dollars per
+    // meeting-hour — was measured at effort low. Left off, the shipped
+    // method is a more expensive note-taker than the one the table is about.
+    const { composer, seen } = composerFor('ledger-opus');
+    await composer.compose(input());
+    expect(composes(seen)[0]?.effort).toBe('low');
+  });
+
+  test('MUTATION CONTROL: the Haiku methods send no effort at all', async () => {
+    for (const method of ['original', 'ledger-haiku'] as const) {
+      const { composer, seen } = composerFor(method);
+      await composer.compose(input());
+      expect(composes(seen)[0]?.effort).toBeUndefined();
+    }
   });
 });
 

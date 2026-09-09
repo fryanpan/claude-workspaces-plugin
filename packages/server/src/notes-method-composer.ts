@@ -51,6 +51,34 @@ const COMPOSE_MODEL: Record<NotesMethod, string | undefined> = {
 const OPUS_MAX_TOKENS = 4_000;
 
 /**
+ * How much of that ceiling it may think for.
+ *
+ * `low`, and the number matters: every Opus figure the exploration measured —
+ * the lost-idea rate AND the price a meeting-hour costs — was measured with
+ * effort low. Shipping the same method with the setting left off would run a
+ * different, more expensive note-taker than the one the table is about, and
+ * the eval could not honestly be compared against its own exploration.
+ */
+const OPUS_EFFORT = 'low';
+
+/**
+ * What a method composes with — the one table the shipped composer and
+ * `scripts/notes-eval-variants.ts` both read.
+ *
+ * Exported because the eval's whole claim is that it measures the SHIPPED
+ * note-takers. A second copy of these three settings in the script is how the
+ * eval starts reporting on a note-taker nobody can select.
+ */
+export function composeSettings(method: NotesMethod): {
+  model?: string;
+  maxTokens?: number;
+  effort?: string;
+} {
+  const model = COMPOSE_MODEL[method];
+  return model ? { model, maxTokens: OPUS_MAX_TOKENS, effort: OPUS_EFFORT } : {};
+}
+
+/**
  * The most meetings whose ledger carry is held at once.
  *
  * A ledger is a few short strings and a meeting ends, so this is a guard
@@ -102,11 +130,10 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
   for (const method of Object.keys(COMPOSE_MODEL) as NotesMethod[]) {
     const key = buildKey(method);
     if (byBuild.has(key)) continue;
-    const model = COMPOSE_MODEL[method];
     const instructions = base.instructions;
     const composer = createHaikuNotesComposer({
       ...base,
-      ...(model ? { model, maxTokens: OPUS_MAX_TOKENS } : {}),
+      ...composeSettings(method),
       ...(notesMethodUsesLedger(method) && instructions
         ? {
             // Re-read per tick like the store it wraps, so an edit on the
