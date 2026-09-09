@@ -1,3 +1,4 @@
+import { onPlacementChange } from '../card-placement.ts';
 import type { MountScope } from '../mount-scope.ts';
 import type { NoteCard } from '../recent-note-cards.ts';
 
@@ -200,7 +201,11 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     // under their finger is the one outcome they cannot detect.
     if (openN !== null) {
       const still = notes.find((f) => f.n === openN);
-      if (!still || still.note !== openNote) closePop();
+      // `marginVisible()` belongs in this check as much as the note does: a
+      // reader who moves their cards into the margin mid-tap gets every note
+      // as a caption, and the card would be a second copy of the one they are
+      // looking at — the same reason a tap does not open one there.
+      if (!still || still.note !== openNote || marginVisible()) closePop();
       else {
         pop.classList.toggle('cw-fn-pop-unsure', still.unsure);
         lightOnly(still.anchor);
@@ -238,6 +243,11 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     if (el && (prose.contains(el) || pop.contains(el))) return;
     closePop();
   });
+
+  // Placement is the reader's, changed from the chrome and from a width
+  // boundary, and neither goes through an editor transaction — so without
+  // this the card the reader had open outlived the surface that justified it.
+  onPlacementChange((target, type, fn) => scope.listen(target, type, fn), refresh);
 
   refresh();
 

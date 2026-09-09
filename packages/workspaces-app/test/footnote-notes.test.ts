@@ -2,6 +2,7 @@ import { prose } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { PLACEMENT_CHANGED_EVENT } from '../src/card-placement.ts';
 import { mountFootnoteNotes } from '../src/doc/footnote-notes.ts';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { MountScope } from '../src/mount-scope.ts';
@@ -38,7 +39,7 @@ const DOC = [
   'and about a third of that waits^[Estimate from three applicants. Unconfirmed.].',
 ].join(' ');
 
-function mount(opts: { marginVisible: boolean; md?: string }) {
+function mount(opts: { marginVisible: boolean | (() => boolean); md?: string }) {
   const ydoc = new Y.Doc();
   prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks(opts.md ?? DOC));
   const container = document.createElement('div');
@@ -53,7 +54,10 @@ function mount(opts: { marginVisible: boolean; md?: string }) {
   const notes = mountFootnoteNotes({
     prose: editor.editor.view.dom,
     container,
-    marginVisible: () => opts.marginVisible,
+    marginVisible:
+      typeof opts.marginVisible === 'function'
+        ? opts.marginVisible
+        : () => opts.marginVisible === true,
     onChange: () => {
       changes++;
     },
@@ -180,6 +184,20 @@ describe('an open card while the text underneath changes', () => {
     // tapped, so the card must not simply repaint itself.
     editor.editor.commands.insertContentAt(1, 'Filed in March^[Intake log, 2025.]. ');
     notes.refresh();
+    expect(popover(container)?.hidden).toBe(true);
+    expect(container.querySelectorAll('.cw-fn-on')).toHaveLength(0);
+  });
+
+  it('closes when the reader moves their cards into the margin under it', () => {
+    // The real predicate this time, reading the attribute the chrome writes.
+    document.body.dataset.cards = 'inline';
+    const { container } = mount({
+      marginVisible: () => document.body.dataset.cards === 'balloon',
+    });
+    tap(supFor(container, '1'));
+    expect(popover(container)?.hidden).toBe(false);
+    document.body.dataset.cards = 'balloon';
+    window.dispatchEvent(new Event(PLACEMENT_CHANGED_EVENT));
     expect(popover(container)?.hidden).toBe(true);
     expect(container.querySelectorAll('.cw-fn-on')).toHaveLength(0);
   });
