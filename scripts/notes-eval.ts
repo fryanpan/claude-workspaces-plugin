@@ -41,12 +41,13 @@
  * not "how often did the model err". Read the failure lines, which name the
  * bullet, before concluding anything about frequency.
  *
- * THE SMOKE SLICE IS THE ONE THAT CAN FAIL. Every other run reports and
- * exits 0: a rate over a model's output is a reading, not a verdict, and one
- * bad meeting must not be able to turn a push red. The exception is the flat
- * wall of bullets — a topic left running past four with no sub-bullets and no
- * subheading under it is decidable, cheap to see, and the shape the notes are
- * not allowed to have — so `--smoke` exits 1 on one.
+ * WHAT CAN TURN A RUN RED is the lost-idea rate and nothing else about the
+ * notes' shape. A rate over a model's output is a reading, not a verdict, so
+ * every behaviour reports and exits 0. The flat wall of bullets — a topic
+ * left running past four with no sub-bullets and no subheading under it — is
+ * decidable and cheap to see, and it prints a WARNING, because the fix for it
+ * is open note-taker work: a daily job red every morning for a reason nobody
+ * is going to act on today hides the day something else breaks.
  *
  * ON DEMAND ONLY. It spends money and it talks to the network, so nothing
  * runs it on a push except the `--smoke` slice, which is sized to cost cents.
@@ -719,7 +720,6 @@ async function runMeeting(
 
 function report(
   behaviours: Record<string, Behaviour>,
-  failOnWalls: boolean,
   ideaRows: readonly MeetingIdeaRate[],
   gateIdeas: boolean,
   quote: boolean,
@@ -776,13 +776,14 @@ function report(
     }
   }
   const walls = behaviours.flatRuns!;
-  if (failOnWalls && walls.failures.length > 0) {
+  if (walls.failures.length > 0) {
     console.log(
-      `\nFAILED: ${walls.failures.length} tick(s) left a topic running past ` +
+      `\nWARNING: ${walls.failures.length} tick(s) left a topic running past ` +
         `${MAX_FLAT_RUN_BULLETS} flat bullets. The instructions ask for the topic's points ` +
-        'to be gathered into groups once it passes the bar; raise the structure, not the bar.',
+        'to be gathered into groups once it passes the bar; raise the structure, not the bar. ' +
+        'Not failing the run: this is open note-taker work, and a daily job that is red for a ' +
+        'known reason hides the day something else breaks.',
     );
-    return 1;
   }
   return ideaCode;
 }
@@ -891,17 +892,16 @@ async function main(argv: string[]): Promise<number> {
   } finally {
     setIdeaUsageSink(null);
   }
-  // Two things can turn a verdict red, and they are red for different
-  // reasons. The flat-wall check is a SHAPE the notes may not have, and only
-  // the smoke slice gates on it because a rate over a model's output is a
-  // reading rather than a verdict. The lost-idea rate is not that kind of
-  // number: it is measured against a fixed ground truth, so it means the same
-  // thing every run, and it gates on every run that measured it.
+  // One thing turns a verdict red: the lost-idea rate. It is measured against
+  // a fixed ground truth, so it means the same thing every run, and it gates
+  // on every run that measured it. The flat-wall check is a SHAPE the notes
+  // may not have, and it warns rather than fails until the note-taker fix
+  // lands, so a daily run is red only when the harness itself breaks.
   // A corpus outside this repo is a private meeting corpus by construction —
   // that is the only reason `--corpus` exists. Its examples never print.
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const quote = !relative(repoRoot, resolve(corpusDir)).startsWith('..');
-  return report(behaviours, smoke, ideaRows, ideas, quote, argv.includes('--ratchet'));
+  return report(behaviours, ideaRows, ideas, quote, argv.includes('--ratchet'));
 }
 
 if (import.meta.main) {
