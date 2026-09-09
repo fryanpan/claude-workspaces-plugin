@@ -275,4 +275,29 @@ describe('a local origin is keyed by where it resolves to', () => {
       'git:github.com/example/widgets',
     );
   });
+  it('keys a scp-style remote the same whether or not it names a user', () => {
+    // Git's rule is positional: a colon with no slash before it makes the
+    // text before it a host, whoever is logging in. Requiring `user@` sent
+    // the userless spelling down the local-path branch, so two clones of one
+    // repository held two identities and shared no documents.
+    const withUser = repoWithLocalOrigin(join(tmp, 'a'), 'git@github.com:example/widgets.git');
+    const without = repoWithLocalOrigin(join(tmp, 'b'), 'github.com:example/widgets.git');
+    expect(repoIdentityAt(join(without, 'docs/plan.md'))?.repoKey).toBe(
+      'git:github.com/example/widgets',
+    );
+    expect(repoIdentityAt(join(without, 'docs/plan.md'))?.repoKey).toBe(
+      repoIdentityAt(join(withUser, 'docs/plan.md'))?.repoKey as string,
+    );
+  });
+
+  it('CONTROL: a local path with no colon is still keyed by where it resolves', () => {
+    // The branch the fix must not swallow. A relative path carries no host,
+    // so it keeps going to `file:` — this is the assertion that the colon,
+    // and not the mere presence of a remote, is what picks the branch.
+    const dir = repoWithLocalOrigin(join(tmp, 'c'), '../remote.git');
+    expect(repoIdentityAt(join(dir, 'docs/plan.md'))?.repoKey.startsWith('file:')).toBe(true);
+    // And a Windows drive letter is a path, not a one-letter machine.
+    const drive = repoWithLocalOrigin(join(tmp, 'd'), 'C:/src/widgets.git');
+    expect(repoIdentityAt(join(drive, 'docs/plan.md'))?.repoKey.startsWith('file:')).toBe(true);
+  });
 });

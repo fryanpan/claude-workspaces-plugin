@@ -85,8 +85,8 @@ export function normalizeRemoteUrl(url: string): string | null {
   if (s === '') return null;
   // scp-style `git@host:path` — no scheme, and the colon is a separator
   // rather than a port. Rewrite it before anything tries to parse a scheme.
-  const scp = s.match(/^[^/:]+@([^/:]+):(.+)$/);
-  if (scp?.[1] && scp[2] !== undefined) s = `${scp[1]}/${scp[2]}`;
+  const scp = scpStyleRemote(s);
+  if (scp) s = `${scp.host}/${scp.path}`;
   else s = s.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
   // A userinfo prefix survives the scheme strip on `https://user@host/…`.
   s = s.replace(/^[^/@]+@/, '');
@@ -97,6 +97,31 @@ export function normalizeRemoteUrl(url: string): string | null {
   const slash = s.indexOf('/');
   const host = (slash === -1 ? s : s.slice(0, slash)).toLowerCase();
   return slash === -1 ? host : `${host}${s.slice(slash)}`;
+}
+
+/**
+ * The scp shorthand for a remote, split into host and path — or null if this
+ * is not one.
+ *
+ * `user@` is OPTIONAL, which is the whole reason this is a function. Git's
+ * rule is positional: a colon with no slash before it makes the text before
+ * it a host, whoever is logging in. Requiring the user meant `example.com:team/repo.git`
+ * read as a filesystem path and keyed by where the clone happened to sit, so
+ * two clones of one repository — one with the user spelled, one without —
+ * held two identities and shared no documents.
+ *
+ * A single-letter host is a Windows drive (`C:/src/repo`), not a machine, and
+ * a `scheme://` colon is not a separator at all.
+ */
+function scpStyleRemote(s: string): { host: string; path: string } | null {
+  // A scheme's own colon is not a separator: `https://host/path` would
+  // otherwise read as the host `https` and the path `//host/path`.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) return null;
+  const m = s.match(/^(?:([^/:]+)@)?([^/:]+):(.+)$/);
+  const host = m?.[2];
+  const path = m?.[3];
+  if (!host || path === undefined || host.length < 2) return null;
+  return { host, path };
 }
 
 /**
@@ -134,7 +159,7 @@ export function readOriginUrl(commonDir: string): string | null {
  *
  * Git's own rule, and the reason this function exists: a remote is remote
  * only when it carries a `scheme://` or is the scp shorthand
- * `user@host:path`. **Everything else is a filesystem path** — `../remote.git`,
+ * `[user@]host:path` — the user is optional, per `scpStyleRemote`. **Everything else is a filesystem path** — `../remote.git`,
  * `/srv/git/widgets.git`, `~/src/widgets`. Those are ordinary: a local
  * mirror, a bare repo on a NAS, a fixture built by a test.
  *
@@ -149,7 +174,7 @@ function isUrlSpelledRemote(url: string): boolean {
   const s = url.trim();
   if (/^file:\/\//i.test(s)) return false;
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) return true;
-  return /^[^/:]+@[^/:]+:.+$/.test(s);
+  return scpStyleRemote(s) !== null;
 }
 
 /**
