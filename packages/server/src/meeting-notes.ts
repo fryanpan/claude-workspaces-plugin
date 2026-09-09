@@ -420,6 +420,18 @@ export interface NotesUpdate {
 }
 
 /**
+ * The doc declined this batch on policy, and would decline it again.
+ *
+ * Its own value rather than a `false` because the two want opposite
+ * handling: a `false` write is retried at once (the outline it failed
+ * against is the thing that changes), and a refusal is not, because nothing
+ * about the doc or the words has moved. Only the notes-heading guard answers
+ * this today; the type is the seam for any later rule that refuses a batch
+ * for what it IS rather than for what the doc happens to hold.
+ */
+export type NotesWriteRefusal = 'refused';
+
+/**
  * "Every place the notes say `from`, they should say `to`" — a rename
  * reaching notes already written.
  *
@@ -638,11 +650,19 @@ export interface MeetingNotesDeps {
    *
    * `void` and `true` both mean written — a sink with nothing to report is
    * the ordinary case and must not have to say so.
+   *
+   * `'refused'` is the third answer, and it is a write that did not land AND
+   * must not be tried again with the same words: the doc declined the batch
+   * on policy, not on a block that had moved. `false` earns an immediate
+   * second compose because re-reading the outline is exactly what fixes it;
+   * a policy refusal would refuse the retry too, so it says so instead of
+   * spending a compose to find out.
    */
   // A sink with nothing to report returns nothing; only an explicit `false`
-  // means the write did not land. The union is the contract, not a slip.
+  // or `'refused'` means the write did not land. The union is the contract,
+  // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes: (update: NotesUpdate) => void | boolean;
+  onNotes: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
   /**
    * Where a rename of a voice already written about goes. Optional: a
    * session with no sink for it composes under the new name from the next
@@ -719,9 +739,10 @@ export interface MeetingNotesDeps {
  */
 export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
   // A sink with nothing to report returns nothing; only an explicit `false`
-  // means the write did not land. The union is the contract, not a slip.
+  // or `'refused'` means the write did not land. The union is the contract,
+  // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes?: (update: NotesUpdate) => void | boolean;
+  onNotes?: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
   taskExtractor?: import('./meeting-task-capture.ts').TaskCaptureExtractor | null;
 };
 
@@ -1265,7 +1286,7 @@ export function beginNotesSession(
           tick: { ...tick, turns: [] },
           edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
         });
-        if (opened !== false) {
+        if (opened !== false && opened !== 'refused') {
           try {
             outline = deps.readOutline({ docId: ids.docId, meetingId: ids.meetingId });
             notesHeadingId = deps.notesHeadingId({
@@ -1390,13 +1411,13 @@ export function beginNotesSession(
         );
         const edits = withSuggestions(checked, unseen, input.humanNotes, notesHeadingId);
         const applyStart = clock();
-        const written =
-          deps.onNotes({
-            docId: ids.docId,
-            meetingId: ids.meetingId,
-            tick: input.tick,
-            edits,
-          }) !== false;
+        const verdict = deps.onNotes({
+          docId: ids.docId,
+          meetingId: ids.meetingId,
+          tick: input.tick,
+          edits,
+        });
+        const written = verdict !== false && verdict !== 'refused';
         applyMs = clock() - applyStart;
         if (!written) {
           // The compose was fine and the DOC refused it. Same handling as a
@@ -1413,7 +1434,14 @@ export function beginNotesSession(
             `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: doc write skipped`,
           );
           report('failed', edits);
-          retryAfterFailure(tick);
+          // A REFUSAL IS NOT RETRIED. `retryAfterFailure` exists because a
+          // store refusal is usually a stale outline, and the retry re-reads
+          // it. A doc that refused these edits on policy — the guard on the
+          // meeting's own notes heading — refuses the same edits again, so
+          // the retry buys a second compose and a second refusal. The words
+          // still carry to the next tick, which composes against a doc that
+          // has moved on.
+          if (verdict !== 'refused') retryAfterFailure(tick);
           return;
         }
         // A question is only asked once, and it is asked once it has LANDED.

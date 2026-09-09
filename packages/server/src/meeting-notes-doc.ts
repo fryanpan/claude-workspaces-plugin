@@ -67,6 +67,7 @@ import {
   type NotesReattribution,
   type NotesRelabel,
   type NotesUpdate,
+  type NotesWriteRefusal,
 } from './meeting-notes.ts';
 import {
   type ResearchFiled,
@@ -327,10 +328,23 @@ function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
  * came back empty (an evicted or deleted doc); `not-prose` is a doc that is
  * not a notepad; `store-refused` is the store declining the batch outright;
  * `all-edits-failed` is every edit in the batch naming a block that is no
- * longer there. Only the last two are a compose worth retrying, and no
+ * longer there. Only those two are a compose worth retrying, and no
  * amount of reading the old line could tell them apart.
+ *
+ * `guard-refused` is the fifth and the one that is NOT a failure: the batch
+ * reached the doc intact and the notes guard declined every edit in it. It
+ * used to report `all-edits-failed`, whose detail told the reader the blocks
+ * were gone — they were not — and whose caller answered by composing the
+ * same tick again, to be refused again. A policy refusal is a decision the
+ * doc made about these edits, so it says so, and the session carries the
+ * words to the next tick instead of spending a second compose on them.
  */
-export type NotesWriteSkip = 'no-doc' | 'not-prose' | 'store-refused' | 'all-edits-failed';
+export type NotesWriteSkip =
+  | 'no-doc'
+  | 'not-prose'
+  | 'store-refused'
+  | 'all-edits-failed'
+  | 'guard-refused';
 
 /** What a tick's write came to: `null` when it landed, else why it did not. */
 export type NotesWriteResult = null | NotesWriteSkip;
@@ -382,10 +396,11 @@ export function applyNotesUpdate(
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);
   }
-  // A batch the guard emptied wrote nothing, and it is not a store failure:
-  // it is the same outcome as a batch whose every edit named a missing block,
-  // which the caller already knows how to log and to retry.
-  if (guarded.edits.length === 0) return 'all-edits-failed';
+  // A batch the guard emptied wrote nothing, and it is neither a store
+  // failure nor a batch of missing blocks: the doc refused it on policy, and
+  // would refuse the identical batch again. Named apart so the log tells the
+  // truth about why, and so the session does not retry it.
+  if (guarded.edits.length === 0) return 'guard-refused';
   const res = applyNotesBlockEdits(docStore, update.docId, guarded.edits);
   if (!res.ok) return 'store-refused';
   heading.learn(
@@ -408,6 +423,9 @@ export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
   }
   if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
   if (skip === 'store-refused') return 'the store refused the batch outright';
+  if (skip === 'guard-refused') {
+    return 'the notes guard refused every edit in the batch — it is a policy refusal, not a lost block, and composing the same words again would meet the same answer';
+  }
   return 'every edit named a block that is no longer in the doc';
 }
 
@@ -892,14 +910,16 @@ export function withServerNotesSinks(
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
       heading.headingId({ docId, meetingId }, outline),
-    onNotes: (update: NotesUpdate): boolean => {
-      let landed = true;
+    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
+      let landed: boolean | NotesWriteRefusal = true;
       try {
         const skip = applyNotesUpdate(deps.docStore(), update, heading, {
           ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
         });
         if (skip !== null) {
-          landed = false;
+          // A guard refusal reaches the session as a refusal rather than as a
+          // failed write, which is what keeps it from being composed again.
+          landed = skip === 'guard-refused' ? 'refused' : false;
           // The reason, the doc, the meeting and the tick. The line this
           // replaces named only the doc, so a meeting whose notes stopped
           // could not be told from a doc that had been deleted.
