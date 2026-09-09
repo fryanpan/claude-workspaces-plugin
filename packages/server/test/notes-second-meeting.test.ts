@@ -169,3 +169,69 @@ describe('a tick the composer had nothing to say about', () => {
     expect(harness.errors).toEqual([]);
   });
 });
+
+/**
+ * A doc whose LAST `Meeting notes` section is EMPTY.
+ *
+ * The 2026-08-31 rule — a new recording opens its own section below whatever
+ * the last one wrote — is about not replacing notes somebody has read. An
+ * empty section holds none, so opening a second one below it leaves a person
+ * looking at two identical headings and nothing under either. That is exactly
+ * what a bot meeting left on 2026-09-09: the note-taker opened its section on
+ * tick 1 and every later tick composed nothing, and the doc ended as two
+ * `## Meeting notes` headings and no words.
+ *
+ * The owner's newer rule is that new minutes reuse an existing section when it
+ * fits the topic, and an empty section fits every topic.
+ */
+describe('a meeting arriving at an empty Meeting notes section', () => {
+  it('writes into it rather than opening a second one', async () => {
+    const harness = createNotesTickHarness({
+      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n`,
+      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
+    });
+    const first = await harness.speak('the Riverbend import runs twice');
+    // ONE section, and the bullet is under it.
+    expect(first.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
+    expect(first.notes).toContain('the Riverbend import runs twice');
+    // The composer was told which heading to write under, so it never took
+    // the section-open branch at all.
+    expect(first.input?.notesHeadingId).toBeTruthy();
+
+    // And it stays that section for the rest of the meeting, now that the
+    // section is no longer empty.
+    const second = await harness.speak('and it double-charges Harborlight');
+    expect(second.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
+    expect(second.notes).toContain('double-charges Harborlight');
+  });
+
+  it('CONTROL: a section with notes in it is still left alone', async () => {
+    // The 2026-08-31 rule, unchanged: a recording that finds words under the
+    // last section opens its own below them and neither replaces nor grows
+    // somebody else's minutes.
+    const harness = createNotesTickHarness({
+      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n\n- last week: the tunnel flapped\n`,
+      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
+    });
+    const snap = await harness.speak('the Riverbend import runs twice');
+    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(2);
+    expect(snap.markdown).toContain('last week: the tunnel flapped');
+    expect(snap.markdown).toContain('the Riverbend import runs twice');
+  });
+
+  it('CONTROL: the empty section it adopts is the LAST one, not the first', async () => {
+    const harness = createNotesTickHarness({
+      doc:
+        `# Standup\n\n## ${MEETING_NOTES_HEADING}\n\n- last week: the tunnel flapped\n\n` +
+        `## ${MEETING_NOTES_HEADING}\n`,
+      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
+    });
+    const snap = await harness.speak('the Riverbend import runs twice');
+    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(2);
+    // Under the second heading, below the first meeting's surviving bullet.
+    const md = snap.markdown;
+    expect(md.indexOf('the tunnel flapped')).toBeLessThan(md.indexOf('Riverbend import'));
+    expect(snap.notes).toContain('the Riverbend import runs twice');
+    expect(snap.notes).not.toContain('the tunnel flapped');
+  });
+});
