@@ -326,7 +326,15 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
     client.speak(7);
     await waitFor(() => client.finals().length === 1, 'the second meeting settled turn');
     schedule.fire();
-    await waitFor(() => updates.length === 4, 'the second meeting notes');
+    // FIVE, NOT FOUR. A meeting that starts on a doc which ALREADY carries a
+    // `Meeting notes` heading opens its own section before it writes its
+    // first bullet, so its first tick sends two updates: the section, then
+    // the notes. The first meeting in this file starts on a doc with no
+    // section at all and still sends one update per tick. What the extra
+    // write buys is below: without it this meeting's early bullets go under
+    // the FIRST meeting's heading and leave the notes the moment this
+    // meeting's own section appears.
+    await waitFor(() => updates.length === 5, 'the second meeting notes');
     const md = docMarkdown();
     // WHAT CHANGED, AND IT IS DELIBERATE. This used to assert ONE section: the
     // old note-taker replaced a section it recognised by its heading TEXT, so

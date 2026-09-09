@@ -1169,6 +1169,65 @@ export function beginNotesSession(
       } catch (err) {
         deps.onError?.(err instanceof Error ? err.message : 'notes heading lookup failed');
       }
+      // OPEN THE SECTION BEFORE THE FIRST BULLET, NEVER ALONGSIDE IT.
+      //
+      // A meeting that has opened no section yet used to compose anyway, and
+      // the model — shown an outline with somebody's `## Meeting notes`
+      // heading in it — wrote its bullets under that heading. It kept doing
+      // so until some later tick opened a section of its own, and BOTH
+      // readers of a notes section take the LAST heading with that text
+      // (`notesSectionStart` in the client, the server's finder here). So
+      // everything written in that window left the notes at the moment the
+      // second section appeared, while staying in the doc. Measured on AMI
+      // fixture ES2003c: the section grew to 23 bullets over fifteen ticks
+      // and read 0 at tick 16, when the whole doc read 26.
+      //
+      // Opening the section first closes the window: there is never a tick
+      // whose bullets go somewhere the notes will later stop being read from.
+      // It is one extra write on the first tick of a meeting and none after.
+      //
+      // THE OWNER'S RULE IS UNTOUCHED. A new recording still opens its own
+      // section below whatever the last one wrote, and the earlier section
+      // keeps every line in it — this changes only WHEN the new section is
+      // opened, from "whenever the model gets round to it" to "before it
+      // writes anything".
+      // ONLY WHEN THE DOC ALREADY HAS A SECTION THIS MEETING DOES NOT OWN.
+      // On a doc with no `Meeting notes` heading at all there is nothing to
+      // be stranded by and nothing to write into by mistake, so the composer
+      // opens the section itself exactly as it always has — the behaviour a
+      // row of tests pins, and the one that lets the model choose where the
+      // section goes. The eager open is for the case that has somewhere
+      // wrong to write.
+      const strandingRisk =
+        notesHeadingId === undefined &&
+        outline.some((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
+      if (strandingRisk && deps.readOutline && deps.notesHeadingId) {
+        const opened = deps.onNotes({
+          docId: ids.docId,
+          meetingId: ids.meetingId,
+          // The tick this write belongs to, carrying no turns: it is the
+          // section being opened, not any speech being noted, and a sink
+          // that reports what a tick wrote must not attribute these words
+          // to the room.
+          tick: { ...tick, turns: [] },
+          edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
+        });
+        if (opened !== false) {
+          try {
+            outline = deps.readOutline({ docId: ids.docId, meetingId: ids.meetingId });
+            notesHeadingId = deps.notesHeadingId({
+              docId: ids.docId,
+              meetingId: ids.meetingId,
+              outline,
+            });
+          } catch (err) {
+            // Same rule as every other outline read: it informs, it never
+            // fails the tick. With no heading the compose behaves exactly as
+            // it did before this block existed.
+            deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
+          }
+        }
+      }
       // DERIVED FROM THE OUTLINE, not from a section read: a block carrying no
       // author is one this agent did not write, or one a person has since
       // touched — `clearAuthorshipOnPersonEdit` makes those the same answer.
