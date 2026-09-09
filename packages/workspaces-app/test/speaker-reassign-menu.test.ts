@@ -261,6 +261,26 @@ describe('renaming the voice from the notes', () => {
     expect(rename()?.disabled).toBe(false);
   });
 
+  it('opens an empty box on a voice nobody has named', async () => {
+    // The row still SAYS "Rename Speaker A" — that is what the person
+    // tapped — but the box it opens is empty. Seeding it with those words
+    // is how "Room Speaker C" became somebody's saved name.
+    const asked: string[] = [];
+    const renameSpeaker = vi.fn(() => Promise.resolve(true));
+    const { editor } = mount('- [@Speaker A](speaker:A) wants the gate moved.\n', VOICES, {
+      renameSpeaker,
+      promptName: (current) => {
+        asked.push(current);
+        return 'Chipmunk';
+      },
+    });
+    await clickTag(editor);
+    expect(rename()?.textContent).toBe('Rename Speaker A');
+    rename()?.click();
+    expect(asked).toEqual(['']);
+    await vi.waitFor(() => expect(renameSpeaker).toHaveBeenCalledWith('A', 'Chipmunk'));
+  });
+
   it('a cancelled or unchanged answer asks for nothing', async () => {
     const renameSpeaker = vi.fn(() => Promise.resolve(true));
     let answer: string | null = null;
