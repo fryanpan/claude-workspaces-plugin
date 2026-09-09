@@ -26,6 +26,7 @@ import {
   stripInventedLinks,
 } from '../src/notes-invented-links.ts';
 import { oneDocStore } from './notes-doc-helpers.ts';
+import { createNotesTickHarness } from './notes-tick-harness.ts';
 
 const ARCHIVE = 'https://web.archive.org/web/2019/https://example.com/notes';
 const NOT_AN_ADDRESS = 'url:speech-recognition';
@@ -340,5 +341,71 @@ describe('the applier drops the link and says how many', () => {
     expect(prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc))).toContain(
       'web.archive.org',
     );
+  });
+});
+
+/* ===== What the tick was given, over the real pipeline ===== */
+
+describe('a row offered as a question on an earlier tick is still a source', () => {
+  /**
+   * Two rows whose bodies are word for word the same, so an ask that
+   * describes the problem ties them and the pipeline offers BOTH as questions
+   * rather than guessing. That is the only way `suggestions` is ever
+   * non-empty, and it has to be, because it is the list this test is about.
+   */
+  const GATES = [
+    {
+      id: 't-north',
+      title: 'Riverbend north gate',
+      status: 'todo',
+      body: 'The latch sticks in the cold and the crew has to force it open.',
+    },
+    {
+      id: 't-south',
+      title: 'Riverbend south gate',
+      status: 'todo',
+      body: 'The latch sticks in the cold and the crew has to force it open.',
+    },
+  ];
+  const ASK =
+    'The latch sticks in the cold and the crew are forcing it open. Link that to the existing ticket.';
+  const NORTH = '/workspaces/w-riverbend?task=t-north';
+
+  test('citing it on a later tick is citing something the tick was given', async () => {
+    // A question is only ASKED once, so the second tick appends nothing — but
+    // the row behind it is still handed to the compose. Sources narrowed to
+    // what this tick is about to write would strip the citation the moment
+    // the doc stopped carrying the earlier question, which is what the
+    // deletion below models: somebody tidied the bullet away.
+    const ydoc = new Y.Doc();
+    const harness = createNotesTickHarness({
+      ydoc,
+      doc: '## Meeting notes\n\n- an earlier point\n',
+      workspaceId: 'w-riverbend',
+      tasks: GATES,
+      compose: (input, n) => {
+        const md =
+          n === 1
+            ? '- The latch is sticking; somebody to say which gate.'
+            : `- It is [the north one](${NORTH}).`;
+        return input.notesHeadingId === undefined
+          ? [{ op: 'insert_at_end', markdown: `## Meeting notes\n\n${md}` }]
+          : [{ op: 'insert_under_heading', headingId: input.notesHeadingId, markdown: md }];
+      },
+    });
+
+    const first = await harness.speak(ASK);
+    expect(first.input?.suggestions?.map((r) => r.url) ?? []).toContain(NORTH);
+    expect(first.notes).toContain('suggest=1');
+
+    // Everything but the heading goes, so the doc is no longer evidence for
+    // the link and only `suggestions` can vouch for it.
+    const fragment = prose.getProseFragment(ydoc);
+    fragment.delete(1, fragment.length - 1);
+
+    const second = await harness.speak(ASK);
+    expect(second.input?.suggestions?.map((r) => r.url) ?? []).toContain(NORTH);
+    expect(second.notes).toContain(NORTH);
+    expect(harness.errors).toEqual([]);
   });
 });

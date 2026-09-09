@@ -1359,10 +1359,17 @@ export function beginNotesSession(
             meetingId: ids.meetingId,
             tick: input.tick,
             edits,
-            // Collected from the SAME `input` the compose was given, plus the
-            // suggestions written after it: a link is a citation only if this
-            // tick could have read the address somewhere.
-            linkSources: notesLinkSources({ ...input, ...input.tick, suggestions: unseen }),
+            // Collected from the SAME `input` the compose was given: a link
+            // is a citation only if this tick could have read the address
+            // somewhere.
+            //
+            // ALL OF `input.suggestions`, NOT THE `unseen` SUBSET. A question
+            // asked on an earlier tick is not asked again, but the row behind
+            // it is still handed to this tick — so a note citing it is citing
+            // something this tick was given, and narrowing the sources to what
+            // is about to be WRITTEN would strip it the moment the doc no
+            // longer carried the earlier question.
+            linkSources: notesLinkSources({ ...input, ...input.tick }),
           }) !== false;
         applyMs = clock() - applyStart;
         if (!written) {
