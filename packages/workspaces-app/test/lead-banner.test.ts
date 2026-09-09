@@ -128,3 +128,51 @@ describe('lead banner', () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+/**
+ * THE SAME DEAD ADDRESS the bot client carried: this banner's own
+ * `defaultSubscribe` built `/events/<docId>` by hand while its GET went
+ * through `api`. So the first read decided the banner for the life of the
+ * page and no later change ever arrived — a lead attaching, or leaving,
+ * moved nothing on screen.
+ */
+describe("the lead banner's own stream address", () => {
+  class FakeEventSource {
+    static opened: string[] = [];
+    static last: FakeEventSource | null = null;
+    readonly listeners = new Map<string, EventListener[]>();
+    constructor(readonly url: string) {
+      FakeEventSource.opened.push(url);
+      FakeEventSource.last = this;
+    }
+    addEventListener(type: string, fn: EventListener): void {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+    }
+    removeEventListener(): void {}
+    close(): void {}
+    emit(type: string, data: unknown): void {
+      const ev = { data: JSON.stringify(data) } as MessageEvent;
+      for (const fn of this.listeners.get(type) ?? []) fn(ev as unknown as Event);
+    }
+  }
+
+  it("opens the doc's workspace-scoped event stream, and hears a change on it", async () => {
+    FakeEventSource.opened = [];
+    history.replaceState(null, '', '/workspaces/w-9/docs/doc-1');
+    const prior = globalThis.EventSource;
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    const parent = document.createElement('div');
+    const banner = mountLeadBanner({
+      docId: 'doc-1',
+      parent,
+      fetchJson: () => Promise.resolve(presence({ live: false })),
+    });
+    await banner.ready;
+    (globalThis as { EventSource?: unknown }).EventSource = prior;
+    expect(FakeEventSource.opened).toEqual(['/workspaces/w-9/docs/doc-1/events:stream']);
+    expect(banner.presence()?.live).toBe(false);
+    FakeEventSource.last?.emit('lead.presence', presence({ live: true }));
+    expect(banner.presence()?.live).toBe(true);
+    banner.destroy();
+  });
+});
