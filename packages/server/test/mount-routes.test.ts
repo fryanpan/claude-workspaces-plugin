@@ -271,6 +271,28 @@ describe('mount routes', () => {
     });
   });
 
+  describe('a malformed percent-escape in the address', () => {
+    /**
+     * `serveMountedFile` calls `decodeURIComponent` on the id segment, which
+     * throws on `%ZZ`. It never sees one: `malformedPathSegment` answers 400
+     * at the front door, above every route (PR 762). That is worth asserting
+     * rather than assuming, because the alternative — a try/catch wrapped
+     * around each decode — is the thing the front-door guard exists to make
+     * unnecessary, and nothing else in this family would notice if it went.
+     */
+    it('is answered 400 at the front door, not by this family', async () => {
+      for (const path of ['/mounts/%ZZ/raw', '/mounts/%', '/mounts/%E0%A4%A/raw']) {
+        const r = await send(path);
+        expect(r.status, path).toBe(400);
+        expect(await r.text(), path).toContain('percent');
+      }
+      // The control: a WELL-formed address the family does not know is its
+      // own 404, so the 400s above are the guard's verdict and not a blanket
+      // refusal of anything under `/mounts/`.
+      expect((await send('/mounts/f-nothing/raw')).status).toBe(404);
+    });
+  });
+
   describe('the table is not reachable from off the box', () => {
     it('refuses a request that came through the edge', async () => {
       const r = await send('/api/mounts', { headers: { 'cf-ray': 'test-ray-3' } });
