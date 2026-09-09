@@ -35,6 +35,15 @@
  * One retry, not three, because the words are re-sent in the prompt and an
  * unbounded queue of them is the uncapped carry-forward that once grew a
  * meeting's prompt without limit (see `beginNotesSession`).
+ *
+ * A SETTLE IS PROVISIONAL UNTIL THE COMPOSE LANDS. The retries a settle hands
+ * back ride on the next compose, and that compose can throw or have its write
+ * refused — in which case the words carry forward and the note-taker never
+ * answered them. Counting the attempt anyway spent the idea's one retry on a
+ * tick that produced no notes, and the tick after it read the same miss as a
+ * SECOND miss and counted the idea lost. So `settle` journals what it did and
+ * the caller says which way it went: `composed()` keeps the verdicts,
+ * `composeFailed()` puts them back exactly as they were.
  */
 
 import type { NotesTurn } from './meeting-notes.ts';
@@ -224,6 +233,17 @@ export interface IdeaLedger {
    * second time is counted lost and never returned again.
    */
   settle(notes: string): readonly SpokenIdea[];
+  /**
+   * The compose that was handed the last settle's retries succeeded. Its
+   * verdicts stand.
+   */
+  composed(): void;
+  /**
+   * It did not — the compose threw, or the doc refused the write. The last
+   * settle's verdicts are undone, because an idea whose second look was
+   * never written cannot be said to have had one.
+   */
+  composeFailed(): void;
   /** The last settle of the meeting: nothing is retried, so what is still
    *  missing is lost. */
   close(notes: string): void;
@@ -245,6 +265,17 @@ interface Pending {
 }
 
 /**
+ * One reversible thing the last settle did.
+ *
+ * Only the two verdicts that depend on the NEXT compose are here. A carried
+ * idea is a fact about notes that are already written, so it is committed as
+ * it is found and never appears in a journal.
+ */
+type Undo =
+  | { kind: 'retried'; k: string; entry: Pending }
+  | { kind: 'lost'; k: string; entry: Pending };
+
+/**
  * The per-meeting ledger.
  *
  * Pending ideas are keyed by their own text so a retried sentence, which is
@@ -257,6 +288,7 @@ export function createIdeaLedger(): IdeaLedger {
   const pending = new Map<string, Pending>();
   const known = new Set<string>();
   const coverage: IdeaCoverage = { seen: 0, carried: 0, retried: 0, lost: 0 };
+  let journal: Undo[] = [];
 
   const key = (idea: SpokenIdea): string => idea.text.trim().toLowerCase();
 
@@ -275,8 +307,14 @@ export function createIdeaLedger(): IdeaLedger {
       }
     },
     settle(notes) {
+      // A settle that follows an unresolved one has no way to undo the older
+      // journal, so the older one stands. Losing the ability to roll back is
+      // better than rolling back to a state two composes old.
+      journal = [];
       const retry: SpokenIdea[] = [];
       for (const [k, entry] of [...pending]) {
+        // Whether the NOTES carry it is a fact about the notes, settled
+        // whatever the next compose does, so it is never journalled.
         if (ideaCarried(entry.idea, notes)) {
           coverage.carried++;
           pending.delete(k);
@@ -285,15 +323,33 @@ export function createIdeaLedger(): IdeaLedger {
         if (entry.retried) {
           coverage.lost++;
           pending.delete(k);
+          journal.push({ kind: 'lost', k, entry });
           continue;
         }
         entry.retried = true;
         coverage.retried++;
+        journal.push({ kind: 'retried', k, entry });
         retry.push(entry.idea);
       }
       return retry;
     },
+    composed() {
+      journal = [];
+    },
+    composeFailed() {
+      for (const undo of journal.reverse()) {
+        if (undo.kind === 'lost') {
+          coverage.lost--;
+          pending.set(undo.k, undo.entry);
+        } else {
+          coverage.retried--;
+          undo.entry.retried = false;
+        }
+      }
+      journal = [];
+    },
     close(notes) {
+      journal = [];
       for (const [k, entry] of [...pending]) {
         if (ideaCarried(entry.idea, notes)) coverage.carried++;
         else coverage.lost++;

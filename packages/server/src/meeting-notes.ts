@@ -1485,6 +1485,9 @@ export function beginNotesSession(
             `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: doc write skipped`,
           );
           report('failed', edits);
+          // The retries this tick was handed were never written, so the
+          // ledger's verdicts on them are withdrawn; see `composeFailed`.
+          ideas.composeFailed();
           // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. This is
           // the case the guard produces: the same edits refused a second
           // time, one tick's compose spent to learn nothing.
@@ -1496,6 +1499,9 @@ export function beginNotesSession(
         // the questions outright — the retry composed without them.
         for (const ref of unseen) offeredSuggestions.add(ref.url);
         retriedFailure = false;
+        // The compose that was handed this tick's retries landed, so what the
+        // settle above decided about them stands.
+        ideas.composed();
         for (const t of raw) composedTurns.add(t.turn);
         lifecycle(
           'written',
@@ -1505,6 +1511,9 @@ export function beginNotesSession(
         report(edits.length > 0 ? 'written' : 'empty', edits);
       } catch (err) {
         carry = [...raw, ...carry];
+        // Same reason as the refused-write path: an idea whose second look
+        // was never composed has not had one.
+        ideas.composeFailed();
         lifecycle(
           'failed',
           tick.tick,
