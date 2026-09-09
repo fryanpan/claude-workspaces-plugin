@@ -34,6 +34,7 @@ export * from './schedule-parse.ts';
 export * from './schedule-trigger.ts';
 export * from './task-schedule.ts';
 export * from './task-wire.ts';
+export * from './footnotes.ts';
 export * from './word-count.ts';
 export * as anchors from './anchor/index.ts';
 export * as prose from './prose.ts';

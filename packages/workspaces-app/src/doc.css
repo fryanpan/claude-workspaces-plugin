@@ -3774,6 +3774,164 @@ body.redline-mode #toggle-suggest-mode {
   stroke: var(--accent);
 }
 
+/* ---------------------------------------------------------------------------
+   INLINE FOOTNOTES (doc/footnote-decorations.ts + doc/footnote-notes.ts)
+
+   `^[a note]` typed into the prose. The characters stay in the file and in
+   the document; everything below is how they are DRAWN, which is three
+   different things at three different widths:
+
+     in the margin the raw run is hidden entirely, the fact it supports is
+                   underlined, and the note is plain grey text beside the line
+                   with a leader across the gutter — the same overlay the
+                   comment balloons draw into. Needs the balloon placement,
+                   which needs both a column and the reader's own choice.
+     everywhere    there is no column to carry the note, so the run folds to
+     else          a small grey superscript number and a tap opens a card
+                   UNDER the line. Absolutely positioned: the paragraph must
+                   not move, or the reader loses their place mid-sentence.
+     on paper      the notes print as a numbered "Sources" list at the end.
+
+   Certainty is carried by the STROKE, never by colour: solid for a note the
+   author confirmed, dotted for one whose text says "Unconfirmed".
+   --------------------------------------------------------------------------- */
+
+/* The raw `^[…]` run. Folded to nothing on a wide screen (the margin has the
+   note) and to a superscript number below the breakpoint. Revealed in full
+   while the caret is inside it, so a note can be edited where it lives. */
+.cw-fn {
+  font-size: 0;
+  letter-spacing: 0;
+}
+.cw-fn::after {
+  content: attr(data-cw-fn);
+  display: var(--cw-fn-sup, inline);
+  font: 400 10px / 0 var(--sans);
+  vertical-align: super;
+  color: var(--fg-muted);
+  padding: 0 2px;
+  cursor: pointer;
+}
+/* The margin already carries every note, so the number in the text would be
+   noise — and ONLY there. Two conditions, and both are needed.
+
+   `body[data-cards]` is the reader's stored placement, never a width: a
+   reader who chose inline cards on a 1180px screen has no margin column, and
+   a number hidden by a media query left that note with no way to reach it at
+   all. It is the same predicate the module asks (`balloonMarginVisible` in
+   card-placement.ts), so the two halves cannot disagree.
+
+   `.cw-fn-margined` is the editor that actually mounts footnote-notes.ts.
+   Every `createEditor` draws these decorations — a task body, a live
+   redline — and only the document editor has a margin, so without this the
+   citation simply vanished in the others. */
+body[data-cards="balloon"] .cw-fn-margined .cw-fn {
+  --cw-fn-sup: none;
+}
+.cw-fn-on::after {
+  background: var(--bg-hover);
+  border-radius: 3px;
+}
+.cw-fn-open {
+  font-size: inherit;
+  letter-spacing: inherit;
+  color: var(--fg-muted);
+}
+.cw-fn-open::after {
+  content: none;
+}
+
+/* The fact the note supports: a hairline under the words, dotted when the
+   author has not confirmed them. */
+.cw-fn-fact {
+  border-bottom: 1px solid var(--border-strong);
+  text-decoration: none;
+}
+.cw-fn-fact-unsure {
+  border-bottom-style: dotted;
+}
+
+/* The margin note. A caption, not a card: no box, no fill, no colour — the
+   column already says "this is about the line beside it". */
+.cw-fn-note {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  padding-left: 6px;
+  font: 400 12px / 1.4 var(--sans);
+  color: var(--fg-muted);
+}
+/* A footnote's leader is GREY, not the red every markup leader inherits: the
+   red says "something was deleted here", and a note is not a change. Dashed
+   for a note the author has not confirmed, matching its underline.
+
+   Written as a COMPOUND selector on purpose. `.cw-leader` is re-declared in
+   the dark-scheme block at the end of this file, which sits after these
+   rules, so a single class would tie on specificity and lose on order — the
+   note's leader came out red in dark mode and only there. */
+.cw-leader.cw-leader-fn,
+.cw-leader.cw-leader-fn-unsure {
+  stroke: var(--border-strong);
+  opacity: 0.7;
+}
+.cw-leader.cw-leader-fn-unsure {
+  stroke-dasharray: 2 3;
+}
+
+/* The phone's card, opened by a tap on the superscript. */
+.cw-fn-pop {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  max-width: 420px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
+  font: 400 13px / 1.45 var(--sans);
+  color: var(--fg-muted);
+}
+.cw-fn-pop-unsure {
+  border-style: dashed;
+}
+
+/* Paper only. Hidden on screen at every width — on a wide screen the margin
+   carries the notes and on a phone the popover does, so a list at the end
+   would be a third copy of the same sentences. */
+.cw-fn-sources {
+  display: none;
+}
+
+@media print {
+  .cw-fn-sources {
+    display: block;
+    margin-top: 34px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font: 400 13px / 1.5 var(--sans);
+    color: var(--fg-muted);
+  }
+  .cw-fn-sources h2 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0;
+  }
+  .cw-fn-sources ol {
+    padding-left: 22px;
+    margin: 6px 0 0;
+  }
+  /* On paper the number is the only way back to the line it came from, so it
+     comes back even for a reader whose screen placement hid it. */
+  .cw-fn {
+    --cw-fn-sup: inline;
+  }
+  .cw-fn-pop,
+  .cw-fn-note {
+    display: none;
+  }
+}
+
 /* Suggestion balloon (redline-suggestions Phase 2, commit 5) — a THIRD kind
    sharing the `.cw-balloon` card + the same layoutBalloons pass as deletions
    and comments (markup-margin.ts). Author color drives the accent (the
