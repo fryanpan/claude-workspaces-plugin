@@ -99,6 +99,13 @@ export async function loadDocSpeakers(
 export interface DocSpeakersCache {
   peek(): DocSpeakers | null;
   load(): Promise<DocSpeakers | null>;
+  /**
+   * Which meeting the doc is in NOW — the strip knows, because it is the
+   * thing that starts and stops them. `null` says a boundary has passed and
+   * the new meeting has not named itself yet, which is a reason to hold
+   * nothing rather than a reason to keep what was there.
+   */
+  meetingChanged(meetingId: string | null): void;
 }
 
 export function createDocSpeakersCache(
@@ -107,15 +114,30 @@ export function createDocSpeakersCache(
 ): DocSpeakersCache {
   let held: DocSpeakers | null = null;
   let inFlight: Promise<DocSpeakers | null> | null = null;
+  /** The meeting the doc is in, once something has said. Null until then —
+   *  and on a freshly opened doc that is exactly right: whatever the server
+   *  calls the latest meeting is the one this page is about. */
+  let current: string | null = null;
+  /** A boundary has passed whose meeting has no id yet. Nothing is current,
+   *  so nothing may be served: this is the window Codex found, where the
+   *  previous meeting's cast was still on offer under the finger. */
+  let unknown = false;
+  /** Which meeting a load was asked on behalf of. An answer that arrives
+   *  after the boundary is about the meeting before it. */
+  let era = 0;
   return {
-    peek: () => held,
+    peek: () => {
+      if (held === null || unknown) return null;
+      return current === null || held.meetingId === current ? held : null;
+    },
     load(): Promise<DocSpeakers | null> {
       if (inFlight) return inFlight;
+      const mine = era;
       const run = loadDocSpeakers(docId, fetchImpl)
         .then((fresh) => {
           // A doc that has never held a meeting answers null, and that is an
           // answer: it replaces whatever was held.
-          held = fresh;
+          if (mine === era) held = fresh;
           return fresh;
         })
         .finally(() => {
@@ -123,6 +145,15 @@ export function createDocSpeakersCache(
         });
       inFlight = run;
       return run;
+    },
+    meetingChanged(meetingId: string | null): void {
+      era += 1;
+      // Whatever is in flight belongs to the era that just ended; the next
+      // ask starts a request of its own rather than riding that one.
+      inFlight = null;
+      current = meetingId;
+      unknown = meetingId === null;
+      if (held !== null && held.meetingId !== meetingId) held = null;
     },
   };
 }

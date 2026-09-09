@@ -172,6 +172,11 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     // meeting's cast on mount, and the HTTP rename for a socket that is
     // gone. Same record the reassign menu below reads.
     loadSpeakers: () => speakers.load(),
+    // The cache is keyed by the meeting it came from, and the strip is what
+    // knows when the doc moves between meetings — so the menu below cannot
+    // go on offering the last meeting's cast as targets for a note being
+    // written in this one.
+    onMeetingChange: (meetingId) => speakers.meetingChanged(meetingId),
     // The other record: what the meeting HEARD, behind the panel's fold.
     // Before this it lived only in the `-raw-transcript.md` beside the
     // server's data dir, which is nowhere for anyone not on that machine.

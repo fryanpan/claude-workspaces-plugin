@@ -410,7 +410,11 @@ describe('opening on the roster already in hand — Bryan, 2026-09-09: "annoying
     expect(document.querySelector('.speaker-menu-list')?.textContent).toContain('Loading');
     await vi.waitFor(() => expect(rows()).toHaveLength(1));
     expect(rows()[0]?.textContent).toContain('Priya');
-    expect(rows().map((r) => r.textContent).join(' ')).not.toContain('Rowan');
+    expect(
+      rows()
+        .map((r) => r.textContent)
+        .join(' '),
+    ).not.toContain('Rowan');
   });
 
   it('still opens on a wait when there is no cache to open on', async () => {
