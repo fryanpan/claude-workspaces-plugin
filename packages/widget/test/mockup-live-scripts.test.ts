@@ -194,6 +194,37 @@ describe("a mock's scripts across rounds", () => {
     expect(page.unhandled()).toEqual([]);
   });
 
+  it('does not re-run a script whose SyntaxError came from its own runtime', async () => {
+    const { swapDocument } = await importLive();
+    page = browserLikeScripts();
+    paintRoundOne();
+    const errors: unknown[][] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+
+    try {
+      // `JSON.parse` on bad input throws a SyntaxError at RUNTIME — after the
+      // line above it has already run. Treating any SyntaxError as a
+      // collision retries this script and does its side effect twice.
+      swapDocument(
+        '<!doctype html><html><body><h1 id="hero">Round side-effect</h1>' +
+          '<script>' +
+          'globalThis.sent = (globalThis.sent || 0) + 1;' +
+          "JSON.parse('{');" +
+          '</script>' +
+          '<p id="keeper">Unchanged paragraph</p></body></html>',
+      );
+    } finally {
+      console.error = realError;
+    }
+
+    expect(page.globals.sent).toBe(1);
+    // The round is not retried, so the failure is reported and the rest of it
+    // still lands.
+    expect(errors.length).toBe(1);
+    expect(document.querySelector('#keeper')).not.toBeNull();
+  });
+
   it('leaves a module script, an external script and a data block as written', async () => {
     const { swapDocument } = await importLive();
     paintRoundOne();

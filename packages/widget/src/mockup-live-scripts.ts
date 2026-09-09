@@ -87,14 +87,32 @@ function canRetryWrapped(el: HTMLScriptElement, source: string): boolean {
 }
 
 /**
- * Is this the early error a redeclaration raises?
+ * The message a redeclaration gets, in the three engines this ships to.
  *
- * Checked by name rather than by `instanceof`: what comes out of an insert is
- * the browser's own exception, and a `SyntaxError` from another realm is not
- * an `instanceof` match for this one's.
+ * V8: `Identifier 'X' has already been declared`. JavaScriptCore, which is
+ * what Bryan's iPad runs: `Cannot declare a const variable twice: 'X'.`, or
+ * `Cannot redeclare ...`. SpiderMonkey: `redeclaration of const X`.
  */
-function isSyntaxError(err: unknown): boolean {
-  return (err as { name?: string } | null)?.name === 'SyntaxError';
+const REDECLARATION =
+  /already been declared|cannot declare a (?:let|const|class) variable twice|cannot redeclare|redeclaration of/i;
+
+/**
+ * Is this the early error a redeclaration raises — and only that?
+ *
+ * The name alone is not enough, and reading it as enough was a bug: a mock's
+ * script can throw a `SyntaxError` at RUNTIME, `JSON.parse` on bad input being
+ * the everyday way, and by then the script has done whatever it did before the
+ * throw. Retrying that one repeats every side effect. Only a declaration
+ * collision is an early error — rejected before the first statement runs — so
+ * only a message that names one may be retried.
+ *
+ * The name is checked by string rather than by `instanceof`: what comes out of
+ * an insert is the browser's own exception, and a `SyntaxError` from another
+ * realm is not an `instanceof` match for this one's.
+ */
+function isRedeclaration(err: unknown): boolean {
+  const e = err as { name?: string; message?: string } | null;
+  return e?.name === 'SyntaxError' && REDECLARATION.test(e.message ?? '');
 }
 
 /**
@@ -104,21 +122,18 @@ function isSyntaxError(err: unknown): boolean {
  * insert — the Sentry event that opened this ticket reads
  * `Failed to execute 'insertBefore' on 'Node': Identifier 'METHODS' has
  * already been declared`. WebKit and Firefox do not: they report it only
- * through the global error-reporting mechanism, so the insert returns
- * normally and a listener hears about it. Bryan reviews mockups on an iPad,
- * which is WebKit, so the event is the shape that matters most here.
+ * through the global error-reporting mechanism, so the insert returns normally
+ * and a listener hears about it. Bryan reviews mockups on an iPad, which is
+ * WebKit, so the event is the shape that matters most here.
  *
  * `error` is null when a browser withholds the exception object, so the
- * message is the fallback. Both are read, and only a syntax error counts: a
- * mock's ordinary runtime error must never be retried, because that script
- * HAS run and running it twice would repeat what it did.
+ * message carries both halves of the question in that case.
  */
 function isRedeclarationEvent(ev: Event): boolean {
   const e = ev as { error?: unknown; message?: string };
-  if (e.error != null) return isSyntaxError(e.error);
-  return /SyntaxError|already been declared|redeclaration|declare a (const|let)/i.test(
-    e.message ?? '',
-  );
+  if (e.error != null) return isRedeclaration(e.error);
+  const message = e.message ?? '';
+  return /SyntaxError/i.test(message) && REDECLARATION.test(message);
 }
 
 /**
@@ -174,7 +189,7 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
   } finally {
     window.removeEventListener('error', onError, true);
   }
-  if (threw && !(retryable && isSyntaxError(threw.err))) throw threw.err;
+  if (threw && !(retryable && isRedeclaration(threw.err))) throw threw.err;
   if (!threw && !collided) return;
   asWritten.remove();
   // The newlines matter: a source ending in a `// line comment` would
