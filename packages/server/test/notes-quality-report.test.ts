@@ -29,6 +29,7 @@ import {
   MAX_DUPLICATE_BULLET_LINES,
   MAX_UNCOVERED_IDEA_SHARE,
 } from '../src/notes-quality-thresholds.ts';
+import { MAX_FLAT_RUN_BULLETS } from '../src/notes-quality.ts';
 
 /* ===== A line written twice ===== */
 
@@ -211,6 +212,52 @@ describe('the thresholds', () => {
     expect(
       buildNotesQualityReport({ notes: overBar, transcript }).flags.map((f) => f.kind),
     ).toContain('duplicate-bullets');
+  });
+
+  it('counts a topic the notes opened twice, and flags the second one', () => {
+    // The failure this is: the section is re-opened rather than added to, so
+    // a reader meets the same subject in two places with different halves of
+    // it under each.
+    const twice = [
+      cleanNotes,
+      '### Ferry timetable',
+      '- The winter timetable starts in November',
+    ].join('\n');
+    expect(buildNotesQualityReport({ notes: twice, transcript }).duplicateHeadings).toEqual([
+      'Ferry timetable',
+    ]);
+    // One repeat is inside the bar a healthy meeting set; a second is not.
+    expect(
+      buildNotesQualityReport({ notes: twice, transcript }).flags.map((f) => f.kind),
+    ).not.toContain('duplicate-headings');
+    const thrice = [twice, '### Signage', '- The slipway boards need paint'].join('\n');
+    expect(
+      buildNotesQualityReport({ notes: thrice, transcript }).flags.map((f) => f.kind),
+    ).toContain('duplicate-headings');
+  });
+
+  it('counts a wall of bullets under one heading, and flags the second wall', () => {
+    const wall = (topic: string): string =>
+      [
+        `### ${topic}`,
+        ...Array.from(
+          { length: MAX_FLAT_RUN_BULLETS + 1 },
+          (_, i) => `- ${topic} point ${i} that nobody grouped under anything`,
+        ),
+      ].join('\n');
+    const one = buildNotesQualityReport({
+      notes: [cleanNotes, wall('Moorings')].join('\n'),
+      transcript,
+    });
+    expect(one.longRuns).toHaveLength(1);
+    expect(one.longRuns[0]?.heading).toBe('Moorings');
+    expect(one.flags.map((f) => f.kind)).not.toContain('flat-runs');
+    const two = buildNotesQualityReport({
+      notes: [cleanNotes, wall('Moorings'), wall('Dredging')].join('\n'),
+      transcript,
+    });
+    expect(two.longRuns).toHaveLength(2);
+    expect(two.flags.map((f) => f.kind)).toContain('flat-runs');
   });
 
   it('flags a meeting that invented a speaker, on the first one', () => {
