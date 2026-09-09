@@ -28,7 +28,7 @@ import { mountLeadBanner } from '../lead-banner.ts';
 import { createMeetingBotClient } from '../meeting-bot-client.ts';
 import { type MeetingLiveZone, createMeetingLiveZone } from '../meeting-live-zone.ts';
 import { othersOnDoc } from '../meeting-solo.ts';
-import { mountMeetingStrip } from '../meeting-strip.ts';
+import { type MeetingStripHandle, mountMeetingStrip } from '../meeting-strip.ts';
 import { wantsLatencyTiming } from '../meeting-timing-client.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { loadDocSpeakers, postSpeakerName } from '../speaker-voices.ts';
@@ -52,6 +52,12 @@ export interface DocMeetingOptions {
 export interface DocMeetingMount {
   liveZone?: MeetingLiveZone;
   watchLeadPresence?: LeadBanner['watch'];
+  /**
+   * Name a voice for the whole meeting — the strip's verb, handed up so the
+   * notes' own rename entry can use the one channel that knows whether a
+   * capture is still running. Absent on a doc that mounts no meeting.
+   */
+  renameSpeaker?: (label: string, name: string) => Promise<boolean>;
 }
 
 export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
@@ -92,7 +98,18 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
   // The provisional zone at the end of the doc: the live transcript, the
   // splitting-off card, and (via the wash extension declared on the editor
   // above) the settle highlight on each freshly written note.
-  const liveZone = createMeetingLiveZone({ parent: editorMount, prose: editor.editor.view.dom });
+  // The zone owns the only speaker pills on screen during a capture (the
+  // strip renders none while it exists), so it is where a voice is named —
+  // and the strip is what knows which channel a name travels on. The two
+  // point at each other, so one of them is reached through a holder: the
+  // strip, because the zone is built first and the strip takes it as an
+  // option.
+  const mounted: { strip?: MeetingStripHandle } = {};
+  const liveZone = createMeetingLiveZone({
+    parent: editorMount,
+    prose: editor.editor.view.dom,
+    nameSpeaker: (label) => mounted.strip?.nameSpeaker(label),
+  });
   const zone = liveZone;
   scope.onCleanup(() => zone.destroy());
   // Nothing here counts the tinted notes any more: the new-content
@@ -143,6 +160,7 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     postName: (meetingId, speaker, name) => postSpeakerName({ docId, meetingId, speaker, name }),
     liveZone: zone,
   });
+  mounted.strip = strip;
   scope.onCleanup(() => strip.destroy());
   // The standing line for an empty lead seat — huddle docs only, because
   // a huddle is the doc whose every ask addresses that seat (the floats
@@ -154,5 +172,9 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     watchLeadPresence = (onChange) => banner.watch(onChange);
     scope.onCleanup(() => banner.destroy());
   }
-  return { liveZone, ...(watchLeadPresence ? { watchLeadPresence } : {}) };
+  return {
+    liveZone,
+    renameSpeaker: (label, name) => strip.renameSpeaker(label, name),
+    ...(watchLeadPresence ? { watchLeadPresence } : {}),
+  };
 }

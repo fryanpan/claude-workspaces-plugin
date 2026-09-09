@@ -770,8 +770,10 @@ body.has-set .doc-switcher-caret {
 }
 .speaker-menu-voice:hover,
 .speaker-menu-nobody:hover,
+.speaker-menu-rename:hover,
 .speaker-menu-voice:focus-visible,
-.speaker-menu-nobody:focus-visible {
+.speaker-menu-nobody:focus-visible,
+.speaker-menu-rename:focus-visible {
   background: var(--chip-bg, rgba(127, 127, 127, 0.12));
 }
 .speaker-menu-who {
@@ -802,6 +804,27 @@ body.has-set .doc-switcher-caret {
 .speaker-menu-nobody {
   border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
   color: var(--fg-muted, #6b7280);
+}
+/* And the one row that is not about this mention at all: it names the VOICE,
+   for every mention of it. Below its own rule for the same reason, and
+   sharing the rows' shape so nothing here reads as a stray browser button.
+   It is the rename surface that outlives the capture — the transcript zone
+   and the strip's row are both gone by then. */
+.speaker-menu-rename {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  font: inherit;
+  color: var(--fg, #111827);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.speaker-menu-rename:disabled {
+  color: var(--fg-muted, #6b7280);
+  cursor: default;
 }
 /* A menu anchored to a word works next to a cursor. Under a thumb it lands
    half off-screen, on top of the sentence being read — so at phone width it
@@ -2254,16 +2277,53 @@ body.is-reading-width #editor > .live-zone {
 .lz-turn {
   display: inline;
 }
+/* Who is speaking, and — where the zone was given a way to record one — the
+   tap that names them. Two elements for the same reason the strip's pill is
+   two (see `.meeting-speaker`): the OUTER is the tap target and carries
+   padding and nothing else, the INNER carries every visual. The outer's
+   vertical padding is cancelled by a matching negative margin, so the target
+   is 34px tall in a line of transcript that never grows for it.
+
+   The tag is a `<span>` when the zone has no rename handler and a `<button>`
+   when it has, and the button-only rules below are what keep the promise
+   honest: only the tappable one wears the pencil and the dotted underline. */
 .lz-speaker {
+  display: inline-block;
+  padding: 8px 0;
+  margin: -8px 0.35em -8px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--lz-fg);
+  vertical-align: baseline;
+}
+.lz-speaker-pill {
+  display: inline-block;
   font-size: 0.78em;
   font-weight: 550;
   letter-spacing: 0.01em;
   padding: 0.1em 0.5em;
-  margin-right: 0.35em;
   border-radius: var(--radius-pill);
   background: rgba(127, 127, 127, 0.12);
-  color: var(--lz-fg);
+  color: inherit;
   white-space: nowrap;
+}
+button.lz-speaker {
+  cursor: pointer;
+}
+/* At rest it has to LOOK like a control: `cursor` and `title` are hover-only
+   and the iPad has no hover, which is exactly how a real two-voice capture
+   ended with "no ability to edit the speaker names". Same pencil and same
+   dotted underline the strip's pill wears, so the two read as one gesture. */
+button.lz-speaker .lz-speaker-pill {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+button.lz-speaker .lz-speaker-pill::before {
+  content: "✎ ";
+}
+button.lz-speaker:hover .lz-speaker-pill {
+  background: rgba(127, 127, 127, 0.22);
 }
 .lz-partial::after {
   content: "";

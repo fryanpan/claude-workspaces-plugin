@@ -15,6 +15,18 @@
  *
  * Scope is one mention, always — see `speaker-reassign.ts` for why the
  * larger gestures are deliberately absent.
+ *
+ * ONE THING ON IT IS NOT ABOUT THIS MENTION. "Rename" gives the voice a
+ * name for the whole meeting, and it sits below a rule for that reason: the
+ * rows above answer "who said this", it answers "what is this person
+ * called". It is here because the notes are the only speaker surface that
+ * outlives the capture — the live transcript zone is gone with the meeting
+ * and the strip's row with it — so after the recording stops, a tag in the
+ * notes is where a person meets a voice still called Speaker A. The rename
+ * itself is somebody else's: `renameSpeaker` carries it over the meeting's
+ * socket while one is open and over HTTP once it is not, and the server
+ * rewrites every mention of that label in the notes already written. This
+ * menu does not touch the document for it.
  */
 
 import type { RosterVoice } from '@claude-workspaces/core';
@@ -42,6 +54,16 @@ export interface SpeakerReassignOpts {
   /** Where the menu is attached. Defaults to the document body, so no
    *  `overflow: hidden` in the editor's own layout can clip it. */
   root?: HTMLElement;
+  /**
+   * Name the voice a tag claims, for the whole meeting. Resolving false is a
+   * refusal the menu says out loud — a name that only ever landed on screen
+   * reads as saved. Absent, the menu offers no rename at all: a doc with no
+   * meeting behind it has nowhere to keep one.
+   */
+  renameSpeaker?: (label: string, name: string) => Promise<boolean>;
+  /** Ask for the new name. `window.prompt` by default; injected by tests,
+   *  which have no dialog to answer. */
+  promptName?: (current: string) => string | null;
 }
 
 export interface SpeakerReassignHandle {
@@ -52,6 +74,9 @@ export function mountSpeakerReassign(opts: SpeakerReassignOpts): SpeakerReassign
   const { editor, loadVoices } = opts;
   const canWrite = opts.canWrite ?? (() => true);
   const root = opts.root ?? document.body;
+  const renameSpeaker = opts.renameSpeaker;
+  const promptName =
+    opts.promptName ?? ((current: string) => window.prompt('Who is this?', current));
   let open: { menu: HTMLElement; scrim: HTMLElement; anchor: HTMLElement } | null = null;
   // Every open gets a number, so a slow roster arriving after the menu was
   // closed and reopened cannot render itself into the newer menu.
@@ -173,6 +198,50 @@ export function mountSpeakerReassign(opts: SpeakerReassignOpts): SpeakerReassign
       close();
     });
     list.append(nobody);
+    if (renameSpeaker) list.append(renameRow(list, voices, tag));
+  }
+
+  /**
+   * "Rename Speaker A" — the voice, not the mention.
+   *
+   * The name it offers to start from is the roster's, not the tag's text:
+   * the tag reads whatever the composer wrote when it wrote it, and a voice
+   * renamed since then is already called something else everywhere. The row
+   * stays in the menu while the rename is in flight, disabled, because the
+   * answer is what says whether it was kept.
+   */
+  function renameRow(list: HTMLElement, voices: RosterVoice[], tag: SpeakerTagRange): HTMLElement {
+    const current = voices.find((v) => v.label === tag.label)?.name ?? tag.text.replace(/^@/, '');
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'speaker-menu-rename';
+    row.setAttribute('role', 'menuitem');
+    row.textContent = `Rename ${current}`;
+    row.addEventListener('click', () => {
+      const answer = promptName(current)?.trim() ?? '';
+      if (!answer || answer === current) return;
+      row.disabled = true;
+      const mine = opened;
+      void (renameSpeaker?.(tag.label, answer) ?? Promise.resolve(false)).then(
+        (kept) => {
+          if (mine !== opened) return;
+          if (kept) {
+            close();
+            return;
+          }
+          row.disabled = false;
+          const failed = document.createElement('div');
+          failed.className = 'speaker-menu-empty';
+          failed.textContent = "That name wasn't saved.";
+          list.append(failed);
+        },
+        () => {
+          if (mine !== opened) return;
+          row.disabled = false;
+        },
+      );
+    });
+    return row;
   }
 
   /** Under the tag, nudged left if it would run off the right edge. The

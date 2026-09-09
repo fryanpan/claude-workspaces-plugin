@@ -1331,6 +1331,82 @@ describe('naming a voice after the meeting — the chooser keeps the cast', () =
     expect(postName).toHaveBeenCalledWith('m-9', 'B', 'Priya');
   });
 
+  /**
+   * The channel the notes' own rename entry uses (speaker-rename ticket,
+   * AC3). It asks for no prompt and answers whether the name was kept, which
+   * is what lets the menu say so — the strip's own pills are gone by then,
+   * along with the strip's row and the live transcript zone.
+   */
+  it('names a voice without a prompt, over HTTP, once the capture has stopped', async () => {
+    const postName = vi.fn(() => Promise.resolve(true));
+    const h = await stopped({ postName, promptName: () => null });
+    await expect(h.strip.renameSpeaker('B', '  Priya  ')).resolves.toBe(true);
+    expect(postName).toHaveBeenCalledWith('m1', 'B', 'Priya');
+    // And the strip agrees with the notes: its own cast reads the new name.
+    h.record().click();
+    expect(h.popNames()).toEqual(['Speaker A', 'Priya']);
+  });
+
+  it('answers false when the server refused, and takes the name back off', async () => {
+    const postName = vi.fn(() => Promise.resolve(false));
+    const h = await stopped({ postName, promptName: () => null });
+    await expect(h.strip.renameSpeaker('B', 'Priya')).resolves.toBe(false);
+    h.record().click();
+    expect(h.popNames()).toEqual(['Speaker A', 'Speaker B']);
+  });
+
+  it('answers false when there is no meeting to address, rather than keeping a name nowhere', async () => {
+    const h = await stopped({ promptName: () => null });
+    await expect(h.strip.renameSpeaker('B', 'Priya')).resolves.toBe(false);
+    h.record().click();
+    expect(h.popNames()).toEqual(['Speaker A', 'Speaker B']);
+  });
+
+  /**
+   * The race Codex found: on a FIRST open the strip's record read and the
+   * notes' own roster read are two requests for the same record, and the
+   * menu's can win. A Rename offered off the menu's answer would then reach a
+   * strip with no meeting id yet — and "that name wasn't saved" is a lie
+   * about a server that refused nothing.
+   *
+   * Ordered menu-first here by holding the strip's read open across the
+   * rename and releasing it afterwards; nothing waits on a clock.
+   */
+  it('a rename asked for while the record is still loading waits for it, and saves', async () => {
+    const postName = vi.fn(() => Promise.resolve(true));
+    let release: (() => void) | undefined;
+    const loaded = new Promise<DocSpeakers | null>((resolve) => {
+      release = () =>
+        resolve({
+          meetingId: 'm-9',
+          voices: [{ label: 'B', name: 'Speaker B', lastSaid: 'Sure.' }],
+        });
+    });
+    const h = mount(undefined, { postName, loadSpeakers: () => loaded });
+    // The menu's own request has already answered; the strip's has not.
+    const asked = h.strip.renameSpeaker('B', 'Priya');
+    let settled: boolean | undefined;
+    void asked.then((v) => {
+      settled = v;
+    });
+    await settle();
+    // Nothing refused and nothing posted: the id is not knowable yet.
+    expect(settled).toBeUndefined();
+    expect(postName).not.toHaveBeenCalled();
+    release?.();
+    await expect(asked).resolves.toBe(true);
+    expect(postName).toHaveBeenCalledWith('m-9', 'B', 'Priya');
+    h.record().click();
+    expect(h.popNames()).toEqual(['Priya']);
+  });
+
+  it('a record that never names a meeting still answers, rather than hanging the rename', async () => {
+    const postName = vi.fn(() => Promise.resolve(true));
+    const h = mount(undefined, { postName, loadSpeakers: () => Promise.resolve(null) });
+    await expect(h.strip.renameSpeaker('B', 'Priya')).resolves.toBe(false);
+    expect(postName).not.toHaveBeenCalled();
+  });
+
   it('starting a new capture clears the old cast — labels are per meeting', async () => {
     const h = mount(undefined, {
       loadSpeakers: () =>

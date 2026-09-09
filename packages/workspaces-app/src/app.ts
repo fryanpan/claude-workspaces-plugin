@@ -9,7 +9,7 @@ import { type CommentPillHandle, mountCommentPill } from './doc/doc-comment-pill
 import { mountDocFloats } from './doc/doc-floats.ts';
 import { wireDocGates } from './doc/doc-gates.ts';
 import { mountDocMargin } from './doc/doc-margin.ts';
-import { mountDocMeeting } from './doc/doc-meeting-mount.ts';
+import { type DocMeetingMount, mountDocMeeting } from './doc/doc-meeting-mount.ts';
 import { mountPointerPillLayer } from './doc/doc-pointer-pill.ts';
 import { wireDocReady } from './doc/doc-ready.ts';
 import { mountDocSaveState } from './doc/doc-save-state.ts';
@@ -20,7 +20,6 @@ import { type EditorHandle, createEditor } from './editor.ts';
 import { wantsHuddleStart } from './huddle-entry.ts';
 import { ensureUserIdentity } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
-import type { LeadBanner } from './lead-banner.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import type { MountContext } from './mount-context.ts';
 import { startReadingTracker } from './reading-tracker.ts';
@@ -317,10 +316,10 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   // out of the address — and the edit-mode decision that also needs it runs
   // much later, by which time `location.search` no longer says anything.
   const startedHuddleHere = wantsHuddleStart(location.search);
-  // The lead banner's read and stream, handed to the floats below so their
-  // receipts can say "no lead attached" off the same answer. Set only
-  // on a huddle doc; the floats read as before without it.
-  let watchLeadPresence: LeadBanner['watch'] | undefined;
+  // The meeting surface, once one is mounted: the lead banner's read and
+  // stream (so the floats' receipts can say "no lead attached" off the same
+  // answer, on a huddle doc), and the channel a speaker rename travels on.
+  let meeting: DocMeetingMount | undefined;
   // Live-meeting transcript strip along the bottom of the editor pane — the
   // whole surface (strip, live zone, bot client, lead banner) mounts together
   // in doc/doc-meeting-mount.ts. Bound to this scope, so navigating away
@@ -331,7 +330,7 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   // review of somebody's branch is not a place a meeting is recorded.
   const meetingStripEl = document.getElementById('meeting-strip');
   if (meetingStripEl && ctx.docType === 'markdown' && ctx.navDocId === undefined) {
-    const meeting = mountDocMeeting({
+    meeting = mountDocMeeting({
       docId,
       stripEl: meetingStripEl,
       scope,
@@ -343,7 +342,6 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
       huddle,
     });
     liveZone = meeting.liveZone;
-    watchLeadPresence = meeting.watchLeadPresence;
   }
 
   // The two always-in-view floats — Approve (the plan gate) and Review.
@@ -358,7 +356,7 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
       user,
       canWrite,
       scope,
-      ...(watchLeadPresence ? { watchLeadPresence } : {}),
+      ...(meeting?.watchLeadPresence ? { watchLeadPresence: meeting.watchLeadPresence } : {}),
     });
   }
 
@@ -372,6 +370,9 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
     // Permission, not mode: a reader in view mode may still fix an
     // attribution, and a reader without write access may not.
     canWrite: () => canWrite,
+    // And the one entry about the VOICE rather than this mention: naming
+    // Speaker A from the notes, after every other pill on the page has gone.
+    ...(meeting?.renameSpeaker ? { renameSpeaker: meeting.renameSpeaker } : {}),
   });
   scope.onCleanup(() => reassign.destroy());
 

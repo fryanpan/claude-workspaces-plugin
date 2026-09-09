@@ -23,7 +23,15 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function mount(markdown: string, voices = VOICES, over: { canWrite?: () => boolean } = {}) {
+function mount(
+  markdown: string,
+  voices = VOICES,
+  over: {
+    canWrite?: () => boolean;
+    renameSpeaker?: (label: string, name: string) => Promise<boolean>;
+    promptName?: (current: string) => string | null;
+  } = {},
+) {
   const ydoc = new Y.Doc();
   getProseFragment(ydoc).push(parseMarkdownBlocks(markdown));
   const host = document.createElement('div');
@@ -184,5 +192,91 @@ describe('the reassign menu', () => {
     });
     await clickTag(editor);
     expect(menu()?.textContent).toContain("Couldn't load");
+  });
+});
+
+/**
+ * Naming the VOICE from the notes (speaker-rename ticket, AC2/AC3).
+ *
+ * The rows above this one answer "who said this"; Rename answers "what is
+ * this person called", for every mention of that label. It is the surface
+ * that matters after the capture has stopped, when the live transcript zone
+ * and the strip's own row are both gone and a tag in the notes is the only
+ * pill left on the page.
+ */
+describe('renaming the voice from the notes', () => {
+  const rename = (): HTMLButtonElement | null =>
+    document.querySelector<HTMLButtonElement>('.speaker-menu-rename');
+
+  it('offers Rename for the voice the tag claims, and hands the answer to the channel', async () => {
+    const asked: string[] = [];
+    const renameSpeaker = vi.fn(() => Promise.resolve(true));
+    const { editor } = mount('- [@Devi](speaker:B) wants the gate moved.\n', VOICES, {
+      renameSpeaker,
+      promptName: (current) => {
+        asked.push(current);
+        return '  Devi Raman  ';
+      },
+    });
+    await clickTag(editor);
+    // Named for the voice, from the ROSTER — not from whatever spelling the
+    // composer happened to write into this one tag.
+    expect(rename()?.textContent).toBe('Rename Devi');
+    rename()?.click();
+    expect(asked).toEqual(['Devi']);
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    expect(renameSpeaker).toHaveBeenCalledWith('B', 'Devi Raman');
+  });
+
+  it('rewrites nothing in the document itself — the rename is the meeting’s', async () => {
+    const { editor, ydoc } = mount('- [@Devi](speaker:B) wants the gate moved.\n', VOICES, {
+      renameSpeaker: () => Promise.resolve(true),
+      promptName: () => 'Devi Raman',
+    });
+    const before = markdownOf(ydoc);
+    await clickTag(editor);
+    rename()?.click();
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    // The server rewrites every mention of the label through the notes sink;
+    // a second rewrite from here would fight it.
+    expect(markdownOf(ydoc)).toBe(before);
+  });
+
+  it('a name the server refused says so, and the menu stays open to try again', async () => {
+    const { editor } = mount('- [@Devi](speaker:B) wants the gate moved.\n', VOICES, {
+      renameSpeaker: () => Promise.resolve(false),
+      promptName: () => 'Devi Raman',
+    });
+    await clickTag(editor);
+    rename()?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('.speaker-menu-empty')?.textContent).toContain("wasn't saved"),
+    );
+    expect(menu()).not.toBeNull();
+    expect(rename()?.disabled).toBe(false);
+  });
+
+  it('a cancelled or unchanged answer asks for nothing', async () => {
+    const renameSpeaker = vi.fn(() => Promise.resolve(true));
+    let answer: string | null = null;
+    const { editor } = mount('- [@Devi](speaker:B) wants the gate moved.\n', VOICES, {
+      renameSpeaker,
+      promptName: () => answer,
+    });
+    await clickTag(editor);
+    expect(rename(), 'no Rename row to cancel').not.toBeNull();
+    rename()?.click();
+    answer = 'Devi';
+    rename()?.click();
+    expect(renameSpeaker).not.toHaveBeenCalled();
+    expect(menu()).not.toBeNull();
+  });
+
+  it('a doc with no meeting behind it offers no Rename at all', async () => {
+    const { editor } = mount('- [@Devi](speaker:B) wants the gate moved.\n');
+    await clickTag(editor);
+    expect(rename()).toBeNull();
+    // Positive control: the menu did render, it just has nowhere to keep a name.
+    expect(document.querySelector('.speaker-menu-nobody')).not.toBeNull();
   });
 });
