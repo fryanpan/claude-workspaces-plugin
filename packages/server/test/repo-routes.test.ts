@@ -11,7 +11,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocStore } from '../src/doc-store.ts';
@@ -20,6 +28,7 @@ import { type RepoRoutesContext, handleRepoRoutes } from '../src/routes/repos.ts
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
+import { waitFor } from './wait-for.ts';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, {
@@ -248,6 +257,107 @@ describe('/api/repos', () => {
       expect(((await r.json()) as { drift: string[] }).drift).toEqual([]);
 
       expect((await send('/api/repos/live-copy')).status).toBe(400);
+    });
+  });
+
+  describe('binding a file that has more than one copy', () => {
+    it('binds to the live copy rather than the one the caller could see', async () => {
+      await register(main);
+      await register(wt);
+      // The agent works in the worktree and names the copy in front of it;
+      // the copy in the main checkout is the one edited most recently.
+      writeFileSync(join(main, rel), '# Plan\n\nedited in main\n');
+      setMtime(join(wt, rel), T0);
+      setMtime(join(main, rel), T0 + 600);
+      const ws = await seedBoard();
+      const created = await send(`/workspaces/${ws}/docs`, {
+        method: 'POST',
+        body: JSON.stringify({
+          docId: 'plan',
+          type: 'markdown',
+          sourceUrl: join(wt, rel),
+          hubWorkspaceId: ws,
+        }),
+      });
+      expect(created.status).toBe(200);
+      const docId = ((await created.json()) as { docId: string }).docId;
+
+      // The binding, not the survey: an edit through the doc has to land in
+      // the copy the server chose. Asking `/live-copy` again would only ask
+      // the same question twice and would pass against a doc bound to the
+      // other file.
+      const written = await send(`/workspaces/${ws}/docs/${docId}/content`, {
+        method: 'POST',
+        body: JSON.stringify({
+          markdown: '# Plan\n\nwritten through the doc\n',
+          author: { name: 'Tester' },
+        }),
+      });
+      expect(written.status).toBe(200);
+      await waitFor(
+        () => readFileSync(join(main, rel), 'utf8').includes('written through the doc'),
+        { describe: 'the write-back reaching the live copy in the main checkout' },
+      );
+      // And the copy the caller named is untouched by it.
+      expect(readFileSync(join(wt, rel), 'utf8')).not.toContain('written through the doc');
+    });
+
+    it('refuses the bind with a candidate table when two copies were edited at once', async () => {
+      await register(main);
+      await register(wt);
+      writeFileSync(join(main, rel), '# Plan\n\nmain edit\n');
+      writeFileSync(join(wt, rel), '# Plan\n\nbranch edit\n');
+      setMtime(join(main, rel), T0);
+      setMtime(join(wt, rel), T0 + 1);
+      const ws = await seedBoard();
+      const r = await send(`/workspaces/${ws}/docs`, {
+        method: 'POST',
+        body: JSON.stringify({
+          docId: 'plan',
+          type: 'markdown',
+          sourceUrl: join(main, rel),
+          hubWorkspaceId: ws,
+        }),
+      });
+      expect(r.status).toBe(409);
+      const body = (await r.json()) as {
+        error: string;
+        candidates: Array<{ root: string }>;
+      };
+      expect(body.error).toBe('ambiguous-copy');
+      expect(body.candidates.map((c) => c.root).sort()).toEqual([main, wt].sort());
+
+      // And the pick lands: same request, naming the checkout to treat as
+      // live. Without this the refusal would be a dead end.
+      const picked = await send(`/workspaces/${ws}/docs`, {
+        method: 'POST',
+        body: JSON.stringify({
+          docId: 'plan',
+          type: 'markdown',
+          sourceUrl: join(main, rel),
+          hubWorkspaceId: ws,
+          checkout: wt,
+        }),
+      });
+      expect(picked.status).toBe(200);
+      const bound = (await picked.json()) as { docId: string; meta: { sourceUrl?: string } };
+      expect(bound.meta.sourceUrl).toBe(join(wt, rel));
+
+      // The pick settles the call it was made on; it is not a standing
+      // answer. The two copies still disagree, so the next question is asked
+      // again — new evidence, not a decision already taken — and nothing is
+      // rebound behind anyone's back in the meantime.
+      const later = await send(`/api/repos/live-copy?docId=${bound.docId}`);
+      expect(later.status).toBe(409);
+    });
+
+    it('CONTROL: a bind with one copy is not refused', async () => {
+      // Same route, same fixture, one checkout registered: an
+      // always-ambiguous bind would stop every ordinary attach dead, and
+      // nothing above would notice.
+      await register(main);
+      const docId = await bindDoc('plan', join(main, rel));
+      expect(docId).toMatch(/^d-/);
     });
   });
 

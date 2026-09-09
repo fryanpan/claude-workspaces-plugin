@@ -57,9 +57,14 @@ export type LiveCopyResult =
 export interface ResolveOpts {
   /**
    * The checkout the caller has PICKED, answering an earlier
-   * `ambiguous-copy`. A pick settles the question for this call and is
-   * remembered on the doc as its live checkout, so the next caller is not
-   * asked the same thing again.
+   * `ambiguous-copy`.
+   *
+   * A pick settles the call it is made on, and the choice is recorded as the
+   * doc's live checkout — but it is NOT a standing answer. If the two copies
+   * are edited concurrently again, the next question is asked again, because
+   * that is new evidence rather than a decision already taken. The cost of
+   * the other rule is silent: a stale pick would keep writing into one
+   * checkout while somebody worked in the other.
    */
   checkout?: string;
   /** Skip the git-status column. On by default for the same reason the

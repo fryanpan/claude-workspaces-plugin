@@ -2027,6 +2027,23 @@ export class DocStore {
   }
 
   /**
+   * Record the copy a doc is actually bound to.
+   *
+   * A bind names the copy the CALLER can see, and since identity became repo
+   * plus path that is a pointer rather than an address — the doc may end up
+   * bound to a different checkout's copy of the same file. `sourceUrl` is
+   * what every later reader (the flush guard, the migration, a status
+   * screen) treats as "where this doc lives", so it has to name the copy
+   * that was chosen rather than the one that was asked for.
+   */
+  noteBoundCopy(docId: string, absPath: string): void {
+    const doc = this.get(docId);
+    if (!doc || doc.meta.sourceUrl === absPath) return;
+    doc.meta.sourceUrl = absPath;
+    this.persistMeta(docId);
+  }
+
+  /**
    * Flush a doc's pending write-back NOW, before a checkout it lives in goes
    * away.
    *
