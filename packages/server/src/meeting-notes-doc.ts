@@ -80,6 +80,7 @@ import {
 } from './meeting-task-capture.ts';
 import { meetingTimingPath } from './meetings.ts';
 import {
+  MEETING_NOTES_HEADING,
   NOTES_AUTHOR_ID,
   type NotesDocStore,
   applyNotesBlockEdits,
@@ -215,6 +216,16 @@ export interface NotesHeadingMemory {
     before: readonly prose.OutlineEntry[],
     after: readonly prose.OutlineEntry[],
   ): void;
+  /**
+   * Take an existing heading as this meeting's section — what
+   * `notesSectionForMeeting` does with an empty one.
+   *
+   * A WRITE, not a return value, and that is the point: one bullet from now
+   * the section is not empty any more, so a next tick that had to re-derive
+   * the same answer would find nothing free and open the twin this exists to
+   * prevent.
+   */
+  adopt(ids: NotesMeetingIds, headingId: string): void;
   /** This meeting is (re)starting: forget whatever it remembered, so it opens
    *  its own section. Another meeting's memory of the same doc is untouched —
    *  that is the whole reason the key carries the meeting id. */
@@ -225,6 +236,75 @@ export interface NotesHeadingMemory {
  *  under it are topics, which the agent also writes and which must never be
  *  mistaken for the section. */
 const NOTES_HEADING_LEVEL = 2;
+
+/**
+ * The section this meeting writes under: the one it remembers, else an
+ * existing EMPTY one it may take over.
+ *
+ * CALL THIS, NOT `headingId`, ANYWHERE THE ANSWER DECIDES WHETHER A SECTION
+ * IS OPENED.
+ *
+ * IT READS ITS OWN OUTLINE FOR THE ADOPTION HALF, and does not judge that off
+ * the `outline` it is handed. Emptiness is invisible in a headings-only
+ * outline — every section looks empty in one — and one of this function's two
+ * callers is a hop away from a reader that asks for exactly that. Trusting
+ * the argument would mean adopting a section full of the last meeting's notes
+ * and writing this meeting's minutes into it. The caller's outline is still
+ * used for the cheap half (is the remembered heading still there), and the
+ * store is read only when nothing is remembered — the first tick of a
+ * meeting, which already pays for a section-open write.
+ */
+export function notesSectionForMeeting(
+  memory: NotesHeadingMemory,
+  ids: NotesMeetingIds,
+  outline: readonly prose.OutlineEntry[],
+  docStore: NotesDocStore,
+): string | undefined {
+  const held = memory.headingId(ids, outline);
+  if (held !== undefined) return held;
+  const free = emptyNotesSection(readNotesOutline(docStore, ids.docId));
+  if (free === undefined) return undefined;
+  memory.adopt(ids, free);
+  return free;
+}
+
+/**
+ * The id of the doc's LAST `Meeting notes` heading when nothing is under it,
+ * else undefined.
+ *
+ * The owner's 2026-08-31 rule — a new recording opens its own section below
+ * whatever the last one wrote — is about never replacing minutes somebody has
+ * read. An EMPTY section holds none, so opening a second one under it leaves
+ * two identical headings with nothing under either, which is what a meeting
+ * whose every tick composed nothing left on a doc on 2026-09-09. The newer
+ * rule is that new minutes reuse a section that fits the topic, and an empty
+ * one fits every topic. A section with a single word in it is left alone.
+ *
+ * THE LAST ONE, because both readers of a notes section take the last heading
+ * with that text (`notesSectionStart` in the client, the finder here) — an
+ * earlier empty section is not where anybody would read the minutes from, so
+ * writing into it would strand them exactly as the eager section-open exists
+ * to prevent.
+ *
+ * A section runs to the next heading at its own level or above; anything at
+ * all inside it — a bullet, a paragraph, a `### Topic` the last recording got
+ * as far as writing — makes it somebody's, and it is left alone.
+ */
+function emptyNotesSection(outline: readonly prose.OutlineEntry[]): string | undefined {
+  let last = -1;
+  for (let i = 0; i < outline.length; i++) {
+    const e = outline[i];
+    if (e?.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING) last = i;
+  }
+  if (last < 0) return undefined;
+  for (let i = last + 1; i < outline.length; i++) {
+    const e = outline[i];
+    if (!e) continue;
+    if (e.kind === 'heading' && (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL) break;
+    return undefined;
+  }
+  return outline[last]?.id;
+}
 
 export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadingMemory {
   // KEYED BY DOC **AND** MEETING. Keyed by doc alone, two recordings into one
@@ -263,6 +343,10 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
       if (present(id, outline)) return id;
       forget(ids);
       return undefined;
+    },
+    adopt(ids, headingId) {
+      byMeeting.set(keyOf(ids), headingId);
+      store?.write(ids, headingId);
     },
     learn(ids, before, after) {
       const held = remembered(ids);
@@ -402,7 +486,12 @@ export function applyNotesUpdate(
   // outline the tick itself read.
   const full = readNotesOutline(docStore, update.docId);
   const guarded = guardNotesEdits(update.edits, {
-    notesHeadingId: heading.headingId({ docId: update.docId, meetingId: update.meetingId }, full),
+    notesHeadingId: notesSectionForMeeting(
+      heading,
+      { docId: update.docId, meetingId: update.meetingId },
+      full,
+      docStore,
+    ),
   });
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);
@@ -938,7 +1027,7 @@ export function withServerNotesSinks(
       }
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
-      heading.headingId({ docId, meetingId }, outline),
+      notesSectionForMeeting(heading, { docId, meetingId }, outline, deps.docStore()),
     onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
       let landed: boolean | NotesWriteRefusal = true;
       try {

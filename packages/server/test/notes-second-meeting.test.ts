@@ -188,7 +188,11 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
   it('writes into it rather than opening a second one', async () => {
     const harness = createNotesTickHarness({
       doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n`,
-      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
+      compose: (input, tick) =>
+        addNotes(
+          input,
+          tick === 1 ? '- the Riverbend import runs twice' : '- and it double-charges Harborlight',
+        ),
     });
     const first = await harness.speak('the Riverbend import runs twice');
     // ONE section, and the bullet is under it.

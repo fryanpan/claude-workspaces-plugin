@@ -143,7 +143,10 @@ describe("the bot client's own stream address", () => {
       this.listeners.set(type, held);
     }
     removeEventListener(type: string, fn: EventListener): void {
-      this.listeners.set(type, (this.listeners.get(type) ?? []).filter((f) => f !== fn));
+      this.listeners.set(
+        type,
+        (this.listeners.get(type) ?? []).filter((f) => f !== fn),
+      );
     }
     close(): void {
       this.closed = true;
@@ -155,7 +158,11 @@ describe("the bot client's own stream address", () => {
     }
   }
 
-  async function subscribed() {
+  async function subscribed(): Promise<{
+    client: ReturnType<typeof createMeetingBotClient>;
+    es: FakeEventSource;
+    opened: string[];
+  }> {
     FakeEventSource.opened = [];
     FakeEventSource.last = null;
     history.replaceState(null, '', '/workspaces/w-9/docs/doc-1');
@@ -167,7 +174,9 @@ describe("the bot client's own stream address", () => {
     });
     await client.ready;
     (globalThis as { EventSource?: unknown }).EventSource = prior;
-    const es = FakeEventSource.last;
+    // Annotated because the `= null` above narrows the static to `null` for
+    // the rest of the function, and the throw below would then make it never.
+    const es: FakeEventSource | null = FakeEventSource.last;
     if (!es) throw new Error('no stream opened');
     return { client, es, opened: FakeEventSource.opened };
   }
