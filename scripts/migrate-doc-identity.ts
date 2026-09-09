@@ -12,12 +12,19 @@
  *   bun scripts/migrate-doc-identity.ts --data-dir <dir>            # dry run
  *   bun scripts/migrate-doc-identity.ts --data-dir <dir> --apply
  *   bun scripts/migrate-doc-identity.ts --data-dir <dir> --revert
+ *   bun scripts/migrate-doc-identity.ts --data-dir <dir> --check
  *
  * `--dry-run` is accepted and is the default. Dry first, always: the report
  * it prints is the same plan `--apply` executes.
+ *
+ * `--check` is the only mode that is safe with the server running: it opens
+ * the journal and the `.ydoc` files read-only and writes nothing at all, so
+ * it can answer "are the merged conversations still there" long after the
+ * run, when a lost write would come from something the run never saw.
  */
 
 import { existsSync } from 'node:fs';
+import { checkLines, checkMerges } from '../packages/server/src/doc-identity-check.ts';
 import { revert } from '../packages/server/src/doc-identity-journal.ts';
 import { applyPlan, liveIo, reportLines } from '../packages/server/src/doc-identity-migration.ts';
 import { planMigration } from '../packages/server/src/doc-identity-plan.ts';
@@ -34,6 +41,13 @@ if (import.meta.main) {
   if (!dataDir || !existsSync(dataDir)) {
     console.error('usage: bun scripts/migrate-doc-identity.ts --data-dir <dir> [--apply|--revert]');
     process.exit(2);
+  }
+  if (flag('check')) {
+    // Before the registry is constructed: a check writes nothing, and
+    // building a RepoRegistry is how a stale in-memory copy gets written.
+    const res = checkMerges(dataDir);
+    console.log(checkLines(res).join('\n'));
+    process.exit(res.ok ? 0 : 1);
   }
   const registry = new RepoRegistry(dataDir);
   if (flag('revert')) {
