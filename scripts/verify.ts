@@ -190,13 +190,10 @@ export const MEMBERS: Member[] = [
  * anybody remembering to add its name here.
  */
 export const NON_GATE_JOBS: Record<string, string> = {
-  'notes-eval-smoke':
-    'spends money and reaches the network, so it runs only on a diff that moves the ' +
-    "note-taking surface and never on a builder's machine. It DOES gate — a token " +
-    'exchange that returns nothing fails it rather than passing green as a skip. It holds ' +
-    'no repository secret: the job proves its identity with a GitHub OIDC token and trades ' +
-    'that for an access token good for one run, which is also why `bun run verify` cannot ' +
-    'run it here — there is no identity to prove off a runner.',
+  // Empty, and that is the current truth rather than an oversight: every job
+  // ci.yml has is covered by a member. The note-taking smoke slice used to
+  // live here; it moved to its own daily workflow because it is the only
+  // thing in CI that spends money, and this file only reads ci.yml.
 };
 
 /**

@@ -1,0 +1,108 @@
+name: Notes eval smoke
+
+# The note-taking behaviour, on three ticks of one real meeting.
+#
+# ONCE A DAY, NOT ONCE A PUSH, and the reason is money. This is the only
+# thing in CI that spends any: it sends real speech to a real model and reads
+# what came back. Bryan's bar is a dollar a day, and a per-PR job cannot
+# promise that — it costs whatever the day's traffic happens to be, and a
+# busy afternoon of pushes to the notes surface is the day it goes over.
+# Once a day is a spend you can multiply by thirty in your head.
+#
+# The measured cost of one run is about three cents (2026-09-09: 7 model
+# calls, $0.0313), so the daily budget is roughly thirty times the bill. That
+# headroom is not an argument for running it more often; it is the margin
+# that lets a fixture grow without anybody having to re-do this arithmetic.
+#
+# THE CAP IS THE PROMISE, not this comment. `--max-usd 1` stops the run the
+# moment it has spent a dollar, so a corpus that grows, a retry loop that
+# misbehaves, or a `--corpus` pointed somewhere large costs one dollar rather
+# than however much it wanted.
+#
+# WORKFLOW_DISPATCH IS THE POINT for anyone changing the note-taker: a diff
+# that moves the prompt or the composer wants this run BEFORE it merges, and
+# waiting for tomorrow's cron is not that. Run it from the Actions tab
+# against the branch.
+#
+# IT HOLDS NO SECRET. `id-token: write` lets the job ask GitHub for a
+# short-lived token proving which repository, ref and workflow is running;
+# the Console's federation rule trades that for an access token good for
+# this run. The four ids below are configuration, not credentials — they
+# name which rule, org, service account and workspace the exchange lands
+# in, and none of them authenticates anything on its own.
+#
+# The full run is `bun run notes:eval`, on demand, from somebody's machine.
+
+on:
+  schedule:
+    - cron: '15 11 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: notes-eval-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      ANTHROPIC_FEDERATION_RULE_ID: fdrl_013msPwNo3psCS2ktphzuyor
+      ANTHROPIC_ORGANIZATION_ID: be49e552-0cfa-4075-80ea-9f297c05aa18
+      ANTHROPIC_SERVICE_ACCOUNT_ID: svac_017e7raEcSZnhUV6b5v9tenX
+      ANTHROPIC_WORKSPACE_ID: wrkspc_01X9H3UXsUDZNv3LGokWPS5s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Same pin as ci.yml. Bump them together.
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - name: Prove this workflow's identity to GitHub
+        uses: actions/github-script@v8
+        id: oidc
+        with:
+          script: |
+            const jwt = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(jwt);
+            core.exportVariable('ANTHROPIC_OIDC_JWT', jwt);
+      - name: Exchange that identity for a short-lived access token
+        run: |
+          set -euo pipefail
+          response=$(curl -sS https://api.anthropic.com/v1/oauth/token \
+            -H 'content-type: application/json' \
+            -d "$(jq -n \
+              --arg assertion "${ANTHROPIC_OIDC_JWT}" \
+              --arg rule "${ANTHROPIC_FEDERATION_RULE_ID}" \
+              --arg org "${ANTHROPIC_ORGANIZATION_ID}" \
+              --arg svc "${ANTHROPIC_SERVICE_ACCOUNT_ID}" \
+              --arg wrk "${ANTHROPIC_WORKSPACE_ID}" \
+              '{grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                assertion: $assertion,
+                federation_rule_id: $rule,
+                organization_id: $org,
+                service_account_id: $svc,
+                workspace_id: $wrk}')")
+          token=$(printf '%s' "$response" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then
+            # Say what came back, because "no token" has several causes that
+            # look identical from here — a rule that does not match this ref,
+            # a wrong id, a disabled service account. Every *token field is
+            # redacted first: a refresh token in a public log is the one
+            # failure worse than the failure being diagnosed.
+            echo "::error::The token exchange returned no access_token."
+            printf '%s' "$response" \
+              | jq 'walk(if type == "object"
+                         then with_entries(if (.key | test("token"))
+                                           then .value = "[redacted]"
+                                           else . end)
+                         else . end)' >&2 || echo '(response was not JSON)' >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "CW_SUMMARY_ACCESS_TOKEN=$token" >> "$GITHUB_ENV"
+      - name: Note-taking smoke slice
+        run: bun run notes:eval --smoke --max-usd 1

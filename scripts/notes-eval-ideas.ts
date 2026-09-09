@@ -104,6 +104,22 @@ const LIST_TOOL: ToolSpec = {
   },
 };
 
+/**
+ * Where this file's own spend is reported. It used to go nowhere, so a run's
+ * printed total counted the note composer and the behaviour judge and silently
+ * omitted every idea-judging call — which is most of the calls a full run
+ * makes. A total that omits the largest term is worse than no total, because
+ * it is the number a spend cap would be enforced against.
+ */
+export type UsageSink = (model: string, input: number, output: number) => void;
+
+let usageSink: UsageSink | null = null;
+
+/** Send this file's token usage somewhere. `null` stops reporting. */
+export function setIdeaUsageSink(sink: UsageSink | null): void {
+  usageSink = sink;
+}
+
 /** A forced tool call, the shape both questions here take. */
 interface ToolSpec {
   name: string;
@@ -142,7 +158,9 @@ async function callTool(
   }
   const body = (await res.json()) as {
     content?: Array<{ type?: string; name?: string; input?: unknown }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
   };
+  usageSink?.(TRUTH_MODEL, body.usage?.input_tokens ?? 0, body.usage?.output_tokens ?? 0);
   const call = body.content?.find((b) => b.type === 'tool_use' && b.name === tool.name);
   if (!call?.input || typeof call.input !== 'object') return null;
   return call.input as Record<string, unknown>;

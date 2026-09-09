@@ -8,6 +8,7 @@
  *   bun run notes:eval --judge off     # programmatic checks only, no Sonnet
  *   bun run notes:eval --no-ideas      # skip the lost-idea rate and its gate
  *   bun run notes:eval --corpus <dir>  # a corpus that is NOT in this repo
+ *   bun run notes:eval --max-usd 0.25  # stop once the run has spent that much
  *   bun run notes:eval --ratchet       # lower the lost-idea bar to this run's rate
  *
  * THE NUMBER THIS RUN EXISTS FOR IS THE LOST-IDEA RATE. Everything else here
@@ -97,6 +98,7 @@ import {
   ratchetLostIdeaBar,
   readTruth,
   reportIdeaRates,
+  setIdeaUsageSink,
 } from './notes-eval-ideas.ts';
 
 const JUDGE_MODEL = 'claude-sonnet-5';
@@ -112,6 +114,60 @@ const PRICES: Record<string, { input: number; output: number }> = {
   [NOTES_MODEL]: { input: 1 / 1_000_000, output: 5 / 1_000_000 },
   [JUDGE_MODEL]: { input: 3 / 1_000_000, output: 15 / 1_000_000 },
 };
+
+/**
+ * What one run may spend before it stops, in dollars.
+ *
+ * Bryan's number: the CI runs must not cost more than a dollar a day. A cap
+ * is the only form of that promise a machine can keep — a measured estimate
+ * says what yesterday cost, and the run that matters is the one where a
+ * fixture grew, a retry loop misbehaved, or somebody pointed `--corpus` at
+ * three hundred meetings. So the run aborts rather than reporting an overrun
+ * afterwards.
+ */
+export const DEFAULT_MAX_USD = 1;
+
+/** Thrown when the cap is reached, so one `catch` in main ends the run. */
+export class SpendCapReached extends Error {
+  constructor(
+    readonly spent: number,
+    readonly cap: number,
+  ) {
+    super(`spend cap reached: $${spent.toFixed(4)} of $${cap.toFixed(2)}`);
+    this.name = 'SpendCapReached';
+  }
+}
+
+let maxUsd = DEFAULT_MAX_USD;
+
+/**
+ * Has this run spent past its cap?
+ *
+ * A cap of zero means UNCAPPED, not "spend nothing" — `--max-usd 0` is how a
+ * person says "I know what I am doing, run the whole corpus". A run that
+ * spent nothing at all is never over, whatever the cap.
+ */
+export function overBudget(spent: number, cap: number): boolean {
+  return cap > 0 && spent > cap;
+}
+
+/** What a set of token counts cost, at the prices this file knows. */
+export function costOf(
+  counts: Readonly<Record<string, { input: number; output: number }>>,
+  prices: Readonly<Record<string, { input: number; output: number }>> = PRICES,
+): number {
+  let sum = 0;
+  for (const [model, u] of Object.entries(counts)) {
+    const price = prices[model];
+    // A model with no price contributes nothing rather than throwing. A new
+    // judge model must not be able to abort a run by being unpriced — but it
+    // is then invisible to the cap, which is why adding one means adding its
+    // price in the same commit.
+    if (!price) continue;
+    sum += u.input * price.input + u.output * price.output;
+  }
+  return sum;
+}
 
 /**
  * A line typed by a person, seeded into every fixture's doc before the
@@ -173,16 +229,15 @@ function recordUsage(model: string, input: number, output: number): void {
   u.input += input;
   u.output += output;
   u.calls++;
+  // Checked AFTER the call is counted, not before: the cap is on what this
+  // run has actually spent, and a check beforehand would have to guess the
+  // size of a reply nobody has seen yet. So the overshoot is bounded by one
+  // call rather than by a guess.
+  if (overBudget(totalCost(), maxUsd)) throw new SpendCapReached(totalCost(), maxUsd);
 }
 
 function totalCost(): number {
-  let sum = 0;
-  for (const [model, u] of Object.entries(usage)) {
-    const price = PRICES[model];
-    if (!price) continue;
-    sum += u.input * price.input + u.output * price.output;
-  }
-  return sum;
+  return costOf(usage);
 }
 
 /**
@@ -704,6 +759,19 @@ async function main(argv: string[]): Promise<number> {
   const keyAt = argv.indexOf('--api-key');
   const judgeAt = argv.indexOf('--judge');
   const judgeOff = judgeAt >= 0 && argv[judgeAt + 1] === 'off';
+  const capAt = argv.indexOf('--max-usd');
+  if (capAt >= 0) {
+    const asked = Number(argv[capAt + 1]);
+    if (!Number.isFinite(asked) || asked < 0) {
+      console.error(`--max-usd wants a number of dollars, not "${argv[capAt + 1]}".`);
+      return 2;
+    }
+    maxUsd = asked;
+  }
+  // Every model call this run makes is priced against one budget, this file's
+  // and the idea judge's alike. The sink is cleared in the `finally` below so
+  // a second run in the same process cannot inherit it.
+  setIdeaUsageSink(recordUsage);
   const key = resolveCredentialFrom(
     keyAt >= 0 ? argv[keyAt + 1] : undefined,
     readKeychainPassword,
@@ -763,9 +831,29 @@ async function main(argv: string[]): Promise<number> {
       `notes on ${NOTES_MODEL}, judge ${opts.judgePerMeeting > 0 ? JUDGE_MODEL : 'off'}`,
   );
   const ideaRows: MeetingIdeaRate[] = [];
-  for (const fixture of fixtures) {
-    const row = await runMeeting(fixture, opts, behaviours, ticksWanted);
-    if (row) ideaRows.push(row);
+  try {
+    for (const fixture of fixtures) {
+      const row = await runMeeting(fixture, opts, behaviours, ticksWanted);
+      if (row) ideaRows.push(row);
+    }
+  } catch (err) {
+    if (!(err instanceof SpendCapReached)) throw err;
+    // Print what was spent before saying anything else: the number is the
+    // reason the run stopped, and a reader who sees only "aborted" goes
+    // looking for a bug.
+    console.log(`\nSpend before the cap stopped it: $${totalCost().toFixed(4)}`);
+    for (const [model, u] of Object.entries(usage)) {
+      console.log(`  ${model}: ${u.calls} calls, ${u.input} in / ${u.output} out`);
+    }
+    console.error(
+      `\nSTOPPED: this run reached its $${err.cap.toFixed(2)} cap and did not finish. ` +
+        'Nothing here is a verdict — the meetings it did not reach were not measured. ' +
+        'Raise it with --max-usd if the corpus genuinely grew; otherwise find what ' +
+        'started calling more than it used to.',
+    );
+    return 1;
+  } finally {
+    setIdeaUsageSink(null);
   }
   // Two things can turn a verdict red, and they are red for different
   // reasons. The flat-wall check is a SHAPE the notes may not have, and only
