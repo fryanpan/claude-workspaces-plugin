@@ -135,7 +135,9 @@ describe('one doc per repo+path, across checkouts', () => {
       null,
       { id: 'user-test', name: 'Reviewer', kind: 'known', color: '#000' },
       'Does this cover the rollback?',
-      { kind: 'text-range', snippet: { text: 'First paragraph.' } },
+      // A subject thread: a comment about the document rather than about a
+      // phrase in it, which is the shape a review ask on a doc takes.
+      { kind: 'subject' },
     );
     expect(store.listThreads(docId).length).toBe(1);
 

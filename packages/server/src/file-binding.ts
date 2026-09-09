@@ -354,6 +354,15 @@ export class FileBindings {
    */
   private failedWrites = new Set<string>();
 
+  /** When we last wrote each doc's bound file ourselves, in epoch ms. Read
+   *  by the live-copy rule; see the write-back that sets it. */
+  private readonly writeBackAt = new Map<string, number>();
+
+  /** When we last wrote this doc's file ourselves, if we ever have. */
+  lastWriteBackAt(docId: string): number | undefined {
+    return this.writeBackAt.get(docId);
+  }
+
   constructor(private readonly p: FileBindingHost) {}
 
   /**
@@ -1733,6 +1742,12 @@ export class FileBindings {
             // write-back as an external edit and schedule a redundant reconcile.
             if (res.exists) {
               binding.lastMtimeMs = res.mtimeMs;
+              // Our own write, as opposed to the mtimes we merely READ. The
+              // live-copy rule needs the difference: a `git checkout` in
+              // another worktree bumps an mtime with nobody having edited
+              // anything, and the copy we ourselves last wrote should not
+              // lose to it.
+              this.writeBackAt.set(doc.docId, res.mtimeMs);
               binding.lastSize = res.size;
             }
             this.failedWrites.delete(doc.docId);

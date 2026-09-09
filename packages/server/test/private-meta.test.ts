@@ -27,6 +27,8 @@ describe('private meta keys', () => {
     expect([...PRIVATE_META_KEYS].sort()).toEqual([
       'docHome',
       'docKey',
+      'driftCheckouts',
+      'liveCheckout',
       'owner',
       'producedBy',
       'sourceUrl',

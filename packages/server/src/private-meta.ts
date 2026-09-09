@@ -27,6 +27,8 @@ export const PRIVATE_META_KEYS = [
   'producedBy',
   'docHome',
   'docKey',
+  'liveCheckout',
+  'driftCheckouts',
 ] as const;
 
 export type PrivateMetaKey = (typeof PRIVATE_META_KEYS)[number];

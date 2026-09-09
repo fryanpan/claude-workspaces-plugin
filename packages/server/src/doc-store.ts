@@ -85,8 +85,6 @@ import {
   isReservedDocId,
   newDocId,
 } from './doc-ids.ts';
-import { docKeyForPath } from './doc-key.ts';
-import { RepoRegistry } from './repo-registry.ts';
 import {
   DOC_INDEX_VERSION,
   type DocIndexEntry,
@@ -98,6 +96,8 @@ import {
   unstageDocIndex,
   writeDocIndex,
 } from './doc-index.ts';
+import { docKeyForPath } from './doc-key.ts';
+import { type LiveCopyResult, type ResolveOpts, resolveLiveCopy } from './doc-live-copy.ts';
 import { resolveOriginRepoCheckout } from './doc-origin-repo.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import {
@@ -113,6 +113,7 @@ import {
   readPrivateMeta,
   writePrivateMeta,
 } from './private-meta.ts';
+import { RepoRegistry } from './repo-registry.ts';
 import { type ArchivedDoc, type ArchivedReview } from './review-archive.ts';
 import { boundFiles, redactBoundPath } from './slow-fs.ts';
 import type { SseBus } from './sse.ts';
@@ -1988,6 +1989,60 @@ export class DocStore {
   boundPathOf(docId: string): string | undefined {
     const target = this.peek(docId)?.docId ?? this.aliases.get(docId) ?? docId;
     return this.bindings.pathOf(target);
+  }
+
+  /**
+   * Which copy of a repo+path doc is live, recorded onto the doc, with the
+   * binding moved there.
+   *
+   * The refusal is the interesting return. Two checkouts edited within the
+   * same window with different bytes is not a tie to be broken by whichever
+   * mtime is larger — see `doc-live-copy.ts` — so the caller gets a candidate
+   * table and asks, and passes the answer back as `checkout`.
+   *
+   * Not called from the flush path: this hashes every copy of the file, and
+   * `originRepoGuard` is the guard that has to be cheap enough to run before
+   * every write. This runs where a decision is being made — a bind, a status
+   * read, a checkout being retired — and leaves a binding the flush path then
+   * uses unchanged.
+   */
+  resolveLiveCopy(docId: string, opts?: ResolveOpts): LiveCopyResult {
+    const target = this.get(docId)?.docId ?? docId;
+    return resolveLiveCopy(
+      {
+        registry: this.repos,
+        meta: (id) => this.get(id)?.meta,
+        boundPath: (id) => this.bindings.pathOf(id),
+        retarget: (id, absPath) => {
+          const doc = this.get(id);
+          if (doc) this.bindings.retargetHomeBinding(doc, absPath);
+        },
+        persistMeta: (id) => this.persistMeta(id),
+        lastFlushAt: (id) => this.bindings.lastWriteBackAt(id),
+        now: () => Date.now(),
+      },
+      target,
+      opts,
+    );
+  }
+
+  /**
+   * Flush a doc's pending write-back NOW, before a checkout it lives in goes
+   * away.
+   *
+   * The bind flushes before a removal it can SEE — an unregister, a worktree
+   * we are told about — which is the whole reason those verbs exist rather
+   * than leaving people to `git worktree remove` unannounced. It cannot help
+   * with a removal nobody mentioned, and does not pretend to.
+   */
+  flushBoundWrites(roots: string[]): number {
+    let flushed = 0;
+    for (const { docId, path } of this.bindings.pendingFileWrites()) {
+      if (!roots.some((root) => path === root || path.startsWith(`${root}/`))) continue;
+      this.bindings.flushWrite(docId, this.get(docId));
+      flushed++;
+    }
+    return flushed;
   }
 
   peekMeta(docId: string): DocMeta | undefined {

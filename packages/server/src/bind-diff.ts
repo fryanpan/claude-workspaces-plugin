@@ -10,7 +10,6 @@
 import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep } from 'node:path';
 import { type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
-import { canonicalRepoRoot } from './doc-origin-repo.ts';
 import {
   type BindHost,
   DEFAULT_MAX_FILES,
@@ -31,6 +30,7 @@ import {
   findOverlongGroupDetails,
 } from './diff-groups.ts';
 import { isReservedDocId } from './doc-ids.ts';
+import { canonicalRepoRoot } from './doc-origin-repo.ts';
 import { scanFolder } from './fs-scan.ts';
 import {
   type DiffFileEntry,
@@ -162,22 +162,22 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     };
   }
 
-/**
- * The path a set id is derived FROM: the repo's main checkout, not the
- * checkout the caller was standing in.
- *
- * Both id derivations hash an absolute path, so browsing a repo through a
- * linked worktree used to mint a whole second review — a different set id,
- * and `memberDocId` therefore a different doc for every file in it. Hashing
- * the repo's canonical root instead makes the two binds land on one review,
- * which is the same rule `doc-key.ts` applies to a single file.
- *
- * A folder that is not a repo has no canonical root and keeps its own path,
- * which is the behaviour it already had.
- */
-function setIdRootFor(root: string): string {
-  return canonicalRepoRoot(root) ?? root;
-}
+  /**
+   * The path a set id is derived FROM: the repo's main checkout, not the
+   * checkout the caller was standing in.
+   *
+   * Both id derivations hash an absolute path, so browsing a repo through a
+   * linked worktree used to mint a whole second review — a different set id,
+   * and `memberDocId` therefore a different doc for every file in it. Hashing
+   * the repo's canonical root instead makes the two binds land on one review,
+   * which is the same rule `doc-key.ts` applies to a single file.
+   *
+   * A folder that is not a repo has no canonical root and keeps its own path,
+   * which is the behaviour it already had.
+   */
+  function setIdRootFor(root: string): string {
+    return canonicalRepoRoot(root) ?? root;
+  }
 
   // BROWSE mode — no base to diff against (plain folder, fresh repo, or the
   // caller just wants to look around). No eager per-file binds: files open
