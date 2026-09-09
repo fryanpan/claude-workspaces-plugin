@@ -120,6 +120,7 @@ import {
   systemAudioOffered,
 } from './meeting-source.ts';
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
+import type { TranscriptReader } from './meeting-transcript-panel.ts';
 import type { DocSpeakers } from './speaker-voices.ts';
 
 /** How often the elapsed clock is redrawn. Twice a second: a second-resolution
@@ -294,7 +295,7 @@ export interface MeetingStripOpts {
    * shows — a bot meeting especially, which leaves nothing else behind on
    * screen.
    */
-  loadTranscript?: () => Promise<{ lines: string[] } | null>;
+  loadTranscript?: TranscriptReader;
   /**
    * Name a voice on a meeting whose audio socket is gone — the rename
    * channel once capture has stopped. Resolves true when the server recorded

@@ -23,6 +23,7 @@ import { liveTuningKeys } from '@claude-workspaces/core';
 import { advancedControls, buildAdvancedSection } from './meeting-advanced.ts';
 import type { AdvancedState } from './meeting-advanced.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
+import { type TranscriptReader, mountTranscriptFold } from './meeting-transcript-panel.ts';
 
 /**
  * The chooser form as it currently stands. Lives on the strip because the
@@ -95,7 +96,7 @@ export interface MeetingChooserDeps {
    * and anything loaded at mount predates it. Absent where the strip was
    * mounted without one, which is every surface that has no meetings API.
    */
-  loadTranscript?: () => Promise<{ lines: string[] } | null>;
+  loadTranscript?: TranscriptReader;
   /** One nameable speaker row. */
   speakerRow(label: string): HTMLElement;
   /** Redraw whichever popover is open. */
@@ -261,53 +262,6 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
   }
 
   /**
-   * WHAT THE MEETING HEARD, one fold below the panel.
-   *
-   * The notes are in the doc; this is the other record, and before it was
-   * here the only copy a person could open was a file beside the server's
-   * data dir. Folded rather than listed, because a transcript is long and
-   * nobody opens this panel to read one by default — and fetched on the
-   * first open rather than at mount, so the meeting that has just ended is
-   * the one it shows.
-   */
-  function transcriptSection(): HTMLElement {
-    const wrap = document.createElement('details');
-    wrap.className = 'meeting-pop-transcript';
-    const summary = document.createElement('summary');
-    summary.textContent = 'Transcript';
-    const body = document.createElement('div');
-    body.className = 'meeting-pop-transcript-body';
-    body.textContent = 'Loading…';
-    wrap.append(summary, body);
-    let asked = false;
-    wrap.addEventListener('toggle', () => {
-      if (!wrap.open || asked) return;
-      asked = true;
-      void loadTranscript?.()
-        .then((found) => {
-          body.replaceChildren();
-          if (!found || found.lines.length === 0) {
-            body.textContent = 'No transcript yet.';
-            return;
-          }
-          for (const line of found.lines) {
-            const row = document.createElement('div');
-            row.className = 'meeting-pop-transcript-line';
-            row.textContent = line;
-            body.append(row);
-          }
-        })
-        .catch(() => {
-          // A record that will not load costs the fold its words, never the
-          // panel: the Start button below it still starts a meeting.
-          body.textContent = 'The transcript could not be loaded.';
-          asked = false;
-        });
-    });
-    return wrap;
-  }
-
-  /**
    * The start chooser: every decision a recording takes, taken here, and a
    * red Start Recording that is the only verb.
    */
@@ -334,7 +288,7 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
       for (const label of idleCast) castWrap.append(speakerRow(label));
       pop.append(castWrap);
     }
-    if (loadTranscript) pop.append(transcriptSection());
+    if (loadTranscript) pop.append(mountTranscriptFold(loadTranscript));
 
     const source = choiceGroup('Source');
     const micChoice = choice({
