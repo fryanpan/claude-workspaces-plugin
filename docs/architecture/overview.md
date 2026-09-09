@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
@@ -206,6 +206,27 @@ refusal over HTTP, loopback-only for the reason the deploy route is: every
 value in it is a path on this machine. Nothing here changes how a doc id is
 minted — ids are still random and still minted in one place — so the picture
 above is unchanged: this is a lookup in front of it.
+
+**A project's mounted folders reuse that identity for files that are not
+documents.** `mount-registry.ts` is the table — which subfolders of a repo the
+lead mounted, the `f-` address each file in them answers at, whether the
+project's files may leave the machine, and where its conventions index lives —
+with `mount-registry-file.ts` as its shape on disk. It keeps its own
+`mounts.json` beside `repos.json` rather than living inside it: the repo
+registry is written on every bind, and a mount table changes for unrelated
+reasons; the two are joined by `repoKey` through `RepoRegistry.repoInfo`, so a
+repo that re-keys carries its mounts across. `mount-scan.ts` is the walk and
+the move fingerprint — a `stat` pass over folders measured in tens of
+gigabytes, so nothing is read whole and only files that vanished or appeared
+are ever hashed. `mount-store.ts` is every decision that needs a filesystem:
+where a relative path is joined, what a mount currently holds, and the
+reconcile that turns a rename into an alias so an address and its comments
+follow the file. `routes/mounts.ts` carries two gates in one family — the
+lead's table is loopback-only like `routes/repos.ts`, and a file's address is
+member-facing but absent from `shareScopeAllows`, narrowed further to
+on-the-box callers when the project is marked local-only. Retention is the
+project's throughout: unmounting is soft and nothing under a mount is ever
+deleted.
 
 Three more modules put the documents that already exist onto that identity,
 and none of them runs on the server's own clock. `doc-identity-plan.ts` is a

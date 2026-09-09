@@ -138,6 +138,12 @@ export class MountStore {
   ):
     | { ok: true; mount: MountRecord; project: ProjectLocation; created: boolean }
     | { ok: false; error: MountError } {
+    // The repo has to be a repo the registry KNOWS before its mounts mean
+    // anything: `rootFor` asks the repo registry where to join a relative
+    // path, and a repo with no record has no answer. `noteCheckout` records
+    // the place without vouching for it — registering a checkout stays the
+    // lead's own act (`register_worktree`), and mounting a folder is not it.
+    this.repos.noteCheckout(absPath);
     const at = this.locate(absPath);
     if (!at) return { ok: false, error: 'not-a-repo' };
     let isDir = false;
