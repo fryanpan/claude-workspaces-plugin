@@ -326,6 +326,15 @@ namespaced speaker labels are rendered by the browser, written by the server
 and read back by the notes composer, so one spelling has to serve three
 processes.
 
+`footnotes.ts` belongs to that document-model tier too and does not move the
+picture: it is the grammar of a `^[a note]` inline footnote — where the notes
+are in a line, whether the author wrote "Unconfirmed", and which words a note
+is about. Nothing about a footnote is stored, so this is a pure text question
+asked at parse time (the inline parser skips a note's body rather than reading
+citation punctuation as emphasis) and again at render time by the editor's
+decoration plugin, which is why the answer lives in `core` rather than in
+either caller.
+
 `prose-integrity.ts` belongs to that document-model tier and does not move the
 picture: it is the check the server runs after a write, asserting the live doc
 holds no markdown syntax that should have become blocks. It is named here so the
