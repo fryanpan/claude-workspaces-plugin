@@ -91,8 +91,12 @@ export function resolveLiveCopy(
   opts: ResolveOpts = {},
 ): LiveCopyResult {
   const meta = host.meta(docId);
-  const docKey = meta?.docKey;
-  if (!docKey) return { ok: false, error: 'no-key' };
+  // The registry is the authority; `meta.docKey` is the copy a freshly
+  // minted doc carries. A doc migrated onto a key has the second and not the
+  // first, and rewriting every one of them to say what the table already
+  // knows would be six thousand writes for nothing.
+  const docKey = meta?.docKey ?? host.registry.primaryKeyFor(docId);
+  if (!docKey || !meta) return { ok: false, error: 'no-key' };
   const parsed = parseDocKey(docKey);
   if (!parsed) return { ok: false, error: 'no-key' };
 

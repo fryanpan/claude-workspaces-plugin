@@ -238,6 +238,22 @@ export class RepoRegistry {
     return [...set].sort();
   }
 
+  /**
+   * The key a doc holds, if it holds one — the canonical one, never an alias.
+   *
+   * `meta.docKey` is written when a doc is minted, so a doc that predates
+   * this feature has none; the registry does, because the migration claims
+   * keys there and nowhere else. Reading through this is what lets a
+   * migrated doc resolve its copies without the migration having to rewrite
+   * six thousand documents to say what one table already knows.
+   */
+  primaryKeyFor(docId: string): string | undefined {
+    for (const [key, held] of Object.entries(this.data.docKeys)) {
+      if (held === docId) return key;
+    }
+    return undefined;
+  }
+
   /** Drop a key claim — the migration's `--revert`, and nothing else. Never
    *  called on a live path: a doc losing its key silently would mint a second
    *  doc on the next bind. */

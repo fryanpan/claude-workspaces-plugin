@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>attachment-backfill.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
@@ -201,6 +201,19 @@ refusal over HTTP, loopback-only for the reason the deploy route is: every
 value in it is a path on this machine. Nothing here changes how a doc id is
 minted — ids are still random and still minted in one place — so the picture
 above is unchanged: this is a lookup in front of it.
+
+Three more modules put the documents that already exist onto that identity,
+and none of them runs on the server's own clock. `doc-identity-plan.ts` is a
+pure planner — it takes the corpus as an io parameter and says which key each
+document would claim, which documents would collapse onto one, and which it
+cannot place — so the dry run is the same code as the run.
+`doc-identity-migration.ts` is the half that touches disk: it files the
+claims, copies each losing document's conversation into the winner through
+`doc-thread-merge.ts`, asserts that the thread count before equals the count
+after, and writes a journal a revert reads back. Only `doc-thread-merge.ts`
+is reachable from the running server's future; the other two are driven by
+`scripts/migrate-doc-identity.ts`, by hand, because a corpus walk that spawns
+git and hydrates documents is not something a restart should do.
 
 **A bound mockup is a live surface, and it keeps its rounds.** A mockup's doc
 holds no content of its own — its surface is somebody's HTML file — so the four
