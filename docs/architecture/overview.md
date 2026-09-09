@@ -254,6 +254,13 @@ recorded, opened only when the operator turns timing on. It holds no meeting
 content — sizes, counts and durations — so it sits beside the notes modules
 rather than with the stores that own durable text.
 
+`notes-heading-store.ts` joins it too and changes none of the picture
+either: it is the one small file per meeting that records which heading that
+meeting's notes are written under, kept beside the meeting's transcript so a
+restart mid-recording keeps writing under the section it opened rather than
+opening a second one. Ids and a block id, no meeting words, so it sits with
+`notes-timing.ts` rather than with the stores that own durable text.
+
 `meeting-stream-set.ts` joins that services tier inside the `meeting-*`
 family and moves nothing in the picture: it is the fan-out one level below
 `meeting-protocol.ts`, opening an engine session per audio stream and folding
