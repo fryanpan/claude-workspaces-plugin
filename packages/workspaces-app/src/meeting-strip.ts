@@ -75,7 +75,8 @@ import {
   type MeetingUnavailableReason,
   type TranscriptionEngineName,
   describeBotState,
-  speakerDisplayName,
+  normalizeSpeakerName,
+  speakerGivenName,
 } from '@claude-workspaces/core';
 import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
 import { parseRoomSpeakers } from '@claude-workspaces/core';
@@ -757,7 +758,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   });
 
   function nameSpeaker(label: string): void {
-    const current = speakerDisplayName(label, names);
+    // SEEDED WITH THE SAVED NAME, NOT THE DISPLAY NAME. Seeding the display
+    // name put the placeholder ("Room Speaker C") and the old group suffix
+    // ("John (Room)") into the box, and whatever is in the box is what gets
+    // saved when somebody presses OK — which is how a doc ended up reading
+    // "@John (Room) (Room)". An unnamed voice starts from an empty field.
+    const current = speakerGivenName(label, names) ?? '';
     const answer = promptName(current)?.trim() ?? '';
     if (!answer) return;
     void renameSpeaker(label, answer);
@@ -784,8 +790,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * this whole path exists to close.
    */
   function renameSpeaker(label: string, name: string): Promise<boolean> {
-    const current = speakerDisplayName(label, names);
-    const answer = clipSpeakerName(name.trim());
+    const current = names[label];
+    // Normalised on the way out as well as on the way in: a name typed with
+    // the group suffix still on it, or one that is only a placeholder, is
+    // not what gets written down.
+    const answer = clipSpeakerName(normalizeSpeakerName(name) ?? '');
     // Nothing asked for is nothing refused: the caller's name already stands.
     if (!answer || answer === current) return Promise.resolve(true);
     const hadName = label in names;
@@ -799,7 +808,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       if (disposed) return;
       // Only undo THIS answer: a newer rename may already be in flight.
       if (names[label] !== answer) return;
-      if (hadName) names[label] = current;
+      if (hadName && current !== undefined) names[label] = current;
       else delete names[label];
       paintNames(label);
     };
@@ -1465,7 +1474,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         lastMeetingId = cast.meetingId;
         for (const voice of cast.voices) {
           seen.add(voice.label);
-          if (voice.name !== speakerDisplayName(voice.label, {})) names[voice.label] = voice.name;
+          // The roster's `name` is a DISPLAY name — a placeholder when the
+          // voice is unnamed — so what is kept here is the given name or
+          // nothing at all.
+          const given = normalizeSpeakerName(voice.name);
+          if (given !== undefined) names[voice.label] = given;
         }
         if (view === 'chooser') renderPop();
       })

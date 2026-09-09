@@ -366,7 +366,16 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   // week later is the ordinary case rather than the exotic one.
   const reassign = mountSpeakerReassign({
     editor: editor.editor,
-    loadVoices: () => loadDocVoices(docId),
+    // The refresh behind the tap. On a doc that mounted a meeting this is
+    // the strip's own cache, so it is deduped against the load already in
+    // flight rather than a second pair of requests.
+    loadVoices: () =>
+      meeting?.speakers
+        ? meeting.speakers.load().then((held) => held?.voices ?? [])
+        : loadDocVoices(docId),
+    // And what the menu paints on the tap itself, when the roster is
+    // already in hand: no wait at all between the finger and the rows.
+    ...(meeting?.speakers ? { cachedVoices: () => meeting.speakers?.peek()?.voices ?? null } : {}),
     // Permission, not mode: a reader in view mode may still fix an
     // attribution, and a reader without write access may not.
     canWrite: () => canWrite,

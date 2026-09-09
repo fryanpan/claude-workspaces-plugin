@@ -80,6 +80,53 @@ export async function loadDocSpeakers(
   };
 }
 
+/**
+ * The doc's roster, held so a tap does not have to wait for it.
+ *
+ * WHY A CACHE AT ALL. `loadDocSpeakers` is two sequential requests — list the
+ * doc's meetings, then fetch the latest meeting's whole record, transcript
+ * and all — and the reassign menu used to make both of them at the moment the
+ * person tapped a name. That is a menu with a wait in it every time it opens,
+ * on an answer that is already in memory: the strip loads exactly the same
+ * roster when the doc mounts.
+ *
+ * So the cache is shared between them. `peek` is what the menu paints on the
+ * tap; `load` is the refresh behind it, and it is deduped, so a menu opened
+ * during the mount's own load rides that request rather than starting a
+ * second one. A failed refresh leaves the last good answer in place: what is
+ * on screen came from the same server a moment ago.
+ */
+export interface DocSpeakersCache {
+  peek(): DocSpeakers | null;
+  load(): Promise<DocSpeakers | null>;
+}
+
+export function createDocSpeakersCache(
+  docId: string,
+  fetchImpl: typeof fetch = fetch,
+): DocSpeakersCache {
+  let held: DocSpeakers | null = null;
+  let inFlight: Promise<DocSpeakers | null> | null = null;
+  return {
+    peek: () => held,
+    load(): Promise<DocSpeakers | null> {
+      if (inFlight) return inFlight;
+      const run = loadDocSpeakers(docId, fetchImpl)
+        .then((fresh) => {
+          // A doc that has never held a meeting answers null, and that is an
+          // answer: it replaces whatever was held.
+          held = fresh;
+          return fresh;
+        })
+        .finally(() => {
+          if (inFlight === run) inFlight = null;
+        });
+      inFlight = run;
+      return run;
+    },
+  };
+}
+
 /** The words of this doc's latest meeting, ready to render. */
 export interface DocTranscript {
   meetingId: string;

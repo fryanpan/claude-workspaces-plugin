@@ -55,7 +55,11 @@
  * writes them into the doc decides delivery (the CRDT, not the event bus).
  */
 
-import { normalizeSpeakerTags, speakerDisplayName } from '@claude-workspaces/core';
+import {
+  normalizeSpeakerName,
+  normalizeSpeakerTags,
+  speakerDisplayName,
+} from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
@@ -1587,7 +1591,12 @@ export function beginNotesSession(
       // the composer actually wrote, whether it was "Speaker B" or an
       // earlier name being corrected.
       const from = speakerDisplayName(speaker, names);
-      names[speaker] = name;
+      // The map holds the NAME, never a display string: a placeholder or a
+      // group suffix arriving from a client is not an answer, and storing it
+      // is what made the composer write "@John (Room) (Room)".
+      const given = normalizeSpeakerName(name);
+      if (given === undefined) return;
+      names[speaker] = given;
       const to = speakerDisplayName(speaker, names);
       if (from === to) return;
       // Two voices can be called the same thing — two people named Alex, or
