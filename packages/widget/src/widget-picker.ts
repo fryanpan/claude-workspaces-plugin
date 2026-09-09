@@ -70,10 +70,13 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     // Skip hover-highlight on touch — fingers don't "hover," and
     // repainting outlines along a drag is just visual noise.
     if (ev.pointerType === 'touch') return;
+    // A composer open means an element is already chosen. Repainting the
+    // hover under it would take the outline off the element the comment is
+    // being written about, which is the one the reader is looking at.
+    if (el.shadow.querySelector('.composer')) return;
     const t = hitTest(ev);
-    if (el.hoverEl && el.hoverEl !== t) unhighlight(el.hoverEl);
     el.hoverEl = t;
-    if (t) highlight(t);
+    setHighlight(t);
   };
   const onTap = (ev: PointerEvent) => {
     const t = hitTest(ev);
@@ -82,6 +85,10 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     if (!t) return;
     ev.preventDefault();
     ev.stopPropagation();
+    // Touch never hovers, so the tap is the only chance to show WHICH
+    // element the composer is about.
+    el.hoverEl = t;
+    setHighlight(t);
     openComposerForElement(el, t, ev.clientX, ev.clientY);
   };
   const onKey = (ev: KeyboardEvent) => {
@@ -90,7 +97,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     // exits the mode. Matches every modal-inside-a-mode convention.
     const composer = el.shadow.querySelector('.composer');
     if (composer) {
-      composer.remove();
+      closeComposer(el, composer);
       return;
     }
     exitFeedbackMode(el);
@@ -106,7 +113,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   el.modeCleanup = () => {
     document.body.classList.remove('cfw-feedback-mode');
     document.body.style.touchAction = prevTouchAction;
-    if (el.hoverEl) unhighlight(el.hoverEl);
+    setHighlight(null);
     el.hoverEl = null;
     banner.remove();
     fab?.setAttribute('aria-pressed', 'false');
@@ -155,13 +162,36 @@ export function isInOwnChrome(node: Node): boolean {
   return false;
 }
 
-function highlight(el: HTMLElement): void {
-  el.dataset.cfwPrevOutline = el.style.outline;
-  el.style.outline = '2px solid #2e7dd7';
-}
-function unhighlight(el: HTMLElement): void {
-  el.style.outline = el.dataset.cfwPrevOutline ?? '';
-  delete el.dataset.cfwPrevOutline;
+const HIGHLIGHT_OUTLINE = '2px solid #2e7dd7';
+
+/**
+ * The outline is a SELECTION: at most one element on the page wears it, and
+ * the state that says which one lives here rather than on the widget, so two
+ * widgets embedded on one page still paint one highlight between them.
+ *
+ * What the page had before is remembered off-DOM. It used to ride a
+ * `data-cfw-prev-outline` attribute, which had two costs. A second
+ * `highlight()` on an element already highlighted — every pointermove within
+ * one element fired one — re-read `style.outline` and saved the picker's own
+ * colour as the "previous" value, so restoring painted the highlight back on
+ * for good. And an element fingerprint captures every `data-*` attribute, so
+ * the bookkeeping was copied into the anchor of every thread posted from a
+ * hovered element.
+ */
+const prevOutline = new WeakMap<HTMLElement, string>();
+let highlighted: HTMLElement | null = null;
+
+function setHighlight(target: HTMLElement | null): void {
+  if (highlighted === target) return;
+  if (highlighted) {
+    highlighted.style.outline = prevOutline.get(highlighted) ?? '';
+    prevOutline.delete(highlighted);
+  }
+  highlighted = target;
+  if (target) {
+    prevOutline.set(target, target.style.outline);
+    target.style.outline = HIGHLIGHT_OUTLINE;
+  }
 }
 
 // --- Composer ---
@@ -203,7 +233,7 @@ function showComposer(
   el.shadow.appendChild(composer);
   const ta = composer.querySelector('textarea') as HTMLTextAreaElement;
   ta.focus();
-  composer.querySelector('.cancel')?.addEventListener('click', () => composer.remove());
+  composer.querySelector('.cancel')?.addEventListener('click', () => closeComposer(el, composer));
   const submit = composer.querySelector('.submit') as HTMLButtonElement;
   // Say it before the first attempt when the widget already knows.
   if (el.signInToWrite && !el.authToken) composerSignIn(el, composer, submit);
@@ -227,6 +257,14 @@ function showComposer(
       else composerNote(composer, 'Couldn’t post — try again.');
       return;
     }
-    composer.remove();
+    closeComposer(el, composer);
   });
+}
+
+/** Dismissing the composer — cancelled, escaped or posted — takes the
+ *  element's outline with it: nothing on the page is selected any more. */
+function closeComposer(el: FeedbackWidgetEl, composer: Element): void {
+  composer.remove();
+  setHighlight(null);
+  el.hoverEl = null;
 }
