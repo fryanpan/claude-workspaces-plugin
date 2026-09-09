@@ -58,6 +58,7 @@
 import { normalizeSpeakerTags, speakerDisplayName } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {
@@ -376,6 +377,19 @@ export interface NotesUpdate {
   /** The tick as composed — includes any words carried from a failed tick. */
   tick: NotesTick;
   edits: readonly prose.BlockEdit[];
+  /**
+   * Every URL this tick was GIVEN, and the text it could have read one out
+   * of, so the applier can drop a citation the composer invented
+   * (`notes-invented-links.ts`).
+   *
+   * IT RIDES THE UPDATE BECAUSE ONLY THE TICK KNOWS IT. The applier sees a
+   * list of edits and a doc; what the model was handed — the matched rows,
+   * the captured tasks, the resolved lookups, the suggestions about to be
+   * appended — is assembled here and nowhere else. Optional, and absent means
+   * "unknown" rather than "none": a sink that cannot say what the tick was
+   * given must not have every link in the batch judged as invented.
+   */
+  linkSources?: NotesLinkSources;
 }
 
 /**
@@ -1345,6 +1359,10 @@ export function beginNotesSession(
             meetingId: ids.meetingId,
             tick: input.tick,
             edits,
+            // Collected from the SAME `input` the compose was given, plus the
+            // suggestions written after it: a link is a citation only if this
+            // tick could have read the address somewhere.
+            linkSources: notesLinkSources({ ...input, ...input.tick, suggestions: unseen }),
           }) !== false;
         applyMs = clock() - applyStart;
         if (!written) {
