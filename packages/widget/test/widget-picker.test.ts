@@ -152,4 +152,60 @@ describe('picker highlight', () => {
     expect(document.body.classList.contains('cfw-feedback-mode')).toBe(false);
     expect(outlineOf(alpha)).toBe('');
   });
+  /**
+   * Two widgets on one page is a real configuration — a mockup embedding a
+   * second board's widget alongside its own. The highlight is one per page,
+   * but taking it away is not everyone's to do: a widget that closes its
+   * composer must not strip the outline from the element ANOTHER widget is
+   * still composing about.
+   */
+  it('a widget clears only the outline it owns', async () => {
+    await importWidget();
+    // Declarative embeds rather than `init`, which is a per-page singleton.
+    const embed = (docId: string) => {
+      const host = document.createElement('claude-feedback-widget');
+      host.setAttribute('doc-id', docId);
+      host.setAttribute('workspace-id', 'w-1');
+      document.body.appendChild(host);
+      return host.shadowRoot as ShadowRoot;
+    };
+    const rootOne = embed('t-own-1');
+    const rootTwo = embed('t-own-2');
+
+    // The first widget takes Alpha.
+    (rootOne.querySelector('.fab') as HTMLButtonElement).click();
+    document.elementFromPoint = () => alpha;
+    move(10);
+    tap(10);
+    const hovered = outlineOf(alpha);
+    expect(hovered).not.toBe('');
+    expect(rootOne.querySelector('.composer')).toBeTruthy();
+    expect(rootTwo.querySelector('.composer'), 'the unarmed widget composed too').toBeNull();
+
+    // The second widget takes Beta, so the page's one outline moves to it.
+    // (Both are armed now, so the tap reaches both — that is the situation
+    // this test is about.)
+    (rootTwo.querySelector('.fab') as HTMLButtonElement).click();
+    document.elementFromPoint = () => beta;
+    tap(50);
+    expect(rootTwo.querySelector('.composer'), 'the second widget composed nothing').toBeTruthy();
+    expect(outlineOf(beta)).toBe(hovered);
+    expect(outlineOf(alpha)).toBe('');
+
+    // Site 7 — the first widget backing out leaves the second one's
+    // selection alone: its composer is still open about Beta.
+    (rootOne.querySelector('.composer .cancel') as HTMLButtonElement).click();
+    expect(rootOne.querySelector('.composer')).toBeNull();
+    expect(rootTwo.querySelector('.composer')).toBeTruthy();
+    expect(outlineOf(beta), 'the other widget stripped the outline').toBe(hovered);
+
+    // Site 8 — nor does the first widget leaving feedback mode.
+    (rootOne.querySelector('.fab') as HTMLButtonElement).click();
+    expect(rootOne.querySelector('.fab')?.getAttribute('aria-pressed')).toBe('false');
+    expect(outlineOf(beta)).toBe(hovered);
+
+    // Positive control: the widget that DOES own the outline still clears it.
+    (rootTwo.querySelector('.composer .cancel') as HTMLButtonElement).click();
+    expect(outlineOf(beta)).toBe('');
+  });
 });

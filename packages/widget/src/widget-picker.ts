@@ -76,7 +76,8 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     if (el.shadow.querySelector('.composer')) return;
     const t = hitTest(ev);
     el.hoverEl = t;
-    setHighlight(t);
+    if (t) setHighlight(el, t);
+    else clearHighlight(el);
   };
   const onTap = (ev: PointerEvent) => {
     const t = hitTest(ev);
@@ -88,7 +89,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     // Touch never hovers, so the tap is the only chance to show WHICH
     // element the composer is about.
     el.hoverEl = t;
-    setHighlight(t);
+    setHighlight(el, t);
     openComposerForElement(el, t, ev.clientX, ev.clientY);
   };
   const onKey = (ev: KeyboardEvent) => {
@@ -113,7 +114,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   el.modeCleanup = () => {
     document.body.classList.remove('cfw-feedback-mode');
     document.body.style.touchAction = prevTouchAction;
-    setHighlight(null);
+    clearHighlight(el);
     el.hoverEl = null;
     banner.remove();
     fab?.setAttribute('aria-pressed', 'false');
@@ -180,18 +181,32 @@ const HIGHLIGHT_OUTLINE = '2px solid #2e7dd7';
  */
 const prevOutline = new WeakMap<HTMLElement, string>();
 let highlighted: HTMLElement | null = null;
+/** The widget whose pick the current outline belongs to. Two widgets on one
+ *  page still paint one highlight between them, but only the one that took
+ *  it may give it back — otherwise a widget closing its own composer strips
+ *  the outline off the element the OTHER widget is still composing about. */
+let highlightOwner: FeedbackWidgetEl | null = null;
 
-function setHighlight(target: HTMLElement | null): void {
-  if (highlighted === target) return;
-  if (highlighted) {
-    highlighted.style.outline = prevOutline.get(highlighted) ?? '';
-    prevOutline.delete(highlighted);
+function setHighlight(owner: FeedbackWidgetEl, target: HTMLElement | null): void {
+  if (highlighted !== target) {
+    if (highlighted) {
+      highlighted.style.outline = prevOutline.get(highlighted) ?? '';
+      prevOutline.delete(highlighted);
+    }
+    highlighted = target;
+    if (target) {
+      prevOutline.set(target, target.style.outline);
+      target.style.outline = HIGHLIGHT_OUTLINE;
+    }
   }
-  highlighted = target;
-  if (target) {
-    prevOutline.set(target, target.style.outline);
-    target.style.outline = HIGHLIGHT_OUTLINE;
-  }
+  // Re-taken by whoever picked it last, even when the element did not move.
+  highlightOwner = target ? owner : null;
+}
+
+/** Take the outline away only if this widget is the one wearing it. */
+function clearHighlight(owner: FeedbackWidgetEl): void {
+  if (highlightOwner !== owner) return;
+  setHighlight(owner, null);
 }
 
 // --- Composer ---
@@ -265,6 +280,6 @@ function showComposer(
  *  element's outline with it: nothing on the page is selected any more. */
 function closeComposer(el: FeedbackWidgetEl, composer: Element): void {
   composer.remove();
-  setHighlight(null);
+  clearHighlight(el);
   el.hoverEl = null;
 }
