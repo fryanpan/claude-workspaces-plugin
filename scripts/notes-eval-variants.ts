@@ -429,6 +429,42 @@ function anchoredHooks(): MeetingHooks {
   };
 }
 
+const COMPRESS_ANCHOR = [
+  '- COMPRESS, NEVER DROP. What goes is the packaging: greetings, thinking',
+  '  aloud, false starts, a point already in the notes, the same point said',
+  '  again in other words. What STAYS is every idea. If the speech raised a',
+  '  subject the notes do not yet carry, it gets a note — even a small one,',
+  '  even a single sentence that mattered for a moment. Length is what you',
+  '  cut; ideas are not. When you must choose, write the idea in five words',
+  '  rather than leaving it out.',
+].join('\n');
+
+/**
+ * Variant E: stop asking for compression at all.
+ *
+ * The shipped rule asks for two things at once — keep every idea, and cut the
+ * length — and every variant that lost ideas wrote FEWER bullets than
+ * baseline, never more. This drops the second half and says the quiet part:
+ * one note per idea, and the page is as long as the meeting was.
+ *
+ * It is the variant that tells the owner what a 5% lost-idea rate COSTS in
+ * page length, which is why the run reports bullets written and page length
+ * beside the rate rather than the rate alone.
+ */
+const ONE_NOTE_PER_IDEA = [
+  '- ONE NOTE PER IDEA, AND NO IDEA WITHOUT A NOTE. Every distinct thing this',
+  '  speech said gets its own bullet: an option, a number, an objection, a',
+  '  reason, a decision, a question, an aside that mattered for a moment.',
+  '  Count the ideas in the speech and write that many bullets.',
+  '- DO NOT COMPRESS. Length is not a cost here and there is no ceiling on',
+  '  how long the notes may get. The only things you leave out are greetings,',
+  '  filler, a false start the speaker corrected, and a point already written',
+  '  in the notes in the same words. Everything else is an idea and gets its',
+  '  bullet, even a small one.',
+  '- WHEN YOU ARE UNSURE WHETHER SOMETHING IS AN IDEA, WRITE IT. A note the',
+  '  room skims past costs a line. An idea left out is gone.',
+].join('\n');
+
 export const VARIANTS: Record<string, Variant> = {
   baseline: { name: 'baseline', begin: passthrough },
   nested: {
@@ -464,6 +500,23 @@ export const VARIANTS: Record<string, Variant> = {
     maxTokens: 4_000,
     effort: 'low',
     begin: passthrough,
+  },
+  // Round 2. The compress instruction removed, on the finding that every
+  // variant which lost ideas wrote fewer bullets than baseline rather than
+  // more — so the instruction to cut length may be the thing being obeyed.
+  everything: {
+    name: 'everything',
+    instructions: swap(DEFAULT_NOTES_INSTRUCTIONS, COMPRESS_ANCHOR, ONE_NOTE_PER_IDEA),
+    begin: passthrough,
+  },
+  // Round 2. The best method on the best model, to price the ceiling.
+  'opus-nested-ledger': {
+    name: 'opus-nested-ledger',
+    model: 'claude-opus-5',
+    maxTokens: 4_000,
+    effort: 'low',
+    instructions: swap(DEFAULT_NOTES_INSTRUCTIONS, FLAT_RUN_ANCHOR, NESTED_RULE),
+    begin: ledgerHooks,
   },
 };
 
