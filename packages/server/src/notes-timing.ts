@@ -16,6 +16,12 @@
  * re-running it. It also names the hypothesis its shape settles, because a
  * file of timings nobody can interpret is a file nobody opens twice.
  *
+ * IT IS WRITTEN FOR EVERY MEETING, not only when somebody asks. It was
+ * opt-in at first, which made it useless to anything downstream: the at-stop
+ * quality report scores how late the notes landed from these rows, and a
+ * file that exists only when an operator remembered a flag is a file that
+ * reader can never rely on. `CW_NOTES_TIMING=0` turns it off.
+ *
  * NOTHING IN HERE IS MEETING CONTENT. Sizes and counts only: no words, no
  * speaker labels, no prompt text. The transcript beside it is the record of
  * what was said, and it is already as private as the meeting was; a second

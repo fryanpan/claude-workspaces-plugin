@@ -868,15 +868,18 @@ under the ceiling, and under the ceiling plus the endpoint window. On a
 10.4s to 7.7s and 43 to 71. `bun run notes:latency` is the same script on the
 synthetic script with a ten-second threshold, run nightly.
 
-**And per tick, when the operator asks.** `CW_NOTES_TIMING=1` opens a
-`<meetingId>-timing.jsonl` beside the transcript: one line per tick carrying
+**And per tick, for every meeting.** A `<meetingId>-timing.jsonl` is written
+beside the transcript, holding one line per tick carrying
 the turn numbers it composed, when its words settled, when the tick fired and why, how long it waited
 behind the previous tick, the compose's prompt and reply sizes and model, the
 apply time, the edit and block counts, how many ticks merged into it, and the
 settled-to-written total — plus the hypothesis that line's shape settles. It
 holds no words: sizes and counts only, because the transcript beside it is
 already the record of what was said. The median and worst are carried into
-the one-line meeting summary.
+the one-line meeting summary. `CW_NOTES_TIMING=0` turns the file off; it is
+on by default because the at-stop quality report reads it, and a measurement
+that exists only when somebody set a flag is one nothing downstream can rely
+on.
 
 **Stopping is the third thing that fires a tick, and the only one that carries
 unfinished words.** Both clocks need the meeting to keep going: the sentence

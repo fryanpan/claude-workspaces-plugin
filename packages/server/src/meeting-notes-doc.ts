@@ -618,11 +618,16 @@ export function withServerNotesSinks(
       else console.log(line);
       options.onMeetingSummary?.(summary);
     },
-    // TIMING IS OFF BY DEFAULT and opt-in per boot. It writes no words, but
-    // it writes a file per meeting, and a measurement nobody asked for is
-    // still a file in Bryan's data dir. `CW_NOTES_TIMING=1` turns it on; the
-    // replay harness passes its own log instead.
-    ...(readRenamedEnv(process.env, 'CW_NOTES_TIMING') === '1' && deps.dataDir !== undefined
+    // TIMING IS ON WHENEVER THERE IS A DATA DIR TO WRITE IT IN. It was
+    // opt-in, on the reasoning that a measurement nobody asked for is still a
+    // file in Bryan's data dir — but the file has a reader now (the at-stop
+    // quality report scores how late the notes landed from it), and a
+    // measurement that is only there when somebody remembered to ask for it
+    // cannot be read by anything. It holds counts and durations and no words,
+    // so it is as private as the empty directory it sits in.
+    // `CW_NOTES_TIMING=0` turns it off; the replay harness and the tick
+    // harness pass their own log instead.
+    ...(readRenamedEnv(process.env, 'CW_NOTES_TIMING') !== '0' && deps.dataDir !== undefined
       ? {
           openTiming: (ids: { docId: string; meetingId: string }) =>
             createNotesTimingLog({

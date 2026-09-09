@@ -7,10 +7,12 @@
  * meeting a note when the disk refuses it — are asserted here rather than
  * being left to the reader of the module.
  */
-import { describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { withServerNotesSinks } from '../src/meeting-notes-doc.ts';
+import { createStubNotesComposer } from '../src/meeting-notes.ts';
 import {
   type NotesTickTiming,
   createNotesTimingLog,
@@ -130,5 +132,57 @@ describe('the per-tick timing log', () => {
     expect(median([])).toBeNull();
     expect(median([1, 2, 3, 4])).toBe(3);
     expect(median([5])).toBe(5);
+  });
+});
+
+describe('when the server writes a timing file at all', () => {
+  const was = process.env.CW_NOTES_TIMING;
+  afterEach(() => {
+    if (was === undefined) delete process.env.CW_NOTES_TIMING;
+    else process.env.CW_NOTES_TIMING = was;
+  });
+
+  /** The deps a meeting session would run on, for one data dir. */
+  const sinksFor = (dataDir: string | undefined) =>
+    withServerNotesSinks(
+      { composer: createStubNotesComposer(), onNotes: () => {} },
+      {
+        docStore: () => ({}) as never,
+        tasks: () => ({ listTasks: () => [] }),
+        ...(dataDir !== undefined ? { dataDir } : {}),
+      },
+    );
+
+  it('opens one for every meeting, with no flag set', () => {
+    // It used to be opt-in, which made it unreadable by anything downstream:
+    // a file that is there only when somebody remembered a flag cannot be
+    // the input to an at-stop report.
+    delete process.env.CW_NOTES_TIMING;
+    const dir = mkdtempSync(join(tmpdir(), 'notes-timing-default-'));
+    try {
+      const open = sinksFor(dir).openTiming;
+      expect(open).toBeDefined();
+      open?.({ docId: 'd-1', meetingId: 'm-1' })?.record(row());
+      expect(existsSync(join(dir, 'meetings', 'd-1', 'm-1-timing.jsonl'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('opens none when the operator turned it off', () => {
+    process.env.CW_NOTES_TIMING = '0';
+    const dir = mkdtempSync(join(tmpdir(), 'notes-timing-off-'));
+    try {
+      expect(sinksFor(dir).openTiming).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('opens none when there is no data dir to write it in', () => {
+    // A server built without a data dir has nowhere to put it, and '.' is
+    // not an answer — that is somebody's working tree.
+    delete process.env.CW_NOTES_TIMING;
+    expect(sinksFor(undefined).openTiming).toBeUndefined();
   });
 });
