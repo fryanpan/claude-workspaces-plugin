@@ -46,9 +46,7 @@ describe('a footnote in the editor', () => {
 
   it('carries the note text out of the prose, where the margin can read it', () => {
     mount(DOC);
-    expect(notes()[0]?.dataset.cwFnNote).toBe(
-      'Planning Department annual report, 2025, table 4.',
-    );
+    expect(notes()[0]?.dataset.cwFnNote).toBe('Planning Department annual report, 2025, table 4.');
   });
 
   it('marks the note the author did not confirm, and only that one', () => {
