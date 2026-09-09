@@ -35,7 +35,7 @@ import {
 import type { prose } from '@claude-workspaces/core';
 import { type HaikuNotesComposerOpts, createHaikuNotesComposer } from './meeting-notes-composer.ts';
 import type { NotesComposeInput, NotesComposer } from './meeting-notes.ts';
-import { type NotesLedger, createNotesLedger } from './notes-ledger.ts';
+import { type NotesLedger, createNotesLedger, nestedNotesInstructions } from './notes-ledger.ts';
 
 /** The model each method composes on. `undefined` is the composer's own
  *  default, which is Haiku — the two cheap methods differ in whether they run
@@ -90,21 +90,38 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
   // Built once each, not per tick: each carries a resolved key and an
   // announcement latch, and constructing one per compose would re-resolve
   // the Keychain on every tick of every meeting.
-  const byModel = new Map<string, NotesComposer>();
-  for (const [method, model] of Object.entries(COMPOSE_MODEL)) {
-    const key = model ?? 'default';
-    if (byModel.has(key)) continue;
+  //
+  // KEYED BY MODEL **AND** WRITING RULE, because the two cheap methods share
+  // a model and do not share a prompt: a ledger method writes in two layers
+  // (`nestedNotesInstructions`), which is what gives every point on the
+  // checklist somewhere to go. Keyed by model alone, `ledger-haiku` would
+  // silently reuse the original's composer and run as the original.
+  const byBuild = new Map<string, NotesComposer>();
+  const buildKey = (method: NotesMethod): string =>
+    `${COMPOSE_MODEL[method] ?? 'default'}|${notesMethodUsesLedger(method) ? 'nested' : 'flat'}`;
+  for (const method of Object.keys(COMPOSE_MODEL) as NotesMethod[]) {
+    const key = buildKey(method);
+    if (byBuild.has(key)) continue;
+    const model = COMPOSE_MODEL[method];
+    const instructions = base.instructions;
     const composer = createHaikuNotesComposer({
       ...base,
       ...(model ? { model, maxTokens: OPUS_MAX_TOKENS } : {}),
+      ...(notesMethodUsesLedger(method) && instructions
+        ? {
+            // Re-read per tick like the store it wraps, so an edit on the
+            // settings page reaches a ledger method the same tick it reaches
+            // the original.
+            instructions: (): string => nestedNotesInstructions(instructions(), deps.onError),
+          }
+        : {}),
     });
     // A NULL HERE IS THE WHOLE FEATURE OFF, not this method off: every
     // method resolves the same key from the same place, so if one cannot be
     // built none can. Answered as `null` so the caller keeps the "notes stay
     // off" path it already has.
     if (!composer) return null;
-    byModel.set(key, composer);
-    void method;
+    byBuild.set(key, composer);
   }
 
   const ledgers = new Map<string, NotesLedger>();
@@ -146,10 +163,10 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
         );
         method = DEFAULT_NOTES_METHOD;
       }
-      const composer = byModel.get(COMPOSE_MODEL[method] ?? 'default');
+      const composer = byBuild.get(buildKey(method));
       // Unreachable while the table covers the union and the loop above
-      // built every entry in it; the default is the safe read either way.
-      const use = composer ?? byModel.get('default');
+      // built every entry in it; the original's build is the safe read.
+      const use = composer ?? byBuild.get(buildKey(DEFAULT_NOTES_METHOD));
       if (!use) throw new Error('no notes composer for method ' + method);
 
       const ledger = notesMethodUsesLedger(method) ? ledgerFor(input.meetingId) : null;

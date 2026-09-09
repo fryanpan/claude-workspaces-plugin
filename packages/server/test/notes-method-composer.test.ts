@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { NotesMethod } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
+import { LEDGER_FLAT_RUN_ANCHOR } from '../src/notes-ledger.ts';
 import { createNotesMethodComposer } from '../src/notes-method-composer.ts';
 
 /** What one call to the model was: which model, and the prompt it carried. */
@@ -238,5 +239,64 @@ describe('an extract that returns nothing composes exactly as the original would
     const { composer, seen } = composerFor('ledger-haiku', harness([]));
     await composer.compose(input());
     expect(composes(seen)[0]?.user).not.toContain('A FIRST PASS ALREADY READ');
+  });
+});
+
+describe('a ledger method writes in two layers, and the original does not', () => {
+  // The pairing the exploration measured: the checklist is only worth its
+  // call if every point on it has somewhere to go, and the nested rule is
+  // what gives it one. Keyed by model alone the two cheap methods would share
+  // a composer and `ledger-haiku` would silently run as the original — this
+  // is the assertion that says they do not.
+
+  const SHIPPED = [
+    'Write the meeting notes.',
+    LEDGER_FLAT_RUN_ANCHOR,
+    'Keep the speaker on decisions and questions.',
+  ].join('\n\n');
+
+  async function composeWith(
+    method: NotesMethod,
+    instructions: string,
+    onError?: (message: string) => void,
+  ): Promise<string> {
+    const h = harness();
+    const composer = createNotesMethodComposer({
+      methodFor: () => method,
+      apiKey: 'k-test',
+      composerOpts: { apiKey: 'k-test', fetchImpl: h.impl, instructions: () => instructions },
+      ledgerFetch: h.impl,
+      ...(onError ? { onError } : {}),
+    });
+    if (!composer) throw new Error('no composer built');
+    await composer.compose(input());
+    return composes(h.seen)[0]?.system ?? '';
+  }
+
+  test('the ledger methods compose against the nested rule', async () => {
+    for (const method of ['ledger-haiku', 'ledger-opus'] as const) {
+      const system = await composeWith(method, SHIPPED);
+      expect(system).toContain('TWO LAYERS, ALWAYS');
+      expect(system).not.toContain(LEDGER_FLAT_RUN_ANCHOR);
+      // Everything else the person wrote is still theirs.
+      expect(system).toContain('Keep the speaker on decisions and questions.');
+    }
+  });
+
+  test('MUTATION CONTROL: the original composes against the shipped rule', async () => {
+    const system = await composeWith('original', SHIPPED);
+    expect(system).toContain(LEDGER_FLAT_RUN_ANCHOR);
+    expect(system).not.toContain('TWO LAYERS, ALWAYS');
+  });
+
+  test('instructions the rule has been edited out of still compose, and say so', async () => {
+    // A person retuning the prompt on the settings page must not be able to
+    // turn a ledger method into a failed tick.
+    let said = '';
+    const system = await composeWith('ledger-haiku', 'Write the meeting notes.', () => {
+      said = 'reported';
+    });
+    expect(system).toBe('Write the meeting notes.');
+    expect(said).toBe('reported');
   });
 });

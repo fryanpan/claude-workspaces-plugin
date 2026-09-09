@@ -253,3 +253,71 @@ export function createNotesLedger(deps: NotesLedgerDeps): NotesLedger {
     },
   };
 }
+
+/**
+ * The paragraph of the shipped instructions the nested rule replaces.
+ *
+ * Asserted rather than assumed: a silent `.replace()` that matched nothing
+ * would run a ledger method on the ORIGINAL prompt and report it as a
+ * different note-taker, which is the failure that makes a whole comparison
+ * table meaningless.
+ */
+export const LEDGER_FLAT_RUN_ANCHOR = [
+  '- ONE POINT PER BULLET, AT MOST 20 WORDS — count them. A longer thought',
+  '  is two bullets, and a bullet that needs a dash, a semicolon or the word',
+  '  "and" to hold two ideas is already those two bullets. The speaker tag',
+  '  does not count towards the twenty.',
+].join('\n');
+
+/**
+ * WHY A LEDGER METHOD WRITES IN TWO LAYERS.
+ *
+ * The checklist is only worth its call if the writer has somewhere to put
+ * every point on it. Under a flat rule the writer drops what will not fit and
+ * the enumeration buys nothing; under this one the glance layer stays short
+ * because the detail is one layer DOWN, and the exploration measured that
+ * pairing (`nested-ledger`) as the lowest lost-idea rate of the sweep. The
+ * twenty-word cap is unchanged and still counted per bullet.
+ */
+export const LEDGER_NESTED_RULE = [
+  '- TWO LAYERS, ALWAYS. The top layer is what a person reads at a glance:',
+  '  short LEAD bullets, at most 12 words each, one per point the room',
+  '  worked on. Under each lead bullet sit its SUB-BULLETS, indented two',
+  '  spaces, one per proposition the speech carried about that point — an',
+  '  option, a number, an objection, a reason, a decision, who said it.',
+  '  Like this:',
+  '      - Remote has to survive the couch',
+  '        - B: people lose it between the cushions weekly',
+  '        - Option: a locator beep triggered by a whistle',
+  '        - Cost of the beeper is not known yet (unconfirmed)',
+  '- SO NOTHING IS EVER DROPPED FOR LENGTH. The glance layer stays short',
+  '  because the detail is one layer DOWN, not because it was cut. If a',
+  '  proposition does not fit in the lead bullet, it becomes a sub-bullet;',
+  '  it never becomes nothing.',
+  '- ONE POINT PER BULLET, AT MOST 20 WORDS — count them, lead bullets and',
+  '  sub-bullets alike. A longer thought is two bullets. The speaker tag',
+  '  does not count towards the twenty.',
+].join('\n');
+
+/**
+ * The shipped instructions with the nested writing rule in place of the flat
+ * one — what a LEDGER method composes against.
+ *
+ * Returns the source unchanged, and says so once, when the anchor is no
+ * longer there: a person editing the prompt on the settings page must not be
+ * able to turn a ledger method into a failed tick. The note-taker then writes
+ * flat, which is the original's behaviour and never nothing.
+ */
+export function nestedNotesInstructions(
+  source: string,
+  onError?: (message: string) => void,
+): string {
+  if (!source.includes(LEDGER_FLAT_RUN_ANCHOR)) {
+    onError?.(
+      'notes ledger: the one-point-per-bullet rule is no longer in the instructions, ' +
+        'so the nested writing rule was not applied',
+    );
+    return source;
+  }
+  return source.replace(LEDGER_FLAT_RUN_ANCHOR, LEDGER_NESTED_RULE);
+}
