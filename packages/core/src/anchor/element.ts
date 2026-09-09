@@ -1,6 +1,14 @@
 import type { ElementAnchor, ElementFingerprint } from '../types.ts';
 import type { ElementResolution, ElementResolveEnv } from './index.ts';
-import { SCORE_THRESHOLD } from './index.ts';
+
+/**
+ * Minimum fingerprint score for an element match to count as a resolution.
+ *
+ * Here rather than in `./index.ts` because this is the only module that reads
+ * it: the barrel imports this file, so a value living there and imported back
+ * closed a runtime cycle. `./index.ts` re-exports the name unchanged.
+ */
+export const SCORE_THRESHOLD = 40;
 
 const STABLE_ATTR_NAMES = ['role', 'aria-label', 'name', 'data-testid'] as const;
 const SNIPPET_MAX = 80;

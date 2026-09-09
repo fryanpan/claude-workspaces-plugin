@@ -24,20 +24,29 @@ import { describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING, findNotesSection } from '../src/notes-section.ts';
-import { createNotesTickHarness, notesItems } from './notes-tick-harness.ts';
+import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+import { asPerson, findSectionSpan } from './notes-doc-helpers.ts';
+import { addNotes, createNotesTickHarness, notesItems } from './notes-tick-harness.ts';
 
 /** Everything the composer was handed for a tick, as one string — the cheapest
  *  way to ask "did these words reach the model at all". */
 const transcriptOf = (input: NotesComposeInput): string =>
   input.tick.turns.map((t) => t.text).join('\n');
 
-/** Type a bullet at the end of the notes section, the way a person would. */
+/**
+ * Type a bullet at the end of the notes section, the way a person would —
+ * under a PERSON-ORIGIN transaction, which is what the collaboration socket
+ * produces. Under a string origin the doc would read the insert as another
+ * server-side write and leave authorship alone, and every assertion below
+ * about the note-taker not touching this line would pass vacuously.
+ */
 function typeInNotes(ydoc: Y.Doc, line: string): void {
   const fragment = prose.getProseFragment(ydoc);
-  const span = findNotesSection(fragment, MEETING_NOTES_HEADING);
+  const span = findSectionSpan(fragment, MEETING_NOTES_HEADING);
   if (!span) throw new Error('no notes section to type in');
-  fragment.insert(span.endExclusive, prose.parseMarkdownBlocks(`- ${line}`));
+  asPerson(ydoc, () => {
+    fragment.insert(span.endExclusive, prose.parseMarkdownBlocks(`- ${line}`));
+  });
 }
 
 describe('the final pass over a meeting that stopped mid-sentence', () => {
@@ -46,7 +55,7 @@ describe('the final pass over a meeting that stopped mid-sentence', () => {
     const h = createNotesTickHarness({
       compose: (input) => {
         seen.push(input);
-        return `## Meeting notes\n\n${input.tick.turns.map((t) => `- ${t.text}`).join('\n')}\n`;
+        return addNotes(input, input.tick.turns.map((t) => `- ${t.text}`).join('\n'));
       },
     });
 
@@ -67,9 +76,7 @@ describe('the final pass over a meeting that stopped mid-sentence', () => {
   it('and it is in the doc when the meeting is over', async () => {
     const h = createNotesTickHarness({
       compose: (input) =>
-        `## Meeting notes\n\n${input.tick.turns
-          .map((t) => `- ${t.text.toLowerCase()}`)
-          .join('\n')}\n`,
+        addNotes(input, input.tick.turns.map((t) => `- ${t.text.toLowerCase()}`).join('\n')),
     });
 
     await h.speak('We agreed on the smaller scope.');
@@ -82,8 +89,7 @@ describe('the final pass over a meeting that stopped mid-sentence', () => {
 
   it('a stop with nothing but an unfinished sentence still writes a note', async () => {
     const h = createNotesTickHarness({
-      compose: (input) =>
-        `## Meeting notes\n\n${input.tick.turns.map((t) => `- ${t.text}`).join('\n')}\n`,
+      compose: (input) => addNotes(input, input.tick.turns.map((t) => `- ${t.text}`).join('\n')),
     });
 
     // No pause ever came: the whole meeting is one turn, cut off.
@@ -96,7 +102,7 @@ describe('the final pass over a meeting that stopped mid-sentence', () => {
 
   it('a meeting that ended in silence writes nothing extra', async () => {
     const h = createNotesTickHarness({
-      compose: () => '## Meeting notes\n\n- the one point\n',
+      compose: (input) => addNotes(input, '- the one point'),
     });
 
     await h.speak('That is everything.');
@@ -113,7 +119,7 @@ describe('the final pass over a meeting that stopped mid-sentence', () => {
     const h = createNotesTickHarness({
       compose: (input) => {
         seen.push(input);
-        return `## Meeting notes\n\n- ${input.tick.turns.length} turns\n`;
+        return addNotes(input, `- ${input.tick.turns.length} turns`);
       },
     });
 
@@ -134,10 +140,11 @@ describe('the final pass over a meeting that stopped mid-sentence', () => {
 describe('a person typing in the notes while the meeting runs', () => {
   it('a new bullet appends under their line instead of replacing it', async () => {
     const h = createNotesTickHarness({
-      compose: (_input, tick) =>
-        `## Meeting notes\n\n${['- the sync is the bottleneck', '- Devi owns the rollout']
-          .slice(0, tick)
-          .join('\n')}\n`,
+      compose: (input, tick) =>
+        addNotes(
+          input,
+          ['- the sync is the bottleneck', '- Devi owns the rollout'][tick - 1] ?? '',
+        ),
     });
 
     await h.speak('The sync is the bottleneck.');
@@ -156,10 +163,11 @@ describe('a person typing in the notes while the meeting runs', () => {
 
   it('and the FINAL pass appends under it too', async () => {
     const h = createNotesTickHarness({
-      compose: (_input, tick) =>
-        `## Meeting notes\n\n${['- the sync is the bottleneck', '- rollback before Friday']
-          .slice(0, tick)
-          .join('\n')}\n`,
+      compose: (input, tick) =>
+        addNotes(
+          input,
+          ['- the sync is the bottleneck', '- rollback before Friday'][tick - 1] ?? '',
+        ),
     });
 
     await h.speak('The sync is the bottleneck.');

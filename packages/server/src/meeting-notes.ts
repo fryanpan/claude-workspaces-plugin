@@ -34,24 +34,31 @@
  *
  * deterministic stub below.
  *
- * WHY THE COMPOSER RETURNS THE WHOLE NOTES, NOT A DELTA. Same shape as the
- * turn-shaped engine contract: notes are REVISED as a meeting develops — a
- * decision gets overturned ten minutes after it was noted — and a delta-only
- * contract could never take anything back. The input carries `previous` so a
- * composer that merely appends can, and one that restructures may.
+ * WHY THE COMPOSER RETURNS SCOPED EDITS, NOT THE WHOLE NOTES. It used to
+ * return the whole section every tick, which made three things true at once:
+ * the reply grew with the MEETING rather than with the tick (so late ticks
+ * were refused for length), every tick rewrote lines nobody had said anything
+ * about, and the merge that landed the result had to work out which of its
+ * own bullets these were. Blocks carry ids now (`prose-outline.ts`), so a
+ * tick reads the doc's OUTLINE and answers with a handful of edits addressed
+ * to it. Revising is still possible — `replace_block` is one of the four ops
+ * — and it costs one bullet rather than a section.
+ *
+ * THERE IS NO SESSION MIRROR OF THE NOTES. `previous` used to be this
+ * module's own copy of what it had written, kept true through renames and
+ * reattributions so the next compose could be handed it. The doc is the only
+ * state now: every tick reads the outline back, so a person's edit, another
+ * agent's edit and this session's own last write all arrive by the same door.
  *
  * NOTHING HERE RIDES SSE. A tick per pause is word-rate-adjacent; ticks and
  * composed notes go to the injected `onNotes` sink only, and the stage that
  * writes them into the doc decides delivery (the CRDT, not the event bus).
  */
 
-import {
-  normalizeSpeakerTags,
-  reattributeSpeakerTags,
-  renameSpeakerTags,
-  speakerDisplayName,
-} from '@claude-workspaces/core';
-import { appendSuggestions, resolveNoteLinks } from './notes-link-intent.ts';
+import { normalizeSpeakerTags, speakerDisplayName } from '@claude-workspaces/core';
+import type { prose } from '@claude-workspaces/core';
+import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {
   DEFAULT_NOTES_CADENCE_MS,
@@ -207,16 +214,33 @@ export interface NotesComposeInput {
   meetingId: string;
   tick: NotesTick;
   /**
-   * The notes as they CURRENTLY READ — the live section including anything a
-   * person typed into it, not merely what this composer last returned. A
-   * composer that saw only its own output would keep re-proposing the words
-   * a person has already fixed. Null on a meeting's first tick.
+   * The doc as it CURRENTLY READS, block by block, each with the id an edit
+   * comes back with and a note of who wrote it. This replaces the old
+   * `previous` string: a composer that saw only its own last output would keep
+   * re-proposing words a person has already fixed, and one handed the whole
+   * section as prose had no way to name a single bullet.
+   *
+   * Capped from the END of the doc (`recentBlocks`), so a tick's work scales
+   * with what was just said rather than with the length of the meeting.
+   * Headings are never dropped, so the model can always see where a point
+   * belongs even when the bullets under a topic have scrolled out.
    */
-  previous: string | null;
+  outline: readonly prose.OutlineEntry[];
   /**
-   * The lines of `previous` a PERSON wrote. They are theirs: reproduce them
-   * verbatim. Returning a changed version of one is read as a proposal and
-   * lands as a suggestion on their line, never as a rewrite of it.
+   * The block id of the heading THIS meeting's notes sit under, when the
+   * session has opened one. Absent on the first tick of a meeting, and again
+   * if somebody deletes the heading — both of which mean "open a section".
+   *
+   * An id and not a heading TEXT, which is the whole point: a person renaming
+   * the heading changes nothing here, so the next tick still writes into the
+   * section they renamed instead of opening a second one below it.
+   */
+  notesHeadingId?: string;
+  /**
+   * The lines of the doc a PERSON wrote — every outline entry carrying no
+   * author. They are theirs: an edit naming one of their blocks reaches them
+   * as a suggestion rather than a rewrite, and the instructions ask the model
+   * not to aim one there without cause.
    */
   humanNotes?: readonly string[];
   context?: NotesProjectContext;
@@ -249,65 +273,79 @@ export interface NotesComposeInput {
 
 export interface NotesComposer {
   readonly name: string;
-  /** Returns the WHOLE notes markdown as it should now read — not a delta. */
-  compose(input: NotesComposeInput): Promise<string>;
+  /** The edits this tick's speech calls for, addressed to the ids in
+   *  `input.outline`. An empty list is a legitimate answer — a tick of
+   *  greetings changes nothing — but a composer that could not read its own
+   *  model's reply throws, so the words carry into the next tick. */
+  compose(input: NotesComposeInput): Promise<readonly prose.BlockEdit[]>;
 }
 
 /**
  * The deterministic composer the tests speak to: no network, no randomness —
- * previous notes plus one bullet per new settled turn. Its determinism is
- * asserted, because a stub that drifted would make every pipeline test
+ * one edit per tick, carrying a bullet per new settled turn. Its determinism
+ * is asserted, because a stub that drifted would make every pipeline test
  * assert luck.
+ *
+ * With no notes heading yet it opens one, exactly as the real composer is
+ * asked to; from then on it addresses that heading by id.
  */
 export function createStubNotesComposer(): NotesComposer {
   return {
     name: 'stub',
-    compose(input: NotesComposeInput): Promise<string> {
-      const head = input.previous ?? '## Notes';
+    compose(input: NotesComposeInput): Promise<readonly prose.BlockEdit[]> {
       const bullets = input.tick.turns
         .map((t) => `- ${t.speaker ? `${t.speaker}: ` : ''}${t.text}`)
         .join('\n');
-      return Promise.resolve(bullets ? `${head}\n${bullets}` : head);
+      if (bullets.length === 0) return Promise.resolve([]);
+      const headingId = input.notesHeadingId;
+      return Promise.resolve(
+        headingId === undefined
+          ? [
+              {
+                op: 'insert_at_end',
+                markdown: `## ${MEETING_NOTES_HEADING}\n\n${bullets}`,
+              } satisfies prose.BlockEdit,
+            ]
+          : [
+              {
+                op: 'insert_under_heading',
+                headingId,
+                markdown: bullets,
+              } satisfies prose.BlockEdit,
+            ],
+      );
     },
   };
 }
 
-/** One composed revision of a meeting's notes, as handed to the sink. */
+/**
+ * One tick's worth of changes, as handed to the sink.
+ *
+ * THERE IS NO `basedOn` AND THERE DOES NOT NEED TO BE. It used to carry the
+ * section's items as the compose read them, so the sink could withhold a
+ * change to a line that had moved underneath it. Block ids do that job
+ * structurally: an edit naming a block a person has since deleted reports
+ * `unknown-block` and the rest of the batch still lands, and one naming a
+ * block a person has since EDITED becomes a suggestion on their words rather
+ * than a rewrite of them. Nothing in this list can overwrite a newer edit.
+ */
 export interface NotesUpdate {
   docId: string;
   meetingId: string;
   /** The tick as composed — includes any words carried from a failed tick. */
   tick: NotesTick;
-  notes: string;
-  /**
-   * The notes section's items as the compose READ them. Anything in the doc
-   * that is not in this list arrived while the compose was in flight, so
-   * these notes were written without knowing about it — the sink withholds
-   * changes to those rather than landing older words on a newer edit.
-   * Absent when the sink was composed without a doc to read.
-   */
-  basedOn?: readonly string[];
-}
-
-/** The notes section as it currently stands, read fresh for each compose. */
-export interface NotesSectionState {
-  /** Heading plus body, the accepted state. */
-  markdown: string;
-  /** Every item, in reading order. */
-  items: readonly string[];
-  /** The subset the agent did not write. */
-  human: readonly string[];
+  edits: readonly prose.BlockEdit[];
 }
 
 /**
  * "Every place the notes say `from`, they should say `to`" — a rename
  * reaching notes already written.
  *
- * A SEPARATE SINK FROM `onNotes` ON PURPOSE. An update carries whole notes
- * this module composed and replaces the section with them; a relabel carries
- * two words and asks for those two words. Sent down the update path it would
- * have to re-send a whole section built from `previous`, discarding anything
- * the human typed into it since the last tick.
+ * A SEPARATE SINK FROM `onNotes` ON PURPOSE. An update carries the blocks a
+ * tick decided to write; a relabel carries two words and asks for those two
+ * words wherever they already appear. Sent down the update path it would have
+ * to re-emit every block that mentions the voice, which costs a bullet's marks
+ * and anchors to change a name inside it.
  */
 export interface NotesRelabel {
   docId: string;
@@ -338,10 +376,10 @@ export interface NotesRelabel {
  * A spoken correction on its way to the doc that holds the note it fixes.
  *
  * A SEPARATE SINK FROM `onNotes`, for the reason {@link NotesRelabel} is one:
- * an update carries whole notes and merges them; a correction carries two
- * phrases and asks for two phrases. Routed through the update path it would
- * have to re-send a section, which is exactly the cost this intent exists to
- * avoid.
+ * an update carries the blocks a tick decided to write; a correction carries
+ * two phrases and asks for two phrases. Routed through the update path it
+ * would have to re-emit the whole bullet, which is exactly the cost this
+ * intent exists to avoid.
  *
  * It answers, where a relabel does not: the session cannot tell whether the
  * phrase resolved to one note, to somebody's note, or to nothing at all —
@@ -366,8 +404,8 @@ export type NotesCorrectionResult = 'revised' | 'suggested' | 'none';
  * notes that were already written.
  *
  * A THIRD SINK, beside `onNotes` and `onRelabel`, because it is a third kind
- * of change. An update carries whole notes and replaces what the agent
- * wrote; a relabel says a voice is called something new and rewrites two
+ * of change. An update carries the blocks a tick decided to write; a relabel
+ * says a voice is called something new and rewrites two
  * words wherever that voice appears; this says nothing about any name — it
  * moves a MENTION from one voice to another, and which mentions move is
  * decided per site from the turns each was composed from.
@@ -467,19 +505,32 @@ export interface MeetingNotesDeps {
     corrections?: readonly SpokenCorrection[];
   }>;
   /**
-   * Read the doc's notes section at the START of each compose, so the
-   * composer sees what the person has written rather than only what it last
-   * returned. Absent in tests that wire no doc; then the composer's own last
-   * output is `previous`, as it always was.
+   * Read the doc's outline at the START of each compose, so the composer sees
+   * the doc as it currently reads — a person's edits included — rather than
+   * only what it last wrote. Absent in tests that wire no doc; then the
+   * composer is handed an empty outline and can only append.
    */
-  readSection?: (input: { docId: string; meetingId: string }) => NotesSectionState | null;
+  readOutline?: (input: { docId: string; meetingId: string }) => readonly prose.OutlineEntry[];
+  /**
+   * Which block id, in that outline, is THIS meeting's notes heading.
+   *
+   * Answered by the stage that holds the doc (`meeting-notes-doc.ts`), because
+   * remembering the heading a meeting opened is a fact about the doc rather
+   * than about the ticker. Absent, or answering `undefined`, tells the
+   * composer to open a section.
+   */
+  notesHeadingId?: (input: {
+    docId: string;
+    meetingId: string;
+    outline: readonly prose.OutlineEntry[];
+  }) => string | undefined;
   /** Where composed notes go. The doc-writing stage plugs in here. */
   onNotes: (update: NotesUpdate) => void;
   /**
    * Where a rename of a voice already written about goes. Optional: a
-   * session with no sink for it still renames the voices in its own
-   * `previous`, so nothing composed AFTER the rename disagrees with the
-   * strip; only the words already in the doc go unrevised.
+   * session with no sink for it composes under the new name from the next
+   * tick on, because the name map is this module's; only the words already
+   * in the doc go unrevised.
    */
   onRelabel?: (relabel: NotesRelabel) => void;
   /**
@@ -507,8 +558,8 @@ export interface MeetingNotesDeps {
   }) => void;
   /**
    * Where the engine's late correction of who spoke goes. Optional on the
-   * same terms as `onRelabel`: a session with no sink still corrects its own
-   * `previous`, so nothing composed afterwards disagrees with the record.
+   * same terms as `onRelabel`: a session with no sink composes under the
+   * corrected labels from the next tick on, and leaves the doc as it was.
    */
   onReattribute?: (reattribution: NotesReattribution) => void;
   onError?: (message: string) => void;
@@ -638,6 +689,49 @@ export function replaceWholeToken(text: string, from: string, to: string): strin
   return out + text.slice(i);
 }
 
+/** Does this edit write at least one bullet? The tappable question hangs off
+ *  a note, so an edit that only opens a heading is not somewhere to put one. */
+function insertsABullet(edit: prose.BlockEdit): boolean {
+  return 'markdown' in edit && /^\s*([-*+]|\d+[.)])\s+\S/m.test(edit.markdown);
+}
+
+/**
+ * Hang this tick's tappable questions off the LAST edit that writes a bullet,
+ * and when the batch has none, emit one edit that carries them.
+ *
+ * NEVER SILENTLY DROPPED. A tick whose speech asked "is that the retry
+ * ticket?" and whose notes came out with no bullet used to lose the question
+ * altogether — the appender had nowhere to hang it and said nothing. That is
+ * the failure this path exists to remove, so the fallback writes a note of its
+ * own rather than returning the batch unchanged.
+ */
+function withSuggestions(
+  edits: readonly prose.BlockEdit[],
+  suggested: readonly NoteReference[],
+  humanNotes: readonly string[] | undefined,
+  notesHeadingId: string | undefined,
+): readonly prose.BlockEdit[] {
+  if (suggested.length === 0) return edits;
+  const opts = humanNotes ? { protect: humanNotes } : {};
+  for (let i = edits.length - 1; i >= 0; i--) {
+    const edit = edits[i];
+    if (edit === undefined || !('markdown' in edit) || !insertsABullet(edit)) continue;
+    const grown = appendSuggestions(edit.markdown, suggested, opts);
+    if (grown === edit.markdown) return edits;
+    const out = [...edits];
+    out[i] = { ...edit, markdown: grown };
+    return out;
+  }
+  const own = appendSuggestions('', suggested, opts).trim();
+  if (own.length === 0) return edits;
+  return [
+    ...edits,
+    notesHeadingId === undefined
+      ? { op: 'insert_at_end', markdown: own }
+      : { op: 'insert_under_heading', headingId: notesHeadingId, markdown: own },
+  ];
+}
+
 /**
  * One meeting's notes pipeline: pause ticks in, composed notes out.
  *
@@ -660,7 +754,9 @@ export function beginNotesSession(
    *  a row filed mid-meeting reaches the notes through the capture pass's
    *  `taskLinks`, which is the path that knows it was just created. */
   const catalogue = deps.resolveReferences?.(ids.docId) ?? [];
-  let previous: string | null = null;
+  /** Tappable questions this meeting has already written, by row URL. See
+   *  where it is read for why the doc alone cannot answer this. */
+  const offeredSuggestions = new Set<string>();
   /** Raw engine labels, never display names — a carried turn is re-mapped
    *  on its next attempt, and mapping a name a second time would wrap it. */
   let carry: NotesTurn[] = [];
@@ -771,9 +867,8 @@ export function beginNotesSession(
           // BEFORE the section is read and BEFORE the compose, not after.
           // The note a correction fixes was written on an earlier tick and is
           // already in the doc, so correcting it first means this tick's
-          // compose reads the corrected words as `previous` — and the merge
-          // that follows never has to reconcile a note the composer echoed
-          // back in its old wording.
+          // compose reads the corrected words in the OUTLINE, and never
+          // re-proposes the note in its old wording.
           for (const correction of captured.corrections ?? []) {
             try {
               deps.onCorrection?.({
@@ -829,31 +924,42 @@ export function beginNotesSession(
         }
       }
       // Read INSIDE the chain, immediately before composing: the compose is
-      // the thing that must not be written from stale text, and the chain is
+      // the thing that must not be written from a stale doc, and the chain is
       // what serializes it against the previous tick's write.
-      let live: NotesSectionState | null = null;
+      let outline: readonly prose.OutlineEntry[] = [];
       try {
-        live = deps.readSection?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? null;
+        outline = deps.readOutline?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? [];
       } catch (err) {
-        // The section is an input to a better compose, never a dependency of
-        // one — same rule as context and capture.
-        deps.onError?.(err instanceof Error ? err.message : 'notes section read failed');
+        // The outline is an input to a better compose, never a dependency of
+        // one — same rule as context and capture. With none, the composer
+        // opens a section and appends, which is what tick one does anyway.
+        deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
       }
+      let notesHeadingId: string | undefined;
+      try {
+        notesHeadingId = deps.notesHeadingId?.({
+          docId: ids.docId,
+          meetingId: ids.meetingId,
+          outline,
+        });
+      } catch (err) {
+        deps.onError?.(err instanceof Error ? err.message : 'notes heading lookup failed');
+      }
+      // DERIVED FROM THE OUTLINE, not from a section read: a block carrying no
+      // author is one this agent did not write, or one a person has since
+      // touched — `clearAuthorshipOnPersonEdit` makes those the same answer.
+      // Headings are left out; the list is about lines, and the outline
+      // already says which heading each line sits under.
+      const humanNotes = outline
+        .filter((e) => e.author === undefined && e.kind !== 'heading' && e.text.length > 0)
+        .map((e) => e.text);
       const input: NotesComposeInput = {
         docId: ids.docId,
         meetingId: ids.meetingId,
         tick: { ...tick, turns },
-        // The FIRST tick of a session composes from scratch, even on a doc
-        // whose notes section still holds the last meeting's — handing that
-        // in would make every meeting a continuation of the one before it.
-        // From the second tick on, `previous` is what the doc actually says,
-        // which is how a person's edits reach the composer at all.
-        previous: previous === null ? null : (live?.markdown ?? previous),
-        // Gated with `previous` for the same reason: on tick one the human
-        // lines in the section are the LAST meeting's, or an agenda written
-        // before this one, and telling a from-scratch compose to reproduce
-        // them verbatim would copy them into these notes.
-        ...(previous !== null && live && live.human.length > 0 ? { humanNotes: live.human } : {}),
+        outline,
+        ...(notesHeadingId !== undefined ? { notesHeadingId } : {}),
+        ...(humanNotes.length > 0 ? { humanNotes } : {}),
         ...(context ? { context } : {}),
         ...(taskLinks.length > 0 ? { taskLinks } : {}),
         ...(docLinks.length > 0 ? { docLinks } : {}),
@@ -867,24 +973,35 @@ export function beginNotesSession(
         // naming a real one is re-rendered from the name map rather than
         // trusted to spell it. Same law the capture pass holds `requester`
         // to — an attribution must name something the transcript contained.
-        const checked = normalizeSpeakerTags(composed, {
-          names,
-          // While the session is effectively solo the composer was shown no
-          // voices at all, so ANY tag it writes is invented — an empty known
-          // set unwraps them all.
-          known: multi ? seen : new Set<string>(),
-          ...(input.humanNotes ? { protect: input.humanNotes } : {}),
-          // What this tick actually carried, per voice. A mention the
-          // composer has just written is stamped with it, so a later
-          // revision of any of those turns can find the mention again.
-          // Mentions this tick merely re-emitted keep the provenance they
-          // already have — see `turnsByLabel` in core.
-          turnsByLabel: turnsByLabel(turns),
+        //
+        // PER EDIT, not over one composed string: an edit's `markdown` is the
+        // only text this tick writes, and running the pass over a joined
+        // blob would need it split again afterwards on a boundary the pass is
+        // free to move.
+        const unknownTags: string[] = [];
+        const checked = composed.map((edit) => {
+          if (!('markdown' in edit)) return edit;
+          const out = normalizeSpeakerTags(edit.markdown, {
+            names,
+            // While the session is effectively solo the composer was shown no
+            // voices at all, so ANY tag it writes is invented — an empty
+            // known set unwraps them all.
+            known: multi ? seen : new Set<string>(),
+            ...(input.humanNotes ? { protect: input.humanNotes } : {}),
+            // What this tick actually carried, per voice. A mention the
+            // composer has just written is stamped with it, so a later
+            // revision of any of those turns can find the mention again.
+            // Mentions this tick merely re-emitted keep the provenance they
+            // already have — see `turnsByLabel` in core.
+            turnsByLabel: turnsByLabel(turns),
+          });
+          unknownTags.push(...out.unknown);
+          return { ...edit, markdown: out.markdown };
         });
-        if (checked.unknown.length > 0) {
+        if (unknownTags.length > 0) {
           deps.onError?.(
-            `notes: dropped speaker tag${checked.unknown.length > 1 ? 's' : ''} for ` +
-              `${[...new Set(checked.unknown)].join(', ')} — no such voice in this meeting`,
+            `notes: dropped speaker tag${unknownTags.length > 1 ? 's' : ''} for ` +
+              `${[...new Set(unknownTags)].join(', ')} — no such voice in this meeting`,
           );
         }
         // The questions, written after the model rather than by it: a
@@ -893,16 +1010,23 @@ export function beginNotesSession(
         // passed so none of them is appended to — a question added to
         // somebody's own sentence reaches the doc as a proposed rewrite of
         // it.
-        const notes = appendSuggestions(checked.markdown, loose.suggested, {
-          ...(input.humanNotes ? { protect: input.humanNotes } : {}),
-        });
-        previous = notes;
+        // A question already asked is not asked again. It used to be deduped
+        // against the notes markdown, where the row's URL was visible; an
+        // outline carries a block's WORDS and not its links, so the memory is
+        // this session's own, plus a look for the question's own label in the
+        // doc — which catches one the notes carry from before this session.
+        const unseen = loose.suggested.filter(
+          (ref) =>
+            !offeredSuggestions.has(ref.url) &&
+            !outline.some((e) => e.text.includes(suggestionLabel(ref.title))),
+        );
+        const edits = withSuggestions(checked, unseen, input.humanNotes, notesHeadingId);
+        for (const ref of unseen) offeredSuggestions.add(ref.url);
         deps.onNotes({
           docId: ids.docId,
           meetingId: ids.meetingId,
           tick: input.tick,
-          notes,
-          ...(live ? { basedOn: live.items } : {}),
+          edits,
         });
         for (const t of raw) composedTurns.add(t.turn);
         lifecycle(
@@ -959,17 +1083,10 @@ export function beginNotesSession(
       revisions.delete(turn);
     }
     if (revisions.size === 0) return;
-    if (previous !== null) {
-      const out = reattributeSpeakerTags(previous, { revisions, names });
-      previous = out.markdown;
-      if (out.unsure > 0) {
-        deps.onError?.(
-          `notes: the engine revised who spoke for part of ${out.unsure} ` +
-            `mention${out.unsure > 1 ? 's' : ''}, so ` +
-            `${out.unsure > 1 ? 'they are' : 'it is'} marked unsure rather than moved`,
-        );
-      }
-    }
+    // The doc is the only copy of the notes now, so the rewrite happens there
+    // and nowhere else — `applyNotesReattribution` on the sink side. This used
+    // to run the same pass over a session-local mirror first, which is exactly
+    // the second source of truth the rebuild removed.
     deps.onReattribute?.({
       docId: ids.docId,
       meetingId: ids.meetingId,
@@ -1028,19 +1145,11 @@ export function beginNotesSession(
         );
       }
       // On the chain, behind any compose in flight: that compose is still
-      // going to return notes written with the old name (it read `previous`
+      // going to return edits written with the old name (it read the outline
       // before the rename), and the rewrite has to land after it, not under
-      // it. Every later tick then sees a `previous` that already reads
-      // correctly, so the name never comes back.
+      // it. Every later tick then reads an outline that already says the new
+      // name, so it never comes back.
       chain = chain.then(() => {
-        if (previous !== null) {
-          // Sweep, then retag — the same order the doc side uses, and for the
-          // same reason: "Devi" → "Devi Raman" leaves the old name inside the
-          // new one, so a sweep run after the retag would find it in the tag
-          // it had just written and say the surname twice.
-          if (!ambiguous) previous = replaceWholeToken(previous, from, to);
-          previous = renameSpeakerTags(previous, speaker, names).markdown;
-        }
         deps.onRelabel?.({
           docId: ids.docId,
           meetingId: ids.meetingId,

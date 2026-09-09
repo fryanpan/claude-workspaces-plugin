@@ -247,6 +247,8 @@ const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'insert_after'],
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'insert_blocks_after'],
   ['workspaces', ':id', 'docs', ':id', 'threads', 'by_find'],
+  ['workspaces', ':id', 'docs', ':id', 'outline'],
+  ['workspaces', ':id', 'docs', ':id', 'block_edits'],
   // …/docs/:id/agent_anchors/:id/... (nested inside the rest dispatch above)
   ['workspaces', ':id', 'docs', ':id', 'agent_anchors', ':id'],
   ['workspaces', ':id', 'docs', ':id', 'agent_anchors', ':id', 'edit'],

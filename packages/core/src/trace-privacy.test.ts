@@ -71,6 +71,20 @@ describe('span names reduce to route patterns', () => {
     expect(scrubSpanName('Largest Contentful Paint')).toBe('Largest Contentful Paint');
   });
 
+  it('keeps the block-address routes readable, ids and all elided', () => {
+    // A route the table does not name still SCRUBS — it degrades to all-:id —
+    // so the only thing a missing entry costs is the ability to tell one
+    // route's latency from another's. That is what these two entries buy, and
+    // an assertion is the only thing that keeps them from being deleted as
+    // decoration.
+    expect(scrubSpanName(`GET /workspaces/${WS_ID}/docs/${NEEDLE}/outline`)).toBe(
+      'GET /workspaces/:id/docs/:id/outline',
+    );
+    expect(scrubSpanName(`POST /workspaces/${WS_ID}/docs/${NEEDLE}/block_edits`)).toBe(
+      'POST /workspaces/:id/docs/:id/block_edits',
+    );
+  });
+
   it('an unknown route still degrades to all-:id, never to the raw path', () => {
     expect(routePatternForSpan(`/nothing/like/a/route/${NEEDLE}`)).toBe('/:id/:id/:id/:id/:id');
   });

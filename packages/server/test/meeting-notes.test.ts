@@ -88,6 +88,37 @@ class ManualScheduler implements TickScheduler {
   }
 }
 
+/**
+ * A composer's reply, as this file's stubs spell it.
+ *
+ * WHAT CHANGED. A composer used to answer with the whole notes section as a
+ * string and the pipeline replaced the section with it. It now answers with
+ * BLOCK EDITS addressed to ids in the outline it was handed. Nearly every
+ * stub here only ever meant "these words go in the notes", so that one shape
+ * is spelled once — a script about coalescing ticks should not read as a
+ * script about block ops.
+ */
+function editsSaying(markdown: string): prose.BlockEdit[] {
+  return [{ op: 'insert_at_end', markdown }];
+}
+
+/**
+ * The words an update carries to the doc: every edit's markdown, in order.
+ *
+ * This is what `update.notes` used to be, and the difference is the point —
+ * there is no whole-section string any more, so an assertion about "what the
+ * tick wrote" has to be built from the edits rather than read off one field.
+ */
+function composedMarkdown(update: NotesUpdate): string {
+  return update.edits.map((e) => ('markdown' in e ? e.markdown : '')).join('\n');
+}
+
+/** The text of the outline a compose was handed, one block per line — the
+ *  outline-shaped answer to the question `input.previous` used to answer. */
+function outlineText(input: NotesComposeInput | undefined): string {
+  return (input?.outline ?? []).map((e) => e.text).join('\n');
+}
+
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
 
@@ -456,57 +487,101 @@ describe('stub notes composer', () => {
     docId: 'doc-a',
     meetingId: 'm-doc-a-1',
     tick,
-    previous: null,
+    outline: [],
   };
 
-  it('is deterministic: the same input composes the same notes', async () => {
+  it('is deterministic: the same input composes the same edits', async () => {
     const composer = createStubNotesComposer();
     const a = await composer.compose(input);
     const b = await composer.compose(input);
-    expect(a).toBe(b);
-    expect(a).toContain('The sync is the bottleneck.');
+    expect(a).toEqual(b);
+    expect(JSON.stringify(a)).toContain('The sync is the bottleneck.');
   });
 
-  it('grows previous notes instead of restating from nothing', async () => {
+  it('opens a section when there is none, and writes under it once there is', async () => {
+    // WHAT CHANGED, AND WHY IT IS THE SAME PROPERTY. The stub used to be
+    // asserted to APPEND to `previous` — the whole notes came back each tick,
+    // so "did not restate from nothing" meant the new string started with the
+    // old one. There is no such string now: the second tick adds a bullet
+    // under the heading the first one opened, and never re-sends what is
+    // already in the doc. Naming the heading by id is what makes that
+    // possible, so that is what this asserts.
     const composer = createStubNotesComposer();
     const first = await composer.compose(input);
+    expect(first).toHaveLength(1);
+    expect(first[0]?.op).toBe('insert_at_end');
+    expect(JSON.stringify(first)).toContain('## Meeting notes');
+    expect(JSON.stringify(first)).toContain('The sync is the bottleneck.');
+
     const second = await composer.compose({
       ...input,
-      previous: first,
+      outline: [
+        { id: 'h7', kind: 'heading', nodeName: 'heading', level: 2, text: 'Meeting notes' },
+      ],
+      notesHeadingId: 'h7',
       tick: { tick: 2, reason: 'pause', turns: [{ turn: 2, text: 'Agreed.' }] },
     });
-    expect(second.startsWith(first)).toBe(true);
-    expect(second).toContain('Agreed.');
+    expect(second).toEqual([
+      { op: 'insert_under_heading', headingId: 'h7', markdown: '- Agreed.' },
+    ]);
+    expect(JSON.stringify(second)).not.toContain('The sync is the bottleneck.');
   });
 });
 
 describe('notes session', () => {
   const ids = { docId: 'doc-b', meetingId: 'm-doc-b-1' };
 
-  it('composes each tick in order, chaining previous notes through', async () => {
+  it('composes each tick in order, each seeing the doc as it then read', async () => {
+    // The chain is still one-at-a-time and still ordered; what threads
+    // through it is no longer the previous ANSWER but the DOC. So the second
+    // compose is asserted to have seen what the first one's edit put there —
+    // which is a stronger statement, because a person's edit reaches it by
+    // the same route.
     const schedule = new ManualScheduler();
     const updates: NotesUpdate[] = [];
     const inputs: NotesComposeInput[] = [];
+    const written: prose.OutlineEntry[] = [];
     // Resolves out of band so ordering is the chain's doing, not luck.
     const composer: NotesComposer = {
       name: 'slow-stub',
       async compose(input) {
         inputs.push(input);
         await new Promise((r) => setTimeout(r, 5));
-        return `notes after tick ${input.tick.tick}`;
+        return editsSaying(`notes after tick ${input.tick.tick}`);
       },
     };
     const session = beginNotesSession(
-      { composer, quietMs: 1000, schedule, onNotes: (u) => updates.push(u) },
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        // A copy: the input holds this array by reference, and a test that
+        // handed out the live one would read LATER ticks' writes back out of
+        // an earlier tick's input.
+        readOutline: () => [...written],
+        onNotes: (u) => {
+          updates.push(u);
+          for (const edit of u.edits) {
+            if ('markdown' in edit)
+              written.push({
+                id: `b${written.length}`,
+                kind: 'block',
+                nodeName: 'paragraph',
+                text: edit.markdown,
+                author: 'meeting-notes',
+              });
+          }
+        },
+      },
       ids,
     );
     session.onTurn({ turn: 0, text: 'First.', final: true });
     schedule.fire();
     session.onTurn({ turn: 1, text: 'Second.', final: true });
     await session.end();
-    expect(updates.map((u) => u.notes)).toEqual(['notes after tick 1', 'notes after tick 2']);
-    expect(inputs[0]?.previous).toBeNull();
-    expect(inputs[1]?.previous).toBe('notes after tick 1');
+    expect(updates.map(composedMarkdown)).toEqual(['notes after tick 1', 'notes after tick 2']);
+    expect(outlineText(inputs[0])).toBe('');
+    expect(outlineText(inputs[1])).toBe('notes after tick 1');
     expect(updates[1]?.tick.reason).toBe('end');
     expect(updates.every((u) => u.docId === ids.docId && u.meetingId === ids.meetingId)).toBe(true);
   });
@@ -518,7 +593,7 @@ describe('notes session', () => {
       name: 'capture',
       compose(input) {
         inputs.push(input);
-        return Promise.resolve('notes');
+        return Promise.resolve(editsSaying('notes'));
       },
     };
     const session = beginNotesSession(
@@ -541,7 +616,7 @@ describe('notes session', () => {
     ]);
   });
 
-  it('naming a voice rewrites the notes already composed, and what the composer remembers', async () => {
+  it('naming a voice tells the sink exactly what to change, in the composer’s words', async () => {
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
     const relabels: NotesRelabel[] = [];
@@ -549,10 +624,8 @@ describe('notes session', () => {
       name: 'capture',
       compose(input) {
         inputs.push(input);
-        // A composer that appends, so tick 2's notes carry tick 1's text —
-        // the shape that makes a stale label visible.
         const line = input.tick.turns.map((t) => `- ${t.speaker}: ${t.text}`).join('\n');
-        return Promise.resolve([input.previous, line].filter(Boolean).join('\n'));
+        return Promise.resolve(editsSaying(line));
       },
     };
     const session = beginNotesSession(
@@ -592,15 +665,21 @@ describe('notes session', () => {
         rewriteUntagged: true,
       },
     ]);
-    // And the session's memory of what it wrote was rewritten too, so the
-    // next compose never sees the placeholder come back.
-    expect(inputs[1]?.previous).toBe('- Marisol: Take it?');
-    expect(inputs[1]?.previous).not.toContain('Speaker B');
+    // WHAT CHANGED. This used to also assert that the SESSION's mirror of
+    // the notes had been rewritten, so the next compose would not read the
+    // placeholder back. There is no mirror: the rewrite happens in the doc,
+    // and the next compose reads the doc. What is left to assert here is that
+    // nothing in this module re-feeds the old words — with no doc wired the
+    // next compose sees an empty outline, where it used to see its own last
+    // answer. The doc-side rewrite is `meeting-notes-doc.test.ts`,
+    // "applyNotesRelabel".
+    expect(outlineText(inputs[1])).toBe('');
+    expect(inputs[1]?.tick.turns[0]?.speaker).toBe('Marisol');
   });
 
   it('a rename during a compose lands after it, not under it', async () => {
-    // The compose in flight read `previous` before the rename and will
-    // return notes written the old way. The rewrite has to be queued behind
+    // The compose in flight read the outline before the rename and will
+    // return edits written the old way. The rewrite has to be queued behind
     // it — ahead of it, the compose would put the placeholder straight back.
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
@@ -612,7 +691,7 @@ describe('notes session', () => {
         inputs.push(input);
         await new Promise((r) => setTimeout(r, 10));
         order.push('composed');
-        return `${input.previous ? `${input.previous}\n` : ''}- ${input.tick.turns[0]?.speaker}: said it`;
+        return editsSaying(`- ${input.tick.turns[0]?.speaker}: said it`);
       },
     };
     const session = beginNotesSession(
@@ -669,7 +748,9 @@ describe('notes session', () => {
     const composer: NotesComposer = {
       name: 'capture',
       compose: (input) =>
-        Promise.resolve(`- ${input.tick.turns[0]?.speaker}: ${input.tick.turns[0]?.text}`),
+        Promise.resolve(
+          editsSaying(`- ${input.tick.turns[0]?.speaker}: ${input.tick.turns[0]?.text}`),
+        ),
     };
     const session = beginNotesSession(
       { composer, quietMs: 1000, schedule, onNotes: () => {}, onRelabel: (r) => relabels.push(r) },
@@ -696,7 +777,10 @@ describe('notes session', () => {
     const errors: string[] = [];
     const session = beginNotesSession(
       {
-        composer: { name: 'x', compose: () => Promise.resolve('- Alex: both of them') },
+        composer: {
+          name: 'x',
+          compose: () => Promise.resolve(editsSaying('- Alex: both of them')),
+        },
         quietMs: 1000,
         schedule,
         onNotes: () => {},
@@ -735,7 +819,7 @@ describe('notes session', () => {
     const errors: string[] = [];
     const session = beginNotesSession(
       {
-        composer: { name: 'x', compose: () => Promise.resolve('notes') },
+        composer: { name: 'x', compose: () => Promise.resolve(editsSaying('notes')) },
         quietMs: 1000,
         schedule,
         onNotes: () => {},
@@ -765,7 +849,7 @@ describe('notes session', () => {
     const errors: string[] = [];
     const session = beginNotesSession(
       {
-        composer: { name: 'x', compose: () => Promise.resolve('notes') },
+        composer: { name: 'x', compose: () => Promise.resolve(editsSaying('notes')) },
         quietMs: 1000,
         schedule,
         onNotes: () => {},
@@ -787,7 +871,7 @@ describe('notes session', () => {
     const relabels: NotesRelabel[] = [];
     const session = beginNotesSession(
       {
-        composer: { name: 'x', compose: () => Promise.resolve('notes') },
+        composer: { name: 'x', compose: () => Promise.resolve(editsSaying('notes')) },
         quietMs: 1000,
         schedule: new ManualScheduler(),
         onNotes: () => {},
@@ -801,7 +885,7 @@ describe('notes session', () => {
   });
 
   it('the stub composer writes the speaker before the words', async () => {
-    const notes = await createStubNotesComposer().compose({
+    const edits = await createStubNotesComposer().compose({
       docId: 'd',
       meetingId: 'm',
       tick: {
@@ -812,9 +896,14 @@ describe('notes session', () => {
           { turn: 1, text: 'Sure.' },
         ],
       },
-      previous: null,
+      outline: [],
     });
-    expect(notes).toBe('## Notes\n- Jordan: Take it?\n- Sure.');
+    expect(edits).toEqual([
+      {
+        op: 'insert_at_end',
+        markdown: '## Meeting notes\n\n- Jordan: Take it?\n- Sure.',
+      },
+    ]);
   });
 
   it('a failed compose reports the error and carries its words into the next tick', async () => {
@@ -826,7 +915,7 @@ describe('notes session', () => {
       name: 'flaky-stub',
       compose(input) {
         if (failures-- > 0) return Promise.reject(new Error('composer refused'));
-        return Promise.resolve(input.tick.turns.map((t) => t.text).join(' | '));
+        return Promise.resolve(editsSaying(input.tick.turns.map((t) => t.text).join(' | ')));
       },
     };
     const session = beginNotesSession(
@@ -851,7 +940,7 @@ describe('notes session', () => {
     expect(errors[0]).toContain('tick 1');
     expect(updates.length).toBe(1);
     // The failed tick's words rode the next one — nothing dropped.
-    expect(updates[0]?.notes).toBe('Lost? | Found.');
+    expect(composedMarkdown(updates[0]!)).toBe('Lost? | Found.');
   });
 
   it('words held by a failure with no later pause still compose at end()', async () => {
@@ -862,7 +951,7 @@ describe('notes session', () => {
       name: 'flaky-stub',
       compose(input) {
         if (failures-- > 0) return Promise.reject(new Error('composer refused'));
-        return Promise.resolve(input.tick.turns.map((t) => t.text).join(' | '));
+        return Promise.resolve(editsSaying(input.tick.turns.map((t) => t.text).join(' | ')));
       },
     };
     const session = beginNotesSession(
@@ -873,7 +962,7 @@ describe('notes session', () => {
     schedule.fire();
     await session.end();
     expect(updates.length).toBe(1);
-    expect(updates[0]?.notes).toBe('Almost lost.');
+    expect(composedMarkdown(updates[0]!)).toBe('Almost lost.');
     expect(updates[0]?.tick.reason).toBe('end');
   });
 
@@ -884,7 +973,7 @@ describe('notes session', () => {
       name: 'spy-stub',
       compose(input) {
         inputs.push(input);
-        return Promise.resolve('n');
+        return Promise.resolve(editsSaying('n'));
       },
     };
     const context = { repoRoot: '/repo', docPaths: ['docs/product/vision.md'] };
@@ -977,7 +1066,7 @@ describe('notes through the audio socket', () => {
     schedule.fire(); // the speaker goes quiet
     await waitFor(() => updates.length === 1, 'the pause tick');
     expect(updates[0]?.tick.reason).toBe('pause');
-    expect(updates[0]?.notes).toContain('So the sync is the bottleneck.');
+    expect(composedMarkdown(updates[0]!)).toContain('So the sync is the bottleneck.');
 
     // Half the second turn, then stop mid-sentence: the tail still composes.
     for (let i = 0; i < 3; i++) ws.send(new Uint8Array(640));
@@ -985,11 +1074,15 @@ describe('notes through the audio socket', () => {
     await waitFor(() => frames.some((f) => f.type === 'stopped'), 'stopped');
     await waitFor(() => updates.length === 2, 'the end tick');
     expect(updates[1]?.tick.reason).toBe('end');
-    // The second tick builds on the first. It is asserted through the WORDS
-    // rather than through tick 1's exact string: `previous` is now the live
-    // section as the doc renders it (heading and all), not the composer's
-    // own last reply, so that the person's writing is in front of it.
-    expect(updates[1]?.notes).toContain('So the sync is the bottleneck.');
+    // WHAT CHANGED, AND IT IS THE POINT OF THE REBUILD. The second tick used
+    // to RE-SEND the first tick's words — the whole section came back each
+    // time and replaced what was there. It now sends only what this tick
+    // added, addressed under the heading the first tick opened, and the
+    // earlier bullet stays in the doc untouched. So the assertion inverts:
+    // tick two must NOT carry tick one's words. That the earlier bullet is
+    // still in the doc is the next test.
+    expect(composedMarkdown(updates[1]!)).not.toContain('So the sync is the bottleneck.');
+    expect(composedMarkdown(updates[1]!).length).toBeGreaterThan(0);
     ws.close();
   });
 
@@ -1097,7 +1190,7 @@ describe('task capture riding the notes session', () => {
       name: 'recording-stub',
       compose(input) {
         inputs.push(input);
-        return Promise.resolve(`notes ${input.tick.tick}`);
+        return Promise.resolve(editsSaying(`notes ${input.tick.tick}`));
       },
     };
     let calls = 0;
@@ -1145,34 +1238,45 @@ describe('task capture riding the notes session', () => {
     // failure was reported rather than swallowed.
     expect(inputs[1]?.taskLinks).toBeUndefined();
     expect(inputs[1]?.docLinks).toBeUndefined();
-    expect(updates.map((u) => u.notes)).toEqual(['notes 1', 'notes 2']);
+    expect(updates.map(composedMarkdown)).toEqual(['notes 1', 'notes 2']);
     expect(errors).toEqual(['capture refused']);
   });
 });
 
-describe('the composer reads the LIVE section, not only its own last answer', () => {
+describe('the composer reads the LIVE doc, not only its own last answer', () => {
   const ids = { docId: 'doc-live', meetingId: 'm-live' };
 
-  it('previous is what the doc now says, and the person’s lines are named', async () => {
+  /** An outline entry, spelled as the doc's reader hands one over. */
+  const block = (id: string, text: string, author?: string): prose.OutlineEntry => ({
+    id,
+    kind: 'listItem',
+    nodeName: 'listItem',
+    text,
+    ...(author !== undefined ? { author } : {}),
+  });
+
+  it('the outline is the doc as it now reads, and a person’s lines are named', async () => {
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
     const composer: NotesComposer = {
       name: 'capture',
       compose(input) {
         inputs.push(input);
-        return Promise.resolve('## Meeting notes\n\n- composed');
+        return Promise.resolve(editsSaying('## Meeting notes\n\n- composed'));
       },
     };
+    let read = 0;
     const session = beginNotesSession(
       {
         composer,
         quietMs: 1000,
         schedule,
-        readSection: () => ({
-          markdown: '## Meeting notes\n\n- composed\n- typed by hand',
-          items: ['composed', 'typed by hand'],
-          human: ['typed by hand'],
-        }),
+        // Empty before the first tick has written anything; after that, the
+        // agent's bullet AND a line the person typed beside it.
+        readOutline: () =>
+          read++ === 0
+            ? []
+            : [block('b1', 'composed', 'meeting-notes'), block('b2', 'typed by hand')],
         onNotes: () => {},
       },
       ids,
@@ -1181,36 +1285,80 @@ describe('the composer reads the LIVE section, not only its own last answer', ()
     schedule.fire();
     session.onTurn({ turn: 1, text: 'Second.', final: true });
     await session.end();
-    // Tick one starts clean — a doc's section may still hold the LAST
-    // meeting's notes, and no meeting is a continuation of that one.
-    expect(inputs[0]?.previous).toBeNull();
-    // Tick two reads the doc: not "## Meeting notes\n\n- composed", the
-    // composer's own last answer, but the section as it now stands, with the
-    // person's line in it and named as theirs.
-    expect(inputs[1]?.previous).toBe('## Meeting notes\n\n- composed\n- typed by hand');
-    // Human lines are gated with `previous`: on tick one the ones in the
-    // section are the last meeting's, and telling a from-scratch compose to
-    // reproduce them verbatim would copy them into these notes.
+    expect(inputs[0]?.outline).toEqual([]);
+    // Tick two reads the doc: not the composer's own last answer, but what
+    // the doc now holds — the person's line included, addressable by id.
+    expect(inputs[1]?.outline.map((e) => e.id)).toEqual(['b1', 'b2']);
+    expect(outlineText(inputs[1])).toBe('composed\ntyped by hand');
+
+    // WHAT CHANGED, AND WHY IT IS SAFE. `humanNotes` used to be withheld on
+    // tick one, because the section might still hold the LAST meeting's notes
+    // and telling a from-scratch compose to reproduce them verbatim would
+    // copy them into these ones. There is no such gate now and none is
+    // needed: a previous meeting's bullets carry this agent's authorship, so
+    // they are not somebody's lines — only actually-unowned blocks are.
     expect(inputs[0]?.humanNotes).toBeUndefined();
     expect(inputs[1]?.humanNotes).toEqual(['typed by hand']);
   });
 
-  it('the update carries the items the compose READ, for the sink’s race check', async () => {
+  it('a previous meeting’s notes are not read as the person’s, on any tick', async () => {
+    // The control for the removed gate: an outline that already holds the
+    // last meeting's bullet, present from tick ONE, and the compose is not
+    // told a person wrote it.
     const schedule = new ManualScheduler();
-    const updates: NotesUpdate[] = [];
-    // Reads change between ticks, the way a doc being typed into does.
-    const reads = [
-      { markdown: 'a', items: ['a'], human: [] as string[] },
-      { markdown: 'b', items: ['a', 'b'], human: ['b'] },
-    ];
+    const inputs: NotesComposeInput[] = [];
+    const session = beginNotesSession(
+      {
+        composer: {
+          name: 'capture',
+          compose(input) {
+            inputs.push(input);
+            return Promise.resolve([]);
+          },
+        },
+        quietMs: 1000,
+        schedule,
+        readOutline: () => [block('old', 'last meeting’s bullet', 'meeting-notes')],
+        onNotes: () => {},
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'First.', final: true });
+    await session.end();
+    expect(inputs[0]?.outline).toHaveLength(1);
+    expect(inputs[0]?.humanNotes).toBeUndefined();
+  });
+
+  it('the heading this meeting writes under is asked for per tick, with the outline', async () => {
+    // Replaces the old `basedOn` assertion. The update used to carry the
+    // items the compose had read so the sink could withhold a change to a
+    // line that had moved underneath it; block ids do that structurally now
+    // (an edit naming a vanished block is refused on its own). What is left
+    // at THIS seam is that the heading id is resolved fresh each tick,
+    // against the outline that tick read — so a section a person renamed is
+    // still found, and a section they deleted is re-opened.
+    const schedule = new ManualScheduler();
+    const asked: Array<readonly string[]> = [];
+    const inputs: NotesComposeInput[] = [];
+    const outlines = [[block('h1', 'Meeting notes', 'meeting-notes')], [block('h2', 'Renamed')]];
     let call = 0;
     const session = beginNotesSession(
       {
-        composer: { name: 's', compose: async () => '## Meeting notes\n\n- n' },
+        composer: {
+          name: 's',
+          compose(input) {
+            inputs.push(input);
+            return Promise.resolve(editsSaying('- n'));
+          },
+        },
         quietMs: 1000,
         schedule,
-        readSection: () => reads[Math.min(call++, reads.length - 1)]!,
-        onNotes: (u) => updates.push(u),
+        readOutline: () => outlines[Math.min(call++, outlines.length - 1)]!,
+        notesHeadingId: ({ outline }) => {
+          asked.push(outline.map((e) => e.id));
+          return outline[0]?.id;
+        },
+        onNotes: () => {},
       },
       ids,
     );
@@ -1218,19 +1366,20 @@ describe('the composer reads the LIVE section, not only its own last answer', ()
     schedule.fire();
     session.onTurn({ turn: 1, text: 'Second.', final: true });
     await session.end();
-    expect(updates.map((u) => u.basedOn)).toEqual([['a'], ['a', 'b']]);
+    expect(asked).toEqual([['h1'], ['h2']]);
+    expect(inputs.map((i) => i.notesHeadingId)).toEqual(['h1', 'h2']);
   });
 
-  it('a section that cannot be read costs the tick its awareness, never its notes', async () => {
+  it('an outline that cannot be read costs the tick its awareness, never its notes', async () => {
     const schedule = new ManualScheduler();
     const updates: NotesUpdate[] = [];
     const errors: string[] = [];
     const session = beginNotesSession(
       {
-        composer: { name: 's', compose: async () => 'notes' },
+        composer: { name: 's', compose: async () => editsSaying('notes') },
         quietMs: 1000,
         schedule,
-        readSection: () => {
+        readOutline: () => {
           throw new Error('doc gone');
         },
         onNotes: (u) => updates.push(u),
@@ -1241,7 +1390,7 @@ describe('the composer reads the LIVE section, not only its own last answer', ()
     session.onTurn({ turn: 0, text: 'First.', final: true });
     await session.end();
     expect(updates.length).toBe(1);
-    expect(updates[0]?.basedOn).toBeUndefined();
+    expect(composedMarkdown(updates[0]!)).toBe('notes');
     expect(errors).toEqual(['doc gone']);
   });
 });
@@ -1255,7 +1404,7 @@ describe('inline speaker tags', () => {
     name: 'scripted',
     compose(input) {
       inputs.push(input);
-      return Promise.resolve(replies.shift() ?? '## Meeting notes');
+      return Promise.resolve(editsSaying(replies.shift() ?? '## Meeting notes'));
     },
   });
 
@@ -1313,7 +1462,9 @@ describe('inline speaker tags', () => {
     session.onTurn({ turn: 90, text: 'mm', final: false, speaker: 'Z' });
     session.onTurn({ turn: 0, text: 'Move the gate.', final: true, speaker: 'B' });
     await session.end();
-    expect(updates[0]?.notes).toContain('[@Speaker B](speaker:B?t=0) wants the gate moved.');
+    expect(composedMarkdown(updates[0]!)).toContain(
+      '[@Speaker B](speaker:B?t=0) wants the gate moved.',
+    );
   });
 
   it('unwraps a tag naming a voice the meeting never carried, and says so', async () => {
@@ -1338,28 +1489,36 @@ describe('inline speaker tags', () => {
     );
     session.onTurn({ turn: 0, text: 'Somebody should run it.', final: true, speaker: 'B' });
     await session.end();
-    expect(updates[0]?.notes).toContain('- Priya volunteered to run it.');
-    expect(updates[0]?.notes).not.toContain('speaker:C');
+    expect(composedMarkdown(updates[0]!)).toContain('- Priya volunteered to run it.');
+    expect(composedMarkdown(updates[0]!)).not.toContain('speaker:C');
     expect(errors.join(' ')).toContain('no such voice');
   });
 
-  it('a tag survives the round trip into the next compose', async () => {
+  it('a tag survives normalization on every tick, not just the one that wrote it', async () => {
     // The positive control for the gate above: a tag for a voice the meeting
-    // DID carry is left alone, so `previous` still carries the attribution.
+    // DID carry is left alone and gains its `?t=`, on the second tick as on
+    // the first.
+    //
+    // WHAT CHANGED. This used to read the round trip off `input.previous` —
+    // the composer's own last answer, held in this module. There is no such
+    // memory; the words go to the doc and the next tick reads the doc. So the
+    // assertion is on what each tick WROTE. The round trip through a real doc
+    // is `notetaker-behaviour.test.ts`.
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
+    const updates: NotesUpdate[] = [];
     const session = beginNotesSession(
       {
         composer: scripted(
           [
             '## Meeting notes\n\n- [@Speaker B](speaker:B) wants the gate moved.',
-            '## Meeting notes\n\n- [@Speaker B](speaker:B) wants the gate moved, by Friday.',
+            '- [@Speaker B](speaker:B) wants the gate moved, by Friday.',
           ],
           inputs,
         ),
         quietMs: 1000,
         schedule,
-        onNotes: () => {},
+        onNotes: (u) => updates.push(u),
       },
       ids,
     );
@@ -1372,20 +1531,28 @@ describe('inline speaker tags', () => {
     await new Promise((r) => setTimeout(r, 0));
     session.onTurn({ turn: 1, text: 'By Friday.', final: true, speaker: 'B' });
     await session.end();
-    expect(inputs[1]?.previous).toContain('[@Speaker B](speaker:B?t=0)');
+    expect(composedMarkdown(updates[0]!)).toContain('[@Speaker B](speaker:B?t=0)');
+    expect(composedMarkdown(updates[1]!)).toContain('[@Speaker B](speaker:B?t=1)');
   });
 
-  it('a rename rewrites the tags in the session memory and names the label to the sink', async () => {
+  it('a rename names the label to the sink, and the next tick composes under it', async () => {
+    // WHAT CHANGED. The old title was "rewrites the tags in the session
+    // memory and names the label to the sink", and it asserted both halves
+    // here. The memory is gone: the rewrite of words ALREADY WRITTEN is the
+    // doc's, and `meeting-notes-doc.test.ts` "applyNotesRelabel" holds it —
+    // including the sweep-order case (Devi → Devi Raman without "Raman
+    // Raman") that used to have a copy in this file.
+    //
+    // What is still this module's, and is what remains here: it decides the
+    // rename happened, addresses it by ENGINE LABEL with the display name it
+    // had been using, and composes under the new name from the next tick on.
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
     const relabels: NotesRelabel[] = [];
     const session = beginNotesSession(
       {
         composer: scripted(
-          [
-            '## Meeting notes\n\n- [@Speaker B](speaker:B) wants the gate moved.',
-            '## Meeting notes\n\n- more',
-          ],
+          ['## Meeting notes\n\n- [@Speaker B](speaker:B) wants the gate moved.', '- more'],
           inputs,
         ),
         quietMs: 1000,
@@ -1407,47 +1574,8 @@ describe('inline speaker tags', () => {
     await session.end();
 
     expect(relabels[0]).toMatchObject({ label: 'B', from: 'Speaker B', to: 'Devi' });
-    expect(inputs[1]?.previous).toContain('[@Devi](speaker:B?t=0) wants the gate moved.');
-    expect(inputs[1]?.previous).not.toContain('Speaker B');
-  });
-
-  it('extends a name in the session memory without saying it twice', async () => {
-    // "Devi" survives inside "Devi Raman", so the untagged sweep has to run
-    // before the retag rather than after it — otherwise it finds the old name
-    // inside the tag the retag has just written. Same order, same reason, as
-    // the doc side.
-    const schedule = new ManualScheduler();
-    const inputs: NotesComposeInput[] = [];
-    const session = beginNotesSession(
-      {
-        composer: scripted(
-          [
-            '## Meeting notes\n\n- [@Devi](speaker:B) wants it. Devi will file it.',
-            '## Meeting notes\n\n- more',
-          ],
-          inputs,
-        ),
-        quietMs: 1000,
-        schedule,
-        onNotes: () => {},
-      },
-      ids,
-    );
-    session.nameSpeaker('B', 'Devi');
-    // A second voice, heard only as a partial: tags and speaker names are
-    // suppressed until the session is genuinely multi-speaker (owner's call,
-    // 2026-08-31), and a partial registers the voice without adding a turn.
-    session.onTurn({ turn: 90, text: 'mm', final: false, speaker: 'Z' });
-    session.onTurn({ turn: 0, text: 'Move the gate.', final: true, speaker: 'B' });
-    schedule.fire();
-    await new Promise((r) => setTimeout(r, 0));
-    session.nameSpeaker('B', 'Devi Raman');
-    session.onTurn({ turn: 1, text: 'By Friday.', final: true, speaker: 'B' });
-    await session.end();
-
-    expect(inputs[1]?.previous).toContain('[@Devi Raman](speaker:B?t=0) wants it.');
-    expect(inputs[1]?.previous).toContain('Devi Raman will file it.');
-    expect(inputs[1]?.previous).not.toContain('Raman Raman');
+    expect(inputs[0]?.tick.turns[0]?.speaker).toBe('Speaker B');
+    expect(inputs[1]?.tick.turns[0]?.speaker).toBe('Devi');
   });
 
   it('leaves a line the person wrote exactly as they wrote it', async () => {
@@ -1469,11 +1597,7 @@ describe('inline speaker tags', () => {
         ),
         quietMs: 1000,
         schedule,
-        readSection: () => ({
-          markdown: `## Meeting notes\n\n- ${mine}`,
-          items: [`item ${mine}`],
-          human: [mine],
-        }),
+        readOutline: () => [{ id: 'b-mine', kind: 'listItem', nodeName: 'listItem', text: mine }],
         onNotes: (u) => updates.push(u),
       },
       ids,
@@ -1487,8 +1611,8 @@ describe('inline speaker tags', () => {
     await new Promise((r) => setTimeout(r, 0));
     session.onTurn({ turn: 1, text: 'Two.', final: true, speaker: 'B' });
     await session.end();
-    expect(updates[1]?.notes).toContain(`- ${mine}`);
-    expect(updates[1]?.notes).toContain('- [@Speaker B](speaker:B?t=1) said it.');
+    expect(composedMarkdown(updates[1]!)).toContain(`- ${mine}`);
+    expect(composedMarkdown(updates[1]!)).toContain('- [@Speaker B](speaker:B?t=1) said it.');
   });
 });
 
@@ -1513,8 +1637,12 @@ describe('a tagged meeting through the audio socket', () => {
       const bullets = input.tick.turns.map(
         (t) => `- [@${t.speaker}](speaker:${t.speakerLabel}) said "${t.text}"`,
       );
-      const head = input.previous ?? '## Meeting notes';
-      return Promise.resolve([head, ...bullets].join('\n'));
+      const headingId = input.notesHeadingId;
+      return Promise.resolve(
+        headingId === undefined
+          ? editsSaying(['## Meeting notes', '', ...bullets].join('\n'))
+          : [{ op: 'insert_under_heading', headingId, markdown: bullets.join('\n') }],
+      );
     },
   };
 
@@ -1650,7 +1778,7 @@ describe('a spoken correction riding the notes session', () => {
   it('reaches the doc BEFORE the section is read for the compose', async () => {
     // Ordering is the whole design: the note being corrected was written on
     // an earlier tick and is already in the doc, so the correction lands
-    // first and this tick's compose reads the corrected words as `previous`.
+    // first and this tick's compose reads the corrected words off the doc.
     // Land it after the compose instead and the composer echoes the old
     // wording back, and the merge has to fight over which one wins.
     const schedule = new ManualScheduler();
@@ -1661,15 +1789,15 @@ describe('a spoken correction riding the notes session', () => {
           name: 'recording-stub',
           compose: () => {
             order.push('compose');
-            return Promise.resolve('## Meeting notes\n\n- noted');
+            return Promise.resolve(editsSaying('## Meeting notes\n\n- noted'));
           },
         },
         quietMs: 1000,
         schedule,
         onNotes: () => order.push('write'),
-        readSection: () => {
+        readOutline: () => {
           order.push('read');
-          return null;
+          return [];
         },
         captureIntents: () =>
           Promise.resolve({
@@ -1748,7 +1876,7 @@ describe('a spoken correction riding the notes session', () => {
     await session.end();
     expect(errors).toContain('doc write refused');
     expect(updates).toHaveLength(1);
-    expect(updates[0]?.notes).toContain('No, I said Thursday.');
+    expect(composedMarkdown(updates[0]!)).toContain('No, I said Thursday.');
   });
 
   it('a pass that returns no corrections asks the sink nothing', async () => {
@@ -1784,7 +1912,7 @@ describe('a late speaker correction reaches notes already written', () => {
     name: 'scripted',
     compose(input) {
       inputs.push(input);
-      return Promise.resolve(replies.shift() ?? '## Meeting notes');
+      return Promise.resolve(editsSaying(replies.shift() ?? '## Meeting notes'));
     },
   });
 
@@ -1830,10 +1958,18 @@ describe('a late speaker correction reaches notes already written', () => {
 
     session.onTurn({ turn: 1, text: 'By Friday.', final: true, speaker: 'C' });
     await session.end();
-    // The session's own memory of the notes is corrected too, so the next
-    // compose does not put the old voice straight back.
-    expect(inputs[1]?.previous).toContain('[@Speaker C](speaker:C?t=0) wants the gate moved.');
-    expect(inputs[1]?.previous).not.toContain('speaker:B');
+    // WHAT CHANGED. This used to also assert that the SESSION's mirror of
+    // the notes had been rewritten. There is no mirror: the rewrite happens
+    // in the doc, off this one payload — `meeting-notes-doc.test.ts`,
+    // "moves a mention whose every turn moved the same way". What this seam
+    // owes is the payload and the name to write, and that it is sent ONCE.
+    // The names map carries only voices somebody has NAMED; C has not been
+    // named, so the doc falls back to its "Speaker C" placeholder — which is
+    // why the map is asserted for what it does not claim.
+    expect(corrections[0]?.names.C).toBeUndefined();
+    expect(corrections).toHaveLength(1);
+    // And the next tick composes under the corrected voice by itself.
+    expect(inputs[1]?.tick.turns[0]?.speaker).toBe('Speaker C');
   });
 
   it('takes the batch as one, so a mention whose turns all moved is moved', async () => {
@@ -1843,6 +1979,7 @@ describe('a late speaker correction reaches notes already written', () => {
     // then find it disagreeing with itself on the second.
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
+    const corrections: NotesReattribution[] = [];
     const session = beginNotesSession(
       {
         composer: scripted(
@@ -1855,6 +1992,7 @@ describe('a late speaker correction reaches notes already written', () => {
         quietMs: 1000,
         schedule,
         onNotes: () => {},
+        onReattribute: (r) => corrections.push(r),
       },
       ids,
     );
@@ -1874,14 +2012,28 @@ describe('a late speaker correction reaches notes already written', () => {
 
     session.onTurn({ turn: 2, text: 'By Friday.', final: true, speaker: 'C' });
     await session.end();
-    expect(inputs[1]?.previous).toContain('[@Speaker C](speaker:C?t=0,1) wants the gate moved.');
-    expect(inputs[1]?.previous).not.toContain('unsure');
+    // ONE payload naming BOTH turns — the batch taken as one. Sent as two, a
+    // mention riding both turns would be moved by the first and then found
+    // disagreeing with itself by the second, and the doc would mark it
+    // unsure. That the doc does the right thing with each shape is
+    // `meeting-notes-doc.test.ts`; that it is handed one and not two is here.
+    expect(corrections).toHaveLength(1);
+    expect([...corrections[0]!.revisions]).toEqual([
+      [0, 'C'],
+      [1, 'C'],
+    ]);
   });
 
-  it('marks what it cannot place, and says so, rather than guessing', async () => {
+  it('sends a partial batch as the partial batch it is, and guesses nothing', async () => {
+    // WHAT CHANGED. The old title ended "and says so", and it asserted the
+    // `unsure=1` marker plus an error line — both of which are now written by
+    // the doc, off this payload (`meeting-notes-doc.test.ts`, "marks a
+    // mention it cannot place rather than guessing between two voices").
+    // The disagreement itself is made HERE, by sending the one turn that
+    // moved and not inventing a verdict for the one that did not.
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
-    const errors: string[] = [];
+    const corrections: NotesReattribution[] = [];
     const session = beginNotesSession(
       {
         composer: scripted(
@@ -1894,7 +2046,7 @@ describe('a late speaker correction reaches notes already written', () => {
         quietMs: 1000,
         schedule,
         onNotes: () => {},
-        onError: (m) => errors.push(m),
+        onReattribute: (r) => corrections.push(r),
       },
       ids,
     );
@@ -1913,8 +2065,9 @@ describe('a late speaker correction reaches notes already written', () => {
 
     session.onTurn({ turn: 2, text: 'By Friday.', final: true, speaker: 'C' });
     await session.end();
-    expect(inputs[1]?.previous).toContain('(speaker:B?t=0,1&unsure=1)');
-    expect(errors.join(' ')).toContain('marked unsure');
+    expect(corrections).toHaveLength(1);
+    expect([...corrections[0]!.revisions]).toEqual([[1, 'C']]);
+    expect(inputs[1]).toBeDefined();
   });
 
   it('a turn still waiting on a tick is not a correction at all', async () => {
@@ -1946,6 +2099,7 @@ describe('a late speaker correction reaches notes already written', () => {
     // ON those notes rather than under them.
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
+    const order: string[] = [];
     let release: () => void = () => {};
     const thinking = new Promise<void>((resolve) => {
       release = resolve;
@@ -1956,13 +2110,20 @@ describe('a late speaker correction reaches notes already written', () => {
         inputs.push(input);
         if (inputs.length === 1) {
           await thinking;
-          return '## Meeting notes\n\n- [@Speaker B](speaker:B) wants the gate moved.';
+          order.push('composed');
+          return editsSaying('## Meeting notes\n\n- [@Speaker B](speaker:B) wants the gate moved.');
         }
-        return '## Meeting notes\n\n- more';
+        return editsSaying('- more');
       },
     };
     const session = beginNotesSession(
-      { composer, quietMs: 1000, schedule, onNotes: () => {} },
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        onNotes: () => {},
+        onReattribute: () => order.push('reattributed'),
+      },
       ids,
     );
     // A second voice, heard only as a partial: tags and speaker names are
@@ -1981,8 +2142,12 @@ describe('a late speaker correction reaches notes already written', () => {
 
     session.onTurn({ turn: 1, text: 'By Friday.', final: true, speaker: 'C' });
     await session.end();
-    expect(inputs[1]?.previous).toContain('speaker:C?t=0');
-    expect(inputs[1]?.previous).not.toContain('speaker:B');
+    // ORDER IS THE ASSERTION, and it is the same one as before by a different
+    // route: the correction is queued behind the compose that was in flight,
+    // so it lands ON those words rather than under them. It used to be read
+    // off the session's mirror of the notes; there is no mirror, so it is
+    // read off the sequence the sinks saw.
+    expect(order).toEqual(['composed', 'reattributed']);
   });
 
   it('re-labels a carried turn instead of correcting words nobody has read', async () => {
@@ -2001,7 +2166,9 @@ describe('a late speaker correction reaches notes already written', () => {
           first = false;
           return Promise.reject(new Error('composer down'));
         }
-        return Promise.resolve('## Meeting notes\n\n- [@Speaker C](speaker:C) wants the gate.');
+        return Promise.resolve(
+          editsSaying('## Meeting notes\n\n- [@Speaker C](speaker:C) wants the gate.'),
+        );
       },
     };
     const session = beginNotesSession(
@@ -2082,7 +2249,7 @@ describe('session start and tick lifecycle', () => {
       compose(input) {
         calls++;
         if (calls === 1) return Promise.reject(new Error('over capacity'));
-        return Promise.resolve(`- ${input.tick.turns.map((t) => t.text).join(' / ')}`);
+        return Promise.resolve(editsSaying(`- ${input.tick.turns.map((t) => t.text).join(' / ')}`));
       },
     };
     const session = beginNotesSession(
@@ -2125,7 +2292,7 @@ describe('speaker tags only in multi-speaker sessions', () => {
       name: 'capture',
       compose(input) {
         inputs.push(input);
-        return Promise.resolve('- noted');
+        return Promise.resolve(editsSaying('- noted'));
       },
     };
     const session = beginNotesSession(
@@ -2146,7 +2313,7 @@ describe('speaker tags only in multi-speaker sessions', () => {
       name: 'capture',
       compose(input) {
         inputs.push(input);
-        return Promise.resolve('- noted');
+        return Promise.resolve(editsSaying('- noted'));
       },
     };
     const session = beginNotesSession(
@@ -2169,7 +2336,9 @@ describe('speaker tags only in multi-speaker sessions', () => {
     const composer: NotesComposer = {
       name: 'inventive',
       compose() {
-        return Promise.resolve('## Meeting notes\n\n- [@Speaker A](speaker:A) said it.');
+        return Promise.resolve(
+          editsSaying('## Meeting notes\n\n- [@Speaker A](speaker:A) said it.'),
+        );
       },
     };
     const session = beginNotesSession(
@@ -2185,8 +2354,8 @@ describe('speaker tags only in multi-speaker sessions', () => {
     session.onTurn({ turn: 0, text: 'Said it.', final: true, speaker: 'A' });
     schedule.fire();
     await session.end();
-    expect(updates[0]?.notes).not.toContain('speaker:A');
-    expect(updates[0]?.notes).toContain('said it.');
+    expect(composedMarkdown(updates[0]!)).not.toContain('speaker:A');
+    expect(composedMarkdown(updates[0]!)).toContain('said it.');
   });
 });
 
@@ -2206,7 +2375,7 @@ describe('a compose refused for running past the output ceiling', () => {
     const schedule = new ManualScheduler();
     const composer: NotesComposer = {
       name: 'refuses',
-      compose(): Promise<string> {
+      compose(): Promise<readonly prose.BlockEdit[]> {
         return Promise.reject(
           new Error('notes compose hit max_tokens; refusing a truncated section'),
         );

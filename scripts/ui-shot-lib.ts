@@ -25,6 +25,22 @@ export const MOBILE_TIER_MAX_WIDTH = 1100;
 /** The stock macOS install location, the last fallback. */
 export const DEFAULT_CHROME_BIN = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
+/**
+ * Where to look when nobody said. macOS first, because that is this fleet;
+ * then the paths a Linux CI image installs Chrome at, so `check:client-boot`
+ * needs no per-runner configuration to find a browser. An explicit `--chrome`
+ * or `$CW_CHROME_BIN` never falls through to this list — a path someone typed
+ * and got wrong must fail loudly, not silently run a different browser.
+ */
+export const CHROME_CANDIDATES: readonly string[] = [
+  DEFAULT_CHROME_BIN,
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/snap/bin/chromium',
+];
+
 export interface ShotOptions {
   url: string;
   width: number;
@@ -230,15 +246,20 @@ export function resolveChromeBin(
   env: Record<string, string | undefined> = process.env,
   exists: (p: string) => boolean = existsSync,
 ): string {
-  const chosen = flag ?? env.CW_CHROME_BIN ?? DEFAULT_CHROME_BIN;
-  if (!exists(chosen)) {
-    const source = flag ? '--chrome' : env.CW_CHROME_BIN ? 'CW_CHROME_BIN' : 'the default path';
+  const named = flag ?? env.CW_CHROME_BIN;
+  if (named !== undefined) {
+    if (exists(named)) return named;
     throw new Error(
-      `Chrome binary not found at ${chosen} (from ${source}). ` +
+      `Chrome binary not found at ${named} (from ${flag ? '--chrome' : 'CW_CHROME_BIN'}). ` +
         'Pass --chrome <bin> or set CW_CHROME_BIN.',
     );
   }
-  return chosen;
+  const found = CHROME_CANDIDATES.find((c) => exists(c));
+  if (found) return found;
+  throw new Error(
+    `Chrome binary not found at any of: ${CHROME_CANDIDATES.join(', ')}. ` +
+      'Pass --chrome <bin> or set CW_CHROME_BIN.',
+  );
 }
 
 /**

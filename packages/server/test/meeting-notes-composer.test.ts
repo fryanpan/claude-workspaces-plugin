@@ -1,7 +1,13 @@
 /**
- * The real notes composer: prompt shape, reply sanitation, and the HTTP
- * seam — all through a stubbed fetch, because a test that reached
- * api.anthropic.com would spend real money to assert string handling.
+ * The real notes composer: prompt shape, reply reading, and the HTTP seam —
+ * all through a stubbed fetch, because a test that reached api.anthropic.com
+ * would spend real money to assert string handling.
+ *
+ * WHAT CHANGED. The composer used to be handed the notes as prose and to
+ * answer with prose; it is now handed an OUTLINE of blocks with ids and
+ * answers with a JSON array of edits. So the prompt assertions are about what
+ * the outline renders as, and the reply assertions are about edits rather than
+ * about a sanitized markdown string.
  *
  * All fixtures are synthetic. The repo is public.
  */
@@ -10,9 +16,12 @@ import {
   NOTES_MODEL,
   buildNotesPrompt,
   createHaikuNotesComposer,
-  sanitizeNotesReply,
+  readNotesEdits,
 } from '../src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
+
+/** One edit, as a model would answer with it. */
+const ONE_EDIT = '[{"op":"insert_under_heading","headingId":"h1","markdown":"- the sync is slow"}]';
 
 const input: NotesComposeInput = {
   docId: 'doc-a',
@@ -25,7 +34,25 @@ const input: NotesComposeInput = {
       { turn: 4, text: 'Measure before rewriting.' },
     ],
   },
-  previous: '## Meeting notes\n- earlier point',
+  outline: [
+    {
+      id: 'h1',
+      kind: 'heading',
+      nodeName: 'heading',
+      level: 2,
+      text: 'Meeting notes',
+      author: 'meeting-notes',
+    },
+    {
+      id: 'b1',
+      kind: 'listItem',
+      nodeName: 'listItem',
+      text: 'earlier point',
+      author: 'meeting-notes',
+      underHeadingId: 'h1',
+    },
+  ],
+  notesHeadingId: 'h1',
   context: {
     docTitle: 'Q3 planning',
     taskTitles: ['Bryan can hear his meeting become notes'],
@@ -44,14 +71,55 @@ function stubFetch(body: unknown, status = 200) {
 }
 
 describe('notes prompt', () => {
-  it('carries the delta, the previous notes, and the project context', () => {
+  it('carries the delta, the doc as addressable blocks, and the project context', () => {
     const { system, user } = buildNotesPrompt(input);
-    expect(system).toContain('## Meeting notes');
+    expect(system).toContain('insert_under_heading');
     for (const turn of input.tick.turns) expect(user).toContain(turn.text);
-    expect(user).toContain('## Meeting notes\n- earlier point');
+    // The block table, not the notes as prose: an id, its kind, whose it is.
+    expect(user).toContain('b1 bullet yours under=h1 | earlier point');
+    expect(user).toContain('h1 h2 yours | Meeting notes');
     expect(user).toContain('Q3 planning');
     expect(user).toContain('Bryan can hear his meeting become notes');
     expect(user).toContain('/repo/planning');
+  });
+
+  it('names which heading is this meeting’s, so a bullet has an id to go under', () => {
+    const { user } = buildNotesPrompt(input);
+    expect(user).toContain('notes are under heading h1.');
+  });
+
+  it('a block a person has touched reads as theirs, which is what gates a rewrite', () => {
+    // `author` is cleared by the doc the moment a person edits a block, so
+    // "theirs" is the whole signal the model gets that a rewrite would land
+    // as a suggestion. If this line ever rendered "yours" the model would be
+    // told it may freely overwrite a person's words.
+    const { user } = buildNotesPrompt({
+      ...input,
+      outline: [{ id: 'b9', kind: 'listItem', nodeName: 'listItem', text: 'my own line' }],
+    });
+    expect(user).toContain('b9 bullet theirs | my own line');
+    expect(user).not.toContain('b9 bullet yours');
+  });
+
+  it('asks for a section to be opened when the meeting has none', () => {
+    const { user } = buildNotesPrompt({
+      ...input,
+      outline: [{ id: 'p1', kind: 'block', nodeName: 'paragraph', text: 'agenda' }],
+      notesHeadingId: undefined,
+    });
+    expect(user).toContain('NO notes section');
+    expect(user).toContain('## Meeting notes');
+  });
+
+  it('an empty doc says so rather than rendering an empty table', () => {
+    const { user } = buildNotesPrompt({
+      ...input,
+      outline: [],
+      notesHeadingId: undefined,
+      context: undefined,
+    });
+    expect(user).toContain('The doc is empty');
+    expect(user).not.toContain('Project context');
   });
 
   it('names the speaker on each line when the tick knows one', () => {
@@ -93,28 +161,56 @@ describe('notes prompt', () => {
     expect(system).toContain('[@Name](speaker:LABEL)');
   });
 
-  it('tells the model a person’s own line never takes a speaker tag', () => {
+  it('tells the model a block that is not its own is edited only as a correction', () => {
     const { system } = buildNotesPrompt(input);
-    expect(system).toContain('never put a speaker tag on one');
-  });
-
-  it('says so when there are no notes yet, instead of an empty section', () => {
-    const { user } = buildNotesPrompt({ ...input, previous: null, context: undefined });
-    expect(user).toContain('none yet');
-    expect(user).not.toContain('Project context');
+    expect(system).toContain('ONLY EDIT A BLOCK MARKED "yours"');
+    expect(system).toContain('suggestion');
   });
 });
 
-describe('sanitizeNotesReply', () => {
-  it('unwraps a fenced reply and keeps the heading', () => {
-    const out = sanitizeNotesReply('```markdown\n## Meeting notes\n- a\n```');
-    expect(out).toBe('## Meeting notes\n- a');
+describe('readNotesEdits', () => {
+  it('reads a bare array of edits', () => {
+    expect(readNotesEdits(ONE_EDIT)).toEqual([
+      { op: 'insert_under_heading', headingId: 'h1', markdown: '- the sync is slow' },
+    ]);
   });
 
-  it('prepends the heading when the model forgot it', () => {
-    const out = sanitizeNotesReply('- bare bullet');
-    expect(out.startsWith('## Meeting notes\n')).toBe(true);
-    expect(out).toContain('- bare bullet');
+  it('unwraps a fenced reply, because models fence JSON too', () => {
+    expect(readNotesEdits(`\`\`\`json\n${ONE_EDIT}\n\`\`\``)).toHaveLength(1);
+  });
+
+  it('keeps the good edits and drops the malformed one', () => {
+    const edits = readNotesEdits(
+      `[{"op":"insert_at_end","markdown":"## Risks"},{"op":"teleport","blockId":"b1"}]`,
+    );
+    expect(edits).toEqual([{ op: 'insert_at_end', markdown: '## Risks' }]);
+  });
+
+  it('a reply it could not read throws, so the tick carries its words forward', () => {
+    // Prose is the failure this contract exists to catch: the old composer
+    // would have taken it as the notes.
+    expect(() => readNotesEdits('## Meeting notes\n- a point')).toThrow('no usable edits');
+    // Every entry discarded is the same failure: nothing usable came back.
+    expect(() => readNotesEdits('[{"op":"teleport"}]')).toThrow('no usable edits');
+  });
+
+  it('a well-formed empty list is an answer, not a failure', () => {
+    // A tick of greetings changes nothing, and `NotesComposer.compose`
+    // documents that as legitimate. Throwing on it made every such tick a
+    // compose failure whose turns were carried forward UNCAPPED, so a stretch
+    // of small talk re-sent an ever-growing turn list to the model.
+    expect(readNotesEdits('[]')).toEqual([]);
+    expect(readNotesEdits('{"edits": []}')).toEqual([]);
+    expect(readNotesEdits('```json\n[]\n```')).toEqual([]);
+  });
+
+  it('finds the array past a stray brace in the preamble', () => {
+    // Taking whichever of `[` and `{` came first picked the brace here, and
+    // the matching `}` closed before the array had opened — so the whole
+    // reply parsed to nothing and a good tick was lost.
+    expect(readNotesEdits(`Here's what I'd note {roughly}: ${ONE_EDIT}`)).toEqual([
+      { op: 'insert_under_heading', headingId: 'h1', markdown: '- the sync is slow' },
+    ]);
   });
 });
 
@@ -123,15 +219,17 @@ describe('createHaikuNotesComposer', () => {
     expect(createHaikuNotesComposer({ apiKey: null })).toBeNull();
   });
 
-  it('posts the prompt to the API with the dedicated key and returns the notes', async () => {
+  it('posts the prompt to the API with the dedicated key and returns the edits', async () => {
     const { impl, calls } = stubFetch({
-      content: [{ text: '## Meeting notes\n- the sync is the bottleneck' }],
+      content: [{ text: ONE_EDIT }],
       stop_reason: 'end_turn',
     });
     const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
     expect(composer).not.toBeNull();
-    const notes = await composer?.compose(input);
-    expect(notes).toBe('## Meeting notes\n- the sync is the bottleneck');
+    const edits = await composer?.compose(input);
+    expect(edits).toEqual([
+      { op: 'insert_under_heading', headingId: 'h1', markdown: '- the sync is slow' },
+    ]);
     expect(calls.length).toBe(1);
     expect(calls[0]?.url).toBe('https://api.anthropic.com/v1/messages');
     const headers = calls[0]?.init.headers as Record<string, string>;
@@ -150,16 +248,16 @@ describe('createHaikuNotesComposer', () => {
     expect(composer?.compose(input)).rejects.toThrow('529');
   });
 
-  it('a reply cut at the token ceiling rejects rather than truncating the notes', async () => {
+  it('a reply cut at the token ceiling rejects rather than applying half a batch', async () => {
     const { impl } = stubFetch({
-      content: [{ text: '## Meeting notes\n- cut mid' }],
+      content: [{ text: '[{"op":"insert_at_end","markdown":"## cut' }],
       stop_reason: 'max_tokens',
     });
     const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
     expect(composer?.compose(input)).rejects.toThrow('max_tokens');
   });
 
-  it('an empty reply rejects — blank notes must never replace real ones', async () => {
+  it('an empty reply rejects — a tick that wrote nothing must not read as covered', async () => {
     const { impl } = stubFetch({ content: [{ text: '   ' }], stop_reason: 'end_turn' });
     const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
     expect(composer?.compose(input)).rejects.toThrow('empty');
@@ -205,24 +303,5 @@ describe('material pulled in, in the prompt', () => {
   it('says nothing about material when the tick asked for none', () => {
     const { user } = buildNotesPrompt(input);
     expect(user).not.toContain('asked to have pulled in');
-  });
-});
-
-describe('the person’s own lines in the prompt', () => {
-  it('names them, and says reproduce them verbatim or propose a change', () => {
-    const { system, user } = buildNotesPrompt({
-      ...input,
-      humanNotes: ['my own bullet, my own words'],
-    });
-    expect(user).toContain('Written by a person — reproduce verbatim:');
-    expect(user).toContain('- my own bullet, my own words');
-    expect(system).toContain('Reproduce each one character for character');
-    expect(system).toContain('suggestion');
-    expect(system).toContain('Never delete one');
-  });
-
-  it('says nothing about them when the person has written nothing', () => {
-    const { user } = buildNotesPrompt(input);
-    expect(user).not.toContain('Written by a person');
   });
 });
