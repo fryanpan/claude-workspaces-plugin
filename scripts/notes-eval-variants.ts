@@ -30,12 +30,19 @@
  * - `sonnet` / `opus`  the shipped prompt, composed by a bigger model.
  */
 
+import { type NotesMethod, notesMethodUsesLedger } from '../packages/core/src/index.ts';
 import type { NotesComposeInput, NotesTurn } from '../packages/server/src/meeting-notes.ts';
 import {
   contentWords,
   ideaCarried,
   sentencesOf,
 } from '../packages/server/src/notes-idea-coverage.ts';
+import {
+  LEDGER_EXTRACT_MODEL,
+  createNotesLedger,
+  nestedNotesInstructions,
+} from '../packages/server/src/notes-ledger.ts';
+import { composeSettings } from '../packages/server/src/notes-method-composer.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from '../packages/server/src/notes-prompt-store.ts';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -581,6 +588,69 @@ const ONE_NOTE_PER_IDEA = [
   '  room skims past costs a line. An idea left out is gone.',
 ].join('\n');
 
+/* ===== The three note-takers that actually ship ===== */
+
+/**
+ * `method:original`, `method:ledger-haiku`, `method:ledger-opus` — the rows
+ * the shipping decision is made on.
+ *
+ * EVERY OTHER VARIANT IN THIS FILE IS AN EXPLORATION, and each carries its own
+ * copy of the idea it was testing: its own extract prompt, its own carry
+ * window, its own instruction swap. That was right while the question was
+ * which idea to keep, and it is wrong now that three of them are code a person
+ * can select in the meeting sheet. A copy here that drifted from
+ * `notes-ledger.ts` by one word would report a rate for a note-taker nobody
+ * can run.
+ *
+ * So these three import the shipped modules and nothing else: the shipped
+ * ledger with the shipped extract prompt and the shipped carry window, the
+ * shipped nested writing rule, and the shipped per-method model, ceiling and
+ * effort out of `composeSettings`. When the ledger changes, this table changes
+ * with it or it stops compiling.
+ */
+function shippedLedgerHooks(ctx: VariantContext): MeetingHooks {
+  const ledger = createNotesLedger({
+    apiKey: ctx.key,
+    // The eval's counting fetch, so the extract's spend lands in the report.
+    // Off the books, a two-pass note-taker prices as a one-pass one.
+    fetchImpl: ctx.fetchFor(LEDGER_EXTRACT_MODEL),
+    onError: (m) => console.error(`  ${m}`),
+  });
+  return {
+    async before(input) {
+      // The turns, not the eval's rendered transcript: `ledgerTranscript` is
+      // how the shipped path labels speech for the extract, and a different
+      // rendering here would be a different first pass.
+      const checklist = await ledger.before(input.tick.turns);
+      return checklist.length === 0 ? {} : { extraPrompt: checklist };
+    },
+    async after(notes) {
+      ledger.after(notes);
+    },
+  };
+}
+
+function shippedMethod(method: NotesMethod): Variant {
+  const settings = composeSettings(method);
+  const ledger = notesMethodUsesLedger(method);
+  return {
+    name: `method:${method}`,
+    ...settings,
+    // `nestedNotesInstructions` throws nothing and asserts nothing on its own,
+    // so the anchor is asserted here the way every other variant asserts its
+    // swap: a ledger method silently running the flat prompt is the failure
+    // that makes the whole table meaningless.
+    ...(ledger
+      ? {
+          instructions: nestedNotesInstructions(DEFAULT_NOTES_INSTRUCTIONS, (m) => {
+            throw new Error(`method:${method}: ${m}`);
+          }),
+        }
+      : {}),
+    begin: ledger ? shippedLedgerHooks : passthrough,
+  };
+}
+
 export const VARIANTS: Record<string, Variant> = {
   baseline: { name: 'baseline', begin: passthrough },
   nested: {
@@ -680,6 +750,10 @@ export const VARIANTS: Record<string, Variant> = {
     begin: ledgerHooks,
   },
 };
+
+for (const method of ['original', 'ledger-haiku', 'ledger-opus'] as const) {
+  VARIANTS[`method:${method}`] = shippedMethod(method);
+}
 
 export function resolveVariant(name: string): Variant {
   const v = VARIANTS[name];
