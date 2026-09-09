@@ -85,6 +85,7 @@ import {
   readNotesOutline,
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
+import { type NotesHeadingStore, createNotesHeadingFileStore } from './notes-heading-store.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
   dropLegacyTranscriptSection,
@@ -166,10 +167,16 @@ export interface NotesContextTasks {
  *
  * PER DOC **AND** PER MEETING. A new recording opens its own section below
  * whatever the last one wrote — the owner's 2026-08-31 rule that a
- * stop-and-restart never replaces what is already written. It is memory only:
- * a restarted server remembers no heading, opens a new section on its first
- * tick, and can still only suggest on the previous one's bullets, which is the
- * safe direction.
+ * stop-and-restart never replaces what is already written.
+ *
+ * AND IT IS NO LONGER MEMORY ONLY. It used to be: a restarted server
+ * remembered no heading and opened a new section on its first tick, so a
+ * lunchtime deploy split one conversation across two `Meeting notes`
+ * headings. The id is written beside the meeting's own transcript now
+ * (`notes-heading-store.ts`), and the map in front of it is a cache. Keying
+ * on the meeting is what keeps the two cases apart: an id the store already
+ * knows belongs to the recording that opened it, and a new recording carries
+ * a new id no record answers to.
  */
 /** What a heading memory is keyed by. Both halves are load-bearing — see the
  *  `NotesHeadingMemory` note on cross-wiring. */
@@ -214,27 +221,46 @@ export interface NotesHeadingMemory {
  *  mistaken for the section. */
 const NOTES_HEADING_LEVEL = 2;
 
-export function createNotesHeadingMemory(): NotesHeadingMemory {
+export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadingMemory {
   // KEYED BY DOC **AND** MEETING. Keyed by doc alone, two recordings into one
   // doc cross-wired: the second one's `beginMeeting` wiped the first one's
   // memory, so the first one's next tick either adopted the second's heading
   // or opened a third section under a doc that already had two.
+  //
+  // The map is now a CACHE over `store`, which keeps the same fact beside the
+  // meeting's transcript. Without one the memory behaves exactly as it did:
+  // remembered for the life of the process and no longer.
   const byMeeting = new Map<string, string>();
   const keyOf = ({ docId, meetingId }: NotesMeetingIds): string => `${docId}::${meetingId}`;
   const present = (id: string, outline: readonly prose.OutlineEntry[]): boolean =>
     outline.some((e) => e.id === id && e.kind === 'heading');
+  /** What this meeting is writing under, reading through to the store on a
+   *  cache miss — which is every read of the first tick after a restart. */
+  const remembered = (ids: NotesMeetingIds): string | undefined => {
+    const key = keyOf(ids);
+    const held = byMeeting.get(key);
+    if (held !== undefined) return held;
+    const stored = store?.read(ids);
+    if (stored !== undefined) byMeeting.set(key, stored);
+    return stored;
+  };
+  /** Forget it in both places. Used only where the heading is GONE from the
+   *  doc: a remembered id whose block no longer exists would fail every edit
+   *  addressed to it for the rest of the meeting. */
+  const forget = (ids: NotesMeetingIds): void => {
+    byMeeting.delete(keyOf(ids));
+    store?.clear(ids);
+  };
   return {
     headingId(ids, outline) {
-      const key = keyOf(ids);
-      const id = byMeeting.get(key);
+      const id = remembered(ids);
       if (id === undefined) return undefined;
       if (present(id, outline)) return id;
-      byMeeting.delete(key);
+      forget(ids);
       return undefined;
     },
     learn(ids, before, after) {
-      const key = keyOf(ids);
-      const held = byMeeting.get(key);
+      const held = remembered(ids);
       if (held !== undefined && present(held, after)) return;
       const known = new Set(before.map((e) => e.id));
       const opened = after.find(
@@ -244,10 +270,18 @@ export function createNotesHeadingMemory(): NotesHeadingMemory {
           e.author === NOTES_AUTHOR_ID &&
           (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL,
       );
-      if (opened) byMeeting.set(key, opened.id);
-      else if (held !== undefined) byMeeting.delete(key);
+      if (opened) {
+        byMeeting.set(keyOf(ids), opened.id);
+        store?.write(ids, opened.id);
+      } else if (held !== undefined) forget(ids);
     },
     beginMeeting(ids) {
+      // IN MEMORY ONLY, AND THAT IS THE RESTART FIX. A meeting id is minted
+      // from the millisecond a recording started, so a session starting under
+      // one the store already knows is the SAME recording coming back after a
+      // restart — and it must find the section it opened rather than open a
+      // second one. A genuinely new recording carries a new id, which no
+      // record answers to, so it still gets a section of its own.
       byMeeting.delete(keyOf(ids));
     },
   };
@@ -499,9 +533,16 @@ export function withServerNotesSinks(
 ): MeetingNotesDeps {
   const extractor = options.taskExtractor;
   const captureBoard = deps.captureBoard;
-  // One heading memory per wiring, i.e. per server: it is keyed by doc, and a
-  // meeting is the life of one notes section.
-  const heading = deps.heading ?? createNotesHeadingMemory();
+  // One heading memory per wiring, i.e. per server: it is keyed by doc and
+  // meeting, and a meeting is the life of one notes section. Backed by the
+  // data dir when there is one, so the section survives a restart mid-meeting
+  // — a deploy at lunchtime used to leave one conversation under two
+  // headings.
+  const heading =
+    deps.heading ??
+    createNotesHeadingMemory(
+      deps.dataDir !== undefined ? createNotesHeadingFileStore(deps.dataDir) : undefined,
+    );
   const boardOf = (docId: string): string | undefined => {
     const doc = deps.docStore().get(docId);
     return doc?.meta.setId ?? deps.boardOf?.(docId);

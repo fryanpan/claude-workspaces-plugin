@@ -770,9 +770,10 @@ at the end of doc for now"*). A meeting opens its section with one
 that heading's BLOCK ID. So anything that lands below the section — a
 Research placeholder pressed or spoken between two ticks, a heading somebody
 typed — grows no second one; the next tick still addresses the same heading.
-The id is remembered per doc and cleared when a new recording starts
-(`NotesHeadingMemory`, below), which is the owner's 2026-08-31 rule that a
-stop-and-restart writes its own section rather than resuming the last one's.
+The id is remembered per doc AND per meeting, and a new recording carries a
+new meeting id (`NotesHeadingMemory`, below), which is the owner's 2026-08-31
+rule that a stop-and-restart writes its own section rather than resuming the
+last one's.
 Every earlier answer to "which section is mine" was a guess a person could
 invalidate — the doc's tail, the last heading whose text read "Meeting
 notes", the last section a ledger still claimed items in — and each produced
@@ -970,14 +971,25 @@ asked to follow, but as the only thing the write verb can do.
 heading its meeting opened — learned from the outline as the level-2 heading
 its first batch added — and re-checks each tick that the block is still there
 (`NotesHeadingMemory` in `meeting-notes-doc.ts`). Only a heading that has been
-DELETED makes it open a new one, and `beginMeeting` clears the memory so a new
-recording opens its own section below whatever the last one wrote. A person
-RENAMING the heading is a non-event, which is exactly what authorship alone
-could not deliver: renaming is a person edit, so it clears `cwAuthor` on the
-very heading the meeting is still writing under. The memory is in process
-only. A restarted server remembers no heading, opens a new section on its next
-tick, and can only suggest on the previous one's bullets — which is the safe
-direction to fall.
+DELETED makes it open a new one, and a new recording opens its own section
+below whatever the last one wrote — it carries a new meeting id, and the
+memory is keyed by meeting. A person RENAMING the heading is a non-event,
+which is exactly what authorship alone could not deliver: renaming is a person
+edit, so it clears `cwAuthor` on the very heading the meeting is still writing
+under.
+
+**And the memory outlives the process.** It used to be in process only: a
+restarted server remembered no heading and opened a second `Meeting notes` on
+its next tick, which split one conversation across two sections — and this
+repo deploys mid-day, so it happened for real. The id is written beside the
+meeting's own transcript as `<meetingId>-section.json`
+(`notes-heading-store.ts`), with the map in front of it as a cache, so a
+meeting that ticks again after a restart writes under the section it opened.
+The store holds a doc id, a meeting id and a block id — no words — and never
+throws: a record that cannot be written or read leaves the note-taker exactly
+as it behaved before the file existed. `beginMeeting` clears only the cache,
+because a session starting under a meeting id the store already knows IS that
+recording coming back.
 
 **A person and a tick may write in the same second.** There is ONE live Yjs
 document per file. The browser reaches it over the collaboration socket and the
