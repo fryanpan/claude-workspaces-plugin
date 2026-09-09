@@ -118,3 +118,73 @@ describe('the meeting bot client', () => {
     expect(subscribed).toBe(0);
   });
 });
+
+/**
+ * THE DEFAULT SUBSCRIBE, which every test above replaces with a seam — and
+ * which is exactly why a dead address in it survived: the injected stream
+ * always worked. It subscribed to `/events/<docId>`, the pre-cutover doc
+ * channel, so on a live server the EventSource 404'd and neither the bot's
+ * state nor a single word ever reached the strip. A doc's stream is
+ * `/workspaces/<ws>/docs/<docId>/events:stream`.
+ */
+describe("the bot client's own stream address", () => {
+  class FakeEventSource {
+    static opened: string[] = [];
+    readonly listeners = new Map<string, EventListener[]>();
+    closed = false;
+    constructor(readonly url: string) {
+      FakeEventSource.opened.push(url);
+      FakeEventSource.last = this;
+    }
+    static last: FakeEventSource | null = null;
+    addEventListener(type: string, fn: EventListener): void {
+      const held = this.listeners.get(type) ?? [];
+      held.push(fn);
+      this.listeners.set(type, held);
+    }
+    removeEventListener(type: string, fn: EventListener): void {
+      this.listeners.set(type, (this.listeners.get(type) ?? []).filter((f) => f !== fn));
+    }
+    close(): void {
+      this.closed = true;
+    }
+    /** Deliver one server frame, as the browser would. */
+    emit(type: string, data: unknown): void {
+      const ev = { data: JSON.stringify(data) } as MessageEvent;
+      for (const fn of this.listeners.get(type) ?? []) fn(ev as unknown as Event);
+    }
+  }
+
+  async function subscribed() {
+    FakeEventSource.opened = [];
+    FakeEventSource.last = null;
+    history.replaceState(null, '', '/workspaces/w-9/docs/doc-1');
+    const prior = globalThis.EventSource;
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    const client = createMeetingBotClient({
+      docId: 'doc-1',
+      fetchJson: () => Promise.resolve({ configured: true, bot: null }),
+    });
+    await client.ready;
+    (globalThis as { EventSource?: unknown }).EventSource = prior;
+    const es = FakeEventSource.last;
+    if (!es) throw new Error('no stream opened');
+    return { client, es, opened: FakeEventSource.opened };
+  }
+
+  it("opens the doc's workspace-scoped event stream, not the deleted /events/<docId>", async () => {
+    const { opened } = await subscribed();
+    expect(opened).toEqual(['/workspaces/w-9/docs/doc-1/events:stream']);
+  });
+
+  it('carries the bot status and its words off that stream into the listeners', async () => {
+    const { client, es } = await subscribed();
+    const words: MeetingTranscriptEvent[] = [];
+    client.onTranscript((f) => words.push(f));
+    es.emit('meeting.bot', status('recording'));
+    es.emit('meeting.transcript', frame(0, 'So the sync.', true));
+    expect(client.status()?.state).toBe('recording');
+    expect(client.live()?.state).toBe('recording');
+    expect(words.map((f) => f.text)).toEqual(['So the sync.']);
+  });
+});
