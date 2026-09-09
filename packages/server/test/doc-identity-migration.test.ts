@@ -165,7 +165,8 @@ describe('the doc-identity migration', () => {
       // will read and write is one of them. Which one is the copies layer's
       // call — here the two are byte-identical, so either is right.
       expect(verdict.survey.copies.map((c) => c.root).sort()).toEqual([main, wt].sort());
-      expect([join(main, rel), join(wt, rel)]).toContain(verdict.live);
+      expect(verdict.live).not.toBeNull();
+      expect([join(main, rel), join(wt, rel)]).toContain(verdict.live as string);
     });
   });
 
