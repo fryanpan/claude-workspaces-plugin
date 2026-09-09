@@ -131,6 +131,52 @@ describe('a link from each source the tick was given survives', () => {
   });
 });
 
+describe('the three ways a check like this is quietly wrong', () => {
+  // Every one of these was a real hole in the first version of this module.
+  const PARENS = 'https://example.com/wiki/Riverbend_(gate)';
+
+  test('a destination carrying balanced parentheses is still judged', () => {
+    const out = stripInventedLinks([edit(`- Devi cited [the wiki](${PARENS}).`)], sources());
+    expect(out.dropped).toEqual([PARENS]);
+    const only = out.edits[0]!;
+    expect('markdown' in only ? only.markdown : '').toBe('- Devi cited the wiki.');
+  });
+
+  test('CONTROL: the same parenthesised address, given, survives', () => {
+    const given = notesLinkSources({ docLinks: [{ url: PARENS }] });
+    expect(findInventedLinks([edit(`- Devi cited [the wiki](${PARENS}).`)], given)).toEqual([]);
+  });
+
+  test('a path that differs only in case is a different page, and invented', () => {
+    const given = notesLinkSources({ docLinks: [{ url: 'https://example.com/Riverbend' }] });
+    expect(findInventedLinks([edit('- [the page](https://example.com/riverbend)')], given)).toEqual(
+      ['https://example.com/riverbend'],
+    );
+  });
+
+  test('CONTROL: the scheme and the host carry no case, so folding them is safe', () => {
+    const given = notesLinkSources({ docLinks: [{ url: 'HTTPS://Example.COM/Riverbend' }] });
+    expect(findInventedLinks([edit('- [the page](https://example.com/Riverbend)')], given)).toEqual(
+      [],
+    );
+  });
+
+  test('an extra query parameter is not the row it was given', () => {
+    // The comment says exact except the fragment and the suggest marker, and
+    // this is what makes that true: a link wrongly stripped loses a footnote,
+    // one wrongly kept is a false source in the record.
+    const given = notesLinkSources({ references: [{ url: ROW }] });
+    expect(findInventedLinks([edit(`- [Riverbend gate](${ROW}&utm_source=x)`)], given)).toEqual([
+      `${ROW}&utm_source=x`,
+    ]);
+  });
+
+  test('CONTROL: the fragment is the exception, and still resolves to its row', () => {
+    const given = notesLinkSources({ references: [{ url: ROW }] });
+    expect(findInventedLinks([edit(`- [Riverbend gate](${ROW}#decisions)`)], given)).toEqual([]);
+  });
+});
+
 describe('what the rule leaves alone', () => {
   test('markdown with no links is returned untouched, object and all', () => {
     const one = edit('- The gate moves before merge, Devi to confirm.');

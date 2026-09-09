@@ -27,12 +27,16 @@
  * it is the address that was imagined, and deleting the sentence would lose a
  * real note to a false footnote.
  *
- * MATCHING IS LENIENT ABOUT THE QUERY AND THE FRAGMENT and exact about
- * everything else. A suggestion href is the row's own URL plus `?suggest=1`,
- * so a comparison that demanded the whole string would refuse the pipeline's
- * own writing; a citation that reaches the right row with an extra parameter
- * on it is still that row. The PATH is never relaxed: that is the half that
- * says which thing is being cited.
+ * MATCHING IS EXACT, with two named exceptions and no others: the `#fragment`
+ * is dropped, and the `suggest=1` marker is dropped. The marker is there
+ * because a suggestion href is the row's own URL plus that parameter, so a
+ * comparison demanding the whole string would refuse the pipeline's own
+ * writing. Nothing else is relaxed — not the case of the path, not an extra
+ * query parameter — because the two errors are not the same size. A real link
+ * wrongly stripped loses its footnote and keeps its sentence; an invented one
+ * wrongly kept is a false source in the record, which is the fault this exists
+ * to answer. Only the scheme and the host are case-folded, which is where
+ * case genuinely carries no meaning.
  */
 
 import { SUGGEST_PARAM, type prose } from '@claude-workspaces/core';
@@ -72,18 +76,35 @@ export function notesLinkSources(input: NotesLinkInputs): NotesLinkSources {
 }
 
 /**
- * Inline links, including the image form. The destination stops at the first
- * whitespace or closing paren, which is markdown's own rule for an unbracketed
- * destination, and an optional `"title"` after it is dropped with the link.
+ * Inline links, including the image form, with an optional `"title"` that is
+ * dropped along with the link.
+ *
+ * THE DESTINATION MAY CARRY ONE LEVEL OF BALANCED PARENTHESES, which is
+ * markdown's own rule for an unbracketed destination and is not a nicety:
+ * `https://example.com/wiki/Foo_(bar)` is an ordinary encyclopedia address,
+ * and a pattern that stopped at the first `(` matched nothing at all there —
+ * so an invented link in exactly that shape walked through the check
+ * untouched. One level is enough for every real URL; anything deeper is
+ * spelled `%28`.
  */
-const INLINE_LINK = /(!?)\[([^\]]*)\]\(\s*(<[^>]*>|[^()\s]*)(?:\s+"[^"]*")?\s*\)/g;
+const INLINE_LINK = /(!?)\[([^\]]*)\]\(\s*(<[^>]*>|(?:[^()\s]|\([^()\s]*\))*)(?:\s+"[^"]*")?\s*\)/g;
 
 /** The scheme this pipeline's own inline speaker mentions carry. */
 const SPEAKER_SCHEME = 'speaker:';
 
+/** The `scheme:` and `//host` a URL opens with, if it has them. Case is
+ *  meaningless in both and load-bearing in everything after. */
+const ORIGIN = /^([A-Za-z][A-Za-z0-9+.-]*:)?(\/\/[^/?#]*)?/;
+
 /**
- * A URL reduced to what two spellings of the same target share: no angle
- * brackets, no fragment, no `suggest` marker, no trailing slash, lowercased.
+ * A URL reduced to what two spellings of the SAME TARGET share: no angle
+ * brackets, no fragment, no `suggest` marker, and the scheme and host folded
+ * to lower case.
+ *
+ * THE PATH AND THE QUERY ARE LEFT EXACTLY AS WRITTEN. Lowercasing the whole
+ * string used to let a given `https://example.com/Foo` authorize a composed
+ * `https://example.com/foo`, which on a case-sensitive server is a different
+ * page — an invented address, authorized by a real one it merely resembles.
  */
 function identity(raw: string): string {
   let url = raw.trim().replace(/^<(.*)>$/, '$1');
@@ -97,8 +118,8 @@ function identity(raw: string): string {
       .filter((p) => p !== `${SUGGEST_PARAM}=1`);
     url = url.slice(0, query) + (kept.length > 0 ? `?${kept.join('&')}` : '');
   }
-  if (url.length > 1 && url.endsWith('/')) url = url.slice(0, -1);
-  return url.toLowerCase();
+  const origin = url.match(ORIGIN)?.[0] ?? '';
+  return origin.toLowerCase() + url.slice(origin.length);
 }
 
 function allowed(raw: string, sources: NotesLinkSources): boolean {
