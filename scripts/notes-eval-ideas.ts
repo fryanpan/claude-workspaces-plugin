@@ -246,8 +246,14 @@ export async function judgeCarried(
     const n = typeof row?.n === 'number' ? row.n - 1 : -1;
     if (n < 0 || n >= ideas.length) continue;
     if (answered.has(n)) return null;
+    // A MISSING VERDICT IS NOT A NO. `row.carried === true` read an absent,
+    // null or string `carried` as false, which the rate then counts as a lost
+    // idea — a number that can fail the gate or ratchet the bar on nothing
+    // but a malformed reply. An unreadable row makes the whole reply
+    // unreadable, the same as a short one.
+    if (typeof row.carried !== 'boolean') return null;
     answered.add(n);
-    verdicts[n] = row.carried === true;
+    verdicts[n] = row.carried;
   }
   // A partial answer is not a verdict on the ones it skipped, and scoring
   // those as lost would grade the judge's arithmetic.

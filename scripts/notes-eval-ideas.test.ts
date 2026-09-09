@@ -296,6 +296,21 @@ describe('reading the judge reply', () => {
     ).toBeNull();
   });
 
+  it('refuses a reply whose verdict is missing or not a boolean', async () => {
+    // The shape a rate must never be built on: three rows, every idea named,
+    // and one verdict that says nothing. Read as false it becomes a lost
+    // idea, and lost ideas are what the gate and the ratchet are made of.
+    for (const bad of [undefined, null, 'yes', 1]) {
+      expect(
+        await judged([
+          { n: 1, carried: true },
+          { n: 2, carried: bad as unknown as boolean },
+          { n: 3, carried: true },
+        ]),
+      ).toBeNull();
+    }
+  });
+
   it('still refuses a reply that is simply short', async () => {
     expect(await judged([{ n: 1, carried: true }])).toBeNull();
   });
