@@ -136,9 +136,15 @@ describe('the per-tick timing log', () => {
 });
 
 describe('when the server writes a timing file at all', () => {
+  // `delete` is a lint error and `= undefined` is not the same thing: it
+  // leaves the STRING "undefined" in the environment, which is a value the
+  // gate would read. `Reflect.deleteProperty` actually unsets it.
+  const unset = (): void => {
+    Reflect.deleteProperty(process.env, 'CW_NOTES_TIMING');
+  };
   const was = process.env.CW_NOTES_TIMING;
   afterEach(() => {
-    if (was === undefined) delete process.env.CW_NOTES_TIMING;
+    if (was === undefined) unset();
     else process.env.CW_NOTES_TIMING = was;
   });
 
@@ -157,7 +163,7 @@ describe('when the server writes a timing file at all', () => {
     // It used to be opt-in, which made it unreadable by anything downstream:
     // a file that is there only when somebody remembered a flag cannot be
     // the input to an at-stop report.
-    delete process.env.CW_NOTES_TIMING;
+    unset();
     const dir = mkdtempSync(join(tmpdir(), 'notes-timing-default-'));
     try {
       const open = sinksFor(dir).openTiming;
@@ -182,7 +188,7 @@ describe('when the server writes a timing file at all', () => {
   it('opens none when there is no data dir to write it in', () => {
     // A server built without a data dir has nowhere to put it, and '.' is
     // not an answer — that is somebody's working tree.
-    delete process.env.CW_NOTES_TIMING;
+    unset();
     expect(sinksFor(undefined).openTiming).toBeUndefined();
   });
 });
