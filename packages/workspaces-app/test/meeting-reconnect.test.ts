@@ -245,6 +245,29 @@ describe('a meeting whose socket drops', () => {
     expect(h.strip.state()).toEqual({ kind: 'recording', startedAt: 1_000 });
   });
 
+  it('restarts the clock when the fallback opens a new meeting', async () => {
+    const h = await recording();
+    h.clock.at = 40_000;
+    h.sockets[0]?.drop();
+    h.fire();
+    h.live().onopen?.();
+    h.clock.at = 41_000;
+    h.live().serve({
+      type: 'ready',
+      meetingId: 'm-doc-1-41000',
+      startedAt: 41_000,
+      engine: 'mock',
+      mode: 'solo',
+    });
+    // A new meeting with its own id, transcript and notes section: an elapsed
+    // readout still counting from the old one would put a length on this
+    // recording that no file of it holds.
+    expect(h.strip.state()).toEqual({ kind: 'recording', startedAt: 41_000 });
+    // …and the sentence saying what happened survives the restart, because
+    // the recording did not end.
+    expect(h.note()).toBe(RESUME_FAILED_NOTE);
+  });
+
   it('says so in one plain sentence when the meeting could not be resumed', async () => {
     const h = await recording();
     h.sockets[0]?.drop();

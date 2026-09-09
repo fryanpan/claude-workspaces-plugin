@@ -981,8 +981,17 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
             turns = [];
             names = {};
             seen = new Set();
+            // And the clock restarts with it. This IS a new meeting — its own
+            // id, its own transcript, its own notes section — so an elapsed
+            // readout still counting from the old one would put a length on
+            // this recording that no file of it holds.
+            const restartedAt = now();
             opts.liveZone?.end();
-            opts.liveZone?.begin(now());
+            opts.liveZone?.begin(restartedAt);
+            // Carries the note through, because `setState` only clears it
+            // when the meeting is over.
+            setState({ kind: 'recording', startedAt: restartedAt });
+            break;
           }
           render();
           break;
