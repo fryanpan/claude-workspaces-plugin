@@ -6,7 +6,9 @@ import {
   createNotesLedger,
   ledgerPrompt,
   ledgerTranscript,
+  nestedNotesInstructions,
 } from '../src/notes-ledger.ts';
+import { DEFAULT_NOTES_INSTRUCTIONS } from '../src/notes-prompt-store.ts';
 
 /** A fetch that answers one tool call with `points`, and records what it was
  *  asked. Nothing here reaches the network. */
@@ -213,5 +215,28 @@ describe('the extract never sends the meeting anywhere but the model', () => {
     await ledger.before([turn(1, 'the boardwalk section still needs a survey', 'Maya Okonkwo')]);
     expect(errors.join('\n')).not.toContain('boardwalk');
     expect(errors.join('\n')).toContain('502');
+  });
+});
+
+describe('the nested rule keeps the speaker where the flat one had it', () => {
+  // The measured regression this closes: nested notes scored 73% on
+  // "decisions and questions keep a speaker" against the original's 100%,
+  // because the rule's own worked example wrote a bare "B:" and its lead
+  // bullets had a twelve-word ceiling to fit under.
+  const nested = nestedNotesInstructions(DEFAULT_NOTES_INSTRUCTIONS);
+
+  test('its worked example writes a real speaker tag, not a bare label', () => {
+    expect(nested).toContain('](speaker:B)');
+  });
+
+  test('a lead bullet is told the tag does not count towards its twelve', () => {
+    expect(nested).toContain("nor towards a lead bullet's twelve");
+  });
+
+  test('MUTATION CONTROL: the instructions it replaced said neither', () => {
+    // Same source, no swap. If these passed either way the two above would
+    // be reading the shipped prompt rather than the rule this module adds.
+    expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain('](speaker:B)');
+    expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain("nor towards a lead bullet's twelve");
   });
 });
