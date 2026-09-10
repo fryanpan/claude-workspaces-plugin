@@ -193,11 +193,15 @@ describe('the notetaking instructions', () => {
 
   it('ask for a topic past the bar to be regrouped, by grouping not dropping', () => {
     expect(system).toContain(`More than ${MAX_FLAT_RUN_BULLETS} bullets under one heading`);
-    expect(system).toMatch(/nested under them\s+as sub-bullets/);
+    // Named as the op, not described as a shape: the regroup is a move, and a
+    // model told only what the result should look like reaches for
+    // replace_block plus delete_block, which retypes every folded point.
+    expect(system).toContain('nest_blocks');
+    expect(system).toMatch(/nest_blocks MOVES bullets/);
     // Grouping, not deleting. An earlier revision passed the bar by dropping a
     // point to get under the number, which trades a wall for a note nobody
     // wrote.
-    expect(system).toMatch(/GROUPING, never by dropping a point/);
+    expect(system).toMatch(/GROUPING, never\s+by dropping a point/);
   });
 });
 

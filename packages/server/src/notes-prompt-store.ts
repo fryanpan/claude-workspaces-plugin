@@ -97,8 +97,25 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  *
  * WHY REGROUPING STILL ASKS FOR SUB-BULLETS. Nesting costs the reader less
  * than a re-cut section: no block they have commented on is re-created, and
- * the ids stay valid. With `replace_block` it is also now cheap to express —
- * one edit rewrites the lead bullet with its points nested under it.
+ * the ids stay valid.
+ *
+ * IT ASKS FOR THEM THROUGH `nest_blocks` NOW, AND THAT CHANGED THE CLAIM
+ * ABOVE FROM A HOPE INTO A FACT. The rule used to be expressed with
+ * `replace_block` — rewrite one bullet as a lead carrying the others' words
+ * nested under it, then `delete_block` the ones folded in. Every folded point
+ * was retyped by the model on that route, so a paraphrase could drift, a
+ * speaker tag could be dropped, and every comment thread anchored to the old
+ * wording orphaned. `nest_blocks` moves the bullets instead: same words, same
+ * ids, threads recovered on their own text.
+ *
+ * AND IT NO LONGER RELIES ON THE MODEL NOTICING. The bar held on 2% to 17% of
+ * ticks with the rule written here in capitals, on all three shipped methods
+ * about equally — which is what a rule looks like when it cannot be acted on
+ * rather than one that is being ignored. Two mechanical things were missing
+ * and both are now supplied: the outline marks a nested bullet "sub-bullet"
+ * so a grouped topic can be told from a flat one, and the server counts the
+ * run itself and names the ids in the prompt (`notes-regroup.ts`). The words
+ * below are the rule; that block is the tick's own arithmetic.
  */
 /**
  * The rules that ask the note-taker WHO SAID IT — and the only part of the
@@ -143,6 +160,7 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '  {"op":"insert_at_end","markdown":"## A heading"}',
   '  {"op":"replace_block","blockId":"<id>","markdown":"- better wording"}',
   '  {"op":"delete_block","blockId":"<id>"}',
+  '  {"op":"nest_blocks","leadBlockId":"<id>","blockIds":["<id>","<id>"]}',
   'Return [] when this speech deserves no note. Never return prose, never a',
   'code fence, never a whole rewritten section.',
   '',
@@ -212,13 +230,21 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   "  heading's id. Never open a second heading for a topic that already has",
   '  one.',
   `- More than ${MAX_FLAT_RUN_BULLETS} bullets under one heading is the wall these notes exist`,
-  '  instead of. Regroup that topic: replace_block two or three of your own',
-  '  bullets with short lead bullets carrying their points nested under them',
-  '  as sub-bullets, and delete_block the ones you folded in. Like this:',
+  '  instead of. Regroup that topic in the SAME update, with nest_blocks:',
+  '  pick the bullet that best introduces two or three of your others and',
+  '  move them under it, so the heading reads as groups rather than a list.',
+  '      {"op":"nest_blocks","leadBlockId":"b7","blockIds":["b8","b9"]}',
+  '  turns',
+  '      - What the export dialog gets wrong',
+  '      - It forgets the range between sessions.',
+  '  into',
   '      - What the export dialog gets wrong',
   '        - It forgets the range between sessions.',
-  '        - The CSV path uses a different dialog.',
-  '  Get under the number by GROUPING, never by dropping a point.',
+  '  nest_blocks MOVES bullets: nothing is retyped and nothing is deleted, so',
+  '  no point can be lost and a comment somebody left on a bullet stays on',
+  '  it. Never regroup by replace_block-ing the words into a new bullet and',
+  '  delete_block-ing the old one. Get under the number by GROUPING, never',
+  '  by dropping a point.',
   '',
   'ACCURACY',
   '- Only what was said: never invent names, numbers, or decisions the',

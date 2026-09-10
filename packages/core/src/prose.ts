@@ -53,6 +53,8 @@ export {
 export type { TextSegment } from './prose-fragment.ts';
 export { detectLiteralMarkdown, literalMarkdownMessage } from './prose-integrity.ts';
 export type { LiteralMarkdownFinding, LiteralMarkdownKind } from './prose-integrity.ts';
+export { nestBlocksOutcome, nestBlocksUnderLead } from './prose-nest.ts';
+export type { NestBlocksError, NestBlocksOptions, NestBlocksResult } from './prose-nest.ts';
 export {
   inlineMarksToDelta,
   normalizeHeadingLevels,
