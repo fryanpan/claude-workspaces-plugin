@@ -24,8 +24,9 @@ import {
   resolveGoogleOauthCreds,
 } from './google-oauth.ts';
 import { stamped } from './log-stamp.ts';
-import { createHaikuNotesComposer } from './meeting-notes-composer.ts';
 import { createHaikuTaskCaptureExtractor } from './meeting-task-capture.ts';
+import { createNotesMethodComposer } from './notes-method-composer.ts';
+import { readNotesMethod } from './notes-method-store.ts';
 import { createPluginRefresher } from './plugin-refresh.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { createRecallCalendarClient } from './recall-calendar.ts';
@@ -300,8 +301,14 @@ export function createServerDeps(
   // The instructions the note-taker runs on come from the prompt store,
   // re-read per tick, so retuning how the notes read is an edit on the
   // settings page rather than a deploy (`prompt-store.ts`).
-  const notesComposer = createHaikuNotesComposer({
-    instructions: () => promptStore.read('meeting-notes'),
+  // ONE composer that is three (`notes-method-composer.ts`): it reads the
+  // doc's chosen method at the top of every compose, so a switch made while
+  // the room is talking is honoured by the next tick with nothing here to
+  // restart. The default is the original note-taker, so a doc nobody has
+  // touched composes exactly as it did before this existed.
+  const notesComposer = createNotesMethodComposer({
+    methodFor: (docId) => readNotesMethod(cfg.dataDir, docId),
+    composerOpts: { instructions: () => promptStore.read('meeting-notes') },
   });
   if (transcription && !notesComposer) {
     console.log(

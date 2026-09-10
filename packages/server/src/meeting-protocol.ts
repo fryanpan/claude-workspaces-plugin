@@ -35,9 +35,11 @@ import {
   type MeetingServerMessage,
   type MeetingStreamId,
   type MeetingTimingMark,
+  type NotesMethod,
   detectsSpeakers,
   maxSpeakersFor,
   maxSpeakersFromTuning,
+  notesMethodLabel,
   parseMeetingClientMessage,
   pickLiveTuning,
   sanitizeTuning,
@@ -93,6 +95,29 @@ export interface MeetingRelayDeps {
   notes: MeetingNotesDeps | null;
   /** Lifecycle facts only — never a transcript frame. */
   broadcast: (docId: string, payload: { event: string } & Record<string, unknown>) => void;
+  /**
+   * Record which note-taker this DOC is now using, changed mid-recording.
+   *
+   * A seam rather than a store because the socket has no business knowing
+   * where the record lives, and because the at-rest half of the same choice
+   * is an HTTP route that writes through the same function. Absent — a relay
+   * built without it, every test that does not care — leaves the frame a
+   * no-op and the doc on the method it had.
+   *
+   * IT ANSWERS WHETHER THE RECORD ACTUALLY MOVED, and the trace line in the
+   * notes is written only on `true`. A data dir that is full or read-only
+   * makes the write fail; the implementation swallows that, because losing a
+   * preference must never fail a tick. But a swallowed failure that still
+   * wrote "Note-taker Ledger · Opus — Bryan" into the doc leaves the notes
+   * asserting a switch that did not happen, and every later tick still
+   * composing with the method the record kept.
+   */
+  setNotesMethod?: (change: {
+    docId: string;
+    meetingId?: string;
+    method: NotesMethod;
+    by?: string;
+  }) => boolean;
 }
 
 /**
@@ -312,6 +337,47 @@ export class MeetingRelay {
       // was one session to ask.
       const applied = Object.keys(live).length > 0 && streams.update(live) ? Object.keys(live) : [];
       this.send(ws, { type: 'tuned', applied });
+      return;
+    }
+    if (msg.type === 'set_notes_method') {
+      // The record first, because that is what the NEXT tick reads and what
+      // survives a reload; the line in the doc is the visible half of the
+      // same fact. Nothing already written is touched, and no answer goes
+      // back — the fold that sent it already shows the row it picked.
+      // A DURABLE WRITE ON THE DOC, so it takes the same sign-in decision the
+      // `start` frame takes. Without this the frame was a way around the REST
+      // route's visitor check that needed no meeting at all: open the socket,
+      // send one frame, and the doc's preference is changed by somebody who
+      // may not write to it. The row is told it was refused, the same answer
+      // an unwritable record gets, so the fold rolls back rather than sitting
+      // on a switch that did not happen.
+      if (ws.data.readOnly) {
+        this.send(ws, { type: 'notes_method', method: msg.method, recorded: false });
+        this.send(ws, {
+          type: 'error',
+          message: 'Sign in to change the note-taker — it is saved on this doc.',
+        });
+        return;
+      }
+      const meeting = conn.meeting;
+      const recorded =
+        this.deps.setNotesMethod?.({
+          docId: ws.data.docId,
+          ...(meeting ? { meetingId: meeting.meetingId } : {}),
+          method: msg.method,
+          ...(msg.by ? { by: msg.by } : {}),
+        }) ?? false;
+      // ONLY WHAT WAS RECORDED IS ANNOUNCED. A doc that says a switch
+      // happened while the next tick composes on the old method is worse
+      // than a switch that visibly did nothing.
+      if (recorded && conn.state === 'live') {
+        conn.notes?.noteMethodChange(notesMethodLabel(msg.method), msg.by);
+      }
+      // AND THE CHOOSER IS TOLD EITHER WAY. It moved its row the moment the
+      // pick happened, because a preference must not sit on a spinner; this
+      // is what makes that optimism honest. The at-rest route has always
+      // answered — this is the same answer, one surface over.
+      this.send(ws, { type: 'notes_method', method: msg.method, recorded });
       return;
     }
     if (msg.type === 'name_speaker') {

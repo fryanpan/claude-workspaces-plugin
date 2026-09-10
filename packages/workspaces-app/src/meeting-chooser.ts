@@ -18,11 +18,12 @@
  * than as a captured closure, which is why they could leave the mount at all.
  */
 
-import { COMBINED_SOURCE, type CaptureMode } from '@claude-workspaces/core';
+import { COMBINED_SOURCE, type CaptureMode, type NotesMethod } from '@claude-workspaces/core';
 import { liveTuningKeys } from '@claude-workspaces/core';
 import { advancedControls, buildAdvancedSection } from './meeting-advanced.ts';
 import type { AdvancedState } from './meeting-advanced.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
+import { appendNotetakerFold } from './meeting-notetaker.ts';
 import { type TranscriptReader, mountTranscriptFold } from './meeting-transcript-panel.ts';
 
 /**
@@ -55,6 +56,18 @@ export interface ChooserState {
   chooseEngine: string | undefined;
   /** Whether the Advanced section is unfolded — one flag across engines. */
   advOpen: boolean;
+  /**
+   * The note-taker this doc's minutes are written by. Per DOC, not per
+   * recording: it is read back from the server when the strip mounts and it
+   * outlives every meeting on the doc.
+   */
+  chooseMethod: NotesMethod;
+  /** Whether the Note-taker fold is unfolded. Collapsed by default — a
+   *  person who never asks has no decision to make. */
+  methodOpen: boolean;
+  /** When the current note-taker was picked, if it was picked during THIS
+   *  meeting: the "since 10:38" on the row that is on. */
+  methodSince: string;
   /** The call the bot would be sent to join. */
   chooseBotUrl: string;
   /** The name that bot wears in the meeting. */
@@ -109,6 +122,12 @@ export interface MeetingChooserDeps {
   socketOpen(): boolean;
   /** Send one frame on the audio socket, if there is one. */
   sendSocket(data: string): void;
+  /**
+   * A note-taker row was picked. The strip owns what happens next, because
+   * the two ways of asking are its two: a frame on the audio socket while it
+   * is recording, and a write on the doc when it is not.
+   */
+  onNotesMethodPicked(method: NotesMethod): void;
 }
 
 /** What the strip calls back into. */
@@ -175,6 +194,7 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     socketOpen,
     sendSocket,
     systemAudioOffered,
+    onNotesMethodPicked,
   } = deps;
   /**
    * One change to the LIVE meeting's knobs. Sent only for a key the running
@@ -411,6 +431,9 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     if (choose.chooseEngine !== undefined && advancedControls(choose.chooseEngine).length > 0) {
       pop.append(buildAdvancedPanel(choose.chooseEngine, false));
     }
+
+    // The Note-taker fold, below Advanced Options and above Start Recording.
+    appendNotetakerFold(pop, choose, { renderPop, onPick: onNotesMethodPicked });
 
     syncStartActions();
   }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseMeetingClientMessage } from './meeting-parse.ts';
 import {
   liveTuningKeys,
   maxSpeakersFromTuning,
@@ -7,7 +8,6 @@ import {
   sanitizeTuning,
   tuningSpecsFor,
 } from './meeting-tuning.ts';
-import { parseMeetingClientMessage } from './meeting.ts';
 
 describe('sanitizeTuning', () => {
   it('keeps known keys, clamps ranges, and drops the rest', () => {

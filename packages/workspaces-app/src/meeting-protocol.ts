@@ -15,6 +15,7 @@ import {
   type MeetingTimingMark,
   meetingSocketPath,
   parseCaptureMode,
+  parseNotesMethod,
 } from '@claude-workspaces/core';
 
 /**
@@ -152,6 +153,14 @@ export function parseMeetingServerMessage(raw: unknown): MeetingServerMessage | 
         ...(typeof m.speaker === 'string' && m.speaker ? { speaker: m.speaker } : {}),
         ...(timing ? { timing } : {}),
       };
+    }
+    case 'notes_method': {
+      // A method this client does not have a row for is not an answer it can
+      // act on, and defaulting one would move the fold to a note-taker
+      // nobody picked.
+      const method = parseNotesMethod(m.method);
+      if (!method) return null;
+      return { type: 'notes_method', method, recorded: m.recorded === true };
     }
     case 'notes_progress': {
       if (typeof m.tick !== 'number' || !Number.isFinite(m.tick)) return null;

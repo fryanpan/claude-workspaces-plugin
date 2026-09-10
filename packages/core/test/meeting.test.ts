@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseMeetingTranscriptEvent } from '../src/meeting-bot.ts';
+import { parseMeetingClientMessage } from '../src/meeting-parse.ts';
 import {
   DEFAULT_ROOM_SPEAKERS,
   MAX_ROOM_SPEAKERS,
@@ -11,7 +12,6 @@ import {
   maxSpeakersFor,
   parseCaptureMode,
   parseEngineName,
-  parseMeetingClientMessage,
   parseRoomSpeakers,
   speakerDisplayName,
 } from '../src/meeting.ts';

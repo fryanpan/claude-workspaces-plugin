@@ -169,6 +169,34 @@ export class RecallMeetingRelay {
     return rec ? toStatus(rec) : null;
   }
 
+  /**
+   * IS A BOT MEETING ON THIS DOC COMPOSING NOTES RIGHT NOW?
+   *
+   * A bot meeting is live on the server and invisible to the browser's
+   * socket test: nobody in the room is holding an audio websocket, because
+   * the vendor does the listening. So the chooser's mid-meeting switch falls
+   * to the REST route, which refuses a live meeting — which made the switch
+   * impossible for exactly the meetings a person watches from the doc. The
+   * route asks this before refusing, and writes the trace line through
+   * `noteMethodChange` below on the same terms the socket path uses.
+   */
+  hasLiveNotes(docId: string): boolean {
+    const rec = this.byDoc.get(docId);
+    return rec?.notes != null && !isTerminalBotState(rec.state);
+  }
+
+  /**
+   * Write the note-taker trace line into a live bot meeting's notes, the way
+   * `set_notes_method` does for a browser-hosted one. Answers whether a
+   * session took it, so a caller never reports a line it did not write.
+   */
+  noteMethodChange(docId: string, label: string, by?: string): boolean {
+    const rec = this.byDoc.get(docId);
+    if (!rec || rec.notes == null || isTerminalBotState(rec.state)) return false;
+    rec.notes.noteMethodChange(label, by);
+    return true;
+  }
+
   async invite(args: {
     docId: string;
     meetingUrl: string;

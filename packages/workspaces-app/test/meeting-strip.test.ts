@@ -10,7 +10,7 @@ import {
   meetingSocketPath,
   parseMeetingClientMessage,
 } from '@claude-workspaces/core';
-import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
+import type { MeetingTranscriptEvent, NotesMethod } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RoomAudioProcessing } from '../src/meeting-audio.ts';
 import type { MeetingCaptureStart } from '../src/meeting-audio.ts';
@@ -307,6 +307,7 @@ function mount(
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
     botNamePrefill?: string;
+    offeredNotesMethods?: readonly NotesMethod[];
     toolbar?: HTMLElement | null;
     systemAudioOffered?: () => boolean;
   } = {},
@@ -983,7 +984,13 @@ describe('the strip opened by the Board’s huddle button', () => {
       // One verb, and the same one whichever mode is selected: the room's
       // announcement and its decline button are gone.
       expect(h.startCta().textContent).toBe('● Start Recording');
-      expect(h.pop().querySelectorAll('button')).toHaveLength(1);
+      // ONE VERB — a fold's head is a disclosure, not a verb, so it is
+      // excluded by class rather than by counting a different number.
+      expect(
+        [...h.pop().querySelectorAll('button')].filter(
+          (b) => !b.classList.contains('meeting-adv-head'),
+        ),
+      ).toHaveLength(1);
     });
 
     it('preselects Multiple Speakers, so the choice made on the Board carries', () => {
@@ -1739,10 +1746,15 @@ describe('the engine is not a start-time question', () => {
         }),
     });
     h.record().click();
-    expect(h.pop().querySelector('.meeting-adv-head')).toBeNull();
+    // The ENGINE's fold. The Note-taker fold beside it is not the engine's
+    // and is there whether or not the list ever answers, so the selector has
+    // to say which fold this is about.
+    const advHead = () =>
+      h.pop().querySelector('.meeting-adv:not(.meeting-notetaker) .meeting-adv-head');
+    expect(advHead()).toBeNull();
     resolveList?.({ engines: ['assemblyai', 'soniox'], default: 'assemblyai' });
     await settle();
-    expect(h.pop().querySelector('.meeting-adv-head')).not.toBeNull();
+    expect(advHead()).not.toBeNull();
     // Still no engine row came with it.
     expect(h.pop().querySelector('input[name="meeting-engine"]')).toBeNull();
   });
@@ -2273,12 +2285,24 @@ describe('the consent step is gone', () => {
     // The skip verb was the decline path. It is the button whose absence is
     // the removal, so it is asserted by class as well as by count.
     expect(h.pop().querySelector('.meeting-skip-cta')).toBeNull();
-    expect(h.pop().querySelectorAll('button')).toHaveLength(1);
+    // ONE VERB — a fold's head is a disclosure, not a verb, so it is
+    // excluded by class rather than by counting a different number.
+    expect(
+      [...h.pop().querySelectorAll('button')].filter(
+        (b) => !b.classList.contains('meeting-adv-head'),
+      ),
+    ).toHaveLength(1);
     // Flipping to the solo room used to change both the verb's words and the
     // button count. Now it changes neither.
     h.pick('Just me');
     expect(h.startCta().textContent).toBe('● Start Recording');
-    expect(h.pop().querySelectorAll('button')).toHaveLength(1);
+    // ONE VERB — a fold's head is a disclosure, not a verb, so it is
+    // excluded by class rather than by counting a different number.
+    expect(
+      [...h.pop().querySelectorAll('button')].filter(
+        (b) => !b.classList.contains('meeting-adv-head'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('quotes no sentence for the room to hear', () => {
@@ -2419,5 +2443,349 @@ describe('the transcript panel opens with the consent reminder', () => {
     });
     expect(h.note()).toBe('Transcription is not configured on this server.');
     expect(h.root.querySelector('.meeting-consent-note')).toBeNull();
+  });
+});
+
+describe('the note-taker answer a running meeting sends back', () => {
+  const frame = (raw: Record<string, unknown>) => parseMeetingServerMessage(JSON.stringify(raw));
+
+  it('parses a recorded change', () => {
+    expect(frame({ type: 'notes_method', method: 'ledger-opus', recorded: true })).toEqual({
+      type: 'notes_method',
+      method: 'ledger-opus',
+      recorded: true,
+    });
+  });
+
+  it('a missing `recorded` reads as NOT recorded, never as success', () => {
+    // An older server that answers nothing about the write must not be taken
+    // for one that wrote: the row would then claim a switch that no tick uses.
+    expect(frame({ type: 'notes_method', method: 'ledger-opus' })).toEqual({
+      type: 'notes_method',
+      method: 'ledger-opus',
+      recorded: false,
+    });
+  });
+
+  it('MUTATION CONTROL: a note-taker this client has no row for is dropped', () => {
+    expect(frame({ type: 'notes_method', method: 'ledger-sonnet-9', recorded: true })).toBeNull();
+  });
+});
+
+/**
+ * TWO NOTE-TAKER PICKS OVER ONE LIVE SOCKET, ANSWERED OUT OF STEP.
+ *
+ * The switch is optimistic — the row moves at the press — and the server
+ * answers each write separately. A person who changes their mind before the
+ * first answer lands has two writes out at once, and the answers name a
+ * method rather than a number. Reading them against whatever the row happens
+ * to show let an earlier success confirm the later pick and the later refusal
+ * then roll back onto that same pick, leaving the fold claiming a note-taker
+ * the server had thrown away — with nothing on screen to say so.
+ */
+describe('two note-taker picks over a live meeting, answered out of step', () => {
+  const offeredNotesMethods: readonly NotesMethod[] = ['original', 'ledger-haiku', 'ledger-opus'];
+
+  /** A recording meeting whose menu holds the note-taker fold, opened. */
+  async function liveWithFold(): Promise<Harness> {
+    const h = mount(undefined, { offeredNotesMethods });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    // The Record button over a running meeting opens the MENU, and the fold
+    // sits in it collapsed with the current note-taker on its head line.
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    return h;
+  }
+
+  /** What the fold says it is on: the head line, and the row that is checked. */
+  const shows = (h: Harness) => ({
+    head: h.pop().querySelector('.meeting-notetaker .meeting-adv-value')?.textContent ?? '',
+    checked:
+      h.pop().querySelector<HTMLInputElement>('.meeting-notetaker input:checked')?.value ?? '',
+  });
+
+  /** Every note-taker this socket was asked to switch to, in order. */
+  const asked = (h: Harness): string[] =>
+    h.sockets[0]?.sent
+      .filter((raw): raw is string => typeof raw === 'string')
+      .map((raw) => JSON.parse(raw) as { type: string; method?: string })
+      .filter((m) => m.type === 'set_notes_method')
+      .map((m) => m.method ?? '') ?? [];
+
+  it('ends on the note-taker the server kept, not on the one it refused', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    expect(asked(h)).toEqual(['ledger-haiku', 'ledger-opus']);
+    // Both writes are out. The first is kept and the second refused, so the
+    // server goes on composing with the FIRST.
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: true });
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-opus', recorded: false });
+    expect(shows(h)).toEqual({ head: 'Ledger · Haiku', checked: 'ledger-haiku' });
+  });
+
+  it('MUTATION CONTROL: with both kept, the row stays on the later pick', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: true });
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-opus', recorded: true });
+    expect(shows(h)).toEqual({ head: 'Ledger · Opus', checked: 'ledger-opus' });
+  });
+
+  it('the earlier answer alone does not settle the row the person is watching', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: true });
+    // The second write is still out: the person keeps looking at their pick.
+    expect(shows(h)).toEqual({ head: 'Ledger · Opus', checked: 'ledger-opus' });
+  });
+
+  /**
+   * TWO AT-REST WRITES, AND THE ROW MUST END WHERE THE DOC DID.
+   *
+   * The server applies a `PUT` when it arrives; the browser learns of it when
+   * the response comes back, and those are not the same order. So response
+   * order cannot be allowed to decide anything — the fold read the LAST
+   * answer as the doc's state, and with both writes allowed out at once the
+   * last answer could be the EARLIER write, leaving the row on a method the
+   * doc had already replaced and every later compose ignoring it.
+   *
+   * The harness is the shape that broke it: the newest outstanding request
+   * answers first. What it asserts is the invariant itself — the row shows
+   * the last method this server actually wrote — so it holds whichever way
+   * the client chooses to keep its writes in step.
+   */
+  it('ends on the last method the server wrote, whatever order the answers come back in', async () => {
+    /** Every write this server applied, in the order it applied them. */
+    const applied: string[] = [];
+    /** Requests it has taken but not yet answered. */
+    const outstanding: Array<() => void> = [];
+    const bot = new FakeBot();
+    bot.set('recording', ['Ann']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: { method?: string; body?: string }) => {
+        if (init?.method !== 'PUT') return Promise.resolve(new Response('{}', { status: 404 }));
+        const body = JSON.parse(init.body ?? '{}') as { method?: string };
+        // Applied on ARRIVAL, which is what makes the last one here the one
+        // the doc holds — whenever its answer happens to get back.
+        applied.push(body.method ?? '');
+        return new Promise<Response>((resolve) => {
+          outstanding.push(() => resolve(new Response('{}', { status: 200 })));
+        });
+      }),
+    );
+    cleanups.push(() => vi.unstubAllGlobals());
+    const h = mount(undefined, { bot, offeredNotesMethods });
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    await vi.waitFor(() => expect(outstanding.length).toBeGreaterThan(0));
+    // Newest first, until the server has nothing left in hand.
+    while (outstanding.length > 0) {
+      outstanding.pop()?.();
+      await settle();
+      await settle();
+    }
+    expect(applied).toEqual(['ledger-haiku', 'ledger-opus']);
+    expect(shows(h).checked).toBe(applied[applied.length - 1]);
+  });
+
+  /**
+   * THE SOCKET DIES BETWEEN THE FRAME AND ITS ANSWER.
+   *
+   * The pick was sent and nothing came back, and nothing ever will — that
+   * socket is gone. The server either applied the change or never saw it, and
+   * the row cannot tell from anything it holds. Left as it was, the fold goes
+   * on stating a note-taker with the same confidence it states a confirmed
+   * one, which is the exact thing the confirmed/pending split exists to
+   * prevent.
+   *
+   * Every test here asserts the same invariant — the row ends on the method
+   * THIS SERVER holds — and drives the two truths a drop can be hiding.
+   */
+  describe('a note-taker pick whose socket dies before the answer', () => {
+    /**
+     * The server's own note-taker, as its GET reports it. Only that route
+     * answers: everything else the mount asks for is left as unavailable, so
+     * this stub decides one thing and the rest of the strip behaves as it
+     * does under every other mount here.
+     */
+    function serveMethod(current: () => string): void {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((url: string, init?: { method?: string }) =>
+          Promise.resolve(
+            String(url).includes('/notes-method') &&
+              (init?.method === undefined || init.method === 'GET')
+              ? new Response(JSON.stringify({ method: current() }), { status: 200 })
+              : new Response('{}', { status: 404 }),
+          ),
+        ),
+      );
+      cleanups.push(() => vi.unstubAllGlobals());
+    }
+
+    /** The drop, the backoff, and the meeting coming back on a new socket. */
+    async function dropAndReconnect(h: Harness): Promise<void> {
+      h.sockets[0]?.onclose?.();
+      await settle();
+      h.fireRetry();
+      await settle();
+      h.sockets[1]?.onopen?.();
+      h.sockets[1]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+      await settle();
+    }
+
+    it('takes the change when the server did apply it', async () => {
+      let held = 'original';
+      serveMethod(() => held);
+      const h = await liveWithFold();
+      h.pick('Ledger · Opus');
+      // The frame arrived and was applied; the ANSWER is what the drop ate.
+      held = 'ledger-opus';
+      await dropAndReconnect(h);
+      await vi.waitFor(() => expect(shows(h).checked).toBe(held));
+      // And the row is SETTLED, not still waiting on a frame nobody will
+      // answer: a refusal on the new socket rolls back to what the server
+      // holds, which a pick left pending for ever would prevent.
+      h.pick('Ledger · Haiku');
+      h.sockets[1]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: false });
+      expect(shows(h).checked).toBe(held);
+    });
+
+    it('gives the change back when the server never saw it', async () => {
+      let held = 'original';
+      serveMethod(() => held);
+      const h = await liveWithFold();
+      h.pick('Ledger · Opus');
+      // The frame died in the socket: the doc is still on what it had.
+      held = 'original';
+      await dropAndReconnect(h);
+      await vi.waitFor(() => expect(shows(h).checked).toBe(held));
+    });
+
+    /**
+     * A DROP THAT IS NOT A RECONNECT. The socket can go away before the
+     * meeting ever says `ready` — the strip gives up on it and says the
+     * connection was lost, rather than retrying — and a pick made in that
+     * window went over the socket like any other. It is stranded the same
+     * way, so it is settled the same way.
+     */
+    it('settles a pick whose socket died before the meeting opened', async () => {
+      const held = 'original';
+      serveMethod(() => held);
+      const h = mount(undefined, { offeredNotesMethods });
+      h.pressStart({ pick: 'Just me' });
+      await settle();
+      h.sockets[0]?.onopen?.();
+      // Open but not yet `ready`: the Record button opens the menu, and the
+      // fold in it sends over the socket.
+      h.record().click();
+      h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+      h.pick('Ledger · Opus');
+      // The frame died in the socket, so the doc is still on what it had —
+      // the branch where a row left stranded states the wrong note-taker.
+      // No `ready` ever came, so this drop is not retried: the strip says the
+      // connection was lost and the meeting is over before it began.
+      h.sockets[0]?.onclose?.();
+      await settle();
+      // The person tries again. The meeting that opens has the fold in its
+      // menu, reading the same row the lost pick was made on.
+      h.startCta().click();
+      await settle();
+      h.sockets[1]?.onopen?.();
+      h.sockets[1]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 2_000, engine: 'test' });
+      await settle();
+      // The menu, with the fold still open from before the drop.
+      h.record().click();
+      await vi.waitFor(() => expect(shows(h).checked).toBe(held));
+    });
+  });
+
+  it('holds the second press until the first write has answered', async () => {
+    // The guarantee the row's correctness rests on: with one write out at a
+    // time, the order the server applies them is the order they were pressed,
+    // so its last write is the last press and the last answer describes it.
+    const applied: string[] = [];
+    const outstanding: Array<() => void> = [];
+    const bot = new FakeBot();
+    bot.set('recording', ['Ann']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: { method?: string; body?: string }) => {
+        if (init?.method !== 'PUT') return Promise.resolve(new Response('{}', { status: 404 }));
+        applied.push((JSON.parse(init.body ?? '{}') as { method?: string }).method ?? '');
+        return new Promise<Response>((resolve) => {
+          outstanding.push(() => resolve(new Response('{}', { status: 200 })));
+        });
+      }),
+    );
+    cleanups.push(() => vi.unstubAllGlobals());
+    const h = mount(undefined, { bot, offeredNotesMethods });
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    await vi.waitFor(() => expect(applied).toEqual(['ledger-haiku']));
+    await settle();
+    // Still just the one: the second press is waiting its turn, not racing.
+    expect(applied).toEqual(['ledger-haiku']);
+    outstanding.pop()?.();
+    await vi.waitFor(() => expect(applied).toEqual(['ledger-haiku', 'ledger-opus']));
+  });
+
+  /**
+   * A BOT MEETING ASKS OVER HTTP, and a refused write must take its "since"
+   * back with it.
+   *
+   * Nobody in this browser is listening to a bot meeting, so the switch goes
+   * on the REST route rather than an audio socket — but it is still a change
+   * made mid-meeting, so the row stamps the time at the press. When the write
+   * is refused the row rolls back, and a "since" left behind then hangs off
+   * the note-taker that never stopped being current: the fold reads as though
+   * the OLD method had been chosen at the moment the new one was refused.
+   */
+  it('a refused bot switch takes its "since" back with the method', async () => {
+    const bot = new FakeBot();
+    bot.set('recording', ['Ann']);
+    // Every write on this doc is refused, which is the path under test.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))),
+    );
+    // Put back before the next test mounts: nothing else in this file expects
+    // a server that refuses everything.
+    cleanups.push(() => vi.unstubAllGlobals());
+    const h = mount(undefined, { bot, offeredNotesMethods });
+    // A live bot puts the Record button on the MENU, where the fold lives.
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    h.pick('Ledger · Opus');
+    await vi.waitFor(() =>
+      expect(h.pop().querySelector('.meeting-notetaker .meeting-adv-value')?.textContent).toBe(
+        'Original',
+      ),
+    );
+    // The row that is current says what it costs and nothing else: no switch
+    // happened, so there is no moment for it to have happened at.
+    const rows = [...h.pop().querySelectorAll('.meeting-notetaker .meeting-choice')];
+    const current = rows.find((el) => el.querySelector('input')?.checked);
+    expect(current?.querySelector('.meeting-choice-detail')?.textContent ?? '').not.toContain(
+      'since',
+    );
+  });
+
+  it('a single refused switch still puts the row back where it was', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Opus');
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-opus', recorded: false });
+    expect(shows(h)).toEqual({ head: 'Original', checked: 'original' });
   });
 });

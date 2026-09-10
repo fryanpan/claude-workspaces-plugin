@@ -58,6 +58,7 @@
 import {
   normalizeSpeakerName,
   normalizeSpeakerTags,
+  notesMethodTraceLine,
   speakerDisplayName,
 } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
@@ -297,6 +298,18 @@ export interface NotesComposeInput {
    * missed twice is counted lost rather than offered a third time.
    */
   missed?: readonly NotesTurn[];
+  /**
+   * An extra block of instruction for THIS tick, rendered into the prompt just
+   * before the outline.
+   *
+   * It exists for `scripts/notes-eval.ts --variant`: the exploration of how to
+   * reach a 5% lost-idea rate needs to try a per-tick checklist, or a per-tick
+   * anchor label, against the same corpus and the same judge, and the only
+   * honest way to do that is to put the words where the real prompt puts them.
+   * Nothing in the server sets it — the live pipeline leaves it undefined and
+   * the prompt is byte-identical to what it was.
+   */
+  extraPrompt?: string;
   /**
    * The block id of the heading THIS meeting's notes sit under, when the
    * session has opened one. Absent on the first tick of a meeting, and again
@@ -775,6 +788,19 @@ export interface MeetingNotesSession {
    * overwritten by it.
    */
   nameSpeaker(speaker: string, name: string): void;
+  /**
+   * "The rest of these notes are taken by a different note-taker."
+   *
+   * Writes ONE line into the meeting's own section saying which one and who
+   * asked, and nothing else: the method itself lives on the doc's record
+   * (`notes-method-store.ts`) and is read by the next compose. Nothing
+   * already written is touched — the owner's rule is that a switch changes
+   * what comes next, not what has been read.
+   *
+   * On the chain like a rename, so the line lands after whatever is
+   * composing rather than inside its write.
+   */
+  noteMethodChange(label: string, by?: string): void;
   /** Flush the tail delta and wait for every compose in flight. */
   end(): Promise<void>;
   /**
@@ -960,6 +986,22 @@ export function beginNotesSession(
    * only report was an `onError` nobody supplied. Counted here so the meeting
    * can say it out loud when it ends.
    */
+  /**
+   * Method-change lines that have nowhere to go YET.
+   *
+   * A switch can happen before this meeting has a section — somebody opens
+   * the sheet and changes the note-taker in the first seconds, before a word
+   * has settled. Written then, the line goes to the end of the DOCUMENT, and
+   * the first compose afterwards opens the meeting's section BELOW it: the
+   * trace ends up outside the minutes it describes, or inside the previous
+   * meeting's section when the doc has one.
+   *
+   * So it waits. The first write that has a heading takes it, under that
+   * heading, still reading the clock time of the CHANGE rather than of the
+   * flush. A meeting that ends having never written a note drops it and says
+   * so — there are no minutes for it to annotate.
+   */
+  const heldMethodLines: string[] = [];
   let composeFailures = 0;
   let refusedTooLong = 0;
   /**
@@ -1319,6 +1361,14 @@ export function beginNotesSession(
       // row of tests pins, and the one that lets the model choose where the
       // section goes. The eager open is for the case that has somewhere
       // wrong to write.
+      //
+      // AND ONLY WHEN THAT SECTION IS ANOTHER MEETING'S — which is settled
+      // before this line, not here. `notesSectionForMeeting` adopts a
+      // section whose topic fits (`notes-section-fit.ts`) and records it in
+      // the heading memory, so on a doc whose notes section is reusable
+      // `notesHeadingId` is already defined and this never fires. What
+      // reaches here is a doc carrying somebody else's minutes, which is
+      // exactly the case the eager open exists for.
       const strandingRisk =
         notesHeadingId === undefined &&
         outline.some((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
@@ -1511,6 +1561,68 @@ export function beginNotesSession(
         });
         const written = answer !== false && answer !== 'refused';
         applyMs = clock() - applyStart;
+        // The section now exists, so anything held from a switch made before
+        // it did has somewhere to be. Under this meeting's own heading, and
+        // after the tick that opened it, which is where a person reading the
+        // minutes expects the note about how they were written.
+        if (written && heldMethodLines.length > 0) {
+          // Asked AFTER the write, because the write is what opens the
+          // section: the id read before composing is `undefined` on exactly
+          // the tick that creates it.
+          //
+          // AND OVER THE POST-WRITE OUTLINE, for the same reason. `outline`
+          // is the snapshot this tick composed from, taken before the edits
+          // were applied, so the heading the write just created is not in it
+          // — resolving from it on the one tick that opens the section finds
+          // nothing, and the held line then waits for a tick that may never
+          // come. A meeting that ends after that tick would drop it at `end`
+          // with the section sitting right there. The re-read costs a doc
+          // read and happens only when a line is actually being held.
+          let landing = notesHeadingId;
+          if (landing === undefined) {
+            let after: readonly prose.OutlineEntry[] = outline;
+            try {
+              after = deps.readOutline?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? outline;
+            } catch {
+              after = outline;
+            }
+            try {
+              landing = deps.notesHeadingId?.({
+                docId: ids.docId,
+                meetingId: ids.meetingId,
+                outline: after,
+              });
+            } catch {
+              landing = undefined;
+            }
+          }
+          if (landing !== undefined) {
+            const held = heldMethodLines.splice(0);
+            // KEPT UNTIL THE DOC TAKES THEM. `onNotes` answers `false` or
+            // `'refused'` for a write the doc would not apply — a concurrent
+            // edit, or the edit guard — and treating that as done discarded
+            // the line for good while the preference behind it was already
+            // recorded. Put back, exactly as the compose path carries words
+            // a refused write never landed.
+            let took = false;
+            try {
+              const answer = deps.onNotes({
+                docId: ids.docId,
+                meetingId: ids.meetingId,
+                tick: { tick: 0, reason: 'end', turns: [] },
+                edits: held.map((markdown) => ({
+                  op: 'insert_under_heading' as const,
+                  headingId: landing as string,
+                  markdown,
+                })),
+              });
+              took = answer !== false && answer !== 'refused';
+            } catch (err) {
+              deps.onError?.(err instanceof Error ? err.message : 'notes method line not written');
+            }
+            if (!took) heldMethodLines.unshift(...held);
+          }
+        }
         if (!written) {
           // The compose was fine and the DOC refused it. Same handling as a
           // failed compose — the words are still unwritten, so they carry —
@@ -1717,6 +1829,76 @@ export function beginNotesSession(
       if (!settledAtOf.has(turn.turn)) settledAtOf.set(turn.turn, clock());
       ticker.onTurn(turn);
     },
+    noteMethodChange(label, by) {
+      // WHEN THE PERSON CHOSE, read here rather than inside the step below.
+      // The step waits for whatever is already on the chain, and a compose
+      // in flight holds it for as long as the model takes — so a clock read
+      // down there stamps the line with the moment it was WRITTEN, tens of
+      // seconds after the switch, and disagrees with the "since" time the
+      // fold showed the person at the press. This line is the audit record
+      // of when the note-taker changed; a record that is wrong by half a
+      // minute and contradicts the UI is worse than none.
+      const at = clock();
+      // One line, on the chain, addressed to this meeting's own section.
+      chain = chain.then(() => {
+        let outline: readonly prose.OutlineEntry[] = [];
+        try {
+          outline = deps.readOutline?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? [];
+        } catch {
+          // A trace line is worth less than a compose, and the compose path
+          // already reports an outline it cannot read. With none, the line
+          // goes to the end of the doc, which is where a meeting with no
+          // section of its own writes anyway.
+        }
+        let headingId: string | undefined;
+        try {
+          headingId = deps.notesHeadingId?.({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            outline,
+          });
+        } catch {
+          headingId = undefined;
+        }
+        const markdown = `- ${notesMethodTraceLine(label, by, at)}`;
+        // No section yet: hold it rather than stranding it at the end of the
+        // document, where the first compose would then open the section
+        // underneath it.
+        if (headingId === undefined) {
+          heldMethodLines.push(markdown);
+          return;
+        }
+        // WITH WHATEVER IS STILL HELD, in the order the switches were made.
+        // A line held from before the section existed, or from a write the
+        // doc refused, is waiting for exactly this: a heading and a write
+        // that lands. Sending them together also keeps them in one edit
+        // batch, so the doc applies the switches in the order they happened.
+        const pending = [...heldMethodLines.splice(0), markdown];
+        let took = false;
+        try {
+          const answer = deps.onNotes({
+            docId: ids.docId,
+            meetingId: ids.meetingId,
+            // Not a tick: no words were said, so a sink that counts what a
+            // tick wrote must not charge the room for this line.
+            tick: { tick: 0, reason: 'end', turns: [] },
+            edits: pending.map((line) => ({
+              op: 'insert_under_heading' as const,
+              headingId: headingId as string,
+              markdown: line,
+            })),
+          });
+          took = answer !== false && answer !== 'refused';
+        } catch (err) {
+          deps.onError?.(err instanceof Error ? err.message : 'notes method line not written');
+        }
+        // A doc that would not take it has not been told anything, and the
+        // preference behind the line is already recorded. Held for the next
+        // successful write rather than dropped, which is what the compose
+        // path does with words a refused write never landed.
+        if (!took) heldMethodLines.unshift(...pending);
+      });
+    },
     nameSpeaker(speaker, name) {
       // Read the OLD display name before the map moves — that is the string
       // the composer actually wrote, whether it was "Speaker B" or an
@@ -1776,6 +1958,18 @@ export function beginNotesSession(
         deps.onError?.(
           `${ids.docId} meeting ${ids.meetingId}: ${refusedTooLong} of this meeting's ` +
             'notes composes were refused as too long — the notes stopped keeping up',
+        );
+      }
+      // A switch was made and this meeting never wrote a note, so it never
+      // opened a section for the line to sit in. Dropped rather than
+      // stranded at the end of the document, and SAID rather than dropped
+      // quietly: the record of the change itself is durable either way, in
+      // `notes-method.json` beside the meeting.
+      if (heldMethodLines.length > 0) {
+        const held = heldMethodLines.splice(0);
+        deps.onError?.(
+          `${ids.docId} meeting ${ids.meetingId}: ${held.length} note-taker change line(s) ` +
+            'not written — this meeting never opened a notes section',
         );
       }
       // The last settle of the meeting. Nothing follows it that could retry

@@ -66,7 +66,7 @@
  * THE CORPUS is AMI (CC BY 4.0), excerpted into committed fixtures by
  * `notes-eval-fixtures.ts`. Speakers are letters; no fixture names a person.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { prose } from '../packages/core/src/index.ts';
@@ -103,8 +103,12 @@ import {
   reportIdeaRates,
   setIdeaUsageSink,
 } from './notes-eval-ideas.ts';
+import { type Variant, resolveVariant } from './notes-eval-variants.ts';
 
 const JUDGE_MODEL = 'claude-sonnet-5';
+/** How the judge's spend is booked, so it never merges with a variant that
+ *  happens to compose on the judge's model. */
+const JUDGE_LABEL = 'claude-sonnet-5 (judge)';
 const NOTES_MODEL = 'claude-haiku-4-5-20251001';
 
 /**
@@ -115,7 +119,16 @@ const NOTES_MODEL = 'claude-haiku-4-5-20251001';
  */
 const PRICES: Record<string, { input: number; output: number }> = {
   [NOTES_MODEL]: { input: 1 / 1_000_000, output: 5 / 1_000_000 },
-  [JUDGE_MODEL]: { input: 3 / 1_000_000, output: 15 / 1_000_000 },
+  // Sonnet 5 and Opus 5 are here because `--variant sonnet|opus` composes on
+  // them. A model priced at zero would report a variant as free, which is the
+  // one wrong number this table must never print.
+  'claude-sonnet-5': { input: 2 / 1_000_000, output: 10 / 1_000_000 },
+  'claude-opus-5': { input: 5 / 1_000_000, output: 25 / 1_000_000 },
+  // The judge, booked under a name of its own at Sonnet's price. `--variant
+  // sonnet` composes on the same model, and one row for both would report the
+  // cost of MEASURING that variant as part of what it costs to run — the one
+  // confusion this whole table exists to prevent.
+  [JUDGE_LABEL]: { input: 2 / 1_000_000, output: 10 / 1_000_000 },
 };
 
 /**
@@ -224,7 +237,7 @@ export function inventedLinkVerdict(
 }
 
 /** One behaviour's tally across the run. */
-class Behaviour {
+export class Behaviour {
   examples = 0;
   passes = 0;
   readonly failures: string[] = [];
@@ -243,6 +256,23 @@ class Behaviour {
   }
   get rate(): number {
     return this.examples === 0 ? 0 : this.passes / this.examples;
+  }
+  /**
+   * How many DIFFERENT things failed, as against how many ticks a failure was
+   * visible on.
+   *
+   * The decidable checks read the NOTES at each tick, so one bad bullet
+   * written on tick one fails every tick it survives — forty failures can be
+   * one line. The rate is still the honest answer to "are the notes good
+   * right now", but it is a terrible answer to "how often did the writer
+   * err", and a table comparing two methods on the rate alone reads a single
+   * unlucky bullet as a systematic gap. So both numbers print.
+   */
+  get distinctFailures(): number {
+    // The meeting and the text, without the tick: the same bullet failing on
+    // twelve ticks of one meeting is one thing, and the same wording in two
+    // different meetings is two.
+    return new Set(this.failures.map((f) => f.replace(/ tick \d+:/, ':'))).size;
   }
 }
 
@@ -424,7 +454,7 @@ async function judge(
     stop_reason?: string | null;
     usage?: { input_tokens?: number; output_tokens?: number };
   };
-  recordUsage(JUDGE_MODEL, body.usage?.input_tokens ?? 0, body.usage?.output_tokens ?? 0);
+  recordUsage(JUDGE_LABEL, body.usage?.input_tokens ?? 0, body.usage?.output_tokens ?? 0);
   const call = body.content?.find((b) => b.type === 'tool_use' && b.name === VERDICT_TOOL.name);
   if (!call?.input || typeof call.input !== 'object') {
     judgeUnread.add(
@@ -461,6 +491,11 @@ interface Options {
   /** Measure the lost-idea rate against the ground truth beside each fixture,
    *  and let it fail the run. */
   ideas: boolean;
+  /** Which way of note-taking this run is measuring. */
+  variant: Variant;
+  /** Where each meeting's final notes are written, so a person can read what
+   *  the rate is a rate OVER. Absent, nothing is written. */
+  dumpDir?: string;
 }
 
 function loadFixtures(only: readonly string[], dir: string): NotesEvalFixture[] {
@@ -485,12 +520,30 @@ async function runMeeting(
   opts: Options,
   behaviours: Record<string, Behaviour>,
   ticksWanted: number,
-): Promise<MeetingIdeaRate | null> {
+): Promise<{ rate: MeetingIdeaRate | null; expanded: MeetingIdeaRate | null }> {
+  const composeModel = opts.variant.model ?? NOTES_MODEL;
+  // The raw key, for the two callers that still want one: the composer and
+  // the variants' own helper calls. An access-token run leaves them without
+  // one — which is what `createHaikuNotesComposer` already reads as "no
+  // dedicated key", and it says so rather than sending an empty header.
+  const rawKey = opts.key.kind === 'key' ? opts.key.value : undefined;
   const composer = createHaikuNotesComposer({
-    apiKey: opts.key.kind === 'key' ? opts.key.value : undefined,
-    fetchImpl: countingFetch(NOTES_MODEL),
+    apiKey: rawKey,
+    fetchImpl: countingFetch(composeModel),
+    ...(opts.variant.model ? { model: opts.variant.model } : {}),
+    ...(opts.variant.maxTokens ? { maxTokens: opts.variant.maxTokens } : {}),
+    ...(opts.variant.effort ? { effort: opts.variant.effort } : {}),
+    ...(opts.variant.instructions
+      ? { instructions: (): string => opts.variant.instructions as string }
+      : {}),
   });
   if (!composer) throw new Error('no composer: the dedicated key did not resolve');
+  const hooks = opts.variant.begin({ credential: opts.key, fetchFor: countingFetch });
+  // The transcript of the tick a compose is running for. The hooks are handed
+  // it rather than re-deriving it, because `input.tick.turns` on a retry tick
+  // is not the same list the harness spoke.
+  let tickTranscript = '';
+  let tickNumber = 0;
 
   const ticks = fixture.ticks.slice(0, ticksWanted);
   // Which ticks the model judge reads. Spread across the meeting rather than
@@ -505,6 +558,16 @@ async function runMeeting(
   );
 
   const harness = createNotesTickHarness({
+    // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
+    // ('d-meeting', 'm1'), which was harmless while meetings ran one at a
+    // time and is not once `--jobs` runs four at once: four sessions sharing
+    // one doc id share every log line and every piece of state keyed on it.
+    // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately. It is
+    // the positive control for the finding: without it, "the collapse stopped
+    // happening" is a claim about a run that also changed nothing else.
+    ...(process.env.CW_NOTES_EVAL_SHARED_IDS === '1'
+      ? {}
+      : { docId: `d-${fixture.meeting}`, meetingId: `m-${fixture.meeting}` }),
     doc: `## Meeting notes\n\n- ${HUMAN_LINE}\n`,
     docTitle: `${fixture.meeting} (AMI)`,
     workspaceId: 'w-eval',
@@ -515,7 +578,34 @@ async function runMeeting(
     // landed is recorded as a failure and every tick behind it fails too —
     // the composes are serialized on one chain.
     tickTimeoutMs: 60_000,
-    compose: (input: NotesComposeInput) => composer.compose(input),
+    compose: async (input: NotesComposeInput) => {
+      const extra = await hooks.before(input, tickNumber, tickTranscript);
+      const edits = await composer.compose({ ...input, ...extra });
+      // CW_NOTES_EVAL_OPS=1 prints the op mix per tick. A meeting whose notes
+      // end EMPTY after fifty ticks is not a note-taker that wrote nothing —
+      // it is one that wrote and then deleted, and the two look identical in
+      // every other number this run prints.
+      if (process.env.CW_NOTES_EVAL_OPS === '1') {
+        // The ids an edit names, and — for a delete — the words it is about to
+        // remove. A tick that took the notes from forty bullets to none is
+        // only legible if the log says WHAT it deleted, not just that it
+        // deleted something.
+        const byId = new Map(input.outline.map((e) => [e.id, e]));
+        const mix = edits
+          .map((e) => {
+            const id = 'blockId' in e ? e.blockId : 'headingId' in e ? e.headingId : undefined;
+            if (e.op !== 'delete_block') return `${e.op}(${id ?? '-'})`;
+            const gone = byId.get(id as string);
+            return `delete_block(${id}: ${gone?.kind ?? '?'} "${(gone?.text ?? '?').slice(0, 40)}")`;
+          })
+          .join(' ');
+        console.log(
+          `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ` +
+            `heading=${input.notesHeadingId ?? 'none'} :: ${mix || '(none)'}`,
+        );
+      }
+      return edits;
+    },
   });
 
   let before = '';
@@ -532,6 +622,8 @@ async function runMeeting(
   for (let i = 0; i < ticks.length; i++) {
     const tick = ticks[i]!;
     const transcript = tick.turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
+    tickTranscript = transcript;
+    tickNumber = i + 1;
     let shot: Awaited<ReturnType<typeof harness.tick>>;
     try {
       shot = await harness.speak(...tick.turns.map((t) => ({ speaker: t.speaker, text: t.text })));
@@ -542,6 +634,13 @@ async function runMeeting(
       continue;
     }
     const notes = shot.notes;
+    if (process.env.CW_NOTES_EVAL_OPS === '1') {
+      console.log(
+        `  [doc] ${fixture.meeting} tick ${i + 1}: ${allBullets(notes).length} bullets in the ` +
+          `notes section, ${allBullets(shot.markdown).length} in the whole doc`,
+      );
+    }
+    await hooks.after(notes, i + 1, transcript);
     const where = `${fixture.meeting} tick ${i + 1}`;
     if (!shot.input) uncomposed++;
     const references = (shot.input?.references ?? []) as readonly NoteReference[];
@@ -644,37 +743,58 @@ async function runMeeting(
   // which a retry that landed two ticks later counts as coverage rather than
   // as a miss.
   let rate: MeetingIdeaRate | null = null;
+  let expanded: MeetingIdeaRate | null = null;
+  const finalNotes = harness.notes();
+  if (opts.dumpDir) {
+    writeFileSync(
+      join(opts.dumpDir, `${fixture.meeting}.${opts.variant.name}.md`),
+      `${harness.notes()}\n`,
+    );
+  }
   if (opts.ideas) {
     const truth = readTruth(opts.corpusDir, fixture.meeting);
     if (!truth) {
       console.log(`  ${fixture.meeting}: no idea ground truth beside the fixture`);
     } else {
-      const row: MeetingIdeaRate = {
-        meeting: fixture.meeting,
-        ideas: 0,
-        lost: 0,
-        unjudged: 0,
-        examples: [],
-      };
-      const finalNotes = harness.notes();
+      // The notes as WRITTEN, and — for a variant whose whole claim is that
+      // the detail sits behind a link — the notes as a reader following those
+      // links would see them. Both, because either alone is a different
+      // question, and reporting only the second would credit an anchor for
+      // words the note itself never carried.
+      const readings: Array<{ notes: string; row: MeetingIdeaRate }> = [
+        {
+          notes: finalNotes,
+          row: { meeting: fixture.meeting, ideas: 0, lost: 0, unjudged: 0, examples: [] },
+        },
+      ];
+      if (opts.variant.judgeExpanded && hooks.expand) {
+        readings.push({
+          notes: hooks.expand(finalNotes),
+          row: { meeting: fixture.meeting, ideas: 0, lost: 0, unjudged: 0, examples: [] },
+        });
+      }
       for (const entry of truth.ticks) {
         // Only the ticks this run actually played. A slice measured against
         // the whole meeting's ground truth would report every idea after the
         // slice as lost.
         if (entry.tick > ticks.length) continue;
-        const verdicts = await judgeCarried(opts.key, entry.ideas, finalNotes);
-        if (!verdicts) {
-          row.unjudged += entry.ideas.length;
-          continue;
+        for (const reading of readings) {
+          const verdicts = await judgeCarried(opts.key, entry.ideas, reading.notes);
+          if (!verdicts) {
+            reading.row.unjudged += entry.ideas.length;
+            continue;
+          }
+          entry.ideas.forEach((idea, i) => {
+            reading.row.ideas++;
+            if (verdicts[i]) return;
+            reading.row.lost++;
+            if (reading.row.examples.length < 5)
+              reading.row.examples.push(`tick ${entry.tick}: ${idea}`);
+          });
         }
-        entry.ideas.forEach((idea, i) => {
-          row.ideas++;
-          if (verdicts[i]) return;
-          row.lost++;
-          if (row.examples.length < 5) row.examples.push(`tick ${entry.tick}: ${idea}`);
-        });
       }
-      rate = row;
+      rate = readings[0]!.row;
+      expanded = readings[1]?.row ?? null;
     }
   }
 
@@ -712,7 +832,7 @@ async function runMeeting(
   for (const reason of new Set(harness.errors)) {
     console.log(`    ${fixture.meeting}: ${reason}`);
   }
-  return rate;
+  return { rate, expanded };
 }
 
 function report(
@@ -722,15 +842,20 @@ function report(
   quote: boolean,
   ratchet = false,
 ): number {
-  console.log('\nBehaviour                                  examples   pass rate');
-  console.log('-'.repeat(66));
+  console.log(
+    '\nBehaviour                                  examples   pass rate   distinct misses',
+  );
+  console.log('-'.repeat(83));
   let thin = 0;
   for (const b of Object.values(behaviours)) {
     const rate = b.examples === 0 ? '     —' : `${(b.rate * 100).toFixed(0).padStart(5)}%`;
-    console.log(`${b.what.padEnd(42)} ${String(b.examples).padStart(8)}   ${rate}`);
+    const distinct = b.failures.length === 0 ? '' : `${b.distinctFailures} of ${b.failures.length}`;
+    console.log(
+      `${b.what.padEnd(42)} ${String(b.examples).padStart(8)}   ${rate}   ${distinct.padStart(15)}`,
+    );
     if (b.examples < 25) thin++;
   }
-  console.log('-'.repeat(66));
+  console.log('-'.repeat(83));
   // A failure line quotes the bullet that failed, and a bullet is the meeting
   // restated. Off-repo corpora are private meetings, so they get the count
   // and nothing else.
@@ -792,6 +917,23 @@ async function main(argv: string[]): Promise<number> {
   const keyAt = argv.indexOf('--api-key');
   const judgeAt = argv.indexOf('--judge');
   const judgeOff = judgeAt >= 0 && argv[judgeAt + 1] === 'off';
+  // `--judge ideas` keeps the number the run exists for and drops the
+  // behaviour half of the model judge. A variant sweep reads the lost-idea
+  // rate over and over and the behaviour verdicts once; paying Sonnet for six
+  // reading-comprehension calls a meeting on every variant is money spent on
+  // a column nobody is comparing.
+  const judgeIdeasOnly = judgeAt >= 0 && argv[judgeAt + 1] === 'ideas';
+  const variantAt = argv.indexOf('--variant');
+  const variant = resolveVariant(variantAt >= 0 ? (argv[variantAt + 1] ?? '') : 'baseline');
+  const jobsAt = argv.indexOf('--jobs');
+  // Meetings are independent — separate harnesses, separate docs, separate
+  // ledgers — so they run side by side. Serially a full run is the sum of
+  // eight meetings' worth of serialized composes, which is most of an hour
+  // per variant and the reason a sweep would not fit in a day.
+  const jobs = Math.max(1, jobsAt >= 0 ? Number(argv[jobsAt + 1]) || 1 : 1);
+  const dumpAt = argv.indexOf('--dump-notes');
+  const dumpDir = dumpAt >= 0 ? argv[dumpAt + 1] : undefined;
+  if (dumpDir) mkdirSync(dumpDir, { recursive: true });
   const capAt = argv.indexOf('--max-usd');
   if (capAt >= 0) {
     const asked = Number(argv[capAt + 1]);
@@ -817,6 +959,16 @@ async function main(argv: string[]): Promise<number> {
     console.error(EVAL_CREDENTIAL_HELP);
     return 2;
   }
+
+  // Every model call this run makes is priced against one budget — the
+  // note-taker's, the variant's helpers', and both judges'. The idea judge
+  // runs on the behaviour judge's model, so its spend is relabelled on the way
+  // in: one row for MEASURING, separate from a `--variant sonnet` that
+  // composes on the same model. The sink is cleared in the `finally` below so
+  // a second run in the same process cannot inherit it.
+  setIdeaUsageSink((model, input, output) =>
+    recordUsage(model === JUDGE_MODEL ? JUDGE_LABEL : model, input, output),
+  );
 
   const behaviours: Record<string, Behaviour> = {
     length: new Behaviour('1.1', 'Bullets: 20 words or fewer'),
@@ -851,23 +1003,44 @@ async function main(argv: string[]): Promise<number> {
     meetings,
     // The smoke slice judges ONE tick: the CI job is there to prove the
     // harness still runs end to end, not to measure anything.
-    judgePerMeeting: judgeOff ? 0 : smoke ? 1 : 6,
+    judgePerMeeting: judgeOff || judgeIdeasOnly ? 0 : smoke ? 1 : 6,
     key,
     corpusDir,
     ideas,
+    variant,
+    ...(dumpDir ? { dumpDir } : {}),
   };
   const ticksWanted = smoke ? 3 : Number.POSITIVE_INFINITY;
 
   console.log(
-    `${smoke ? 'Smoke slice' : 'Full run'}: ${fixtures.length} meeting(s), ` +
-      `notes on ${NOTES_MODEL}, judge ${opts.judgePerMeeting > 0 ? JUDGE_MODEL : 'off'}`,
+    `${smoke ? 'Smoke slice' : 'Full run'}: variant ${variant.name}, ${fixtures.length} meeting(s), ` +
+      `notes on ${variant.model ?? NOTES_MODEL}, behaviour judge ` +
+      `${opts.judgePerMeeting > 0 ? JUDGE_MODEL : 'off'}, idea judge ${ideas ? JUDGE_MODEL : 'off'}` +
+      `, ${jobs} meeting(s) at a time`,
   );
+  const started = Date.now();
   const ideaRows: MeetingIdeaRate[] = [];
+  const expandedRows: MeetingIdeaRate[] = [];
+  const queue = [...fixtures];
   try {
-    for (const fixture of fixtures) {
-      const row = await runMeeting(fixture, opts, behaviours, ticksWanted);
-      if (row) ideaRows.push(row);
-    }
+    const workers = Array.from({ length: Math.min(jobs, queue.length) }, async () => {
+      for (;;) {
+        const fixture = queue.shift();
+        if (!fixture) return;
+        const out = await runMeeting(fixture, opts, behaviours, ticksWanted);
+        if (out.rate) ideaRows.push(out.rate);
+        if (out.expanded) expandedRows.push(out.expanded);
+      }
+    });
+    // SETTLED, not `Promise.all`. The cap is thrown from inside one worker,
+    // and the others are still in flight: `all` would reject while they kept
+    // running, which turns their own throws into unhandled rejections and
+    // leaves the spend still climbing after the message said it stopped.
+    // So every worker is awaited, and then the first failure is re-thrown.
+    // The overshoot is the calls already in flight, not another meeting.
+    const settled = await Promise.allSettled(workers);
+    const failed = settled.find((r) => r.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
   } catch (err) {
     if (!(err instanceof SpendCapReached)) throw err;
     // Print what was spent before saying anything else: the number is the
@@ -887,6 +1060,11 @@ async function main(argv: string[]): Promise<number> {
   } finally {
     setIdeaUsageSink(null);
   }
+  // Rows come back in whatever order the meetings finished. A table that
+  // reorders itself between runs cannot be diffed against another variant's.
+  ideaRows.sort((a, b) => a.meeting.localeCompare(b.meeting));
+  expandedRows.sort((a, b) => a.meeting.localeCompare(b.meeting));
+  console.log(`\nRan in ${Math.round((Date.now() - started) / 1000)}s.`);
   // One thing turns a verdict red: the lost-idea rate. It is measured against
   // a fixed ground truth, so it means the same thing every run, and it gates
   // on every run that measured it. The flat-wall check is a SHAPE the notes
@@ -896,7 +1074,15 @@ async function main(argv: string[]): Promise<number> {
   // that is the only reason `--corpus` exists. Its examples never print.
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const quote = !relative(repoRoot, resolve(corpusDir)).startsWith('..');
-  return report(behaviours, ideaRows, ideas, quote, argv.includes('--ratchet'));
+  const code = report(behaviours, ideaRows, ideas, quote, argv.includes('--ratchet'));
+  if (expandedRows.length > 0) {
+    console.log(
+      '\nThe same notes, read with every anchor followed — what a person who ' +
+        'clicks through sees, not what the page says:',
+    );
+    reportIdeaRates(expandedRows, false, quote);
+  }
+  return code;
 }
 
 if (import.meta.main) {

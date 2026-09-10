@@ -80,7 +80,6 @@ import {
 } from './meeting-task-capture.ts';
 import { meetingTimingPath } from './meetings.ts';
 import {
-  MEETING_NOTES_HEADING,
   NOTES_AUTHOR_ID,
   type NotesDocStore,
   applyNotesBlockEdits,
@@ -98,6 +97,7 @@ import { type NotesQualityPassResult, runNotesQualityPass } from './notes-qualit
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
+import { lastNotesHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
 import {
   reattributeNotesSection,
   relabelNotesSection,
@@ -230,6 +230,17 @@ export interface NotesHeadingMemory {
    *  its own section. Another meeting's memory of the same doc is untouched —
    *  that is the whole reason the key carries the meeting id. */
   beginMeeting(ids: NotesMeetingIds): void;
+  /**
+   * Every heading on this doc that SOME meeting has claimed as its section —
+   * this process's own adoptions and opens, plus whatever the store holds
+   * from meetings that have already stopped.
+   *
+   * The durable half of "is this section a meeting's or the doc's own", and
+   * the reason that question is not answered from authorship: starting a
+   * recording releases every claim (`releaseNotesAuthorship`), so a finished
+   * meeting's minutes read as authorless by design.
+   */
+  claimedIn(docId: string): ReadonlySet<string>;
 }
 
 /** The level a meeting's own section heading is written at. Deeper headings
@@ -262,48 +273,53 @@ export function notesSectionForMeeting(
 ): string | undefined {
   const held = memory.headingId(ids, outline);
   if (held !== undefined) return held;
-  const free = emptyNotesSection(readNotesOutline(docStore, ids.docId));
+  const free = reusableNotesSection(
+    readNotesOutline(docStore, ids.docId),
+    memory.claimedIn(ids.docId),
+  );
   if (free === undefined) return undefined;
   memory.adopt(ids, free);
   return free;
 }
 
 /**
- * The id of the doc's LAST `Meeting notes` heading when nothing is under it,
- * else undefined.
+ * The id of the doc's LAST `Meeting notes` heading when new minutes may write
+ * into it, else undefined.
  *
  * The owner's 2026-08-31 rule — a new recording opens its own section below
- * whatever the last one wrote — is about never replacing minutes somebody has
- * read. An EMPTY section holds none, so opening a second one under it leaves
- * two identical headings with nothing under either, which is what a meeting
- * whose every tick composed nothing left on a doc on 2026-09-09. The newer
- * rule is that new minutes reuse a section that fits the topic, and an empty
- * one fits every topic. A section with a single word in it is left alone.
+ * whatever the last one wrote — is about never replacing MINUTES somebody has
+ * read, and the 2026-09-09 rule says what the other case is: new minutes
+ * reuse an existing section when its topic fits. `notes-section-fit.ts` is
+ * that test, and it reads the body's AUTHORSHIP rather than its emptiness.
+ *
+ * WIDENED FROM "EMPTY" ON 2026-09-09, because empty was too narrow by exactly
+ * one shape: a `Meeting notes` heading somebody typed with their own lines
+ * under it. That is not another meeting's record, it is the doc saying where
+ * its minutes go — and refusing to adopt it opened a SECOND heading beside
+ * it, which took the person's lines out of the notes while leaving them in
+ * the doc. Measured on the eval's own seeded doc, which scored "a person's
+ * bullet is never edited" at 0% across every meeting while nothing had
+ * edited it.
+ *
+ * ADOPTION IS WHAT MAKES IT STICK. The caller records the answer in the
+ * heading memory, so from the second tick on this meeting knows which section
+ * is its own — without that, the bullets THIS meeting had just written would
+ * read as somebody's work on the next tick and it would open a second section
+ * anyway.
  *
  * THE LAST ONE, because both readers of a notes section take the last heading
  * with that text (`notesSectionStart` in the client, the finder here) — an
- * earlier empty section is not where anybody would read the minutes from, so
+ * earlier section is not where anybody would read the minutes from, so
  * writing into it would strand them exactly as the eager section-open exists
  * to prevent.
- *
- * A section runs to the next heading at its own level or above; anything at
- * all inside it — a bullet, a paragraph, a `### Topic` the last recording got
- * as far as writing — makes it somebody's, and it is left alone.
  */
-function emptyNotesSection(outline: readonly prose.OutlineEntry[]): string | undefined {
-  let last = -1;
-  for (let i = 0; i < outline.length; i++) {
-    const e = outline[i];
-    if (e?.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING) last = i;
-  }
-  if (last < 0) return undefined;
-  for (let i = last + 1; i < outline.length; i++) {
-    const e = outline[i];
-    if (!e) continue;
-    if (e.kind === 'heading' && (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL) break;
-    return undefined;
-  }
-  return outline[last]?.id;
+function reusableNotesSection(
+  outline: readonly prose.OutlineEntry[],
+  claimed: ReadonlySet<string>,
+): string | undefined {
+  const at = lastNotesHeadingIndex(outline);
+  if (at < 0) return undefined;
+  return notesSectionFits(outline, claimed) ? outline[at]?.id : undefined;
 }
 
 export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadingMemory {
@@ -316,6 +332,16 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
   // meeting's transcript. Without one the memory behaves exactly as it did:
   // remembered for the life of the process and no longer.
   const byMeeting = new Map<string, string>();
+  // Every heading this PROCESS has seen a meeting take, per doc. Added to and
+  // never removed by `beginMeeting`: a section the last recording opened is
+  // still that recording's record after it stops, which is exactly what the
+  // next recording must not write into.
+  const claimedByDoc = new Map<string, Set<string>>();
+  const claim = (docId: string, headingId: string): void => {
+    const held = claimedByDoc.get(docId);
+    if (held) held.add(headingId);
+    else claimedByDoc.set(docId, new Set([headingId]));
+  };
   const keyOf = ({ docId, meetingId }: NotesMeetingIds): string => `${docId}::${meetingId}`;
   const present = (id: string, outline: readonly prose.OutlineEntry[]): boolean =>
     outline.some((e) => e.id === id && e.kind === 'heading');
@@ -346,6 +372,7 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
     },
     adopt(ids, headingId) {
       byMeeting.set(keyOf(ids), headingId);
+      claim(ids.docId, headingId);
       store?.write(ids, headingId);
     },
     learn(ids, before, after) {
@@ -361,8 +388,14 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
       );
       if (opened) {
         byMeeting.set(keyOf(ids), opened.id);
+        claim(ids.docId, opened.id);
         store?.write(ids, opened.id);
       } else if (held !== undefined) forget(ids);
+    },
+    claimedIn(docId) {
+      const out = new Set(claimedByDoc.get(docId) ?? []);
+      for (const id of store?.openedIn?.(docId) ?? []) out.add(id);
+      return out;
     },
     beginMeeting(ids) {
       // IN MEMORY ONLY, AND THAT IS THE RESTART FIX. A meeting id is minted

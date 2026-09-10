@@ -23,12 +23,19 @@ import { dirname } from 'node:path';
  * Dependencies arrive in an explicit context rather than captured from the
  * `createServer` closure, following `task-routes-context.ts`.
  */
-import { MAX_SPEAKER_NAME, speakerDisplayName } from '@claude-workspaces/core';
+import {
+  DEFAULT_NOTES_METHOD,
+  MAX_SPEAKER_NAME,
+  notesMethodLabel,
+  parseNotesMethod,
+  speakerDisplayName,
+} from '@claude-workspaces/core';
 import { meetingDocAlias, meetingDocFilePath, meetingDocTitle } from '../huddle.ts';
 import type { MeetingRelay } from '../meeting-protocol.ts';
 import type { MeetingStore } from '../meetings.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { type WorkspaceScope, matchRest } from '../middleware/workspace-scope.ts';
+import { readNotesMethodRecord, writeNotesMethod } from '../notes-method-store.ts';
 import {
   type CalendarConnectionStore,
   type CalendarSyncConsumer,
@@ -154,6 +161,78 @@ export async function handleMeetingCalendarRoutes(
     // their own field, so a caller reading one is never reading the
     // other by accident.
     return j(200, { ...record, transcript: meetingStore.transcript(docId, meetingId) });
+  }
+  // --- Which note-taker this doc uses ---
+  //
+  // The at-rest half of the chooser's Note-taker fold. During a meeting the
+  // audio socket carries `set_notes_method`, for the same reason the rename
+  // does: the change has to reach the live session so the next tick composes
+  // with it and the doc gets its one trace line. A live meeting is refused
+  // here (409) rather than written behind that session's back.
+  //
+  // Per DOC and durable: the record outlives the meeting, so reopening the
+  // doc tomorrow shows the method it was left on.
+  const notesMethodMatch = matchRest(scope, /^docs\/([^/]+)\/notes-method$/);
+  if (notesMethodMatch && (req.method === 'GET' || req.method === 'PUT')) {
+    // A preference on somebody's doc, read and written owner-side only —
+    // the same line every mutating route in this family holds, and the read
+    // is held to it too so no share widens by one field.
+    if (visitor) return j(403, { error: 'not available to share visitors' });
+    const addressed = decodeURIComponent(notesMethodMatch[1] ?? '');
+    if (!isValidDocId(addressed)) return j(400, { error: 'bad docId' });
+    const docId = docStore.get(addressed)?.docId ?? addressed;
+    if (req.method === 'GET') {
+      const held = readNotesMethodRecord(dataDir, docId);
+      return j(200, {
+        docId,
+        method: held?.method ?? DEFAULT_NOTES_METHOD,
+        changes: held?.changes ?? [],
+      });
+    }
+    const body = (await req.json().catch(() => null)) as {
+      method?: unknown;
+      by?: unknown;
+    } | null;
+    // Named, not defaulted: a body the server cannot read must never quietly
+    // move a doc to the original note-taker.
+    const method = parseNotesMethod(body?.method);
+    if (!method) return j(400, { error: 'unknown note-taker' });
+    // A BOT MEETING IS LIVE AND HAS NO SOCKET TO SEND IT OVER. The refusal
+    // below is addressed to a meeting whose audio websocket carries
+    // `set_notes_method`; a vendor bot meeting has none, because nobody in
+    // the room is listening — so refusing it here left the mid-meeting
+    // switch impossible for exactly the meetings a person watches from the
+    // doc. Written here instead, and the live bot's notes session takes the
+    // same one trace line the socket path writes.
+    const live = meetingStore.active(docId);
+    const botLive = live !== undefined && recallRelay.hasLiveNotes(docId);
+    if (live && !botLive) {
+      return j(409, { error: 'meeting is live — change it over the audio socket' });
+    }
+    const by = typeof body?.by === 'string' ? body.by.trim().slice(0, MAX_SPEAKER_NAME) : '';
+    // NAMED WITH THE MEETING IT WAS MADE IN, when there is one. That is what
+    // separates "changed the doc's default" from "changed it while the room
+    // was talking" in the history — and it is also what stops the store
+    // dropping a re-affirmation of the current method as a no-op repeat,
+    // which would leave a trace line in the notes with no record behind it.
+    const meetingId = botLive ? live?.meetingId : undefined;
+    const record = writeNotesMethod(dataDir, docId, {
+      method,
+      at: Date.now(),
+      ...(by ? { by } : {}),
+      ...(meetingId ? { meetingId } : {}),
+    });
+    // ONLY ON A RECORDED CHANGE, the rule the socket path and the trace
+    // writer both hold: the record is written first and the line is a report
+    // of that write, never an announcement of one that did not happen.
+    // The store says whether it appended. A caller cannot tell from the
+    // history's length: at `MAX_KEPT_CHANGES` an append drops the oldest and
+    // the length does not move, which would silence every trace line on a
+    // doc that has been switched fifty times.
+    if (botLive && record.recorded) {
+      recallRelay.noteMethodChange(docId, notesMethodLabel(method), by || undefined);
+    }
+    return j(200, { docId, method: record.method, changes: record.changes });
   }
   // --- Naming a voice AFTER the meeting ---
   //

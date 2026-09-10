@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
+import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import { meetingTranscriptPath } from '../src/meetings.ts';
 import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
 import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
@@ -155,7 +156,12 @@ describe('the end-of-meeting line', () => {
     // first's repeats, which is the whole reason the section is addressed by
     // the heading's block id.
     const repeat = '- Kestrel Lane keeps the winter crew until April';
+    // ONE heading memory, because one server ran both meetings: it is what
+    // tells the second that the section below is the first's record rather
+    // than the doc's own standing section.
+    const heading = createNotesHeadingMemory();
     const first = createNotesTickHarness({
+      heading,
       meetingId: 'm-first',
       compose: (input) => addNotes(input, [repeat, repeat, repeat, repeat, repeat].join('\n')),
     });
@@ -163,6 +169,7 @@ describe('the end-of-meeting line', () => {
     await first.end();
 
     const second = createNotesTickHarness({
+      heading,
       meetingId: 'm-second',
       ydoc: first.ydoc,
       compose: (input) => addNotes(input, '- New boards go up at the slipway'),

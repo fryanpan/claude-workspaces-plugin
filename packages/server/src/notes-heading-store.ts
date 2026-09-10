@@ -25,9 +25,17 @@
  * words are in the transcript beside it.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { meetingSectionPath } from './meetings.ts';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
+import { meetingDirPath, meetingSectionPath } from './meetings.ts';
 
 /** What a heading record is keyed by — the same pair the in-memory map uses. */
 export interface NotesHeadingIds {
@@ -52,6 +60,18 @@ export interface NotesHeadingStore {
   /** Forget it: the heading is gone from the doc, so a later tick addressing
    *  it would fail with `unknown-block` for the rest of the meeting. */
   clear(ids: NotesHeadingIds): void;
+  /**
+   * Every heading id ANY meeting on this doc has recorded as its section.
+   *
+   * The durable answer to "is this heading a meeting's record or the doc's
+   * own", and the only one that survives `releaseNotesAuthorship` — which
+   * drops every claim when a recording starts, so a stopped meeting's minutes
+   * are indistinguishable from a person's notes by authorship alone.
+   *
+   * Optional so a fake store in a test need not grow a method to keep
+   * compiling; absent, the caller sees only what the process remembers.
+   */
+  openedIn?(docId: string): readonly string[];
 }
 
 /** What one record holds. `at` is for a human reading the data dir, never
@@ -117,6 +137,31 @@ export function createNotesHeadingFileStore(dataDir: string): NotesHeadingStore 
         rmSync(path, { force: true });
       } catch (err) {
         console.error(`[meeting-notes] heading record not cleared at ${path}:`, err);
+      }
+    },
+    openedIn(docId) {
+      // One directory listing per first tick of a meeting, over a folder
+      // holding one small file per meeting this doc has had. Read here rather
+      // than kept in a registry for the reason the records themselves are
+      // here: deleting a meeting's folder must delete its memory with it.
+      const dir = meetingDirPath(dataDir, docId);
+      try {
+        if (!existsSync(dir)) return [];
+        const out: string[] = [];
+        for (const name of readdirSync(dir)) {
+          if (!name.endsWith('-section.json')) continue;
+          try {
+            const id = headingIdOf(JSON.parse(readFileSync(join(dir, name), 'utf8')));
+            if (id !== undefined) out.push(id);
+          } catch {
+            // One unreadable record is one meeting this scan cannot vouch
+            // for, not a reason to answer nothing for the whole doc.
+          }
+        }
+        return out;
+      } catch (err) {
+        console.error(`[meeting-notes] heading records unreadable in ${dir}:`, err);
+        return [];
       }
     },
   };
