@@ -134,6 +134,59 @@ export function resolveKeyFrom(
 }
 
 /**
+ * How a call proves who it is. Two shapes, because there are two ways this
+ * repo is allowed to reach the API and they send different headers.
+ *
+ * A KEY is the operator's own dedicated credential, in the Keychain or the
+ * env override, and it is long-lived. A TOKEN is short-lived and minted by
+ * an identity provider — on CI, GitHub's OIDC token exchanged for one — so
+ * nothing durable has to be stored in a repository secret for a job to run.
+ * Neither is ever printed: the value lives in this object and reaches a
+ * header, and nothing else may read it back out.
+ */
+export type SummaryCredential =
+  | { readonly kind: 'key'; readonly value: string }
+  | { readonly kind: 'token'; readonly value: string };
+
+/** Env var holding an already-exchanged access token. */
+export const ACCESS_TOKEN_ENV = 'CW_SUMMARY_ACCESS_TOKEN';
+
+/**
+ * The one auth header this credential sends. A key goes in `x-api-key`; a
+ * token goes in `authorization` as a bearer. Sending both is what an
+ * "either/or" written as two optional fields turns into by accident, so the
+ * shape returns exactly one.
+ */
+export function authHeader(cred: SummaryCredential): Record<string, string> {
+  return cred.kind === 'token'
+    ? { authorization: `Bearer ${cred.value}` }
+    : { 'x-api-key': cred.value };
+}
+
+/**
+ * Which credential to use, in the order that keeps every existing caller
+ * working.
+ *
+ * An EXPLICIT argument wins outright — somebody typed `--api-key`, and a
+ * token that happens to be in the environment must not quietly override a
+ * credential a person chose in the same command. Otherwise an access token
+ * in the environment beats the Keychain, because the only thing that sets
+ * one is a job that just minted it for this run. With neither, this is the
+ * documented "feature off" null, exactly as before.
+ */
+export function resolveCredentialFrom(
+  explicit: string | null | undefined,
+  read: (service: string) => string | null,
+  env: Record<string, string | undefined>,
+): SummaryCredential | null {
+  if (explicit !== undefined) return explicit ? { kind: 'key', value: explicit } : null;
+  const token = env[ACCESS_TOKEN_ENV]?.trim();
+  if (token) return { kind: 'token', value: token };
+  const key = resolveKeyFrom(undefined, read);
+  return key ? { kind: 'key', value: key } : null;
+}
+
+/**
  * The reader is a parameter above so the ORDER can be tested without a
  * keychain: `readKeychainPassword` shells out to `security`, so a test of the
  * real function would either touch this machine's keychain or measure

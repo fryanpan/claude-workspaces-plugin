@@ -12,6 +12,15 @@
  * record transcripts and compose nothing, which the caller logs as the
  * configured-off state, not an error.
  *
+ * CI has no keychain and holds no repository secret, so it authenticates the
+ * other way this seam allows: it proves its identity to GitHub, trades that
+ * for an access token good for one run, and hands it over in
+ * `CW_SUMMARY_ACCESS_TOKEN`. That is still an act of consent — somebody
+ * configured a federation rule naming this repository — and it is a better
+ * one, because nothing long-lived is left lying in the repository to leak.
+ * `resolveCredentialFrom` picks between the two and `authHeader` sends
+ * exactly one header.
+ *
  * FAILURE THROWS, UNLIKE THE SUMMARIZER'S NULL. A summary that fails leaves
  * a deterministic card line standing; failed notes have no fallback text —
  * what they have is the session's carry (`beginNotesSession`), which needs a
@@ -27,7 +36,7 @@ import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { authHeader, resolveCredentialFrom } from './summarize.ts';
 
 export const NOTES_MODEL = 'claude-haiku-4-5-20251001';
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -288,7 +297,12 @@ export function readNotesEdits(raw: string): readonly prose.BlockEdit[] {
 }
 
 export interface HaikuNotesComposerOpts {
-  /** Tests: a key (or `null` for the explicit no-key state) without Keychain. */
+  /**
+   * Tests, and `--api-key`: an explicit key (or `null` for the explicit
+   * no-key state) without Keychain. Given, it wins over an access token in
+   * the environment — a credential somebody named in the same breath is not
+   * something an ambient one gets to override.
+   */
   apiKey?: string | null;
   /** Tests: the HTTP seam. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
@@ -323,8 +337,11 @@ let announcedOn = false;
  */
 export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): NotesComposer | null {
   if (readRenamedEnv(process.env, 'CW_MEETING_NOTES') === '0') return null;
-  const key = resolveKeyFrom(opts.apiKey, readKeychainPassword);
-  if (!key) return null;
+  // A key from the Keychain, or a short-lived access token the environment
+  // was handed — CI mints one from its OIDC identity so no long-lived secret
+  // has to sit in the repository. Either way one header, chosen here once.
+  const cred = resolveCredentialFrom(opts.apiKey, readKeychainPassword, process.env);
+  if (!cred) return null;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const model = opts.model ?? NOTES_MODEL;
   const maxTokens = opts.maxTokens ?? MAX_TOKENS;
@@ -353,7 +370,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-api-key': key,
+            ...authHeader(cred),
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({

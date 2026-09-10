@@ -33,6 +33,7 @@
 
 import type { NotesTurn } from './meeting-notes.ts';
 import { contentWords, ideaCarried } from './notes-idea-coverage.ts';
+import { type SummaryCredential, authHeader } from './summarize.ts';
 
 /** The cheap model the extract runs on, whatever composes the notes. */
 export const LEDGER_EXTRACT_MODEL = 'claude-haiku-4-5-20251001';
@@ -117,7 +118,13 @@ interface CarriedPoint {
 /** How the ledger reaches the model. Injected so a test drives it with no key
  *  and no network, and so the eval can count its spend. */
 export interface NotesLedgerDeps {
-  apiKey: string;
+  /**
+   * How the extract authenticates — the SAME shape the compose half uses, and
+   * for the same reason it is a shape rather than a string: an access token
+   * and an API key go in different headers, and a ledger that could only send
+   * one of them would go quiet on exactly the runs that hold a token.
+   */
+  credential: SummaryCredential;
   fetchImpl?: typeof fetch;
   /** Where an unreadable extract is reported. Never throws out of the ledger:
    *  a failed enumeration must degrade to the original note-taker, not fail
@@ -176,7 +183,7 @@ async function extractPoints(deps: NotesLedgerDeps, transcript: string): Promise
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': deps.apiKey,
+        ...authHeader(deps.credential),
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({

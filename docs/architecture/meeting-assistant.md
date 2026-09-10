@@ -1010,6 +1010,19 @@ rates ever come back from that half: an example line is a line of somebody's
 meeting restated, so the harness withholds every example — lost ideas and
 failed bullets alike — whenever the corpus resolves outside this repo.
 
+**CI runs the smoke slice once a day, not once a push.** It is the only
+thing in this repo's CI that spends money, and Bryan's bar is a dollar a
+day — a per-PR job cannot promise that, because it costs whatever the day's
+traffic happens to be. One run measured 7 model calls and $0.0313 on
+2026-09-09, so the daily budget is about thirty times the bill; the headroom
+is margin for a fixture growing, not an argument for running it more often.
+The promise is enforced rather than estimated: `--max-usd` aborts the run the
+moment its priced token usage passes the cap, and CI passes 1. A run that
+stops that way prints what it spent and exits 1 saying that nothing it
+reports is a verdict, because the meetings it never reached were not
+measured. `workflow_dispatch` is how somebody changing the prompt runs it
+before merging rather than waiting for the cron.
+
 **The bar is not met today, and the reason is arithmetic.** Measured
 2026-09-08 on `claude-haiku-4-5`, the rate is 40.7% over the eight AMI
 meetings (852 ideas) and 44.3% over three of this machine's own (300 ideas).

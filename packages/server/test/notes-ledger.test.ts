@@ -89,17 +89,62 @@ describe('the checklist handed to the writer', () => {
   });
 });
 
+describe('the extract authenticates the way the credential says, not one fixed way', () => {
+  /** Records the auth headers one extract went out with. */
+  function headerFetch(): { impl: typeof fetch; sent: Array<Record<string, string>> } {
+    const sent: Array<Record<string, string>> = [];
+    const impl = (async (_url: string, init?: RequestInit) => {
+      sent.push({ ...((init?.headers ?? {}) as Record<string, string>) });
+      return new Response(
+        JSON.stringify({
+          content: [{ type: 'tool_use', name: 'record_points', input: { points: ['A: a point'] } }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+    return { impl, sent };
+  }
+
+  test('a key goes out as x-api-key', async () => {
+    const f = headerFetch();
+    const ledger = createNotesLedger({
+      credential: { kind: 'key', value: 'k-test' },
+      fetchImpl: f.impl,
+    });
+    await ledger.before([turn(1, 'the boardwalk needs a survey', 'A')]);
+    expect(f.sent[0]?.['x-api-key']).toBe('k-test');
+    expect(f.sent[0]?.authorization).toBeUndefined();
+  });
+
+  test('MUTATION CONTROL: a token goes out as a bearer and no x-api-key at all', async () => {
+    const f = headerFetch();
+    const ledger = createNotesLedger({
+      credential: { kind: 'token', value: 't-test' },
+      fetchImpl: f.impl,
+    });
+    await ledger.before([turn(1, 'the boardwalk needs a survey', 'A')]);
+    expect(f.sent[0]?.authorization).toBe('Bearer t-test');
+    expect(f.sent[0]?.['x-api-key']).toBeUndefined();
+  });
+});
+
 describe('a tick with nothing said pays no round trip', () => {
   test('empty speech does not call the model', async () => {
     const f = extractFetch([['never asked for']]);
-    const ledger = createNotesLedger({ apiKey: 'k-test', fetchImpl: f.impl });
+    const ledger = createNotesLedger({
+      credential: { kind: 'key', value: 'k-test' } as const,
+      fetchImpl: f.impl,
+    });
     expect(await ledger.before([])).toBe('');
     expect(f.calls()).toBe(0);
   });
 
   test('CONTROL: speech does call it', async () => {
     const f = extractFetch([['Maya (A): survey the boardwalk']]);
-    const ledger = createNotesLedger({ apiKey: 'k-test', fetchImpl: f.impl });
+    const ledger = createNotesLedger({
+      credential: { kind: 'key', value: 'k-test' } as const,
+      fetchImpl: f.impl,
+    });
     expect(await ledger.before([turn(1, 'survey the boardwalk', 'Maya Okonkwo', 'A')])).toContain(
       'survey the boardwalk',
     );
@@ -110,7 +155,10 @@ describe('a tick with nothing said pays no round trip', () => {
 describe('what the carry offers again', () => {
   test('a point the notes now carry is not offered a second time', async () => {
     const f = extractFetch([['Maya (A): survey the boardwalk'], []]);
-    const ledger = createNotesLedger({ apiKey: 'k-test', fetchImpl: f.impl });
+    const ledger = createNotesLedger({
+      credential: { kind: 'key', value: 'k-test' } as const,
+      fetchImpl: f.impl,
+    });
     await ledger.before([turn(1, 'survey the boardwalk', 'Maya Okonkwo', 'A')]);
     ledger.after('- Maya: the boardwalk section needs a survey before work starts');
     // Second tick: the extract answers nothing, so anything in the prompt
@@ -120,7 +168,10 @@ describe('what the carry offers again', () => {
 
   test('a point the notes did NOT carry rides to the next tick', async () => {
     const f = extractFetch([['Maya (A): survey the boardwalk'], []]);
-    const ledger = createNotesLedger({ apiKey: 'k-test', fetchImpl: f.impl });
+    const ledger = createNotesLedger({
+      credential: { kind: 'key', value: 'k-test' } as const,
+      fetchImpl: f.impl,
+    });
     await ledger.before([turn(1, 'survey the boardwalk', 'Maya Okonkwo', 'A')]);
     ledger.after('- Devin: the plaque wording is settled');
     expect(await ledger.before([turn(2, 'next topic', 'Devin Aluko', 'B')])).toContain(
@@ -130,7 +181,10 @@ describe('what the carry offers again', () => {
 
   test('a point declined often enough stops being offered', async () => {
     const f = extractFetch([['Maya (A): survey the boardwalk'], [], [], [], []]);
-    const ledger = createNotesLedger({ apiKey: 'k-test', fetchImpl: f.impl });
+    const ledger = createNotesLedger({
+      credential: { kind: 'key', value: 'k-test' } as const,
+      fetchImpl: f.impl,
+    });
     await ledger.before([turn(1, 'survey the boardwalk', 'Maya Okonkwo', 'A')]);
     let offers = 0;
     for (let i = 0; i < 4; i++) {
@@ -147,7 +201,10 @@ describe('what the carry offers again', () => {
   test('the carry has a ceiling, and it keeps the newest points', async () => {
     const many = Array.from({ length: MAX_CARRIED + 8 }, (_, i) => `Maya (A): point number ${i}`);
     const f = extractFetch([many, []]);
-    const ledger = createNotesLedger({ apiKey: 'k-test', fetchImpl: f.impl });
+    const ledger = createNotesLedger({
+      credential: { kind: 'key', value: 'k-test' } as const,
+      fetchImpl: f.impl,
+    });
     await ledger.before([turn(1, 'a long stretch of talk', 'Maya Okonkwo', 'A')]);
     ledger.after('- nothing of the sort was written');
     const second = await ledger.before([turn(2, 'more', 'Devin Aluko', 'B')]);
@@ -162,7 +219,7 @@ describe('an extract that cannot be read degrades to the original note-taker', (
   async function ledgerAnswering(res: () => Promise<Response>): Promise<string> {
     const errors: string[] = [];
     const ledger = createNotesLedger({
-      apiKey: 'k-test',
+      credential: { kind: 'key', value: 'k-test' } as const,
       fetchImpl: res as unknown as typeof fetch,
       onError: (m) => errors.push(m),
     });
@@ -191,7 +248,7 @@ describe('an extract that cannot be read degrades to the original note-taker', (
 
   test('a reply with no tool call is an empty checklist', async () => {
     const ledger = createNotesLedger({
-      apiKey: 'k-test',
+      credential: { kind: 'key', value: 'k-test' } as const,
       fetchImpl: (async () =>
         new Response(JSON.stringify({ content: [{ type: 'text' }] }), {
           status: 200,
@@ -205,7 +262,7 @@ describe('the extract never sends the meeting anywhere but the model', () => {
   test('the error line carries a status, never the speech', async () => {
     const errors: string[] = [];
     const ledger = createNotesLedger({
-      apiKey: 'k-test',
+      credential: { kind: 'key', value: 'k-test' } as const,
       fetchImpl: (async () =>
         new Response('the boardwalk section still needs a survey', {
           status: 502,

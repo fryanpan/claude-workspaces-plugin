@@ -44,6 +44,7 @@ import {
 } from '../packages/server/src/notes-ledger.ts';
 import { composeSettings } from '../packages/server/src/notes-method-composer.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from '../packages/server/src/notes-prompt-store.ts';
+import { type SummaryCredential, authHeader } from '../packages/server/src/summarize.ts';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 /** The cheap model the extra passes run on. A variant that pays Sonnet for its
@@ -117,7 +118,10 @@ interface ToolSpec {
 
 /** How a variant reaches the API and gets its spend counted. */
 export interface VariantContext {
-  key: string;
+  /** The run's credential, in the shape that knows its own header. A raw
+   *  string here would send `x-api-key` for a run holding an access token,
+   *  and the helper calls would fail while the compose half succeeded. */
+  credential: SummaryCredential;
   /** The eval's counting fetch for a model, so helper spend lands in the
    *  report rather than off the books. */
   fetchFor: (model: string) => typeof fetch;
@@ -134,7 +138,7 @@ async function callTool(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': ctx.key,
+      ...authHeader(ctx.credential),
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -610,7 +614,7 @@ const ONE_NOTE_PER_IDEA = [
  */
 function shippedLedgerHooks(ctx: VariantContext): MeetingHooks {
   const ledger = createNotesLedger({
-    apiKey: ctx.key,
+    credential: ctx.credential,
     // The eval's counting fetch, so the extract's spend lands in the report.
     // Off the books, a two-pass note-taker prices as a one-pass one.
     fetchImpl: ctx.fetchFor(LEDGER_EXTRACT_MODEL),

@@ -12,10 +12,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { type NotesEvalFixture } from './notes-eval-fixtures.ts';
 import {
   MIN_GATED_IDEAS,
   type MeetingIdeaRate,
   TARGET_LOST_IDEA_RATE,
+  buildMeetingTruth,
+  judgeCarried,
   ratchetLostIdeaBar,
   rateOf,
   readLostIdeaBar,
@@ -171,5 +174,144 @@ describe('the ratchet', () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+/**
+ * A ground truth is written once and then left alone, so a build that got a
+ * short answer out of the network freezes that gap in permanently.
+ */
+describe('building a meeting ground truth', () => {
+  const fixture = (ticks: number): NotesEvalFixture => ({
+    meeting: 'FIC001',
+    corpus: 'fictional',
+    licence: 'none',
+    source: 'invented for this test',
+    window: { fromSeconds: 0, seconds: 60 },
+    board: [],
+    ticks: Array.from({ length: ticks }, (_, i) => ({
+      turns: [{ speaker: 'Robin', text: `We should ship thing ${i + 1}.` }],
+    })),
+  });
+
+  it('lists every tick when every call answers', async () => {
+    const built = await buildMeetingTruth(
+      fixture(3),
+      async (t) => [t.trim()],
+      () => '2026-01-01T00:00:00.000Z',
+    );
+    expect('truth' in built).toBe(true);
+    if (!('truth' in built)) return;
+    expect(built.truth.ticks.map((t) => t.tick)).toEqual([1, 2, 3]);
+    expect(built.truth.meeting).toBe('FIC001');
+  });
+
+  it('hands back the unreadable ticks instead of a short list', async () => {
+    const built = await buildMeetingTruth(fixture(4), async (t) =>
+      t.includes('thing 2') || t.includes('thing 4') ? null : [t.trim()],
+    );
+    expect('truth' in built).toBe(false);
+    if ('truth' in built) return;
+    expect(built.unreadable).toEqual([2, 4]);
+  });
+
+  it('is not fooled by a tick that legitimately held no ideas', async () => {
+    // An empty list is an ANSWER — that tick was read and contained nothing.
+    // Only `null`, the unread call, may stop a build.
+    const built = await buildMeetingTruth(fixture(3), async (t) =>
+      t.includes('thing 2') ? [] : [t.trim()],
+    );
+    expect('truth' in built).toBe(true);
+    if (!('truth' in built)) return;
+    expect(built.truth.ticks.map((t) => t.tick)).toEqual([1, 3]);
+  });
+});
+
+/**
+ * The judge answers one row per idea. A reply that answers the same idea
+ * twice reaches the expected total while leaving another idea unanswered,
+ * and that idea then scores false — lost — on a verdict nobody gave.
+ */
+describe('reading the judge reply', () => {
+  const cred = { kind: 'key', value: 'test-not-a-real-key' } as const;
+  const ideas = ['the export drops the range', 'the invoice rounds down', 'we ship Tuesday'];
+
+  /** A judge that replies with exactly these rows. */
+  function judgeReplying(carried: Array<{ n: number; carried: boolean }>): typeof fetch {
+    return (async () =>
+      new Response(
+        JSON.stringify({
+          content: [{ type: 'tool_use', name: 'record_carried', input: { carried } }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch;
+  }
+
+  async function judged(
+    carried: Array<{ n: number; carried: boolean }>,
+  ): Promise<boolean[] | null> {
+    const real = globalThis.fetch;
+    globalThis.fetch = judgeReplying(carried);
+    try {
+      return await judgeCarried(cred, ideas, 'the notes');
+    } finally {
+      globalThis.fetch = real;
+    }
+  }
+
+  it('reads a reply that answers each idea exactly once', async () => {
+    expect(
+      await judged([
+        { n: 1, carried: true },
+        { n: 2, carried: false },
+        { n: 3, carried: true },
+      ]),
+    ).toEqual([true, false, true]);
+  });
+
+  it('refuses a reply that repeats one idea and omits another', async () => {
+    // Three rows for three ideas, so a count of rows sees nothing wrong —
+    // and idea 3, which the judge never reached, would have scored lost.
+    expect(
+      await judged([
+        { n: 1, carried: true },
+        { n: 2, carried: false },
+        { n: 2, carried: true },
+      ]),
+    ).toBeNull();
+  });
+
+  it('refuses a reply that repeats an idea even when every idea is answered', async () => {
+    // Four rows covering all three ideas, so the distinct-index count is
+    // satisfied. A judge that answered one idea twice has lost its place in
+    // the list, and which of its two answers is the real one is unknowable.
+    expect(
+      await judged([
+        { n: 1, carried: true },
+        { n: 2, carried: false },
+        { n: 2, carried: true },
+        { n: 3, carried: true },
+      ]),
+    ).toBeNull();
+  });
+
+  it('refuses a reply whose verdict is missing or not a boolean', async () => {
+    // The shape a rate must never be built on: three rows, every idea named,
+    // and one verdict that says nothing. Read as false it becomes a lost
+    // idea, and lost ideas are what the gate and the ratchet are made of.
+    for (const bad of [undefined, null, 'yes', 1]) {
+      expect(
+        await judged([
+          { n: 1, carried: true },
+          { n: 2, carried: bad as unknown as boolean },
+          { n: 3, carried: true },
+        ]),
+      ).toBeNull();
+    }
+  });
+
+  it('still refuses a reply that is simply short', async () => {
+    expect(await judged([{ n: 1, carried: true }])).toBeNull();
   });
 });

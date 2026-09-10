@@ -37,7 +37,11 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
+import {
+  type SummaryCredential,
+  authHeader,
+  resolveCredentialFrom,
+} from '../packages/server/src/summarize.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,6 +104,22 @@ const LIST_TOOL: ToolSpec = {
   },
 };
 
+/**
+ * Where this file's own spend is reported. It used to go nowhere, so a run's
+ * printed total counted the note composer and the behaviour judge and silently
+ * omitted every idea-judging call — which is most of the calls a full run
+ * makes. A total that omits the largest term is worse than no total, because
+ * it is the number a spend cap would be enforced against.
+ */
+export type UsageSink = (model: string, input: number, output: number) => void;
+
+let usageSink: UsageSink | null = null;
+
+/** Send this file's token usage somewhere. `null` stops reporting. */
+export function setIdeaUsageSink(sink: UsageSink | null): void {
+  usageSink = sink;
+}
+
 /** A forced tool call, the shape both questions here take. */
 interface ToolSpec {
   name: string;
@@ -107,33 +127,18 @@ interface ToolSpec {
   input_schema: { type: 'object'; properties: Record<string, unknown>; required: string[] };
 }
 
-/**
- * The fetch these calls go through.
- *
- * `notes-eval.ts` swaps in its counting wrapper so the idea judge's spend
- * lands in the run's own Spend table. It used to call the global directly,
- * which meant a run reported what the NOTE-TAKER cost and silently omitted
- * what MEASURING it cost — and the second number is most of the bill on a
- * variant sweep, where the same judge is paid over and over.
- */
-let judgeFetch: typeof fetch = globalThis.fetch;
-
-export function useIdeaJudgeFetch(impl: typeof fetch): void {
-  judgeFetch = impl;
-}
-
 async function callTool(
-  key: string,
+  key: SummaryCredential,
   system: string,
   user: string,
   tool: ToolSpec,
   maxTokens: number,
 ): Promise<Record<string, unknown> | null> {
-  const res = await judgeFetch(API_URL, {
+  const res = await fetch(API_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': key,
+      ...authHeader(key),
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -153,14 +158,19 @@ async function callTool(
   }
   const body = (await res.json()) as {
     content?: Array<{ type?: string; name?: string; input?: unknown }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
   };
+  usageSink?.(TRUTH_MODEL, body.usage?.input_tokens ?? 0, body.usage?.output_tokens ?? 0);
   const call = body.content?.find((b) => b.type === 'tool_use' && b.name === tool.name);
   if (!call?.input || typeof call.input !== 'object') return null;
   return call.input as Record<string, unknown>;
 }
 
 /** List one tick's ideas. Null when the model could not be read. */
-export async function listIdeas(key: string, transcript: string): Promise<string[] | null> {
+export async function listIdeas(
+  key: SummaryCredential,
+  transcript: string,
+): Promise<string[] | null> {
   const out = await callTool(
     key,
     LIST_SYSTEM,
@@ -214,7 +224,7 @@ const CARRY_TOOL: ToolSpec = {
  * because a judge that would not answer is not evidence about the notes.
  */
 export async function judgeCarried(
-  key: string,
+  key: SummaryCredential,
   ideas: readonly string[],
   notes: string,
 ): Promise<boolean[] | null> {
@@ -226,16 +236,28 @@ export async function judgeCarried(
   const out = await callTool(key, CARRY_SYSTEM, user, CARRY_TOOL, 200 + ideas.length * 40);
   if (!out || !Array.isArray(out.carried)) return null;
   const verdicts = new Array<boolean>(ideas.length).fill(false);
-  let answered = 0;
+  // INDICES, NOT ROWS. Counting rows let a judge that answered idea 3 twice
+  // and never answered idea 5 reach the expected total, and idea 5 then
+  // scored `false` — lost — on a verdict nobody gave. A repeat is also a
+  // sign the judge lost its place, so it fails the whole reply rather than
+  // being taken as the last word on that idea.
+  const answered = new Set<number>();
   for (const row of out.carried as Array<{ n?: unknown; carried?: unknown }>) {
     const n = typeof row?.n === 'number' ? row.n - 1 : -1;
     if (n < 0 || n >= ideas.length) continue;
-    verdicts[n] = row.carried === true;
-    answered++;
+    if (answered.has(n)) return null;
+    // A MISSING VERDICT IS NOT A NO. `row.carried === true` read an absent,
+    // null or string `carried` as false, which the rate then counts as a lost
+    // idea — a number that can fail the gate or ratchet the bar on nothing
+    // but a malformed reply. An unreadable row makes the whole reply
+    // unreadable, the same as a short one.
+    if (typeof row.carried !== 'boolean') return null;
+    answered.add(n);
+    verdicts[n] = row.carried;
   }
   // A partial answer is not a verdict on the ones it skipped, and scoring
   // those as lost would grade the judge's arithmetic.
-  return answered === ideas.length ? verdicts : null;
+  return answered.size === ideas.length ? verdicts : null;
 }
 
 /* ===== The rate ===== */
@@ -403,7 +425,44 @@ export function reportIdeaRates(
 
 /* ===== Building the ground truth ===== */
 
-async function build(dir: string, only: readonly string[], key: string): Promise<number> {
+/**
+ * One meeting's ground truth, or the ticks that could not be read.
+ *
+ * SEPARATE FROM THE WRITER on purpose. A tick whose API call failed used to
+ * be logged and skipped, and the file was written anyway — complete-looking,
+ * short by however many ticks the network ate. The next build then saw the
+ * file already existed and left it alone, so a transient failure became the
+ * permanent ground truth every later lost-idea rate was measured against.
+ * The rule is all-or-nothing: either every tick was read, or the caller is
+ * handed the list of the ones that were not and writes nothing.
+ */
+export async function buildMeetingTruth(
+  fixture: NotesEvalFixture,
+  list: (transcript: string) => Promise<string[] | null>,
+  now: () => string = () => new Date().toISOString(),
+): Promise<{ truth: IdeaTruth } | { unreadable: number[] }> {
+  const ticks: TickIdeas[] = [];
+  const unreadable: number[] = [];
+  for (let i = 0; i < fixture.ticks.length; i++) {
+    const transcript = fixture.ticks[i]!.turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
+    const ideas = await list(transcript);
+    if (ideas === null) {
+      unreadable.push(i + 1);
+      continue;
+    }
+    if (ideas.length > 0) ticks.push({ tick: i + 1, ideas });
+  }
+  if (unreadable.length > 0) return { unreadable };
+  return {
+    truth: { meeting: fixture.meeting, listedBy: TRUTH_MODEL, listedAt: now(), ticks },
+  };
+}
+
+async function build(
+  dir: string,
+  only: readonly string[],
+  key: SummaryCredential,
+): Promise<number> {
   const files = readdirSync(dir)
     .filter((f) => f.endsWith('.json') && !f.endsWith('.ideas.json'))
     .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as NotesEvalFixture)
@@ -411,6 +470,7 @@ async function build(dir: string, only: readonly string[], key: string): Promise
     .sort((a, b) => a.meeting.localeCompare(b.meeting));
   if (files.length === 0) throw new Error(`No fixtures in ${dir}`);
 
+  const failed: string[] = [];
   for (const fixture of files) {
     const path = truthPath(dir, fixture.meeting);
     if (existsSync(path) && only.length === 0) {
@@ -420,23 +480,21 @@ async function build(dir: string, only: readonly string[], key: string): Promise
       console.log(`${fixture.meeting}: ground truth already exists, left alone`);
       continue;
     }
-    const ticks: TickIdeas[] = [];
-    for (let i = 0; i < fixture.ticks.length; i++) {
-      const transcript = fixture.ticks[i]!.turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
-      const ideas = await listIdeas(key, transcript);
-      if (ideas === null) {
-        console.error(`  ${fixture.meeting} tick ${i + 1}: unreadable, listed as no ideas`);
-        continue;
-      }
-      if (ideas.length > 0) ticks.push({ tick: i + 1, ideas });
+    const built = await buildMeetingTruth(fixture, (transcript) => listIdeas(key, transcript));
+    if ('unreadable' in built) {
+      // NOTHING IS WRITTEN. A file that exists is a file the next build
+      // leaves alone, so writing a short list here would freeze the gap in
+      // and every later rate would be measured against ground truth that
+      // silently omits whole ticks.
+      console.error(
+        `  ${fixture.meeting}: tick(s) ${built.unreadable.join(', ')} could not be read. ` +
+          'No ground truth written — re-run this meeting once the API answers.',
+      );
+      failed.push(fixture.meeting);
+      continue;
     }
-    const truth: IdeaTruth = {
-      meeting: fixture.meeting,
-      listedBy: TRUTH_MODEL,
-      listedAt: new Date().toISOString(),
-      ticks,
-    };
-    writeFileSync(path, `${JSON.stringify(truth, null, 2)}\n`);
+    writeFileSync(path, `${JSON.stringify(built.truth, null, 2)}\n`);
+    const ticks = built.truth.ticks;
     const total = ticks.reduce((n, t) => n + t.ideas.length, 0);
     console.log(`${fixture.meeting}: ${total} ideas over ${ticks.length} ticks -> ${path}`);
   }
@@ -449,6 +507,13 @@ async function build(dir: string, only: readonly string[], key: string): Promise
   if (!relative(REPO_ROOT, dir).startsWith('..')) {
     Bun.spawnSync(['bunx', 'biome', 'check', '--write', dir], { cwd: REPO_ROOT });
   }
+  // A build that skipped a meeting exits non-zero. It used to exit 0 with the
+  // reason on stderr, which a caller reading the status code — a script, a
+  // job, a person running it under `&&` — could not see at all.
+  if (failed.length > 0) {
+    console.error(`\nGround truth incomplete for: ${failed.join(', ')}`);
+    return 1;
+  }
   return 0;
 }
 
@@ -457,9 +522,12 @@ if (import.meta.main) {
   const at = argv.indexOf('--meeting');
   const corpusAt = argv.indexOf('--corpus');
   const dir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
-  const key = resolveKeyFrom(undefined, readKeychainPassword);
+  const key = resolveCredentialFrom(undefined, readKeychainPassword, process.env);
   if (!key) {
-    console.error('No dedicated key. Set CW_SUMMARY_API_KEY or use the Keychain entry.');
+    console.error(
+      'No credential. Set CW_SUMMARY_ACCESS_TOKEN, set CW_SUMMARY_API_KEY, or use the ' +
+        'Keychain entry.',
+    );
     process.exit(2);
   }
   if (!argv.includes('--build')) {

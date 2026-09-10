@@ -37,7 +37,7 @@ import { type HaikuNotesComposerOpts, createHaikuNotesComposer } from './meeting
 import type { NotesComposeInput, NotesComposer } from './meeting-notes.ts';
 import { type NotesLedger, createNotesLedger, nestedNotesInstructions } from './notes-ledger.ts';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { type SummaryCredential, resolveCredentialFrom } from './summarize.ts';
 
 /** The model each method composes on. `undefined` is the composer's own
  *  default, which is Haiku — the two cheap methods differ in whether they run
@@ -145,13 +145,28 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
   // The compose half. Unchanged in effect: this is the resolution
   // `createHaikuNotesComposer` was already doing for itself, lifted so the
   // ledger can be given the same answer.
-  const composeKey = resolveKeyFrom(base.apiKey, read);
-  // The extract half. A ledger key said to be absent turns the LEDGER off and
-  // leaves the notes composing as the original, which is a state worth
-  // keeping; what the server was hitting instead was `undefined` reaching the
-  // extract as "no key" while the compose quietly read the Keychain, so both
-  // ledger methods ran their two-layer prompt with no checklist behind it.
-  const ledgerKey = resolveKeyFrom(deps.apiKey === undefined ? base.apiKey : deps.apiKey, read);
+  const composeCredential = resolveCredentialFrom(base.apiKey, read, process.env);
+  // The extract half. A ledger credential said to be absent turns the LEDGER
+  // off and leaves the notes composing as the original, which is a state
+  // worth keeping; what the server was hitting instead was `undefined`
+  // reaching the extract as "no key" while the compose quietly read the
+  // Keychain, so both ledger methods ran their two-layer prompt with no
+  // checklist behind it.
+  const ledgerCredential: SummaryCredential | null = resolveCredentialFrom(
+    deps.apiKey === undefined ? base.apiKey : deps.apiKey,
+    read,
+    process.env,
+  );
+  // A KEY IS HANDED OVER; A TOKEN IS LEFT TO BE RE-RESOLVED. The composer
+  // takes a string or nothing, so a token cannot be passed down as one —
+  // and it does not need to be: the same environment resolves to the same
+  // token there as it did here.
+  const composeApiKey =
+    composeCredential === null
+      ? null
+      : composeCredential.kind === 'key'
+        ? composeCredential.value
+        : undefined;
   // Built once each, not per tick: each carries a resolved key and an
   // announcement latch, and constructing one per compose would re-resolve
   // the Keychain on every tick of every meeting.
@@ -170,9 +185,9 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
     const instructions = base.instructions;
     const composer = createHaikuNotesComposer({
       ...base,
-      // After `...base` on purpose: the resolved key IS the one base asked
-      // for, read through the same seam the ledger's key came through.
-      apiKey: composeKey,
+      // After `...base` on purpose: the resolved credential IS the one base
+      // asked for, read through the same seam the ledger's came through.
+      apiKey: composeApiKey,
       ...composeSettings(method),
       ...(notesMethodUsesLedger(method) && instructions
         ? {
@@ -193,7 +208,7 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
 
   const ledgers = new Map<string, NotesLedger>();
   function ledgerFor(meetingId: string): NotesLedger | null {
-    if (!ledgerKey) return null;
+    if (!ledgerCredential) return null;
     const held = ledgers.get(meetingId);
     if (held) return held;
     if (ledgers.size >= MAX_LIVE_LEDGERS) {
@@ -203,7 +218,7 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
       if (!oldest.done) ledgers.delete(oldest.value);
     }
     const made = createNotesLedger({
-      apiKey: ledgerKey,
+      credential: ledgerCredential,
       ...(deps.ledgerFetch ? { fetchImpl: deps.ledgerFetch } : {}),
       ...(deps.onError ? { onError: deps.onError } : {}),
     });
