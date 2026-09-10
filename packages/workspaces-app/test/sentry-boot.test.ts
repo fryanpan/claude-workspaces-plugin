@@ -188,7 +188,7 @@ describe('the page Sentry entry', () => {
     expect(send(collision)).not.toBeNull();
 
     // Inside the insert the widget is about to retry, it goes nowhere.
-    enterRecoverableInsert();
+    const before = enterRecoverableInsert();
     try {
       expect(send(collision)).toBeNull();
       // Still narrow while the flag is up: a SyntaxError thrown at runtime is
@@ -199,7 +199,7 @@ describe('the page Sentry entry', () => {
         }),
       ).not.toBeNull();
     } finally {
-      leaveRecoverableInsert();
+      leaveRecoverableInsert(before);
     }
 
     expect(send(collision)).not.toBeNull();

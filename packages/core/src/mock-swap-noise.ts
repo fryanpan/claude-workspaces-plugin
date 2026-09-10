@@ -40,8 +40,20 @@
  * The property the swap raises on the global while it inserts a script it can
  * retry. A DEPTH rather than a boolean so a nested insert cannot lower a
  * window its caller still needs.
+ *
+ * It sits on the same global a mock's own scripts run in, which is unavoidable
+ * — that global is the only thing the two bundles share. So the value is
+ * treated as untrusted input rather than as state this module owns: a read
+ * accepts only a small positive integer this module could have written, and a
+ * leave RESTORES what its own enter saw rather than decrementing whatever is
+ * there now. Between them, a page that writes `Infinity`, `true`, `'2'` or a
+ * huge number to this key cannot leave the window standing open — which
+ * decrementing could, since `Infinity - 1` is `Infinity`.
  */
 const DEPTH_KEY = '__cwMockSwapRecoverableInsert';
+
+/** Deeper than the swap ever nests; a stored value above it is not ours. */
+const MAX_DEPTH = 8;
 
 /**
  * The message a redeclaration gets, in the three engines this ships to.
@@ -60,26 +72,33 @@ export const REDECLARATION =
 export type SwapScope = Record<string, unknown>;
 
 /**
- * The floor is HERE and only here — a leave without its enter, and whatever a
- * mock's own script may have left on the global under this name, both read as
- * zero. Clamping in `leaveRecoverableInsert` as well looked like belt and
- * braces and was dead code: the test for it stayed green with that clamp
- * deleted, because this read had already done the job.
+ * The stored depth, or zero for anything this module would not have written.
+ * The floor, the integer check and the ceiling are all HERE and only here.
  */
 function depth(scope: SwapScope): number {
   const n = scope[DEPTH_KEY];
-  return typeof n === 'number' && n > 0 ? n : 0;
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 && n <= MAX_DEPTH ? n : 0;
 }
 
-/** Raise the window: a collision reported from here on is one we will retry. */
-export function enterRecoverableInsert(scope: SwapScope = globalThis as SwapScope): void {
-  scope[DEPTH_KEY] = depth(scope) + 1;
+/**
+ * Raise the window: a collision reported from here on is one we will retry.
+ * Returns the depth to restore, which its `leaveRecoverableInsert` must be
+ * handed — that pairing is what makes the close unconditional.
+ */
+export function enterRecoverableInsert(scope: SwapScope = globalThis as SwapScope): number {
+  const before = depth(scope);
+  scope[DEPTH_KEY] = Math.min(before + 1, MAX_DEPTH);
+  return before;
 }
 
-/** Lower it again. Always from a `finally` — a window left up silences later
- *  collisions that nothing recovered. */
-export function leaveRecoverableInsert(scope: SwapScope = globalThis as SwapScope): void {
-  scope[DEPTH_KEY] = depth(scope) - 1;
+/** Lower it again, to exactly what the matching enter saw. Always from a
+ *  `finally` — a window left up silences later collisions that nothing
+ *  recovered. */
+export function leaveRecoverableInsert(
+  before: number,
+  scope: SwapScope = globalThis as SwapScope,
+): void {
+  scope[DEPTH_KEY] = before;
 }
 
 /** Is a retryable insert on the stack right now? */

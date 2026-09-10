@@ -179,7 +179,7 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
     collided = true;
     ev.preventDefault();
   };
-  if (retryable) enterRecoverableInsert();
+  const restoreDepth = retryable ? enterRecoverableInsert() : 0;
   window.addEventListener('error', onError, true);
   let threw: { err: unknown } | null = null;
   try {
@@ -188,7 +188,7 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
     threw = { err };
   } finally {
     window.removeEventListener('error', onError, true);
-    if (retryable) leaveRecoverableInsert();
+    if (retryable) leaveRecoverableInsert(restoreDepth);
   }
   if (threw && !(retryable && isRedeclaration(threw.err))) throw threw.err;
   if (!threw && !collided) return;

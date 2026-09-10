@@ -32,30 +32,46 @@ describe('the flag a recoverable insert raises', () => {
   it('is down until an insert raises it, and down again after', () => {
     const scope: SwapScope = {};
     expect(insideRecoverableInsert(scope)).toBe(false);
-    enterRecoverableInsert(scope);
+    const before = enterRecoverableInsert(scope);
     expect(insideRecoverableInsert(scope)).toBe(true);
-    leaveRecoverableInsert(scope);
+    leaveRecoverableInsert(before, scope);
     expect(insideRecoverableInsert(scope)).toBe(false);
   });
 
   it('survives a nested insert lowering it — the outer window is still up', () => {
     const scope: SwapScope = {};
-    enterRecoverableInsert(scope);
-    enterRecoverableInsert(scope);
-    leaveRecoverableInsert(scope);
+    const outer = enterRecoverableInsert(scope);
+    const inner = enterRecoverableInsert(scope);
+    leaveRecoverableInsert(inner, scope);
     // A boolean would have gone down here and let the outer insert's own
     // collision through, which is the whole reason this is a depth.
     expect(insideRecoverableInsert(scope)).toBe(true);
-    leaveRecoverableInsert(scope);
+    leaveRecoverableInsert(outer, scope);
     expect(insideRecoverableInsert(scope)).toBe(false);
   });
 
-  it('cannot be driven below zero by an unpaired leave', () => {
+  it.each([
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['a number no swap could have written', 9_000],
+    ['a fraction', 1.5],
+    ['true', true],
+    ['a string', '3'],
+  ])('reads %s left on the global by a mock as no window at all', (_what, planted) => {
+    // The flag lives on the same global a mock's own scripts run in — there is
+    // nothing else the two bundles share. Decrementing whatever was there
+    // would have made `Infinity` permanent, and every later redeclaration
+    // silently unreportable.
+    const scope: SwapScope = { __cwMockSwapRecoverableInsert: planted };
+    expect(insideRecoverableInsert(scope)).toBe(false);
+  });
+
+  it('closes the window even if the mock overwrites the flag mid-insert', () => {
     const scope: SwapScope = {};
-    leaveRecoverableInsert(scope);
-    leaveRecoverableInsert(scope);
-    enterRecoverableInsert(scope);
-    expect(insideRecoverableInsert(scope)).toBe(true);
+    const before = enterRecoverableInsert(scope);
+    // The inserted script runs here, and this one is careless.
+    scope.__cwMockSwapRecoverableInsert = 5;
+    leaveRecoverableInsert(before, scope);
+    expect(insideRecoverableInsert(scope)).toBe(false);
   });
 });
 
@@ -107,6 +123,14 @@ describe('the verdict beforeSend reads', () => {
     expect(isRecoveredMockCollision(collision, scope)).toBe(true);
   });
 
+  it('does not drop one because a mock left the flag looking raised', () => {
+    expect(
+      isRecoveredMockCollision(collision, {
+        __cwMockSwapRecoverableInsert: Number.POSITIVE_INFINITY,
+      }),
+    ).toBe(false);
+  });
+
   it('sends the same collision when no insert raised the window', () => {
     // The mutation control for the case above: turn the flag off and the
     // identical report is filed. A filter that silences a collision the swap
@@ -124,8 +148,7 @@ describe('the verdict beforeSend reads', () => {
 
   it('sends the collision again once the insert has finished', () => {
     const scope: SwapScope = {};
-    enterRecoverableInsert(scope);
-    leaveRecoverableInsert(scope);
+    leaveRecoverableInsert(enterRecoverableInsert(scope), scope);
     expect(isRecoveredMockCollision(collision, scope)).toBe(false);
   });
 });
