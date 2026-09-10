@@ -281,6 +281,12 @@ export function boardFixture(): {
       // them a branch emits no bytes at all, so growth inside one is
       // invisible to a budget on the total — the same hole the workspace map
       // had, one level in.
+      // The body's own clock, and the reason it is not a rare branch: 229 of
+      // the live board's 777 rows carry it (every row whose description has
+      // been rewritten since it was filed), which is 147 at this scale. It is
+      // the revision token the trimmed row's refetch keys on, so it rides
+      // every one of those rows and the budget has to see it.
+      ...(i % 10 < 3 ? { bodyWrittenAt: FIXTURE_NOW - 11 * DAY } : {}),
       ...(i % 7 === 4 ? { unplacedSince: FIXTURE_NOW - 6 * DAY } : {}),
       ...(i % 17 === 5 ? { origin: { kind: 'doc' as const, docId: 'fixture-doc-0007' } } : {}),
       ...(i % 27 === 7 ? { possiblyStale: { docRevision: 4, ts: FIXTURE_NOW - 8 * DAY } } : {}),

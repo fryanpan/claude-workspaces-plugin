@@ -297,6 +297,19 @@ export function projectTask(
     ...projectNotes(task.notes),
     bodyDocId: taskBodyDocId(task.id),
     ...projectBody(task.body),
+    // WHEN the description was last written — the revision token the panel's
+    // refetch is keyed on, and the reason this field is projected at all.
+    //
+    // `updateBodySnapshot` is the choke point every body writer passes
+    // through, and it deliberately bumps NOTHING: no `task.*` event, no
+    // `updatedAt` (body typing is not board activity). That was harmless
+    // while the projection carried the body — the diff-aware `refresh` saw
+    // the new text and pushed it. On a row whose body is trimmed there is no
+    // text to differ, so without this stamp the rewrite produces a
+    // byte-identical row, `refresh` pushes nothing, and a panel that fetched
+    // the old body has no way to learn it is stale. This is the one field
+    // that moves when a body does.
+    ...(task.bodyWrittenAt !== undefined ? { bodyWrittenAt: task.bodyWrittenAt } : {}),
     createdAt: task.createdAt,
     // Who filed it, already resolved through the one reader the derived
     // review item uses — so the Home card (built in the browser off this

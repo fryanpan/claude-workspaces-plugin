@@ -22,11 +22,17 @@ import { boardState, task } from './support/board-region-harness.ts';
 /** A row as the server sends one: no body, marked. `status` is a parameter
  *  because it is no longer what decides the trim — an in-progress row reaches
  *  the browser exactly as short as a closed one. */
-function trimmed(id: string, updatedAt: number, status = 'done'): BoardTask {
+function trimmed(
+  id: string,
+  updatedAt: number,
+  status = 'done',
+  bodyWrittenAt?: number,
+): BoardTask {
   return {
     ...task(id),
     updatedAt,
     status,
+    ...(bodyWrittenAt !== undefined ? { bodyWrittenAt } : {}),
     detailTrimmed: true,
     body: undefined,
     // The trail as the wire carries it: the stop, without the words on it.
@@ -76,6 +82,33 @@ describe('mergeTaskDetail', () => {
     // the id alone left the panel rendering a body fetched before the change.
     const overlay = new Map([[detailKey('t-1', 10), whole('t-1', 10, 'stale')]]);
     expect(mergeTaskDetail(trimmed('t-1', 11), overlay).body).toBeUndefined();
+  });
+
+  it('drops a fetched body once the description has been rewritten under it', () => {
+    // The residue the first two rounds of this design left behind, and the
+    // one that reaches the common path: `updateBodySnapshot` rewrites the
+    // body, stamps `bodyWrittenAt`, and deliberately bumps NO row clock. On a
+    // trimmed row there is no body in the projection to differ, so keyed on
+    // `updatedAt` alone the snapshot went on filling the hole with the text
+    // somebody had already replaced — on an open panel, until something
+    // unrelated touched the row. Bryan edits task bodies; so do agents.
+    //
+    // MUTATION CONTROL: dropping `bodyWrittenAt` from `detailKey` fails the
+    // first assertion (the stale body comes back); dropping it from the
+    // PROJECTION cannot be caught here at all, which is why the server test
+    // in `projection.test.ts` asserts the field reaches the row.
+    const overlay = new Map([
+      [detailKey('t-1', 10, 100), whole('t-1', 10, 'the body before the rewrite')],
+    ]);
+    const rewritten = trimmed('t-1', 10, 'in-progress', 200);
+    expect(rewritten.updatedAt).toBe(10);
+
+    expect(mergeTaskDetail(rewritten, overlay).body).toBeUndefined();
+    // Positive control: the same row at the revision the fetch was made at
+    // still fills, so this is not passing because the overlay is unreachable.
+    expect(mergeTaskDetail(trimmed('t-1', 10, 'in-progress', 100), overlay).body).toBe(
+      'the body before the rewrite',
+    );
   });
 
   it('never overlays a row that arrived whole', () => {
@@ -276,6 +309,40 @@ describe('asking for the rest of a row', () => {
 
     expect(state.tasks.get('t-1')?.body).toBeUndefined();
     expect(state.tasks.get('t-1')?.updatedAt).toBe(11);
+  });
+
+  it('asks again, and paints the NEW body, when the description is rewritten', async () => {
+    // The whole path the reader actually walks: open the panel, get the row,
+    // then somebody rewrites the description while it is on screen. The
+    // rewrite bumps no row clock and pushes no body — `bodyWrittenAt` moving
+    // is the only thing that reaches the browser — so this is the assertion
+    // that the panel does not go on showing the words that are gone.
+    //
+    // MUTATION CONTROL: dropping `bodyWrittenAt` from `detailKey` fails
+    // `toHaveBeenCalledTimes(2)` — the second render finds the key already
+    // asked and never re-asks.
+    state.tasks.set('t-1', trimmed('t-1', 10, 'in-progress', 100));
+    fetchMock.mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ task: whole('t-1', 10, 'the description as first fetched') }),
+    }));
+    const api = loads();
+    api.loadTaskDetail('t-1');
+    await settle();
+    expect(state.tasks.get('t-1')?.body).toBe('the description as first fetched');
+
+    // What the ydoc pushes after `updateBodySnapshot`: the same row, the same
+    // `updatedAt`, a moved `bodyWrittenAt` — and still no body on it.
+    state.tasks.set('t-1', trimmed('t-1', 10, 'in-progress', 200));
+    fetchMock.mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ task: whole('t-1', 10, 'the description AFTER the rewrite') }),
+    }));
+    api.loadTaskDetail('t-1');
+    await settle();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(state.tasks.get('t-1')?.body).toBe('the description AFTER the rewrite');
   });
 
   it('leaves the list row standing when the ask never reaches the server', async () => {

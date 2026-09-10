@@ -144,6 +144,9 @@ type ProjectedTask = {
   bodyDocId: string;
   body?: string;
   bodyTruncated?: boolean;
+  bodyWrittenAt?: number;
+  updatedAt: number;
+  detailTrimmed?: boolean;
   transitions: Array<{
     by: Record<string, unknown>;
     from: string;
@@ -469,6 +472,61 @@ describe('ydoc projection + workspace doc', () => {
     expect(r.status).toBe(200);
     await settle(700);
     expect(full(taskId).body).toContain('stays current');
+  });
+
+  /**
+   * The board row has to MOVE when a body is rewritten, even though the
+   * rewrite is deliberately not board activity.
+   *
+   * `updateBodySnapshot` bumps no row clock and fires no `task.*` event on
+   * purpose. While the projection carried the body that was invisible — the
+   * diff-aware refresh saw new text and pushed it. On a trimmed row there is
+   * no text to differ, so without a revision token the rewrite produces a
+   * byte-identical row, `refresh` pushes nothing, and the panel that fetched
+   * the old description has no way to learn it is stale. `bodyWrittenAt` is
+   * that token, and this is the test that it reaches the wire.
+   *
+   * MUTATION CONTROL: dropping the `bodyWrittenAt` line from `projectTask`
+   * fails the `after.bodyWrittenAt` assertion while every other assertion
+   * here — including the refetched body — stays green, which is exactly the
+   * silence the bug lived in.
+   */
+  it('moves the board row when a body is rewritten, though the row clock does not', async () => {
+    const wsId = await makeWorkspace('body-revision-token');
+    const taskId = await makeTask(wsId, {
+      title: 'Rewrite the rollout note',
+      body: 'Agent can read the first description so that it can start.\n',
+    });
+    const doc = handle.docStore.get(workspaceDocId(wsId));
+    if (!doc) throw new Error('ws doc missing');
+    const row = (): ProjectedTask => doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask;
+    const before = { ...row() };
+    // The premise: this row is trimmed, so there is no body on it to differ.
+    expect(before.detailTrimmed).toBe(true);
+    expect(before.body).toBeUndefined();
+    expect(before.bodyWrittenAt).toBeUndefined();
+
+    const r = await post(`/workspaces/${wsId}/docs/${taskBodyDocId(taskId)}/content`, {
+      markdown: 'Agent can read the SECOND description so that it stays current.\n',
+    });
+    expect(r.status).toBe(200);
+    await settle(700);
+
+    const after = row();
+    // Body typing is not board activity, and this is what makes the token
+    // necessary rather than redundant: the row clock has NOT moved.
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(typeof after.bodyWrittenAt).toBe('number');
+    // Ordering, not a wall-clock reading: the words were written after the
+    // row last moved, so the token sits at or past the row clock it replaces.
+    expect(after.bodyWrittenAt ?? 0).toBeGreaterThanOrEqual(before.updatedAt);
+    // Still no body on the board row — the trim is unchanged; what moved is
+    // only the token the browser keys its refetch on.
+    expect(after.body).toBeUndefined();
+    const stored = handle.tasks.getTask(taskId);
+    if (!stored) throw new Error('task went missing');
+    const fetched = handle.projection.projectRowInFull(wsId, stored) as unknown as ProjectedTask;
+    expect(fetched.body).toContain('stays current');
   });
 
   it('caps a runaway description and says it capped it', async () => {

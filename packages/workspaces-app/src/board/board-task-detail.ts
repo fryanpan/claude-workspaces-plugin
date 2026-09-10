@@ -13,10 +13,13 @@
  *
  * Three rules, and each of them is a bug this had on the way in:
  *
- *   - **Keyed on `updatedAt`, not on the id.** A fetched row is a snapshot,
- *     and the projection keeps moving under it. Holding it against the id
- *     alone meant an agent's new note landed in the ydoc while the panel
- *     kept rendering the body it fetched ten minutes ago.
+ *   - **Keyed on the row's revision, not on the id — and on BOTH of its
+ *     clocks.** A fetched row is a snapshot, and the projection keeps moving
+ *     under it. Holding it against the id alone meant an agent's new note
+ *     landed in the ydoc while the panel kept rendering the body it fetched
+ *     ten minutes ago; holding it against `updatedAt` alone had the same
+ *     failure for the description itself, because a body rewrite deliberately
+ *     moves no row clock. See `detailKey`.
  *   - **Asked at most once per snapshot.** `renderDetail` runs on every board
  *     event and every clock tick, so a fetch fired from the render path is a
  *     fetch fired several times a second. The `asked` set is what makes the
@@ -49,9 +52,24 @@ export interface TaskDetailLoads {
   loadTaskDetail(taskId: string | null): void;
 }
 
-/** The overlay key: a row's identity is its id AND the revision it was at. */
-export function detailKey(taskId: string, updatedAt: number): string {
-  return `${taskId}@${updatedAt}`;
+/**
+ * The overlay key: a row's identity is its id AND the revision it was at.
+ *
+ * TWO clocks, because one of them does not tick for the body. `updatedAt`
+ * moves on every board-visible change — a note, a review item, a transition,
+ * an assignment. It deliberately does NOT move when somebody rewrites the
+ * description: `updateBodySnapshot` fires no event and bumps no row clock,
+ * because body typing is not board activity. That was invisible while the
+ * projection carried the body (the diff-aware refresh pushed the new text),
+ * and it is load-bearing now that a trimmed row has no text to differ: keyed
+ * on `updatedAt` alone, a fetched snapshot would go on filling the hole with
+ * the body somebody had already replaced, for as long as nothing unrelated
+ * touched the row. `bodyWrittenAt` is the clock that does move, so it is half
+ * the key — and when it moves the overlay misses, `loadTaskDetail` asks
+ * again, and the panel repaints with what the row now says.
+ */
+export function detailKey(taskId: string, updatedAt: number, bodyWrittenAt?: number): string {
+  return `${taskId}@${updatedAt}#${bodyWrittenAt ?? 0}`;
 }
 
 /**
@@ -62,10 +80,13 @@ export function detailKey(taskId: string, updatedAt: number): string {
  * shape exists to prevent rather than a preference. A fetched row is a
  * snapshot of the whole ticket; the projection keeps moving under it, and not
  * every move bumps `updatedAt` — a body rewrite (`updateBodySnapshot`)
- * stamps `quote`, clears `possiblyStale` and touches nothing the key is built
- * from. Returning the snapshot whole therefore froze every OTHER field at the
- * revision the fetch happened at: the drift notice a rewrite had just
- * cleared stayed on screen until something unrelated moved the row.
+ * stamps `quote`, clears `possiblyStale` and bumps no row clock. Returning
+ * the snapshot whole therefore froze every OTHER field at the revision the
+ * fetch happened at: the drift notice a rewrite had just cleared stayed on
+ * screen until something unrelated moved the row. (That rewrite is now half
+ * the key — `bodyWrittenAt` — so the snapshot is dropped rather than
+ * re-applied; the two fixes are separate and this one still has to hold,
+ * because `updatedAt` moves for reasons of its own.)
  *
  * So the snapshot fills HOLES and nothing else. Every field the board still
  * sends stays the board's, which is not the same rule as "the trimmed fields
@@ -84,7 +105,7 @@ export function detailKey(taskId: string, updatedAt: number): string {
  */
 export function mergeTaskDetail(projected: BoardTask, overlay: Map<string, BoardTask>): BoardTask {
   if (!projected.detailTrimmed) return projected;
-  const whole = overlay.get(detailKey(projected.id, projected.updatedAt));
+  const whole = overlay.get(detailKey(projected.id, projected.updatedAt, projected.bodyWrittenAt));
   if (!whole) return projected;
   const merged: BoardTask = { ...projected };
   // Both sides through a string-keyed view: the field names are a union of
@@ -97,9 +118,8 @@ export function mergeTaskDetail(projected: BoardTask, overlay: Map<string, Board
     // no promise that this particular field went: an open decision keeps its
     // `body` for the walkthrough's card and is still marked, because its
     // `reviews` and `quote` went. Overwriting there would put a snapshot body
-    // on a card the projection is keeping current — and permanently, since a
-    // body rewrite moves nothing this key is built from. So the snapshot only
-    // ever fills a HOLE.
+    // on a card the projection is keeping current. So the snapshot only ever
+    // fills a HOLE.
     if (filled[field] === undefined && fetched[field] !== undefined) {
       filled[field] = fetched[field];
     }
@@ -127,7 +147,7 @@ export function createTaskDetailLoads(deps: TaskDetailDeps): TaskDetailLoads {
     // Nothing to ask for: the row is not on the board yet, or it arrived
     // whole because every field the trim looks at was already absent.
     if (!row?.detailTrimmed) return;
-    const key = detailKey(taskId, row.updatedAt);
+    const key = detailKey(taskId, row.updatedAt, row.bodyWrittenAt);
     if (asked.has(key) || state.taskDetail.has(key)) return;
     asked.add(key);
     void fetchJson<{ task: BoardTask }>(
