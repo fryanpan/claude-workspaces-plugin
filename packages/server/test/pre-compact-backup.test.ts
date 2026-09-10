@@ -12,7 +12,7 @@
  * the compacted ones.
  */
 import { describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
@@ -131,4 +131,60 @@ describe('the pre-compaction backup', () => {
     expect(Y.encodeStateAsUpdate(doc!.ydoc).byteLength).toBeGreaterThan(compactedSize);
     expect(Y.encodeStateAsUpdate(doc!.ydoc).byteLength).toBeGreaterThanOrEqual(original.byteLength);
   });
+});
+
+/**
+ * WHICH docs the store compacts, isolated from WHETHER they are compactable.
+ *
+ * Every doc here is byte-identical and every one would be compacted on its
+ * merits — same maps, same churn, same size. Only the id differs. That is
+ * deliberate: if these fixtures held prose the shape guard inside
+ * `compactBoardState` would refuse them and the test would pass without the
+ * id gate existing at all. Naming the same bytes three ways is what makes
+ * this a test of the gate rather than of the guard behind it.
+ */
+describe('only a board doc is compacted', () => {
+  const bytes = churnedBoardBytes();
+
+  function loadAs(docId: string): { size: number; backedUp: boolean; rows: number } {
+    const d = dir();
+    const path = join(d, `${docId}.ydoc`);
+    writeFileSync(path, bytes);
+    const store = new DocStore({
+      dataDir: d,
+      sse: new SseBus(),
+      webhooks: createWebhookDispatcher({ onLog: () => {} }),
+    });
+    const doc = store.get(docId);
+    return {
+      size: Y.encodeStateAsUpdate(doc!.ydoc).byteLength,
+      backedUp: existsSync(preCompactPath(path)),
+      rows: doc!.ydoc.getMap('tasks').size,
+    };
+  }
+
+  const expectedRows = (() => {
+    const d = new Y.Doc();
+    Y.applyUpdate(d, bytes);
+    return d.getMap('tasks').size;
+  })();
+
+  it('compacts a ws: doc — the positive control the rest is measured against', () => {
+    const board = loadAs('ws:w-test');
+    expect(board.size).toBeLessThan(bytes.byteLength);
+    expect(board.backedUp).toBe(true);
+    expect(board.rows).toBe(expectedRows);
+  });
+
+  for (const docId of ['task:t-body', 'd-bound', 'meeting-notes-2026-01-01']) {
+    it(`leaves ${docId.split(/[:-]/)[0]} docs alone, same bytes and all`, () => {
+      const other = loadAs(docId);
+      // Not rebuilt: it still carries the history a board doc would have shed.
+      expect(other.size).toBeGreaterThanOrEqual(bytes.byteLength);
+      // And nothing was written beside it — the backup only exists for docs
+      // this actually compacts.
+      expect(other.backedUp).toBe(false);
+      expect(other.rows).toBe(expectedRows);
+    });
+  }
 });
