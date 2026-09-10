@@ -388,6 +388,12 @@ describe.skipIf(CHROME === null)('ui-shot against real headless Chrome', () => {
         SCRIPT,
         '--url',
         'data:text/html,<p>probe</p>',
+        // Two ways to fail at the page, and no way to succeed: a 1ms ceiling
+        // on the load, and a selector that never matches. Which of the two
+        // wins is a race, so the assertion accepts either — what it must not
+        // see is a failure from BEFORE the page, which is the bug.
+        '--wait-for',
+        '#never-matches',
         '--timeout',
         '1',
         '--settle',
@@ -397,11 +403,14 @@ describe.skipIf(CHROME === null)('ui-shot against real headless Chrome', () => {
       ],
       { encoding: 'utf8', timeout: 60_000, env: { ...process.env, [RUN_ID_ENV]: runId } },
     );
-    // Positive control first: this must be a RUN that got as far as a page,
-    // not a usage error that never launched anything. `--settle 0` did exactly
-    // that and made an earlier version of this test pass against the bug.
-    expect(r.stderr).not.toMatch(/usage:/);
-    expect(r.status, r.stderr).toBe(1);
+    // Positive control first: this must be a RUN that got as far as a page.
+    // An earlier version asserted only the exit code, and `--settle 0` made it
+    // pass against the bug by exiting at usage parsing without launching
+    // anything. Naming the page-stage error is what makes the pass mean
+    // Chrome started.
+    expect(r.stderr, 'the run must reach the page stage').toMatch(
+      /page load did not finish|never matched/,
+    );
     expect(r.stderr).not.toMatch(/CDP never came up/);
     expect(r.stderr).not.toMatch(/no page target listed/);
   }, 60_000);
