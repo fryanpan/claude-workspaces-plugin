@@ -203,15 +203,52 @@ function buildOne(spec: (typeof MEETINGS)[number]): NotesEvalFixture {
   };
 }
 
+/**
+ * A meeting and window named on argv rather than picked from {@link MEETINGS}.
+ *
+ * `EN2001a:0:3600` — the meeting, where to start, how long. It exists because
+ * the eight committed fixtures are fifteen-minute windows, and the question
+ * "do the notes still keep up at the end of an hour" cannot be asked of a
+ * fifteen-minute one. AMI's non-scenario set holds real hour-long meetings
+ * (EN2001a and EN2009d run past eighty minutes), so an hour of continuous
+ * real speech needs no synthesis at all — it needs a window this builder
+ * would otherwise never cut.
+ *
+ * Returns null for an argument that is not one, so the existing
+ * "just this meeting" form still reads as a meeting name.
+ */
+export function parseWindowSpec(
+  arg: string,
+): { meeting: string; fromSeconds: number; seconds: number } | null {
+  const m = arg.match(/^([A-Za-z0-9]+):(\d+):(\d+)$/);
+  if (!m) return null;
+  return { meeting: m[1]!, fromSeconds: Number(m[2]), seconds: Number(m[3]) };
+}
+
 if (import.meta.main) {
-  const only = process.argv.slice(2);
-  const specs = only.length > 0 ? MEETINGS.filter((m) => only.includes(m.meeting)) : MEETINGS;
-  if (specs.length === 0) throw new Error(`No such meeting: ${only.join(', ')}`);
-  mkdirSync(FIXTURE_DIR, { recursive: true });
+  const argv = process.argv.slice(2);
+  // WHERE THE FIXTURE LANDS, because an hour-long one does not belong in the
+  // repo. The committed eight are small and CI reads them; an hour of speech
+  // is several hundred kilobytes each and nothing in CI runs it. `--out`
+  // keeps those runs beside the corpus they measure, which is the same place
+  // `notes-eval.ts --corpus` already reads from.
+  const outAt = argv.indexOf('--out');
+  const outDir = outAt >= 0 && argv[outAt + 1] ? resolve(argv[outAt + 1]!) : FIXTURE_DIR;
+  const rest = argv.filter((_, i) => i !== outAt && i !== outAt + 1);
+  const windows = rest.map(parseWindowSpec).filter((w): w is NonNullable<typeof w> => w !== null);
+  const names = rest.filter((a) => parseWindowSpec(a) === null);
+  const specs =
+    windows.length > 0
+      ? windows
+      : names.length > 0
+        ? MEETINGS.filter((m) => names.includes(m.meeting))
+        : MEETINGS;
+  if (specs.length === 0) throw new Error(`No such meeting: ${names.join(', ')}`);
+  mkdirSync(outDir, { recursive: true });
   let ticks = 0;
   for (const spec of specs) {
     const fixture = buildOne(spec);
-    const path = join(FIXTURE_DIR, `${spec.meeting}.json`);
+    const path = join(outDir, `${spec.meeting}.json`);
     writeFileSync(path, `${JSON.stringify(fixture, null, 2)}\n`);
     ticks += fixture.ticks.length;
     const turns = fixture.ticks.reduce((n, t) => n + t.turns.length, 0);
