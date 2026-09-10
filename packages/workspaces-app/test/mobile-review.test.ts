@@ -144,6 +144,11 @@ function harness(
     openSheet: () => shell.classList.add('threads-open'),
     closeSheet: () => shell.classList.remove('threads-open'),
     isSheetOpen: () => shell.classList.contains('threads-open'),
+    // The inline surface's own hide-resolved rule has its own suite
+    // (resolved-visibility.test.ts); everything here predates it and asserts
+    // the wiring, so the harness keeps every thread on the page unless a case
+    // says otherwise.
+    showResolved: () => true,
     listen: (target, type, handler) => {
       target.addEventListener(type, handler);
       listeners.push(() => target.removeEventListener(type, handler));
