@@ -170,6 +170,15 @@ function runAudit(...args: string[]): Run {
 }
 
 describe('the audit enumerates untracked files', () => {
+  // This case spawns the real audit THREE times — a clean before-probe, the
+  // red after-probe, and a clean run once the probe is gone — where its two
+  // siblings spawn it once each. Each spawn walks the whole test tree, so at
+  // ~0.7s a run the case sits near three times a sibling's cost, and vitest's
+  // 5s default is not a budget it can hold on a loaded CI shard: it timed out
+  // at 6623ms in the `client (3)` shard of PR 865 while passing in 2.3s
+  // locally. The explicit number is per this case, not a global bump
+  // (.claude/rules/testing-standards.md standard 5), and it is a ceiling on a
+  // hang rather than a target — nothing here should approach it.
   it('names an untracked test file, and fails on the sleep inside it', () => {
     // CONTROL, in the same run: with no probe planted the audit is clean and
     // does not name the path. Without this, "the audit named it" could be a
@@ -192,7 +201,7 @@ describe('the audit enumerates untracked files', () => {
     rmSync(PROBE_ABS);
     // Back to clean once the file is gone, so the failure above was the probe.
     expect(runAudit().code).toBe(0);
-  });
+  }, 30_000);
 
   it('still names tracked files', () => {
     // The positive control for the negative control below. Adding `--others`

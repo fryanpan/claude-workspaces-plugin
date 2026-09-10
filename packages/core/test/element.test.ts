@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment happy-dom
+ *
+ * Element anchoring is about finding a node again in a real document tree, so
+ * this one core file asks for a DOM the rest of the package does not need.
+ */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createAnchor, createFingerprint, scoreMatch } from '../src/anchor/element.ts';
 import { resolve } from '../src/anchor/element.ts';

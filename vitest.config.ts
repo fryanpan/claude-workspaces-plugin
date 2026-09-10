@@ -12,7 +12,22 @@ export default defineConfig({
     pool: 'forks',
     poolOptions: { forks: { maxForks: 4, minForks: 1 } },
     maxWorkers: 4,
-    environment: 'happy-dom',
+    // A DOM is not free: creating a happy-dom window costs ~170ms of CPU per
+    // test FILE, and vitest builds one per file. Measured 2026-09-10 over
+    // packages/core alone (76 files): 12.84s of `environment` time against
+    // 9ms under `node`. Most of this suite never touches a document — the
+    // MCP client, the repo scripts, most of core — so the DOM is opt-in by
+    // path, and one core file asks for it in its own docblock
+    // (`@vitest-environment happy-dom` in element.test.ts, which is about
+    // anchoring to real elements).
+    //
+    // A file that needs a DOM and does not get one fails loudly on
+    // `document is not defined`, so this cannot silently weaken a test.
+    environment: 'node',
+    environmentMatchGlobs: [
+      ['packages/workspaces-app/**', 'happy-dom'],
+      ['packages/widget/**', 'happy-dom'],
+    ],
     setupFiles: ['./vitest.setup.ts'],
     include: [
       'packages/*/test/**/*.test.{ts,tsx}',

@@ -24,28 +24,55 @@ import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type ReplayMarks, claimReplayMarks, saveReplayMarks } from '../src/sse-marks.ts';
 import { REPLAY_MAX_AGE_MS, REPLAY_MAX_EVENTS, SseBus, openSseStream } from '../src/sse.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'known', color: '#2e7dd7' };
-const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Poll until the stream has delivered at least `n` frames of `event`.
+ *
+ * This file used to sleep a flat 400ms after every action and 150ms after
+ * every open — twenty-eight waits, 9.7s of the server suite's wall clock, and
+ * every one of them a race that a loaded box could still lose. There is an
+ * observable for each: the frame itself.
+ */
+const gotFrames = (l: { frames: Frame[] }, event: string, n: number): Promise<true> =>
+  waitFor(() => l.frames.filter((f) => f.event === event).length >= n || null, {
+    describe: `${n} ${event} frame(s) on the stream`,
+  });
 
 type Frame = { event: string; id?: string; data?: Record<string, unknown> };
 
 /** Read an SSE stream, collecting full frames (event name, id line, parsed
  *  data). Unlike the listener in event-id.test.ts this keeps the `id:` line,
  *  because the id ON THE WIRE is the thing under test here. */
-function listenFrames(res: Response): { frames: Frame[]; stop: () => Promise<void> } {
+function listenFrames(res: Response): {
+  frames: Frame[];
+  /** Resolves once the stream's `:ok` preamble has arrived. `openSseStream`
+   *  registers the sink and writes that preamble in the same synchronous
+   *  `start()`, so a reader that has seen it is a reader the next broadcast
+   *  cannot miss — which is what the 150ms sleeps after every open were
+   *  guessing at. */
+  ready: Promise<void>;
+  stop: () => Promise<void>;
+} {
   const frames: Frame[] = [];
   const reader = (res.body as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder();
   let stopped = false;
   let buf = '';
+  let opened!: () => void;
+  const ready = new Promise<void>((r) => {
+    opened = r;
+  });
   const pump = (async () => {
     try {
       while (!stopped) {
         const { done, value } = await reader.read();
         if (done) return;
         buf += decoder.decode(value, { stream: true });
+        opened();
         let sep = buf.indexOf('\n\n');
         while (sep >= 0) {
           const raw = buf.slice(0, sep);
@@ -69,8 +96,10 @@ function listenFrames(res: Response): { frames: Frame[]; stop: () => Promise<voi
   })();
   return {
     frames,
+    ready,
     stop: async () => {
       stopped = true;
+      opened();
       await reader.cancel().catch(() => {});
       await pump;
     },
@@ -130,9 +159,9 @@ describe('SSE Last-Event-ID replay', () => {
   it('replays events broadcast during a disconnect, in order, then resumes live', async () => {
     // Connected: see one event and remember its wire id.
     const first = listenFrames(await get(`/workspaces/${WS}/docs/doc-replay/events:stream`));
-    await settle(150);
+    await first.ready;
     await comment('Seen live.');
-    await settle();
+    await gotFrames(first, 'thread.created', 1);
     const seen = first.frames.filter((f) => f.event === 'thread.created');
     expect(seen.length).toBe(1);
     const lastId = seen[0]?.id;
@@ -143,9 +172,10 @@ describe('SSE Last-Event-ID replay', () => {
     await first.stop(); // the wifi switch
 
     // Broadcast into the gap — nobody is listening.
+    // The POST has returned, so the broadcast has already happened — there is
+    // nothing left in flight for a sleep to wait on.
     await comment('Missed one.');
     await comment('Missed two.');
-    await settle();
 
     // Reconnect presenting Last-Event-ID (the header, because that is what a
     // native EventSource sends automatically).
@@ -154,7 +184,7 @@ describe('SSE Last-Event-ID replay', () => {
         'Last-Event-ID': lastId as string,
       }),
     );
-    await settle();
+    await gotFrames(second, 'thread.created', 2);
     const replayed = second.frames.filter((f) => f.event === 'thread.created');
     expect(replayed.map(commentText)).toEqual(['Missed one.', 'Missed two.']);
     // Replayed frames carry their ids too, so a second drop resumes from the
@@ -165,7 +195,7 @@ describe('SSE Last-Event-ID replay', () => {
 
     // …then the live feed, on the same connection.
     await comment('Live again.');
-    await settle();
+    await gotFrames(second, 'thread.created', 3);
     const after = second.frames.filter((f) => f.event === 'thread.created');
     expect(after.map(commentText)).toEqual(['Missed one.', 'Missed two.', 'Live again.']);
     await second.stop();
@@ -173,7 +203,6 @@ describe('SSE Last-Event-ID replay', () => {
 
   it('signals replay.gap for an unknown (pre-restart) id instead of pretending completeness', async () => {
     await comment('Missed while away.');
-    await settle();
     // An id minted by a previous server epoch: same shape, never issued by
     // this process. The server cannot know what it missed, so it must say so.
     const s = listenFrames(
@@ -181,14 +210,14 @@ describe('SSE Last-Event-ID replay', () => {
         'Last-Event-ID': 'deadbeef:42',
       }),
     );
-    await settle();
+    await gotFrames(s, 'replay.gap', 1);
     expect(s.frames.some((f) => f.event === 'replay.gap')).toBe(true);
     // And NO partial replay — a half-answer would read as a whole one.
     expect(s.frames.filter((f) => f.event === 'thread.created').length).toBe(0);
 
     // The gap signal must not end the stream: live events still arrive.
     await comment('Live after gap.');
-    await settle();
+    await gotFrames(s, 'thread.created', 1);
     const live = s.frames.filter((f) => f.event === 'thread.created');
     expect(live.map(commentText)).toEqual(['Live after gap.']);
     await s.stop();
@@ -196,19 +225,18 @@ describe('SSE Last-Event-ID replay', () => {
 
   it('accepts the id as a query param too (for hand-rolled consumers)', async () => {
     const first = listenFrames(await get(`/workspaces/${WS}/docs/doc-replay/events:stream`));
-    await settle(150);
+    await first.ready;
     await comment('Anchor.');
-    await settle();
+    await gotFrames(first, 'thread.created', 1);
     const lastId = first.frames.find((f) => f.event === 'thread.created')?.id as string;
     await first.stop();
     await comment('Missed via query.');
-    await settle();
     const second = listenFrames(
       await get(
         `/workspaces/${WS}/docs/doc-replay/events:stream?lastEventId=${encodeURIComponent(lastId)}`,
       ),
     );
-    await settle();
+    await gotFrames(second, 'thread.created', 1);
     expect(second.frames.filter((f) => f.event === 'thread.created').map(commentText)).toEqual([
       'Missed via query.',
     ]);
@@ -225,9 +253,9 @@ describe('SSE Last-Event-ID replay', () => {
   // what goes red.
   it('reconnecting with the current id is a clean no-op: no replay, no gap, live continues', async () => {
     const first = listenFrames(await get(`/workspaces/${WS}/docs/doc-replay/events:stream`));
-    await settle(150);
+    await first.ready;
     await comment('Nothing after this.');
-    await settle();
+    await gotFrames(first, 'thread.created', 1);
     const lastId = first.frames.find((f) => f.event === 'thread.created')?.id as string;
     expect(typeof lastId).toBe('string');
     await first.stop();
@@ -236,13 +264,17 @@ describe('SSE Last-Event-ID replay', () => {
     const second = listenFrames(
       await get(`/workspaces/${WS}/docs/doc-replay/events:stream`, { 'Last-Event-ID': lastId }),
     );
-    await settle();
-    expect(second.frames.filter((f) => f.event === 'thread.created').length).toBe(0);
-    expect(second.frames.some((f) => f.event === 'replay.gap')).toBe(false);
+    await second.ready;
 
-    // …and the stream is genuinely live, not quietly dead.
+    // The live event is what makes the two absences below OBSERVATIONS rather
+    // than a race won by a sleep: frames on one connection arrive in order, so
+    // a replay or a gap the server was going to send for this reconnect has
+    // already landed by the time this one does.
     await comment('First new thing.');
-    await settle();
+    await gotFrames(second, 'thread.created', 1);
+    expect(second.frames.some((f) => f.event === 'replay.gap')).toBe(false);
+    // Exactly the live comment: no duplicate of the last-seen event ahead of
+    // it, which is the replay this reconnect must NOT have been given.
     expect(second.frames.filter((f) => f.event === 'thread.created').map(commentText)).toEqual([
       'First new thing.',
     ]);
@@ -418,7 +450,7 @@ describe('SseBus addressed-frame replay', () => {
     bus.sendToAgent(CH, 'lead-1', { event: 'triage.requested', kind: 'bucket-review' } as never);
 
     const l = listenFrames(openSseStream(bus, CH, undefined, undefined, 'lead-1', anchor));
-    await settle(150);
+    await gotFrames(l, 'triage.requested', 1);
     const replayed = l.frames.filter((f) => f.event === 'triage.requested');
     expect(replayed.length).toBe(1);
     expect(typeof replayed[0]?.id).toBe('string');
@@ -429,7 +461,12 @@ describe('SseBus addressed-frame replay', () => {
     // Control: an anonymous stream presenting the same anchor replays nothing
     // — the addressed frame is not leaked to a browser tab's catch-up.
     const tab = listenFrames(openSseStream(bus, CH, undefined, undefined, undefined, anchor));
-    await settle(150);
+    await tab.ready;
+    // A marker broadcast AFTER the catch-up, so the two absences below are
+    // read off a stream that has demonstrably delivered everything the
+    // reconnect was going to give it — ordering, not a sleep.
+    bus.broadcast(CH, { event: 'task.updated', n: 2 } as never);
+    await gotFrames(tab, 'task.updated', 1);
     expect(tab.frames.filter((f) => f.event === 'triage.requested').length).toBe(0);
     expect(tab.frames.some((f) => f.event === 'replay.gap')).toBe(false);
     await tab.stop();
@@ -438,9 +475,9 @@ describe('SseBus addressed-frame replay', () => {
   it('a live addressed write carries its id, so the recipient cursor advances past it', async () => {
     const bus = new SseBus();
     const l = listenFrames(openSseStream(bus, CH, undefined, undefined, 'lead-1'));
-    await settle(150);
+    await l.ready;
     bus.sendToAgent(CH, 'lead-1', { event: 'triage.requested', kind: 'bucket-review' } as never);
-    await settle(150);
+    await gotFrames(l, 'triage.requested', 1);
     const got = l.frames.filter((f) => f.event === 'triage.requested');
     expect(got.length).toBe(1);
     expect(typeof got[0]?.id).toBe('string');
@@ -776,9 +813,9 @@ describe('a restart is silent when nothing was missed', () => {
 
   it('a reconnect at the pre-restart cursor gets no gap and no duplicate', async () => {
     const first = listenFrames(await get(`/workspaces/${WS}/docs/doc-boot/events:stream`));
-    await settle(150);
+    await first.ready;
     await comment('Before the deploy.');
-    await settle();
+    await gotFrames(first, 'thread.created', 1);
     const cursor = first.frames.find((f) => f.event === 'thread.created')?.id as string;
     expect(typeof cursor).toBe('string');
     await first.stop();
@@ -794,13 +831,14 @@ describe('a restart is silent when nothing was missed', () => {
     const second = listenFrames(
       await get(`/workspaces/${WS}/docs/doc-boot/events:stream`, { 'Last-Event-ID': cursor }),
     );
-    await settle();
-    expect(second.frames.some((f) => f.event === 'replay.gap')).toBe(false);
-    expect(second.frames.filter((f) => f.event === 'thread.created').length).toBe(0);
-
-    // …and the stream is live rather than quietly dead.
+    await second.ready;
+    // The live event orders the absences: anything this reconnect was owed
+    // arrives ahead of it on the same connection.
     await comment('After the deploy.');
-    await settle();
+    await gotFrames(second, 'thread.created', 1);
+    expect(second.frames.some((f) => f.event === 'replay.gap')).toBe(false);
+    // Exactly one frame, and it is the one broadcast after the restart — so
+    // no duplicate of the pre-restart event was replayed ahead of it.
     expect(second.frames.filter((f) => f.event === 'thread.created').map(commentText)).toEqual([
       'After the deploy.',
     ]);
@@ -809,16 +847,15 @@ describe('a restart is silent when nothing was missed', () => {
 
   it('POSITIVE CONTROL: an event missed across the restart still produces exactly one gap', async () => {
     const first = listenFrames(await get(`/workspaces/${WS}/docs/doc-boot/events:stream`));
-    await settle(150);
+    await first.ready;
     await comment('Seen.');
-    await settle();
+    await gotFrames(first, 'thread.created', 1);
     const cursor = first.frames.find((f) => f.event === 'thread.created')?.id as string;
     await first.stop();
 
     // Broadcast into the disconnect, THEN restart. The subscriber's cursor is
     // behind by one event that no buffer survives — a real hole.
     await comment('Missed, then the deploy.');
-    await settle();
     // Board writes are debounced; the next process reads this dir off disk.
     handle.tasks.flush();
     await handle.stop();
@@ -827,7 +864,7 @@ describe('a restart is silent when nothing was missed', () => {
     const second = listenFrames(
       await get(`/workspaces/${WS}/docs/doc-boot/events:stream`, { 'Last-Event-ID': cursor }),
     );
-    await settle();
+    await gotFrames(second, 'replay.gap', 1);
     expect(second.frames.filter((f) => f.event === 'replay.gap').length).toBe(1);
     // Still no partial replay — a half-answer would read as a whole one.
     expect(second.frames.filter((f) => f.event === 'thread.created').length).toBe(0);

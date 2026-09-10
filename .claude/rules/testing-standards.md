@@ -83,6 +83,21 @@ with the window it is proving, which exempts it from the audit.
 *Check:* `test:audit` counts `sleep(N)` and `setTimeout(fn, N)` with N >= 500
 in `packages/server/test`, minus the `// timed:` ones.
 
+*And a second check, in milliseconds rather than sites:* `waitBudgetMs` sums
+every fixed wait the server suite always PAYS — no 500ms floor, `// timed:`
+waits included, calls to a one-line `settle`-style wrapper resolved to the
+window they sleep for, and a timer's callback shape irrelevant. A timer on a
+`Promise.race` line, or an inline callback nobody awaits, is a deadline rather
+than a wait: excluded, and listed under `--list` with the total it would have
+added. The count above is a gate against a new LONG sleep; it read
+zero while `sse-replay.test.ts` held 28 waits of 150-400ms (9.7s in one file)
+and `sse-keepalive.test.ts` held a correctly-marked `// timed:` 15s that made
+it the most expensive file in the suite. A wait exempt from the count is not
+exempt from the clock. It is a static sum over source text, so it is not a
+wall-clock assertion and reads the same on a loaded runner; the measured
+figures and what the sum cannot see are in
+`scripts/test-audit.baseline.json`'s own prose.
+
 ### The cadences are scaled, so never write one as a literal
 
 Polling cannot shorten a debounce the server itself schedules, and the suite

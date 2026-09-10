@@ -27,7 +27,27 @@ const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const baselinePath = join(repoRoot, 'scripts', 'test-audit.baseline.json');
 
 type Site = { file: string; line: number; text: string };
-type Check = { id: string; title: string; pattern: string; sites: Site[] };
+type Check = {
+  id: string;
+  title: string;
+  pattern: string;
+  sites: Site[];
+  /**
+   * Sites the check DELIBERATELY leaves out, printed under `--list` with the
+   * number they would have added. A boundary nobody can see is indistinguishable
+   * from a hole: this one was an artefact of a regex shape until a reviewer
+   * found it, and it is written down now so the next reader can disagree with
+   * it on purpose.
+   */
+  excluded?: { title: string; why: string; total: number; sites: Site[] };
+  /**
+   * The number the ratchet compares. Site COUNT for every check but the wait
+   * budget, whose number is a sum of milliseconds — the same machinery, a
+   * different unit, so `unit` says which one the table is printing.
+   */
+  count: number;
+  unit?: string;
+};
 
 function lsFiles(args: string[], globs: string[]): string[] {
   const out = Bun.spawnSync(['git', 'ls-files', ...args, ...globs], { cwd: repoRoot });
@@ -63,16 +83,42 @@ function lsFiles(args: string[], globs: string[]): string[] {
  */
 const WORKTREES = `.claude${sep}worktrees${sep}`;
 
+/**
+ * Both caches are safe because this is a one-shot script: every file it judges
+ * is on disk before it starts, and nothing here writes. Four checks over two
+ * globs meant EIGHT `git ls-files` spawns and two full reads of every test
+ * file — `fixedSleeps` and `waitBudget` walk the same ~505 server tests,
+ * `sourceShape` and `wallClock` the same whole-repo set. The cache is what
+ * kept a fourth check from making the script slower: 0.47s before it, 0.62s
+ * with the check and no cache, 0.35s with both. That matters past the script's
+ * own runtime, because `scripts/test-audit.test.ts` shells out to it three
+ * times inside one vitest case.
+ */
+const fileLists = new Map<string, string[]>();
+
 function gitFiles(...globs: string[]): string[] {
+  const key = globs.join('\u0000');
+  const hit = fileLists.get(key);
+  if (hit) return hit;
   const tracked = lsFiles([], globs);
   const untracked = lsFiles(['--others', '--exclude-standard'], globs);
-  return [...new Set([...tracked, ...untracked])]
+  const list = [...new Set([...tracked, ...untracked])]
     .filter((rel) => !rel.includes(WORKTREES))
     .filter((rel) => existsSync(join(repoRoot, rel)))
     .sort();
+  fileLists.set(key, list);
+  return list;
 }
 
-const read = (rel: string): string[] => readFileSync(join(repoRoot, rel), 'utf8').split('\n');
+const fileLines = new Map<string, string[]>();
+
+const read = (rel: string): string[] => {
+  const hit = fileLines.get(rel);
+  if (hit) return hit;
+  const lines = readFileSync(join(repoRoot, rel), 'utf8').split('\n');
+  fileLines.set(rel, lines);
+  return lines;
+};
 
 const COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
 
@@ -130,6 +176,7 @@ function fixedSleeps(): Check {
   }
   return {
     id: 'fixedSleeps',
+    count: sites.length,
     title: 'fixed sleeps >= 500ms (server suite)',
     pattern:
       'sleep(N) or setTimeout(fn, N) with N >= 500 — N literal or a ms constant declared in the same file — without a `// timed:` marker',
@@ -556,6 +603,7 @@ function sourceShape(): Check {
   }
   return {
     id: 'sourceShape',
+    count: sites.length,
     title: 'source-shape reads (all suites)',
     pattern:
       'in a test that asserts with toContain/toMatch/toBe/toEqual/toStrictEqual or an ordered comparison: ' +
@@ -596,6 +644,7 @@ function wallClock(): Check {
   }
   return {
     id: 'wallClock',
+    count: sites.length,
     title: 'wall-clock assertions (all suites)',
     pattern:
       'expect() on a Date.now()/performance.now() value or on a variable assigned from a now() delta',
@@ -603,13 +652,187 @@ function wallClock(): Check {
   };
 }
 
-const checks = [fixedSleeps(), sourceShape(), wallClock()];
-const counts = Object.fromEntries(checks.map((c) => [c.id, c.sites.length]));
+/**
+ * 4. The server suite's DECLARED WAIT BUDGET, in milliseconds.
+ *
+ * The count above has a 500ms floor and a `// timed:` exemption, and both are
+ * right for what it is: a gate against a NEW long sleep. Neither can see the
+ * shape the suite actually accumulated. `sse-replay.test.ts` held twenty-eight
+ * waits of 150-400ms — 9.7 seconds, every one of them under the floor — and
+ * `sse-keepalive.test.ts` held a legitimate `// timed:` 15s that was the single
+ * most expensive file in the suite. `fixedSleeps` read zero through all of it.
+ *
+ * So this is the other half: every fixed wait the suite declares, whatever its
+ * size, `// timed:` ones included, added up. A wait that is exempt from the
+ * count is not exempt from the clock, and this is the number a builder's
+ * two-minute verdict is actually made of.
+ *
+ * It is STATIC — a sum over source text, not a measurement — so it reads the
+ * same on a loaded box as on an idle one and nothing here is a wall-clock
+ * assertion. It is a CEILING that ratchets down, in the style of
+ * `packages/server/test/board-payload.baseline.json`.
+ *
+ * What it cannot see, so nobody reads it as the suite's idle time: a wait
+ * inside a poll loop's own interval, a server-side debounce a test waits out
+ * through `waitFor`, a value arriving from a helper in another file, and every
+ * process start. The measured wall clocks live in the baseline's own prose.
+ */
+/**
+ * A one-line sleep wrapper declared in the file, and the window it sleeps for.
+ *
+ * The house shape is `const settle = (ms = 400) => new Promise((r) =>
+ * setTimeout(r, ms));`, and a call to it is a fixed wait that neither `SLEEP`
+ * nor `MS_CONST` can see: the literal is a PARAMETER DEFAULT, and the call
+ * site says only `settle()`. Twenty-eight of them, 9.7 seconds, were invisible
+ * to this file until they were resolved here.
+ *
+ * Returns the wrapper's default window; a call passing its own number uses
+ * that instead. A wrapper whose window is neither a literal nor a defaulted
+ * parameter is skipped — the budget under-reports rather than guesses.
+ */
+const SLEEP_WRAPPER =
+  /^\s*(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(([^)]*)\)[^=]*=>[^;]*\bsetTimeout\s*\(\s*[^,]+,\s*([\w$]+)\s*\)/;
+
+function sleepWrappers(lines: string[]): Map<string, number> {
+  const found = new Map<string, number>();
+  for (const line of lines) {
+    const m = line.match(SLEEP_WRAPPER);
+    if (!m?.[1] || !m[3]) continue;
+    const arg = m[3];
+    if (/^\d/.test(arg)) {
+      found.set(m[1], Number(arg.replace(/_/g, '')));
+      continue;
+    }
+    const dflt = (m[2] ?? '').match(
+      new RegExp(`\\b${arg}\\s*(?::\\s*number\\s*)?=\\s*(\\d[\\d_]*)`),
+    );
+    if (dflt?.[1]) found.set(m[1], Number(dflt[1].replace(/_/g, '')));
+  }
+  return found;
+}
+
+/**
+ * `setTimeout(<an inline function>, N)`, which `SLEEP` above cannot see: it
+ * wants a bare identifier for its callback, so `setTimeout(() => r(), 400)`
+ * was invisible to both the count and the budget.
+ *
+ * Matching it is not the same as counting it. What decides is the CONTEXT the
+ * timer sits in, not the shape of its callback — an inline callback says
+ * nothing about whether anybody waits for it.
+ */
+const INLINE_WAIT =
+  /\bsetTimeout\(\s*(?:async\s*)?(?:\([^)]*\)|function\b)[\s\S]*?,\s*([\w$]+)\s*\)/g;
+
+/**
+ * Is this timer a DEADLINE — armed beside a real observable and paid only when
+ * something is broken — rather than a wait the suite always spends?
+ *
+ * Two things say so, and both are about the line rather than the callback:
+ *
+ *   - `Promise.race` anywhere on it. The timer is the losing branch of a race
+ *     on a green run, whatever shape its callback has. This also takes
+ *     `await Promise.race([gotEvent, sleep(3000)…])` OUT of the budget, which
+ *     the bare-identifier rule had been counting as three seconds nobody
+ *     spends.
+ *   - an inline callback with no `await` on the line. `const timer =
+ *     setTimeout(() => reject(…), 15_000)` beside an MCP round trip, `const
+ *     tooSlow = new Promise((resolve) => setTimeout(() => resolve('wedged'),
+ *     HEALTH_MS))` beside a health check, `setTimeout(() => {}, 100_000)`
+ *     holding a process alive. Nobody awaits the line they are written on.
+ *
+ * So `await new Promise((r) => setTimeout(() => r(), 1000))` — always paid, and
+ * the exact shape a shape-based rule would have let through — IS counted. The
+ * first version of this classified by callback shape and would have missed it;
+ * a reviewer found that, which is why the excluded sites are listed rather
+ * than dropped.
+ *
+ * Under-reports rather than guesses, in one known way: a `setTimeout` whose
+ * milliseconds sit on a different line from its opening paren is matched by
+ * nothing here.
+ */
+function isDeadline(line: string, inlineCallback: boolean): boolean {
+  if (/\bPromise\.race\b/.test(line)) return true;
+  return inlineCallback && !/\bawait\b/.test(line);
+}
+
+function waitBudget(): Check {
+  const sites: Site[] = [];
+  const deadlines: Site[] = [];
+  let total = 0;
+  let deadlineTotal = 0;
+  for (const file of gitFiles('packages/server/test/*.ts')) {
+    const lines = read(file);
+    const consts = msConstants(lines);
+    const wrappers = sleepWrappers(lines);
+    const calls =
+      wrappers.size === 0
+        ? null
+        : new RegExp(`\\b(${[...wrappers.keys()].join('|')})\\(\\s*(\\d[\\d_]*)?\\s*\\)`, 'g');
+    lines.forEach((text, i) => {
+      if (COMMENT_LINE.test(text)) return;
+      // A wrapper's DECLARATION pays nothing — its calls do, and they are
+      // counted below. Counting the declaration too charged a fixed-window
+      // wrapper (`const settle = () => new Promise((r) => setTimeout(r, 260))`)
+      // one extra window that nobody ever waits.
+      if (SLEEP_WRAPPER.test(text)) return;
+      const add = (raw: string, inlineCallback: boolean): void => {
+        const ms = /^\d/.test(raw)
+          ? Number(raw.replace(/_/g, ''))
+          : (consts.get(raw) ?? Number.NaN);
+        // A wait whose value this cannot resolve contributes nothing rather
+        // than NaN — the budget under-reports instead of failing to compute.
+        if (!Number.isFinite(ms) || ms <= 0) return;
+        const site = { file, line: i + 1, text: `${ms}ms  ${text.trim()}` };
+        if (isDeadline(text, inlineCallback)) {
+          deadlineTotal += ms;
+          deadlines.push(site);
+          return;
+        }
+        total += ms;
+        sites.push(site);
+      };
+      for (const m of text.matchAll(SLEEP)) add(m[1] ?? m[2] ?? '', false);
+      for (const m of text.matchAll(INLINE_WAIT)) add(m[1] ?? '', true);
+      if (!calls) return;
+      for (const m of text.matchAll(calls)) {
+        const passed = m[2];
+        add(passed ?? String(wrappers.get(m[1] ?? '') ?? ''), false);
+      }
+    });
+  }
+  return {
+    id: 'waitBudgetMs',
+    count: total,
+    unit: 'ms',
+    title: 'declared fixed-wait budget (server suite)',
+    excluded: {
+      title: 'raced deadlines — NOT in the budget',
+      why: 'a timer on a Promise.race line, or an inline callback nobody awaits: armed beside a real observable and paid only when something is broken. Summing these would put time nobody waits into the budget.',
+      total: deadlineTotal,
+      sites: deadlines,
+    },
+    pattern:
+      'every awaited fixed wait in packages/server/test/*.ts summed in milliseconds — sleep(N), setTimeout(fn, N) whatever the callback, and one-line sleep-wrapper calls; no floor, `// timed:` waits included, raced deadlines excluded and listed',
+    sites,
+  };
+}
+
+const checks = [fixedSleeps(), sourceShape(), wallClock(), waitBudget()];
+const counts = Object.fromEntries(checks.map((c) => [c.id, c.count]));
 
 if (process.argv.includes('--write')) {
+  // The `_`-prefixed keys are the prose a reviewer reads to tell a detector
+  // change from a real regression, and they are the most expensive thing in
+  // this file to rewrite. `--write` used to drop all of them on the floor.
+  const prose = Object.fromEntries(
+    Object.entries(
+      JSON.parse(readFileSync(baselinePath, 'utf8')) as Record<string, unknown>,
+    ).filter(([k]) => k.startsWith('_')),
+  );
   const body = {
     _comment:
       'Ratchet for bun run test:audit. Counts may only go down. Lower a number in the same commit that lowers the count.',
+    ...prose,
     ...counts,
   };
   writeFileSync(baselinePath, `${JSON.stringify(body, null, 2)}\n`);
@@ -623,23 +846,27 @@ if (process.argv.includes('--list')) {
   for (const c of checks) {
     console.log(`\n# ${c.title}`);
     for (const s of c.sites) console.log(`  ${s.file}:${s.line}  ${s.text.slice(0, 110)}`);
+    if (!c.excluded) continue;
+    console.log(`\n# ${c.title} — ${c.excluded.title} (${c.excluded.total}${c.unit ?? ''})`);
+    console.log(`  ${c.excluded.why}`);
+    for (const s of c.excluded.sites) console.log(`  ${s.file}:${s.line}  ${s.text.slice(0, 110)}`);
   }
   console.log('');
 }
 
 const rows = checks.map((c) => {
   const max = baseline[c.id];
-  const over = typeof max !== 'number' || c.sites.length > max;
+  const over = typeof max !== 'number' || c.count > max;
   return { c, max, over };
 });
 
 const w = Math.max(...checks.map((c) => c.title.length));
-console.log(`${'check'.padEnd(w)}  count  baseline  status`);
-console.log('-'.repeat(w + 26));
+console.log(`${'check'.padEnd(w)}    count  baseline      status`);
+console.log('-'.repeat(w + 30));
 for (const { c, max, over } of rows) {
-  const status = over ? 'OVER' : c.sites.length < (max ?? 0) ? 'under (lower it)' : 'ok';
+  const status = over ? 'OVER' : c.count < (max ?? 0) ? 'under (lower it)' : 'ok';
   console.log(
-    `${c.title.padEnd(w)}  ${String(c.sites.length).padStart(5)}  ${String(max ?? '-').padStart(8)}  ${status}`,
+    `${c.title.padEnd(w)}  ${String(c.count).padStart(7)}  ${String(max ?? '-').padStart(8)}  ${c.unit ?? ''}  ${status}`,
   );
 }
 
@@ -647,7 +874,9 @@ const failed = rows.filter((r) => r.over);
 if (failed.length > 0) {
   console.error('\nOver the ratchet:');
   for (const { c, max } of failed) {
-    console.error(`  ${c.id}: ${c.sites.length} > ${max ?? 'no baseline'} — matches ${c.pattern}`);
+    console.error(
+      `  ${c.id}: ${c.count}${c.unit ?? ''} > ${max ?? 'no baseline'}${c.unit ?? ''} — matches ${c.pattern}`,
+    );
     for (const s of c.sites.slice(0, 20))
       console.error(`    ${s.file}:${s.line}  ${s.text.slice(0, 100)}`);
   }

@@ -267,6 +267,17 @@ export interface ServerOptions {
    */
   stallNudgeQuietMs?: number;
   /**
+   * The socket idle timeout handed to `Bun.serve` (default
+   * `HTTP_IDLE_TIMEOUT_SEC`, 120s). A test seam, and the ONLY way to watch a
+   * stream die of the timeout this server configures rather than of Bun's own
+   * default: the shipped 120s is unwaitable, and a test that waits Bun's 10s
+   * default out is testing Bun. With this at 1 the death lands in ~4s (Bun
+   * rounds the check up to about that whatever the value), and a build that
+   * dropped `idleTimeout` from `Bun.serve` altogether would survive it —
+   * which is exactly the regression `sse-keepalive.test.ts` exists for.
+   */
+  httpIdleTimeoutSec?: number;
+  /**
    * The scheduled-task loop's clock (task-scheduler.ts). A test seam for the
    * same reason `stallNudgeQuietMs` is one, and a stronger one: the feature
    * is entirely a comparison against a clock, so without this a test asserting

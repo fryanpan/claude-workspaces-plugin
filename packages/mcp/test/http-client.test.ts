@@ -110,7 +110,12 @@ function fakeFetch(script: Array<{ status: number; body: string }>) {
     calls.push({ url, init });
     const next = script[Math.min(i, script.length - 1)];
     i += 1;
-    return new Response(next.body, { status: next.status });
+    // A 204/304 carries no body — the platform `Response` constructor
+    // rejects one, so the script's body for those statuses is dropped here
+    // rather than written as `''` at every call site. `res.text()` on a null
+    // body is `''`, which is exactly what the empty-200 case asserts about.
+    const bodyless = next.status === 204 || next.status === 304 || next.status === 205;
+    return new Response(bodyless ? null : next.body, { status: next.status });
   };
   return { fn, calls };
 }

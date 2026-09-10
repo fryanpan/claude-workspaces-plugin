@@ -1,9 +1,4 @@
 import { afterAll } from 'vitest';
-import * as composerChunk from './packages/workspaces-app/src/md-composer-chunk.ts';
-import {
-  destroyLiveComposers,
-  setComposerEditorLoader,
-} from './packages/workspaces-app/src/md-composer.ts';
 
 /**
  * Composers reach their markdown editor through a dynamic `import()` — the
@@ -15,8 +10,23 @@ import {
  * So the suite hands the composer the REAL module, synchronously. Not a
  * stand-in: a stand-in is a second implementation to keep honest, and these
  * tests are about what a person types into the box.
+ *
+ * …and only where there IS a document. This file runs before EVERY test file,
+ * so a STATIC import of the chunk evaluated the whole Tiptap stack 429 times
+ * a run — 36.5s of CPU on the measurement that produced this change, most of
+ * it for files (the MCP client, the repo scripts, core) that have no DOM and
+ * could never build a composer. The environment is what says which those are:
+ * `environment: 'node'` has no `document`, and a ProseMirror view cannot
+ * mount there at all. Loading it behind that test costs the DOM files
+ * nothing and takes the whole cost off everybody else.
  */
-setComposerEditorLoader(() => composerChunk);
+const hasDom = typeof document !== 'undefined';
+
+if (hasDom) {
+  const composerChunk = await import('./packages/workspaces-app/src/md-composer-chunk.ts');
+  const { setComposerEditorLoader } = await import('./packages/workspaces-app/src/md-composer.ts');
+  setComposerEditorLoader(() => composerChunk);
+}
 
 /**
  * End every composer a file left running, before vitest takes the environment
@@ -34,6 +44,8 @@ setComposerEditorLoader(() => composerChunk);
  * the floor under the ones that don't: 441 of the 451 views the suite leaked
  * when this was written were composers, spread over thirty-odd files.
  */
-afterAll(() => {
+afterAll(async () => {
+  if (!hasDom) return;
+  const { destroyLiveComposers } = await import('./packages/workspaces-app/src/md-composer.ts');
   destroyLiveComposers();
 });

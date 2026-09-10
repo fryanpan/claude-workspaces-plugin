@@ -18,13 +18,40 @@
  * replay, so everything broadcast during those gaps was lost for good. A
  * regression here is invisible by construction — which is why the invariant is
  * asserted directly rather than only through behaviour.
+ *
+ * WHY THIS FILE IS NO LONGER NINETEEN SECONDS LONG. It used to hold one stream
+ * open for a real `SSE_KEEPALIVE_MS` (15s) and watch a second die on a doomed
+ * server built here (4s), which made it the single most expensive file in the
+ * server suite — 19.3s of the 308s the whole suite spends. The claim is split
+ * into the three things the bug was actually made of, each with an observable
+ * that arrives in its own time rather than the product's:
+ *
+ *   1. the two numbers still mean something together (arithmetic, free);
+ *   2. the interval really WRITES to a live stream (`openSseStream` on a
+ *      100ms period — the seam `sse-mux.ts` already had);
+ *   3. the timeout this server configures really reaches `Bun.serve`, watched
+ *      on a server whose idle timeout is one second while the shipped
+ *      keepalive (15s) is far too slow to save it. That is the shipped bug in
+ *      miniature, and a build that dropped `idleTimeout` from `Bun.serve`
+ *      falls back to Bun's ~10s default and fails it.
+ *
+ * 2 and 3 are each other's control: one is a stream that must stay open, the
+ * other a stream that must close, read by the same watcher.
+ *
+ * WHAT NO LONGER HAS A BEHAVIOURAL PROOF, said plainly: that the period a
+ * PRODUCTION stream runs on is `SSE_KEEPALIVE_MS` rather than some other
+ * number. Watching that costs one real period. It is a default parameter on
+ * `openSseStream` with no production caller overriding it, and case 1 is what
+ * keeps the number itself honest.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { HTTP_IDLE_TIMEOUT_SEC, SSE_KEEPALIVE_MS } from '../src/sse.ts';
+import { HTTP_IDLE_TIMEOUT_SEC, SSE_KEEPALIVE_MS, SseBus, openSseStream } from '../src/sse.ts';
+import { waitFor } from './wait-for.ts';
+import { seedBoard } from './workspace-seed.ts';
 
 describe('the keepalive/idle-timeout invariant', () => {
   it('fires the keepalive well inside the idle timeout it guards', () => {
@@ -46,12 +73,50 @@ describe('the keepalive/idle-timeout invariant', () => {
   });
 });
 
-/**
- * The behavioural half. The invariant above is the one that would have caught
- * the bug; this one proves the invariant is actually wired to `Bun.serve`
- * rather than merely declared in a module nobody reads.
- */
-describe('an idle SSE stream survives past the old death window', () => {
+/** Reads a stream in the background and records whether the server ended it. */
+function watch(res: Response) {
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const state = { closed: false, bytes: 0 };
+  const pump = (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          state.closed = true;
+          return;
+        }
+        state.bytes += value?.byteLength ?? 0;
+      }
+    } catch {
+      // A torn-down stream is a close as far as the reader is concerned.
+      state.closed = true;
+    }
+  })();
+  return { state, pump, cancel: () => void reader.cancel().catch(() => {}) };
+}
+
+describe('the keepalive writes, so an idle stream is not a silent one', () => {
+  it('keeps enqueueing on its own period with nothing else to send', async () => {
+    const bus = new SseBus();
+    // 100ms rather than 15s: the claim is that the interval fires and writes,
+    // and that claim does not get truer for being waited out longer.
+    const w = watch(
+      openSseStream(bus, 'doc-ka', undefined, undefined, undefined, undefined, undefined, 100),
+    );
+    // The `:ok` preamble is five bytes, written once at start. Anything past
+    // it on a channel nobody broadcasts to is the keepalive and nothing else.
+    const preamble = await waitFor(() => (w.state.bytes > 0 ? w.state.bytes : false), {
+      describe: 'the stream preamble',
+    });
+    await waitFor(() => w.state.bytes > preamble, {
+      describe: 'a keepalive comment past the preamble',
+    });
+    expect(w.state.closed).toBe(false);
+    w.cancel();
+  }, 10_000);
+});
+
+describe('the idle timeout this server configures is the one Bun enforces', () => {
   let handle: ServerHandle | null = null;
   let dataDir = '';
 
@@ -61,95 +126,68 @@ describe('an idle SSE stream survives past the old death window', () => {
     if (dataDir) rmSync(dataDir, { recursive: true, force: true });
   });
 
-  /** Reads a stream in the background and records whether the server ended it. */
-  function watch(res: Response) {
-    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
-    const state = { closed: false, bytes: 0 };
-    const pump = (async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            state.closed = true;
-            return;
-          }
-          state.bytes += value?.byteLength ?? 0;
-        }
-      } catch {
-        // A torn-down stream is a close as far as the reader is concerned.
-        state.closed = true;
-      }
-    })();
-    return { state, pump, cancel: () => void reader.cancel().catch(() => {}) };
+  /**
+   * The stream read over a RAW SOCKET rather than `fetch`.
+   *
+   * Bun's fetch reopens an idempotent GET once when the server drops the
+   * connection under it, so the reader saw a second `:ok` preamble at ~4s and
+   * only ended at ~8s — one close read as two, and the budget below would have
+   * had to be wide enough to swallow both. A socket reports the close the
+   * server actually performed, at the moment it performs it.
+   */
+  function rawStream(port: number, path: string) {
+    const state = { bytes: 0, closed: false, status: '' };
+    const socket = Bun.connect({
+      hostname: 'localhost',
+      port,
+      socket: {
+        open(s) {
+          s.write(
+            `GET ${path} HTTP/1.1\r\nHost: localhost:${port}\r\nAccept: text/event-stream\r\nConnection: keep-alive\r\n\r\n`,
+          );
+        },
+        data(_s, chunk) {
+          const text = new TextDecoder().decode(chunk);
+          if (state.status === '') state.status = text.slice(0, text.indexOf('\r\n'));
+          state.bytes += chunk.byteLength;
+        },
+        close() {
+          state.closed = true;
+        },
+        error() {
+          state.closed = true;
+        },
+      },
+    });
+    return { state, end: async () => (await socket).end() };
   }
 
-  async function open() {
-    dataDir = mkdtempSync(join(tmpdir(), 'sse-keepalive-'));
-    handle = createServer({ port: 0, dataDir });
+  it('closes a stream the keepalive is too slow to save — the shipped bug, in miniature', async () => {
+    // One second of idle timeout against the shipped 15s keepalive: the guard's
+    // period is longer than the timeout it guards, which is exactly the
+    // arithmetic that shipped. Bun rounds its idle check up to about four
+    // seconds whatever the configured value, so the close lands there.
+    //
+    // THIS IS THE WIRING TEST. Drop `idleTimeout` from the `Bun.serve` options
+    // and Bun's own ~10s default applies instead: the close never arrives
+    // inside the budget below and this goes red. It is also the control for
+    // the case above — one stream that must stay open, one that must close.
+    dataDir = mkdtempSync(join(tmpdir(), 'sse-idle-'));
+    handle = createServer({ port: 0, dataDir, httpIdleTimeoutSec: 1 });
     const base = `http://localhost:${handle.port}`;
     const host = `localhost:${handle.port}`;
-    const made = await fetch(`${base}/workspaces`, {
-      method: 'POST',
-      headers: { host, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Idle Board' }),
+    const ws = await seedBoard(base, { host });
+    const stream = rawStream(handle.port, `/workspaces/${ws}/events:stream`);
+    // It started: "closed" below is a stream that lived and then died, not a
+    // request that never got an answer.
+    await waitFor(() => stream.state.status.includes('200'), {
+      describe: 'the stream to answer 200',
     });
-    const { workspace } = (await made.json()) as { workspace: { id: string } };
-    const res = await fetch(`${base}/workspaces/${workspace.id}/events:stream`, {
-      headers: { host, accept: 'text/event-stream' },
+    expect(stream.state.bytes).toBeGreaterThan(0);
+    await waitFor(() => stream.state.closed, {
+      timeout: 8_000,
+      describe: 'the configured idle timeout to close the stream',
     });
-    expect(res.status).toBe(200);
-    return watch(res);
-  }
-
-  it('is still open after 15s of silence — past the ~10s it used to die at', async () => {
-    const w = await open();
-    // timed: the duration IS the claim. The stream has to outlive both the
-    // ~10s it used to die at and a full SSE_KEEPALIVE_MS (15s) cycle, so
-    // there is no earlier observable to poll for — the absence of a close is
-    // only meaningful once that much silence has actually elapsed. Scaling it
-    // would mean making the keepalive interval injectable in src/sse.ts.
-    await new Promise((r) => setTimeout(r, SSE_KEEPALIVE_MS));
-    expect(w.state.closed).toBe(false);
-    // It also actually received the preamble, so "not closed" is a live
-    // stream rather than a response whose body never started.
-    expect(w.state.bytes).toBeGreaterThan(0);
-    w.cancel();
-  }, 30_000);
-
-  it('POSITIVE CONTROL: the same watcher does see an idle timeout kill a stream', async () => {
-    // Without this, the assertion above passes just as happily against a
-    // watcher that can never report a close — which is precisely the failure
-    // mode this whole file exists to rule out.
-    //
-    // The control is a server configured the way the bug was: an idle
-    // timeout shorter than anything that writes. So it proves the watcher
-    // detects THE death under test, not merely some close. (`handle.stop()`
-    // is no good here — Bun's graceful stop leaves live connections up, so
-    // it reports nothing and would make this control a false negative.)
-    const doomed = Bun.serve({
-      port: 0,
-      idleTimeout: 1,
-      fetch: () =>
-        new Response(
-          new ReadableStream({
-            start(c) {
-              c.enqueue(new TextEncoder().encode(':ok\n\n'));
-              // …and then deliberately nothing, forever.
-            },
-          }),
-          { headers: { 'content-type': 'text/event-stream' } },
-        ),
-    });
-    try {
-      const res = await fetch(`http://localhost:${doomed.port}/events`);
-      const w = watch(res);
-      // timed: a deadline, not a wait. The doomed server's 1s idle timeout
-      // resolves this in about a second; the 8s only gets paid if the control
-      // is broken, which is exactly when the suite should be slow and red.
-      await Promise.race([w.pump, new Promise((r) => setTimeout(r, 8_000))]);
-      expect(w.state.closed).toBe(true);
-    } finally {
-      doomed.stop(true);
-    }
+    expect(stream.state.closed).toBe(true);
   }, 20_000);
 });
