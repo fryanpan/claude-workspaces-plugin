@@ -980,6 +980,22 @@ export function beginNotesSession(
    * only report was an `onError` nobody supplied. Counted here so the meeting
    * can say it out loud when it ends.
    */
+  /**
+   * Method-change lines that have nowhere to go YET.
+   *
+   * A switch can happen before this meeting has a section — somebody opens
+   * the sheet and changes the note-taker in the first seconds, before a word
+   * has settled. Written then, the line goes to the end of the DOCUMENT, and
+   * the first compose afterwards opens the meeting's section BELOW it: the
+   * trace ends up outside the minutes it describes, or inside the previous
+   * meeting's section when the doc has one.
+   *
+   * So it waits. The first write that has a heading takes it, under that
+   * heading, still reading the clock time of the CHANGE rather than of the
+   * flush. A meeting that ends having never written a note drops it and says
+   * so — there are no minutes for it to annotate.
+   */
+  const heldMethodLines: string[] = [];
   let composeFailures = 0;
   let refusedTooLong = 0;
   /**
@@ -1504,6 +1520,46 @@ export function beginNotesSession(
         });
         const written = answer !== false && answer !== 'refused';
         applyMs = clock() - applyStart;
+        // The section now exists, so anything held from a switch made before
+        // it did has somewhere to be. Under this meeting's own heading, and
+        // after the tick that opened it, which is where a person reading the
+        // minutes expects the note about how they were written.
+        if (written && heldMethodLines.length > 0) {
+          // Asked AFTER the write, because the write is what opens the
+          // section: the id read before composing is `undefined` on exactly
+          // the tick that creates it. The outline is the one already in hand,
+          // so this costs no extra doc read, and it is asked at all only when
+          // something is actually being held.
+          let landing = notesHeadingId;
+          if (landing === undefined) {
+            try {
+              landing = deps.notesHeadingId?.({
+                docId: ids.docId,
+                meetingId: ids.meetingId,
+                outline,
+              });
+            } catch {
+              landing = undefined;
+            }
+          }
+          if (landing !== undefined) {
+            const held = heldMethodLines.splice(0);
+            try {
+              deps.onNotes({
+                docId: ids.docId,
+                meetingId: ids.meetingId,
+                tick: { tick: 0, reason: 'end', turns: [] },
+                edits: held.map((markdown) => ({
+                  op: 'insert_under_heading' as const,
+                  headingId: landing as string,
+                  markdown,
+                })),
+              });
+            } catch (err) {
+              deps.onError?.(err instanceof Error ? err.message : 'notes method line not written');
+            }
+          }
+        }
         if (!written) {
           // The compose was fine and the DOC refused it. Same handling as a
           // failed compose — the words are still unwritten, so they carry —
@@ -1718,6 +1774,13 @@ export function beginNotesSession(
           headingId = undefined;
         }
         const markdown = `- ${notesMethodTraceLine(label, by, clock())}`;
+        // No section yet: hold it rather than stranding it at the end of the
+        // document, where the first compose would then open the section
+        // underneath it.
+        if (headingId === undefined) {
+          heldMethodLines.push(markdown);
+          return;
+        }
         try {
           deps.onNotes({
             docId: ids.docId,
@@ -1725,11 +1788,7 @@ export function beginNotesSession(
             // Not a tick: no words were said, so a sink that counts what a
             // tick wrote must not charge the room for this line.
             tick: { tick: 0, reason: 'end', turns: [] },
-            edits: [
-              headingId === undefined
-                ? { op: 'insert_at_end', markdown }
-                : { op: 'insert_under_heading', headingId, markdown },
-            ],
+            edits: [{ op: 'insert_under_heading', headingId, markdown }],
           });
         } catch (err) {
           deps.onError?.(err instanceof Error ? err.message : 'notes method line not written');
@@ -1795,6 +1854,18 @@ export function beginNotesSession(
         deps.onError?.(
           `${ids.docId} meeting ${ids.meetingId}: ${refusedTooLong} of this meeting's ` +
             'notes composes were refused as too long — the notes stopped keeping up',
+        );
+      }
+      // A switch was made and this meeting never wrote a note, so it never
+      // opened a section for the line to sit in. Dropped rather than
+      // stranded at the end of the document, and SAID rather than dropped
+      // quietly: the record of the change itself is durable either way, in
+      // `notes-method.json` beside the meeting.
+      if (heldMethodLines.length > 0) {
+        const held = heldMethodLines.splice(0);
+        deps.onError?.(
+          `${ids.docId} meeting ${ids.meetingId}: ${held.length} note-taker change line(s) ` +
+            'not written — this meeting never opened a notes section',
         );
       }
       // The last settle of the meeting. Nothing follows it that could retry

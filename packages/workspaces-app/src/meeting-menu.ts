@@ -26,10 +26,11 @@
  * close are the strip's verbs, handed in.
  */
 
-import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
+import type { CaptureMode, MeetingBotStatus, NotesMethod } from '@claude-workspaces/core';
 import { describeBotState, speakerDisplayName } from '@claude-workspaces/core';
 import { advancedControls } from './meeting-advanced.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
+import { type NotetakerFoldState, appendNotetakerFold } from './meeting-notetaker.ts';
 import { formatElapsed } from './meeting-protocol.ts';
 import type { StripState } from './meeting-strip.ts';
 
@@ -66,6 +67,26 @@ export interface MeetingMenuDeps {
   closePop(): void;
   /** Whether the mount has been torn down under an in-flight promise. */
   isDisposed(): boolean;
+  /**
+   * The note-taker fold, in the panel a RUNNING meeting opens.
+   *
+   * It has to be here as well as in the start sheet, and the reason is the
+   * whole feature: a person listening to notes arrive decides they are too
+   * thin and buys a better note-taker for the rest of the meeting. While a
+   * recording or a bot meeting is live the Record button leads here and not
+   * to the sheet, so a fold that exists only on the sheet is a mid-meeting
+   * switch that cannot be made mid-meeting.
+   */
+  notetakerState(): NotetakerFoldState;
+  /** A row picked in that fold. Same handler the sheet's fold uses. */
+  onNotesMethodPicked(method: NotesMethod): void;
+  /** Redraw whichever popover is open, after the fold moves its own state. */
+  renderPop(): void;
+  /**
+   * Which note-takers to offer, for tests that need more than one row. The
+   * fold hides itself below two, so a caller measuring it supplies its own.
+   */
+  offeredNotesMethods?: readonly NotesMethod[];
 }
 
 /** What the strip calls back into. */
@@ -161,6 +182,14 @@ export function createMeetingMenu(deps: MeetingMenuDeps): MeetingMenu {
     if (!live && engine !== null && advancedControls(engine).length > 0) {
       pop.append(deps.buildAdvancedPanel(engine, true));
     }
+    // The note-taker, changeable while the room is talking. Above the
+    // separator, so it sits with the things a live meeting can still be
+    // steered by rather than beside the verb that ends it.
+    appendNotetakerFold(pop, deps.notetakerState(), {
+      renderPop: deps.renderPop,
+      onPick: deps.onNotesMethodPicked,
+      ...(deps.offeredNotesMethods ? { offered: deps.offeredNotesMethods } : {}),
+    });
     const sep = document.createElement('div');
     sep.className = 'meeting-pop-sep';
     pop.append(sep);

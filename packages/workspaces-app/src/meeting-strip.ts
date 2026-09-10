@@ -79,7 +79,7 @@ import {
   speakerGivenName,
 } from '@claude-workspaces/core';
 import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
-import { DEFAULT_NOTES_METHOD, parseRoomSpeakers } from '@claude-workspaces/core';
+import { DEFAULT_NOTES_METHOD, type NotesMethod, parseRoomSpeakers } from '@claude-workspaces/core';
 import { currentWorkspaceId } from './doc-path.ts';
 import {
   type AdvancedState,
@@ -763,37 +763,45 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     isChooserView: () => view === 'chooser',
     socketOpen: () => socketOpen,
     sendSocket: (data) => socket?.send(data),
-    onNotesMethodPicked: (method) => {
-      // Optimistic, because the fold is a preference and the sheet must not
-      // sit on a spinner: the row moves now, and the two ways of asking below
-      // are what make it true. A failure puts it back.
-      showMethod(notetakerPicked(methodChoice, method));
-      if (socketOpen && socket) {
-        // Recording: over the audio socket, so the live session learns it —
-        // the next tick composes with it and the doc gets its one line. The
-        // server answers `notes_method`, and that answer is what confirms
-        // this row or puts it back.
-        choose.methodSince = clockLabel(Date.now());
-        socket.send(
-          JSON.stringify({
-            type: 'set_notes_method',
-            method,
-            ...(opts.participantName ? { by: opts.participantName } : {}),
-          }),
-        );
-        return;
-      }
-      // At rest: a write on the doc. No meeting is running, so there is no
-      // session to tell and no line to write.
-      choose.methodSince = '';
-      void putNotesMethod(docId, method, opts.participantName).then((ok) => {
-        showMethod(notetakerAcknowledged(methodChoice, ok));
-        if (ok) return;
-        choose.chooseError = 'That note-taker could not be saved.';
-        renderPop();
-      });
-    },
+    onNotesMethodPicked: (method) => pickNotesMethod(method),
   });
+
+  /**
+   * A note-taker picked, from either fold — the start sheet's or the running
+   * meeting's. One function because the two are one choice: which of the two
+   * ways of asking is used depends on whether a socket is open, not on which
+   * panel the person happened to be looking at.
+   */
+  function pickNotesMethod(method: NotesMethod): void {
+    // Optimistic, because the fold is a preference and the sheet must not
+    // sit on a spinner: the row moves now, and the two ways of asking below
+    // are what make it true. A failure puts it back.
+    showMethod(notetakerPicked(methodChoice, method));
+    if (socketOpen && socket) {
+      // Recording: over the audio socket, so the live session learns it —
+      // the next tick composes with it and the doc gets its one line. The
+      // server answers `notes_method`, and that answer is what confirms
+      // this row or puts it back.
+      choose.methodSince = clockLabel(Date.now());
+      socket.send(
+        JSON.stringify({
+          type: 'set_notes_method',
+          method,
+          ...(opts.participantName ? { by: opts.participantName } : {}),
+        }),
+      );
+      return;
+    }
+    // At rest: a write on the doc. No meeting is running, so there is no
+    // session to tell and no line to write.
+    choose.methodSince = '';
+    void putNotesMethod(docId, method, opts.participantName).then((ok) => {
+      showMethod(notetakerAcknowledged(methodChoice, ok));
+      if (ok) return;
+      choose.chooseError = 'That note-taker could not be saved.';
+      renderPop();
+    });
+  }
 
   /**
    * The transcript line, and the speaker menu the Record button opens over a
@@ -834,6 +842,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     stop: () => stop(),
     closePop: () => closePop(),
     isDisposed: () => disposed,
+    // The same fold and the same handler the start sheet has. A meeting that
+    // is running is exactly when somebody wants this control, and this panel
+    // is the only one the Record button opens while it runs.
+    notetakerState: () => choose,
+    onNotesMethodPicked: (method) => pickNotesMethod(method),
+    renderPop,
   });
 
   function nameSpeaker(label: string): void {

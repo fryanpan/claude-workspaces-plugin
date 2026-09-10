@@ -1,7 +1,8 @@
-import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
+import type { CaptureMode, MeetingBotStatus, NotesMethod } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import type { MeetingBotClient } from '../src/meeting-bot-client.ts';
 import { type MeetingMenu, createMeetingMenu } from '../src/meeting-menu.ts';
+import type { NotetakerFoldState } from '../src/meeting-notetaker.ts';
 import type { StripState } from '../src/meeting-strip.ts';
 
 /**
@@ -26,6 +27,10 @@ interface Harness {
   closed: number;
   disposed: boolean;
   bot: MeetingBotClient | undefined;
+  notetaker: NotetakerFoldState;
+  offered: readonly NotesMethod[] | undefined;
+  picked: NotesMethod[];
+  rendered: number;
   menu: MeetingMenu;
 }
 
@@ -45,6 +50,14 @@ function makeMenu(over: Partial<Harness> = {}): Harness {
     closed: 0,
     disposed: false,
     bot: undefined as MeetingBotClient | undefined,
+    notetaker: {
+      chooseMethod: 'original',
+      methodOpen: false,
+      methodSince: '',
+    } as NotetakerFoldState,
+    offered: undefined as readonly NotesMethod[] | undefined,
+    picked: [] as NotesMethod[],
+    rendered: 0,
     menu: undefined as unknown as MeetingMenu,
     ...over,
   };
@@ -72,6 +85,12 @@ function makeMenu(over: Partial<Harness> = {}): Harness {
       h.closed += 1;
     },
     isDisposed: () => h.disposed,
+    notetakerState: () => h.notetaker,
+    offeredNotesMethods: h.offered,
+    onNotesMethodPicked: (m) => h.picked.push(m),
+    renderPop: () => {
+      h.rendered += 1;
+    },
   });
   return h;
 }
@@ -208,5 +227,49 @@ describe('createMeetingMenu — the one verb', () => {
     await leave.catch(() => undefined);
     await Promise.resolve();
     expect(h.closed).toBe(0);
+  });
+});
+
+/**
+ * THE MID-MEETING SWITCH IS ONLY REAL IF THE RUNNING MEETING'S PANEL CARRIES
+ * IT. While a recording or a bot meeting is live the Record button opens this
+ * menu rather than the start sheet, so a note-taker fold that lives only on
+ * the sheet is a switch nobody can reach once the room is talking — which is
+ * the one moment the feature is for.
+ */
+describe('createMeetingMenu — the note-taker fold', () => {
+  const twoOffered: readonly NotesMethod[] = ['original', 'ledger-haiku'];
+
+  it('draws the fold in the panel a running recording opens', () => {
+    const h = makeMenu({ offered: twoOffered });
+    h.menu.buildMenu();
+    expect(h.pop.querySelector('.meeting-notetaker')).not.toBeNull();
+  });
+
+  it('draws it for a live bot meeting too, above the separator', () => {
+    const h = makeMenu({ offered: twoOffered, liveBot: botStatus() });
+    h.menu.buildMenu();
+    const fold = h.pop.querySelector('.meeting-notetaker');
+    const sep = h.pop.querySelector('.meeting-pop-sep');
+    expect(fold).not.toBeNull();
+    expect(sep).not.toBeNull();
+    // compareDocumentPosition: FOLLOWING === the separator comes after the fold.
+    expect(
+      (fold?.compareDocumentPosition(sep as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('reports a pick made in the running meeting to the same handler the sheet uses', () => {
+    const h = makeMenu({
+      offered: twoOffered,
+      notetaker: { chooseMethod: 'original', methodOpen: true, methodSince: '' },
+    });
+    document.body.append(h.pop);
+    h.menu.buildMenu();
+    const rows = h.pop.querySelectorAll<HTMLLabelElement>('.meeting-choice');
+    expect(rows).toHaveLength(2);
+    rows[1]?.click();
+    expect(h.picked).toEqual(['ledger-haiku']);
+    expect(h.rendered).toBe(1);
   });
 });

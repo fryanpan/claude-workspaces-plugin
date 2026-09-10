@@ -368,8 +368,10 @@ describe('the line the live session writes', () => {
   function session(headingId: string | undefined): {
     s: MeetingNotesSession;
     writes: NotesUpdate[];
+    errors: string[];
   } {
     const writes: NotesUpdate[] = [];
+    const errors: string[] = [];
     const s = beginNotesSession(
       {
         composer: { name: 'never', compose: () => Promise.resolve([]) },
@@ -381,10 +383,11 @@ describe('the line the live session writes', () => {
           writes.push(u);
           return true;
         },
+        onError: (m) => errors.push(m),
       },
       ids,
     );
-    return { s, writes };
+    return { s, writes, errors };
   }
 
   it('goes under the meeting’s own heading, as one bullet, charged to no tick', async () => {
@@ -402,10 +405,64 @@ describe('the line the live session writes', () => {
     expect(h.writes[0]?.tick.turns).toEqual([]);
   });
 
-  it('falls to the end of the doc when this meeting has opened no section', async () => {
+  it('the held line lands under this meeting’s heading once the first tick opens it', async () => {
+    // The whole point of holding it: the trace ends up INSIDE the minutes it
+    // describes, and still reading the time of the change.
+    const writes: NotesUpdate[] = [];
+    const sched = new ManualScheduler();
+    let heading: string | undefined;
+    const s = beginNotesSession(
+      {
+        composer: {
+          name: 'opens',
+          compose: () => {
+            // The compose is what opens the section, so the heading exists
+            // from the moment its edits are applied.
+            heading = 'h-mine';
+            return Promise.resolve([{ op: 'insert_at_end', markdown: '- a first bullet' }]);
+          },
+        },
+        schedule: sched,
+        now: () => new Date(2026, 8, 9, 10, 38).getTime(),
+        readOutline: () => [],
+        notesHeadingId: () => heading,
+        onNotes: (u) => {
+          writes.push(u);
+          return true;
+        },
+      },
+      ids,
+    );
+    s.noteMethodChange(notesMethodLabel('ledger-opus'), 'Maya');
+    s.onTurn({ turn: 1, text: 'the boardwalk needs a survey', speaker: 'A', final: true });
+    sched.fire();
+    await s.end();
+    const traces = writes
+      .flatMap((w) => w.edits)
+      .filter((e) => 'markdown' in e && e.markdown.includes('Note-taker'));
+    expect(traces).toHaveLength(1);
+    expect(traces[0]?.op).toBe('insert_under_heading');
+    expect(traces[0] && 'markdown' in traces[0] ? traces[0].markdown : '').toBe(
+      '- 10:38 Note-taker Ledger · Opus — Maya',
+    );
+  });
+
+  it('WAITS when this meeting has opened no section yet, rather than going to the doc end', async () => {
+    // Written at the end of the DOCUMENT, the line would be overtaken: the
+    // first compose opens this meeting's section below it, so the trace ends
+    // up outside the minutes it describes — or inside the previous meeting's.
     const h = session(undefined);
     h.s.noteMethodChange(notesMethodLabel('original'), undefined);
     await h.s.end();
-    expect(h.writes[0]?.edits[0]?.op).toBe('insert_at_end');
+    expect(h.writes.flatMap((w) => w.edits)).toEqual([]);
+    expect(h.errors.join(' ')).toContain('never opened a notes section');
+  });
+
+  it('MUTATION CONTROL: the same change with a section already there is written at once', async () => {
+    const h = session('h-mine');
+    h.s.noteMethodChange(notesMethodLabel('original'), undefined);
+    await h.s.end();
+    expect(h.writes.flatMap((w) => w.edits)[0]?.op).toBe('insert_under_heading');
+    expect(h.errors.join(' ')).not.toContain('never opened a notes section');
   });
 });
