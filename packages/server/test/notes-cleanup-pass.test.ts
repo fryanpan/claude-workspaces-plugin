@@ -55,10 +55,14 @@ describe('the section a cleanup may touch', () => {
 });
 
 describe('what the gate refuses', () => {
+  // `h1` is OWNED as well as being the section heading — that is the real
+  // state a meeting leaves behind, and the heading-delete case below is
+  // vacuous without it: an unowned heading is refused by the ownership
+  // check, so the guard it means to prove is never reached.
   const scope = {
     blocks: new Set(['h1', 'b1', 'b2']),
     headings: new Set(['h1']),
-    owned: new Set(['b1']),
+    owned: new Set(['h1', 'b1']),
     headingId: 'h1',
   };
 
@@ -84,9 +88,14 @@ describe('what the gate refuses', () => {
     expect(kept).toEqual([]);
   });
 
-  it('refuses a delete of the section heading itself', () => {
+  it('refuses a delete of the section heading itself — it orphans every note under it', () => {
     const { kept } = confineToSection([{ op: 'delete_block', blockId: 'h1' }], scope);
     expect(kept).toEqual([]);
+    // And a rewrite of it, for the same reason: the heading is the address
+    // the meeting's own notes are found at.
+    expect(
+      confineToSection([{ op: 'replace_block', blockId: 'h1', markdown: '## Notes' }], scope).kept,
+    ).toEqual([]);
   });
 
   it("keeps a rewrite of the note-taker's own bullet, and an insert under its heading", () => {

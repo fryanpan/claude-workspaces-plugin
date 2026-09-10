@@ -1612,14 +1612,20 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     }, step.delayMs);
   }
 
-  /** Meetings already announced as ended, so the two paths that can see the
-   *  same end — a local stop and a `stopped` frame — announce it once. */
-  const announcedEnds = new Set<string>();
-
-  /** A recording ended. Fires at most once for a given meeting. */
+  /**
+   * A recording ended.
+   *
+   * NOT DEDUPED, deliberately. Both paths that reach here — a press of Stop
+   * and the server's own `stopped` frame — close the socket first, and
+   * closing detaches its handlers, so no meeting can travel both. A dedupe
+   * set was written here and no mutation could make it go red, because
+   * nothing reaches it; and the offer it raises is idempotent anyway
+   * (`offer(id)` re-shows the same card). Untestable defence against an
+   * unreachable case is worse than none: it reads as a guarantee somebody
+   * will later rely on.
+   */
   function announceEnded(): void {
-    if (!lastMeetingId || announcedEnds.has(lastMeetingId)) return;
-    announcedEnds.add(lastMeetingId);
+    if (!lastMeetingId) return;
     opts.onMeetingEnded?.(lastMeetingId);
   }
 

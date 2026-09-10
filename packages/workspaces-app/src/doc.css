@@ -2529,6 +2529,9 @@ button.lz-speaker:hover .lz-speaker-pill {
 .cleanup-offer {
   display: flex;
   align-items: center;
+  /* Stated, not inherited from the initial value: the phone rule below turns
+     it on, and a base that says nothing makes that rule unreadable. */
+  flex-wrap: nowrap;
   gap: 8px;
   /* The prose's own top gap, so the offer sits one line under the last note
      rather than against it. The live zone's own margin rules do not apply:
@@ -2539,6 +2542,25 @@ button.lz-speaker:hover .lz-speaker-pill {
 }
 body.is-reading-width #editor > .cleanup-offer {
   max-width: 36rem;
+}
+/* The offer hugs the last note, for the same reason the live zone does: the
+   editor's 60vh click-to-type floor would otherwise strand it a full screen
+   below the notes it is asking about, which is where it landed in the first
+   headless render at 430. Only while it is showing — an ordinary doc keeps
+   its clickable runway. `auto`, never `0`: in the balloon-margin grid an
+   explicit min-height becomes the prose ROW's size. */
+#editor:has(> .cleanup-offer:not([hidden])) > .ProseMirror {
+  min-height: auto;
+}
+/* And in the balloon-margin grid it auto-places into a row under the prose
+   column, where grid's default `align-content: stretch` would park it a
+   screen down all over again. */
+#editor.redline-layout:has(> .cleanup-offer:not([hidden])) {
+  align-content: start;
+}
+#editor.redline-layout > .cleanup-offer {
+  grid-column: 1;
+  width: 100%;
 }
 .cleanup-offer-go {
   font: inherit;

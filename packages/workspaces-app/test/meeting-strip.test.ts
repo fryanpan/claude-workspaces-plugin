@@ -947,10 +947,11 @@ describe('the strip when no words are coming', () => {
 
   /**
    * The tidy-up offer is raised by this callback, so a doc that merely SHOWS
-   * an old meeting's cast must never see it fire — and an end reported twice
-   * (a press of Stop, then the server's own frame) must not raise two offers.
+   * an old meeting's cast must never see it fire. Both ways a recording can
+   * end have their own case, because each closes the socket — which detaches
+   * its handlers — so a meeting only ever travels one of them.
    */
-  it('reports a recording ending exactly once, however the end arrives', async () => {
+  it('reports the end the server announces, once', async () => {
     const onMeetingEnded = vi.fn();
     const h = mount(undefined, { onMeetingEnded });
     h.pressStart({ pick: 'Just me' });
@@ -959,9 +960,22 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
     // A live meeting has ended nothing yet.
     expect(onMeetingEnded).not.toHaveBeenCalled();
-    h.pressStop();
     h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
     expect(onMeetingEnded.mock.calls.map((c) => c[0])).toEqual(['m2']);
+  });
+
+  it('reports an end from a press of Stop, which the server frame never follows', async () => {
+    const onMeetingEnded = vi.fn();
+    const h = mount(undefined, { onMeetingEnded });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm3', startedAt: 1_000, engine: 'test' });
+    // `stop()` detaches the socket's handlers, so the server's `stopped` is
+    // never read here: without its own call the offer would never appear on
+    // the one path most meetings actually end by.
+    h.pressStop();
+    expect(onMeetingEnded.mock.calls.map((c) => c[0])).toEqual(['m3']);
   });
 
   it('settles to idle when the server reports the meeting stopped', async () => {
