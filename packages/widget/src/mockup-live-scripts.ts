@@ -1,5 +1,7 @@
 import {
   REDECLARATION,
+  collisionIsOurs,
+  declaredNames,
   enterRecoverableInsert,
   leaveRecoverableInsert,
 } from '@claude-workspaces/core/mock-swap-noise';
@@ -106,9 +108,12 @@ function canRetryWrapped(el: HTMLScriptElement, source: string): boolean {
  * an insert is the browser's own exception, and a `SyntaxError` from another
  * realm is not an `instanceof` match for this one's.
  */
-function isRedeclaration(err: unknown): boolean {
+function isRedeclaration(err: unknown, declared: string[] | null): boolean {
   const e = err as { name?: string; message?: string } | null;
-  return e?.name === 'SyntaxError' && REDECLARATION.test(e.message ?? '');
+  const message = e?.message ?? '';
+  return (
+    e?.name === 'SyntaxError' && REDECLARATION.test(message) && collisionIsOurs(message, declared)
+  );
 }
 
 /**
@@ -125,11 +130,15 @@ function isRedeclaration(err: unknown): boolean {
  * `error` is null when a browser withholds the exception object, so the
  * message carries both halves of the question in that case.
  */
-function isRedeclarationEvent(ev: Event): boolean {
+function isRedeclarationEvent(ev: Event, declared: string[] | null): boolean {
   const e = ev as { error?: unknown; message?: string };
-  if (e.error != null) return isRedeclaration(e.error);
+  if (e.error != null) return isRedeclaration(e.error, declared);
   const message = e.message ?? '';
-  return /SyntaxError/i.test(message) && REDECLARATION.test(message);
+  return (
+    /SyntaxError/i.test(message) &&
+    REDECLARATION.test(message) &&
+    collisionIsOurs(message, declared)
+  );
 }
 
 /**
@@ -174,12 +183,13 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
   const asWritten = reviveScript(src, source);
   const retryable = canRetryWrapped(src, source);
   let collided = false;
+  const declared = declaredNames(source);
   const onError = (ev: Event): void => {
-    if (!retryable || !isRedeclarationEvent(ev)) return;
+    if (!retryable || !isRedeclarationEvent(ev, declared)) return;
     collided = true;
     ev.preventDefault();
   };
-  const restoreDepth = retryable ? enterRecoverableInsert() : 0;
+  const restore = retryable ? enterRecoverableInsert(source) : null;
   window.addEventListener('error', onError, true);
   let threw: { err: unknown } | null = null;
   try {
@@ -188,9 +198,9 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
     threw = { err };
   } finally {
     window.removeEventListener('error', onError, true);
-    if (retryable) leaveRecoverableInsert(restoreDepth);
+    if (restore) leaveRecoverableInsert(restore);
   }
-  if (threw && !(retryable && isRedeclaration(threw.err))) throw threw.err;
+  if (threw && !(retryable && isRedeclaration(threw.err, declared))) throw threw.err;
   if (!threw && !collided) return;
   asWritten.remove();
   // The newlines matter: a source ending in a `// line comment` would

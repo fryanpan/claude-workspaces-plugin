@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type SwapScope,
+  declaredNames,
   enterRecoverableInsert,
   insideRecoverableInsert,
   isRecoveredMockCollision,
@@ -20,6 +21,10 @@ import {
  * one condition.
  */
 
+/** The source the swap is inserting in these cases: it declares `params`,
+ *  which is the identifier the real Sentry issues collided on. */
+const SOURCE = "const params = ['round 2'];";
+
 /** A window.onerror report as the SDK builds it from an exception object. */
 function report(
   type: string,
@@ -32,7 +37,7 @@ describe('the flag a recoverable insert raises', () => {
   it('is down until an insert raises it, and down again after', () => {
     const scope: SwapScope = {};
     expect(insideRecoverableInsert(scope)).toBe(false);
-    const before = enterRecoverableInsert(scope);
+    const before = enterRecoverableInsert(SOURCE, scope);
     expect(insideRecoverableInsert(scope)).toBe(true);
     leaveRecoverableInsert(before, scope);
     expect(insideRecoverableInsert(scope)).toBe(false);
@@ -40,8 +45,8 @@ describe('the flag a recoverable insert raises', () => {
 
   it('survives a nested insert lowering it — the outer window is still up', () => {
     const scope: SwapScope = {};
-    const outer = enterRecoverableInsert(scope);
-    const inner = enterRecoverableInsert(scope);
+    const outer = enterRecoverableInsert(SOURCE, scope);
+    const inner = enterRecoverableInsert(SOURCE, scope);
     leaveRecoverableInsert(inner, scope);
     // A boolean would have gone down here and let the outer insert's own
     // collision through, which is the whole reason this is a depth.
@@ -67,7 +72,7 @@ describe('the flag a recoverable insert raises', () => {
 
   it('closes the window even if the mock overwrites the flag mid-insert', () => {
     const scope: SwapScope = {};
-    const before = enterRecoverableInsert(scope);
+    const before = enterRecoverableInsert(SOURCE, scope);
     // The inserted script runs here, and this one is careless.
     scope.__cwMockSwapRecoverableInsert = 5;
     leaveRecoverableInsert(before, scope);
@@ -114,12 +119,36 @@ describe('which reports name a declaration collision', () => {
   });
 });
 
+describe('the bindings a source declares', () => {
+  it('names every kind a second run can collide on', () => {
+    expect(declaredNames('const A = 1; let b = 2; class C {} var d = 3; function e() {}')).toEqual([
+      'A',
+      'b',
+      'C',
+      'd',
+      'e',
+    ]);
+  });
+
+  it('gives up on a destructuring declaration rather than guessing', () => {
+    // Answering with a short list would be worse than answering "cannot tell":
+    // the real colliding name would be missing, the collision would look like
+    // somebody else's, and the noise this exists to stop would be filed again.
+    expect(declaredNames('const { a, b } = window.cfg;')).toBeNull();
+    expect(declaredNames('const [first] = rows;')).toBeNull();
+  });
+
+  it('has no names to give for a source that declares nothing', () => {
+    expect(declaredNames('document.title = "hi";')).toEqual([]);
+  });
+});
+
 describe('the verdict beforeSend reads', () => {
   const collision = report('SyntaxError', "Identifier 'params' has already been declared");
 
   it('drops a collision raised inside the insert that will be retried', () => {
     const scope: SwapScope = {};
-    enterRecoverableInsert(scope);
+    enterRecoverableInsert(SOURCE, scope);
     expect(isRecoveredMockCollision(collision, scope)).toBe(true);
   });
 
@@ -138,9 +167,50 @@ describe('the verdict beforeSend reads', () => {
     expect(isRecoveredMockCollision(collision, {})).toBe(false);
   });
 
+  it('sends a collision on a binding this source never declared', () => {
+    // The script did not collide, so it RAN, and while it ran it inserted or
+    // evaluated code of its own that collided on something else. Nothing
+    // recovers that one, so it is filed — the window alone would have dropped
+    // it (Codex review, round 2).
+    const scope: SwapScope = {};
+    enterRecoverableInsert(SOURCE, scope);
+    expect(
+      isRecoveredMockCollision(
+        report('SyntaxError', "Identifier 'somethingElse' has already been declared"),
+        scope,
+      ),
+    ).toBe(false);
+  });
+
+  it('reads the identifier past the wrapper Chrome puts in front of it', () => {
+    // `Failed to execute 'insertBefore' on 'Node': …` quotes two names before
+    // the real one, so taking the first quoted word would compare against
+    // `insertBefore` and drop nothing.
+    const scope: SwapScope = {};
+    enterRecoverableInsert(SOURCE, scope);
+    expect(
+      isRecoveredMockCollision(
+        report(
+          'SyntaxError',
+          "Failed to execute 'insertBefore' on 'Node': Identifier 'params' has already been declared",
+        ),
+        scope,
+      ),
+    ).toBe(true);
+  });
+
+  it('drops a collision it cannot attribute, inside the window', () => {
+    // Neither half is readable — a source whose declarations could not be
+    // enumerated. Wide is the safe direction: the narrow answer files the
+    // noise again, and this is still inside an insert about to be retried.
+    const scope: SwapScope = {};
+    enterRecoverableInsert('const { params } = cfg;', scope);
+    expect(isRecoveredMockCollision(collision, scope)).toBe(true);
+  });
+
   it('sends a runtime SyntaxError even inside the window', () => {
     const scope: SwapScope = {};
-    enterRecoverableInsert(scope);
+    enterRecoverableInsert(SOURCE, scope);
     expect(
       isRecoveredMockCollision(report('SyntaxError', 'Unexpected end of JSON input'), scope),
     ).toBe(false);
@@ -148,7 +218,7 @@ describe('the verdict beforeSend reads', () => {
 
   it('sends the collision again once the insert has finished', () => {
     const scope: SwapScope = {};
-    leaveRecoverableInsert(enterRecoverableInsert(scope), scope);
+    leaveRecoverableInsert(enterRecoverableInsert(SOURCE, scope), scope);
     expect(isRecoveredMockCollision(collision, scope)).toBe(false);
   });
 });
