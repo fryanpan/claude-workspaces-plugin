@@ -167,9 +167,26 @@ export function overBudget(spent: number, cap: number): boolean {
   return cap > 0 && spent > cap;
 }
 
-/** What a set of token counts cost, at the prices this file knows. */
+/**
+ * What a set of token counts cost, at the prices this file knows.
+ *
+ * CACHED TOKENS ARE PRICED SEPARATELY, and leaving them out was not a rounding
+ * error. The API reports `input_tokens` as the uncached remainder only: a
+ * prompt served almost entirely from cache reports a tiny `input` and carries
+ * the rest in `cache_read_input_tokens`. Summing input and output alone
+ * therefore priced a cached run at a fraction of its bill — and `--max-usd`,
+ * which is meant to stop a runaway, read the same fraction. Cache reads bill
+ * at a tenth of input and a five-minute cache write at 1.25x, so both are
+ * expressed as multipliers of the model's own input price rather than as new
+ * per-model numbers to keep in step.
+ */
+export const CACHE_READ_MULTIPLIER = 0.1;
+export const CACHE_WRITE_MULTIPLIER = 1.25;
+
 export function costOf(
-  counts: Readonly<Record<string, { input: number; output: number }>>,
+  counts: Readonly<
+    Record<string, { input: number; output: number; cacheRead?: number; cacheWrite?: number }>
+  >,
   prices: Readonly<Record<string, { input: number; output: number }>> = PRICES,
 ): number {
   let sum = 0;
@@ -181,6 +198,8 @@ export function costOf(
     // price in the same commit.
     if (!price) continue;
     sum += u.input * price.input + u.output * price.output;
+    sum += (u.cacheRead ?? 0) * price.input * CACHE_READ_MULTIPLIER;
+    sum += (u.cacheWrite ?? 0) * price.input * CACHE_WRITE_MULTIPLIER;
   }
   return sum;
 }
@@ -281,15 +300,27 @@ export class Behaviour {
 interface Usage {
   input: number;
   output: number;
+  /** Served from an existing cache entry, billed at a tenth of input. */
+  cacheRead: number;
+  /** Written into a new cache entry, billed at 1.25x input (5-minute TTL). */
+  cacheWrite: number;
   calls: number;
 }
 
 const usage: Record<string, Usage> = {};
 
-function recordUsage(model: string, input: number, output: number): void {
-  const u = (usage[model] ??= { input: 0, output: 0, calls: 0 });
+function recordUsage(
+  model: string,
+  input: number,
+  output: number,
+  cacheRead = 0,
+  cacheWrite = 0,
+): void {
+  const u = (usage[model] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 });
   u.input += input;
   u.output += output;
+  u.cacheRead += cacheRead;
+  u.cacheWrite += cacheWrite;
   u.calls++;
   // Checked AFTER the call is counted, not before: the cap is on what this
   // run has actually spent, and a check beforehand would have to guess the
@@ -316,8 +347,25 @@ function countingFetch(model: string): typeof fetch {
       .clone()
       .json()
       .catch(() => null);
-    const u = (body as { usage?: { input_tokens?: number; output_tokens?: number } } | null)?.usage;
-    if (u) recordUsage(model, u.input_tokens ?? 0, u.output_tokens ?? 0);
+    const u = (
+      body as {
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number;
+          cache_creation_input_tokens?: number;
+        };
+      } | null
+    )?.usage;
+    if (u) {
+      recordUsage(
+        model,
+        u.input_tokens ?? 0,
+        u.output_tokens ?? 0,
+        u.cache_read_input_tokens ?? 0,
+        u.cache_creation_input_tokens ?? 0,
+      );
+    }
     return res;
   };
   // Bun's `fetch` type carries a `preconnect`; nothing here calls it, and the
@@ -874,10 +922,22 @@ function report(
   }
   console.log('\nSpend:');
   for (const [model, u] of Object.entries(usage)) {
-    const price = PRICES[model];
-    const cost = price ? u.input * price.input + u.output * price.output : 0;
+    // Through `costOf` rather than a second copy of the formula here. The
+    // inline copy is what printed a cached run at a fraction of its bill
+    // after the totals had already learned better.
+    const cost = costOf({ [model]: u });
     console.log(
-      `  ${model}: ${u.calls} calls, ${u.input} in / ${u.output} out, $${cost.toFixed(4)}`,
+      `  ${model}: ${u.calls} calls, ${u.input} in / ${u.output} out` +
+        // Printed only when the prompt was cacheable at all, so a run against
+        // an uncached path reads exactly as it always did. `cache read` is
+        // also the only honest answer to "is the cache working": a
+        // `cache_control` marker on a prompt below the model's minimum
+        // cacheable size is ignored silently, and a zero here is what says so.
+        (u.cacheRead + u.cacheWrite > 0
+          ? `, ${u.cacheRead} cache read / ${u.cacheWrite} cache write` +
+            ` (${((100 * u.cacheRead) / Math.max(1, u.input + u.cacheRead + u.cacheWrite)).toFixed(0)}% of prompt served from cache)`
+          : '') +
+        `, $${cost.toFixed(4)}`,
     );
   }
   console.log(`  total: $${totalCost().toFixed(4)}`);
