@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { type DetailHandlers } from '../src/board/board-detail-render.ts';
 import {
+  type BoardGoal,
   type BoardTask,
   archivedTasks,
   boardSections,
+  goalLabel,
   isTaskArchived,
   taskVisible,
 } from '../src/board/board-model.ts';
@@ -292,5 +294,106 @@ describe('the detail panel', () => {
     // Positive control: the close button is there either way, so the query
     // above is looking at a panel that really rendered.
     expect(el.querySelector('.board-detail-close')).not.toBeNull();
+  });
+});
+
+/**
+ * The Goal picker on a ticket, when the board has archived bands.
+ *
+ * Filing is a phone action somebody repeats several times in a sitting, so the
+ * list has to be short and in the order the board works. Only the SHORT half was ever
+ * broken: the picker already walked `goals[]`, which is priority order, but it
+ * walked all of it — on a board with six archived bands out of fifteen, a
+ * third of the list was a choice that could only be wrong, which is what put
+ * the band a ticket belongs to below a screenful of dead ones.
+ *
+ * The order is pinned here anyway, against `boardSections` — the board's own
+ * answer to "which bands, in what order" — because the fix routes the picker
+ * through that same filter, and a future sort applied to one and not the other
+ * is exactly the drift the reader would see as the panel disagreeing with the
+ * board behind it.
+ */
+describe('the goal picker', () => {
+  const base: DetailHandlers = {
+    onClose: () => {},
+    onStatusSet: () => {},
+    onTitleCommit: () => {},
+    onAnswer: () => undefined,
+    onAssign: () => {},
+  };
+
+  // Priority order deliberately disagrees with every order a list could fall
+  // into by accident: the top band's title sorts LAST alphabetically, and the
+  // archived band sits between the two live ones rather than at either end.
+  const BANDS: BoardGoal[] = [
+    { id: 'g-now', title: 'Zebra migration' },
+    { id: 'g-old', title: 'Archived push', archivedAt: 500 },
+    { id: 'g-next', title: 'Alpha rollout' },
+  ];
+
+  function picker(t: BoardTask, over: Partial<DetailHandlers> = {}): HTMLSelectElement {
+    const el = document.createElement('div');
+    renderTaskDetail(el, t, {
+      ...base,
+      goals: BANDS,
+      goalLabel: (id) => goalLabel(BANDS, id),
+      ...over,
+    });
+    return el.querySelector('.board-detail-goal') as HTMLSelectElement;
+  }
+
+  it('offers the live bands only, in the order the board works them', () => {
+    const sel = picker(task({ goal: 'g-now' }));
+    expect([...sel.options].map((o) => o.value)).toEqual(['g-now', 'g-next']);
+    // The same answer the board itself gives — one source, not two copies.
+    const bands = boardSections(BANDS, [], FILTERS)
+      .filter((s) => !s.isChores && !s.isScheduled)
+      .map((s) => s.id);
+    expect([...sel.options].map((o) => o.value)).toEqual(bands);
+    // The archived band was HANDED to the panel and is simply not offered:
+    // the same fixture, asked for the ticket standing on that band, does draw
+    // it (the case below), so the list above is a filter rather than a fixture
+    // that never carried it.
+    expect([...picker(task({ goal: 'g-old' })).options].map((o) => o.value)).toContain('g-old');
+  });
+
+  it('keeps a ticket standing on an archived band on it, saying so', () => {
+    const sel = picker(task({ goal: 'g-old' }));
+    // The assignment survives opening the picker: nothing else is selected,
+    // so a save from here cannot silently move the ticket.
+    expect(sel.value).toBe('g-old');
+    // And the option SAYS so, so the closed control — which is all a phone
+    // shows until the sheet is opened — does not read as an ordinary band.
+    const opt = [...sel.querySelectorAll('option')].find((o) => o.value === 'g-old');
+    expect(opt?.textContent).toBe('Archived push (archived)');
+    // And it is BELOW the live bands rather than mixed in with them.
+    expect([...sel.querySelectorAll('option')].map((o) => o.value)).toEqual([
+      'g-now',
+      'g-next',
+      'g-old',
+    ]);
+  });
+
+  it('moves a ticket off an archived band onto a live one', () => {
+    const moved: Array<[string, string]> = [];
+    const sel = picker(task({ id: 't-x', goal: 'g-old' }), {
+      onGoalSet: (t, goalId) => moved.push([t.id, goalId]),
+    });
+    sel.value = 'g-next';
+    sel.dispatchEvent(new Event('change'));
+    expect(moved).toEqual([['t-x', 'g-next']]);
+  });
+
+  it('says nothing about archives when the ticket sits on a live band', () => {
+    const sel = picker(task({ goal: 'g-now' }));
+    expect([...sel.options].map((o) => o.textContent)).toEqual([
+      'Zebra migration',
+      'Alpha rollout',
+    ]);
+    // Positive control: the same picker DOES say it for the ticket that needs
+    // it, so the assertion above is measuring the ticket and not the label.
+    expect([...picker(task({ goal: 'g-old' })).options].map((o) => o.textContent)).toContain(
+      'Archived push (archived)',
+    );
   });
 });

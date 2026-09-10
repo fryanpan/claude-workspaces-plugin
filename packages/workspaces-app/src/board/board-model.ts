@@ -608,6 +608,28 @@ export function isGoalArchived(goal: BoardGoal): boolean {
 }
 
 /**
+ * The bands a task can be FILED under, in the board's own order.
+ *
+ * Goal order IS priority order (§3.2), and an archived band is off the board —
+ * so this is `boardSections`' first two lines with the tasks left out, and the
+ * ticket panel's Goal picker calls it rather than re-deciding which bands are
+ * live. A picker built from the raw list offers bands the reader cannot see,
+ * and on a board a third of whose goals are archived that is a third of the
+ * list that can only be wrong.
+ *
+ * It does NOT unify every question about a band's rank: `goalRank`,
+ * `goalLabel` and `bandOfGoal` all still answer for an archived id, and
+ * disagree with the board about a straggler filed under one.
+ *
+ * What it deliberately does NOT do is drop the goal a task is ALREADY on: a
+ * caller that has one keeps showing it (see `renderTaskDetail`), because a
+ * band vanishing from the picker would re-place the task on the next change.
+ */
+export function goalChoices(goals: BoardGoal[]): BoardGoal[] {
+  return goals.filter((g) => !isGoalArchived(g));
+}
+
+/**
  * "5 tasks" — the blast radius of a band's archive, as words.
  *
  * ONE builder, because the confirmation, the toast that follows it and the
@@ -777,8 +799,7 @@ export function boardSections(
   f: BoardFilters,
 ): BoardSection[] {
   const sections: BoardSection[] = [];
-  for (const g of goals) {
-    if (isGoalArchived(g)) continue;
+  for (const g of goalChoices(goals)) {
     sections.push({
       id: g.id,
       title: g.title,
