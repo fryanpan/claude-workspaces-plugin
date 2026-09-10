@@ -34,6 +34,7 @@ import {
   readBlockId,
 } from './prose-identity.ts';
 import { parseMarkdownBlocks } from './prose-markdown.ts';
+import { type NestBlocksError, nestBlocksOutcome } from './prose-nest.ts';
 import {
   addressableBlocks,
   claimSubtree,
@@ -48,7 +49,8 @@ export type BlockEdit =
   | { op: 'insert_under_heading'; headingId: string; markdown: string }
   | { op: 'insert_at_end'; markdown: string }
   | { op: 'replace_block'; blockId: string; markdown: string }
-  | { op: 'delete_block'; blockId: string };
+  | { op: 'delete_block'; blockId: string }
+  | { op: 'nest_blocks'; leadBlockId: string; blockIds: readonly string[] };
 
 export type BlockEditOp = BlockEdit['op'];
 
@@ -59,7 +61,8 @@ export type BlockEditError =
   | 'parse-failed'
   | 'empty'
   | 'no-range'
-  | 'suggest-failed';
+  | 'suggest-failed'
+  | NestBlocksError;
 
 export interface BlockEditOutcome {
   op: BlockEditOp;
@@ -350,6 +353,10 @@ export function applyBlockEdits(
           }
           for (const el of created) claimSubtree(el, opts.author);
           outcomes.push({ op: edit.op, status: 'applied' });
+          break;
+        }
+        case 'nest_blocks': {
+          outcomes.push(nestBlocksOutcome(fragment, edit, opts.author));
           break;
         }
         case 'replace_block':

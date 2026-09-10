@@ -95,6 +95,18 @@ export interface OutlineEntry {
   author?: string;
   /** Id of the nearest heading above it, when there is one. */
   underHeadingId?: string;
+  /**
+   * How deeply a `listItem` is nested: `0` for a top-level bullet, `1` for a
+   * sub-bullet under one, and so on. Absent for anything that is not a list
+   * item.
+   *
+   * WITHOUT THIS AN OUTLINE CANNOT TELL A GROUPED TOPIC FROM A FLAT ONE. Every
+   * bullet printed the same, so a note-taker asked to regroup a topic past
+   * the flat-run bar had no way to see whether it had already done so — and
+   * no way to count the run it was being asked about. It read six lines under
+   * a heading whether they were a wall or three tidy groups.
+   */
+  depth?: number;
 }
 
 /** The Yjs parent of a node, as an untyped walk. Yjs's own `parent` is typed
@@ -121,6 +133,20 @@ export function newBlockId(): string {
 
 function isListEl(el: Y.XmlElement): boolean {
   return el.nodeName === 'bulletList' || el.nodeName === 'orderedList';
+}
+
+/** How many lists a list item sits inside, less the one that holds it: `0`
+ *  for a top-level bullet. Climbed rather than tracked through the walk,
+ *  because `addressableBlocks` hands back a flat array and the nesting is
+ *  the one thing that array has thrown away. */
+function listDepthOf(el: Y.XmlElement): number {
+  let depth = -1;
+  let node: unknown = el;
+  while (node != null) {
+    if (node instanceof Y.XmlElement && isListEl(node)) depth++;
+    node = parentOf(node);
+  }
+  return depth < 0 ? 0 : depth;
 }
 
 /**
@@ -244,6 +270,7 @@ export function readOutline(doc: Y.Doc, opts: OutlineOptions = {}): OutlineEntry
       text: outlineTextOf(el),
       ...(author !== undefined ? { author } : {}),
       ...(!isHeading && underHeadingId !== undefined ? { underHeadingId } : {}),
+      ...(el.nodeName === 'listItem' ? { depth: listDepthOf(el) } : {}),
     });
   }
   const cap = opts.recentBlocks;
