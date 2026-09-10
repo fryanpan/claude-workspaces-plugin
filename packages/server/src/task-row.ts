@@ -16,8 +16,15 @@ import {
 } from '@claude-workspaces/core';
 import type { TaskReviewItem } from '@claude-workspaces/core';
 import { TASK_NOTES_READ_CAP } from './agent-notes.ts';
-import { type OwnerKind } from './task-owner.ts';
-import { type Task, legacyDecisionItem, taskAskedBy } from './tasks.ts';
+import { type OwnerKind, resolveOwnerKind } from './task-owner.ts';
+import {
+  type BoardWorkspace,
+  type GoalRow,
+  type Task,
+  goalStatusMeta,
+  legacyDecisionItem,
+  taskAskedBy,
+} from './tasks.ts';
 
 /**
  * The docId of a task's live body doc.
@@ -318,5 +325,107 @@ export function projectTask(
     ...(task.effortEstimate !== undefined ? { effortEstimate: task.effortEstimate } : {}),
     ...(task.readingTime !== undefined ? { readingTime: task.readingTime } : {}),
     updatedAt: task.updatedAt,
+  };
+}
+
+/**
+ * One goal band's projected metadata — the half of a `goals` entry that is
+ * derived rather than stored.
+ *
+ * Extracted from `TaskProjection.refresh` so the payload budget can measure
+ * the workspace map through the same code the server writes it with. The
+ * three things it needs from the projection instance arrive as plain values,
+ * which is what makes it callable from a test without a store: the goal's
+ * comment count and the roster test the owner kind resolves against.
+ */
+export function projectGoalMeta(
+  row: GoalRow,
+  commentCount: number,
+  isAttachedAgent: (name: string) => boolean,
+): Record<string, unknown> {
+  return {
+    ...goalStatusMeta(row),
+    bodyDocId: taskBodyDocId(row.id),
+    ...projectBody(row.body),
+    // The docs this goal ties to (backfill + settle-time scan) — projected
+    // like a task's links so the goal panel can draw them. Conditional: an
+    // absent key is how "no linked docs" reads, and the refresh deletes keys
+    // this object stops carrying.
+    ...(row.links !== undefined && row.links.length > 0 ? { links: row.links } : {}),
+    ...(commentCount > 0 ? { commentCount } : {}),
+    ...(row.assignee !== undefined
+      ? {
+          assignee: row.assignee,
+          ownerKind: resolveOwnerKind(row.assignee, undefined, isAttachedAgent),
+        }
+      : {}),
+    // A band that has been archived rides out SAYING so, the way an archived
+    // task does — projected rather than filtered here, because the restore
+    // list is drawn from the same projection the board is and a band the
+    // projection dropped could never be put back. `boardSections` is the one
+    // place "off the board" is applied, exactly as `taskVisible` is for a
+    // task.
+    ...(row.archivedAt !== undefined
+      ? {
+          archivedAt: row.archivedAt,
+          ...(row.archivedBy !== undefined ? { archivedBy: row.archivedBy } : {}),
+          ...(row.archiveReason !== undefined ? { archiveReason: row.archiveReason } : {}),
+        }
+      : {}),
+  };
+}
+
+/**
+ * The `workspace` Y.Map's whole contents — every key the board doc carries
+ * about the board ITSELF, as against its rows.
+ *
+ * Extracted from `TaskProjection.refresh` for one reason: the board's sync
+ * payload budget drove `projectTask` for rows and hand-built this half, so a
+ * field added here — or a goal list that grew — left the gate green. A gate
+ * whose stated reason is that it runs the real projector must run all of it.
+ * `refresh` calls this in the position the literal held, and the budget
+ * fixture calls the same function, so neither can drift from the other.
+ *
+ * Every optional key is conditional rather than `undefined`, and that is
+ * load-bearing: `refresh` DELETES projected keys absent from this object, so
+ * an absent lead removes the key and the surface renders the vacancy instead
+ * of a stale name.
+ */
+export function projectWorkspaceFields(
+  ws: Pick<
+    BoardWorkspace,
+    | 'id'
+    | 'name'
+    | 'goals'
+    | 'docIds'
+    | 'createdAt'
+    | 'leadAgentId'
+    | 'leadAgentSince'
+    | 'retiredAt'
+    | 'retiredReason'
+  >,
+  goalMeta: Map<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    id: ws.id,
+    name: ws.name,
+    goals: ws.goals.map((g) => ({
+      ...g,
+      ...(goalMeta.get(g.id) ?? {}),
+    })),
+    docIds: ws.docIds,
+    // Who is responsible for this board. Conditional, never `undefined`: the
+    // refresh deletes projected keys that aren't in this object, so an absent
+    // lead removes the key and the surface renders the vacancy instead of a
+    // stale name. An agentId is not host-machine-describing — it already
+    // rides agent.attached on the visitor-facing SSE feed.
+    ...(ws.leadAgentId !== undefined ? { leadAgentId: ws.leadAgentId } : {}),
+    ...(ws.leadAgentSince !== undefined ? { leadAgentSince: ws.leadAgentSince } : {}),
+    // The board has been stood down. Conditional like the lead above and for
+    // the same reason — un-retiring removes the key and the badge goes away
+    // without anything having to clear it.
+    ...(ws.retiredAt !== undefined ? { retiredAt: ws.retiredAt } : {}),
+    ...(ws.retiredReason !== undefined ? { retiredReason: ws.retiredReason } : {}),
+    createdAt: ws.createdAt,
   };
 }

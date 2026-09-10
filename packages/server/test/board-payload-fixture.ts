@@ -28,6 +28,7 @@
  * which is what lets the budget be a byte count rather than a range.
  */
 import type { Task, TaskNote, TaskTransition } from '@claude-workspaces/core';
+import type { GoalRow } from '../src/tasks.ts';
 
 /** The instant every fixture row is dated against. Fixed so the trim's
  *  fresh-window decision is a property of the fixture, not of the day the
@@ -137,9 +138,26 @@ function reviews(index: number, count: number): Task['reviews'] {
  * `ws:` doc carries both maps in the same frame and a budget that measured
  * only the rows would miss a goal list that grew.
  */
+/**
+ * The board record's own fields, as the STORE holds them — the input half of
+ * `projectWorkspaceFields`. Deliberately not the projected shape: the point
+ * of handing this to the real projector is that the fixture never states what
+ * comes out.
+ */
+export interface FixtureWorkspace {
+  id: string;
+  name: string;
+  goals: Array<{ id: string; title: string; order: number }>;
+  docIds: string[];
+  createdAt: number;
+  leadAgentId: string;
+  leadAgentSince: number;
+}
+
 export function boardFixture(): {
   tasks: Task[];
-  workspace: { id: string; name: string; goals: unknown[]; docIds: string[]; createdAt: number };
+  workspace: FixtureWorkspace;
+  goalRows: GoalRow[];
 } {
   const rand = lcg(20_260_910);
   const tasks: Task[] = [];
@@ -262,9 +280,7 @@ export function boardFixture(): {
       goals: GOAL_IDS.map((gid, i) => ({
         id: gid,
         title: `${GOALS_TEXT[i % GOALS_TEXT.length]}`,
-        description: filler(2_400),
         order: i,
-        status: 'active',
       })),
       // Deliberately NOT spelled like a real doc id: the leak gate's denylist
       // matches `d-` plus ten or more characters, and it is right to — a
@@ -272,6 +288,28 @@ export function boardFixture(): {
       // a public repo. Same length, so the array weighs what a real one does.
       docIds: Array.from({ length: 120 }, (_, i) => `fixture-doc-${String(i).padStart(4, '0')}`),
       createdAt: FIXTURE_NOW - 400 * DAY,
+      leadAgentId: 'agent-ada-lint',
+      leadAgentSince: FIXTURE_NOW - 9 * DAY,
     },
+    // The STORED goal rows. `projectGoalMeta` derives the rest of each
+    // `goals` entry from these, and the projection is what merges the two —
+    // so the fixture states what the store holds and nothing about what comes
+    // out the far side.
+    goalRows: GOAL_IDS.map((gid, i) => ({
+      id: gid,
+      workspaceId: 'w-fixture',
+      kind: 'goal',
+      title: `${GOALS_TEXT[i % GOALS_TEXT.length]}`,
+      body: filler(2_400),
+      status: 'in-progress',
+      assignee: AGENTS[i % AGENTS.length] ?? 'Ada Lint',
+      goal: gid,
+      order: i,
+      after: [],
+      links: [],
+      transitions: [],
+      createdAt: FIXTURE_NOW - 400 * DAY,
+      updatedAt: FIXTURE_NOW - 3 * DAY,
+    })) as GoalRow[],
   };
 }

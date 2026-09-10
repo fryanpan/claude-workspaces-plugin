@@ -19,11 +19,15 @@
  *
  * This is the whole-payload gate. Three things make it worth its runtime:
  *
- *   - **It drives the REAL projection.** The fixture is `Task` rows and the
- *     bytes come out of `projectTask` + `slimClosedRow`, so a field added to
- *     the projection lands in the measurement whether or not anybody thought
- *     to add it to a fixture. That is the regression this exists for, and it
- *     is exactly what a hand-built row object cannot see.
+ *   - **It drives the REAL projection — BOTH halves.** The fixture is `Task`
+ *     rows and store-shaped goal rows; the bytes come out of `projectTask` +
+ *     `slimClosedRow` for the rows and `projectWorkspaceFields` +
+ *     `projectGoalMeta` for the board's own fields. So a field added to any
+ *     of the four lands in the measurement whether or not anybody thought to
+ *     add it to a fixture. The first version of this test hand-built the
+ *     workspace half, which left a field added there invisible — the reason
+ *     `projectWorkspaceFields` was extracted from `TaskProjection.refresh`
+ *     rather than copied.
  *   - **It measures the frame, not a proxy.** `writeSyncStep2` against an
  *     empty state vector is the message the server actually sends a fresh
  *     tab, encoded by the real Yjs encoder.
@@ -36,9 +40,9 @@
  * different sizes of regression — both were run red before this landed:
  *
  *   - Dropping `notes` from `TRIMMED_ROW_FIELDS` — one word off a list — took
- *     the fixture from 722,484 bytes to 1,099,156 and failed the CEILING.
+ *     the fixture from 722,804 bytes to 1,099,476 and failed the CEILING.
  *   - Adding one extra string field to every projected row took it to
- *     733,784, which is UNDER the ceiling's 2% headroom and failed the DRIFT
+ *     734,104, which is UNDER the ceiling's 2% headroom and failed the DRIFT
  *     check instead. That is the division of labour: the ceiling refuses a
  *     payload that is simply too big, and the drift band makes a smaller
  *     move land in the baseline diff rather than being absorbed by headroom.
@@ -66,12 +70,18 @@ import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 import { slimClosedRow } from '../src/task-row-slim.ts';
-import { projectTask } from '../src/task-row.ts';
+import { projectGoalMeta, projectTask, projectWorkspaceFields } from '../src/task-row.ts';
 import { FIXTURE_NOW, boardFixture } from './board-payload-fixture.ts';
 
 const baseline = JSON.parse(
   readFileSync(join(import.meta.dir, 'board-payload.baseline.json'), 'utf8'),
-) as { budgetBytes: number; measuredBytes: number; driftPct: number; rows: number };
+) as {
+  budgetBytes: number;
+  measuredBytes: number;
+  workspaceBytes: number;
+  driftPct: number;
+  rows: number;
+};
 
 /** Pinned so the update's client-block header is the same width every run.
  *  A Y.Doc mints a random clientID, which varints to between one and five
@@ -88,18 +98,29 @@ const MSG_SYNC = 0;
  * `slimClosedRow` skipped, which is what a regression that dropped the trim
  * would produce.
  */
-function syncStep2Bytes(trim: boolean): number {
-  const { tasks, workspace } = boardFixture();
+function syncStep2Bytes(trim: boolean, half: 'all' | 'workspace' = 'all'): number {
+  const { tasks, workspace, goalRows } = boardFixture();
   const doc = new Y.Doc();
   doc.clientID = FIXTURE_CLIENT_ID;
   doc.transact(() => {
     const tasksMap = doc.getMap('tasks');
-    for (const task of tasks) {
+    for (const task of half === 'workspace' ? [] : tasks) {
       const row = projectTask(task, 0, 'agent', task.assigneeId);
       tasksMap.set(task.id, trim ? slimClosedRow(row, FIXTURE_NOW) : row);
     }
+    // The board's OWN fields go through the same projector `refresh` calls,
+    // for the reason this whole test exists: a hand-built literal here would
+    // leave the gate green when a field is added to `projectWorkspaceFields`
+    // or a goal list grows. Only 1.7% of today's payload — but an unmeasured
+    // 1.7% is how the next field arrives unnoticed.
+    const goalMeta = new Map(
+      goalRows.map((row) => [row.id, projectGoalMeta(row, 0, () => true)] as const),
+    );
     const wsMap = doc.getMap('workspace');
-    for (const [key, value] of Object.entries(workspace)) wsMap.set(key, value);
+    for (const [key, value] of Object.entries(projectWorkspaceFields(workspace, goalMeta))) {
+      wsMap.set(key, value);
+    }
+    if (half === 'workspace') return;
     const meta = doc.getMap('meta');
     meta.set('docId', 'ws:w-fixture');
     meta.set('type', 'workspace');
@@ -156,6 +177,45 @@ describe('the board sync payload budget', () => {
     // builds of the whole board must agree exactly.
     expect(syncStep2Bytes(true)).toBe(measured);
     expect(syncStep2Bytes(true)).toBe(measured);
+  });
+});
+
+describe('the workspace half of the map', () => {
+  /**
+   * An EXACT byte count, and the only exact one here, because the total
+   * cannot see this half.
+   *
+   * The `workspace` map is about 1.7% of the payload, so a new scalar field
+   * on it — `schemaVersion: 3`, say — moves the total by twenty bytes out of
+   * seven hundred thousand. Measured: adding one left every band above GREEN.
+   * That is the hole Codex found in the first version of this test, and
+   * routing the fixture through `projectWorkspaceFields` closed only half of
+   * it: the projector now runs, but a change too small for the total's 1%
+   * drift band still reaches the wire unremarked.
+   *
+   * So this half gets its own scale. Seventeen kilobytes is small enough to
+   * assert to the byte, deterministic for the same reasons the total is, and
+   * a field added to `projectWorkspaceFields` or `projectGoalMeta` fails here
+   * whatever its size. A yjs upgrade that shifts the encoding fails it too —
+   * that is a one-line baseline update, and it is the right trade for a gate
+   * that can see a single added key.
+   */
+  it('is exactly the recorded size, so any added field is refused', () => {
+    const measured = syncStep2Bytes(true, 'workspace');
+    if (measured !== baseline.workspaceBytes) {
+      throw new Error(
+        `the board doc's workspace map is ${measured} bytes; the baseline records ` +
+          `${baseline.workspaceBytes}. A field added to projectWorkspaceFields or ` +
+          'projectGoalMeta lands here. If the field is intended, record the new number in ' +
+          'packages/server/test/board-payload.baseline.json and say in the PR body what a ' +
+          'board reader now downloads that they did not before.',
+      );
+    }
+    expect(measured).toBe(baseline.workspaceBytes);
+  });
+
+  it('measures the same bytes every run', () => {
+    expect(syncStep2Bytes(true, 'workspace')).toBe(syncStep2Bytes(true, 'workspace'));
   });
 });
 
