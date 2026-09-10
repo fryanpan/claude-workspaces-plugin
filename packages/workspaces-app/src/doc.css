@@ -2542,7 +2542,12 @@ button.lz-speaker:hover .lz-speaker-pill {
     max-width: 100%;
     max-height: min(82vh, calc(100vh - var(--kb-bottom, 0px) - 56px));
     z-index: 950;
-    transform: translateY(100%);
+    /* The keyboard inset comes back out of the slide-away, for the reason
+       spelled out on `.thread-view` below: the sheet's bottom edge is lifted
+       by `--kb-bottom`, so `translateY(100%)` leaves that much of a CLOSED
+       sheet on screen — the panel that rode up with the keyboard whenever the
+       comment box opened. */
+    transform: translateY(calc(100% + var(--kb-bottom, 0px)));
     transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
     border-left: none;
     border-top: 1px solid var(--border);
@@ -2620,7 +2625,16 @@ button.lz-speaker:hover .lz-speaker-pill {
   background: var(--bg);
   display: flex;
   flex-direction: column;
-  transform: translateY(100%);
+  /* 100% of WHAT. The sheet's height is the viewport minus the keyboard, so
+     `translateY(100%)` alone parks a closed sheet with its top edge exactly
+     on the keyboard line — and the keyboard's worth of it is then ON SCREEN.
+     That is the panel titled "Suggestion" that rode up with the keyboard
+     every time Bryan opened the comment box (2026-09-10): the closed
+     `.cw-suggest-sheet` from the redline margin, never opened, never hidden
+     either, because `.thread-view.hidden` keeps `display: flex` and
+     `opacity: 1` so the slide can animate. The keyboard inset has to come
+     back out of the transform for "off the bottom" to mean off the bottom. */
+  transform: translateY(calc(100% + var(--kb-bottom, 0px)));
   transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
   padding-top: var(--safe-top);
   padding-bottom: var(--safe-bottom);
