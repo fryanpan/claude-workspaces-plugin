@@ -279,6 +279,21 @@ the next round replaces it. Same link, every round — which is what a rebind
 under an existing id has meant since it started destroying the page underneath
 the comments.
 
+**A review item raised on a mockup is answerable on the mockup.** The ask used
+to live only on the ticket, so a reader opened the mock, looked at it, and
+then left for the Home queue to say what they thought. `widget-dock.ts` — a
+new top-level module of the widget package, beside `widget-picker.ts` and
+`widget-threads.ts`, with its shadow-DOM rules in a second stylesheet module,
+`styles-dock.ts` (`styles.ts` was at the 500-line bar, and the build's CSS
+minifier now matches every `styles*.ts`) — draws the standing ask as a bar across the bottom of the
+page it was raised on, opens it with every earlier ROUND still readable, and
+answers it through the route the doc page already answers through
+(`…/threads/:id/answer`). It joins no new data flow: a review item IS a
+payload on a comment, so the dock reads the same synced threads the pins read
+and adds no fetch of its own. The Home-queue row for such an item deep-links
+to `/workspaces/<ws>/mockups/<doc>?thread=<id>`, which is why a queue row now
+carries the doc's `type`.
+
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,
 suggestions, anchors, presence, live notes. Agents hold no replica, so an agent
