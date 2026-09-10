@@ -187,11 +187,21 @@ function speech(n: number): string {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Scale the CSS half of the settle's clock to match the JS half. */
-function scaleTransitions(scale: number): void {
-  const style = document.createElement('style');
-  style.textContent = `.live-zone{--lz-fade-ms:${Math.round(260 * scale)}ms;--lz-collapse-ms:${Math.round(440 * scale)}ms}`;
-  document.head.append(style);
+/**
+ * Put both halves of the settle's clock on one scale.
+ *
+ * Installed from the ORIGINAL timer and into ONE style element every time, so
+ * a page that drives several meetings scales each of them by the factor it
+ * asked for rather than by the product of every factor before it.
+ */
+const realTimeout = window.setTimeout;
+const scaleSheet = document.createElement('style');
+document.head.append(scaleSheet);
+function scaleClock(scale: number): void {
+  // biome-ignore lint/suspicious/noExplicitAny: the timer's own signature
+  window.setTimeout = ((fn: any, delay?: number, ...rest: any[]) =>
+    realTimeout(fn, Math.max(0, Math.round((delay ?? 0) * scale)), ...rest)) as typeof setTimeout;
+  scaleSheet.textContent = `.live-zone{--lz-fade-ms:${Math.round(260 * scale)}ms;--lz-collapse-ms:${Math.round(440 * scale)}ms}`;
 }
 
 /**
@@ -204,13 +214,7 @@ async function drive(o: DriveOptions): Promise<string> {
   const editor = document.getElementById('editor') as HTMLElement;
   const prose = document.querySelector('.ProseMirror') as HTMLElement;
   const ms = (n: number): number => Math.round(n * o.scale);
-  if (o.scale !== 1) {
-    const real = window.setTimeout;
-    // biome-ignore lint/suspicious/noExplicitAny: the timer's own signature
-    window.setTimeout = ((fn: any, delay?: number, ...rest: any[]) =>
-      real(fn, Math.max(0, ms(delay ?? 0)), ...rest)) as typeof window.setTimeout;
-    scaleTransitions(o.scale);
-  }
+  scaleClock(o.scale);
 
   const zone = createMeetingLiveZone({ parent: editor, prose, reducedMotion: () => false });
   zone.begin(Date.now());
@@ -318,6 +322,7 @@ async function drive(o: DriveOptions): Promise<string> {
  * every assertion vacuously.
  */
 async function control(): Promise<string> {
+  scaleClock(1);
   const editor = document.getElementById('editor') as HTMLElement;
   const prose = document.querySelector('.ProseMirror') as HTMLElement;
   const zone = createMeetingLiveZone({ parent: editor, prose, reducedMotion: () => false });

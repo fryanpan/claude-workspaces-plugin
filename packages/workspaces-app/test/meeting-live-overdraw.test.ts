@@ -121,14 +121,25 @@ function inBrowser(html: string, preset: 'ipad' | 'phone', probe: string): strin
   return (JSON.parse(r.stdout) as { result: string }).result;
 }
 
-const drive = (html: string, preset: 'ipad' | 'phone', o: DriveOptions): DriveResult =>
-  JSON.parse(inBrowser(html, preset, `window.liveZoneDrive(${JSON.stringify(o)})`)) as DriveResult;
+interface Reading {
+  control: { worst: Overlap; line: number };
+  meeting: DriveResult;
+  unhurried: DriveResult;
+}
 
-const controlOf = (html: string, preset: 'ipad' | 'phone'): { worst: Overlap; line: number } =>
-  JSON.parse(inBrowser(html, preset, 'window.liveZoneControl()')) as {
-    worst: Overlap;
-    line: number;
-  };
+/**
+ * Every scenario in ONE page load: a launch, a profile directory and a CDP
+ * handshake cost more than the meetings do, and the zones are torn down
+ * between runs.
+ */
+function measure(html: string, preset: 'ipad' | 'phone', runs: readonly DriveOptions[]): Reading {
+  const probe = `(async () => JSON.stringify({
+    control: JSON.parse(await window.liveZoneControl()),
+    meeting: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[0])})),
+    unhurried: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[1])})),
+  }))()`;
+  return JSON.parse(inBrowser(html, preset, probe)) as Reading;
+}
 
 /**
  * A meeting's worth of writes, with every awkward moment in it: ticks that
@@ -172,16 +183,18 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
     it(
       `holds through thirty note-writes and every awkward tick at ${width}`,
       () => {
-        const html = buildPage();
+        const {
+          control: c,
+          meeting,
+          unhurried,
+        } = measure(buildPage(), preset, [MEETING, UNHURRIED]);
 
         // The control first: the pre-fix offsets, painted on purpose. Without
         // it a sampler that measured nothing would pass every case below.
-        const c = controlOf(html, preset);
         expect(c.line).toBeGreaterThan(10);
         expect(c.worst.area).toBeGreaterThan(SMEAR_PX2 * 10);
         expect(c.worst.height).toBeGreaterThan(c.line * 0.8);
 
-        const meeting = drive(html, preset, MEETING);
         // The meeting really ran: thirty writes, sampled every frame, with
         // ticks that composed nothing leaving words stranded in the stream —
         // the state the smear needs.
@@ -192,7 +205,6 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         expect(meeting.stranded).toBeGreaterThan(0);
         expect(meeting.worst.area).toBeLessThan(SMEAR_PX2);
 
-        const unhurried = drive(html, preset, UNHURRIED);
         expect(unhurried.samples).toBeGreaterThan(50);
         expect(unhurried.stranded).toBeGreaterThan(0);
         expect(unhurried.worst.area).toBeLessThan(SMEAR_PX2);
