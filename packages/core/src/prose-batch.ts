@@ -26,7 +26,7 @@
  *   bullets are bullets the agent can no longer find.
  */
 import * as Y from 'yjs';
-import { getProseFragment, headingLevelOf, walkProse } from './prose-fragment.ts';
+import { getProseFragment, headingLevelOf, precedingBlock, walkProse } from './prose-fragment.ts';
 import {
   BLOCK_AUTHOR_ATTR,
   BLOCK_ID_ATTR,
@@ -182,7 +182,6 @@ function insertBlocksMerging(
 ): Y.XmlElement[] {
   const created: Y.XmlElement[] = [];
   const siblings = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
-  const before = siblings[index - 1];
   const leading = splitLeadingListItems(markdown);
   let rest = markdown;
   if (leading) {
@@ -194,6 +193,10 @@ function insertBlocksMerging(
     // `rest` blocks in front of the items it had just spliced, inverting the
     // markdown's own order. It is gone rather than fixed.
     const wanted = leading.ordered ? 'orderedList' : 'bulletList';
+    // `precedingBlock`, not `siblings[index - 1]`: it walks back over the
+    // empty paragraph a browser keeps at a doc's end, which is what made
+    // every note of a meeting open a list of its own.
+    const before = precedingBlock(siblings, index);
     const host = isList(before) && before.nodeName === wanted ? before : null;
     if (host) {
       const items = leading.items

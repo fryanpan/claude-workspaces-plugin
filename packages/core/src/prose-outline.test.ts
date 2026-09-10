@@ -316,3 +316,120 @@ describe('applyBlockEdits', () => {
     expect(res.outcomes[0]?.error).toBe('not-a-heading');
   });
 });
+
+/**
+ * What a browser with the doc open does after every change: keep an empty,
+ * unclaimed paragraph at the end of the document whenever the last block is
+ * not one. That is Tiptap StarterKit's `TrailingNode`, and it is why a
+ * meeting's notes each became a one-item list of their own.
+ */
+function browserTrailingNode(doc: Y.Doc): void {
+  const fragment = getProseFragment(doc);
+  const last = fragment.get(fragment.length - 1) as Y.XmlElement | Y.XmlText | undefined;
+  if (last instanceof Y.XmlElement && last.nodeName === 'paragraph') return;
+  fragment.push([new Y.XmlElement('paragraph')]);
+}
+
+function lastTop(doc: Y.Doc): Y.XmlElement {
+  const fragment = getProseFragment(doc);
+  return fragment.get(fragment.length - 1) as Y.XmlElement;
+}
+
+describe('applyBlockEdits while a browser holds the doc open', () => {
+  it('grows the list across the empty paragraph the browser leaves at the end', () => {
+    const doc = docOf('## Notes\n\n- one\n');
+    browserTrailingNode(doc);
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph']);
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- two\n' }]);
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph']);
+    // The trailing paragraph is still its own (empty) block at the end.
+    expect(readOutline(doc).map((e) => e.text)).toEqual(['Notes', 'one', 'two', '']);
+  });
+
+  it('keeps five ticks of a meeting in one list instead of five', () => {
+    const doc = docOf('## Notes\n');
+    const headingId = readOutline(doc)[0]?.id as string;
+    for (const n of ['one', 'two', 'three', 'four', 'five']) {
+      apply(doc, [{ op: 'insert_under_heading', headingId, markdown: `- ${n}\n` }]);
+      browserTrailingNode(doc);
+    }
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph']);
+    expect(readOutline(doc).map((e) => e.text)).toEqual([
+      'Notes',
+      'one',
+      'two',
+      'three',
+      'four',
+      'five',
+      '',
+    ]);
+    // Every bullet is still the agent's, so a later tick may revise any of them.
+    expect(blocksAuthoredBy(doc, AGENT).length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('leaves the browser paragraph itself untouched — same element, still last', () => {
+    const doc = docOf('## Notes\n\n- one\n');
+    browserTrailingNode(doc);
+    const paragraph = lastTop(doc);
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- two\n' }]);
+    expect(lastTop(doc)).toBe(paragraph);
+    expect(readBlockAuthor(paragraph)).toBeUndefined();
+  });
+
+  it('reaches the list from insert_at_end too', () => {
+    const doc = docOf('- one\n');
+    browserTrailingNode(doc);
+    apply(doc, [{ op: 'insert_at_end', markdown: '- two\n' }]);
+    expect(topKinds(doc)).toEqual(['bulletList', 'paragraph']);
+    expect(readOutline(doc).map((e) => e.text)).toEqual(['one', 'two', '']);
+  });
+
+  // ---- negative controls: what the walk must still refuse to step over ----
+
+  it('does not reach past a paragraph that has words in it', () => {
+    const doc = docOf('## Notes\n\n- one\n\nA thought of my own.\n');
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- two\n' }]);
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph', 'bulletList']);
+  });
+
+  it('does not reach past an empty paragraph an agent claimed', () => {
+    const doc = docOf('## Notes\n\n- one\n');
+    browserTrailingNode(doc);
+    lastTop(doc).setAttribute('cwAuthor', AGENT);
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- two\n' }]);
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph', 'bulletList']);
+  });
+
+  it('does not reach past a paragraph holding an image', () => {
+    const doc = docOf('## Notes\n\n- one\n');
+    const fragment = getProseFragment(doc);
+    const paragraph = new Y.XmlElement('paragraph');
+    paragraph.insert(0, [new Y.XmlElement('image')]);
+    fragment.push([paragraph]);
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- two\n' }]);
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph', 'bulletList']);
+  });
+
+  it('still refuses to join lists of different types across the paragraph', () => {
+    const doc = docOf('## Notes\n\n- one\n');
+    browserTrailingNode(doc);
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '1. first\n' }]);
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph', 'orderedList']);
+  });
+
+  it('opens a list when the section holds only the browser paragraph', () => {
+    const doc = docOf('## Notes\n');
+    const fragment = getProseFragment(doc);
+    fragment.push([new Y.XmlElement('paragraph')]);
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- one\n' }]);
+    expect(topKinds(doc)).toEqual(['heading', 'paragraph', 'bulletList']);
+    expect(readOutline(doc).map((e) => e.text)).toEqual(['Notes', '', 'one']);
+  });
+});

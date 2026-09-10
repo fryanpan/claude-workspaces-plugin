@@ -1,0 +1,78 @@
+#!/usr/bin/env bun
+/**
+ * Repair the documents whose notes read with blank lines between them.
+ *
+ *   bun scripts/repair-note-list-gaps.ts --data-dir <dir>             # dry run
+ *   bun scripts/repair-note-list-gaps.ts --data-dir <dir> --apply
+ *   bun scripts/repair-note-list-gaps.ts --data-dir <dir> --doc d-xxx --apply
+ *
+ * Dry first, always: the report a dry run prints is the plan `--apply`
+ * executes, doc by doc and site by site.
+ *
+ * `--force` proceeds while a server is live. Only pass it knowing which
+ * server that is and that it does not hold this corpus — one that does
+ * rewrites every document it has open from memory, throwing the repair away
+ * with no error anywhere.
+ *
+ * The repair is `packages/server/src/note-list-gap-repair.ts`; this file is
+ * the only thing that names a real data directory, which is what keeps a test
+ * run and a stray import from rewriting a corpus. Read that module's header
+ * for what the move does to block ids, authorship and comment anchors, and
+ * for how to revert one document.
+ */
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { pidIsAlive, readDiscovery } from '../packages/core/src/discovery-file.ts';
+import { repairDataDir } from '../packages/server/src/note-list-gap-repair.ts';
+
+interface Args {
+  dataDir: string;
+  apply: boolean;
+  force: boolean;
+  docs: string[];
+}
+
+function parseArgs(argv: string[]): Args {
+  const args: Args = { dataDir: '', apply: false, force: false, docs: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (flag === '--data-dir') args.dataDir = argv[++i] ?? '';
+    else if (flag === '--doc') args.docs.push(argv[++i] ?? '');
+    else if (flag === '--apply') args.apply = true;
+    else if (flag === '--force') args.force = true;
+    else if (flag === '--dry-run') args.apply = false;
+    else throw new Error(`unknown argument: ${flag}`);
+  }
+  if (!args.dataDir) throw new Error('--data-dir is required');
+  if (!existsSync(args.dataDir)) throw new Error(`no such data dir: ${args.dataDir}`);
+  return args;
+}
+
+const args = parseArgs(process.argv.slice(2));
+
+// A server holding a document rewrites it from memory on its next flush, so a
+// repair written under one is thrown away with no error anywhere. The
+// discovery slot cannot say WHICH corpus that server holds, which is why
+// --force is an override rather than this being a hard rule.
+if (args.apply && !args.force) {
+  const entry = readDiscovery(homedir());
+  if (entry && pidIsAlive(entry.pid)) {
+    console.error(
+      `A server is live on port ${entry.port} (pid ${entry.pid}). It rewrites every\n` +
+        'document it holds from memory, which would throw this repair away. Stop it,\n' +
+        'or pass --force if that server does not hold this corpus.',
+    );
+    process.exit(2);
+  }
+}
+
+const result = repairDataDir(args.dataDir, { apply: args.apply, docIds: args.docs });
+
+console.log(
+  args.apply
+    ? `\n${result.docsRepaired} doc(s) repaired, ${result.sitesRepaired} site(s), ` +
+        `${result.itemsMoved} item(s) moved, ${result.anchorsRebuilt} anchor(s) rebuilt, ` +
+        `${result.anchorsUnverified} left alone.`
+    : `\n${result.docsWithSites} doc(s) carry ${result.sitesFound} site(s). ` +
+        'Re-run with --apply to repair them.',
+);
