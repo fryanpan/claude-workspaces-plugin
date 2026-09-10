@@ -1,4 +1,9 @@
-import { type ElementAnchor, anchors, escapeHtml as escape } from '@claude-workspaces/core';
+import {
+  type Anchor,
+  type ElementAnchor,
+  anchors,
+  escapeHtml as escape,
+} from '@claude-workspaces/core';
 import { composerNote, composerSignIn } from './widget-auth.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -33,6 +38,46 @@ export function toggleFeedbackMode(el: FeedbackWidgetEl): void {
   else enterFeedbackMode(el);
 }
 
+/**
+ * The width below which the mode opens as a PROMPT rather than as a composer.
+ *
+ * A layout question, not a device one: it asks whether there is room to float
+ * a 300px composer beside the thing being commented on without covering it.
+ * (Width cannot identify a device — zoom moves it — which is why nothing here
+ * concludes anything about the reader from it.)
+ */
+const PHONE_MAX = 1100;
+export function isPhoneFace(): boolean {
+  return window.innerWidth <= PHONE_MAX;
+}
+
+/**
+ * The anchor a draft starts on before an element has been picked: the page.
+ *
+ * Entering the mode has to give you somewhere to type — that is behaviour 3 —
+ * and at that moment nothing has been pointed at. A subject anchor is exactly
+ * "this comment is about the thing as a whole", it cannot break, and tapping
+ * an element afterwards re-anchors the SAME draft rather than starting a new
+ * one.
+ */
+function subjectAnchor(): Anchor {
+  return { kind: 'subject' };
+}
+
+/**
+ * Enter posts; Shift+Enter is a newline.
+ *
+ * `isComposing` is checked because an IME's Enter picks a candidate — eating
+ * that keystroke posts a half-typed word and loses the rest.
+ */
+export function submitOnEnter(ta: HTMLTextAreaElement, submit: () => void): void {
+  ta.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' || ev.shiftKey || ev.isComposing) return;
+    ev.preventDefault();
+    submit();
+  });
+}
+
 export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   if (el.feedbackMode) return;
   el.feedbackMode = true;
@@ -65,6 +110,13 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
       <button class="picker-cancel">Done (Esc)</button>
     `;
   el.shadow.appendChild(banner);
+  // The mode's resting state where there is room for one: a focused field on
+  // the page you are looking at. Round 3's answer — "entering comment mode
+  // focuses the text input" — and the reason Done lives up here on the banner
+  // and never beside Post: the two read as the same button when adjacent.
+  // At phone width the banner IS the prompt and the field opens on the tap,
+  // because a composer over a 430px page covers the thing being commented on.
+  if (!isPhoneFace()) openDefaultComposer(el);
 
   const onMove = (ev: PointerEvent) => {
     // Skip hover-highlight on touch — fingers don't "hover," and
@@ -224,21 +276,37 @@ function openComposerForElement(
   showComposer(widget, anchor, cx, cy, null);
 }
 
+/**
+ * The composer the mode opens with, anchored on the page rather than on
+ * anything in it. Tapping an element afterwards moves the same draft onto it.
+ */
+export function openDefaultComposer(widget: FeedbackWidgetEl): void {
+  showComposer(widget, subjectAnchor(), window.innerWidth / 2 - 162, 96, null);
+}
+
 function showComposer(
   el: FeedbackWidgetEl,
-  anchor: ElementAnchor,
+  anchor: Anchor,
   cx: number,
   cy: number,
   replyTo: string | null,
 ): void {
   const existing = el.shadow.querySelector('.composer') as HTMLElement | null;
+  // The draft moves with you. Tapping an element while a draft is open
+  // RE-ANCHORS what you were writing rather than throwing it away and
+  // starting again — the composer is replaced, the sentence is not.
+  const carried = (existing?.querySelector('textarea') as HTMLTextAreaElement | null)?.value ?? '';
   existing?.remove();
   const composer = document.createElement('div');
   composer.className = 'composer';
-  composer.style.left = `${Math.min(cx + 12, window.innerWidth - 320)}px`;
-  composer.style.top = `${Math.min(cy + 12, window.innerHeight - 200)}px`;
+  composer.style.left = `${Math.max(8, Math.min(cx + 12, window.innerWidth - 320))}px`;
+  composer.style.top = `${Math.max(8, Math.min(cy + 12, window.innerHeight - 200))}px`;
+  // A subject anchor points AT the page rather than into it, so there is no
+  // quotation to show — it says what it is about instead.
+  const snippet =
+    anchor.kind === 'subject' ? 'About this page' : (anchor as ElementAnchor).snippet.text;
   composer.innerHTML = `
-      <div class="composer-snippet">${escape(anchor.snippet.text)}</div>
+      <div class="composer-snippet">${escape(snippet)}</div>
       <textarea placeholder="${replyTo ? 'Reply…' : 'Comment on this element…'}" rows="3"></textarea>
       <div class="composer-actions">
         <button class="cancel">Cancel</button>
@@ -247,12 +315,24 @@ function showComposer(
     `;
   el.shadow.appendChild(composer);
   const ta = composer.querySelector('textarea') as HTMLTextAreaElement;
+  ta.value = carried;
+  // Synchronously, inside the handler that opened it: deferred to a timeout
+  // this is no longer a user gesture and iOS keeps the keyboard down — the
+  // field looks focused and nothing can be typed.
   ta.focus();
-  composer.querySelector('.cancel')?.addEventListener('click', () => closeComposer(el, composer));
+  ta.setSelectionRange(carried.length, carried.length);
+  // Cancel is NOT Done. It throws the draft away and hands you back the mode,
+  // so the next element is one tap away; where the mode rests in a composer,
+  // that is a fresh empty one. Leaving the mode is the banner's Done, and it
+  // never sits beside Post.
+  composer.querySelector('.cancel')?.addEventListener('click', () => {
+    closeComposer(el, composer);
+    if (el.feedbackMode && !replyTo && !isPhoneFace()) openDefaultComposer(el);
+  });
   const submit = composer.querySelector('.submit') as HTMLButtonElement;
   // Say it before the first attempt when the widget already knows.
   if (el.signInToWrite && !el.authToken) composerSignIn(el, composer, submit);
-  submit.addEventListener('click', async () => {
+  const post = async (): Promise<void> => {
     const text = ta.value.trim();
     if (!text || !el.user) return;
     // A silent await reads as a dead button — say the click landed.
@@ -273,7 +353,14 @@ function showComposer(
       return;
     }
     closeComposer(el, composer);
-  });
+    // Commenting is a MODE: posting hands you straight back to it, so several
+    // comments in a row cost one entry and one exit. Round 3 dropped this at
+    // tablet width and the next element was not tappable until the FAB had
+    // been pressed twice.
+    if (el.feedbackMode && !replyTo && !isPhoneFace()) openDefaultComposer(el);
+  };
+  submit.addEventListener('click', () => void post());
+  submitOnEnter(ta, () => void post());
 }
 
 /** Dismissing the composer — cancelled, escaped or posted — takes the
