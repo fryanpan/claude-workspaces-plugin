@@ -63,6 +63,7 @@ import {
   withTimeout,
 } from './headless-chrome.ts';
 import {
+  STARTUP_TIMEOUT_MS,
   type ShotOptions,
   USAGE,
   UsageError,
@@ -166,13 +167,13 @@ async function main(argv: string[]): Promise<number> {
     browser = await launchChrome(
       bin,
       (profile) => chromeLaunchArgs(o, profile),
-      o.timeoutMs,
+      STARTUP_TIMEOUT_MS,
       runId,
       (b) => {
         browser = b;
       },
     );
-    cdp = await Cdp.connect(await pageSocketUrl(browser.port, o.timeoutMs));
+    cdp = await Cdp.connect(await pageSocketUrl(browser.port, STARTUP_TIMEOUT_MS));
     const summary = await shoot(o, cdp);
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return 0;

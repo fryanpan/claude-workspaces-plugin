@@ -253,12 +253,32 @@ describe('ui-shot stale profile report', () => {
   });
 });
 
-const CHROME = process.env.CW_CHROME_BIN ?? DEFAULT_CHROME_BIN;
+/**
+ * `CW_CHROME_BIN ?? DEFAULT_CHROME_BIN` was the wrong question, and it made
+ * every case below decorative on CI: that constant is the macOS
+ * `/Applications` path, so on the `client` job (ubuntu-latest, nothing named)
+ * it does not exist and `skipIf` skipped the whole describe — while Chrome
+ * WAS on the runner and `resolveChromeBin` reaches it through
+ * `CHROME_CANDIDATES`, which is how the gates job's `check:client-boot` step
+ * already finds it with no path named. A silent skip and a pass read
+ * identically in a green log.
+ *
+ * It THROWS when nothing resolves, and a throw here would take the file down
+ * at load rather than skipping it, so the miss is caught. A `CW_CHROME_BIN`
+ * pointing at nothing still skips, exactly as before.
+ */
+const CHROME = ((): string | null => {
+  try {
+    return resolveChromeBin(undefined);
+  } catch {
+    return null;
+  }
+})();
 const SCRIPT = resolve(process.cwd(), 'scripts/ui-shot.ts');
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe.skipIf(!existsSync(CHROME))('ui-shot against real headless Chrome', () => {
+describe.skipIf(CHROME === null)('ui-shot against real headless Chrome', () => {
   let dir: string;
   /**
    * Run ids this file handed out. Only profiles carrying one of these may be
@@ -346,6 +366,54 @@ describe.skipIf(!existsSync(CHROME))('ui-shot against real headless Chrome', () 
     // launches in the same suite, which is what made the coin land.
     60_000,
   );
+
+  /**
+   * `--timeout` is documented as the ceiling for load and `--wait-for`, and it
+   * was also being handed to the browser launch — so a short page budget
+   * failed the run before a page existed to be slow. CI failed here twice on
+   * a branch whose diff touched neither ui-shot nor the page under test:
+   * `CDP never came up within 15000ms`, from a Chrome cold start inside a
+   * shard running a hundred other files.
+   *
+   * Chrome cannot start in a millisecond, so a run with `--timeout 1` proves
+   * the split on any machine: it must still fail (the page budget is real),
+   * but never at the browser stage. Before the split this failed with exactly
+   * the message asserted absent below.
+   */
+  it('gives the browser launch its own budget, so --timeout only bounds the page', () => {
+    const runId = newRunId();
+    const r = spawnSync(
+      'bun',
+      [
+        SCRIPT,
+        '--url',
+        'data:text/html,<p>probe</p>',
+        // Two ways to fail at the page, and no way to succeed: a 1ms ceiling
+        // on the load, and a selector that never matches. Which of the two
+        // wins is a race, so the assertion accepts either — what it must not
+        // see is a failure from BEFORE the page, which is the bug.
+        '--wait-for',
+        '#never-matches',
+        '--timeout',
+        '1',
+        '--settle',
+        '1',
+        '--eval',
+        '1',
+      ],
+      { encoding: 'utf8', timeout: 60_000, env: { ...process.env, [RUN_ID_ENV]: runId } },
+    );
+    // Positive control first: this must be a RUN that got as far as a page.
+    // An earlier version asserted only the exit code, and `--settle 0` made it
+    // pass against the bug by exiting at usage parsing without launching
+    // anything. Naming the page-stage error is what makes the pass mean
+    // Chrome started.
+    expect(r.stderr, 'the run must reach the page stage').toMatch(
+      /page load did not finish|never matched/,
+    );
+    expect(r.stderr).not.toMatch(/CDP never came up/);
+    expect(r.stderr).not.toMatch(/no page target listed/);
+  }, 60_000);
 
   it('screenshots a data: URL at 430px and the page reports innerWidth 430', () => {
     dir = mkdtempSync(join(tmpdir(), 'ui-shot-test-'));

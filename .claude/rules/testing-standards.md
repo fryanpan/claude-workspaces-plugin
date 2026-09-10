@@ -133,6 +133,29 @@ Chromium against a throwaway profile. Verify at **1180x820** (tablet/laptop,
 where height is the scarce axis) and **430** wide, per
 [docs/product/design-mobile.md](../../docs/product/design-mobile.md).
 
+### Two budgets, and neither is vitest's default
+
+A test that launches a real browser pays for a process spawn, a profile
+directory and a CDP handshake before any page exists, and then for the page.
+Give each its own number.
+
+- **The vitest case timeout.** Vitest's default is 5s; a launch plus a load is
+  4–6s unloaded on this machine, so the default loses to a neighbouring suite
+  rather than to an assertion. Pass an explicit per-case timeout — the
+  Chrome-launching cases here use `60_000`.
+- **ui-shot's `--timeout`.** It is the ceiling for load and `--wait-for` only.
+  The browser launch has its own `STARTUP_TIMEOUT_MS`, because one number
+  doing both jobs failed CI twice with `CDP never came up within 15000ms` on
+  a branch whose diff touched neither ui-shot nor the page under test —
+  a cold start inside a shard running a hundred other files.
+
+**And check the guard actually lets the test run.** A real-browser case behind
+`skipIf` reads identically to a passing one in a green log. Resolve the binary
+through `resolveChromeBin(undefined)`, which reaches `CHROME_CANDIDATES` and
+so finds the runner's own Chrome with no path named; `CW_CHROME_BIN ??
+DEFAULT_CHROME_BIN` names the macOS `/Applications` path and skips everywhere
+else. Prove it by reading the test COUNT off a CI run, not the colour.
+
 *Check:* no check yet.
 
 ## 6. The gates, and what each one catches
