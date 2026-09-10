@@ -36,6 +36,8 @@ import {
   type ScheduleWrite,
   TASK_STATUS_ORDER,
   type TaskStatus,
+  goalChoices,
+  isGoalArchived,
   ownerKindSuffix,
   ownerMarkKind,
   statusLabel,
@@ -951,11 +953,15 @@ export function detailFields(
   cell('Due', due);
 
   // The goal list comes from the board rather than being re-derived, so the
-  // options here are the sections a reader can already see. The task's own
-  // goal is always present even when the list does not have it: a stale or
-  // deleted band must not silently re-place the task on the next change event.
+  // options here are the sections a reader can already see, in the order the
+  // board works them: `goalChoices` is `boardSections`' own filter, which is
+  // what keeps an archived band out of a list where it could only be a wrong
+  // answer. The task's own goal is always present even when that list does not
+  // carry it: a stale, archived or deleted band must not silently re-place the
+  // task on the next change event.
   const goal = document.createElement('select');
   goal.className = 'board-detail-select board-detail-goal';
+  const bands = handlers.goals ?? [];
   const seen = new Set<string>();
   const addGoalOption = (id: string, label: string): void => {
     if (seen.has(id)) return;
@@ -965,7 +971,15 @@ export function detailFields(
     opt.textContent = label;
     goal.append(opt);
   };
-  for (const g of handlers.goals ?? []) addGoalOption(g.id, g.title);
+  for (const g of goalChoices(bands)) addGoalOption(g.id, g.title);
+  // The one band that may still appear below the live ones, and only for the
+  // task standing on it. Its label SAYS archived rather than being grouped
+  // under a heading, because the reader spends most of their time looking at
+  // this control CLOSED — on a phone the dropdown is a sheet they have to
+  // open — and a heading is invisible from there, which would leave a band
+  // that is off the board reading exactly like a band that is on it.
+  const own = bands.find((g) => g.id === task.goal);
+  if (own && isGoalArchived(own)) addGoalOption(own.id, `${own.title} (archived)`);
   addGoalOption(task.goal, handlers.goalLabel?.(task.goal) ?? task.goal);
   goal.value = task.goal;
   goal.setAttribute('aria-label', 'Goal');
