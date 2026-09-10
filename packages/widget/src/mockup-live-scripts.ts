@@ -1,3 +1,9 @@
+import {
+  REDECLARATION,
+  enterRecoverableInsert,
+  leaveRecoverableInsert,
+} from '@claude-workspaces/core/mock-swap-noise';
+
 /**
  * Re-running a mock's own inline scripts, round after round.
  *
@@ -87,16 +93,6 @@ function canRetryWrapped(el: HTMLScriptElement, source: string): boolean {
 }
 
 /**
- * The message a redeclaration gets, in the three engines this ships to.
- *
- * V8: `Identifier 'X' has already been declared`. JavaScriptCore, which is
- * what Bryan's iPad runs: `Cannot declare a const variable twice: 'X'.`, or
- * `Cannot redeclare ...`. SpiderMonkey: `redeclaration of const X`.
- */
-const REDECLARATION =
-  /already been declared|cannot declare a (?:let|const|class) variable twice|cannot redeclare|redeclaration of/i;
-
-/**
  * Is this the early error a redeclaration raises — and only that?
  *
  * The name alone is not enough, and reading it as enough was a bug: a mock's
@@ -164,11 +160,14 @@ function reviveScript(src: HTMLScriptElement, source: string): HTMLScriptElement
  * `preventDefault()` runs only on the event this will retry, and does exactly
  * one thing: it suppresses the browser's DEFAULT reporting of an error the
  * reader never sees. It does NOT unregister anyone else — a page-level `error`
- * listener installed before the swap (Sentry's is) still hears the event, so a
- * recovered round on Chrome still files one CLAUDE-WORKSPACES-8. Measured, not
- * assumed: the headless probe recorded that message with the round recovered
- * and `#hero` reading round two. An error this does NOT retry is left to
- * propagate exactly as it did before.
+ * listener installed before the swap (Sentry's is) still hears the event, and
+ * for as long as that was the whole story a recovered round on Chrome filed
+ * one CLAUDE-WORKSPACES-8 anyway. So the insert that WILL be retried also
+ * raises the window `enterRecoverableInsert` opens, which is what
+ * `/app/sentry.js` reads in `beforeSend` to tell a collision the product
+ * handled from one it did not. It is lowered in the same `finally` as the
+ * listener is removed: an error this does NOT retry — the wrapped retry
+ * itself included — is left to propagate and be reported exactly as before.
  */
 export function insertScript(src: HTMLScriptElement, before: Node | null): void {
   const source = src.textContent ?? '';
@@ -180,6 +179,7 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
     collided = true;
     ev.preventDefault();
   };
+  if (retryable) enterRecoverableInsert();
   window.addEventListener('error', onError, true);
   let threw: { err: unknown } | null = null;
   try {
@@ -188,6 +188,7 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
     threw = { err };
   } finally {
     window.removeEventListener('error', onError, true);
+    if (retryable) leaveRecoverableInsert();
   }
   if (threw && !(retryable && isRedeclaration(threw.err))) throw threw.err;
   if (!threw && !collided) return;

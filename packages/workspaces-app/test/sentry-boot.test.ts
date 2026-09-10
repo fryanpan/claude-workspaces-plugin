@@ -1,3 +1,7 @@
+import {
+  enterRecoverableInsert,
+  leaveRecoverableInsert,
+} from '@claude-workspaces/core/mock-swap-noise';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -165,6 +169,40 @@ describe('the page Sentry entry', () => {
     };
     expect(JSON.stringify(metric)).toContain(needle);
     expect(JSON.stringify(opts.beforeSendMetric(metric))).not.toContain(needle);
+  });
+
+  it('drops the redeclaration a mockup round has already recovered from, and only that', async () => {
+    shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'mockup' });
+    await boot();
+    const send = (init.mock.calls[0]?.[0] as InitOptions).beforeSend;
+    const collision = {
+      exception: {
+        values: [{ type: 'SyntaxError', value: "Identifier 'params' has already been declared" }],
+      },
+    };
+
+    // Outside a swap nothing has recovered anything, so the report is filed —
+    // this is the control for the drop below, and it is also the shape a
+    // `"use strict"` or `type="module"` collision arrives in, which the swap
+    // never retries.
+    expect(send(collision)).not.toBeNull();
+
+    // Inside the insert the widget is about to retry, it goes nowhere.
+    enterRecoverableInsert();
+    try {
+      expect(send(collision)).toBeNull();
+      // Still narrow while the flag is up: a SyntaxError thrown at runtime is
+      // not an early error, nothing retries it, and it is filed.
+      expect(
+        send({
+          exception: { values: [{ type: 'SyntaxError', value: 'Unexpected end of JSON input' }] },
+        }),
+      ).not.toBeNull();
+    } finally {
+      leaveRecoverableInsert();
+    }
+
+    expect(send(collision)).not.toBeNull();
   });
 
   it('scrubs every event and every transaction on the way out', async () => {
