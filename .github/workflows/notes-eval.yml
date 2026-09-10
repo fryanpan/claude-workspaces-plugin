@@ -76,6 +76,21 @@ jobs:
             const jwt = await core.getIDToken('https://api.anthropic.com');
             core.setSecret(jwt);
             core.exportVariable('ANTHROPIC_OIDC_JWT', jwt);
+      - name: Say which claims this run is presenting
+        run: |
+          set -euo pipefail
+          # WHY THIS PRINTS. A federation rule matches on claims, and every
+          # mismatch comes back as the same opaque "Authentication failed" —
+          # so without this step diagnosing one costs a round trip through a
+          # person reading the rule back to us. These are the claims a rule
+          # can key on, and none of them is a secret: the repository, its
+          # owner, the ref and the workflow file are public facts about a
+          # public repo, and the audience is the string this workflow asked
+          # for. The signature is never printed and the token stays masked.
+          payload=$(printf '%s' "${ANTHROPIC_OIDC_JWT}" | cut -d. -f2)
+          case $(( ${#payload} % 4 )) in 2) payload="${payload}==";; 3) payload="${payload}=";; esac
+          printf '%s' "$payload" | tr '_-' '/+' | base64 -d 2>/dev/null \
+            | jq '{aud, sub, event_name, repository, repository_owner, ref, ref_type, workflow_ref, job_workflow_ref}'
       - name: Check the four repository variables are set
         run: |
           set -euo pipefail
