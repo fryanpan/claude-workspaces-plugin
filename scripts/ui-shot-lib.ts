@@ -73,6 +73,25 @@ export const DEFAULTS = {
   timeoutMs: 15000,
 } as const;
 
+/**
+ * How long to wait for Chrome to start and announce its CDP port — separate
+ * from `--timeout`, which is the ceiling for load and `--wait-for` once a page
+ * exists.
+ *
+ * One number was doing both jobs, and the one it was documented to do is the
+ * page one. Starting a browser is not page work: it is a process spawn, a
+ * profile directory and a port handshake, and on a CI runner executing a
+ * hundred other test files concurrently that cold start has exceeded fifteen
+ * seconds. `scripts/client-boot-check.ts` already launches with its own
+ * 30_000 and passes `o.timeoutMs` only to the page; this is ui-shot catching
+ * up with its sibling rather than a ceiling raised to make a run go green.
+ *
+ * Consequence worth knowing: `--timeout 500` no longer shortens the browser
+ * launch, so a probe that means to prove a page is slow cannot accidentally
+ * prove Chrome is.
+ */
+export const STARTUP_TIMEOUT_MS = 30_000;
+
 export const USAGE = `usage: bun run ui:shot --url <url> [--preset ipad|phone | --size WxH]
                        [--out shot.png] [--eval '<js expression>'] [--eval-file expr.js]
                        [--wait-for '<css selector>'] [--settle <ms>] [--timeout <ms>]
