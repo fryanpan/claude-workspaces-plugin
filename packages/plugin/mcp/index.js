@@ -15211,7 +15211,7 @@ var TOOL_LIST = {
     },
     {
       name: "post_reply",
-      description: "Reply to an existing thread. Pass review when the reply is asking a person to decide or look; without it, it is an ordinary comment and does not enter the queue. A review payload is judged by the same quality gate a ticket item passes: `held: true` means the item is off the queue until you revise it, and the result names the gap plus the revise_review_item(docId=…, threadId=…, commentId=…) call that ends the hold. A comment is an ask, a decision, or a reply to a person — where the work stands goes through post_status instead. Returns threadUrl, the link to hand a peer.",
+      description: "Reply to an existing thread. Pass review when the reply is asking a person to decide or look; without it, it is an ordinary comment and does not enter the queue. A review payload is judged by the same quality gate a ticket item passes: `held: true` means the item is off the queue until you revise it, and the result names the gap plus the revise_review_item(docId=…, threadId=…, commentId=…) call that ends the hold. A comment is an ask, a decision, or a reply to a person — where the work stands goes through post_status instead. Returns threadUrl, the link to hand a peer. When you passed review, the result also carries reviewItemId — the universal id of the item. Keep it: the NEXT round is one call, revise_review_item(workspaceId, reviewItemId, headline/detail/options), which rewrites this same item and keeps the earlier rounds readable on it. Raising a second thread for round 2 is the duplicate the queue exists to remove.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15273,7 +15273,7 @@ var TOOL_LIST = {
     },
     {
       name: "create_thread",
-      description: "Open a comment thread on a doc. Pass find to anchor it to a phrase; omit find entirely for a thread about the doc as a whole — that is how you comment on a task, whose body doc is task:<taskId> and is often empty. Pass review when you are asking a person to decide or look; leave it off for notes you are recording. A review payload goes through the same quality gate a ticket item does: `held: true` in the result means it is off the reader's queue until you revise it, and the result carries the reason plus the exact revise_review_item(docId=…, threadId=…, commentId=…) call that lifts it. Returns threadUrl — hand that to a peer instead of pasting the report into chat.",
+      description: "Open a comment thread on a doc. Pass find to anchor it to a phrase; omit find entirely for a thread about the doc as a whole — that is how you comment on a task, whose body doc is task:<taskId> and is often empty. Pass review when you are asking a person to decide or look; leave it off for notes you are recording. A review payload goes through the same quality gate a ticket item does: `held: true` in the result means it is off the reader's queue until you revise it, and the result carries the reason plus the exact revise_review_item(docId=…, threadId=…, commentId=…) call that lifts it. Returns threadUrl — hand that to a peer instead of pasting the report into chat. When you passed review, the result also carries reviewItemId — the universal id of the item. Keep it: the NEXT round is one call, revise_review_item(workspaceId, reviewItemId, headline/detail/options), which rewrites this same item and keeps the earlier rounds readable on it. Raising a second thread for round 2 is the duplicate the queue exists to remove.",
       inputSchema: {
         type: "object",
         properties: {
@@ -19416,7 +19416,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.200";
+var PLUGIN_VERSION = "0.1.201";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

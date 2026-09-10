@@ -1,12 +1,13 @@
 import {
+  type Anchor,
   type AnchorContext,
-  type ElementAnchor,
   type FeedbackClient,
   STATUS_COLORS,
   type User,
   connect,
   resolveUser,
 } from '@claude-workspaces/core';
+import { dockStyles } from './styles-dock.ts';
 import { widgetStyles } from './styles.ts';
 import {
   askIfSignInRequired,
@@ -16,6 +17,7 @@ import {
   updateAuthUi,
   validateStoredAuth,
 } from './widget-auth.ts';
+import { deepLinkThread, renderDockInto } from './widget-dock.ts';
 import {
   IGNORE_ATTR,
   TAG,
@@ -185,6 +187,12 @@ export class FeedbackWidgetEl extends HTMLElement {
   anonUser: User | null = null;
   authPopup: Window | null = null;
   authMsgHandler: ((ev: MessageEvent) => void) | null = null;
+  /**
+   * The thread a `?thread=` deep link asked to be opened on, until the dock
+   * has one to open. Held rather than acted on at init: the threads arrive
+   * over the socket, so at init there is nothing yet to open.
+   */
+  pendingDockThread: string | null = null;
 
   constructor() {
     super();
@@ -237,6 +245,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       url: currentUrl(),
       ...(opts.context?.view ? { view: opts.context.view } : {}),
     };
+    this.pendingDockThread = deepLinkThread(location.search);
     this.wireHistoryListeners();
     this.wireVisualViewport();
     this.renderShell();
@@ -440,7 +449,9 @@ export class FeedbackWidgetEl extends HTMLElement {
 
   private renderShell(): void {
     const style = document.createElement('style');
-    style.textContent = widgetStyles;
+    // Two sheets, one <style>: the dock shares no selector with the comment
+    // chrome, so order between them is free and the split is only about size.
+    style.textContent = widgetStyles + dockStyles;
     this.shadow.appendChild(style);
 
     // Above the FAB: the way into the thread list, now that the FAB itself
@@ -513,7 +524,7 @@ export class FeedbackWidgetEl extends HTMLElement {
    *  the typed comment, so signing in and pressing Post again is all it takes.
    *  Discarding it on a refusal would lose the very thing the sign-in prompt
    *  is asking the person to come back and finish. */
-  async postNewThread(anchor: ElementAnchor, text: string): Promise<boolean> {
+  async postNewThread(anchor: Anchor, text: string): Promise<boolean> {
     const res = await authedPost(this, `${httpBase(this)}${this.docPath()}/threads`, () => ({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -531,6 +542,38 @@ export class FeedbackWidgetEl extends HTMLElement {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ author: this.user, text }),
+      }),
+    );
+    return res.ok;
+  }
+
+  /**
+   * Answer a review item docked on this page — `false` when the server
+   * refused it, so the modal can keep the words and say so.
+   *
+   * The same route the doc page answers through, deliberately: `text` is
+   * always the verbatim answer and `optionId` only records which offered
+   * option those words came from. A second door onto "answered" would be a
+   * second definition of it.
+   */
+  async postAnswer(
+    threadId: string,
+    commentId: string,
+    text: string,
+    optionId?: string,
+  ): Promise<boolean> {
+    const res = await authedPost(
+      this,
+      `${httpBase(this)}${this.docPath()}/threads/${encodeURIComponent(threadId)}/answer`,
+      () => ({
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          author: this.user,
+          text,
+          commentId,
+          ...(optionId !== undefined ? { optionId } : {}),
+        }),
       }),
     );
     return res.ok;
@@ -577,6 +620,7 @@ export class FeedbackWidgetEl extends HTMLElement {
    */
   renderThreads(): void {
     renderThreadsInto(this);
+    renderDockInto(this);
   }
 
   scheduleRender(): void {

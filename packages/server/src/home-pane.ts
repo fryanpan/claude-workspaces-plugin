@@ -136,7 +136,15 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
         // share visitor reads this route (§3.3): a label is workspace
         // content, a path is not.
         const base = meta?.relPath?.split('/').pop();
-        return { docId, title: meta?.title || base || docId };
+        // The doc's KIND rides along so a question asked on a mockup opens
+        // the mockup. It is not a host-machine fact — `relPath` and
+        // `sourceUrl` are, and stay out for that reason — it is what sort of
+        // thing the workspace holds, which is workspace content.
+        return {
+          docId,
+          title: meta?.title || base || docId,
+          ...(meta?.type ? { type: meta.type } : {}),
+        };
       }),
       source: {
         threadsOf: (docId) => docStore.listThreads(docId, { status: 'open' }),

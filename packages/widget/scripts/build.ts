@@ -54,17 +54,22 @@ const lib0Shims: BunPlugin = {
 const cssMinify: BunPlugin = {
   name: 'widget-css-minify',
   setup(build) {
-    build.onLoad({ filter: /widget[/\\]src[/\\]styles\.ts$/ }, (args) => {
+    // Every stylesheet module, not just the first one: `styles-dock.ts` is a
+    // second sheet and CSS the minifier never sees is CSS the gzip budget
+    // pays for in full.
+    build.onLoad({ filter: /widget[/\\]src[/\\]styles(-[a-z-]+)?\.ts$/ }, (args) => {
       const src = readFileSync(args.path, 'utf8');
       let hit = false;
       const contents = src.replace(
-        /export const widgetStyles = `([\s\S]*?)`;/,
-        (_m, css: string) => {
+        /export const (\w+) = `([\s\S]*?)`;/,
+        (_m, name: string, css: string) => {
           hit = true;
-          return `export const widgetStyles = \`${minifyCss(css)}\`;`;
+          return `export const ${name} = \`${minifyCss(css)}\`;`;
         },
       );
-      if (!hit) throw new Error('widget-css-minify: could not find widgetStyles template literal');
+      if (!hit) {
+        throw new Error(`widget-css-minify: no stylesheet template literal in ${args.path}`);
+      }
       return { contents, loader: 'ts' };
     });
   },

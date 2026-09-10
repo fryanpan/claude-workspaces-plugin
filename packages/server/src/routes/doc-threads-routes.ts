@@ -32,6 +32,7 @@ import {
   reviewItemState,
   reviewPayloadMessage,
   summaryHash,
+  threadReviewItemId,
 } from '@claude-workspaces/core';
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
@@ -46,6 +47,27 @@ import {
   parseSuggestionAuthor,
   withSyncError,
 } from './docs-routes-context.ts';
+
+/**
+ * The id of the item a write just raised — the STANDING declaration on the
+ * thread, addressed the universal way (`threadReviewItemId`).
+ *
+ * Returned by every door that can declare one so the round that comes next
+ * is a single call: `revise_review_item(workspaceId, reviewItemId)` names the
+ * same item, and the agent never has to know that a doc-thread item's
+ * identity is derived from three ids. Without it the only way to re-ask was
+ * to keep (docId, threadId, commentId) by hand, and the failure of doing that
+ * is a SECOND thread about one question — the duplicate-row shape the whole
+ * queue exists to remove.
+ *
+ * `undefined` when nothing on the thread is declaring, which is the ordinary
+ * comment and the overwhelming majority.
+ */
+function declaredItemId(docId: string, thread: Thread | null): string | undefined {
+  if (!thread) return undefined;
+  const declaring = pendingDeclaration(thread);
+  return declaring ? threadReviewItemId(docId, thread.id, declaring.id) : undefined;
+}
 
 /** A comment's optional Review Item declaration, checked at the door.
  *
@@ -218,11 +240,15 @@ export async function handleDocThreadRoutes(
           ? await gateThreadDeclaration(docId, t, declared.review, user)
           : undefined;
       const handoff = threadUrl(docId, Boolean(visitor));
-      return t
+      const replied = t ? (docStore.getThread(docId, t.id) ?? t) : null;
+      return replied
         ? j(200, {
-            thread: docStore.getThread(docId, t.id) ?? t,
+            thread: replied,
             ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
             ...(handoff ? { threadUrl: handoff } : {}),
+            ...(declaredItemId(docId, replied) !== undefined
+              ? { reviewItemId: declaredItemId(docId, replied) }
+              : {}),
             ...heldFields(replyGate),
           })
         : j(404, { error: 'thread not found' });
@@ -609,6 +635,9 @@ export async function handleDocThreadRoutes(
             thread: settledPrior,
             ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
             ...(handoff ? { threadUrl: handoff } : {}),
+            ...(declaredItemId(docId, settledPrior) !== undefined
+              ? { reviewItemId: declaredItemId(docId, settledPrior) }
+              : {}),
             ...heldFields(recordedThreadHold(docId, settledPrior, declared.review)),
           })
         : j(500, { error: 'could not create thread' });
@@ -729,6 +758,9 @@ export async function handleDocThreadRoutes(
           thread: settled,
           ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
           ...(handoff ? { threadUrl: handoff } : {}),
+          ...(declaredItemId(docId, settled) !== undefined
+            ? { reviewItemId: declaredItemId(docId, settled) }
+            : {}),
           // `gate` is undefined on a DEDUPLICATED request — it never
           // ran the closure — so the hold is read back off the stored
           // payload rather than dropped. See `recordedThreadHold`.
@@ -764,11 +796,15 @@ export async function handleDocThreadRoutes(
         ? await gateThreadDeclaration(docId, res.thread, declared.review, author)
         : undefined;
     const findHandoff = threadUrl(docId, Boolean(visitor));
-    return res.ok
+    const found = res.ok ? (docStore.getThread(docId, res.thread.id) ?? res.thread) : null;
+    return res.ok && found
       ? j(200, {
-          thread: docStore.getThread(docId, res.thread.id) ?? res.thread,
+          thread: found,
           ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
           ...(findHandoff ? { threadUrl: findHandoff } : {}),
+          ...(declaredItemId(docId, found) !== undefined
+            ? { reviewItemId: declaredItemId(docId, found) }
+            : {}),
           ...heldFields(findGate),
         })
       : j(409, res);

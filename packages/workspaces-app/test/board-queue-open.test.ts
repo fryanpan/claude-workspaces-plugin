@@ -76,6 +76,39 @@ describe('createBoardQueueOpeners', () => {
     expect(o.assigned).toEqual(['/workspaces/w-1/docs/plan-a?thread=th-7']);
   });
 
+  /**
+   * A question asked ON a mockup opens the MOCKUP. `/docs/` renders a
+   * mockup's stored HTML in the markdown editor — a 200, and the one surface
+   * on which "does this screen read right" cannot be answered at all.
+   */
+  it('opens a mockup comment on the mockup, at the thread that asked', () => {
+    const o = openers();
+    const still = o.openReviewItem(
+      item({
+        thread: { kind: 'doc-thread', docId: 'd-mock', threadId: 'th-2', docType: 'mockup' },
+      }),
+    );
+    expect(still).toBe(false);
+    expect(o.assigned).toEqual(['/workspaces/w-1/mockups/d-mock?thread=th-2']);
+  });
+
+  it('CONTROL: the same row without the kind still opens the doc surface', () => {
+    // An older server ships no `docType`, and the destination it always had
+    // has to survive that. Without this control the assertion above would
+    // pass on a client that sent every doc row to /mockups/.
+    const o = openers();
+    o.openReviewItem(item({ thread: { kind: 'doc-thread', docId: 'd-mock', threadId: 'th-2' } }));
+    expect(o.assigned).toEqual(['/workspaces/w-1/docs/d-mock?thread=th-2']);
+
+    const markdown = openers();
+    markdown.openReviewItem(
+      item({
+        thread: { kind: 'doc-thread', docId: 'plan-a', threadId: 'th-7', docType: 'markdown' },
+      }),
+    );
+    expect(markdown.assigned).toEqual(['/workspaces/w-1/docs/plan-a?thread=th-7']);
+  });
+
   it('carries the reader’s queue place onto the doc URL, but only when asked', () => {
     const o = openers();
     o.openReviewItem(item({ thread: { kind: 'doc', docId: 'plan-a', threadId: 'th-7' } }), 'k-42');

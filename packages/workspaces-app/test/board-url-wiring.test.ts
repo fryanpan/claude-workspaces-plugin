@@ -141,13 +141,16 @@ describe('emitted links are canonical', () => {
     expect(BOARD_APP).toContain('taskShareUrl(location.origin, workspaceIdFromPath(), taskId)');
   });
 
-  it('a doc-thread review item navigates to the workspace doc address', () => {
+  it('a doc-thread review item never falls back to the legacy /review/ shape', () => {
     // The legacy `/review/` shape stays only where the doc's workspace is
     // unknown client-side (presence follows) — there the server's redirect is
     // the resolver. This jump knows its workspace, so it says so.
-    expect(BOARD_APP).toMatch(
-      /\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/docs\/\$\{encodeURIComponent\(t\.docId\)\}\?thread=/,
-    );
+    //
+    // WHICH address it emits is no longer pinned by source text here: the
+    // surface now depends on the doc's kind (a mockup's item opens on the
+    // mockup), so `board-queue-open.test.ts` drives `openReviewItem` and
+    // reads the emitted URL for all three cases. What is left is the
+    // ABSENCE, which no behavioural test can check across four files.
     expect(BOARD_APP).not.toMatch(/`\/review\/[^\n]*\?thread=/);
   });
 });
