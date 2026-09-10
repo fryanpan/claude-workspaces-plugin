@@ -50,12 +50,17 @@ export const DEFAULT_NOTES_METHOD: NotesMethod = 'original';
  * while offering one and finding out later that it drops speakers costs the
  * notes of whoever picked it.
  *
- * TODAY THAT IS THE ORIGINAL ALONE, and the reason is a measurement that
- * could not be finished rather than a method that failed. The eval's key
- * reached its monthly usage limit on 2026-09-09 with one complete run of the
- * original and none of either ledger method on the shipped prompt; it regains
- * access on 2026-10-01. Adding the two ledger ids back is this one line, once
- * two clean runs of each exist.
+ * TODAY THAT IS THE ORIGINAL ALONE, and the reason is a measurement that has
+ * not been finished rather than a method that failed: one complete run of the
+ * original exists and neither ledger method has two clean runs on the shipped
+ * prompt. Adding the two ledger ids back is this one line, once they do.
+ *
+ * DO NOT WRITE A DATE HERE. This paragraph carried one for a while — a spend
+ * limit said to lift on a named day — and it was wrong within a day of being
+ * written, because that is a fact about a key rather than about the
+ * note-takers this module describes. What gates the list is the eval's own
+ * output, which is checkable; anything else read here is a claim nobody
+ * re-reads.
  *
  * The FOLD HIDES ITSELF when this holds fewer than two methods, because a
  * chooser with one row is a control that does nothing.
