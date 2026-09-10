@@ -205,12 +205,68 @@ function rewriteSpeakerTagRuns(
           prose.insertTextWithMarks(node, edit.offset, text, {
             attributes: attributesFor(edit.attributes, edit.rewrite.href),
           });
+        } else {
+          closeTheGap(node, edit.offset);
         }
         replaced++;
       }
     }
   }, 'agent');
   return { replaced };
+}
+
+/** The plain words of a `Y.XmlText`, embeds counted one position wide so an
+ *  offset taken from the delta still lands where it means to. */
+function plainTextOf(node: Y.XmlText): string {
+  let out = '';
+  for (const op of node.toDelta() as YTextOp[]) {
+    out += typeof op.insert === 'string' ? op.insert : '\u0000';
+  }
+  return out;
+}
+
+/** Punctuation that must not be left floating after the word before it. */
+const CLINGING = /^[.,;:!?)\]]/;
+
+/** An attribution separator: punctuation whose only job was to introduce the
+ *  name that has just been taken out. */
+const NAME_SEPARATOR = /^[ \t]*(?::|—|–)[ \t]*/;
+
+/**
+ * Close the hole a WITHDRAWN mention leaves behind, in the doc itself.
+ *
+ * The markdown gate does this on a string (`speaker-tags.ts`); this is the
+ * same tidy where the notes actually live, because a claim can also be
+ * withdrawn long after the words were written — the engine's whole-session
+ * pass decides a turn belonged to nobody, and the mention it wrote goes.
+ *
+ * Deleting only the mention's own span leaves the punctuation that was
+ * introducing it: `[@Devi](speaker:B) wants the gate` came out as a bullet
+ * opening with two spaces and a lowercase verb. So the separator or the one
+ * spare space goes too, and a sentence the name was opening gets its capital
+ * back — from the marks already at that position, so a bolded lead stays
+ * bold.
+ */
+function closeTheGap(node: Y.XmlText, offset: number): void {
+  const text = plainTextOf(node);
+  const before = text.slice(0, offset);
+  const rest = text.slice(offset);
+  const separator = NAME_SEPARATOR.exec(rest);
+  if (separator && separator[0].length > 0) {
+    node.delete(offset, separator[0].length);
+  } else if (rest.startsWith(' ') && (before.endsWith(' ') || before.trim() === '')) {
+    node.delete(offset, 1);
+  } else if (before.endsWith(' ') && (rest === '' || CLINGING.test(rest))) {
+    node.delete(offset - 1, 1);
+    return;
+  }
+  if (before.trim() !== '') return;
+  const now = plainTextOf(node).slice(offset);
+  const word = /^[A-Za-z]+/.exec(now)?.[0];
+  if (word === undefined || word !== word.toLowerCase()) return;
+  const attributes = prose.coveringInlineMarks([{ node, offset, length: 1 }]).attributes;
+  node.delete(offset, 1);
+  prose.insertTextWithMarks(node, offset, word[0]!.toUpperCase(), { attributes });
 }
 
 /** The site's marks with the link mark pointed somewhere new — or dropped,

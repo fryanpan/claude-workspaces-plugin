@@ -117,6 +117,38 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  * run itself and names the ids in the prompt (`notes-regroup.ts`). The words
  * below are the rule; that block is the tick's own arithmetic.
  */
+/**
+ * The rules that ask the note-taker WHO SAID IT — and the only part of the
+ * instructions a solo meeting does not get.
+ *
+ * WHY IT IS A SEPARATE CONSTANT. A meeting with one voice in the room is
+ * shown transcript lines carrying no name at all (`meeting-notes.ts` hands
+ * the composer bare turns until a second voice has been heard), and these
+ * rules then ask it for something it has not been given: attribution for
+ * every note, plus "Speaker B" spelled out as the shape such a name takes.
+ * A model asked for a name it does not have invents one, and that is exactly
+ * what a solo meeting written up as Speaker A and Speaker B was — the prompt
+ * naming the phantom before the composer did.
+ *
+ * So the block is spliceable, `withoutSpeakerAttribution` takes it back out,
+ * and a multi-voice prompt is byte-identical to what it always was.
+ */
+export const NOTES_SPEAKER_ATTRIBUTION = [
+  '- Transcript lines are prefixed with who said them, as "Name (LABEL):".',
+  '  Use that to name the owner of an action item or the side of a',
+  '  disagreement; a name like "Speaker B" is a voice nobody has named yet —',
+  '  keep it as written, never guess who it is.',
+  '- ATTRIBUTE EVERY NOTE TO THE VOICE THAT SAID IT, as a speaker tag: the',
+  '  markdown link `[@Name](speaker:LABEL)`, where LABEL is the label in',
+  "  parentheses on the transcript line and Name is that line's name. Write",
+  '  it where the person would be named — usually opening the note — and',
+  '  write one per voice the note covers, never a tag for a voice that line',
+  '  did not come from. A note that summarizes the room rather than anybody',
+  '  in it takes no tag.',
+  '- A DECISION AND AN OPEN QUESTION ALWAYS KEEP THEIR SPEAKER TAG. Who',
+  '  decided, and who is asking, is part of what those notes say.',
+].join('\n');
+
 export const DEFAULT_NOTES_INSTRUCTIONS = [
   'You are the live note-taker for a working meeting, writing in the doc the',
   'room is looking at while they talk. You are shown the doc as a list of',
@@ -239,25 +271,45 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '  than no note at all.',
   '',
   'NAMES AND LINKS',
-  '- Transcript lines are prefixed with who said them, as "Name (LABEL):".',
-  '  Use that to name the owner of an action item or the side of a',
-  '  disagreement; a name like "Speaker B" is a voice nobody has named yet —',
-  '  keep it as written, never guess who it is.',
-  '- ATTRIBUTE EVERY NOTE TO THE VOICE THAT SAID IT, as a speaker tag: the',
-  '  markdown link `[@Name](speaker:LABEL)`, where LABEL is the label in',
-  "  parentheses on the transcript line and Name is that line's name. Write",
-  '  it where the person would be named — usually opening the note — and',
-  '  write one per voice the note covers, never a tag for a voice that line',
-  '  did not come from. A note that summarizes the room rather than anybody',
-  '  in it takes no tag.',
-  '- A DECISION AND AN OPEN QUESTION ALWAYS KEEP THEIR SPEAKER TAG. Who',
-  '  decided, and who is asking, is part of what those notes say.',
+  NOTES_SPEAKER_ATTRIBUTION,
   '- Where a note is about a task, doc or earlier meeting offered to you',
   '  above, cite it as a markdown link the first time that note names it.',
   '  When you replace_block a bullet, keep the links it already carried.',
   '',
   'Output the JSON array only: no preamble, no explanation, nothing after it.',
 ].join('\n');
+
+/**
+ * The same instructions with the attribution rules taken out — what a SOLO
+ * meeting's note-taker is sent.
+ *
+ * A VERBATIM REMOVAL, and it has to be: the words are the operator's to
+ * change (`prompt-store.ts`), so an override that rewrote this block is one
+ * this cannot find. It then returns the prompt unchanged, which is the safe
+ * direction — the operator gets the words they wrote, and the deterministic
+ * gate downstream still takes any invented tag out of the notes. What is
+ * lost is only the first of the two defences, for a deployment that opted
+ * out of the shipped wording.
+ */
+export function withoutSpeakerAttribution(instructions: string): string {
+  let out = instructions;
+  for (const segment of SOLO_REMOVES) out = out.replace(segment, '');
+  return out;
+}
+
+/**
+ * What comes out for a solo meeting: the attribution block, and the one
+ * clause elsewhere in the instructions that assumes a tag will be there.
+ *
+ * The clause matters as much as the block. "The speaker tag does not count
+ * towards the twenty" is not an instruction to attribute, but it tells a
+ * model reading it that a speaker tag is a thing these notes have — which is
+ * all a model needs to start writing one.
+ */
+const SOLO_REMOVES: readonly string[] = [
+  `${NOTES_SPEAKER_ATTRIBUTION}\n`,
+  ' The speaker tag\n  does not count towards the twenty.',
+];
 
 /**
  * The operator's `notes-prompt.md`, or null when there is nothing to read.

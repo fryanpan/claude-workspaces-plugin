@@ -150,6 +150,19 @@ export interface NotesMeetingSummary {
   composeFailures: number;
   refusedTooLong: number;
   /**
+   * Speaker tags the deterministic gate took out of composed notes because
+   * the meeting never carried the voice they named.
+   *
+   * A FACT ABOUT THE PIPELINE, which is why it rides here and not in the
+   * quality report. `unknownVoices` over there counts phantoms that SURVIVED
+   * into the notes a person now reads; this counts the ones caught on the
+   * way in. Before it existed the gate spoke only through `onError`, so a
+   * meeting whose composer invented a voice on every tick reported "0
+   * unknown speakers" on the one line anybody reads — the gate having done
+   * its job and left no trace of having had to.
+   */
+  phantomTags: number;
+  /**
    * THE LATENCY, when the meeting was measured: milliseconds from a
    * sentence settling to its note being in the doc, median and worst over
    * every tick that produced one. Absent when timing was off — which is the
@@ -327,6 +340,23 @@ export interface NotesComposeInput {
    * not to aim one there without cause.
    */
   humanNotes?: readonly string[];
+  /**
+   * Has this meeting heard more than one voice yet?
+   *
+   * The turns already say so implicitly — the solo path strips `speaker`
+   * off every one of them — but implicitly is not good enough for the
+   * prompt. A multi-speaker tick whose diarization labelled nothing looks
+   * exactly like a solo tick from the turns alone, and the instructions must
+   * not lose their attribution rules over one unlabelled minute. So the
+   * session states it, and `buildNotesPrompt` sends a solo note-taker no
+   * attribution rules at all: rules asking for a name it was never given are
+   * how a huddle with one person in it came out written as Speaker A and
+   * Speaker B.
+   *
+   * Absent reads as multi, which is what every caller that predates the
+   * field meant and keeps their prompt byte-identical.
+   */
+  multiSpeaker?: boolean;
   context?: NotesProjectContext;
   /** Tasks captured from THIS tick's speech. Absent when capture is off,
    *  found nothing, or failed — the notes compose either way. */
@@ -1015,6 +1045,7 @@ export function beginNotesSession(
   const heldMethodLines: string[] = [];
   let composeFailures = 0;
   let refusedTooLong = 0;
+  let phantomTags = 0;
   /**
    * Which turns the engine settled, and which of them a compose actually
    * carried. Sets rather than counters because a turn can reach the composer
@@ -1480,6 +1511,7 @@ export function beginNotesSession(
         docId: ids.docId,
         meetingId: ids.meetingId,
         tick: { ...tick, turns },
+        multiSpeaker: multi,
         ...(retries.length > 0 ? { missed: retries } : {}),
         outline,
         ...(notesHeadingId !== undefined ? { notesHeadingId } : {}),
@@ -1529,6 +1561,7 @@ export function beginNotesSession(
           unknownTags.push(...out.unknown);
           return { ...edit, markdown: out.markdown };
         });
+        phantomTags += unknownTags.length;
         if (unknownTags.length > 0) {
           deps.onError?.(
             `notes: dropped speaker tag${unknownTags.length > 1 ? 's' : ''} for ` +
@@ -2034,6 +2067,7 @@ export function beginNotesSession(
         ideas: { ...ideas.coverage },
         composeFailures,
         refusedTooLong,
+        phantomTags,
         ...(latencies.length > 0
           ? {
               latencyMedianMs: median(latencies) ?? 0,

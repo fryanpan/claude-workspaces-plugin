@@ -1673,9 +1673,10 @@ describe('inline speaker tags', () => {
     );
   });
 
-  it('unwraps a tag naming a voice the meeting never carried, and says so', async () => {
-    // The deterministic gate on a model-made claim. The words stay; the
-    // attribution — the only part that was invented — goes.
+  it('drops a tag naming a voice the meeting never carried, and says so', async () => {
+    // The deterministic gate on a model-made claim. The note's words stay;
+    // the attribution — the only part that was invented — goes, and so does
+    // the NAME, which is the whole of what a reader would have seen.
     const schedule = new ManualScheduler();
     const inputs: NotesComposeInput[] = [];
     const updates: NotesUpdate[] = [];
@@ -1697,7 +1698,8 @@ describe('inline speaker tags', () => {
     );
     session.onTurn({ turn: 0, text: 'Somebody should run it.', final: true, speaker: 'B' });
     await session.end();
-    expect(composedMarkdown(updates[0]!)).toContain('- Priya volunteered to run it.');
+    expect(composedMarkdown(updates[0]!)).toContain('- Volunteered to run it.');
+    expect(composedMarkdown(updates[0]!)).not.toContain('Priya');
     expect(composedMarkdown(updates[0]!)).not.toContain('speaker:C');
     expect(errors.join(' ')).toContain('no such voice');
   });
@@ -2922,7 +2924,7 @@ describe('speaker tags only in multi-speaker sessions', () => {
     expect(inputs[1]?.tick.turns[0]).toMatchObject({ speaker: 'Speaker B', speakerLabel: 'B' });
   });
 
-  it('a solo composer’s invented tag is unwrapped, even for a voice the meeting carried', async () => {
+  it('a solo composer’s invented tag is dropped, even for a voice the meeting carried', async () => {
     const schedule = new ManualScheduler();
     const updates: NotesUpdate[] = [];
     const composer: NotesComposer = {
@@ -2949,7 +2951,11 @@ describe('speaker tags only in multi-speaker sessions', () => {
     schedule.fire();
     await session.end();
     expect(composedMarkdown(updates[0]!)).not.toContain('speaker:A');
-    expect(composedMarkdown(updates[0]!)).toContain('said it.');
+    // The words of the note, and no voice: a solo meeting has nobody to
+    // name, so "Speaker A" in the sentence would be a person invented twice
+    // over — once by the composer and once by the gate that let it stand.
+    expect(composedMarkdown(updates[0]!)).toContain('Said it.');
+    expect(composedMarkdown(updates[0]!)).not.toContain('Speaker A');
   });
 });
 

@@ -2323,7 +2323,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_agent',
       description:
-        'Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged rows to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away.',
+        'Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged rows to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away. ACT ON `sentry`: it names the Sentry projects this deployment raises alarms into, and a raised alarm reaches you only if you hold the subscription — which is keyed on your LAUNCH path, so a session started somewhere new holds nothing and is told nothing. Call sentry_watch_project on each slug it returns (idempotent, so it is free when you already hold it); sentry_list_my_watches is the check.',
       inputSchema: {
         type: 'object',
         properties: {

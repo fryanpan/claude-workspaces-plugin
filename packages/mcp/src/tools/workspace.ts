@@ -385,6 +385,10 @@ export async function handleWorkspaceTool(
         seatTakenFrom?: string;
         watching?: number;
         notes?: string[];
+        sentry?: {
+          projects: Array<{ slug: string; raises: string }>;
+          remedy: string;
+        };
       };
       // Only when this session attached as ITSELF: the keepalive proves
       // THIS process is alive, and refreshing somebody else's attachment
@@ -465,6 +469,13 @@ export async function handleWorkspaceTool(
         // This attach TOOK the seat from a holder that was gone. Say so
         // wherever you report in — a handover is not a detail.
         ...(res.seatTakenFrom !== undefined ? { seatTakenFrom: res.seatTakenFrom } : {}),
+        // WHICH SENTRY PROJECTS THIS DEPLOYMENT RAISES INTO. Alarms reach a
+        // session only if that session holds the subscription, and it is
+        // keyed on the session's LAUNCH path — so a session started
+        // somewhere new holds nothing and is never told. Call
+        // sentry_watch_project on each slug (idempotent) and check with
+        // sentry_list_my_watches. Absent from an older server.
+        ...(res.sentry !== undefined ? { sentry: res.sentry } : {}),
       });
     }
     case 'heartbeat': {

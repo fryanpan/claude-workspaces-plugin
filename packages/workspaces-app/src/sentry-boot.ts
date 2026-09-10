@@ -1,3 +1,4 @@
+import { isRecoveredMockCollision } from '@claude-workspaces/core/mock-swap-noise';
 import { scrubBrowserEvent, scrubTelemetryItem } from '@claude-workspaces/core/trace-privacy';
 /**
  * The browser's Sentry init — one entry, every page type.
@@ -74,12 +75,25 @@ if (dsn) {
         build_id: BUILD_ID || UNKNOWN,
       },
     },
-    // The privacy floor, shared with the server (PR #487) and extended for
-    // the shapes only a browser event has. A page URL, a fetch span's
+    // Two questions on the way out, in this order.
+    //
+    // Is this the redeclaration a mockup's live reload has ALREADY recovered
+    // from? A round that re-runs the mock's own top-level `const` is rejected
+    // by the browser, retried inside a block by the widget's swap, and lands —
+    // but Chrome reports that early error globally on its way past, and this
+    // handler was registered before the widget ever loaded. Nine events in one
+    // day for a failure nothing needs to look at is how a real client error
+    // gets lost. `isRecoveredMockCollision` drops one only while the insert
+    // that will be retried is on the stack, so a collision nothing recovers
+    // still files; see mock-swap-noise.ts for why it cannot be a listener.
+    //
+    // Then the privacy floor, shared with the server (PR #487) and extended
+    // for the shapes only a browser event has. A page URL, a fetch span's
     // description and a navigation breadcrumb all carry a doc id — which can
     // be a bound file's relative PATH. Nothing leaves this browser without
     // going through here.
-    beforeSend: (event) => scrubBrowserEvent(event) as typeof event,
+    beforeSend: (event) =>
+      isRecoveredMockCollision(event) ? null : (scrubBrowserEvent(event) as typeof event),
     beforeSendTransaction: (event) => scrubBrowserEvent(event) as typeof event,
     // Logs and metrics travel in their own envelopes and never pass the two
     // hooks above; a console line or a metric attribute is exactly where a
