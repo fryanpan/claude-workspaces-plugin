@@ -1,6 +1,6 @@
 # Scheduled tasks — the board starting work at its time
 
-A board row can carry a **rule** that says when its work should start. When
+A board task can carry a **rule** that says when its work should start. When
 the rule comes due the server files the work as an ordinary task and puts it
 in front of its owner. Nobody has to be watching a clock, and no session has
 to stay awake to be the thing that remembers.
@@ -11,27 +11,27 @@ mechanics live in the two modules' own doc comments and are not repeated
 here: `packages/core/src/task-schedule.ts` (all the arithmetic, pure) and
 `packages/server/src/task-scheduler.ts` (the loop that acts on it).
 
-## A rule row is not the work
+## A rule task is not the work
 
-The row you write the rule on is the **rule**. It never moves through
+The task you write the rule on is the **rule**. It never moves through
 statuses, and closing it would be closing the thing that produces the work.
 Each time the rule comes due the server creates a separate ordinary task — an
-**instance** — and that is the row somebody actually does.
+**instance** — and that is the task somebody actually does.
 
 An instance is a real task in every way that matters. It lands in the rule's
 own goal band, owned by the rule's owner, filed through the same door as
 anything a person files, so it queues, blocks, gets picked up and closes
 exactly like its neighbours. What sets it apart is one mark, `recurrenceOf`,
 naming the rule it came from and — this is the part a reader needs — **the
-occurrence it stands for**, which is not the same as when the row was
-created. A catch-up after downtime files a row on Friday for Monday's
+occurrence it stands for**, which is not the same as when the task was
+created. A catch-up after downtime files a task on Friday for Monday's
 occurrence, and the board has to be able to say so.
 
 ```mermaid
 flowchart LR
-  R["Rule row<br/>schedule: every weekday 9am"] -->|"occurrence comes due"| S["The loop<br/>task-scheduler.ts"]
+  R["Rule task<br/>schedule: every weekday 9am"] -->|"occurrence comes due"| S["The loop<br/>task-scheduler.ts"]
   S --> I["Instance<br/>ordinary task, rule's band and owner<br/>recurrenceOf: rule + occurrence"]
-  S --> A["Activity note on the rule row<br/>which occurrence, which instance"]
+  S --> A["Activity note on the rule task<br/>which occurrence, which instance"]
   S --> C["Cursor advanced on the rule<br/>lastOccurrenceAt"]
 ```
 
@@ -85,20 +85,20 @@ half an interval for an interval rule. An on-time occurrence is the ordinary
 fire whatever the policy says; the policy is about missed work only. An
 after-completion rule has no slot to miss, so it takes no clause and no chip.
 
-The catch-up instance is an ordinary row with `catchUp` on its recurrence
+The catch-up instance is an ordinary task with `catchUp` on its recurrence
 mark: the board draws the mark in the accent and its title says how many
-occurrences it stands in for. A skip leaves no row, so the record is the rule
-row's activity ("Skipped missed occurrence …") and two counters on the rule:
-`missedTotal`, every occurrence that got no row of its own, and
+occurrences it stands in for. A skip leaves no task, so the record is the rule
+task's activity ("Skipped missed occurrence …") and two counters on the rule:
+`missedTotal`, every occurrence that got no task of its own, and
 `skippedTotal`, the part of that the policy declined.
 
-**The open catch-up row is a lock.** While a catch-up instance is still open,
+**The open catch-up task is a lock.** While a catch-up instance is still open,
 the next occurrence of a fixed-cadence rule *folds into it* — the cursor
 advances, the catch-up's own count grows, the activity says where the
-occurrence went, and no second row is filed. The lock is held on the board,
-in the row's status, not in any process: closing or archiving the catch-up
+occurrence went, and no second task is filed. The lock is held on the board,
+in the task's status, not in any process: closing or archiving the catch-up
 releases it, and the next occurrence files as normal. An ordinary open run is
-not a lock — fixed cadence stacks by design, and only the row that already
+not a lock — fixed cadence stacks by design, and only the task that already
 stands in for missed work refuses company. The decision is
 `missedRunOutcome` in `packages/core/src/schedule-missed.ts`, pure like the
 rest of the arithmetic.
@@ -106,24 +106,24 @@ rest of the arithmetic.
 ## The run record — prove the run happened, not that it was scheduled
 
 Every peer interviewed for this subsystem had a scheduled job fail silently
-for weeks, and all three asked for the same three facts on the row: the last
+for weeks, and all three asked for the same three facts on the task: the last
 run, how it ended, and how old that reading is. A schedule that is not firing
-looks exactly like one that is until the row carries them.
+looks exactly like one that is until the task carries them.
 
 `packages/core/src/schedule-run-record.ts` derives them, pure, from the
 rule's own state and its last instance; the board and the server both call
-it, so the row on screen and the item the server files can never disagree.
-On the Scheduled row it is one phrase after the next run — `Done 2h ago`,
+it, so the task on screen and the item the server files can never disagree.
+On the Scheduled task it is one phrase after the next run — `Done 2h ago`,
 `Running 3d`, `Never ran`, `Ran 2d ago` for an instance the board no longer
 holds — and the rule's activity gets one line per success naming the
 instance the work landed in (`Run finished — t-… done, 2h after it
-started`), so "where did the output go" is answered by the row's own trail.
+started`), so "where did the output go" is answered by the task's own trail.
 
 **A success is written onto the rule** (`state.lastSuccessAt`) by
 `packages/server/src/task-run-record.ts` on the scheduler's pass, the first
 tick after the instance closes `done`. The instance is not a durable
 witness — it can be reopened, archived, or age off a board — and a record
-that forgot a success every time somebody touched the row would be worse
+that forgot a success every time somebody touched the task would be worse
 than none.
 
 **Stale.** The last success is older than one interval plus a slack, the
@@ -133,11 +133,11 @@ rule that has never succeeded counts from its arming. A one-off has no
 interval and is never stale; a rule past its end limit is finished, not
 stale; an after-completion rule's interval is its delay, so an instance
 nobody closes goes stale like any other — the failure the peers described.
-On the row the word `stale` takes the state slot (blocked and triage outrank
+On the task the word `stale` takes the state slot (blocked and triage outrank
 it) and the record turns red.
 
 **Stale files ONE review item, never one per tick.** The server files it on
-the rule row as the scheduler's own actor, through the same door the stall
+the rule task as the scheduler's own actor, through the same door the stall
 escalation uses, and remembers it on the rule (`state.staleItem`). While
 that item is open nothing more is filed. A success withdraws it. Answering
 it closes it too, and an answered item is not filed again until the rule
@@ -145,9 +145,9 @@ has succeeded and gone stale AGAIN — an item re-filed against the silence
 the reader just acknowledged is the log nobody reads, wearing a queue's
 clothes.
 
-## The wake path — a filed row is not a started one
+## The wake path — a filed task is not a started one
 
-Every scheduled row's owner is an agent, and an agent's session is not
+Every scheduled task's owner is an agent, and an agent's session is not
 always running. So filing the instance is the first half of a run; the
 second is getting a session onto it, and that is `task-scheduled-wake.ts`,
 on the same pass as the run record. The pure half — the retry schedule,
@@ -162,8 +162,8 @@ stream gets nothing it could read; instead the SPAWNER — the one session on
 this server that starts others, named by `spawnerAgentId` on
 `ServerOptions` (`CW_SPAWNER_AGENT_ID`, default the fleet's Team Lead) and
 reached on whichever board it is attached to — gets one
-`task.spawn_requested` naming the owner and the row. One per instance: the
-spawned session claiming the row is the answer both are waiting for, and a
+`task.spawn_requested` naming the owner and the task. One per instance: the
+spawned session claiming the task is the answer both are waiting for, and a
 second ask before the first is acted on is noise. Bryan's words for it
 (2026-09-04): *"alert Team Lead to spawn the session just to run one task.
 Then spin down."*
@@ -172,8 +172,8 @@ Then spin down."*
 fifteen and forty-five minutes after the previous one. An attempt that
 reaches nobody is still an attempt — that is what bounds the run. One more
 window after the last, the board stops and files ONE review item on the
-instance, the owner's own row, so a person can start the session, hand the
-row over, or say it can wait. Every attempt is written on the rule
+instance, the owner's own task, so a person can start the session, hand the
+task over, or say it can wait. Every attempt is written on the rule
 (`state.wake`, replaced when the next instance is filed), with who it
 reached, and the moment the instance leaves `todo` the wake records who
 took it. The run record reads that back: an open instance says `Waiting 5m`
@@ -191,7 +191,7 @@ an occurrence at or before the cursor is spent forever, and every later one is
 still owed. Storing when the server happened to notice would make a late fire
 indistinguishable from a fresh one.
 
-The instance and the cursor **land in one write**. Both the rule row and the
+The instance and the cursor **land in one write**. Both the rule task and the
 instance live in the same workspace sidecar, written whole and renamed into
 place. A crash between them is not possible: either both survive, or neither
 does and the next boot fires the occurrence it never finished. That is why
@@ -272,14 +272,14 @@ have, not gaps in the parser:
   cycle it to. The next-owed line says "when it changes", and the
   missed-run chip is absent because the rule has no slot to miss.
 
-The editor is the task panel's Schedule section. An unscheduled row shows one
+The editor is the task panel's Schedule section. An unscheduled task shows one
 ghost affordance; everything else appears once there is a rule to show.
 
 ## What is not here yet
 
-Deliberately, and each is a row of its own:
+Deliberately, and each is a task of its own:
 
-- **the Scheduled board section** — rule rows have no home of their own on the
+- **the Scheduled board section** — rule tasks have no home of their own on the
   board yet, and Scheduled is separate from Blocked.
 
 The scheduler still never starts a session itself: the wake path asks the

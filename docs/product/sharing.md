@@ -355,7 +355,7 @@ becomes useless.
   any time.
 - **Comments need a signed-in person, and the widget's token lives on the
   host page.** The server refuses unsigned browser writes by default
-  (`requireSignInToWrite`, owner decision on the security row, 2026-09-02;
+  (`requireSignInToWrite`, owner decision on the security task, 2026-09-02;
   `CW_REQUIRE_SIGNIN_TO_WRITE=0` turns it off). Reading is never gated. The
   widget asks `GET /api/auth/session` on load and, when the answer is
   `signInToWrite:true`, offers the popup-token handshake on every embed —

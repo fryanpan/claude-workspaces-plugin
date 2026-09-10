@@ -119,7 +119,8 @@ over — the change merged — retire it yourself rather than leaving it to
 present its unresolved threads forever: `archive_attachment_set(setId, reason)`, with
 the id `create_diff_review` returned and a reason like `"merged in #301"`.
 
-Archiving takes the review off the home page and off its board row and stops
+Archiving takes the review off the home page and off any board task it was
+linked to, and stops
 its docs syncing, and it **destroys nothing**: the docs stay on disk, every
 comment still feeds the activity analyses, and `unarchive_attachment_set(setId)` puts
 the whole thing back — threads, board links and all. Open threads do not block

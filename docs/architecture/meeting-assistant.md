@@ -763,7 +763,7 @@ reach an LLM.
 
 **What the note-taker is asked to write** is a settings file rather than a
 code path (`notes-prompt-store.ts`), and the words in it are the behaviour.
-They ask for what a good notetaker does in a shared meeting (Bryan's row,
+They ask for what a good notetaker does in a shared meeting (Bryan's task,
 2026-09-03: *"the doc is the room's shared memory instead of a transcript
 with headings"*):
 
@@ -818,7 +818,7 @@ with headings"*):
   beats no note.
 - **Keep the speaker on a decision and on an open question.** Who decided and
   who is asking is part of what those notes say.
-- **Link what it names**: a board row or doc the tick's speech named arrives
+- **Link what it names**: a board task or doc the tick's speech named arrives
   in the prompt with its URL (below), and the note cites it inline.
 
 A person's line is protected by the DOC rather than by any of this. The
@@ -877,7 +877,7 @@ compose them again, `empty` because the compose ran and wrote nothing. The
 server used to report `written` for both of the last two states, so a tick
 that composed no edits took the speaker's words off the screen with no note
 to show for them: eleven of seventeen ticks on the meeting that produced this
-row (Bryan, 2026-09-09). An empty tick's words therefore stay on screen for
+finding (Bryan, 2026-09-09). An empty tick's words therefore stay on screen for
 the rest of the meeting, which is the honest reading of "nothing was written
 up about this".
 
@@ -1181,9 +1181,9 @@ wrote something does not get to rewrite it.
 ### What a note may link: the board, searched per tick
 
 A note-taker links the ticket somebody just named. Doing that needs the board,
-and the board is hundreds of rows — handing all of them to every tick would
+and the board is hundreds of tasks — handing all of them to every tick would
 cost more prompt than the notes. So the catalogue is assembled ONCE per
-meeting (`resolveReferences`: every open row with its `taskCaptureUrl`, every
+meeting (`resolveReferences`: every open task with its `taskCaptureUrl`, every
 doc the board holds with its `docLookupUrl` and the date it last carried a
 meeting) and SEARCHED per tick (`notes-references.ts`). Only what this tick's
 words actually named reaches the prompt, with its URL, and the composer's job
@@ -1196,20 +1196,20 @@ missed link costs a reader one search. So a match needs a contiguous run of
 the title's own significant words: three words is distinctive by itself, two
 only when they are half the title or more, and one only when it is eight
 characters or longer. That coverage rule is what refuses "meeting notes" as a
-match for a six-word row about meeting notes — the pair every row on a board
+match for a six-word task about meeting notes — the pair every task on a board
 about this product shares. Words are stemmed on both sides, because a board
 writes "Export dialog forgets the chosen range" and the room says "the export
 dialog's forgetting the chosen range".
 
-Four references per tick, at most. Rows the capture pass FILED from this
+Four references per tick, at most. Tasks the capture pass FILED from this
 speech arrive separately as `taskLinks`; these were merely mentioned, and most
 ticks name none.
 
 ### "Link that to the existing task" — the loose matcher, and the question
 
-The precision bar above is right for a row nobody asked about, and wrong the
+The precision bar above is right for a task nobody asked about, and wrong the
 moment somebody asks. "Link that to the existing task" is a person saying they
-know the row exists; answering "no contiguous run of significant words" to
+know the task exists; answering "no contiguous run of significant words" to
 that is a refusal to look. And the ask is exactly when the description is
 loosest — a person who could quote the title would have quoted it.
 
@@ -1217,15 +1217,15 @@ So there are two matchers with opposite bars, and which one is allowed to
 answer depends on whether anybody asked (`notes-link-intent.ts`, deterministic
 and testable with no model in the loop):
 
-- **Asked.** `detectLinkAsk` reads a link verb followed by a row noun
+- **Asked.** `detectLinkAsk` reads a link verb followed by a task noun
   ("link that to the ticket", "hook this up to the card"), and refuses when
   the noun is preceded by *new* / *another* / *separate* — "file a new ticket"
   is the capture pass's job, not this one. The rest of the tick's words then
   go through `scoreRelatedWork`, the SAME scorer behind the board's
-  `find_related_work` verb, over the row titles AND their bodies. The ask's
-  own vocabulary is blanked out of the query first, or a row called "Task
+  `find_related_work` verb, over the task titles AND their bodies. The ask's
+  own vocabulary is blanked out of the query first, or a task called "Task
   capture" outranks the subject in every sentence containing the word "task".
-  The top row is linked when it clears a low bar and beats the runner-up by a
+  The top task is linked when it clears a low bar and beats the runner-up by a
   margin; a near-tie is not guessed at, it is offered.
 - **Not asked.** Nothing. No scoring runs at all.
 

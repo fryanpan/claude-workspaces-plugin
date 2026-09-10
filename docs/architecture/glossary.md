@@ -74,7 +74,7 @@ The product and the code have drifted into two vocabularies: the UI says Home, T
   1. Decided (Bryan, 2026-09-02): drop "Huddle" from the UI; the two kinds are Plan and Meeting notes, and the button becomes "Have a meeting". Code may keep huddle as the shared container until the rename pass.
   2. **Shipped 2026-09-02, words only.** No user-visible string says Huddle any more. The identifiers listed in the concept table above were deliberately left alone so the rename lane can move them in one pass rather than in a copy-edit.
 7. **`park_task`** — the `parked` task state was removed in August 2026 and the verb now means "move to triage and leave a note" (`server/src/park-note.ts`, `park-migration.ts`). 
-  1. Decided (Bryan, 2026-09-02): triage is confusing as a parking place; add a Blocked state meaning "waiting on a dependency or a date", park_task becomes block_task and moves a row there with the reason. Filed as its own task.
+  1. Decided (Bryan, 2026-09-02): triage is confusing as a parking place; add a Blocked state meaning "waiting on a dependency or a date", park_task becomes block_task and moves a task there with the reason. Filed as its own task.
 
 ## Suggested rename order
 

@@ -1,6 +1,6 @@
 # The stall check — design
 
-**Goal:** every open row on every board is either moving, or its blocker is
+**Goal:** every open task on every board is either moving, or its blocker is
 named where the person it waits on can answer it, and nobody has to poke to
 find out.
 
@@ -12,10 +12,10 @@ block each, are in [criteria.md](criteria.md).
 
 ## What "working" means
 
-Three conditions, checked on every row, every tick. Anything in the stall
+Three conditions, checked on every task, every tick. Anything in the stall
 check that serves none of them is weight.
 
-1. **No silent stall.** A row quiet longer than the window either has a
+1. **No silent stall.** A task quiet longer than the window either has a
    filed ask on the person it waits for, or its lead has been told and is
    acting.
 2. **No noise to a person.** The owner is only ever shown something they can
@@ -28,14 +28,14 @@ check that serves none of them is weight.
 
 | Finding | Who hears it | How |
 | --- | --- | --- |
-| A row is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
-| A row waits on a person and nothing is filed on that person's queue | The lead | Same frame, `unfiled` |
+| A task is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
+| A task waits on a person and nothing is filed on that person's queue | The lead | Same frame, `unfiled` |
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
-| An agent-filed UI row is being built with no answered review item | The lead | Same frame, `ungatedUi` |
+| An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
 | No session on the board is alive | Team Lead, then the owner | The last resort — the board files an item past the lead |
 
-The owner is the addressee of exactly one row of that table, and only when
-Team Lead cannot be reached either. A row waiting on the owner with a filed
+The owner is the addressee of exactly one line of that table, and only when
+Team Lead cannot be reached either. A task waiting on the owner with a filed
 item is already on their queue and is never re-announced.
 
 ## The rebuild, in order
@@ -47,10 +47,10 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    persisted, read from `GET /workspaces/<id>/keep-moving` and the log.
    Appears on no board. The box cron it replaced posted 404s for nine days
    before anyone noticed.
-2. **"Waiting on a person" is declared, not inferred** (PR 802). A row
+2. **"Waiting on a person" is declared, not inferred** (PR 802). A task
    waiting on a person carries the address of every filed item excusing it —
    a ticket item, or a comment-borne item on the ticket's thread or a doc
-   the row links — and whether an item still excuses the row is the Home
+   the task links — and whether an item still excuses the task is the Home
    queue's own predicate (`isReviewItemOnQueue`, `pendingDeclaration`), so a
    held, answered, withdrawn or reader-asked-back item excuses nothing. A
    note saying "waiting on Bryan" with nothing filed is a plain stall to the
@@ -63,13 +63,13 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    escalation window (an hour). Only then does it go past its lead: its own
    stall frame to Team Lead, on whichever board Team Lead holds a stream,
    once per window while it stays dead; and a review item on the reader's
-   queue only when Team Lead is unreachable too. A live lead's rows never
-   escalate, however stuck — the wake is their addressee. A row waiting on a
+   queue only when Team Lead is unreachable too. A live lead's tasks never
+   escalate, however stuck — the wake is their addressee. A task waiting on a
    person with the ask filed is not a finding, so it is never in the item.
    The told clock, the undeliverable clock, the anchor mask, the settle
    window and the re-file cooldown are gone with the trigger: the item is
    withdrawn the tick a session is on the board again, and the board's own
-   writes on its anchor row do not count as the row moving.
+   writes on its anchor task do not count as the task moving.
 4. **A hold cannot become a silent ask** (this PR). A held review item has
    two windows, and they belong to two people. At five minutes
    (`CW_HELD_ITEM_MINUTES`) the FILER is told, once per hold — the filer can
@@ -85,26 +85,26 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    number on each. A hold revised away inside the window never reaches the
    lead at all.
 5. **A UI change an agent proposed cannot ship unasked** (this PR). An
-   agent-filed row that changes what a person sees on screen clears a review
+   agent-filed task that changes what a person sees on screen clears a review
    item — answered — before anybody builds it. That is the complex-task gate
    the two board skills already carry; what is new is that a breach is
-   VISIBLE. A row an agent filed, in flight, whose words read as UI work
+   VISIBLE. A task an agent filed, in flight, whose words read as UI work
    (`ui-review-gate.ts`), with no answered review item on either of its two
    surfaces, is named in the lead's stall frame as `ungatedUi` and counted on
-   the verdict's `ungatedUi` line. It is the only finding here about a row
+   the verdict's `ungatedUi` line. It is the only finding here about a task
    that IS moving, which is the point: the rule it breaks is about what got
    skipped on the way, and every other check on this board is a check for
    silence. Three of its four reads are explicit state; the fourth is a
-   keyword read of the row's own words, and its limits are in
+   keyword read of the task's own words, and its limits are in
    [criteria.md](criteria.md).
 
 ## How to read the verdict
 
 `GET /workspaces/<id>/keep-moving` returns the latest verdict and a week of
-history. Each verdict is PASS or FAIL with the rows behind it: `stalled`,
+history. Each verdict is PASS or FAIL with the tasks behind it: `stalled`,
 `unfiled`, `unreadable`, `held` (items past the window), `escalated` (items
-the board filed to the owner in the last day) and `ungatedUi` (rows built past
-the UI gate), plus `waiting` — the rows a
+the board filed to the owner in the last day) and `ungatedUi` (tasks built past
+the UI gate), plus `waiting` — the tasks a
 filed item excuses, each with the item's address — which is a record rather
 than a finding. The target is PASS on every
 run and `escalated` at zero. The log line is
