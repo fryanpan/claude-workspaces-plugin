@@ -136,17 +136,24 @@ describe('body — kept only where a list surface draws it', () => {
     expect(slim.bodyTruncated).toBe(true);
   });
 
-  it('drops it again once that decision is answered, or archived, or done', () => {
+  it('drops it again once that decision is answered or done', () => {
     const answered = { answer: { text: 'yes', by: 'Bryan', ts: NOW } };
     expect(
       slimTaskRow(liveRow('t-a', { needs: 'decision', ...answered }), NOW).body,
     ).toBeUndefined();
     expect(
-      slimTaskRow(liveRow('t-b', { needs: 'decision', archivedAt: NOW - 1000 }), NOW).body,
-    ).toBeUndefined();
-    expect(
       slimTaskRow(liveRow('t-c', { needs: 'decision', status: 'done' }), NOW).body,
     ).toBeUndefined();
+  });
+
+  it('keeps it on an ARCHIVED unanswered decision, which still draws a card', () => {
+    // MUTATION CONTROL: this is the assertion that fails if `archivedAt ===
+    // undefined` goes back into `rendersBodyInAList` — the shape this had on
+    // the way in. Archiving writes `archivedAt` and leaves `status` alone, so
+    // the row still passes every clause `decisionRows` tests and the
+    // walkthrough still renders `row.task.body` for it.
+    const archived = liveRow('t-arch', { needs: 'decision', archivedAt: NOW - 1000 });
+    expect(slimTaskRow(archived, NOW).body).toBe(archived.body);
   });
 });
 

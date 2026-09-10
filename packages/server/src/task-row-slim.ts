@@ -22,7 +22,9 @@
  *     `heldReviewItems`, `discussionStream` and the panel's "Original words"
  *     block — three surfaces that exist only while a ticket is open on
  *     screen. 14.9% of the wire, carried by 22 rows.
- *   - **`body` and `bodyTruncated` go from every row but an open decision.**
+ *   - **`body` and `bodyTruncated` go from every row but an unanswered,
+ *     not-done decision** — archived or not, because archiving is not a
+ *     status and the decision queue does not filter on it.
  *     The panel mounts the live body doc over `bodySlot`, so the projected
  *     copy is a pre-mount fallback there; the ONE list surface that renders
  *     it is the walkthrough's decision card (`WalkTaskBody`, off
@@ -90,19 +92,22 @@ export { TRIMMED_ROW_FIELDS };
  * Does a list surface still render this row's description?
  *
  * The walkthrough's decision card does, for an open unanswered decision, and
- * it reads the projection with no refetch behind it. Deliberately one clause
- * WIDER than `decisionRows`, which also drops a decision marked `waiting`:
- * that mark is derived and flips back to `revised` without the body changing,
- * so a carve-out matching it exactly would blank the card at the moment it
- * returns to the queue.
+ * it reads the projection with no refetch behind it. So this is `decisionRows`
+ * with one clause dropped and none added.
+ *
+ * The dropped one is `decisionState !== 'waiting'`: that mark is derived and
+ * flips back to `revised` without the body changing, so a carve-out matching
+ * it exactly would blank the card at the moment it returns to the queue.
+ *
+ * **`archivedAt` is deliberately not a clause**, and adding it was a bug this
+ * had on the way in. Archiving "is deliberately NOT a status" — `archive_task`
+ * writes three fields and leaves `status` alone — so an archived, unanswered
+ * decision still satisfies every clause `decisionRows` tests, still enters the
+ * review queue, and still draws a walkthrough card. Trimming its body drew
+ * that card with no question on it.
  */
 function rendersBodyInAList(row: ProjectedTaskRow): boolean {
-  return (
-    row.archivedAt === undefined &&
-    row.status !== 'done' &&
-    row.needs === 'decision' &&
-    row.answer === undefined
-  );
+  return row.status !== 'done' && row.needs === 'decision' && row.answer === undefined;
 }
 
 /**
