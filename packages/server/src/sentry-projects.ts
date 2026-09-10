@@ -75,7 +75,13 @@ function parseEntry(raw: string): SentryProjectRef | null {
   // `slug` or `slug:side`. A bare slug is the common case and must stay
   // writable without knowing the vocabulary; the side is what lets a
   // reader tell a browser project from a server one.
-  const [slugPart, sidePart] = raw.split(':');
+  // codex review: `slug:side` and nothing further. Destructuring the split
+  // dropped a third segment on the floor, so `project:browser:typo` parsed
+  // clean — an unreadable override that took effect instead of falling back,
+  // which is the one thing the all-or-nothing rule below exists to prevent.
+  const parts = raw.split(':');
+  if (parts.length > 2) return null;
+  const [slugPart, sidePart] = parts;
   const slug = slugPart?.trim() ?? '';
   if (!SLUG_SHAPE.test(slug)) return null;
   const side = sidePart?.trim().toLowerCase();

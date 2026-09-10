@@ -63,6 +63,9 @@ describe('sentryWatchPlan', () => {
       'https://sentry.io/organizations/x/projects/y/',
       'good-one,bad slug here',
       'good-one:sideways',
+      // codex review: a third segment used to be dropped on the floor, so
+      // this parsed clean and took effect instead of falling back.
+      'good-one:browser:typo',
       '   ',
       ',,,',
     ]) {
