@@ -16,6 +16,7 @@ import {
   EVAL_ACCESS_TOKEN_ENV,
   EVAL_CREDENTIAL_HELP,
   EVAL_KEYCHAIN_SERVICE,
+  EVAL_KEY_ENV,
   resolveEvalCredentialFrom,
 } from './eval-credential.ts';
 
@@ -89,7 +90,16 @@ describe('the eval credential', () => {
     const run = spawnSync('bun', ['scripts/notes-eval.ts', '--api-key', ''], {
       cwd: resolve(__dirname, '..'),
       encoding: 'utf8',
-      env: { ...process.env, CW_SUMMARY_API_KEY: 'prod-shaped-value' },
+      // The eval item is present via its env override, so the ONLY way this
+      // run reaches the no-credential path is the flag being parsed and its
+      // explicit empty value winning. Without that parse it would resolve the
+      // override and go on to run. That makes the case decide something on a
+      // machine that has the Keychain item and on one that does not.
+      env: {
+        ...process.env,
+        [EVAL_KEY_ENV]: 'not-a-real-value',
+        CW_SUMMARY_API_KEY: 'prod-shaped-value',
+      },
     });
     expect(run.status).toBe(2);
     expect(run.stderr).toContain(EVAL_KEYCHAIN_SERVICE);
@@ -102,5 +112,31 @@ describe('the eval credential', () => {
     expect(EVAL_CREDENTIAL_HELP).toContain(EVAL_KEYCHAIN_SERVICE);
     expect(EVAL_CREDENTIAL_HELP).not.toContain(KEYCHAIN_SERVICE);
     expect(EVAL_CREDENTIAL_HELP).toMatch(/never the one[\s\S]*live meetings use/);
+  });
+
+  it('offers no route the caller printing it does not have', () => {
+    // One string, two entry points, and only `notes-eval.ts` reads argv for a
+    // key — so help naming `--api-key` was false wherever `notes-eval-ideas.ts`
+    // printed it. It is also the route that puts a credential in shell history
+    // and the process list, so the env override is what gets recommended.
+    expect(EVAL_CREDENTIAL_HELP).not.toContain('--api-key');
+    expect(EVAL_CREDENTIAL_HELP).toContain(EVAL_KEY_ENV);
+  });
+
+  it('falls back to no ambient credential of any name', () => {
+    // The fourth-bug check. Every plausible key-shaped variable is set and
+    // the Keychain holds nothing the eval may read: the answer must still be
+    // "there is no credential", never something picked up from the ambient
+    // environment.
+    const k = keychain({ [KEYCHAIN_SERVICE]: 'prod-value' });
+    const ambient = {
+      ANTHROPIC_API_KEY: 'ambient-value',
+      CLAUDE_API_KEY: 'ambient-value',
+      CW_SUMMARY_API_KEY: 'prod-value',
+      CLAUDE_WORKSPACES_SUMMARY_API_KEY: 'prod-value',
+      ANTHROPIC_AUTH_TOKEN: 'ambient-value',
+    };
+    expect(resolveEvalCredentialFrom(undefined, k.read, ambient)).toBeNull();
+    expect(k.asked).toEqual([EVAL_KEYCHAIN_SERVICE]);
   });
 });

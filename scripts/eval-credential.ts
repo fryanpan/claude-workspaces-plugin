@@ -9,12 +9,15 @@
  *
  * WHAT IS ACCEPTED, IN ORDER:
  *
- *  1. `--api-key <value>` — somebody named a credential in the same command.
- *     Explicit consent, and it wins over anything ambient.
+ *  1. An explicitly named credential — somebody said which one in the same
+ *     breath, and it wins over anything ambient. `scripts/notes-eval.ts`
+ *     surfaces this as `--api-key`; nothing here advertises that route, for
+ *     the reason under `EVAL_CREDENTIAL_HELP`.
  *  2. `CW_SUMMARY_ACCESS_TOKEN` — the short-lived token CI mints from its own
  *     OIDC identity for one run. It is not prod's key: nothing durable exists
  *     to exhaust, and the service account behind it is CI's.
- *  3. The Keychain item `claude-workspaces-eval-api-key`.
+ *  3. The Keychain item `claude-workspaces-eval-api-key`, or its env override
+ *     `CLAUDE_WORKSPACES_EVAL_API_KEY` for a one-off.
  *
  * WHAT IS REFUSED: prod's Keychain item, its legacy name, and the
  * `CW_SUMMARY_API_KEY` env override. Those are the live meeting's credential.
@@ -32,18 +35,37 @@ export const EVAL_KEYCHAIN_SERVICE = 'claude-workspaces-eval-api-key';
 /** Env var holding an already-exchanged access token — how CI runs. */
 export const EVAL_ACCESS_TOKEN_ENV = 'CW_SUMMARY_ACCESS_TOKEN';
 
+/** The env override `readKeychainPassword` honours for that item — its
+ *  service name uppercased, dashes to underscores. */
+export const EVAL_KEY_ENV = 'CLAUDE_WORKSPACES_EVAL_API_KEY';
+
 /**
- * What to tell somebody who has no eval credential. It names the item and
- * the command that adds it, and says in as many words that prod's key is not
- * a fallback — otherwise the obvious next move is to point the eval back at
- * the key this whole change exists to protect.
+ * What to tell somebody who has no eval credential.
+ *
+ * It names the item, the command that adds it, and says in as many words that
+ * prod's key is not a fallback — otherwise the obvious next move is to point
+ * the eval back at the key this whole change exists to protect.
+ *
+ * IT DELIBERATELY DOES NOT OFFER `--api-key`. Two reasons, and the second is
+ * why this is not just a wording fix. A key on argv lands in shell history and
+ * is readable from the process list by anything running as this user, which is
+ * the exact exposure keeping it in the Keychain exists to avoid — so help that
+ * suggests it is help pointing at the worse door. And this string is printed
+ * by BOTH eval entry points, only one of which parses the flag: `notes-eval.ts`
+ * does, `notes-eval-ideas.ts` never reads argv for it, so the advertisement was
+ * simply false there. The env override above is the one-off route, and it is
+ * the safer one.
+ *
+ * `notes-eval.ts` still ACCEPTS `--api-key` — three sibling cost scripts take
+ * it too, so the pattern is established and removing it is a wider change than
+ * this. It is just no longer recommended.
  */
 export const EVAL_CREDENTIAL_HELP: string =
   'No eval credential. The note-taking eval spends its OWN key, never the one\n' +
   'live meetings use. Add it once with:\n' +
   `  security add-generic-password -a "$USER" -s "${EVAL_KEYCHAIN_SERVICE}" -w\n` +
-  `or set ${EVAL_ACCESS_TOKEN_ENV} to an already-exchanged access token (how CI\n` +
-  'runs), or pass --api-key. Nothing was run.';
+  `or set ${EVAL_KEY_ENV} for a one-off, or ${EVAL_ACCESS_TOKEN_ENV} to an\n` +
+  'already-exchanged access token (how CI runs). Nothing was run.';
 
 /**
  * Resolve the eval's credential, or null when there is none.

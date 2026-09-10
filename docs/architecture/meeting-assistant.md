@@ -1895,9 +1895,21 @@ job must not be able to do that, so the eval reads
 `claude-workspaces-eval-api-key` and nothing else — prod's item, its legacy
 name and the `CW_SUMMARY_API_KEY` override are all refused, and a run with no
 eval credential fails naming the item to add rather than borrowing one
-(`scripts/eval-credential.ts`). CI is the one other accepted route: the
-short-lived access token it mints from its own OIDC identity, in
+(`scripts/eval-credential.ts`). For a one-off, the Keychain reader's own env
+override `CLAUDE_WORKSPACES_EVAL_API_KEY` — not a command-line flag, which
+would put the key in shell history and in the process list for anything
+running as this user. CI is the one other accepted route: the short-lived
+access token it mints from its own OIDC identity, in
 `CW_SUMMARY_ACCESS_TOKEN`, which exhausts nothing durable.
+
+**That token variable is still shared with prod's resolver by name, and the
+reason it has not been renamed is worth knowing before somebody renames it.**
+When the eval resolves a TOKEN it has no way to hand it to the composer —
+`createHaikuNotesComposer` takes a key string and nothing else — so the
+composer re-resolves from the environment itself. Give the eval a variable of
+its own without first giving the composer a credential seam, and a token run
+stops finding one there and falls through to prod's Keychain item, which is
+strictly worse than the sharing being removed.
 
 **The corpus is AMI** (CC BY 4.0), the same one `room-labels-check.ts` scores
 the room measurement against, excerpted into committed fixtures by
