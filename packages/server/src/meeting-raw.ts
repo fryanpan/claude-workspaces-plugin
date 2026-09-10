@@ -8,10 +8,20 @@
  * is be opened by the person whose note came out wrong. That person needs
  * the words as they were heard, in order, with a clock and a name on each
  * line, in a file that any markdown viewer renders and any grep searches.
- * That is this file, and its whole grammar is two markdown forms: a
- * `## Segment N — <ISO start>` heading per recording, and a
- * `- [HH:MM:SSZ] Speaker: words` bullet per settled turn. No custom syntax,
- * so a viewer later is a rendering choice, not a parser.
+ * That is this file, and its whole grammar is three markdown forms: a
+ * `## Segment N — <ISO start>` heading per recording, a
+ * `- [HH:MM:SSZ] Speaker: words` bullet per settled turn, and a
+ * `- [HH:MM:SSZ] — ... —` bullet for a stretch where a capture was dead. No
+ * custom syntax, so a viewer later is a rendering choice, not a parser.
+ *
+ * WHY A GAP IS A LINE AND NOT AN ABSENCE. A meeting whose microphone died for
+ * three minutes produces a transcript whose turns simply run from before the
+ * outage to after it, and it reads as a conversation in which nobody said
+ * anything about those three minutes. That is the worst possible record: it is
+ * indistinguishable from a true one, so nothing prompts anybody to go looking
+ * for what was lost. The gap line sits in time order among the turns, in the
+ * place the missing words would have been, and says how long went unrecorded
+ * and which capture was not listening.
  *
  * WHY IT IS WRITTEN AT STOP, FROM THE JSONL. The live record revises turns
  * in place — a punctuated final replaces a rough one, an end-of-session pass
@@ -56,6 +66,7 @@ import {
   speakerDisplayName,
 } from '@claude-workspaces/core';
 import {
+  type MeetingGap,
   type MeetingRecord,
   type TranscriptTurn,
   listMeetings,
@@ -112,6 +123,13 @@ export interface MeetingJsonSegment {
   /** Who was on the microphone socket, when the client said — see MeetingRecord. */
   participant?: string;
   audio: MeetingJsonAudio[];
+  /**
+   * Stretches where one capture delivered nothing. Here as well as in the
+   * markdown because this is the file a replay reads: the audio for a stream
+   * is SHORTER than the meeting by exactly these, so a tool lining the PCM up
+   * against the clock has to know where the silence it will not find is.
+   */
+  gaps?: MeetingGap[];
 }
 
 /**
@@ -179,6 +197,44 @@ export function formatRawBullet(ts: number, speaker: string, text: string): stri
 }
 
 /**
+ * How long an outage lasted, for a person rather than for arithmetic:
+ * `2h 5m`, `3m 12s`, `45s`. Rounded to the second, because the browser
+ * reported it off a track event and the seconds are the honest precision.
+ */
+export function formatGapDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+/** What a stream is called on a gap line, in the words the strip uses. */
+function gapStreamWords(stream: string): string {
+  if (stream === 'system') return "this Mac's audio";
+  if (stream === 'mic') return 'the microphone';
+  return stream;
+}
+
+/**
+ * `- [HH:MM:SSZ] — the microphone stopped for 3m 12s; nothing was recorded —`
+ *
+ * A gap the meeting ended inside says so instead of naming a length: the
+ * capture never came back, so there is no end to measure to, and writing one
+ * would be inventing the moment the loss stopped.
+ */
+export function formatGapBullet(gap: MeetingGap): string {
+  const words = gapStreamWords(gap.stream);
+  const tail =
+    gap.to === null
+      ? 'stopped here and did not come back before the meeting ended'
+      : `stopped for ${formatGapDuration(gap.to - gap.from)}`;
+  return `- [${utcClock(gap.from)}] — ${words} ${tail}; nothing from it was recorded —`;
+}
+
+/**
  * Who a bullet says spoke: the engine's label, shown as the name the person
  * gave it or as "Speaker A"; failing a label, the participant on the
  * socket; failing that, "Speaker 1" — one voice assumed, as a solo capture
@@ -210,6 +266,9 @@ export interface RawSegmentInput {
   source: MeetingSource;
   audio: readonly MeetingJsonAudio[];
   turns: readonly TranscriptTurn[];
+  /** Stretches with no audio from one capture, rendered in time order among
+   *  the turns. Empty on every meeting that never lost one. */
+  gaps?: readonly MeetingGap[];
   names: Readonly<Record<string, string>>;
   participant?: string;
 }
@@ -244,14 +303,27 @@ export function formatRawSegment(seg: RawSegmentInput): string {
     facts.join(' · '),
     '',
   ];
-  if (seg.turns.length === 0) {
+  const gaps = seg.gaps ?? [];
+  if (seg.turns.length === 0 && gaps.length === 0) {
     lines.push('_(no settled turns)_');
   } else {
-    for (const t of seg.turns) {
-      lines.push(
-        formatRawBullet(t.ts, speakerLineName(t.speaker, seg.names, seg.participant), t.text),
-      );
-    }
+    // Turns and gaps in ONE time-ordered run, because a gap's whole job is to
+    // sit where the words it swallowed would have been. Sorted on the moment
+    // each thing happened — a turn's settle time, a gap's start — and nothing
+    // finer: two things stamped in the SAME millisecond keep turns first,
+    // which is a tie this record cannot break and does not try to. In a real
+    // meeting the two are seconds apart, because a gap opens when a device
+    // dies and a turn settles when somebody stops talking.
+    const entries: Array<{ at: number; turn: boolean; line: string }> = [
+      ...seg.turns.map((t) => ({
+        at: t.ts,
+        turn: true,
+        line: formatRawBullet(t.ts, speakerLineName(t.speaker, seg.names, seg.participant), t.text),
+      })),
+      ...gaps.map((g) => ({ at: g.from, turn: false, line: formatGapBullet(g) })),
+    ];
+    entries.sort((a, b) => a.at - b.at || Number(b.turn) - Number(a.turn));
+    for (const entry of entries) lines.push(entry.line);
   }
   lines.push('');
   return `${lines.join('\n')}\n`;
@@ -475,6 +547,10 @@ export function flushRawSegments(args: {
         // sink counts only the bytes IT appended, and the file holds both.
         audio: audioOnDisk(dir, n, record.sampleRate),
         turns: rest,
+        // Only the outages of THIS leg: the block before the restart already
+        // carries the ones that happened before it, and a gap printed twice
+        // reads as two separate losses.
+        gaps: (record.gaps ?? []).filter((g) => g.from >= (ended.resumedAt as number)),
         names: record.speakers ?? {},
         ...(record.participant !== undefined ? { participant: record.participant } : {}),
       });
@@ -482,6 +558,7 @@ export function flushRawSegments(args: {
       if (stored) {
         stored.endedAt = record.endedAt;
         stored.audio = audioOnDisk(dir, n, record.sampleRate);
+        if (record.gaps && record.gaps.length > 0) stored.gaps = record.gaps;
       }
       return;
     }
@@ -503,6 +580,7 @@ export function flushRawSegments(args: {
       source,
       audio,
       turns: readTranscript(dataDir, docId, record.meetingId),
+      ...(record.gaps && record.gaps.length > 0 ? { gaps: record.gaps } : {}),
       names: record.speakers ?? {},
       ...(record.participant !== undefined ? { participant: record.participant } : {}),
     });
@@ -516,6 +594,7 @@ export function flushRawSegments(args: {
       source,
       ...(record.participant !== undefined ? { participant: record.participant } : {}),
       audio,
+      ...(record.gaps && record.gaps.length > 0 ? { gaps: record.gaps } : {}),
     });
     written.add(record.meetingId);
   });

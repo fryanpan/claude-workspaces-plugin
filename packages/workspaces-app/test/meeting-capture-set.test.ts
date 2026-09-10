@@ -14,7 +14,11 @@ import { combinedMicRoom, openCaptureSet, partialCaptureNote } from '../src/meet
 type Started = Parameters<Parameters<typeof openCaptureSet>[0]['startCapture'] & object>[0];
 
 function fakeCapture() {
-  return { stop: vi.fn(), setEchoCancellation: vi.fn(() => Promise.resolve()) };
+  return {
+    stop: vi.fn(),
+    setEchoCancellation: vi.fn(() => Promise.resolve()),
+    reopen: vi.fn(() => Promise.resolve({ ok: true as const })),
+  };
 }
 
 /** An opener that grants everything except the streams named. */

@@ -354,7 +354,11 @@ function mount(
       (() =>
         Promise.resolve({
           ok: true,
-          capture: { stop, setEchoCancellation: () => Promise.resolve() },
+          capture: {
+            stop,
+            setEchoCancellation: () => Promise.resolve(),
+            reopen: () => Promise.resolve({ ok: true as const }),
+          },
         })),
     ...extra,
   });
@@ -414,6 +418,7 @@ function mount(
 const fakeCapture = (stop: () => void = vi.fn()) => ({
   stop,
   setEchoCancellation: () => Promise.resolve(),
+  reopen: () => Promise.resolve({ ok: true as const }),
 });
 
 /** Let the click's promise chain settle. */
@@ -1628,7 +1633,11 @@ describe('what the strip tells the microphone and the server about the room', ()
       calls.push(opts);
       return Promise.resolve({
         ok: true,
-        capture: { stop: vi.fn(), setEchoCancellation: () => Promise.resolve() },
+        capture: {
+          stop: vi.fn(),
+          setEchoCancellation: () => Promise.resolve(),
+          reopen: () => Promise.resolve({ ok: true as const }),
+        },
       });
     }, extra);
     h.pressStart(pick ? { pick } : {});

@@ -14,7 +14,7 @@
  * types and only the server reads the frames.
  */
 
-import { parseCaptureSource } from './meeting-streams.ts';
+import { type MeetingStreamId, parseCaptureSource } from './meeting-streams.ts';
 import { parseRawTuning } from './meeting-tuning.ts';
 import { MAX_SPEAKER_NAME, MEETING_AUDIO_ENCODING } from './meeting.ts';
 import type { MeetingClientMessage } from './meeting.ts';
@@ -65,6 +65,21 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
     if (!method) return null;
     const by = typeof m.by === 'string' ? m.by.trim().slice(0, MAX_SPEAKER_NAME) : '';
     return by ? { type: 'set_notes_method', method, by } : { type: 'set_notes_method', method };
+  }
+  if (m.type === 'stream_state') {
+    // The stream must be one this server knows how to write a file for: the
+    // value reaches the durable record as the name of the source that went
+    // quiet, and an unreadable one there is worse than no gap line at all.
+    const stream =
+      m.stream === 'mic' || m.stream === 'system' ? (m.stream as MeetingStreamId) : null;
+    if (!stream) return null;
+    if (m.state !== 'lost' && m.state !== 'restored') return null;
+    // Bounded and dropped when empty, like every other free-text field on
+    // this socket: it is a short machine word, not a sentence.
+    const reason = typeof m.reason === 'string' ? m.reason.trim().slice(0, 40) : '';
+    return reason
+      ? { type: 'stream_state', stream, state: m.state, reason }
+      : { type: 'stream_state', stream, state: m.state };
   }
   if (m.type === 'name_speaker') {
     const speaker = typeof m.speaker === 'string' ? m.speaker.trim() : '';

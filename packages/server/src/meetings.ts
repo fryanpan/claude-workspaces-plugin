@@ -88,6 +88,29 @@ export interface MeetingRecord {
    * anything. Absent on every meeting that ran to its end in one go.
    */
   resumedAt?: number[];
+  /**
+   * Stretches of the meeting where a capture was NOT delivering audio, oldest
+   * first. Opened when the browser reports one of its tracks died and closed
+   * when the same stream comes back; a gap still open when the meeting stops
+   * keeps `to: null`, which is the difference between "it came back" and "it
+   * never did" and is exactly the fact a person reading the transcript needs.
+   *
+   * Absent on every meeting that never lost a stream, which is almost all of
+   * them — an empty array here would put a heading over nothing in the raw
+   * companion.
+   */
+  gaps?: MeetingGap[];
+}
+
+/** One stretch of a meeting during which one capture delivered nothing. */
+export interface MeetingGap {
+  /** Which capture went quiet — the same id its audio file is named after. */
+  stream: string;
+  from: number;
+  /** Null while it is still down, and for a gap the meeting ended inside. */
+  to: number | null;
+  /** What the browser said stopped it (`ended`, `muted`). */
+  reason?: string;
 }
 
 /**
@@ -203,6 +226,27 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
     }
     if (typeof row.endedAt === 'number') existing.endedAt = row.endedAt;
     if (typeof row.turns === 'number') existing.turns = row.turns;
+    // A gap is two append-only lines, opened by one and closed by the other,
+    // so a server that dies mid-outage still leaves the gap in the record
+    // rather than losing it with the line that would have closed it.
+    if (typeof row.gapStream === 'string') {
+      const gaps = existing.gaps ?? [];
+      if (typeof row.gapFrom === 'number') {
+        gaps.push({
+          stream: row.gapStream,
+          from: row.gapFrom,
+          to: null,
+          ...(typeof row.gapReason === 'string' ? { reason: row.gapReason } : {}),
+        });
+      } else if (typeof row.gapTo === 'number') {
+        // The newest still-open gap on that stream: a close can only ever be
+        // about the one that has not been closed, and searching from the end
+        // is what keeps a repeated open-close pair from closing the wrong one.
+        const open = [...gaps].reverse().find((g) => g.stream === row.gapStream && g.to === null);
+        if (open) open.to = row.gapTo;
+      }
+      existing.gaps = gaps;
+    }
     // One line per naming, merged in order: a rename is a later line for
     // the same label, and the last one is what the person meant.
     if (typeof row.speakers === 'object' && row.speakers !== null) {
@@ -290,6 +334,16 @@ export interface ActiveMeeting {
   recordTurn(turn: number, text: string, speaker?: string): void;
   /** "Label `speaker` is `name`" — appended to the index, last word wins. */
   nameSpeaker(speaker: string, name: string): void;
+  /**
+   * "This capture stopped delivering", and later "it is back".
+   *
+   * Idempotent in both directions: a second `lost` for a stream already down
+   * opens no second gap, and a `restored` for a stream that was never down
+   * writes nothing. The browser sends these off a track's own events, and an
+   * event that fires twice must not put two holes in a record that cannot be
+   * edited afterwards.
+   */
+  recordGap(stream: string, state: 'lost' | 'restored', reason?: string): void;
   /**
    * Tee one audio frame to this meeting's retained audio, exactly as it
    * arrived. `stream` separates sources that carry more than one (a bot's
@@ -510,6 +564,20 @@ export class MeetingStore {
     // Above everything already recorded, never on top of it — see `turnBase`.
     const turnBase = args.seed.reduce((top, t) => Math.max(top, t.turn + 1), 0);
     const speakers: Record<string, string> = {};
+    /**
+     * Streams currently down, and when each went — the open half of a gap.
+     *
+     * SEEDED FROM THE INDEX, not started empty, because a resumed meeting is
+     * the same recording: a capture that died before the socket dropped is
+     * still dead, and the client re-announces it on the new socket. An empty
+     * map would read that as a new loss and open a SECOND gap over the one
+     * already open, which the fold would then never close.
+     */
+    const openGaps = new Map<string, number>();
+    for (const gap of listMeetings(dataDir, docId).find((m) => m.meetingId === meetingId)?.gaps ??
+      []) {
+      if (gap.to === null) openGaps.set(gap.stream, gap.from);
+    }
     let stopped = false;
     const live = this.live;
     const store = this;
@@ -558,6 +626,26 @@ export class MeetingStore {
         speakers[speaker] = given;
         appendLine(meetingIndexPath(dataDir, docId), { meetingId, speakers: { [speaker]: given } });
       },
+      recordGap(stream: string, state: 'lost' | 'restored', reason?: string): void {
+        if (stopped) return;
+        const ts = Date.now();
+        if (state === 'lost') {
+          // Already down: the track fired twice, or a reopen failed and the
+          // client said so again. The gap that is open is still the gap.
+          if (openGaps.has(stream)) return;
+          openGaps.set(stream, ts);
+          appendLine(meetingIndexPath(dataDir, docId), {
+            meetingId,
+            gapStream: stream,
+            gapFrom: ts,
+            ...(reason !== undefined ? { gapReason: reason } : {}),
+          });
+          return;
+        }
+        if (!openGaps.has(stream)) return;
+        openGaps.delete(stream);
+        appendLine(meetingIndexPath(dataDir, docId), { meetingId, gapStream: stream, gapTo: ts });
+      },
       recordAudio(chunk: Uint8Array, stream = 'mic'): void {
         if (stopped || chunk.byteLength === 0) return;
         let sink = sinks.get(stream);
@@ -585,6 +673,15 @@ export class MeetingStore {
           segment,
           source,
           ...(participant !== undefined ? { participant } : {}),
+          // Read back off the index rather than kept in a second place: the
+          // lines this leg appended and the ones an earlier leg appended are
+          // one meeting's gaps, and only the fold sees both.
+          ...(() => {
+            const gaps = listMeetings(dataDir, docId).find(
+              (m) => m.meetingId === meetingId,
+            )?.gaps;
+            return gaps && gaps.length > 0 ? { gaps } : {};
+          })(),
         };
         if (stopped) return record;
         stopped = true;

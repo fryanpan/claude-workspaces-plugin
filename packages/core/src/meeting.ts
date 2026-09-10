@@ -20,7 +20,7 @@
  * thinks ended. There is one fact here and one owner of it.
  */
 
-import type { MeetingCaptureSource, MeetingGroup } from './meeting-streams.ts';
+import type { MeetingCaptureSource, MeetingGroup, MeetingStreamId } from './meeting-streams.ts';
 import type { MeetingTimingMark } from './meeting-timing.ts';
 import { MAX_ROOM_SPEAKERS, MIN_ROOM_SPEAKERS } from './meeting-tuning.ts';
 import { type NotesMethod } from './notes-method.ts';
@@ -284,7 +284,35 @@ export type MeetingClientMessage =
    * rest, which is why the socket carries it at all — the at-rest case is an
    * HTTP call and needs no live session.
    */
-  | { type: 'set_notes_method'; method: NotesMethod; by?: string };
+  | { type: 'set_notes_method'; method: NotesMethod; by?: string }
+  /**
+   * "One of my microphones just died", and later "it is back".
+   *
+   * A capture is not the meeting. The socket can be perfectly healthy while
+   * the browser has taken a stream away underneath it — which is what starting
+   * a screen share does to a `getDisplayMedia` capture, because the browser
+   * and the OS re-arbitrate screen capture at exactly that moment. The audio
+   * graph downstream of a dead track keeps pulling and keeps delivering
+   * SILENCE, so every frame still arrives, the engine hears a quiet room, and
+   * nothing anywhere reports a problem. That is the shape of the bug this
+   * frame exists for: not a failure, an absence that looks like success.
+   *
+   * So the browser says so out loud. `lost` opens a gap in the durable
+   * record at the moment the track ended; `restored` closes it. A gap left
+   * open when the meeting stops stays open, because "the audio never came
+   * back" is a different fact from "it came back at the end".
+   *
+   * It changes NOTHING about the audio path: the frames on this socket are
+   * the frames the streams that are still running produce. This is a note in
+   * the margin of the record, and the record is the only thing it reaches.
+   */
+  | {
+      type: 'stream_state';
+      stream: MeetingStreamId;
+      state: 'lost' | 'restored';
+      /** A short machine reason (`ended`, `muted`) for the record. */
+      reason?: string;
+    };
 
 /** Longest name a speaker label can be given. A name, not a bio. */
 export const MAX_SPEAKER_NAME = 60;

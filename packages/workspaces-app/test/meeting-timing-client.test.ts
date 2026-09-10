@@ -253,7 +253,11 @@ async function mountStrip(timing: boolean): Promise<{ root: HTMLElement; socket:
     startCapture: () =>
       Promise.resolve({
         ok: true,
-        capture: { stop: vi.fn(), setEchoCancellation: () => Promise.resolve() },
+        capture: {
+          stop: vi.fn(),
+          setEchoCancellation: () => Promise.resolve(),
+          reopen: () => Promise.resolve({ ok: true as const }),
+        },
       }),
     // Solo, so the start frame's shape is the minimal one this file pins and
     // no announcement machinery wakes up.

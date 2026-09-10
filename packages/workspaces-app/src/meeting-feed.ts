@@ -25,7 +25,8 @@
  * tag, is handed straight to the strip's `nameSpeaker`.
  */
 
-import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
+import type { CaptureMode, MeetingBotStatus, MeetingStreamId } from '@claude-workspaces/core';
+import type { StreamAlarm } from './meeting-stream-health.ts';
 import {
   RECORDING_CONSENT_NOTE,
   describeBotState,
@@ -71,6 +72,20 @@ export interface MeetingFeedDeps {
    * Empty for every meeting that never lost its connection.
    */
   standingNote(): string;
+  /**
+   * The captures that have died under this meeting, as a sentence and
+   * sometimes a button — or null while every one of them is delivering.
+   *
+   * It OUTRANKS `standingNote`, and the strip has one line so one of them has
+   * to. This is the one with an action on it: a person who presses the button
+   * gets the Mac's audio back, where the reconnect sentence is about something
+   * already recovering on its own and needs nothing from them.
+   */
+  streamAlarm(): StreamAlarm | null;
+  /** The line shown for a few seconds after a capture came back. */
+  restoredLine(): string;
+  /** The button on the alarm was pressed: open that capture again. */
+  reopenStream(stream: MeetingStreamId): void;
   /** Engine label → what the person calls that voice. */
   names(): Record<string, string>;
   /** The bot's status while it will still act, or null. */
@@ -226,8 +241,29 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
    * sentence has it to itself.
    */
   function standing(): void {
-    const text = deps.standingNote();
-    if (!text || deps.state().kind !== 'recording') return;
+    if (deps.state().kind !== 'recording') return;
+    const alarm = deps.streamAlarm();
+    if (alarm) {
+      // Its own class, not the consent note's: this is the one line on the
+      // strip that reports something being LOST while the meeting runs, and it
+      // has to be able to look like it.
+      const note = document.createElement('span');
+      note.className = 'meeting-note meeting-stream-alarm';
+      note.textContent = alarm.text;
+      if (alarm.action) {
+        const action = alarm.action;
+        const press = document.createElement('button');
+        press.type = 'button';
+        press.className = 'meeting-note-action';
+        press.textContent = action.label;
+        press.addEventListener('click', () => deps.reopenStream(action.stream));
+        note.append(' ', press);
+      }
+      line.prepend(note);
+      return;
+    }
+    const text = deps.restoredLine() || deps.standingNote();
+    if (!text) return;
     const note = document.createElement('span');
     note.className = 'meeting-note meeting-consent-note';
     note.textContent = text;

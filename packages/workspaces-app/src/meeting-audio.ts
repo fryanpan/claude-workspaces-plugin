@@ -24,6 +24,7 @@ import {
   DEFAULT_CAPTURE_MODE,
   MEETING_SAMPLE_RATE,
 } from '@claude-workspaces/core';
+import { type RoomAudioProcessing, captureConstraints } from './meeting-room-audio.ts';
 import {
   type MediaDeviceSeam,
   type MeetingAudioSource,
@@ -31,6 +32,12 @@ import {
   mediaErrorCode,
   openMeetingSource,
 } from './meeting-source.ts';
+import {
+  type TrackLossReason,
+  type TrackWatch,
+  type WatchableTrack,
+  watchTracks,
+} from './meeting-track-watch.ts';
 import {
   type OriginFacts,
   defaultOriginFacts,
@@ -50,128 +57,17 @@ import {
  */
 export const MEETING_FRAME_SAMPLES = MEETING_SAMPLE_RATE / 20;
 
-/**
- * The browser's three microphone processors, as one config.
- *
- * They are a config rather than three literals because a ROOM is not the
- * situation any of them was tuned for. Echo cancellation, noise suppression
- * and automatic gain control are built for one near-field talker on a laptop:
- * AGC renormalises level continuously, noise suppression gates the quieter
- * part of the spectrum, and both act on exactly the cues — relative loudness,
- * timbre, the difference between the person at the mic and the person across
- * the table — that a diarizer uses to tell two voices apart. Whether they
- * help or hurt a shared microphone is a MEASUREMENT, not an opinion, and
- * `scripts/room-labels-check.ts` is the instrument; this shape is what lets
- * one recording session vary them.
- */
-export interface RoomAudioProcessing {
-  echoCancellation: boolean;
-  noiseSuppression: boolean;
-  autoGainControl: boolean;
-}
-
-/**
- * What a solo capture asks for: the three answers this subsystem has always
- * given, kept as their own constant so that moving the ROOM default below
- * cannot reach a case it was never measured on. One person holding a device
- * is not a room, and nothing here has measured it.
- */
-const SOLO_AUDIO_PROCESSING: RoomAudioProcessing = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-};
-
-/**
- * What a room capture asks for, now that the measurement has spoken.
- *
- * Measured through the real engine on one far-field element of the AMI array
- * — one microphone on a table with people around it. The figure is the one
- * that survives a change of denominator: reference words BOTH transcribed and
- * attributed to the person who said them, over every word said in the window.
- * (Attribution over the part a run covered cannot rank settings, because each
- * setting produces a different transcript and so covers a different amount.)
- *
- *     two people, 120s     raw 16.4%   ns 34.4%   agc 13.4%   ns+agc 16.4%
- *     four people, 120s    raw 27.3%   ns 29.5%   agc 31.8%   ns+agc 49.0%
- *
- * NOISE SUPPRESSION ON beats noise suppression off in all four pairings —
- * both windows, gain control either way. That one is not close and it is not
- * split.
- *
- * GAIN CONTROL IS SPLIT, and the honest reading is that it depends on how
- * many people are in the room. On two voices it costs (13.4 against 16.4, and
- * it cancels the whole of noise suppression's gain: 16.4 against 34.4); on
- * four it helps (31.8 against 27.3, and the best row of the eight). A
- * mechanism fits both halves: telling people apart on ONE microphone leans on
- * how loud each of them is, so removing that difference costs when two voices
- * are already separable and pays when four voices are so unequal that the
- * quiet ones are lost entirely.
- *
- * So this default is chosen for the room this product is FOR — two people
- * with a device on the table — and not by a majority of the eight numbers. A
- * bigger room wants `?mic=ec1-ns1-agc1`, which is exactly why the knob is on
- * the address.
- *
- * Echo cancellation stays on and UNMEASURED: it cancels what the device's own
- * speaker is playing, and an AMI recording has no far-end signal to cancel,
- * so no run here says anything about it either way.
- *
- * These were ffmpeg approximations of a browser's processors, on two windows
- * of one meeting. Bryan's own recording is what confirms them; moving this
- * line back is as cheap as moving it was.
- */
-export const ROOM_AUDIO_DEFAULT: RoomAudioProcessing = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: false,
-};
-
-/** The short spelling the address knob and the measurement report share. */
-export function formatRoomAudio(cfg: RoomAudioProcessing): string {
-  const bit = (on: boolean) => (on ? '1' : '0');
-  return `ec${bit(cfg.echoCancellation)}-ns${bit(cfg.noiseSuppression)}-agc${bit(cfg.autoGainControl)}`;
-}
-
-/**
- * A config out of `ec1-ns0-agc0`, or nothing.
- *
- * Nothing for anything unreadable, so a typo in an address bar falls back to
- * the default instead of silently recording under half a setting. Each flag
- * is independent: `ns0` alone leaves the other two at their defaults.
- */
-export function parseRoomAudio(raw: string | null | undefined): RoomAudioProcessing | undefined {
-  if (!raw) return undefined;
-  const flags = /^(?:ec([01])-?)?(?:ns([01])-?)?(?:agc([01]))?$/.exec(raw.trim().toLowerCase());
-  if (!flags || flags.slice(1).every((f) => f === undefined)) return undefined;
-  const read = (v: string | undefined, fallback: boolean) =>
-    v === undefined ? fallback : v === '1';
-  return {
-    echoCancellation: read(flags[1], ROOM_AUDIO_DEFAULT.echoCancellation),
-    noiseSuppression: read(flags[2], ROOM_AUDIO_DEFAULT.noiseSuppression),
-    autoGainControl: read(flags[3], ROOM_AUDIO_DEFAULT.autoGainControl),
-  };
-}
-
-/** What the browser is asked for: one channel of cleaned-up speech. */
-export const MEETING_CONSTRAINTS: MediaStreamConstraints = {
-  audio: { channelCount: 1, ...SOLO_AUDIO_PROCESSING },
-};
-
-/**
- * The constraints for a capture, given what its room is doing.
- *
- * A `solo` capture is not a room and takes no config: it is one person at
- * arm's length, which is the case every one of these processors was designed
- * for, and it keeps `MEETING_CONSTRAINTS` exactly as it was.
- */
-export function captureConstraints(
-  mode: CaptureMode,
-  room?: RoomAudioProcessing,
-): MediaStreamConstraints {
-  if (mode !== 'conversation') return MEETING_CONSTRAINTS;
-  return { audio: { channelCount: 1, ...(room ?? ROOM_AUDIO_DEFAULT) } };
-}
+// What the browser is ASKED for now lives beside the measurement that chose
+// it (`meeting-room-audio.ts`); re-exported here because every caller reaches
+// for the constraints in the same breath as the capture that sends them.
+export {
+  MEETING_CONSTRAINTS,
+  ROOM_AUDIO_DEFAULT,
+  type RoomAudioProcessing,
+  captureConstraints,
+  formatRoomAudio,
+  parseRoomAudio,
+} from './meeting-room-audio.ts';
 
 /**
  * Float samples to signed 16-bit, clamped.
@@ -403,7 +299,27 @@ export interface MeetingCapture {
    * an announcement behind it.
    */
   setEchoCancellation(on: boolean): Promise<void>;
+  /**
+   * Open the same source again, in place, after its track died.
+   *
+   * The capture keeps its identity across this: the same `onFrame`, the same
+   * stream id on the wire, the same meeting. What is rebuilt is everything
+   * below the track — a fresh graph, and a fresh resampler, because the
+   * replacement device is free to run at a different rate and a resampler
+   * carrying the old ratio would quietly transpose the speech.
+   *
+   * WHETHER IT NEEDS A GESTURE IS THE CALLER'S PROBLEM, NOT THIS ONE'S.
+   * `getUserMedia` on a permission the page already holds opens no prompt, so
+   * a microphone can come back on its own; the share picker is a modal and
+   * cannot be opened except from a click. Both arrive here as the same call —
+   * `meeting-stream-health.ts` holds the rule about which may be called
+   * without a person, so this module is not the second place it is written.
+   */
+  reopen(): Promise<MeetingReopen>;
 }
+
+/** Whether a capture came back, with the strip's words when it did not. */
+export type MeetingReopen = { ok: true } | { ok: false; message: string };
 
 /** Why a capture did not start, in words the strip can show as they are. */
 export type MeetingCaptureStart =
@@ -419,6 +335,14 @@ export interface MeetingCaptureOpts {
   room?: RoomAudioProcessing;
   /** The microphone unless said otherwise — see `meeting-source.ts`. */
   source?: MeetingAudioSource;
+  /**
+   * The capture stopped delivering audio and the meeting is still running —
+   * see `meeting-track-watch.ts` for what counts. Reported ONCE per leg, and
+   * again only after a `reopen` that landed.
+   */
+  onLost?: (reason: TrackLossReason) => void;
+  /** The clock the mute window is measured on. Injected by tests. */
+  now?: () => number;
   deps?: MeetingCaptureDeps;
 }
 
@@ -434,49 +358,81 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
   const deps = opts.deps ?? {};
   const blocked = insecureOriginMessage((deps.readOrigin ?? defaultOriginFacts)());
   if (blocked) return { ok: false, kind: 'insecure', message: blocked };
+  const constraints = captureConstraints(opts.mode ?? DEFAULT_CAPTURE_MODE, opts.room);
+  const source = opts.source ?? 'mic';
 
-  let stream: MediaStream;
-  try {
-    const constraints = captureConstraints(opts.mode ?? DEFAULT_CAPTURE_MODE, opts.room);
-    const source = opts.source ?? 'mic';
-    stream =
-      source === 'mic' && deps.getMedia
-        ? await deps.getMedia(constraints)
-        : await openMeetingSource(source, constraints, deps.devices);
-  } catch (err) {
-    // A source refusal already says, in the strip's words, what to do next.
-    const message = isSourceRefusal(err)
-      ? err.message
-      : recognitionErrorMessage(mediaErrorCode(err));
-    return { ok: false, kind: 'denied', message };
+  /** The device, the graph and the watch over them — replaced whole by a reopen. */
+  interface Leg {
+    stream: MediaStream;
+    pump: AudioPump;
+    watch: TrackWatch;
   }
 
-  const releaseStream = () => {
-    for (const track of stream.getTracks()) track.stop();
-  };
-
-  let pump: AudioPump;
-  try {
-    pump = await (deps.createPump ?? createAudioPump)(stream);
-  } catch (err) {
-    releaseStream();
-    return { ok: false, kind: 'denied', message: recognitionErrorMessage(mediaErrorCode(err)) };
+  async function openLeg(): Promise<{ ok: true; leg: Leg } | { ok: false; message: string }> {
+    let stream: MediaStream;
+    try {
+      stream =
+        source === 'mic' && deps.getMedia
+          ? await deps.getMedia(constraints)
+          : await openMeetingSource(source, constraints, deps.devices);
+    } catch (err) {
+      // A source refusal already says, in the strip's words, what to do next.
+      const message = isSourceRefusal(err)
+        ? err.message
+        : recognitionErrorMessage(mediaErrorCode(err));
+      return { ok: false, message };
+    }
+    let pump: AudioPump;
+    try {
+      pump = await (deps.createPump ?? createAudioPump)(stream);
+    } catch (err) {
+      for (const track of stream.getTracks()) track.stop();
+      return { ok: false, message: recognitionErrorMessage(mediaErrorCode(err)) };
+    }
+    // A resampler PER LEG, never one shared across a reopen: it is built from
+    // the rate the graph reported, and the device that comes back may not be
+    // the one that went away.
+    const resample = createResampler(pump.sampleRate, MEETING_SAMPLE_RATE);
+    let pending: Int16Array = new Int16Array(0);
+    const watch = watchTracks({
+      tracks: stream.getAudioTracks() as unknown as WatchableTrack[],
+      onLost: (reason) => opts.onLost?.(reason),
+      ...(opts.now ? { now: opts.now } : {}),
+    });
+    pump.onBlock = (block) => {
+      // Before the samples, not after: this block may BE the silence a dead
+      // track is producing, and forwarding it first would put another frame of
+      // nothing on the wire ahead of the report.
+      watch.tick();
+      const step = chunkPcm16(pending, floatToPcm16(resample(block)), MEETING_FRAME_SAMPLES);
+      pending = step.rest;
+      for (const frame of step.frames) opts.onFrame(frame);
+    };
+    return { ok: true, leg: { stream, pump, watch } };
   }
 
-  const resample = createResampler(pump.sampleRate, MEETING_SAMPLE_RATE);
-  let pending: Int16Array = new Int16Array(0);
-  pump.onBlock = (block) => {
-    const step = chunkPcm16(pending, floatToPcm16(resample(block)), MEETING_FRAME_SAMPLES);
-    pending = step.rest;
-    for (const frame of step.frames) opts.onFrame(frame);
-  };
+  const first = await openLeg();
+  if (!first.ok) return { ok: false, kind: 'denied', message: first.message };
+  let leg = first.leg;
+  let closed = false;
+
+  /** Everything below the track, released. The track itself goes with it. */
+  function tearDown(current: Leg): void {
+    current.watch.stop();
+    current.pump.onBlock = null;
+    current.pump.stop();
+    // The graph closing is not enough: the TRACK is what holds the device,
+    // and leaving it open keeps the browser's recording indicator lit long
+    // after the meeting ended.
+    for (const track of current.stream.getTracks()) track.stop();
+  }
 
   return {
     ok: true,
     capture: {
       setEchoCancellation: async (on: boolean) => {
         await Promise.all(
-          stream.getAudioTracks().map(async (track) => {
+          leg.stream.getAudioTracks().map(async (track) => {
             try {
               await track.applyConstraints({ echoCancellation: on });
             } catch {
@@ -487,13 +443,27 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
           }),
         );
       },
+      async reopen(): Promise<MeetingReopen> {
+        if (closed) return { ok: false, message: 'The recording has already stopped.' };
+        const next = await openLeg();
+        if (!next.ok) return { ok: false, message: next.message };
+        // The OLD leg comes down only once the new one is up. Reversing this
+        // would put a hole in the audio for the length of a permission round
+        // trip, on a path whose whole job is to lose less of the meeting — and
+        // would release a working capture to find out the replacement was
+        // refused.
+        if (closed) {
+          tearDown(next.leg);
+          return { ok: false, message: 'The recording has already stopped.' };
+        }
+        const previous = leg;
+        leg = next.leg;
+        tearDown(previous);
+        return { ok: true };
+      },
       stop: () => {
-        pump.onBlock = null;
-        pump.stop();
-        // The graph closing is not enough: the TRACK is what holds the device,
-        // and leaving it open keeps the browser's recording indicator lit long
-        // after the meeting ended.
-        releaseStream();
+        closed = true;
+        tearDown(leg);
       },
     },
   };

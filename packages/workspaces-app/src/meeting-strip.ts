@@ -72,6 +72,7 @@ import {
   type MeetingBotStatus,
   type MeetingCaptureSource,
   type MeetingServerMessage,
+  type MeetingStreamId,
   type MeetingUnavailableReason,
   type TranscriptionEngineName,
   describeBotState,
@@ -87,14 +88,11 @@ import {
   defaultAdvancedState,
   tuningPayload,
 } from './meeting-advanced.ts';
-import {
-  type MeetingCaptureStart,
-  type RoomAudioProcessing,
-  startMeetingCapture,
-} from './meeting-audio.ts';
+import { type RoomAudioProcessing, startMeetingCapture } from './meeting-audio.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
 import {
   type CaptureSetResult,
+  type StartOneCapture,
   openCaptureSet,
   partialCaptureNote,
 } from './meeting-capture-set.ts';
@@ -127,12 +125,18 @@ import {
   type ReconnectPlan,
   createReconnectPlan,
 } from './meeting-reconnect.ts';
+import { COMBINED_ECHO_NOTE, systemAudioOffered } from './meeting-source.ts';
 import {
-  COMBINED_ECHO_NOTE,
-  type MeetingAudioSource,
-  systemAudioOffered,
-} from './meeting-source.ts';
+  type LostStream,
+  RESTORED_NOTE_MS,
+  type StreamAlarm,
+  createStreamRetryPlan,
+  reopensWithoutGesture,
+  restoredNote,
+  streamAlarm,
+} from './meeting-stream-health.ts';
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
+import type { TrackLossReason } from './meeting-track-watch.ts';
 import type { TranscriptReader } from './meeting-transcript-panel.ts';
 import type { DocSpeakers } from './speaker-voices.ts';
 
@@ -224,14 +228,12 @@ export interface MeetingStripOpts {
   openSocket?: (url: string) => MeetingSocket;
   /**
    * How ONE stream is opened. A mic + Mac-audio meeting calls it twice — see
-   * `meeting-capture-set.ts`, which is what the strip actually talks to.
+   * `meeting-capture-set.ts`, which is what the strip actually talks to, and
+   * which owns this type. It used to be spelled out again here, and the copy
+   * went stale the moment the seam grew `onLost`: the strip passed a callback
+   * its own opts said did not exist.
    */
-  startCapture?: (opts: {
-    onFrame: (pcm: Int16Array) => void;
-    mode: CaptureMode;
-    room?: RoomAudioProcessing;
-    source?: MeetingAudioSource;
-  }) => Promise<MeetingCaptureStart>;
+  startCapture?: StartOneCapture;
   /** Whether to offer the Mac Audio source. Defaults to asking the browser. */
   systemAudioOffered?: () => boolean;
   /**
@@ -611,6 +613,22 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   let liveMeetingId: string | null = null;
   /** The reconnect backoff, reset by every landed connection. */
   const reconnect: ReconnectPlan = createReconnectPlan({ now });
+  /**
+   * The captures that have stopped delivering audio, in the order they died.
+   *
+   * Mount-level rather than per-meeting because it has to survive a socket
+   * drop: the microphone stays open across a reconnect, so a stream that was
+   * already dead is still dead on the other side of it, and the gap the server
+   * has open is still the same gap.
+   */
+  let lostStreams: LostStream[] = [];
+  /** One backoff per stream that can come back on its own. */
+  const streamRetries = new Map<MeetingStreamId, ReconnectPlan>();
+  /** Cancels the reopen waiting on each stream's backoff. */
+  const streamRetryCancels = new Map<MeetingStreamId, () => void>();
+  /** The "it is back" line, until `RESTORED_NOTE_MS` takes it down. */
+  let restoredLine = '';
+  let cancelRestoredLine: (() => void) | null = null;
   /** Cancels the retry that is waiting, or null when none is. */
   let cancelRetry: (() => void) | null = null;
   /** Whether the socket now open sent a `start` asking to resume. */
@@ -945,6 +963,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     mode: () => mode,
     startNote: () => startNote,
     standingNote: () => standingNote,
+    streamAlarm: currentAlarm,
+    restoredLine: () => restoredLine,
+    reopenStream: (stream) => void attemptStreamReopen(stream),
     names: () => names,
     liveBot,
     botFarewell,
@@ -1206,8 +1227,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       stopClock?.();
       stopClock = null;
       // Nothing is reconnecting to a meeting that is over, and the sentence
-      // saying so must not outlive it.
+      // saying so must not outlive it. Nor is anything still trying to reopen
+      // a capture for it: a retry that outlived the meeting would reopen the
+      // microphone with nothing recording, permission light and all.
       standingNote = '';
+      forgetStreamLosses();
       liveMeetingId = null;
       // However the meeting ended, there is no live session left to tune —
       // the menu's Advanced panel and its "Applied." notes end with it. The
@@ -1218,6 +1242,161 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       staleKeys.clear();
     }
     render();
+  }
+
+  // ---- captures that die mid-meeting ---------------------------------------
+
+  /**
+   * Tell the server a stream went away, or came back.
+   *
+   * Fire and forget: a socket that is down cannot be told, and the gap the
+   * server already has open is the right shape either way — a `lost` it never
+   * heard is re-sent when the socket comes back (`announceLostStreams`), and a
+   * `restored` it never heard leaves a gap open that the meeting's stop closes
+   * with `to: null`, which reads as "it did not come back". Wrong in the safe
+   * direction: the record over-reports a loss rather than hiding one.
+   */
+  function tellServerAboutStream(
+    stream: MeetingStreamId,
+    state: 'lost' | 'restored',
+    reason?: TrackLossReason,
+  ): void {
+    if (!socketOpen) return;
+    socket?.send(
+      JSON.stringify({ type: 'stream_state', stream, state, ...(reason ? { reason } : {}) }),
+    );
+  }
+
+  /**
+   * Every stream still down, announced on a socket that has just come up.
+   *
+   * `recordGap` is idempotent per stream, so a gap the server already knows
+   * about is not opened twice — and one it never heard because the socket was
+   * already gone when the track died is opened now, dated from this moment
+   * rather than from the death. Late is the honest failure here: the gap is
+   * real, and the alternative is a record that does not mention it at all.
+   */
+  function announceLostStreams(): void {
+    for (const lost of lostStreams) tellServerAboutStream(lost.stream, 'lost', lost.reason);
+  }
+
+  /** Which streams are still delivering audio — never which were asked for. */
+  function runningStreams(): MeetingStreamId[] {
+    const opened = capture?.captures.map((c) => c.stream) ?? [];
+    return opened.filter((s) => !lostStreams.some((l) => l.stream === s));
+  }
+
+  /** What the strip shows about the captures, or null while all is well. */
+  function currentAlarm(): StreamAlarm | null {
+    return streamAlarm({ lost: lostStreams, running: runningStreams() });
+  }
+
+  /**
+   * A capture stopped delivering while the meeting is still running.
+   *
+   * The three things that have to happen, in this order and for these reasons:
+   * the person is told (they are in the meeting NOW, and the whole point is
+   * that they find out in seconds rather than afterwards); the record is told
+   * (so the transcript carries the hole rather than closing over it); and the
+   * stream is asked for again where asking is possible without them.
+   */
+  function onStreamLost(stream: MeetingStreamId, reason: TrackLossReason): void {
+    if (disposed || state.kind !== 'recording') return;
+    // The watch reports once per leg, but a failed reopen can report again on
+    // the leg it opened, and two entries for one stream would say it twice.
+    if (lostStreams.some((l) => l.stream === stream)) return;
+    const recovering = reopensWithoutGesture(stream);
+    lostStreams = [...lostStreams, { stream, reason, recovering }];
+    tellServerAboutStream(stream, 'lost', reason);
+    render();
+    if (recovering) scheduleStreamRetry(stream, true);
+  }
+
+  /**
+   * Ask for a stream again after the backoff, or at once for the first try.
+   *
+   * `immediate` is the first attempt after a death: a microphone the browser
+   * handed back to the OS for a moment is usually available again straight
+   * away, and waiting a second to find that out is a second of the meeting.
+   */
+  function scheduleStreamRetry(stream: MeetingStreamId, immediate = false): void {
+    const plan = streamRetries.get(stream) ?? createStreamRetryPlan({ now });
+    streamRetries.set(stream, plan);
+    if (immediate) {
+      void attemptStreamReopen(stream);
+      return;
+    }
+    const step = plan.dropped();
+    if (step.kind === 'give-up') {
+      // The window is spent. The line stops promising a recovery and offers
+      // the button instead — a person can still get it back, and now they are
+      // the only one who can.
+      lostStreams = lostStreams.map((l) => (l.stream === stream ? { ...l, recovering: false } : l));
+      render();
+      return;
+    }
+    streamRetryCancels.set(
+      stream,
+      schedule(() => {
+        streamRetryCancels.delete(stream);
+        void attemptStreamReopen(stream);
+      }, step.delayMs),
+    );
+  }
+
+  /**
+   * One attempt at reopening a dead capture. Also the click handler behind the
+   * button, which is why it takes no view of whether a gesture was involved —
+   * `getDisplayMedia` simply succeeds from a click and fails without one.
+   */
+  async function attemptStreamReopen(stream: MeetingStreamId): Promise<void> {
+    if (disposed || state.kind !== 'recording') return;
+    const set = capture;
+    if (!set) return;
+    // A press while a backoff attempt is waiting takes over from it, so the
+    // person never waits out a timer they just tried to skip.
+    streamRetryCancels.get(stream)?.();
+    streamRetryCancels.delete(stream);
+    // The button's own press is the gesture, so from here on the stream counts
+    // as recovering however it got here.
+    lostStreams = lostStreams.map((l) => (l.stream === stream ? { ...l, recovering: true } : l));
+    render();
+    const result = await set.reopen(stream);
+    if (disposed || state.kind !== 'recording') return;
+    if (!result.ok) {
+      scheduleStreamRetry(stream);
+      return;
+    }
+    onStreamRestored(stream);
+  }
+
+  /** A capture is delivering audio again: close the gap, and say so briefly. */
+  function onStreamRestored(stream: MeetingStreamId): void {
+    if (!lostStreams.some((l) => l.stream === stream)) return;
+    lostStreams = lostStreams.filter((l) => l.stream !== stream);
+    streamRetries.delete(stream);
+    streamRetryCancels.get(stream)?.();
+    streamRetryCancels.delete(stream);
+    tellServerAboutStream(stream, 'restored');
+    restoredLine = restoredNote(stream);
+    cancelRestoredLine?.();
+    cancelRestoredLine = schedule(() => {
+      restoredLine = '';
+      cancelRestoredLine = null;
+      render();
+    }, RESTORED_NOTE_MS);
+    render();
+  }
+
+  /** Every retry and every note about a capture, dropped with the meeting. */
+  function forgetStreamLosses(): void {
+    for (const cancel of streamRetryCancels.values()) cancel();
+    streamRetryCancels.clear();
+    streamRetries.clear();
+    lostStreams = [];
+    cancelRestoredLine?.();
+    cancelRestoredLine = null;
+    restoredLine = '';
   }
 
   function releaseAudio(): void {
@@ -1268,6 +1447,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         const wasResuming = resuming;
         resuming = false;
         reconnect.succeeded();
+        // A capture that died while the socket was down: the server that is
+        // answering now has heard nothing about it.
+        announceLostStreams();
         if (msg.meetingId) liveMeetingId = msg.meetingId;
         // The meeting now has a name, so anything keyed to one can hold
         // this meeting's roster rather than nothing.
@@ -1429,6 +1611,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // to the last one is about people this meeting has not heard from.
     opts.onMeetingChange?.(null);
     standingNote = '';
+    forgetStreamLosses();
     tapToStart = false;
     setState({ kind: 'requesting' });
     startNote = '';
@@ -1443,6 +1626,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         // ordinal the server's ledger gives the chunk it receives.
         timing?.frameSent();
       },
+      onStreamLost,
       // Read HERE rather than at mount: the chooser can change it between
       // meetings, and the constraints belong to the microphone this press is
       // about to open.

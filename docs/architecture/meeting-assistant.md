@@ -2388,6 +2388,81 @@ rather than measured against whichever stream wrote the ledger last.
 **Cost doubles per meeting-hour** while both streams run: two billed streaming
 sessions, each with its own diarization surcharge on a `conversation`.
 
+## A capture that dies under a running meeting (2026-09-10)
+
+**The 2026-09-10 incident.** Bryan started sharing his screen part-way through
+a two-stream meeting and the recording went silent from that moment. Nothing
+told him until afterwards, and the finished transcript ran the two halves of
+the meeting together as though the missing minutes had never happened.
+
+**The premise was checked before anything was changed, and it held.** A probe
+over the capture path counted the track listeners installed anywhere in it:
+zero. Nothing read `readyState`, nothing listened for `ended`, nothing watched
+`muted`. With the track ended the pump kept firing and frames kept leaving:
+`{"trackListenersInstalled":0,"readyStateAfterEnd":"ended","framesBeforeEnd":1,
+"framesAfterEnd":2,"pumpStopped":0}`. So the failure is an **absence, not an
+error** — a `MediaStreamAudioSourceNode` downstream of a dead track keeps being
+pulled and keeps delivering silence, the socket stays open, and the engine
+hears a quiet room. Every health signal a meeting had said everything was fine.
+
+**Noticing costs no timer.** `meeting-track-watch.ts` reads `readyState` and
+`muted` from inside the audio graph's own block handler, which is already
+running twenty times a second, so there is no polling loop and no second clock.
+It listens for `ended` as well, because that is the fast path and the one the
+real failure takes — but it cannot rely on the event, since `track.stop()` ends
+a track **silently** by spec, and that half is measured rather than cited in
+`meeting-track-death-browser.test.ts`. A `muted` track has to stay muted past
+`MUTE_LOST_MS` (5s) before it counts; a quiet room never trips it, because
+`muted` is a fact about the source rather than about how loud it is.
+
+**A microphone can come back on its own; the Mac's audio cannot.** That
+asymmetry is the whole recovery design, and it lives in one place —
+`reopensWithoutGesture` in `meeting-stream-health.ts`. `getUserMedia` on a
+permission the page already holds opens no prompt, so a lost microphone is
+retried on the socket's own backoff ladder (`createReconnectPlan`, reused
+rather than reinvented) and the best outcome is a person who never knew.
+`getDisplayMedia` is a modal browsers refuse without a fresh user gesture, and
+trying anyway fails as a rejected promise nobody sees — so the strip renders a
+button instead, and "Trying to get it back" is said only while it is true.
+
+**A reopen builds the new leg before releasing the old one.** `MeetingCapture`
+keeps its identity across it — same `onFrame`, same stream byte on the wire,
+same meeting — and what is rebuilt is everything below the track, including the
+resampler, because the replacement device is free to run at another rate and a
+resampler carrying the old ratio would quietly transpose the speech. A refused
+reopen therefore costs no audio at all.
+
+**The person is told during the meeting, not in a log.** The strip's alarm line
+names what stopped AND what is still being recorded — "This Mac's audio
+stopped — voices on the call aren't being recorded. Still recording the
+microphone." — for the same reason `partialCaptureNote` does: a line that only
+says what failed reads as a meeting that did not start, and the person stops a
+recording that is still catching every word they say. It is 16px rather than
+the strip's 13px chrome, because it is read at arm's length off an iPad while
+people are talking, and it outranks the reconnect sentence, because the strip
+has one line and this is the one with an action on it.
+
+**A gap is a line in the record, not a seam closed up.** The server hears a
+`stream_state` frame and appends two more lines to the index a meeting is
+already folded from — one when the gap opens, one when it closes — so the
+record stays append-only and a crash mid-gap leaves an open gap rather than a
+lie. `openGaps` is seeded from the index when a meeting is opened, so a resumed
+meeting re-announcing a loss does not open a second gap over the one already
+there. The raw transcript then carries the gap as a **bullet among the turns**,
+ordered by the same clock: the durable record says time was lost, because
+silently closing the seam is the bug rather than the fix.
+
+**What is proved, and what is not.** `meeting-track-death-browser.test.ts`
+drives the real capture path in headless Chromium against real
+`MediaStreamTrack`s: three kill-and-recover cycles, one ended with an event and
+two with the spec's silent `stop()`, every kill landing inside a continuous
+tone. It measures that no frame of silence reaches the wire before the loss is
+reported, that frames keep arriving afterwards with zero energy when nothing is
+torn down, and that an untouched microphone meeting reports nothing at all.
+What no test can do is start Chrome's share picker: the real-meeting
+confirmation over real screen shares is a person's step and is not covered
+here.
+
 ## Where things live
 
 `packages/core/src/meeting.ts` (wire contract, incl. `CaptureMode` and
@@ -2433,8 +2508,10 @@ late correction) + `speaker-roster.ts` (the meeting's cast) ·
 (the socket state machine and the surface it drives) + `meeting-chooser.ts`
 (the start form) + `meeting-feed.ts` (the transcript line and the notes that
 stand in for it) + `meeting-menu.ts` (the running meeting's report) · `meeting-solo.ts` (who else is on the doc — the one-tap predicate) ·
-`packages/workspaces-app/src/meeting-audio.ts` (capture + the room's
-microphone config) · `packages/server/src/recall.ts` (vendor
+`packages/workspaces-app/src/meeting-audio.ts` (capture, and the reopen that
+replaces a dead leg) + `meeting-room-audio.ts` (the room's microphone config,
+lifted out of it) + `meeting-track-watch.ts` (noticing a capture has died) +
+`meeting-stream-health.ts` (what that means, in words and in policy) · `packages/server/src/recall.ts` (vendor
 client) · `recall-turns.ts` (frames → turns, naming) · `recall-status.ts` +
 `recall-webhook-auth.ts` (bot state, signatures) · `recall-meeting.ts` (the
 bot lifecycle) · `packages/core/src/meeting-bot.ts` (wire contract) ·
