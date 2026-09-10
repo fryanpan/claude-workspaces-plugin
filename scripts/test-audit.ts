@@ -83,16 +83,42 @@ function lsFiles(args: string[], globs: string[]): string[] {
  */
 const WORKTREES = `.claude${sep}worktrees${sep}`;
 
+/**
+ * Both caches are safe because this is a one-shot script: every file it judges
+ * is on disk before it starts, and nothing here writes. Four checks over two
+ * globs meant EIGHT `git ls-files` spawns and two full reads of every test
+ * file — `fixedSleeps` and `waitBudget` walk the same ~505 server tests,
+ * `sourceShape` and `wallClock` the same whole-repo set. The cache is what
+ * kept a fourth check from making the script slower: 0.47s before it, 0.62s
+ * with the check and no cache, 0.35s with both. That matters past the script's
+ * own runtime, because `scripts/test-audit.test.ts` shells out to it three
+ * times inside one vitest case.
+ */
+const fileLists = new Map<string, string[]>();
+
 function gitFiles(...globs: string[]): string[] {
+  const key = globs.join('\u0000');
+  const hit = fileLists.get(key);
+  if (hit) return hit;
   const tracked = lsFiles([], globs);
   const untracked = lsFiles(['--others', '--exclude-standard'], globs);
-  return [...new Set([...tracked, ...untracked])]
+  const list = [...new Set([...tracked, ...untracked])]
     .filter((rel) => !rel.includes(WORKTREES))
     .filter((rel) => existsSync(join(repoRoot, rel)))
     .sort();
+  fileLists.set(key, list);
+  return list;
 }
 
-const read = (rel: string): string[] => readFileSync(join(repoRoot, rel), 'utf8').split('\n');
+const fileLines = new Map<string, string[]>();
+
+const read = (rel: string): string[] => {
+  const hit = fileLines.get(rel);
+  if (hit) return hit;
+  const lines = readFileSync(join(repoRoot, rel), 'utf8').split('\n');
+  fileLines.set(rel, lines);
+  return lines;
+};
 
 const COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
 
