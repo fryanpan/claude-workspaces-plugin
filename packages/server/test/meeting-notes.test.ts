@@ -2540,6 +2540,63 @@ describe('session start and tick lifecycle', () => {
     expect(landed).toHaveLength(1);
   });
 
+  it('a tick that composed nothing announces empty, not written', async () => {
+    // `written` is what takes a chunk of transcript off the live surface, so
+    // firing it for a tick with no edits took the speaker's words away with
+    // no note to show for them (Bryan, 2026-09-09: eleven of one meeting's
+    // seventeen ticks). It is not `failed` either — the compose ran, the sink
+    // was called, and nothing is carried or retried.
+    const schedule = new ManualScheduler();
+    const events: Array<{ phase: string; turns: readonly number[] }> = [];
+    const landed: NotesUpdate[] = [];
+    const silent: NotesComposer = { name: 'silent', compose: () => Promise.resolve([]) };
+    const session = beginNotesSession(
+      {
+        composer: silent,
+        quietMs: 1000,
+        schedule,
+        onNotes: (u) => {
+          landed.push(u);
+        },
+        onError: () => {},
+        onTickLifecycle: (e) => events.push({ phase: e.phase, turns: e.turns }),
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'Small talk.', final: true });
+    schedule.fire();
+    await session.end();
+    expect(events).toEqual([
+      { phase: 'composing', turns: [0] },
+      { phase: 'empty', turns: [0] },
+    ]);
+    // Control: the sink really was called, so this is the successful path and
+    // not a refusal wearing a different name.
+    expect(landed).toHaveLength(1);
+    expect(landed[0]?.edits).toEqual([]);
+  });
+
+  it('a tick that composed something still announces written', async () => {
+    // The other half of the pair: the phase turns on the EDITS, so a normal
+    // tick must be unaffected by the empty one above.
+    const schedule = new ManualScheduler();
+    const events: string[] = [];
+    const session = beginNotesSession(
+      {
+        composer: createStubNotesComposer(),
+        quietMs: 1000,
+        schedule,
+        onNotes: () => {},
+        onTickLifecycle: (e) => events.push(e.phase),
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'Something worth a note.', final: true });
+    schedule.fire();
+    await session.end();
+    expect(events).toEqual(['composing', 'written']);
+  });
+
   it('a sink that reports nothing is not a refusal', async () => {
     // The contract is `void | boolean`, and every sink in the tree returns
     // nothing. Only an explicit `false` may fail a tick — otherwise the fix

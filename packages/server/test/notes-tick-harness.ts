@@ -278,7 +278,10 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
         summary = s;
       },
       onTickLifecycle: (event) => {
-        if (event.phase === 'written' || event.phase === 'failed') done.add(event.tick);
+        // Every terminal phase, `empty` included: this set is what `tick()`
+        // waits on, and a tick that composed nothing is as finished as one
+        // that wrote a bullet. Leaving it out hangs the wait.
+        if (event.phase !== 'composing') done.add(event.tick);
       },
     },
     {

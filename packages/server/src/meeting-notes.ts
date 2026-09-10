@@ -554,16 +554,27 @@ export interface NotesReattribution {
 
 /**
  * Where a tick is in its life, for the surface showing provisional text: the
- * words split off to compose, they landed in the doc, or the compose failed
- * and they are carried into the next tick. `turns` are engine turn ids — the
- * identity the strip already tracks — so a client can move exactly those
- * turns from its provisional block into "being written" and out again.
+ * words split off to compose (`composing`), a note carrying them landed in
+ * the doc (`written`), the compose or the write failed and they are carried
+ * into the next tick (`failed`), or the compose ran and wrote nothing
+ * (`empty`). `turns` are engine turn ids — the identity the strip already
+ * tracks — so a client can move exactly those turns from its provisional
+ * block into "being written" and out again.
+ *
+ * `empty` IS ITS OWN PHASE, and it is why this union has four members rather
+ * than three. `written` is what takes a chunk of transcript off the live
+ * surface, and a tick that composed no edits has no note to take it into: it
+ * used to report `written` all the same, so eleven of one meeting's
+ * seventeen ticks removed the speaker's words with nothing to show for them
+ * (Bryan, 2026-09-09). It is not `failed` either — nothing is carried, there
+ * is no retry, and the model has already had its look at those words — so
+ * the two cannot be collapsed without lying to one reader or the other.
  */
 export interface NotesTickLifecycle {
   docId: string;
   meetingId: string;
   tick: number;
-  phase: 'composing' | 'written' | 'failed';
+  phase: 'composing' | 'written' | 'empty' | 'failed';
   turns: readonly number[];
 }
 
@@ -1021,7 +1032,7 @@ export function beginNotesSession(
    */
   const ideas = createIdeaLedger();
 
-  const lifecycle = (phase: 'composing' | 'written' | 'failed', tick: number, turns: number[]) =>
+  const lifecycle = (phase: NotesTickLifecycle['phase'], tick: number, turns: number[]) =>
     deps.onTickLifecycle?.({ docId: ids.docId, meetingId: ids.meetingId, tick, phase, turns });
 
   /**
@@ -1656,8 +1667,13 @@ export function beginNotesSession(
         // settle above decided about them stands.
         ideas.composed();
         for (const t of raw) composedTurns.add(t.turn);
+        // THE SAME VERDICT THE TIMING ROW BELOW RECORDS, and it used to be a
+        // flat `written` sitting one line above a report that already knew
+        // better. `written` is the phase that fades a chunk of transcript off
+        // the live surface; a tick that composed no edits has nothing for it
+        // to fade into, so it says so and the words stay provisional.
         lifecycle(
-          'written',
+          edits.length > 0 ? 'written' : 'empty',
           tick.tick,
           raw.map((t) => t.turn),
         );

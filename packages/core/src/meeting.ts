@@ -365,15 +365,21 @@ export type MeetingServerMessage =
     }
   /**
    * Where a notes tick is in its life: its turns split off to compose
-   * (`composing`), the composed note landed in the doc (`written`), or the
-   * compose failed and the turns carry into the next tick (`failed`). `turns`
-   * are the same turn ids the `transcript` frames carry, so the provisional
-   * surface can move exactly those lines into "being written" and out again.
+   * (`composing`), the composed note landed in the doc (`written`), the
+   * compose ran and wrote nothing (`empty`), or the compose failed and the
+   * turns carry into the next tick (`failed`). `turns` are the same turn ids
+   * the `transcript` frames carry, so the provisional surface can move
+   * exactly those lines into "being written" and out again.
+   *
+   * `empty` and `failed` differ on the server and not on the surface: both
+   * mean no note carries these words, so both return them to the stream.
+   * They are separate because only `failed` carries them into another
+   * compose — see `NotesTickLifecycle`.
    */
   | {
       type: 'notes_progress';
       tick: number;
-      phase: 'composing' | 'written' | 'failed';
+      phase: 'composing' | 'written' | 'empty' | 'failed';
       turns: number[];
     }
   /** The answer to a `timing_ping`, carrying both server-side timestamps. */

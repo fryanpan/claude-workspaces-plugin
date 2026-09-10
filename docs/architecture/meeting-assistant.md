@@ -869,6 +869,25 @@ cross-fade and loses only the collapse's travel — less movement, not none
 (owner, 2026-09-05: the instant swap *"was too sudden"*). The settle wash on
 the written note carries the eye up.
 
+**Words leave the zone only when a note carries them, and only by that
+fade.** `notes_progress` has four phases, not three: `composing` splits the
+words off, `written` hands the chunk to the settle, and `empty` and `failed`
+both put them back in the stream — `failed` because the next tick will
+compose them again, `empty` because the compose ran and wrote nothing. The
+server used to report `written` for both of the last two states, so a tick
+that composed no edits took the speaker's words off the screen with no note
+to show for them: eleven of seventeen ticks on the meeting that produced this
+row (Bryan, 2026-09-09). An empty tick's words therefore stay on screen for
+the rest of the meeting, which is the honest reading of "nothing was written
+up about this".
+
+The doc-insert fallback (`clearSettled`, for a bot meeting whose words arrive
+over the doc stream rather than the audio socket) settles through the same
+two beats, and it is INERT once a meeting has reported a tick. A note landing
+in the doc and the `written` frame naming its turns are the same event over
+two channels; the fallback carries no turn ids, so running both let the
+earlier of the two wipe the very chunk the later one was about to fade.
+
 **Three clocks fire a tick, and whichever comes first wins.**
 
 - **The endpoint window** — `DEFAULT_NOTES_ENDPOINT_CONFIRM_MS` (1s), opened

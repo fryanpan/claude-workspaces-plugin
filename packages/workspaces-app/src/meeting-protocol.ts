@@ -165,7 +165,8 @@ export function parseMeetingServerMessage(raw: unknown): MeetingServerMessage | 
     case 'notes_progress': {
       if (typeof m.tick !== 'number' || !Number.isFinite(m.tick)) return null;
       const phase = m.phase;
-      if (phase !== 'composing' && phase !== 'written' && phase !== 'failed') return null;
+      if (phase !== 'composing' && phase !== 'written' && phase !== 'empty' && phase !== 'failed')
+        return null;
       return {
         type: 'notes_progress',
         tick: m.tick,

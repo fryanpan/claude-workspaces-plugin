@@ -59,7 +59,7 @@ export interface LiveZoneTurn {
 /** A `notes_progress` frame, already parsed. */
 export interface LiveZoneProgress {
   tick: number;
-  phase: 'composing' | 'written' | 'failed';
+  phase: 'composing' | 'written' | 'empty' | 'failed';
   turns: readonly number[];
 }
 
@@ -73,9 +73,16 @@ export interface MeetingLiveZone {
   /** The strip's label→name map, re-sent whenever a voice is (re)named. */
   setNames(names: Readonly<Record<string, string>>): void;
   /**
-   * Fallback for meetings without progress frames (a bot's words arrive over
-   * the doc stream): notes just landed remotely, so every settled line has
-   * been written — drop them, keep the one still being spoken.
+   * Fallback for meetings WITHOUT progress frames (a bot's words arrive over
+   * the doc stream, and nothing tells this zone what a tick did): notes just
+   * landed remotely, so every settled line has been written — settle them,
+   * keep the one still being spoken.
+   *
+   * It settles rather than deletes, so the bot path leaves by the same two
+   * beats every other path does, and it is INERT once a meeting has reported
+   * a tick: a doc insert and a `written` frame are the same event arriving
+   * twice, and this one carries no turn ids, so running both let a note
+   * landing a beat early wipe the very chunk the frame was about to fade.
    */
   clearSettled(): void;
   /** The meeting ended, however it ended: hide and forget everything. */
@@ -189,6 +196,9 @@ export function createMeetingLiveZone(opts: {
 
   let live = false;
   let endedAt = 0;
+  /** Whether this meeting has ever reported a tick. One that does is driven
+   *  by its frames alone; see `clearSettled`. */
+  let sawProgress = false;
   let names: Readonly<Record<string, string>> = {};
   const turns = new Map<number, ZoneTurn>();
   /** Voices actually heard — two of them is what turns the pills on. */
@@ -410,10 +420,43 @@ export function createMeetingLiveZone(opts: {
     keepInView();
   }
 
+  /**
+   * Lift these turns out of the stream into a chunk of their own — the first
+   * beat, and what a `composing` frame asks for.
+   */
+  function split(ids: readonly number[]): void {
+    // Where the surviving stream sits BEFORE the split, for the hold to
+    // restore. Read before the turns are flagged: `composing` is what tells
+    // `render` who is leaving.
+    splitAnchor = survivorAnchor(ids);
+    for (const id of ids) {
+      const t = turns.get(id);
+      if (t) t.composing = true;
+    }
+    render();
+    splitAnchor = null; // consumed, or dropped if render bailed
+  }
+
+  /**
+   * The note is in the doc; the settle wash up there takes over. The words do
+   * NOT leave with their turns — the block holding them is handed to the
+   * settle, which fades them where they sit and only then collapses the
+   * space.
+   */
+  function land(ids: readonly number[]): void {
+    for (const id of ids) turns.delete(id);
+    const done = openChunk;
+    openChunk = null;
+    if (done) settling.add(done); // before render, or the zone hides
+    render();
+    if (done) settle(done);
+  }
+
   return {
     begin() {
       live = true;
       follow = true;
+      sawProgress = false;
       clearChunks();
       turns.clear();
       voices.clear();
@@ -434,34 +477,21 @@ export function createMeetingLiveZone(opts: {
     },
     onProgress(e) {
       if (!live) return;
+      sawProgress = true;
       if (e.phase === 'composing') {
-        // Where the surviving stream sits BEFORE the split, for the hold to
-        // restore. Read before the turns are flagged: `composing` is what
-        // tells `render` who is leaving.
-        splitAnchor = survivorAnchor(e.turns);
-        for (const id of e.turns) {
-          const t = turns.get(id);
-          if (t) t.composing = true;
-        }
-        render();
-        splitAnchor = null; // consumed, or dropped if render bailed
+        split(e.turns);
         return;
       }
       if (e.phase === 'written') {
-        // The note is in the doc; the settle wash up there takes over. The
-        // words do NOT leave with their turns — the block holding them is
-        // handed to the settle, which fades them where they sit and only
-        // then collapses the space.
-        for (const id of e.turns) turns.delete(id);
-        const done = openChunk;
-        openChunk = null;
-        if (done) settling.add(done); // before render, or the zone hides
-        render();
-        if (done) settle(done);
+        land(e.turns);
         return;
       }
-      // Failed: the tick's words are carried into the next tick — they are
-      // still provisional, so they return to the stream.
+      // `failed` or `empty`: no note carries these words. A failed tick's are
+      // composed again in the next one; an empty tick's have had their look
+      // and produced nothing. Either way they are still provisional and
+      // nothing has been written up, so they go back to the stream rather
+      // than fading out of it — the fade means "this is in the notes now",
+      // and on an empty tick that would be a lie the reader cannot check.
       for (const id of e.turns) {
         const t = turns.get(id);
         if (t) t.composing = false;
@@ -474,10 +504,22 @@ export function createMeetingLiveZone(opts: {
     },
     clearSettled() {
       if (!live) return;
-      for (const [id, t] of turns) {
-        if (t.final) turns.delete(id);
-      }
-      render();
+      // The guard, and the whole of it: a meeting that reports its ticks is
+      // driven by those frames, which are the only thing that knows what a
+      // tick actually wrote. Filtering the composing turns out here instead
+      // would leave the rest of them — words spoken since the tick fired,
+      // which no note covers — being faded away by a note about something
+      // else.
+      if (sawProgress) return;
+      const settled = ordered()
+        .filter((t) => t.final)
+        .map((t) => t.turn);
+      if (settled.length === 0) return;
+      // The same two beats a reported tick uses, in one frame: nothing is
+      // painted between them, so the words simply stay where they are and
+      // then fade.
+      split(settled);
+      land(settled);
     },
     end() {
       if (live) endedAt = now();
