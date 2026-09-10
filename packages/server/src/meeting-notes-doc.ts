@@ -488,7 +488,19 @@ export function applyNotesUpdate(
   docStore: NotesDocStore,
   update: NotesUpdate,
   heading: NotesHeadingMemory,
-  opts: { dataDir?: string } = {},
+  opts: {
+    dataDir?: string;
+    /**
+     * The applier's per-edit verdicts, handed back for the log.
+     *
+     * `all-edits-failed` used to be the whole answer, and it names a symptom
+     * rather than a cause: five ops can fail five different ways and the line
+     * read the same for all of them. A callback rather than a wider return
+     * type because every caller of this function compares its result to a
+     * string, and a tick whose write LANDED wants none of this.
+     */
+    onOutcomes?: (outcomes: readonly prose.BlockEditOutcome[]) => void;
+  } = {},
 ): NotesWriteResult {
   const doc = docStore.get(update.docId);
   if (!doc) return 'no-doc';
@@ -566,6 +578,7 @@ export function applyNotesUpdate(
   if (guarded.edits.length === 0 && guarded.refused.length > 0) return 'guard-refused';
   const res = applyNotesBlockEdits(docStore, update.docId, linked.edits);
   if (!res.ok) return 'store-refused';
+  opts.onOutcomes?.(res.outcomes);
   heading.learn(
     { docId: update.docId, meetingId: update.meetingId },
     before,
@@ -575,12 +588,46 @@ export function applyNotesUpdate(
   // what reports the skip. A batch that landed some of its edits is a
   // success: the rest reported `unknown-block`, which is the ordinary answer
   // for a block a person deleted mid-compose.
-  return res.applied + res.suggested > 0 ? null : 'all-edits-failed';
+  //
+  // BUT ONLY WHEN SOMETHING THE BATCH CARRIED WAS WORDS. `nest_blocks` and
+  // `delete_block` propose no text: a batch of nothing but those, every one
+  // refused, leaves the notes exactly as they were. That is a regroup that
+  // did not happen, not a note that did not arrive, and calling it a failed
+  // write costs the meeting three times over — the tick's turns carry into
+  // the next tick, a second compose is spent composing them again, and the
+  // live surface is told the speaker's words never reached the doc. Measured
+  // on an hour-long AMI meeting: two consecutive ticks came back as four
+  // `nest_blocks` edits, all answered `nothing-to-nest`, and both were
+  // reported as writes that failed.
+  if (res.applied + res.suggested > 0) return null;
+  return failedCarryingWords(res.outcomes) ? 'all-edits-failed' : null;
 }
 
-/** What the log says about a skip, beyond its name — the detail whoever is
- *  reading it needs next. Empty when the name is the whole answer. */
-export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
+/** Whether any edit that failed was one that would have PUT WORDS in the doc.
+ *  An insert or a replace carries text; a move and a delete do not. */
+function failedCarryingWords(outcomes: readonly prose.BlockEditOutcome[]): boolean {
+  return outcomes.some(
+    (o) =>
+      o.status === 'failed' &&
+      (o.op === 'insert_at_end' || o.op === 'insert_under_heading' || o.op === 'replace_block'),
+  );
+}
+
+/**
+ * What the log says about a skip, beyond its name — the detail whoever is
+ * reading it needs next. Empty when the name is the whole answer.
+ *
+ * `outcomes` is the applier's per-edit verdict list, and it is what turns
+ * `all-edits-failed` from a symptom into a cause. Without it the line said
+ * "every edit named a block that is no longer in the doc" whatever had
+ * actually happened — a guess dressed as a reading, and wrong for every
+ * failure that is not `unknown-block`. Absent, the old sentence stands, which
+ * is what the direct callers in the tests still get.
+ */
+export function notesWriteSkipDetail(
+  skip: NotesWriteSkip,
+  outcomes?: readonly prose.BlockEditOutcome[],
+): string {
   if (skip === 'no-doc') {
     return 'the doc store had no such doc — it was deleted, or evicted while the meeting ran';
   }
@@ -589,7 +636,17 @@ export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
   if (skip === 'guard-refused') {
     return 'every edit touched the meeting’s own notes heading, which the guard never lets through';
   }
-  return 'every edit named a block that is no longer in the doc';
+  if (outcomes === undefined || outcomes.length === 0) {
+    return 'every edit named a block that is no longer in the doc';
+  }
+  const why = new Map<string, number>();
+  for (const o of outcomes) {
+    if (o.status !== 'failed') continue;
+    const key = `${o.op}/${o.error ?? 'no reason given'}`;
+    why.set(key, (why.get(key) ?? 0) + 1);
+  }
+  if (why.size === 0) return 'the applier reported no failure, and nothing landed';
+  return `nothing landed — ${[...why].map(([k, n]) => (n > 1 ? `${k} x${n}` : k)).join(', ')}`;
 }
 
 /** The doc as the composer addresses it, capped so a tick's prompt is the size
@@ -726,6 +783,7 @@ export function meetingSummaryLine(
     (qualityLine === undefined ? '' : ` | ${qualityLine}`)
   );
 }
+
 
 export function applyNotesReattribution(
   docStore: NotesDocStore,
@@ -1105,9 +1163,13 @@ export function withServerNotesSinks(
       notesSectionForMeeting(heading, { docId, meetingId }, outline, deps.docStore()),
     onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
       let landed: boolean | NotesWriteRefusal = true;
+      let outcomes: readonly prose.BlockEditOutcome[] | undefined;
       try {
         const skip = applyNotesUpdate(deps.docStore(), update, heading, {
           ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+          onOutcomes: (o) => {
+            outcomes = o;
+          },
         });
         if (skip !== null) {
           // A GUARD REFUSAL REACHES THE SESSION AS A REFUSAL, not as a failed
@@ -1121,7 +1183,8 @@ export function withServerNotesSinks(
           console.error(
             `[meeting-notes] doc write skipped for ${update.docId} meeting ` +
               `${update.meetingId} tick ${update.tick.tick} (${update.edits.length} ` +
-              `edit${update.edits.length === 1 ? '' : 's'}): ${skip} — ${notesWriteSkipDetail(skip)}`,
+              `edit${update.edits.length === 1 ? '' : 's'}): ${skip} — ` +
+              `${notesWriteSkipDetail(skip, outcomes)}`,
           );
         }
       } catch (err) {

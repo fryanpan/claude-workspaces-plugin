@@ -954,12 +954,40 @@ refused, retry at once instead of costing a whole tick; a composer that is
 simply down still carries to the next tick, which is what keeps the window in
 which a late revision can re-label a carried turn.
 
-**A doc write that did not land fails the tick.** `applyNotesUpdate` returns
-which of four things happened — `no-doc`, `not-prose`, `store-refused`,
-`all-edits-failed` — rather than a boolean, and the sink reports to the
-session whether the write landed. A refusal is announced as `failed`, so the
-live area keeps the chunk on screen instead of clearing it against a note
-that never reached the doc. A doc a meeting is being recorded into is also
+**A doc write that did not land fails the tick — if it was carrying words.**
+`applyNotesUpdate` returns which of four things happened — `no-doc`,
+`not-prose`, `store-refused`, `all-edits-failed` — rather than a boolean, and
+the sink reports to the session whether the write landed. A refusal is
+announced as `failed`, so the live area keeps the chunk on screen instead of
+clearing it against a note that never reached the doc.
+
+**But a batch that proposed no words is not a failed write.** `nest_blocks`
+and `delete_block` carry no text: a batch of nothing but those, every one
+refused, leaves the notes exactly as they were. That is a regroup that did not
+happen, not a note that did not arrive, and calling it `all-edits-failed` cost
+the meeting three times over — the tick's turns carried into the next tick, a
+second compose was spent composing them again, and the live area told the
+speaker their words never reached the doc. `failedCarryingWords` is the test,
+and it is why the return is no longer "did anything land". Measured across
+three hour-long AMI meetings on 2026-09-10: ALL eleven failed writes in 535
+ticks were pure-`nest_blocks` batches answering `nothing-to-nest`, and not one
+was a note that failed to arrive.
+
+**And the skip line names the cause.** The applier's per-edit verdicts reach
+the log through `onOutcomes`, so `notesWriteSkipDetail` can say
+`nest_blocks/nothing-to-nest x4` rather than the old catch-all "every edit
+named a block that is no longer in the doc" — which was a default, not
+evidence, and misreported every failure that was not `unknown-block`. That
+line is what identified the causes above. `nestBlocksUnderLead` looks for
+members among the lead's OWN siblings, so anything else answers
+`nothing-to-nest` whatever went wrong. Classifying forty of them: four in five
+name bullets that are already nested under that lead — the note-taker
+re-proposing a regroup that has already happened — and the rest name bullets
+sitting at the lead's depth in a different list, which is the un-merged
+per-tick list, not a regroup at all. One error name, two unrelated bugs; the
+detail line is what tells them apart.
+
+A doc a meeting is being recorded into is also
 held resident (`DocStoreConfig.isRecording`): the notes arrive by a door no
 other eviction hold can see.
 
