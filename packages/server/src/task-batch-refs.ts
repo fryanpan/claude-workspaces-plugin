@@ -144,7 +144,7 @@ function resolveEntry(
         return {
           ok: false,
           error: UNKNOWN_BATCH_REF_ERROR,
-          message: `\`${field}\` names "${entry}", but no row in this batch declares key "${label}". Give that row \`key: "${label}"\`, or name a task id you already hold.`,
+          message: `\`${field}\` names "${entry}", but no task in this batch declares key "${label}". Give that task \`key: "${label}"\`, or name a task id you already hold.`,
         };
       }
       target = found;
@@ -172,7 +172,7 @@ function resolveEntry(
     return {
       ok: false,
       error: FORWARD_BATCH_REF_ERROR,
-      message: `\`${field}\` names row ${target}, which is not above row ${index}. Rows are created in the order given, so a row can only depend on a row above it — reorder the batch.`,
+      message: `\`${field}\` names task ${target}, which is not above task ${index}. Tasks are created in the order given, so a task can only depend on a task above it — reorder the batch.`,
     };
   }
   const id = ctx.idByIndex.get(target);

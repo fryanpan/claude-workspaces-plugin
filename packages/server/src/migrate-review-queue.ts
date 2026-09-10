@@ -85,7 +85,7 @@ async function main(): Promise<number> {
       `Dry run — nothing was changed. Re-run with --apply --author "<name>" to resolve the ${targets.length} receipt row(s).`,
     );
     console.log(
-      'The question and skim rows are for a person or an agent to read; this script will never resolve them.',
+      'The question and skim items are for a person or an agent to read; this script will never resolve them.',
     );
     return 0;
   }

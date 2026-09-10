@@ -248,7 +248,7 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
   const headline = p.headline;
   if (headline === undefined || (typeof headline === 'string' && headline.trim() === '')) {
     fail(
-      `review.headline is required — one line saying what needs review, at most ${REVIEW_LIMITS.headline} characters. It is the row title; write it as a ticket title, not as the first sentence of a status note.`,
+      `review.headline is required — one line saying what needs review, at most ${REVIEW_LIMITS.headline} characters. It is the item title; write it as a ticket title, not as the first sentence of a status note.`,
     );
   } else if (typeof headline !== 'string') {
     fail('review.headline must be a string.');
@@ -398,7 +398,7 @@ export function reviewPayloadMessage(check: ReviewCheck): string {
   return [
     'This review item cannot be filed as written.',
     ...check.errors,
-    'A review item is a row on a phone: one line saying what needs review, then the body. Post it as an ordinary comment instead if it is a status note — status notes are welcome and no longer enter the review queue.',
+    'A review item is a line on a phone: one line saying what needs review, then the body. Post it as an ordinary comment instead if it is a status note — status notes are welcome and no longer enter the review queue.',
   ].join(' ');
 }
 

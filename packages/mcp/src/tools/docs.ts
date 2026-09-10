@@ -203,7 +203,7 @@ export async function handleDocsTool(
             : (process.env.CW_WORKSPACE_ID ?? process.env.FEEDBACK_WORKSPACE_ID ?? '').trim();
         if (ws === '') {
           return err(
-            'post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose row it lands on',
+            'post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose task it lands on',
           );
         }
         path = `/workspaces/${encodeURIComponent(ws)}/agents/${encodeURIComponent(AUTHOR.name)}/notes`;
@@ -220,7 +220,7 @@ export async function handleDocsTool(
         ...(res.workspaceId !== undefined ? { workspaceId: res.workspaceId } : {}),
         ...(res.taskId === undefined
           ? {
-              note: 'no in-progress task of yours to pin this to — kept on your own recent-activity list; pass taskId to put it on a row',
+              note: 'no in-progress task of yours to pin this to — kept on your own recent-activity list; pass taskId to put it on a task',
             }
           : {}),
       });

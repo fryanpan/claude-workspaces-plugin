@@ -168,7 +168,7 @@ describe('the queue tells an agent who is already on a row', () => {
   // The fields without the instruction are two more keys to skim. What has to
   // reach the reader is what a live claim MEANS.
   it('says not to start a row a live session holds, and to use hive instead', () => {
-    expect(SKILL).toContain('DO NOT START THAT ROW');
+    expect(SKILL).toContain('DO NOT START THAT TASK');
     expect(SKILL).toContain('claude-hive');
   });
 

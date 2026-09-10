@@ -119,5 +119,5 @@ export function claimWarning(
     ? `is already IN PROGRESS under session ${holder.agentId} (${seen}, claimed ${humanDuration(Math.max(0, now - claim.at))} ago)`
     : `is owned by session ${holder.agentId}, which is live (${seen})`;
 
-  return `[claim] ${namedRow(row)} ${held}. Do not start this row blind — message that session over claude-hive, agree who has it, and take a different row if they do. Nothing here refuses you: two sessions on one row is sometimes right, but it has to be a decision rather than a collision neither side can see.`;
+  return `[claim] ${namedRow(row)} ${held}. Do not start this task blind — message that session over claude-hive, agree who has it, and take a different task if they do. Nothing here refuses you: two sessions on one task is sometimes right, but it has to be a decision rather than a collision neither side can see.`;
 }

@@ -86,7 +86,7 @@ describe('create_tasks is the canonical create verb', () => {
 
   it('documents the batch-local dependency reference on the row schema', () => {
     const schema = JSON.stringify(mcp.tool('create_tasks')?.inputSchema ?? {});
-    expect(schema).toContain('`key` labels a row'); // the field that makes a reference possible
+    expect(schema).toContain('`key` labels a task'); // the field that makes a reference possible
     expect(schema).toContain('#seed'); // the spelling
     expect(schema).toContain('depend on one above it'); // and the direction rule
   });

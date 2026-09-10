@@ -57,7 +57,7 @@ import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
 const REVIEW_ITEM_SCHEMA = {
   type: 'object',
   description:
-    "Declares this a Review Item, putting it on the reviewer's Home queue once it passes the board's quality gate. Omit it for ordinary comments — status notes and closing remarks are not review items. headline is the row title; missing or multi-line is refused, over-long files anyway with advice. Everything else goes in detail, in whatever shape the ask wants to read.",
+    "Declares this a Review Item, putting it on the reviewer's Home queue once it passes the board's quality gate. Omit it for ordinary comments — status notes and closing remarks are not review items. headline is the item title; missing or multi-line is refused, over-long files anyway with advice. Everything else goes in detail, in whatever shape the ask wants to read.",
   properties: {
     review_type: {
       type: 'string',
@@ -135,7 +135,7 @@ const TASK_REVIEW_ITEM_SCHEMA = {
 const NEW_TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   description:
-    'A question about the work this row creates — for when you are filing the work and the question together. If the question came up while working a task that already exists, hang it there with add_review_item instead, so the ask keeps the context of the work that raised it. The ticket title names the work; headline names the ask.',
+    'A question about the work this task creates — for when you are filing the work and the question together. If the question came up while working a task that already exists, hang it there with add_review_item instead, so the ask keeps the context of the work that raised it. The ticket title names the work; headline names the ask.',
 } as const;
 
 export const TOOL_LIST: ListToolsResult = {
@@ -275,13 +275,13 @@ export const TOOL_LIST: ListToolsResult = {
           workspaceId: {
             type: 'string',
             description:
-              'The BOARD the row is on — every note is addressed under one. With taskId it goes to /workspaces/<workspaceId>/tasks/<taskId>/notes; without, to your own notes on that board, where the server pins it to your current claim there. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board.',
+              'The BOARD the task is on — every note is addressed under one. With taskId it goes to /workspaces/<workspaceId>/tasks/<taskId>/notes; without, to your own notes on that board, where the server pins it to your current claim there. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board.',
           },
           text: { type: 'string' },
           taskId: {
             type: 'string',
             description:
-              'The row to report on. Omit it and the note lands on your current in-progress task; with none, it is kept on your own recent-activity list only.',
+              'The task to report on. Omit it and the note lands on your current in-progress task; with none, it is kept on your own recent-activity list only.',
           },
         },
         required: ['text'],
@@ -690,7 +690,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unarchive_attachment_set',
       description:
-        'Bring an archived attachment set back: every member returns with its threads, its file bindings and its board rows intact. This is what makes archive_attachment_set safe to call. restore-collision means a docId was re-minted while it was away and nothing moved.',
+        'Bring an archived attachment set back: every member returns with its threads, its file bindings and its board tasks intact. This is what makes archive_attachment_set safe to call. restore-collision means a docId was re-minted while it was away and nothing moved.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -728,7 +728,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unarchive_doc',
       description:
-        'Bring an archived doc back with its threads, file binding and board rows intact. This is what makes archive_doc safe to call.',
+        'Bring an archived doc back with its threads, file binding and board tasks intact. This is what makes archive_doc safe to call.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1487,7 +1487,7 @@ export const TOOL_LIST: ListToolsResult = {
           tasks: {
             type: 'array',
             description:
-              'The rows, at most 100 — an oversized batch is refused whole; a tracker that big belongs in import_tasks_markdown. `title` is the only required field. `key` labels a row so a later row in the same batch can reference it: unique in the batch, not all digits, no leading "#". Rows are created in order, so a row can only depend on one above it; a forward reference is refused.',
+              'The tasks, at most 100 — an oversized batch is refused whole; a tracker that big belongs in import_tasks_markdown. `title` is the only required field. `key` labels a task so a later task in the same batch can reference it: unique in the batch, not all digits, no leading "#". Tasks are created in order, so a task can only depend on one above it; a forward reference is refused.',
             // The row contract used to live on the single-row create verb's
             // declaration, and `tasks` merely pointed at it. Removing that
             // tool would have removed every field description with it — the
@@ -1503,17 +1503,17 @@ export const TOOL_LIST: ListToolsResult = {
                 title: {
                   type: 'string',
                   description:
-                    "One line naming the work, in the form `<persona> can <do x> so that <goal y>` — one persona (Agent, Bryan, Collaborator), 20 words or less. A title that states an observation rather than an outcome gives a column of rows nothing to prioritise by. Never refused; the lead's shape review is where a rough one gets rewritten.",
+                    "One line naming the work, in the form `<persona> can <do x> so that <goal y>` — one persona (Agent, Bryan, Collaborator), 20 words or less. A title that states an observation rather than an outcome gives a column of tasks nothing to prioritise by. Never refused; the lead's shape review is where a rough one gets rewritten.",
                 },
                 body: {
                   type: 'string',
                   description:
-                    'What the row is for, as a compact user story — `<persona> can <do x> so that <goal y>`, one persona (Agent, Bryan, Collaborator) — plus "done when" criteria for anything you hand over or park. Markdown; it comes back whole from next_tasks. On a `needs:\'decision\'` row this is required and must contain the actual question, the stakes, and what each option costs; a body with no question in it is refused.',
+                    'What the task is for, as a compact user story — `<persona> can <do x> so that <goal y>`, one persona (Agent, Bryan, Collaborator) — plus "done when" criteria for anything you hand over or park. Markdown; it comes back whole from next_tasks. On a `needs:\'decision\'` task this is required and must contain the actual question, the stakes, and what each option costs; a body with no question in it is refused.',
                 },
                 key: {
                   type: 'string',
                   description:
-                    'An optional label THIS batch uses to reference the row from a later row\'s `after` / `afterEnforce`. Unique within the batch; not all digits; must not start with "#". Means nothing outside this call.',
+                    'An optional label THIS batch uses to reference the task from a later task\'s `after` / `afterEnforce`. Unique within the batch; not all digits; must not start with "#". Means nothing outside this call.',
                 },
                 assignee: {
                   type: 'string',
@@ -1535,27 +1535,27 @@ export const TOOL_LIST: ListToolsResult = {
                 options: {
                   type: 'array',
                   description:
-                    "Candidate answers for this row's one decision: [{label, detail?}]. `label` is recorded verbatim as the answer if picked; `detail` is what picking it costs. Two or more. They are a shortcut, not a closed set — writing a different answer stays available, so do not pad the list.",
+                    "Candidate answers for this task's one decision: [{label, detail?}]. `label` is recorded verbatim as the answer if picked; `detail` is what picking it costs. Two or more. They are a shortcut, not a closed set — writing a different answer stays available, so do not pad the list.",
                   items: { type: 'object' },
                 },
                 review: NEW_TASK_REVIEW_ITEM_SCHEMA,
                 goal: {
                   type: 'string',
                   description:
-                    'Goal id, or "chores". OMIT to leave this row UNPLACED at the bottom of Backlog for the lead to place. An explicit goal — even "chores" — is a placement.',
+                    'Goal id, or "chores". OMIT to leave this task UNPLACED at the bottom of Backlog for the lead to place. An explicit goal — even "chores" — is a placement.',
                 },
                 order: { type: 'number', description: 'Fractional position within the goal.' },
                 after: {
                   type: 'array',
                   items: { type: 'string' },
                   description:
-                    'What this row waits on ("don\'t start yet" is a dependency, not a status). An existing task id, or a row of THIS batch by index (`0`) or by another row\'s `key` (`"#seed"`).',
+                    'What this task waits on ("don\'t start yet" is a dependency, not a status). An existing task id, or a task of THIS batch by index (`0`) or by another task\'s `key` (`"#seed"`).',
                 },
                 afterEnforce: {
                   type: 'array',
                   items: { type: 'string' },
                   description:
-                    'Subset of `after` that hard-blocks transitions while open. Every entry must also appear in `after`, or the row is refused rather than silently widening the gate.',
+                    'Subset of `after` that hard-blocks transitions while open. Every entry must also appear in `after`, or the task is refused rather than silently widening the gate.',
                 },
                 dueAt: {
                   type: 'number',
@@ -1580,7 +1580,7 @@ export const TOOL_LIST: ListToolsResult = {
           sourceDoc: {
             type: 'object',
             description:
-              "The doc these rows were derived from — set it whenever you are filing tasks out of a doc, and every row gets a structured origin ref back to it (no separate link call). `mode` says what kind of doc: 'plan' (the default for an ordinary doc) files the rows as DRAFTS — visible on the board, in no dispatch read, held in triage until a person approves the plan on the doc page, which releases them; 'discussion' (the default for a meeting notes doc) files them live immediately. A later edit to the doc flags still-open derived rows as possibly stale.",
+              "The doc these tasks were derived from — set it whenever you are filing tasks out of a doc, and every task gets a structured origin ref back to it (no separate link call). `mode` says what kind of doc: 'plan' (the default for an ordinary doc) files the tasks as DRAFTS — visible on the board, in no dispatch read, held in triage until a person approves the plan on the doc page, which releases them; 'discussion' (the default for a meeting notes doc) files them live immediately. A later edit to the doc flags still-open derived tasks as possibly stale.",
             properties: {
               docId: { type: 'string' },
               mode: { type: 'string', enum: ['plan', 'discussion'] },
@@ -1610,7 +1610,7 @@ export const TOOL_LIST: ListToolsResult = {
           assignee: {
             type: 'string',
             description:
-              "Who owns it. Omit and you do — same rule as a create_tasks row's assignee.",
+              "Who owns it. Omit and you do — same rule as a create_tasks entry's assignee.",
           },
           assigneeKind: {
             type: 'string',
@@ -1651,7 +1651,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'get_workspace',
       description:
-        "Read a board's goals in priority order, with per-goal task counts, plus the parallelism cap — its value, slots in use and free, and who last moved it and when. First row is the highest band. Call it before deciding what to work on — list_tasks returns goal ids only, so without this the ordering is invisible. Cheap by design: pair it with next_tasks, which carries the tasks themselves.",
+        "Read a board's goals in priority order, with per-goal task counts, plus the parallelism cap — its value, slots in use and free, and who last moved it and when. First goal is the highest band. Call it before deciding what to work on — list_tasks returns goal ids only, so without this the ordering is invisible. Cheap by design: pair it with next_tasks, which carries the tasks themselves.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1709,7 +1709,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_tasks',
       description:
-        "List a board's tasks, filtered by goal / status / assignee / needs. Rows are trimmed — no body, no transition history. Pass fields to narrow further; the default rows run large on a big board. Archived rows need includeArchived: true.",
+        "List a board's tasks, filtered by goal / status / assignee / needs. Tasks come back trimmed — no body, no transition history. Pass fields to narrow further; the default shape runs large on a big board. Archived tasks need includeArchived: true.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1719,7 +1719,7 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'string',
             enum: [...TASK_STATUSES],
             description:
-              'status:"triage" is the sweep for rows an agent filed that nobody has vetted. next_tasks never returns them, so this filter is the only way to enumerate what is waiting on a look.',
+              'status:"triage" is the sweep for tasks an agent filed that nobody has vetted. next_tasks never returns them, so this filter is the only way to enumerate what is waiting on a look.',
           },
           assignee: { type: 'string' },
           needs: { type: 'string', enum: ['action', 'decision'] },
@@ -1727,12 +1727,12 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'array',
             items: { type: 'string' },
             description:
-              "Project each row to just these keys (`id` always included). Use it for board-wide sweeps so heavy per-row fields — reviews, infoRequests, options — don't overflow the result: fields:['title','status','assignee'] answers most triage questions in a few KB.",
+              "Project each task to just these keys (`id` always included). Use it for board-wide sweeps so heavy per-task fields — reviews, infoRequests, options — don't overflow the result: fields:['title','status','assignee'] answers most triage questions in a few KB.",
           },
           includeArchived: {
             type: 'boolean',
             description:
-              'Include soft-deleted rows, which are hidden by default. Each comes back carrying `archivedAt`, `archivedBy` and `archiveReason`, so this is the read behind "what did we archive, and why". `unarchive_task` puts one back.',
+              'Include soft-deleted tasks, which are hidden by default. Each comes back carrying `archivedAt`, `archivedBy` and `archiveReason`, so this is the read behind "what did we archive, and why". `unarchive_task` puts one back.',
           },
         },
         required: ['workspaceId'],
@@ -1795,7 +1795,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'block_task',
       description:
-        'Say what a task is waiting for: name the ticket or tickets that have to close first. The row reads as Blocked on the board from that moment — the edge IS the state, there is no status to set — it leaves next_tasks and the stall check, and it comes free by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. A todo row and an in-progress row both read as Blocked; blocking one you are already working on is legitimate and says so on the board rather than silently dropping it from the queue. Adds to whatever the row already waits on; remove an edge with set_task_dependencies. This replaces park_task: "not now" belongs to whatever the work is waiting for, and triage is for rows nobody has vetted yet. A row waiting on a PERSON is not blocked — leave it in-progress and file the ask with add_review_item.',
+        'Say what a task is waiting for: name the ticket or tickets that have to close first. The task reads as Blocked on the board from that moment — the edge IS the state, there is no status to set — it leaves next_tasks and the stall check, and it comes free by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. A todo task and an in-progress task both read as Blocked; blocking one you are already working on is legitimate and says so on the board rather than silently dropping it from the queue. Adds to whatever the task already waits on; remove an edge with set_task_dependencies. This replaces park_task: "not now" belongs to whatever the work is waiting for, and triage is for tasks nobody has vetted yet. A task waiting on a PERSON is not blocked — leave it in-progress and file the ask with add_review_item.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1807,7 +1807,7 @@ export const TOOL_LIST: ListToolsResult = {
           taskId: { type: 'string' },
           blockedBy: {
             description:
-              'The task id, or ids, this row waits on. Each must be a task on the same board; an unknown id is refused rather than recorded, because a dangling edge blocks nothing and says it does.',
+              'The task id, or ids, this task waits on. Each must be a task on the same board; an unknown id is refused rather than recorded, because a dangling edge blocks nothing and says it does.',
             oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
           },
         },
@@ -1817,7 +1817,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'archive_task',
       description:
-        'Take a task off the board without destroying it — the soft delete, and the only removal a task has. Reach for it freely for a duplicate, a row the goal moved past, or a capture that turned out not to be work. It writes three fields and nothing else, so unarchive_task is a field clear rather than a restore. Archiving is not completing — if the work happened, use done. Write a reason.',
+        'Take a task off the board without destroying it — the soft delete, and the only removal a task has. Reach for it freely for a duplicate, a task the goal moved past, or a capture that turned out not to be work. It writes three fields and nothing else, so unarchive_task is a field clear rather than a restore. Archiving is not completing — if the work happened, use done. Write a reason.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1830,7 +1830,7 @@ export const TOOL_LIST: ListToolsResult = {
           reason: {
             type: 'string',
             description:
-              'Why, in one line — e.g. "duplicate of the index row" or "the goal moved past this". Capped at 200 characters. Optional, and the row is archived either way; it is the half a later reader acts on.',
+              'Why, in one line — e.g. "duplicate of the index task" or "the goal moved past this". Capped at 200 characters. Optional, and the task is archived either way; it is the half a later reader acts on.',
           },
         },
         required: ['workspaceId', 'taskId'],
@@ -1839,7 +1839,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unarchive_task',
       description:
-        'Put an archived task back — it rejoins its band at the position, status and owner it always had. Find archived rows with list_tasks(includeArchived: true). A row that was not archived answers changed: false rather than erroring.',
+        'Put an archived task back — it rejoins its band at the position, status and owner it always had. Find archived tasks with list_tasks(includeArchived: true). A task that was not archived answers changed: false rather than erroring.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1856,7 +1856,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'rewrite_task',
       description:
-        "Rewrite a task's title, body, or both, with a reason that rides the audit trail. Body is a whole-body replace — send the full markdown. The row's original words are preserved to quote automatically, so a rewrite is never the only record of what was said. When the words are a person's deliberate phrasing, ask on the task instead of replacing them.",
+        "Rewrite a task's title, body, or both, with a reason that rides the audit trail. Body is a whole-body replace — send the full markdown. The task's original words are preserved to quote automatically, so a rewrite is never the only record of what was said. When the words are a person's deliberate phrasing, ask on the task instead of replacing them.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1879,7 +1879,7 @@ export const TOOL_LIST: ListToolsResult = {
           reason: {
             type: 'string',
             description:
-              'Why you are rewriting, in one line — e.g. "title named the artifact, not the outcome". Recorded on the audit row and rendered in the activity feed, so the filer can see what the rewrite was for.',
+              'Why you are rewriting, in one line — e.g. "title named the artifact, not the outcome". Recorded on the audit entry and rendered in the activity feed, so the filer can see what the rewrite was for.',
           },
         },
         required: ['workspaceId', 'taskId', 'reason'],
@@ -1888,7 +1888,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_task_goal',
       description:
-        'Place a task under a goal at an exact position — pick the spot, not just the bucket. position is fractional, so there is always room between two rows; omit it for the bottom of the band. Every move is recorded, so regroup freely. When your move crosses a placement a person made, say why in a comment on the task.',
+        'Place a task under a goal at an exact position — pick the spot, not just the bucket. position is fractional, so there is always room between two tasks; omit it for the bottom of the band. Every move is recorded, so regroup freely. When your move crosses a placement a person made, say why in a comment on the task.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1967,7 +1967,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'reorder_goals',
       description:
-        "Change the priority order of a board's goals — order is priority. Permutation only: order must be exactly the ids the board already holds, so nothing can be created, renamed or lost. Take the ids from get_workspace and send every row whose reorderable is true. Use set_goal_list only when you actually mean to add or remove a band.",
+        "Change the priority order of a board's goals — order is priority. Permutation only: order must be exactly the ids the board already holds, so nothing can be created, renamed or lost. Take the ids from get_workspace and send every goal whose reorderable is true. Use set_goal_list only when you actually mean to add or remove a band.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1976,7 +1976,7 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'array',
             items: { type: 'string' },
             description:
-              'EVERY reorderable goal id, in the new priority order, highest first. Leaving one out is an error, not a demotion; including a non-reorderable row (Backlog) is an error too.',
+              'EVERY reorderable goal id, in the new priority order, highest first. Leaving one out is an error, not a demotion; including a non-reorderable goal (Backlog) is an error too.',
           },
         },
         required: ['workspaceId', 'order'],
@@ -1985,7 +1985,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'add_review_item',
       description:
-        'Hang a question on a ticket that already exists — the verb for a question that came up while working it, so the ask stays attached to the work that raised it. A ticket carries several at once, each answered on its own, so the title keeps naming the work and a second question needs no second ticket. When you are filing the work and the question together, use review on a create_tasks row instead. Every item passes a quality gate (the board’s criteria, see set_review_item_criteria): a result with `held: true` means it is on the ticket but OFF the reader’s queue — fix the gap in `heldReason` with revise_review_item, which judges it again.',
+        'Hang a question on a ticket that already exists — the verb for a question that came up while working it, so the ask stays attached to the work that raised it. A ticket carries several at once, each answered on its own, so the title keeps naming the work and a second question needs no second ticket. When you are filing the work and the question together, use review on a create_tasks entry instead. Every item passes a quality gate (the board’s criteria, see set_review_item_criteria): a result with `held: true` means it is on the ticket but OFF the reader’s queue — fix the gap in `heldReason` with revise_review_item, which judges it again.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -2054,7 +2054,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'revise_review_item',
       description:
-        "Rewrite one of your review items in place — the answer to a question somebody asked ON it, or the fix for an item the quality gate HELD (`held: true` from add_review_item, or a workspace.review_item_held wake). Pass only the fields that change; the previous words are kept as history. Address the item wherever you raised it: on a TICKET, `taskId` + `reviewItemId` (the id rides with the question on the task's thread); for the TICKET'S OWN decision — a `needs: 'decision'` row, which has no item id because its words ARE the title, body and options — `taskId` alone, the shape answer_decision takes for the same row; on a DOC THREAD, `docId` + `threadId` + `commentId` — the review is a payload on one comment, and `commentId` is the `thread.comments[].id` that create_thread / post_reply already handed you when you raised it. Half a doc address is refused, not guessed. EVERY form re-judges every revision — a held item reaches the reader's queue when it passes, and a revision that still misses the mark comes back `held: true` with the gap named. The ticket form additionally returns an already-queued item marked Revised, with their question quoted and the changed span highlighted, and `reply` posts on the asking thread in the same call. Revising a ticket's own decision rewrites the row's words, so rewrite_task does the same job and is judged the same way. The doc form has no `reply`; it rewrites the item, judges it, and tells the thread's watchers.",
+        "Rewrite one of your review items in place — the answer to a question somebody asked ON it, or the fix for an item the quality gate HELD (`held: true` from add_review_item, or a workspace.review_item_held wake). Pass only the fields that change; the previous words are kept as history. Address the item wherever you raised it: on a TICKET, `taskId` + `reviewItemId` (the id rides with the question on the task's thread); for the TICKET'S OWN decision — a `needs: 'decision'` task, which has no item id because its words ARE the title, body and options — `taskId` alone, the shape answer_decision takes for the same task; on a DOC THREAD, `docId` + `threadId` + `commentId` — the review is a payload on one comment, and `commentId` is the `thread.comments[].id` that create_thread / post_reply already handed you when you raised it. Half a doc address is refused, not guessed. EVERY form re-judges every revision — a held item reaches the reader's queue when it passes, and a revision that still misses the mark comes back `held: true` with the gap named. The ticket form additionally returns an already-queued item marked Revised, with their question quoted and the changed span highlighted, and `reply` posts on the asking thread in the same call. Revising a ticket's own decision rewrites the task's words, so rewrite_task does the same job and is judged the same way. The doc form has no `reply`; it rewrites the item, judges it, and tells the thread's watchers.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2071,7 +2071,7 @@ export const TOOL_LIST: ListToolsResult = {
           reviewItemId: {
             type: 'string',
             description:
-              "Which item to revise. Alone — no taskId — it addresses the item wherever it lives, a doc-thread item included. With taskId, one of the items filed on that ticket. Omit for the ticket's own decision — the question a `needs: 'decision'` row asks in its title and body, which carries no item id.",
+              "Which item to revise. Alone — no taskId — it addresses the item wherever it lives, a doc-thread item included. With taskId, one of the items filed on that ticket. Omit for the ticket's own decision — the question a `needs: 'decision'` task asks in its title and body, which carries no item id.",
           },
           docId: {
             type: 'string',
@@ -2217,7 +2217,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_task_schedule',
       description:
-        "Set, replace or clear the rule that says WHEN a task's work starts — the row files one occurrence per firing and the scheduler wakes its owner (docs/architecture/scheduled-tasks.md). Five rule kinds: once {kind:'once', at: <epoch ms>}; every {kind:'every', everyMs: 86400000}; calendar {kind:'calendar', times:[{hour:6, minute:47}], weekdays:[1]} (0 = Sunday; omit weekdays for every day; timezone is an IANA zone, absent reads as UTC); after-completion {kind:'after-completion', delayMs: 3600000} (the delay runs from the last instance closing); on-change {kind:'on-change', source:{kind:'doc', docId} | {kind:'task', taskId}, debounceMs?}. rule: null clears. Re-arming an UNCHANGED rule keeps its run history, so the floor stays at the last occurrence — but a rule that has not fired yet has no last occurrence, and its floor moves to the new arm time (a slot between the old arm time and now is lost); a CHANGED rule always starts from the arm time. Either way check nextAt in the reply. on-change is the newest kind (2026-09) and the only one that is not a clock. The reply is the stored schedule read back plus nextAt, the next firing — check it says what you meant. A validation refusal is the server's own message. Read a schedule later with list_tasks fields:['schedule']; not a due date, which is when work should be finished.",
+        "Set, replace or clear the rule that says WHEN a task's work starts — the task files one occurrence per firing and the scheduler wakes its owner (docs/architecture/scheduled-tasks.md). Five rule kinds: once {kind:'once', at: <epoch ms>}; every {kind:'every', everyMs: 86400000}; calendar {kind:'calendar', times:[{hour:6, minute:47}], weekdays:[1]} (0 = Sunday; omit weekdays for every day; timezone is an IANA zone, absent reads as UTC); after-completion {kind:'after-completion', delayMs: 3600000} (the delay runs from the last instance closing); on-change {kind:'on-change', source:{kind:'doc', docId} | {kind:'task', taskId}, debounceMs?}. rule: null clears. Re-arming an UNCHANGED rule keeps its run history, so the floor stays at the last occurrence — but a rule that has not fired yet has no last occurrence, and its floor moves to the new arm time (a slot between the old arm time and now is lost); a CHANGED rule always starts from the arm time. Either way check nextAt in the reply. on-change is the newest kind (2026-09) and the only one that is not a clock. The reply is the stored schedule read back plus nextAt, the next firing — check it says what you meant. A validation refusal is the server's own message. Read a schedule later with list_tasks fields:['schedule']; not a due date, which is when work should be finished.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2364,7 +2364,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'register_dispatch',
       description:
-        "Tell the board a builder is working a task in a private git worktree, so the stall loop can read the worktree's file activity as the row moving instead of waking the lead over silence it cannot see. Call it when you spawn a builder; re-registering the same task replaces the old worktree. Close it with close_dispatch when the builder reaches terminal (done or died) — a worktree that is deleted closes its own dispatch.",
+        "Tell the board a builder is working a task in a private git worktree, so the stall loop can read the worktree's file activity as the task moving instead of waking the lead over silence it cannot see. Call it when you spawn a builder; re-registering the same task replaces the old worktree. Close it with close_dispatch when the builder reaches terminal (done or died) — a worktree that is deleted closes its own dispatch.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2445,7 +2445,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unregister_worktree',
       description:
-        'Retire a checkout before it goes away. Any document with unsaved edits in it is written out FIRST — which is the whole reason to call this rather than deleting the directory and hoping — and the answer says how many were flushed. Nothing is destroyed: the row stays with its dates, every doc keeps its id and its comments, and a doc bound to that checkout falls back to another copy of the same file. Call it just before `git worktree remove`. Machine-scoped: no workspaceId.',
+        'Retire a checkout before it goes away. Any document with unsaved edits in it is written out FIRST — which is the whole reason to call this rather than deleting the directory and hoping — and the answer says how many were flushed. Nothing is destroyed: the checkout stays with its dates, every doc keeps its id and its comments, and a doc bound to that checkout falls back to another copy of the same file. Call it just before `git worktree remove`. Machine-scoped: no workspaceId.',
       inputSchema: {
         type: 'object',
         properties: {

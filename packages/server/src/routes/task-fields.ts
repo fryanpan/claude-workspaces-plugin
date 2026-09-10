@@ -359,7 +359,7 @@ export async function handleTaskFields(
         changed: false,
         commented: false,
         message:
-          'Un-parking is retired — parking is now a move to triage plus a comment, so there is no deferral to lift. Move the row on with a status change when it is ready.',
+          'Un-parking is retired — parking is now a move to triage plus a comment, so there is no deferral to lift. Move the task on with a status change when it is ready.',
       });
     }
     const until = present ? (raw as number) : undefined;

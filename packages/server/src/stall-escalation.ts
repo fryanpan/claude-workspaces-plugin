@@ -136,7 +136,7 @@ export function buildStallEscalationReview(input: {
   const headline =
     n === 1
       ? `Nobody is on this board, and “${clip(rows[0]?.title ?? '', 40)}” is stuck`
-      : `Nobody is on this board, and ${n} rows are stuck`;
+      : `Nobody is on this board, and ${n} tasks are stuck`;
   const lines = rows.map((row) => {
     const why = BUCKET_WORDS[row.bucket] ?? row.bucket;
     return `- [${label(row.title)}](${taskDeepLink(workspaceId, row.id)}) — ${why}. Quiet ${span(row.quietMs)}.`;
@@ -277,7 +277,7 @@ export class StallEscalations {
               ? 'the board was retired'
               : deadFor === undefined
                 ? 'a session is on the board again'
-                : 'the rows it named are no longer stuck',
+                : 'the tasks it named are no longer stuck',
           );
         }
       }
@@ -411,7 +411,7 @@ export class StallEscalations {
     if (!this.anchorReachable(filed)) {
       // Moved in the same tick: this is one ask being carried somewhere the
       // reader can see it, not a second ask.
-      this.withdrawItem(key, filed, 'moved to a row that is still stuck');
+      this.withdrawItem(key, filed, 'moved to a task that is still stuck');
       dead.filed = undefined;
       this.file(key, dead, rows, deadForMs);
       return;

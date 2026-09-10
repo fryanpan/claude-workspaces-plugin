@@ -124,7 +124,7 @@ export function buildUnansweredReview(input: {
       ? 'A spawn request went out once for the detached owner and was not acted on.'
       : 'No session that could start the owner was attached, so nobody could be asked to.',
     '',
-    'Start the session yourself, hand the row to somebody else, or answer here to say it can wait. The board asks once per run.',
+    'Start the session yourself, hand the task to somebody else, or answer here to say it can wait. The board asks once per run.',
   ].join('\n');
   return {
     review_type: 'question',
