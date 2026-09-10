@@ -41,12 +41,6 @@ residue that is true of THIS repo and nowhere else.
   `.claude/worktrees/` reported its own path's hash and held nothing.
   **Check:** `sentry_list_my_watches` names the id it answered for, and "No
   active subscriptions" means alarms are raising and reaching nobody here.
-  Do NOT check it with `POST /api/sentry`: that self-test sends
-  `captureMessage(..., 'info')`, and the watches sit at `min_level=warning`,
-  so a green self-test with an event id proves the server's path TO Sentry and
-  cannot fail for the reason you are asking about. The two halves are
-  different — only a warning-or-above event exercises the path FROM Sentry to
-  a session.
   **Fix:** `sentry_watch_project` on each slug — idempotent, so calling it
   when you already hold the watch changes nothing. **What is not a check:**
   `POST /api/sentry` (loopback, `routes/ops.ts`) captures at `info`, below the
