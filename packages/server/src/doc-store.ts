@@ -1809,7 +1809,7 @@ export class DocStore {
       return existing;
     }
     const ydoc = new Y.Doc();
-    this.loadFromDisk(docId, ydoc);
+    const compacted = this.loadFromDisk(docId, ydoc);
     // Private fields live in a sidecar, not the CRDT (see private-meta.ts).
     // A `.ydoc` written before that change still carries them: lift them out
     // — which also DELETES them from the doc, so the next share visitor to
@@ -1897,7 +1897,12 @@ export class DocStore {
     // reason — the lift's transaction also ran before wireEvents listened, so
     // without this the private keys would still be in the `.ydoc` on disk and
     // would come straight back on the next restart.
-    if (isNew || Object.keys(legacyPrivate).length > 0) this.saveToDisk(doc);
+    // A compacted board doc is the third member of this list, and for exactly
+    // the same reason as the other two: the change happened inside
+    // `loadFromDisk`, before `wireEvents` was listening, so no update event
+    // will ever schedule the save. Without this the rebuild is discarded at
+    // shutdown and paid for again on the next boot.
+    if (isNew || Object.keys(legacyPrivate).length > 0 || compacted) this.saveToDisk(doc);
     return doc;
   }
 
@@ -3711,13 +3716,25 @@ export class DocStore {
     return join(this.cfg.dataDir, `${docId}.ydoc`);
   }
 
-  private loadFromDisk(docId: string, ydoc: Y.Doc): void {
+  /**
+   * Read the doc's persisted state into `ydoc`.
+   *
+   * Returns whether what landed in the doc DIFFERS from what is on disk — true
+   * only when a board doc was compacted. The caller has to know, because this
+   * runs before the doc's update listener exists: applying the rebuild fires
+   * no event, so nothing schedules the save that would put it on disk. When
+   * something else changes the doc moments later the rebuild rides along on
+   * that save, which is why this was invisible; when nothing does — a quiet
+   * board, or a projection that finds every value unchanged — the compaction
+   * is thrown away and redone, once per boot, forever.
+   */
+  private loadFromDisk(docId: string, ydoc: Y.Doc): boolean {
     // The `.ydoc` in the server's own data dir, never a bound path — the
     // synchronous read below is safe for the same reason every other data-dir
     // read is: this process owns the directory, and no cloud-sync provider
     // stands between it and the disk. Bound paths go through `slow-fs.ts`.
     const path = this.pathFor(docId);
-    if (!existsSync(path)) return;
+    if (!existsSync(path)) return false;
     try {
       const buf = readFileSync(path);
       // A BOARD doc sheds its history on the way in. It is a projection —
@@ -3747,8 +3764,10 @@ export class DocStore {
           `[doc-store] ${docId} left uncompacted: could not keep its pre-compaction bytes`,
         );
       }
+      return useCompacted;
     } catch (err) {
       console.error(`[doc-store] failed to load ${docId}:`, err);
+      return false;
     }
   }
 
