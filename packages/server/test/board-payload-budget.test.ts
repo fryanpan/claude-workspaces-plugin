@@ -34,18 +34,44 @@
  *   - **It is a byte count, not a clock.** The same number on a loaded runner
  *     as on an idle laptop — no wall-clock assertion, nothing to flake.
  *
+ * WHAT THIS GATE CANNOT SEE, stated so nobody trusts it further than it
+ * goes. A conditional branch with no input emits no bytes, so growth inside
+ * one is invisible however tight the band. `projectTask` has about twenty
+ * `...(task.X !== undefined ? …)` spreads, and the first version of this
+ * fixture populated seven of them; `untitled`, `needs`, `options`,
+ * `infoRequests`, `afterEnforce`, `dueAt`, `schedule`, `recurrenceOf`,
+ * `origin`, `planHold`, `possiblyStale`, `answer`, `unplacedSince` and the
+ * `projectDecisionState` pair were all unrepresented, which is the same hole
+ * the workspace map had, one level in. Every branch the projector has TODAY
+ * now has at least one row that takes it — asserted separately in
+ * `board-payload-coverage.test.ts`, which fails if one stops being covered.
+ *
+ * So the honest claim is **"every branch the projector has today is
+ * represented"**, NOT "any added field is caught". A future field behind a
+ * NEW condition — one no fixture row satisfies — still emits nothing and
+ * still passes. Adding such a field means adding a fixture row that takes its
+ * branch, in the same commit. The coverage test names the branches but cannot
+ * know about a condition that does not exist yet.
+ *
  * The budget lives in `board-payload.baseline.json` so it moves in a diff
  * line a reviewer sees, and it is a CEILING that ratchets down, in the style
  * of `scripts/test-audit.baseline.json`. Two assertions, because they catch
  * different sizes of regression — both were run red before this landed:
  *
  *   - Dropping `notes` from `TRIMMED_ROW_FIELDS` — one word off a list — took
- *     the fixture from 722,804 bytes to 1,099,476 and failed the CEILING.
+ *     the fixture from 756,209 bytes to 1,132,881 and failed the CEILING.
  *   - Adding one extra string field to every projected row took it to
- *     734,104, which is UNDER the ceiling's 2% headroom and failed the DRIFT
+ *     767,509, which is UNDER the ceiling's 2% headroom and failed the DRIFT
  *     check instead. That is the division of labour: the ceiling refuses a
  *     payload that is simply too big, and the drift band makes a smaller
  *     move land in the baseline diff rather than being absorbed by headroom.
+ *   - Doubling what the `options` branch carries — a branch no fixture row
+ *     took until the coverage pass — reads 771,179 and fails both. Before
+ *     that pass it would have moved nothing at all.
+ *   - A bare scalar on the WORKSPACE fields (`schemaVersion: 3`) moves the
+ *     total by twenty-nine bytes in seven hundred thousand and passes every
+ *     band above. It fails the exact assertion on that map instead:
+ *     12,619 -> 12,648. That is why the workspace half has its own scale.
  *
  * Deliberately measured RAW rather than deflated, and the distinction is
  * worth stating because it is easy to over-read this number. The doc socket

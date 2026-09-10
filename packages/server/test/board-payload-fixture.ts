@@ -164,7 +164,7 @@ export function boardFixture(): {
   for (let i = 0; i < FIXTURE_ROWS; i += 1) {
     const open = i % 5 === 0;
     const archived = !open && i % 5 === 1;
-    const id = `t-fixture${String(i).padStart(4, '0')}`;
+    const id = `fixture-task-${String(i).padStart(4, '0')}`;
     /** Which open row this is, so the detail-field weights below can be
      *  stated against open rows rather than against every fifth index. */
     const nth = Math.floor(i / 5);
@@ -188,10 +188,10 @@ export function boardFixture(): {
       assigneeId: `agent-${(AGENTS[i % AGENTS.length] ?? 'ada lint').toLowerCase().replace(' ', '-')}`,
       goal: GOAL_IDS[i % GOAL_IDS.length] ?? 'g-payload',
       order: i,
-      after: i % 7 === 0 ? [`t-fixture${String(Math.max(0, i - 3)).padStart(4, '0')}`] : [],
+      after: i % 7 === 0 ? [`fixture-task-${String(Math.max(0, i - 3)).padStart(4, '0')}`] : [],
       links:
         i % 6 === 0
-          ? [{ kind: 'task', taskId: `t-fixture${String(i % 97).padStart(4, '0')}` }]
+          ? [{ kind: 'task', taskId: `fixture-task-${String(i % 97).padStart(4, '0')}` }]
           : [],
       transitions: trail(rand, open ? 1 : 2 + (i % 3), !open),
       createdAt: FIXTURE_NOW - (10 + (i % 120)) * DAY,
@@ -213,7 +213,15 @@ export function boardFixture(): {
             },
           }
         : {}),
-      ...(i % 5 === 0 ? { readingTime: { totalSeconds: 90 + i, readers: 2 } } : {}),
+      ...(i % 5 === 0
+        ? {
+            readingTime: {
+              totalSeconds: 90 + i,
+              sessionCount: 2,
+              lastSessionAt: FIXTURE_NOW - 4 * DAY,
+            },
+          }
+        : {}),
       // Bodies: every open row plus the fresh-window closed ones, which is
       // the live board's 135 of 774. One in ten is over the projection cap,
       // so the truncation path is exercised rather than assumed.
@@ -262,6 +270,83 @@ export function boardFixture(): {
             },
           }
         : {}),
+      // ---- THE RARER BRANCHES ----
+      //
+      // Every remaining conditional in `projectTask` gets at least one row
+      // that takes it, weighted off the live board's own counts scaled from
+      // 774 rows to 500 — `unplacedSince` 114, `origin` 46, `needs` 45,
+      // `possiblyStale` 30, `answer` 27, `options` 20, `afterEnforce` 16,
+      // `dueAt` 3, `untitled` 3, `schedule` 1, `recurrenceOf` 1. Without
+      // them a branch emits no bytes at all, so growth inside one is
+      // invisible to a budget on the total — the same hole the workspace map
+      // had, one level in.
+      ...(i % 7 === 4 ? { unplacedSince: FIXTURE_NOW - 6 * DAY } : {}),
+      ...(i % 17 === 5 ? { origin: { kind: 'doc' as const, docId: 'fixture-doc-0007' } } : {}),
+      ...(i % 27 === 7 ? { possiblyStale: { docRevision: 4, ts: FIXTURE_NOW - 8 * DAY } } : {}),
+      ...(i % 51 === 9
+        ? { afterEnforce: [`fixture-task-${String(Math.max(0, i - 3)).padStart(4, '0')}`] }
+        : {}),
+      ...(i % 250 === 11 ? { dueAt: FIXTURE_NOW + 9 * DAY } : {}),
+      ...(i % 250 === 13 ? { untitled: true as const } : {}),
+      // The decision rows. `needs`, `options`, `answer` and `infoRequests`
+      // ride together because that is how a decision is shaped — and
+      // `projectDecisionState` reads all four, so splitting them across rows
+      // would leave its branch unrepresented however many rows carried one.
+      ...(i % 17 === 3
+        ? {
+            needs: 'decision' as const,
+            options: [
+              { id: 'o-keep', label: 'Keep the rule as written', detail: filler(180) },
+              { id: 'o-narrow', label: 'Narrow it to the case that bit us', detail: filler(180) },
+            ],
+            // Never on the rows that carry a threaded question: an ANSWERED
+            // item is not a waiting one, and a waiting one is the only thing
+            // that makes projectDecisionState emit.
+            ...(i % 34 === 3 && i % 170 !== 3
+              ? {
+                  answer: {
+                    text: filler(220),
+                    by: 'Ada Lint',
+                    ts: FIXTURE_NOW - DAY,
+                    optionId: 'o-narrow',
+                  },
+                }
+              : {}),
+            ...(i % 170 === 3
+              ? {
+                  infoRequests: [
+                    {
+                      text: filler(160),
+                      by: 'Bo Refactor',
+                      ts: FIXTURE_NOW - 2 * DAY,
+                      // Threaded, which is what `reviewItemState` reads as
+                      // waiting on the owner — and therefore the only input
+                      // that makes `projectDecisionState` emit a branch.
+                      threadId: 'th-fixture-0001',
+                    },
+                  ],
+                }
+              : {}),
+          }
+        : {}),
+      ...(i % 83 === 6 ? { needs: 'action' as const } : {}),
+      ...(i % 400 === 15 ? { planHold: { docId: 'fixture-doc-0011' } } : {}),
+      // The scheduling pair. A rule and an occurrence of one, together for
+      // the same reason the decision fields are: a `recurrenceOf` mark with
+      // no rule on the board is not a shape the scheduler produces.
+      ...(i % 400 === 17
+        ? {
+            schedule: {
+              rule: { kind: 'every' as const, everyMs: 7 * DAY },
+              timezone: 'America/Los_Angeles',
+              armedAt: FIXTURE_NOW - 60 * DAY,
+              armedBy: 'Cy Ratchet',
+            },
+          }
+        : {}),
+      ...(i % 400 === 19
+        ? { recurrenceOf: { taskId: 'fixture-task-0017', occurrenceAt: FIXTURE_NOW - 7 * DAY } }
+        : {}),
       ...(archived
         ? {
             archivedAt: updatedAt,
@@ -269,7 +354,7 @@ export function boardFixture(): {
             archiveReason: 'Folded into the covering ticket it duplicated',
           }
         : {}),
-    } as Task;
+    };
     tasks.push(task);
   }
   return {
@@ -282,7 +367,8 @@ export function boardFixture(): {
         title: `${GOALS_TEXT[i % GOALS_TEXT.length]}`,
         order: i,
       })),
-      // Deliberately NOT spelled like a real doc id: the leak gate's denylist
+      // Deliberately NOT spelled like a real doc id — same reason the task
+      // ids above are not spelled like real task ids. The leak gate's denylist
       // matches `d-` plus ten or more characters, and it is right to — a
       // fixture that looks exactly like production data is how real ids reach
       // a public repo. Same length, so the array weighs what a real one does.
@@ -310,6 +396,6 @@ export function boardFixture(): {
       transitions: [],
       createdAt: FIXTURE_NOW - 400 * DAY,
       updatedAt: FIXTURE_NOW - 3 * DAY,
-    })) as GoalRow[],
+    })),
   };
 }
