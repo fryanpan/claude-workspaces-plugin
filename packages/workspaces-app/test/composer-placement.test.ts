@@ -324,6 +324,37 @@ describe('opening the composer', () => {
     expect(scrimEl().classList.contains('composer-scrim--clear')).toBe(false);
   });
 
+  it('becomes a margin box when a window widened past the breakpoint is resized', () => {
+    // Rotating an iPad while the box is open. `balloonMarginVisible` answers
+    // yes where it answered no a moment ago, and an open sheet has to be able
+    // to move into the margin rather than staying a sheet until it is closed.
+    mountChromeDom();
+    let slot: ComposerSlot | null = null;
+    const chrome = mountReviewChrome(chromeOpts({ placeComposer: () => slot }));
+    chrome.openComposer();
+    expect(composerEl().classList.contains('composer--margin')).toBe(false);
+
+    slot = { top: 200, left: 904, width: 260 };
+    window.dispatchEvent(new Event('resize'));
+    expect(composerEl().classList.contains('composer--margin')).toBe(true);
+    expect(composerEl().style.top).toBe('200px');
+  });
+
+  it('leaves a closed composer alone when the window is resized', () => {
+    // The control for the row above: `#composer` keeps `display: block` while
+    // hidden, so placing one would leave a margin-sized box reporting a rect
+    // in the middle of a screen nobody has opened a composer on.
+    mountChromeDom();
+    const chrome = mountReviewChrome(
+      chromeOpts({ placeComposer: () => ({ top: 200, left: 904, width: 260 }) }),
+    );
+    chrome.openComposer();
+    chrome.hideComposer();
+    window.dispatchEvent(new Event('resize'));
+    expect(composerEl().classList.contains('composer--margin')).toBe(false);
+    expect(composerEl().style.top).toBe('');
+  });
+
   it('goes back to the sheet on the next open once the margin is gone', () => {
     mountChromeDom();
     let slot: ComposerSlot | null = { top: 312, left: 904, width: 260 };

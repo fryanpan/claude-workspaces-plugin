@@ -252,12 +252,17 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
   // that stops the doc being scrolled to reach it. Re-place instead: the slot
   // only moves when it has to, exactly as a growing balloon does. Same for a
   // rotation or a keyboard, which move the band the slot is clamped into.
-  const replaceIfPlaced = (): void => {
-    if (composer.classList.contains('composer--margin')) placeComposer();
+  //
+  // The condition is OPEN, not already-in-the-margin. A box that opened as a
+  // sheet on a narrow window and is then widened past the margin's breakpoint
+  // has to be able to become a margin box; asking only the ones already there
+  // makes the sheet a one-way door for as long as the box stays open.
+  const replaceIfOpen = (): void => {
+    if (!composer.classList.contains('hidden')) placeComposer();
   };
-  on(composerText, 'input', replaceIfPlaced);
-  on(window, 'resize', replaceIfPlaced);
-  if (window.visualViewport) on(window.visualViewport, 'resize', replaceIfPlaced);
+  on(composerText, 'input', replaceIfOpen);
+  on(window, 'resize', replaceIfOpen);
+  if (window.visualViewport) on(window.visualViewport, 'resize', replaceIfOpen);
   on(composerText, 'keydown', (ev) => {
     const ke = ev as KeyboardEvent;
     if (ke.key === 'Enter' && !ke.shiftKey && !ke.isComposing) {
