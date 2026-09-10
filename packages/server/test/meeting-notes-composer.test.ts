@@ -18,7 +18,8 @@ import {
   createHaikuNotesComposer,
   readNotesEdits,
 } from '../src/meeting-notes-composer.ts';
-import type { NotesComposeInput } from '../src/meeting-notes.ts';
+import type { NotesComposeInput, NotesComposer } from '../src/meeting-notes.ts';
+import { isQuotaFailure } from '../src/model-quota.ts';
 
 /** One edit, as a model would answer with it. */
 const ONE_EDIT = '[{"op":"insert_under_heading","headingId":"h1","markdown":"- the sync is slow"}]';
@@ -68,6 +69,18 @@ function stubFetch(body: unknown, status = 200) {
     return new Response(JSON.stringify(body), { status });
   }) as typeof fetch;
   return { impl, calls };
+}
+
+/** The message a compose rejected with. Fails loudly if it resolved instead:
+ *  a composer that returned edits would otherwise read as "not a quota
+ *  refusal" and pass the negative case for the wrong reason. */
+async function refusalOf(composer: NotesComposer | null): Promise<string> {
+  try {
+    await composer?.compose(input);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  throw new Error('compose resolved; expected it to reject');
 }
 
 describe('notes prompt', () => {
@@ -316,6 +329,32 @@ describe('createHaikuNotesComposer', () => {
     const { impl } = stubFetch({ error: 'overloaded' }, 529);
     const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
     expect(composer?.compose(input)).rejects.toThrow('529');
+  });
+
+  it('marks a 429 as a quota refusal, so the meeting can be told', async () => {
+    const { impl } = stubFetch({ error: { message: 'rate limited' } }, 429);
+    const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
+    expect(isQuotaFailure(await refusalOf(composer))).toBe(true);
+  });
+
+  it('marks the 400 whose body says the account is empty', async () => {
+    // The shape the 2026-09-09 outage produced: a 400, not a 429, with the
+    // account named in the body rather than in the status.
+    const { impl } = stubFetch(
+      { error: { type: 'invalid_request_error', message: 'Your credit balance is too low' } },
+      400,
+    );
+    const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
+    expect(isQuotaFailure(await refusalOf(composer))).toBe(true);
+  });
+
+  it('leaves an ordinary 400 unmarked — a bad request is this tick’s problem only', async () => {
+    const { impl } = stubFetch(
+      { error: { type: 'invalid_request_error', message: 'model: unknown model' } },
+      400,
+    );
+    const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
+    expect(isQuotaFailure(await refusalOf(composer))).toBe(false);
   });
 
   it('a reply cut at the token ceiling rejects rather than applying half a batch', async () => {

@@ -148,6 +148,20 @@
           >
             ▤
           </button>
+          <!-- Settled comments are off the page by default: their cards and
+               their anchor tints both go, so what is left on screen is what
+               still needs an answer. Nothing is deleted — the thread stays in
+               the store and in the drawer's list — and this brings every one
+               of them back, muted, beside the sentence it was left on.
+               Hidden until the doc actually has one; doc/resolved-visibility.ts
+               owns the state and paints the count. -->
+          <button
+            type="button"
+            id="toggle-resolved"
+            class="icon-btn resolved-toggle"
+            aria-pressed="false"
+            hidden
+          ></button>
           <!-- Doc-level pending-suggestions affordance (redline-suggestions
                Phase 2). Hidden by default; mountSuggestionsSummary shows it
                once the doc has ≥1 pending proposal. Per-suggestion

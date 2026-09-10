@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { wireThreadRangeClicks } from '../src/doc/chrome-panels.ts';
+import { setShowResolved } from '../src/doc/resolved-visibility.ts';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { type ComposerEditorModule, setComposerEditorLoader } from '../src/md-composer.ts';
 import { MountScope } from '../src/mount-scope.ts';
@@ -42,6 +43,9 @@ beforeEach(() => {
 const open: Array<() => void> = [];
 afterEach(() => {
   for (const f of open.splice(0).reverse()) f();
+  // Settled-comment visibility is a per-device preference that outlives a
+  // mount; put it back so one case cannot decide what the next one draws.
+  setShowResolved(false);
 });
 
 function mountSurface(baseText: string, md: string) {
@@ -721,7 +725,12 @@ describe('mountMarkupMargin — comment balloons', () => {
     expect(parent.querySelector('.cw-balloon-comment .thread-answered')).toBeNull();
   });
 
-  it('renders a resolved thread as a folded, resolved balloon', async () => {
+  it('renders a revealed resolved thread as a folded, resolved balloon — and draws none while they are hidden', async () => {
+    // Settled comments leave the margin by default now
+    // (src/doc/resolved-visibility.ts), so this case drives the revealed
+    // state to keep asserting the folded/muted balloon, and the hidden state
+    // is its control.
+    setShowResolved(true);
     const { parent, surface, ydoc, chrome, scope } = mountRedlineWithChrome(
       '',
       'Alpha bravo gamma.\n',
@@ -750,6 +759,14 @@ describe('mountMarkupMargin — comment balloons', () => {
     expect(balloons).toHaveLength(1);
     expect(balloons[0]?.classList.contains('resolved')).toBe(true);
     expect(balloons[0]?.classList.contains('thread-kind-resolved')).toBe(true);
+
+    // Control: hiding them takes the balloon off the page while the thread
+    // itself stays in the store, which is the whole point of hide-not-delete.
+    setShowResolved(false);
+    await tick();
+    margin.relayout();
+    expect(parent.querySelectorAll('.cw-balloon-comment')).toHaveLength(0);
+    expect(chrome.collectThreads().map((t) => t.status)).toEqual(['resolved']);
   });
 });
 

@@ -32,6 +32,7 @@
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import type { NotesComposeInput, NotesComposer, NotesTick, NotesTurn } from './meeting-notes.ts';
+import { refusalMessage } from './model-quota.ts';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
@@ -382,8 +383,14 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
           }),
           signal: ctl.signal,
         });
-        // The status is safe to surface; the key never is.
-        if (!res.ok) throw new Error(`notes compose HTTP ${res.status}`);
+        // The status is safe to surface; the key never is. A refusal's BODY
+        // is read only to tell "the account is out of quota" from every other
+        // 400 — see `model-quota.ts` — and never re-emitted, because a body
+        // can echo the request that carried the credential.
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(refusalMessage('notes compose', res.status, body));
+        }
         const body = (await res.json()) as {
           content?: Array<{ text?: string }>;
           stop_reason?: string | null;

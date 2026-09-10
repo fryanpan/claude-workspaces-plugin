@@ -1850,6 +1850,36 @@ composer revises the notes for it as it always has. The prompt rule spends
 most of its tokens on that distinction, because it is the one that decides
 whether this intent is useful or a nuisance.
 
+### When the model refuses on quota, the room is told
+
+A compose that fails is normally one tick's bad luck: the words carry to the
+next tick and nothing is said, because saying something would be noise about a
+condition that has already passed. A QUOTA refusal is the exception — it will
+refuse the next tick too, and every one after it, so the notes simply stop.
+That is indistinguishable, from the room, from a stretch where nobody said
+anything worth writing down, and on 2026-09-09 it stayed indistinguishable for
+hours.
+
+So the refusal is classified (`model-quota.ts`: a 429, or a 400 whose body
+names the account rather than the request) and one sentence goes into the
+meeting's own notes saying live notes are paused and the recording is not.
+ONCE per outage, held by two guards that are deliberately both there — the
+session's own memory, and a look for the sentence in the outline the tick
+already read, which covers a session that restarted mid-outage. The first tick
+that composes again deletes it, because a doc still claiming an outage under a
+paragraph of fresh notes teaches the reader to disbelieve the next notice.
+
+**What the session remembers follows what the doc ACCEPTED, never what was
+attempted.** The sink can throw, answer `false`, or refuse on policy, and each
+of those looks identical to a success from the calling line. Recording a
+bounced notice as written suppresses every later refusal for the rest of the
+meeting; recording a bounced deletion as done means nobody looks again and the
+sentence stays under fresh notes forever. So both flags move only on an
+accepted write, and the retraction runs on EVERY successful tick rather than
+only when this session remembers writing a notice — a session that started
+mid-outage remembers nothing, and the doc is the only thing that knows.
+Nothing from the refusal body reaches the doc, the log or the error message.
+
 ### Is it behaving? `bun run notes:eval`
 
 Everything in the notetaking behaviour above is a property of what a MODEL
@@ -1857,6 +1887,29 @@ wrote, and a unit test can only prove the instruction was SENT. So the
 instructions are checked the way a person would check them — run real meetings
 through the real pipeline and read the notes — except on 273 ticks rather than
 three (`scripts/notes-eval.ts`).
+
+**It spends its own key, never the live meeting's.** On 2026-09-09 both drew
+on the Keychain item `claude-workspaces-summary-api-key`; the account hit its
+monthly limit and a meeting in progress stopped taking notes. A measurement
+job must not be able to do that, so the eval reads
+`claude-workspaces-eval-api-key` and nothing else — prod's item, its legacy
+name and the `CW_SUMMARY_API_KEY` override are all refused, and a run with no
+eval credential fails naming the item to add rather than borrowing one
+(`scripts/eval-credential.ts`). For a one-off, the Keychain reader's own env
+override `CLAUDE_WORKSPACES_EVAL_API_KEY` — not a command-line flag, which
+would put the key in shell history and in the process list for anything
+running as this user. CI is the one other accepted route: the short-lived
+access token it mints from its own OIDC identity, in
+`CW_SUMMARY_ACCESS_TOKEN`, which exhausts nothing durable.
+
+**That token variable is still shared with prod's resolver by name, and the
+reason it has not been renamed is worth knowing before somebody renames it.**
+When the eval resolves a TOKEN it has no way to hand it to the composer —
+`createHaikuNotesComposer` takes a key string and nothing else — so the
+composer re-resolves from the environment itself. Give the eval a variable of
+its own without first giving the composer a credential seam, and a token run
+stops finding one there and falls through to prod's Keychain item, which is
+strictly worse than the sharing being removed.
 
 **The corpus is AMI** (CC BY 4.0), the same one `room-labels-check.ts` scores
 the room measurement against, excerpted into committed fixtures by

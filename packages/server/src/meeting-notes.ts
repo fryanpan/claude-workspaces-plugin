@@ -62,10 +62,16 @@ import {
   speakerDisplayName,
 } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
+import { isQuotaFailure } from './model-quota.ts';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
+import {
+  announceQuotaOutage,
+  createQuotaNoticeState,
+  retractQuotaNotice,
+} from './notes-quota-notice.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {
   type NotesComposeMeasure,
@@ -1060,6 +1066,41 @@ export function beginNotesSession(
    */
   let retriedFailure = false;
 
+  /** Whether the doc is currently carrying "notes are paused" — one notice
+   *  per outage, taken away by the first tick that composes again. */
+  const quotaNotice = createQuotaNoticeState();
+
+  /**
+   * Put a notice edit (or its retraction) in the doc, out of band from the
+   * tick's own write.
+   *
+   * It swallows everything. A meeting whose note-taker is already refused is
+   * not one to also break on the sentence explaining that, and the sink is
+   * allowed to throw — the section-open path above treats a throw as a
+   * refusal for the same reason.
+   */
+  const writeQuotaNotice = (edits: readonly prose.BlockEdit[]): boolean => {
+    if (edits.length === 0) return false;
+    try {
+      const answer = deps.onNotes({
+        docId: ids.docId,
+        meetingId: ids.meetingId,
+        // No turns: these words are about the note-taker, not about anything
+        // the room said, and a sink that reports what a tick wrote must not
+        // attribute them to a speaker.
+        tick: { tick: lastTickNo, reason: 'pause', turns: [] },
+        edits,
+      });
+      // The same verdict a tick's own write is judged by. A sink that
+      // declined this one has not written it, and saying otherwise is how a
+      // notice goes missing for the rest of the meeting.
+      return answer !== false && answer !== 'refused';
+    } catch (err) {
+      deps.onError?.(err instanceof Error ? err.message : 'notes quota notice failed');
+      return false;
+    }
+  };
+
   const mergeTicks = (a: NotesTick, b: NotesTick): NotesTick => ({
     // The later number and the later reason: what the merged tick IS, is the
     // most recent moment that asked for notes. An `end` merged into a pause
@@ -1599,6 +1640,14 @@ export function beginNotesSession(
           raw.map((t) => t.turn),
         );
         report(edits.length > 0 ? 'written' : 'empty', edits);
+        // The outage is over and the doc must stop saying it is not. Its own
+        // write rather than a member of the batch above: the guard judges a
+        // tick's edits as a set, and a refusal of the notes would then take
+        // the retraction down with them.
+        // UNCONDITIONALLY, not only when this session remembers writing one:
+        // a session that started mid-outage remembers nothing, and the doc
+        // would go on claiming an outage that ended before it began.
+        retractQuotaNotice(quotaNotice, outline, writeQuotaNotice);
       } catch (err) {
         carry = [...raw, ...carry];
         // Same reason as the refused-write path: an idea whose second look
@@ -1616,6 +1665,13 @@ export function beginNotesSession(
         // max_tokens" in a log with several meetings running says nothing
         // about which meeting stopped keeping up, or how far into it.
         deps.onError?.(`${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: ${reason}`);
+        // A quota refusal is the one failure the room has to be told about:
+        // it will refuse the next tick too, and the notes simply stopping is
+        // indistinguishable from a quiet meeting. Once per outage — see
+        // `notes-quota-notice.ts`.
+        if (isQuotaFailure(reason)) {
+          announceQuotaOutage(quotaNotice, outline, notesHeadingId, writeQuotaNotice);
+        }
         // Only a size refusal is worth trying again at once; see
         // `retryAfterFailure`.
         report('failed', []);
