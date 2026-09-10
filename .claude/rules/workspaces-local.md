@@ -45,14 +45,18 @@ residue that is true of THIS repo and nowhere else.
   **Check:** `sentry_list_my_watches` names the id it answered for, and "No
   active subscriptions" means alarms are raising and reaching nobody here.
   **Fix:** `sentry_watch_project` on each slug — idempotent, so calling it
-  when you already hold the watch changes nothing. **What is not a check:**
-  `POST /api/sentry` (loopback, `routes/ops.ts`) captures at `info`, below the
-  `warning` floor these watches use, so a green self-test — `flushed: true`
-  with an `eventId` — proves the server's path TO Sentry and nothing about
-  whether a session is told. Only a warning-or-above event exercises the half
-  that reaches a person, and the obvious tool tests the other one. There is
-  deliberately no automatic version: the server knows only the numeric project
-  id its DSN carries (`sentryProjectOf`, `packages/server/src/sentry.ts`) and
-  cannot turn that into a slug without the Sentry API, so anything automatic
-  would be a second place to configure the slugs, for a hole that opens only
-  when somebody launches a lead outside the repo root.
+  when you already hold the watch changes nothing. **You are told the slugs
+  without asking:** `attach_agent` answers with a `sentry` field naming both
+  projects and the remedy, so the fix needs no memory of this file. The server
+  cannot derive them — a DSN carries only the numeric project id
+  (`sentryProjectOf`, `packages/server/src/sentry.ts`) and turning that into a
+  slug needs the Sentry API — so they are named configuration in
+  `packages/server/src/sentry-projects.ts`, `CW_SENTRY_PROJECTS` overriding
+  them for a deployment that raises elsewhere. Two written-down copies, this
+  one and that one; the running server's is the one a session is handed.
+  **What is not a check:** `POST /api/sentry` (loopback, `routes/ops.ts`)
+  captures at `info`, below the `warning` floor these watches use, so a green
+  self-test — `flushed: true` with an `eventId` — proves the server's path TO
+  Sentry and nothing about whether a session is told. Only a warning-or-above
+  event exercises the half that reaches a person, and the obvious tool tests
+  the other one.
