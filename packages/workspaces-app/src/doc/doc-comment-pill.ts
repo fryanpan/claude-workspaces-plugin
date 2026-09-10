@@ -12,7 +12,7 @@
  *
  * On a huddle doc a range selection grows the pointer pill instead (see
  * doc-pointer-pill.ts); the round pill survives there only in caret mode,
- * where its job is to make the selection the pointer pill then hangs off.
+ * where pressing it opens the composer exactly as it does everywhere else.
  */
 import type { EditorState } from '@tiptap/pm/state';
 import type { EditorHandle } from '../editor.ts';
@@ -20,6 +20,7 @@ import { trackGesture } from '../gesture.ts';
 import type { MountScope } from '../mount-scope.ts';
 import type { ChromeSelection } from './anchor-body.ts';
 import { showToast } from './chrome-dom.ts';
+import { keyboardClearDelta } from './composer-slot.ts';
 import type { PointerPillLayer } from './doc-pointer-pill.ts';
 
 export interface CommentPillOptions {
@@ -281,15 +282,14 @@ export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
       const sel = editor.getSelectionRel();
       if (sel) selection = sel;
     }
-    // On a HUDDLE doc the round pill only ever appears in caret mode, and its
-    // job ends with the sentence selection it just made: `positionPill` sees
-    // a range and brings up the pointer pill over it. Everywhere else it is
-    // the comment affordance it has always been, and opens the composer.
-    if (huddle) {
-      selectionSettled = true;
-      positionPill();
-      return;
-    }
+    // ONE press, everywhere. On a huddle doc this used to end with the
+    // sentence selection it had just made and let `positionPill` grow the
+    // pointer pill over it — so the reader pressed 💬, was handed a second
+    // button reading Comment, and pressed that (Bryan, 2026-09-10: "after
+    // clicking that button, another comment button shows up, and then I can
+    // comment"). The round pill IS the comment affordance on every surface;
+    // the pointer pill still owns a RANGE selection, which is already one
+    // press, and which is the only shape the round pill defers to.
     openComposer();
   });
 
@@ -366,22 +366,44 @@ export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
   // =========================================================================
 
   function scrollSelectionAboveKeyboard(): void {
+    // Nothing to clear when the composer opened in the margin: the keyboard
+    // is not up, the box is not over the prose, and scrolling the doc would
+    // move the sentence out from under a composer pinned beside it.
+    if (composer.classList.contains('composer--margin')) return;
     try {
       const vv = window.visualViewport;
       const vvTop = vv?.offsetTop ?? 0;
       const vvHeight = vv?.height ?? window.innerHeight;
-      // 20% from the top of the visible-above-keyboard area
-      const desiredTop = vvTop + vvHeight * 0.2;
       let selTop = 0;
+      let selBottom = 0;
       const winSel = window.getSelection();
       if (winSel && winSel.rangeCount > 0 && !winSel.isCollapsed) {
-        selTop = winSel.getRangeAt(0).getBoundingClientRect().top;
+        // The LAST line of the selection, not the union of all of them. The
+        // gap below is counted in line heights, and a three-line selection's
+        // bounding box is three lines tall — asking for nine lines of
+        // clearance, which the clamp then answers by pinning it to the top.
+        const rects = winSel.getRangeAt(0).getClientRects();
+        const r =
+          (rects.length > 0 ? rects[rects.length - 1] : null) ??
+          winSel.getRangeAt(0).getBoundingClientRect();
+        selTop = r.top;
+        selBottom = r.bottom;
       } else {
         const { from } = editor.editor.state.selection;
-        selTop = editor.editor.view.coordsAtPos(from).top;
+        const c = editor.editor.view.coordsAtPos(from);
+        selTop = c.top;
+        selBottom = c.bottom;
       }
-      const deltaY = selTop - desiredTop;
-      if (Math.abs(deltaY) < 20) return;
+      const composerTop = composer.getBoundingClientRect().top;
+      const deltaY = keyboardClearDelta({
+        selTop,
+        selBottom,
+        // A composer that has not been laid out (a stripped test document)
+        // reports 0; the bottom of the visible band stands in for it.
+        composerTop: composerTop > 0 ? composerTop : vvTop + vvHeight,
+        bandTop: vvTop,
+      });
+      if (deltaY === 0) return;
       const scroller = document.getElementById('editor');
       if (scroller) scroller.scrollBy({ top: deltaY, behavior: 'smooth' });
     } catch {}
