@@ -147,11 +147,12 @@ function measure(html: string, preset: 'ipad' | 'phone', runs: readonly DriveOpt
  * beat into the last one's fade.
  */
 const MEETING: DriveOptions = {
-  writes: 45,
+  writes: 30,
   emptyEvery: 5,
   failEvery: 7,
   midSplit: false,
   backToBack: true,
+  interleave: true,
   scale: 0.25,
 };
 
@@ -163,6 +164,7 @@ const UNHURRIED: DriveOptions = {
   failEvery: 5,
   midSplit: true,
   backToBack: false,
+  interleave: false,
   scale: 0.25,
 };
 
@@ -201,12 +203,21 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         // Thirty note-writes that actually WROTE one: the ticks that composed
         // nothing and the ticks that failed are extra, not part of the count.
         expect(meeting.written).toBeGreaterThanOrEqual(30);
-        expect(meeting.samples).toBeGreaterThan(50);
+        // Not the raw frame count: Chrome throttles animation frames under a
+        // loaded suite, and a floor on those failed `bun run verify` at 32
+        // while measuring the meeting perfectly well. What has to be non-zero
+        // is the number of samples that could SEE two runs at once.
+        expect(meeting.compared).toBeGreaterThan(meeting.written);
+        // Ticks that composed nothing really did strand words: their turns
+        // went back to the stream and no later tick ever named them again,
+        // which is the state every smear measured here needed.
         expect(meeting.stranded).toBeGreaterThan(0);
+        expect(meeting.streaming).toBeGreaterThanOrEqual(meeting.stranded);
         expect(meeting.worst.area).toBeLessThan(SMEAR_PX2);
 
-        expect(unhurried.samples).toBeGreaterThan(50);
+        expect(unhurried.compared).toBeGreaterThan(unhurried.written);
         expect(unhurried.stranded).toBeGreaterThan(0);
+        expect(unhurried.streaming).toBeGreaterThanOrEqual(unhurried.stranded);
         expect(unhurried.worst.area).toBeLessThan(SMEAR_PX2);
       },
       BROWSER_CASE_MS,

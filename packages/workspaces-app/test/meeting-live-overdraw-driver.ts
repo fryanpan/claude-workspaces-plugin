@@ -49,6 +49,14 @@ export interface DriveOptions {
   failEvery: number;
   /** Fire a second split one beat into the last one's fade. */
   midSplit: boolean;
+  /**
+   * Leave two ticks outstanding: fire the next tick's `composing` before this
+   * one's outcome comes back. The server does this whenever a tick fires while
+   * another is still composing — it announces `composing` per FIRING and
+   * reports the outcome per COMPOSE — so the client sees the frames in this
+   * order for real.
+   */
+  interleave: boolean;
   /** Leave no quiet gap between one write and the next. */
   backToBack: boolean;
   /**
@@ -63,12 +71,27 @@ export interface DriveOptions {
 export interface DriveResult {
   /** Samples taken. Zero would make every reading below vacuous. */
   samples: number;
+  /**
+   * Samples in which two or more runs of text were on screen, so a comparison
+   * was actually possible. This, not `samples`, is what makes a reading of
+   * zero mean something: a sampler that found one run every time would report
+   * a clean meeting however hard it looked.
+   */
+  compared: number;
   /** The worst overlap seen across the whole meeting. */
   worst: Overlap;
   /** Note-writes that actually reported `written`. */
   written: number;
-  /** Turns still in the stream at the end — the empty ticks' strandings. */
+  /**
+   * Turns an `empty` tick handed back to the stream, which the server's carry
+   * then dropped — so no later tick ever names them again and they sit at the
+   * head of the stream for the rest of the meeting. This is the state the
+   * smear needs, counted from the frames driven rather than from the DOM: a
+   * count of what is on screen is every streaming turn and proves nothing.
+   */
   stranded: number;
+  /** Turns left in the stream at the end, stranded ones included. */
+  streaming: number;
 }
 
 const opacityOf = (el: Element | null): number => {
@@ -137,12 +160,24 @@ function glyphRects(root: Element, source: string, out: Painted[]): void {
   }
 }
 
-/** Every run the zone is painting, tagged by which run of text it belongs to. */
+/**
+ * Every run the zone is painting, tagged PER TURN.
+ *
+ * Not per container. The whole of the fix is that a settle which cannot lift
+ * happens INSIDE `.lz-lines`, so a tag per container would give every run in
+ * the stream one source and make the pair-skipping rule below throw away the
+ * very overlap this file exists to catch — the post-fix zero would be a zero
+ * because nothing was compared. A turn is the smallest thing the layout moves
+ * as a unit, so it is the right grain: two rects of ONE turn are the browser
+ * wrapping a line, and two rects of two turns intersecting is a smear whether
+ * they sit in one box or two.
+ */
 function painted(): Painted[] {
   const out: Painted[] = [];
-  const lines = document.querySelector('.lz-lines');
-  if (lines) glyphRects(lines, 'stream', out);
-  document.querySelectorAll('.lz-slot').forEach((slot, i) => glyphRects(slot, `chunk${i}`, out));
+  const zone = document.querySelector('.live-zone');
+  if (!zone) return out;
+  let i = 0;
+  for (const turn of zone.querySelectorAll('.lz-turn')) glyphRects(turn, `turn${i++}`, out);
   return out;
 }
 
@@ -153,8 +188,8 @@ function painted(): Painted[] {
  * the chunk's tail — beside it, past the indent — so adjacency is expected and
  * only intersected area is a smear.
  */
-export function worstOverlap(): Overlap {
-  const rs = painted().sort((a, b) => a.top - b.top);
+export function worstOverlap(runs: readonly Painted[] = painted()): Overlap {
+  const rs = [...runs].sort((a, b) => a.top - b.top);
   let worst: Overlap = { area: 0, width: 0, height: 0 };
   for (let i = 0; i < rs.length; i++) {
     const a = rs[i] as Painted;
@@ -220,21 +255,41 @@ async function drive(o: DriveOptions): Promise<string> {
   zone.begin(Date.now());
 
   let samples = 0;
+  let compared = 0;
   let sampling = true;
   let mark = 'start';
   let worst: Overlap = { area: 0, width: 0, height: 0 };
   const sample = (): void => {
     if (!sampling) return;
     samples++;
-    const w = worstOverlap();
+    const runs = painted();
+    if (runs.length >= 2) compared++;
+    const w = worstOverlap(runs);
     if (w.area > worst.area) worst = { ...w, mark };
-    requestAnimationFrame(sample);
   };
-  requestAnimationFrame(sample);
+  /**
+   * Every moment the zone is asked to change, sampled synchronously — the
+   * animation frames BETWEEN them are covered by the loop below, but they are
+   * the half a loaded machine takes away. Chrome throttles `requestAnimation
+   * Frame` hard under a full test suite: the same meeting that samples ~800
+   * frames idle sampled 32 inside `bun run verify`, which turned the guard
+   * against a blind sampler into a guard against a busy machine.
+   */
+  const at = (m: string): void => {
+    mark = m;
+    sample();
+  };
+  const frame = (): void => {
+    if (!sampling) return;
+    sample();
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 
   let nextId = 0;
   let unwritten: number[] = [];
   let written = 0;
+  let stranded = 0;
 
   /** One utterance: partial, partial, final — under one id, as the engine does. */
   async function utter(words: number): Promise<void> {
@@ -264,40 +319,69 @@ async function drive(o: DriveOptions): Promise<string> {
   };
 
   for (let i = 0; i < o.writes; i++) {
-    mark = `speaking-${i}`;
+    at(`speaking-${i}`);
     await utter(7);
     await utter(6);
     const ids = unwritten.slice();
-    mark = `composing-${i}`;
+    at(`composing-${i}`);
     zone.onProgress({ tick: i, phase: 'composing', turns: ids });
+    sample();
     // Words keep arriving while the tick composes.
     await utter(5);
     await sleep(ms(120));
+    // A second tick fires while this one is still composing. Its own outcome
+    // is reported after this one's, which is the ordering that made a
+    // remembered answer from the first go stale inside the second.
+    let outstanding: number[] = [];
+    if (o.interleave) {
+      at(`outstanding-${i}`);
+      await utter(4);
+      outstanding = unwritten.filter((id) => !ids.includes(id));
+      if (outstanding.length > 0) {
+        zone.onProgress({ tick: 2000 + i, phase: 'composing', turns: outstanding });
+        sample();
+      }
+    }
     const empty = o.emptyEvery > 0 && (i + 1) % o.emptyEvery === 0;
     const failed = !empty && o.failEvery > 0 && (i + 1) % o.failEvery === 0;
     if (empty || failed) {
-      mark = `${empty ? 'empty' : 'failed'}-${i}`;
+      at(`${empty ? 'empty' : 'failed'}-${i}`);
       zone.onProgress({ tick: i, phase: empty ? 'empty' : 'failed', turns: ids });
+      sample();
       // An empty tick's words are dropped by the server and stay in the
       // stream; a failed tick's carry into the next tick.
-      if (empty) clear(ids);
+      if (empty) {
+        clear(ids);
+        stranded += ids.length;
+      }
     } else {
-      mark = `written-${i}`;
+      at(`written-${i}`);
       note(i);
       zone.onProgress({ tick: i, phase: 'written', turns: ids });
+      sample();
       clear(ids);
+      written++;
+    }
+    if (outstanding.length > 0) {
+      at(`outstanding-written-${i}`);
+      note(2000 + i);
+      zone.onProgress({ tick: 2000 + i, phase: 'written', turns: outstanding });
+      sample();
+      clear(outstanding);
       written++;
     }
     if (o.midSplit) {
       // A second split one beat into the last one's fade.
       await sleep(ms(300));
-      mark = `midsplit-${i}`;
+      at(`midsplit-${i}`);
       await utter(5);
       const mid = unwritten.slice();
       zone.onProgress({ tick: 1000 + i, phase: 'composing', turns: mid });
+      sample();
       await sleep(ms(200));
       note(1000 + i);
       zone.onProgress({ tick: 1000 + i, phase: 'written', turns: mid });
+      sample();
       clear(mid);
       written++;
     }
@@ -305,9 +389,9 @@ async function drive(o: DriveOptions): Promise<string> {
   }
   await sleep(ms(1600));
   sampling = false;
-  const stranded = document.querySelectorAll('.lz-lines .lz-turn').length;
+  const streaming = document.querySelectorAll('.lz-lines .lz-turn').length;
   zone.destroy();
-  const result: DriveResult = { samples, worst, written, stranded };
+  const result: DriveResult = { samples, compared, worst, written, stranded, streaming };
   return JSON.stringify(result);
 }
 

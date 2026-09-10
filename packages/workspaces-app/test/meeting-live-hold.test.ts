@@ -282,32 +282,119 @@ describe('words with a survivor in front of them fade where they sit', () => {
     zone.onProgress({ tick: 2, phase: 'empty', turns: [1] });
     expect(turnEls().some((el) => el.classList.contains('lz-chunk'))).toBe(false);
     expect(textOf()).toContain('and what was said after them');
-    // And no beat is left running underneath: a fade that fired after the
-    // words came back would take them away again.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a tick withdrawing mid-fade brings its words back, beat and all', () => {
+    // A retry: the write landed, the fade started, and then the tick came
+    // back `failed`. The words are no more written up than they were before,
+    // so they return — and the beat that was taking them away has to die with
+    // the claim, or they leave the stream anyway one frame later.
+    const zone = stranded();
+    zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
+    vi.advanceTimersByTime(NOTE_LAND_MS);
+    expect(turnEls().some((el) => el.classList.contains('is-fading'))).toBe(true);
+
+    zone.onProgress({ tick: 2, phase: 'failed', turns: [1] });
+    expect(turnEls().some((el) => el.classList.contains('is-fading'))).toBe(false);
+    expect(turnEls().some((el) => el.classList.contains('lz-chunk'))).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS);
     expect(textOf()).toContain('and what was said after them');
   });
 
-  it("a tick arriving mid-fade takes the last one's words with it", () => {
-    // The hazard the finish exists for: left running, the pending settle's
-    // last beat would clear the in-place flag in the middle of THIS split and
-    // hand a chunk words that are not the front of the stream.
+  it("another tick's withdrawal leaves a running fade alone", () => {
+    // Two ticks are outstanding whenever one fires while another is still
+    // composing, so a terminal frame naming turns this settle never had must
+    // not cancel it. Cancelled, its words keep the composing flag with no beat
+    // left to remove them — stranded in the stream for the rest of the
+    // meeting, which is the bug this whole change is about.
+    const zone = stranded();
+    zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
+    vi.advanceTimersByTime(NOTE_LAND_MS);
+    zone.onTurn({ turn: 3, text: 'the next thing said', final: true });
+    zone.onProgress({ tick: 3, phase: 'composing', turns: [3] });
+    zone.onProgress({ tick: 3, phase: 'empty', turns: [3] });
+
+    // Tick 3 withdrew its own words; tick 2's fade is still running on its
+    // own clock and finishes on time.
+    expect(turnEls().some((el) => el.classList.contains('is-fading'))).toBe(true);
+    vi.advanceTimersByTime(FADE_MS);
+    expect(textOf()).not.toContain('and what was said after them');
+    expect(textOf()).toContain('the next thing said');
+  });
+
+  it('two notes landing inside one window take both sets of words', () => {
+    // One clock over the union, not a second one racing it: two clocks left
+    // whichever finished first deleting only its own half, and the other half
+    // flagged composing for the rest of the meeting.
+    const zone = stranded();
+    zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
+    zone.onTurn({ turn: 3, text: 'the next thing said', final: true });
+    zone.onProgress({ tick: 3, phase: 'composing', turns: [3] });
+    zone.onProgress({ tick: 3, phase: 'written', turns: [3] });
+
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS);
+    expect(textOf()).not.toContain('and what was said after them');
+    expect(textOf()).not.toContain('the next thing said');
+    expect(textOf()).toContain('the words no note ever covered');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a second tick firing mid-fade neither lifts nor cuts the first short', () => {
+    // Two ticks outstanding, which the server produces by announcing
+    // `composing` per FIRING and reporting the outcome per COMPOSE. Nothing
+    // here may be decided from what the LAST split concluded: the stranded
+    // head is still in front of both, so neither may be lifted.
     const zone = stranded();
     zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
     vi.advanceTimersByTime(NOTE_LAND_MS);
     zone.onTurn({ turn: 3, text: 'the next thing said', final: true });
     zone.onProgress({ tick: 3, phase: 'composing', turns: [3] });
 
-    // The last settle's words are gone rather than half-faded, and the new
-    // one is in place too — the stranded head is still in front of it.
-    expect(textOf()).not.toContain('and what was said after them');
     expect(zoneEl().querySelector('.lz-slot')).toBe(null);
-    const composing = turnEls().filter((el) => el.classList.contains('lz-chunk'));
-    expect(composing[0]?.textContent).toBe('the next thing said');
-
-    // And the old beat is dead: it cannot come back and take the new words.
+    const marked = turnEls().filter((el) => el.classList.contains('lz-chunk'));
+    expect(marked.map((el) => el.textContent)).toEqual([
+      'and what was said after them',
+      'the next thing said',
+    ]);
+    // The first settle keeps its own beat rather than being cut short by the
+    // arrival of the second.
     vi.advanceTimersByTime(FADE_MS);
+    expect(textOf()).not.toContain('and what was said after them');
     expect(textOf()).toContain('the next thing said');
+
+    // And the new one is still a settle in place, not a chunk that mounted
+    // once the last one's words left.
+    zone.onProgress({ tick: 3, phase: 'written', turns: [3] });
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS);
+    expect(zoneEl().querySelector('.lz-slot')).toBe(null);
+    expect(textOf()).not.toContain('the next thing said');
+  });
+
+  it('a meeting that never reported a tick fades its settled words in place', () => {
+    // `clearSettled` is the other caller of the two beats — the fallback for a
+    // meeting whose notes surface reports nothing. A partial turn in front of
+    // a settled one puts it on the in-place route as surely as a strand does.
+    const zone = createMeetingLiveZone({ parent, now, reducedMotion: () => false });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'a sentence still being spoken', final: false });
+    zone.onTurn({ turn: 1, text: 'one that is finished', final: true });
+    zone.clearSettled();
+
+    expect(zoneEl().querySelector('.lz-slot')).toBe(null);
+    expect(textOf()).toContain('one that is finished');
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS);
+    expect(textOf()).not.toContain('one that is finished');
+    expect(textOf()).toContain('a sentence still being spoken');
+  });
+
+  it('the zone going away takes the fade with it', () => {
+    const zone = stranded();
+    zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
+    vi.advanceTimersByTime(NOTE_LAND_MS);
+    zone.destroy();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('the meeting ending takes the fade with it', () => {
@@ -320,6 +407,7 @@ describe('words with a survivor in front of them fade where they sit', () => {
     expect(zoneEl().hidden).toBe(true);
     // And the next meeting starts clean rather than under the last one's
     // fade: a beat still running would mark its first words on arrival.
+    expect(vi.getTimerCount()).toBe(0);
     zone.begin(now());
     zone.onTurn({ turn: 0, text: 'a new meeting', final: true });
     expect(textOf()).toBe('a new meeting');
