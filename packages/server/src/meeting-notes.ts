@@ -319,10 +319,24 @@ export interface NotesComposeInput {
    * reach a 5% lost-idea rate needs to try a per-tick checklist, or a per-tick
    * anchor label, against the same corpus and the same judge, and the only
    * honest way to do that is to put the words where the real prompt puts them.
-   * Nothing in the server sets it — the live pipeline leaves it undefined and
-   * the prompt is byte-identical to what it was.
+   * Nothing in the live pipeline sets it — a tick leaves it undefined and the
+   * prompt is byte-identical to what it was. The at-stop cleanup pass
+   * (`notes-cleanup-pass.ts`) does set it, which is the same use: an
+   * instruction about THIS read, put where the real prompt puts one.
    */
   extraPrompt?: string;
+  /**
+   * How the transcript block is introduced, replacing "New transcript since
+   * the last update".
+   *
+   * It exists for the cleanup pass, which carries the WHOLE meeting rather
+   * than the words since the last tick. A model told an hour of speech has
+   * just been said reads the meeting's opening as a new thought and writes it
+   * up a second time — the label is the one line that stops it, and it is
+   * cheaper than a second prompt builder. Absent leaves every existing
+   * caller's prompt byte-identical.
+   */
+  transcriptLabel?: string;
   /**
    * The block id of the heading THIS meeting's notes sit under, when the
    * session has opened one. Absent on the first tick of a meeting, and again

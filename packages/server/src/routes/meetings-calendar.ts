@@ -32,9 +32,11 @@ import {
 } from '@claude-workspaces/core';
 import { meetingDocAlias, meetingDocFilePath, meetingDocTitle } from '../huddle.ts';
 import type { MeetingRelay } from '../meeting-protocol.ts';
-import type { MeetingStore } from '../meetings.ts';
+import { type MeetingStore, listMeetings } from '../meetings.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { type WorkspaceScope, matchRest } from '../middleware/workspace-scope.ts';
+import { runNotesCleanupPass } from '../notes-cleanup-pass.ts';
+import { createNotesHeadingFileStore } from '../notes-heading-store.ts';
 import { readNotesMethodRecord, writeNotesMethod } from '../notes-method-store.ts';
 import {
   type CalendarConnectionStore,
@@ -308,6 +310,63 @@ export async function handleMeetingCalendarRoutes(
       });
     }
     return j(200, { docId, meetingId, speakers: names });
+  }
+
+  // --- The tidy-up pass: one more read of a finished meeting's notes ---
+  //
+  // The live note-taker composes against the last minute of speech, under a
+  // clock, on a model chosen for latency. This runs once when the recording
+  // is over, with the WHOLE transcript in front of the same composer, and is
+  // how "good enough to have the meeting" notes become notes worth keeping.
+  //
+  // IT IS A POST BECAUSE SOMEBODY HAS TO ASK FOR IT. Criterion one of the
+  // ticket is explicit human approval, and the approval is this request: the
+  // button in the doc is the only caller, share visitors are refused, and
+  // nothing on the stop path reaches it. A pass that ran itself would rewrite
+  // notes people are still reading, which is the failure the whole design of
+  // `notes-cleanup-pass.ts` is arranged against.
+  const cleanupMatch = matchRest(scope, /^docs\/([^/]+)\/meetings\/([^/]+)\/notes-cleanup$/);
+  if (cleanupMatch && req.method === 'POST') {
+    if (visitor) return j(403, { error: 'not available to share visitors' });
+    const addressed = decodeURIComponent(cleanupMatch[1] ?? '');
+    const meetingId = decodeURIComponent(cleanupMatch[2] ?? '');
+    if (!isValidDocId(addressed)) return j(400, { error: 'bad docId' });
+    const docId = docStore.get(addressed)?.docId ?? addressed;
+    // A LIVE meeting is refused, for the reason a live rename is: the session
+    // on the socket is still composing against this section, and a second
+    // writer working from a transcript that is still growing would race it.
+    if (meetingStore.active(docId)?.meetingId === meetingId) {
+      return j(409, { error: 'meeting is still recording — stop it first' });
+    }
+    if (!listMeetings(dataDir, docId).some((m) => m.meetingId === meetingId)) {
+      return j(404, { error: 'meeting not found' });
+    }
+    const result = await runNotesCleanupPass(
+      {
+        docStore: () => docStore,
+        composer: meetingRelay.notesDeps?.composer ?? null,
+        dataDir,
+        headingIdOf: (doc, meeting) =>
+          createNotesHeadingFileStore(dataDir).read({ docId: doc, meetingId: meeting }),
+      },
+      { docId, meetingId },
+    );
+    // Logged either way: a pass that changed nothing is the good case and is
+    // still worth a line, because the alternative is a feature nobody can
+    // check the restraint of after the fact.
+    console.log(`[meeting-notes] ${result.line}`);
+    return j(result.ok ? 200 : 409, {
+      docId,
+      meetingId,
+      ok: result.ok,
+      ...(result.reason !== undefined ? { reason: result.reason } : {}),
+      proposed: result.proposed,
+      refused: result.refused,
+      applied: result.applied,
+      failed: result.failed,
+      touched: result.touched,
+      turns: result.turns,
+    });
   }
 
   // --- Calendar: connect a Google Calendar, join meetings one click ---

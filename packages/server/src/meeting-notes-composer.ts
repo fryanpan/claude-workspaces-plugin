@@ -77,6 +77,17 @@ export const NOTES_OUTLINE_RECENT_BLOCKS = 80;
 const HEADING_LINE = `## ${MEETING_NOTES_HEADING}`;
 
 /**
+ * How a tick's speech is introduced.
+ *
+ * A tick carries what was said SINCE the last one, which is what this says.
+ * The at-stop cleanup pass carries the whole meeting instead
+ * (`notes-cleanup-pass.ts`) and overrides it through `transcriptLabel`: a
+ * model told these are the newest words, and handed an hour of them, reads
+ * the opening of the meeting as something just said.
+ */
+const DEFAULT_TRANSCRIPT_LABEL = 'New transcript since the last update';
+
+/**
  * Prompt building is pure and exported: what the transcript is asked to
  * become is behaviour worth pinning without a network in the test.
  *
@@ -173,7 +184,7 @@ export function buildNotesPrompt(
   if (regroup) parts.push(regroup);
   parts.push(renderOutline(input));
   parts.push(
-    `New transcript since the last update:\n${input.tick.turns
+    `${input.transcriptLabel ?? DEFAULT_TRANSCRIPT_LABEL}:\n${input.tick.turns
       .map((t) => `- ${speakerPrefix(t)}${t.text}${turnSuffix(t, input.tick.reason)}`)
       .join('\n')}`,
   );
