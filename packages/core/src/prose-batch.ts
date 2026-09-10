@@ -184,18 +184,16 @@ function insertBlocksMerging(
   const siblings = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
   const leading = splitLeadingListItems(markdown);
   let rest = markdown;
+  let at = index;
   if (leading) {
     // Grow the list ENDING AT the insertion point rather than splicing a
     // second one after it: appending keeps the new points in the order they
-    // were said. There used to be a mirror branch that prepended into a list
-    // sitting AFTER the insertion point; nothing ever reached it — every
-    // caller inserts at a section end or at the fragment end — and it put the
-    // `rest` blocks in front of the items it had just spliced, inverting the
-    // markdown's own order. It is gone rather than fixed.
+    // were said. A mirror branch that prepended into a list AFTER the point
+    // was deleted rather than fixed — nothing ever reached it (callers insert
+    // at a section end or the fragment end) and it inverted the markdown.
     const wanted = leading.ordered ? 'orderedList' : 'bulletList';
-    // `precedingBlock`, not `siblings[index - 1]`: it walks back over the
-    // empty paragraph a browser keeps at a doc's end, which is what made
-    // every note of a meeting open a list of its own.
+    // `precedingBlock`, not `siblings[index - 1]`: it steps back over the
+    // browser's trailing paragraph, which made every note open its own list.
     const before = precedingBlock(siblings, index);
     const host = isList(before) && before.nodeName === wanted ? before : null;
     if (host) {
@@ -206,16 +204,20 @@ function insertBlocksMerging(
         host.insert(host.length, items);
         created.push(...items);
       }
+      // Whatever the markdown put after its items goes after them here too —
+      // in FRONT of the paragraph stepped over, or a note's own detail
+      // paragraph would land past it with the gap back in between.
+      at = siblings.indexOf(host) + 1;
       rest = leading.rest;
     }
   }
   if (rest.trim().length === 0) return created;
   const blocks = parseMarkdownBlocks(rest);
   if (blocks.length === 0) return created;
-  parent.insert(index, blocks);
+  parent.insert(at, blocks);
   // Reading the freshly inserted elements is safe — they are integrated now.
   const after = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
-  for (const el of after.slice(index, index + blocks.length)) {
+  for (const el of after.slice(at, at + blocks.length)) {
     if (el instanceof Y.XmlElement) created.push(el);
   }
   return created;

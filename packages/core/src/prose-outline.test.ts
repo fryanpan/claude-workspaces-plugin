@@ -378,6 +378,27 @@ describe('applyBlockEdits while a browser holds the doc open', () => {
     expect(readBlockAuthor(paragraph)).toBeUndefined();
   });
 
+  it("keeps a note's own paragraph with the note, not behind the browser's", () => {
+    const doc = docOf('## Notes\n\n- one\n');
+    browserTrailingNode(doc);
+    const paragraph = lastTop(doc);
+    const headingId = readOutline(doc)[0]?.id as string;
+    apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- two\n\nWhy it matters.\n' }]);
+    // The bullet joined the list and its paragraph follows it. Inserting that
+    // paragraph at the original index would put the browser's empty one back
+    // between the two — the gap this whole change exists to close.
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph', 'paragraph']);
+    expect(readOutline(doc).map((e) => e.text)).toEqual([
+      'Notes',
+      'one',
+      'two',
+      'Why it matters.',
+      '',
+    ]);
+    // And the block still at the end is the browser's own, not a new one.
+    expect(lastTop(doc)).toBe(paragraph);
+  });
+
   it('reaches the list from insert_at_end too', () => {
     const doc = docOf('- one\n');
     browserTrailingNode(doc);
