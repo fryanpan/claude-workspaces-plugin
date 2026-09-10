@@ -307,6 +307,38 @@ it, because events come only from store mutations — and reasserts the whole
 projection from the store on hydrate, so a crash cannot leave forged board
 state standing. `isBoardOwnedDoc` (`doc-ids.ts`) is the prefix authority for
 which docs those are, `ws:` and `task:`, and none of them is ever file-bound.
+**What a projected row carries is a size decision, because sync-step-2 is one
+frame.** Opening a board costs the whole `ws:` doc, so the projection sends a
+CLOSED row out as a list row: `task-row-slim.ts` drops the five fields only the
+open panel renders, and `routes/task-detail.ts` hands the whole row back to the
+one reader who opens it. `board-doc-compaction.ts` sheds the doc's delete set
+at hydrate, which is safe for a `ws:` doc and nothing else because the sidecar
+is the record and the projection is reasserted after load. `slow-load-alarm.ts`
+reports a board load that crossed its budget. Measured together on the live
+board: 1.53 MB on the wire before, 0.22 MB after.
+
+**A rebuild changes every clientID, so a tab that was away is told to start
+over.** Sync is a state-vector exchange, and after a rebuild a reconnecting
+tab's vector covers none of the doc — so the protocol asks it for everything
+it holds and the doc re-inflates. `board-sync-gate.ts` refuses that merge and
+`yjs-protocol.ts` answers with a third message kind (2, reset) which the board
+turns into a reload. Scoped to `ws:` docs in the gate itself, never by where
+it is called from: for a projection the client is never authoritative, and for
+a bound document dropping its offline edits is data loss. Measured on a copy
+of the live board: 0.97 MB held flat across three restarts, against 2.98 MB
+and climbing without it.
+
+**`<docId>.ydoc.pre-compact` is that compaction's one safety copy.** The first
+time a board doc is compacted, the bytes that were on disk are written beside
+it and fsynced before the rebuild is applied, and never overwritten
+afterwards — a second compaction offering already-compacted bytes is refused,
+because replacing the copy with them is the one failure that would look like
+the backup working. A doc whose backup cannot be written is left uncompacted
+rather than compacted with nothing behind it. Nothing reads the file: it
+exists so the claim that compaction loses no content is falsifiable rather
+than merely argued. **It is safe to delete once someone trusts the
+compaction**, and it costs the doc's pre-compaction size once per board.
+
 That is why editing a task chip inside a document does not write the task —
 the edit is reverted a moment later and the board changes only through the
 named REST routes, which is the consequence [security.md](security.md) records

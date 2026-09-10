@@ -190,6 +190,10 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/tasks-list-create.ts', [['share-scope', '/workspaces/:ws/tasks', 'GET POST']]),
   ...family('routes/tasks-batch.ts', [['trusted-local', '/workspaces/:ws/tasks/batch', 'POST']]),
 
+  ...family('routes/task-detail.ts', [
+    ['share-scope', '/workspaces/:ws/tasks/:taskId/detail', 'GET'],
+  ]),
+
   ...family('routes/task-status-links.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/transition', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/evidence', 'POST'],

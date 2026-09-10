@@ -21,6 +21,7 @@
  */
 import { handleDispatchAndNoteRoutes } from './dispatch-and-notes.ts';
 import { handleTaskAnswers } from './task-answers.ts';
+import { handleTaskDetail } from './task-detail.ts';
 import { handleTaskFields } from './task-fields.ts';
 import { handleTaskReviewItems } from './task-review-items.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -42,6 +43,7 @@ export async function handleTaskRoutes(
   return (
     (await handleTaskListCreate(ctx, rq)) ??
     (await handleTaskBatch(ctx, rq)) ??
+    (await handleTaskDetail(ctx, rq)) ??
     (await handleTaskStatusAndLinks(ctx, rq)) ??
     (await handleTaskAnswers(ctx, rq)) ??
     (await handleTaskReviewItems(ctx, rq)) ??

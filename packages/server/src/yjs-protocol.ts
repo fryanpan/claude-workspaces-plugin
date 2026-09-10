@@ -2,6 +2,8 @@ import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as syncProtocol from 'y-protocols/sync';
+import * as Y from 'yjs';
+import { clientStateIsDead, peekSyncFrame } from './board-sync-gate.ts';
 import type { FeedbackWs, LiveDoc } from './doc-store.ts';
 import { captureServerError } from './sentry.ts';
 
@@ -10,10 +12,27 @@ import { captureServerError } from './sentry.ts';
  * Framing: messages are Uint8Array with a leading varuint indicating kind.
  *   0 = sync  (see y-protocols/sync)
  *   1 = awareness (see y-protocols/awareness)
+ *   2 = reset (server → client; this file, below)
  */
 
 export const MSG_SYNC = 0;
 export const MSG_AWARENESS = 1;
+/**
+ * "The state you are holding is dead — start over."
+ *
+ * Sent to a tab whose sync step 1 offers a state vector a rebuilt board doc
+ * shares nothing with. Payload-free: there is exactly one thing to say and
+ * the client's only useful answer is to drop what it has, so a body would be
+ * a field nobody reads.
+ *
+ * A kind rather than a close code, because closing only makes the same tab
+ * reconnect with the same dead doc. A client too old to know this kind
+ * ignores it — `ws-client.ts` falls through on an unknown kind — and is
+ * caught instead by the stale-build notice, which fires on the same reconnect
+ * for the same reason: an old tab is by definition one that was open across
+ * the deploy that shipped this.
+ */
+export const MSG_RESET = 2;
 
 /**
  * Per-connection state attached to the WebSocket. We track the set of
@@ -24,6 +43,17 @@ type WsState = {
   cleanup?: () => void;
   /** clientIDs we've seen incoming awareness from on this ws. */
   knownClientIds: Set<number>;
+  /**
+   * This connection offered a state vector a rebuilt board doc shares nothing
+   * with, so nothing it pushes may be merged.
+   *
+   * Per CONNECTION, not per doc: another tab on the same board may be
+   * perfectly current, and the whole point is to refuse one client's history
+   * without refusing anybody else's. Set once, when its step 1 arrives, which
+   * is always before the step 2 that answers ours — the client sends step 1
+   * from its `open` handler and step 2 only from a later `message`.
+   */
+  deadState?: boolean;
 };
 
 function state(ws: FeedbackWs): WsState {
@@ -117,6 +147,41 @@ export function onOpen(doc: LiveDoc, ws: FeedbackWs): void {
   };
 }
 
+/**
+ * The board-doc gate: mark a connection whose state is dead, and drop what it
+ * tries to push afterwards. Returns true when the frame must not be handled.
+ *
+ * Step 1 is never dropped — the client still gets its step 2 and paints
+ * current content while it reloads. What is dropped is the step 2 and the
+ * updates, which is precisely the 5 MB of history the doc just shed. See
+ * board-sync-gate.ts for why this is a `ws:`-only judgement.
+ */
+function refuseDeadState(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): boolean {
+  const parsed = peekSyncFrame(data);
+  if (parsed === null) return false;
+  if (parsed.stateVector !== null) {
+    if (
+      clientStateIsDead({
+        docId: doc.docId,
+        clientStateVector: parsed.stateVector,
+        docStateVector: Y.encodeStateVector(doc.ydoc),
+      })
+    ) {
+      state(ws).deadState = true;
+      console.log(`[ws] ${doc.docId}: a client's state shares nothing with this doc; reset`);
+      const enc = encoding.createEncoder();
+      encoding.writeVarUint(enc, MSG_RESET);
+      try {
+        ws.sendBinary(encoding.toUint8Array(enc), true);
+      } catch (e) {
+        console.error('[ws] reset send failed', e);
+      }
+    }
+    return false;
+  }
+  return state(ws).deadState === true;
+}
+
 export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void {
   try {
     const dec = decoding.createDecoder(data);
@@ -124,6 +189,7 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
     const enc = encoding.createEncoder();
     switch (kind) {
       case MSG_SYNC: {
+        if (refuseDeadState(doc, ws, data)) return;
         encoding.writeVarUint(enc, MSG_SYNC);
         if (ws.data.readOnly) {
           // A socket that may read and may not write (`WsCtx.readOnly`).

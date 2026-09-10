@@ -48,6 +48,19 @@ export function isBoardOwnedDoc(docId: string): boolean {
 }
 
 /**
+ * Just the BOARD doc — `ws:<workspaceId>` — and not a task's body doc.
+ *
+ * Narrower than `isBoardOwnedDoc` on purpose, and the narrowing is
+ * load-bearing: a `ws:` doc holds nothing but server-written maps and can be
+ * rebuilt from its own contents, while a `task:` body doc holds prose and
+ * comment threads whose history is the point. Anything that treats the board
+ * doc as disposable must ask THIS question, never the broader one.
+ */
+export function isWorkspaceProjectionDoc(docId: string): boolean {
+  return docId.startsWith('ws:');
+}
+
+/**
  * Prefixes a CALLER may never create or name.
  *
  * A superset of the board doc prefixes: `goal:` reserves the namespace for the

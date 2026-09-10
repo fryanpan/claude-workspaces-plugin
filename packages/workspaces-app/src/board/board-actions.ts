@@ -55,6 +55,13 @@ import type { WalkProgress } from './walkthrough-island.tsx';
 export interface BoardState {
   info: BoardWorkspaceInfo | null;
   tasks: Map<string, BoardTask>;
+  /**
+   * Whole rows fetched for closed tasks the server sent out trimmed, keyed by
+   * id AND revision (`detailKey`). `readProjection` merges them over `tasks`,
+   * so nothing downstream has to know a row ever arrived short. Grows only
+   * with the tickets this reader actually opened.
+   */
+  taskDetail: Map<string, BoardTask>;
   /** Which of the four nav destinations is showing. THE source: `pane`,
    *  `tab` and `view` below are derived from it in `setNav` and never set
    *  anywhere else, so a deep link and a click cannot disagree. */

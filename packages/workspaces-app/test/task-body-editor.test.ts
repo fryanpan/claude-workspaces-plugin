@@ -39,6 +39,7 @@ function fakeClient(docId: string): FakeClient {
     },
     onReady: () => {},
     onStatus: () => {},
+    onReset: () => {},
   };
   return c;
 }

@@ -23,6 +23,7 @@ export function boardState(over: Partial<BoardState> = {}): BoardState {
     seat: null,
     info: null,
     tasks: new Map(),
+    taskDetail: new Map(),
     nav: 'tasks',
     pane: 'board',
     settingsOpen: false,

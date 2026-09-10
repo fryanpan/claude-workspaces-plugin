@@ -58,6 +58,7 @@ import { type WalkSources, reviewQueue } from './board-review-model.ts';
 import { wireBoardSettingsPanel } from './board-settings-panel.ts';
 import { buildShell, wireNavCollapse } from './board-shell.ts';
 import { wireBoardShortcuts } from './board-shortcuts.ts';
+import { createTaskDetailLoads } from './board-task-detail.ts';
 import {
   type BoardLocation,
   buildBoardUrl,
@@ -244,6 +245,14 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // ── Realtime: the ws:<id> board doc ────────────────────────────────────
   const client = connect(boardSocketUrl(location, workspaceId));
   installStaleClientNotice(client);
+  // The server rebuilt this board doc while this tab was away, so what the tab
+  // holds cannot be reconciled with it — the two sets of structs are
+  // concurrent and a Yjs map resolves that by clientID magnitude, which is a
+  // coin flip per row. Reloading is the whole answer: the board keeps no local
+  // state to lose, `board-projection.ts` never writes to the ydoc, and every
+  // board mutation goes through the REST gate. It cannot loop — a reloaded tab
+  // comes back with an empty state vector, which the server never refuses.
+  client.onReset(() => location.reload());
   // The board had no reading of its own connection at all, in any viewport —
   // during a restart it just stopped updating. Wired here rather than in
   // renderAll: this subscribes once, to THIS client, and the banner it drives
@@ -499,6 +508,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     titleOf,
     knownAgentIds,
     loadEvents: () => loadEvents(),
+    loadTaskDetail: (taskId: string | null) => loadTaskDetail(taskId),
     syncBoardUrl,
     connectMarkdown: (docId) => connect(wsUrl(docId, 'markdown')),
     // Already awaited above — the description box is never live before the
@@ -595,6 +605,15 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   const repaintGuard = createRepaintGuard({ dom: document, win: window });
 
   // ── What the board keeps learning from the server ───────────────────────
+  // The rest of a CLOSED row, for the reader who opens one. Built here rather
+  // than inside `createBoardLoads` because it is not one of the three reads
+  // that fire on every board event — it fires once per ticket somebody opens.
+  const { loadTaskDetail } = createTaskDetailLoads({
+    state,
+    workspaceId,
+    schedule: (paint: () => void) => repaintGuard.schedule(paint),
+    renderDetail,
+  });
   const { loadReviewItems, loadAgents, loadEvents, repaintQueueRegions } = createBoardLoads({
     state,
     workspaceId,

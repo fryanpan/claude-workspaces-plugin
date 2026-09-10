@@ -125,6 +125,7 @@ import { captureServerError, routePatternForSpan, withRouteSpan } from './sentry
 import type { ServerOptions } from './server-options.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
+import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
 import { HTTP_IDLE_TIMEOUT_SEC, SseBus } from './sse.ts';
@@ -1965,6 +1966,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * Built once, for the same reason: every collaborator in it is long-lived,
    * and the per-request half travels with each call.
    */
+  // Every board load report is judged against the two-second list-paint
+  // budget on its way into the log, and a slow one is raised where somebody
+  // is watching. Through `captureServerError` rather than a second capture
+  // path, so the alarm groups, scrubs and ships exactly like every other
+  // server-side event — the sentry-claude-channel plugin is what turns it
+  // into a message an agent receives.
+  const slowLoadAlarm = new SlowLoadAlarm((message, extra) =>
+    captureServerError(new Error(message), extra),
+  );
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     taskStore,
     taskProjection,
@@ -1984,6 +1994,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     homePayload,
     reviewItemsFor,
     parallelismCapView,
+    slowLoadAlarm,
     resolveWorkspaceForDoc,
     fileUnderBoardWorkspace,
     unfileFromDefault,

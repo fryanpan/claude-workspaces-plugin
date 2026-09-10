@@ -102,6 +102,9 @@ export interface BoardDetailDeps {
   knownAgentIds(): string[];
   /** Fetch the workspace's audit rows — the Activity tab's, one per open. */
   loadEvents(): Promise<void>;
+  /** Fetch the rest of a row the server sent out as a LIST row. Cheap and
+   *  idempotent, which is what lets the render path call it. */
+  loadTaskDetail(taskId: string | null): void;
   /** Write the address for what the panel is showing. */
   syncBoardUrl(): void;
   /** Open the task's body doc. `bootBoard` owns the URL shape. */
@@ -133,6 +136,7 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
     titleOf,
     knownAgentIds,
     loadEvents,
+    loadTaskDetail,
     syncBoardUrl,
     connectMarkdown,
     canWrite,
@@ -418,6 +422,13 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
       detailEventsFor = task.id;
       void loadEvents();
     }
+    // …and the fields a CLOSED row did not arrive with. Called from the
+    // render rather than from the dozen places that set `detailTaskId`, for
+    // the same reason `loadEvents` is: this is the one point every way into
+    // the panel passes through. Idempotent per row revision — see
+    // `board-task-detail.ts`, which is where the guard lives rather than
+    // here, so a repaint several times a second costs nothing.
+    loadTaskDetail(task?.id ?? null);
     if (!task) detailEventsFor = null;
     // Only pass a discussion that belongs to the task on screen. An in-flight
     // load for a task the reader has left must not paint under this one.

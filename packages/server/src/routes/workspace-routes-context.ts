@@ -6,6 +6,7 @@ import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
+import type { SlowLoadAlarm } from '../slow-load-alarm.ts';
 import type { SseBus } from '../sse.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
@@ -74,6 +75,14 @@ export interface WorkspaceRoutesContext {
   homePayload: (workspace: BoardWorkspace, person: string, now: number) => unknown;
   /** The review items on a board, in the order Home shows them. */
   reviewItemsFor: (workspace: BoardWorkspace) => ReviewItemRow[];
+  /**
+   * The slow-load alarm every board load report is judged against.
+   *
+   * On the context rather than module state in the route, so a suite running
+   * several servers in one process does not share one rate limiter — the
+   * shape that makes a cooldown pass alone and fail in a suite.
+   */
+  slowLoadAlarm: SlowLoadAlarm;
   /** How many builders the board may run, and who is holding the slots. */
   parallelismCapView: (
     workspaceId: string,

@@ -174,6 +174,8 @@ export interface FakeClient extends FeedbackClient {
   sync(): void;
   /** Move the connection, firing every `onStatus` subscriber. */
   moveTo(next: ConnectionStatus): void;
+  /** Deliver the server's "your state is dead" message to this client. */
+  reset(): void;
   readonly closed: boolean;
 }
 
@@ -181,6 +183,7 @@ function makeClient(url: string): FakeClient {
   const ydoc = new Y.Doc();
   const awareness = new Awareness(ydoc);
   const readyCbs: (() => void)[] = [];
+  const resetCbs: (() => void)[] = [];
   const statusCbs: ((s: ConnectionStatus) => void)[] = [];
   let ready = false;
   let status: ConnectionStatus = 'connecting';
@@ -205,6 +208,11 @@ function makeClient(url: string): FakeClient {
       if (ready) cb();
       else readyCbs.push(cb);
     },
+    /** The real client fires this when the server declares the tab's state
+     *  dead. `reset()` below is what a test uses to drive it. */
+    onReset(cb: () => void): void {
+      resetCbs.push(cb);
+    },
     onStatus(cb: (s: ConnectionStatus) => void): void {
       statusCbs.push(cb);
       // The real client calls back immediately with the current status.
@@ -217,6 +225,9 @@ function makeClient(url: string): FakeClient {
     moveTo(next: ConnectionStatus): void {
       status = next;
       for (const cb of [...statusCbs]) cb(next);
+    },
+    reset(): void {
+      for (const cb of [...resetCbs]) cb();
     },
   };
   return client;

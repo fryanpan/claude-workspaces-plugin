@@ -237,6 +237,19 @@ export interface BoardTask {
    *  `bodyTruncated` — with the full text always in the body doc. */
   body?: string;
   bodyTruncated?: boolean;
+  /**
+   * This row arrived as a LIST row: the server dropped `body`, `notes`,
+   * `reviews` and `quote` and stripped the prose off each transition, because
+   * the row is closed and has not moved in a day. Set by the server
+   * (`slimClosedRow`) and by nothing else; absent on every row that arrived
+   * whole and on any server older than the trim.
+   *
+   * The panel reads it and asks `GET …/tasks/:id/detail` for the rest — see
+   * `board-task-detail.ts`. Nothing else should branch on it: a surface that
+   * renders a trimmed field should be reading the merged row, which is what
+   * `readProjection` hands it.
+   */
+  detailTrimmed?: boolean;
   /** How many comments the task's discussion holds. Absent means none — the
    *  server omits the key rather than projecting a zero, so a row is marked
    *  only when there is something to read. */
