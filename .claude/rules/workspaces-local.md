@@ -33,10 +33,13 @@ residue that is true of THIS repo and nowhere else.
   repo root inherits whatever a previous one subscribed to, across restarts,
   having never called subscribe itself — and `cd` into a worktree mid-session
   changes nothing, because the id is fixed at launch. A session *started*
-  elsewhere holds nothing: inside a worktree, in prod's checkout under
-  `Application Support`, under the home-directory spelling of this repo (the
-  boot disk symlinks into `/Volumes/Data`, so one tree hashes two ways), or on
-  another machine. Measured both ways on 2026-09-10 — the repo root hashes to
+  elsewhere starts from a different id, and holds whatever has been subscribed
+  under THAT path — nothing, until somebody does: inside a worktree, in prod's
+  checkout under `Application Support`, under the home-directory spelling of
+  this repo (the boot disk symlinks into `/Volumes/Data`, so one tree hashes
+  two ways), or on another machine. Which is why the check below is the answer
+  and this list is only where to expect a surprise: subscribe once from such a
+  path and its sessions inherit it thereafter, exactly as the root's do. Measured both ways on 2026-09-10 — the repo root hashes to
   `2a6518a92270` and holds both projects; a session launched in
   `.claude/worktrees/` reported its own path's hash and held nothing.
   **Check:** `sentry_list_my_watches` names the id it answered for, and "No
