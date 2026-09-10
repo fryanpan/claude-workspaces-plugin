@@ -792,9 +792,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       );
       return;
     }
-    // At rest: a write on the doc. No meeting is running, so there is no
-    // session to tell and no line to write.
-    choose.methodSince = '';
+    // At rest, or a bot meeting: a write on the doc. A bot meeting is live on
+    // the server while this browser holds no audio socket — nobody here is
+    // listening — so the REST route is the only way to ask, and it tells the
+    // live bot's notes session for us. That is a change during a meeting, so
+    // it gets the same "since" the socket path shows.
+    choose.methodSince = liveBot() ? clockLabel(Date.now()) : '';
     void putNotesMethod(docId, method, opts.participantName).then((ok) => {
       showMethod(notetakerAcknowledged(methodChoice, ok));
       if (ok) return;

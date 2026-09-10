@@ -26,6 +26,7 @@ import { dirname } from 'node:path';
 import {
   DEFAULT_NOTES_METHOD,
   MAX_SPEAKER_NAME,
+  notesMethodLabel,
   parseNotesMethod,
   speakerDisplayName,
 } from '@claude-workspaces/core';
@@ -196,7 +197,15 @@ export async function handleMeetingCalendarRoutes(
     // move a doc to the original note-taker.
     const method = parseNotesMethod(body?.method);
     if (!method) return j(400, { error: 'unknown note-taker' });
-    if (meetingStore.active(docId)) {
+    // A BOT MEETING IS LIVE AND HAS NO SOCKET TO SEND IT OVER. The refusal
+    // below is addressed to a meeting whose audio websocket carries
+    // `set_notes_method`; a vendor bot meeting has none, because nobody in
+    // the room is listening — so refusing it here left the mid-meeting
+    // switch impossible for exactly the meetings a person watches from the
+    // doc. Written here instead, and the live bot's notes session takes the
+    // same one trace line the socket path writes.
+    const botLive = meetingStore.active(docId) && recallRelay.hasLiveNotes(docId);
+    if (meetingStore.active(docId) && !botLive) {
       return j(409, { error: 'meeting is live — change it over the audio socket' });
     }
     const by = typeof body?.by === 'string' ? body.by.trim().slice(0, MAX_SPEAKER_NAME) : '';
@@ -205,6 +214,9 @@ export async function handleMeetingCalendarRoutes(
       at: Date.now(),
       ...(by ? { by } : {}),
     });
+    // Only on a recorded change, exactly as the socket path does it: the
+    // record is written first, and the line is a report of that write.
+    if (botLive) recallRelay.noteMethodChange(docId, notesMethodLabel(method), by || undefined);
     return j(200, { docId, method: record.method, changes: record.changes });
   }
   // --- Naming a voice AFTER the meeting ---

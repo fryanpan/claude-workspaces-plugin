@@ -346,6 +346,7 @@ The remaining 93 are exceptions. Each row names the one harness its cases share.
 | `packages/server/test/live-doc-fanout.test.ts` | 508 | Five describes over one fixture pair — `makeDoc()` and the recording `makeHost()`. Broadcast, thread frames, socket sweeps, presence and `wireEvents` are the stages of one frame's journey through the same fan-out object, and every case is built from those two helpers. |
 | `packages/server/test/home-routes.test.ts` | 506 | All four describes construct their server via the one `makeHarness(summarizer?)` factory. |
 | `packages/workspaces-app/test/write-gate.test.ts` | 503 | Every describe uses the module-scope `beforeEach` DOM reset with `docShell()` / `boardShell()`. |
+| `packages/server/test/notes-method-switch.test.ts` | 522 | The five describes are the five places one switch is decided — the socket frame, the at-rest route, the live refusal and its bot exception, the trace line, and the composer dispatch — and each stage is asserted against the state the previous one left. Splitting them would duplicate the `session()` notes fixture and the `put()` route driver into files that only make sense read in order. |
 | `packages/server/test/dispatch-routes.test.ts` | 502 | One describe over the shared `listenFrames` / `waitForFrames` fake-watcher server harness. |
 
 ---

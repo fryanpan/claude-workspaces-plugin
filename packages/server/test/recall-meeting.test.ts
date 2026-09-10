@@ -14,7 +14,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
-import type { NotesComposeInput, NotesComposer, TickScheduler } from '../src/meeting-notes.ts';
+import type {
+  NotesComposeInput,
+  NotesComposer,
+  NotesUpdate,
+  TickScheduler,
+} from '../src/meeting-notes.ts';
 import { MeetingStore, readTranscript } from '../src/meetings.ts';
 import { BOT_ENGINE_NAME, RecallMeetingRelay } from '../src/recall-meeting.ts';
 import type { CreateBotArgs, RecallBot, RecallClient, RecallConfig } from '../src/recall.ts';
@@ -555,5 +560,87 @@ describe('the bot meeting', () => {
     relay.onStatus({ botId: 'bot_1', state: 'in_call', at: 2000 });
     await new Promise((r) => setTimeout(r, 5));
     expect(vendor.permissionAsked).toEqual(['bot_1']);
+  });
+});
+
+/**
+ * THE MID-MEETING NOTE-TAKER SWITCH, FOR A MEETING NOBODY IN THE ROOM IS
+ * LISTENING TO.
+ *
+ * A browser-hosted meeting carries `set_notes_method` over its audio socket.
+ * A bot meeting has no such socket — the vendor does the listening — so the
+ * chooser's pick arrives on the REST route instead, and the route reaches the
+ * live session through these two.
+ */
+describe('a live bot meeting can be told which note-taker to use', () => {
+  let dataDir: string;
+  let store: MeetingStore;
+  let wrote: NotesUpdate[];
+  let sched: ManualScheduler;
+
+  function relay(): RecallMeetingRelay {
+    return new RecallMeetingRelay({
+      store,
+      notes: {
+        composer: { name: 'stub', compose: () => Promise.resolve([]) },
+        quietMs: 1000,
+        schedule: sched,
+        // A heading this meeting already owns, so the trace line goes to the
+        // doc rather than being held for a section that does not exist yet.
+        notesHeadingId: () => 'h-bot',
+        onNotes: (u) => {
+          wrote.push(u);
+          return true;
+        },
+      },
+      client: new FakeRecall(config()),
+      broadcast: () => {},
+      broadcastTransient: () => {},
+      mintToken: () => TOKEN,
+    });
+  }
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cw-recall-method-'));
+    store = new MeetingStore(dataDir);
+    wrote = [];
+    sched = new ManualScheduler();
+  });
+  afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
+
+  it('holds no notes session before the first word, and one after it', async () => {
+    const r = relay();
+    await r.invite({ docId: 'doc-b', meetingUrl: ZOOM_URL });
+    expect(r.hasLiveNotes('doc-b')).toBe(false);
+    r.onSocketText(TOKEN, transcriptFrame({ final: true, id: 1, name: 'Devi Raman', text: 'Hi.' }));
+    expect(r.hasLiveNotes('doc-b')).toBe(true);
+    // A doc with no bot at all is not a bot meeting waiting to happen.
+    expect(r.hasLiveNotes('doc-other')).toBe(false);
+  });
+
+  it('writes the one trace line into the meeting the bot is in', async () => {
+    const r = relay();
+    await r.invite({ docId: 'doc-b', meetingUrl: ZOOM_URL });
+    r.onSocketText(TOKEN, transcriptFrame({ final: true, id: 1, name: 'Devi Raman', text: 'Hi.' }));
+    expect(r.noteMethodChange('doc-b', 'Ledger · Opus', 'Maya')).toBe(true);
+    // The session serializes its writes on a promise chain, so the line lands
+    // a microtask later — the same ordering that keeps a tick and this line
+    // from interleaving.
+    await new Promise((res) => setTimeout(res, 0));
+    const edits = wrote.flatMap((u) => u.edits);
+    expect(edits).toHaveLength(1);
+    const edit = edits[0];
+    expect(edit?.op).toBe('insert_under_heading');
+    expect(edit && 'markdown' in edit ? edit.markdown : '').toContain('Note-taker Ledger · Opus');
+  });
+
+  it('takes nothing once the bot has left, so no line lands after the flush', async () => {
+    const r = relay();
+    await r.invite({ docId: 'doc-b', meetingUrl: ZOOM_URL });
+    r.onSocketText(TOKEN, transcriptFrame({ final: true, id: 1, name: 'Devi Raman', text: 'Hi.' }));
+    r.onStatus({ botId: 'bot_1', state: 'left' });
+    await new Promise((res) => setTimeout(res, 10));
+    expect(r.hasLiveNotes('doc-b')).toBe(false);
+    expect(r.noteMethodChange('doc-b', 'Ledger · Opus')).toBe(false);
   });
 });

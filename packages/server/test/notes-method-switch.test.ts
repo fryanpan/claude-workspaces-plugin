@@ -317,19 +317,36 @@ describe('a live meeting keeps the at-rest route out', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  function ctxWith(meetingStore: MeetingStore): MeetingCalendarRoutesContext {
+  /** What the route asks the bot relay, and what it told it. */
+  interface BotStub {
+    live: boolean;
+    said: { docId: string; label: string; by?: string }[];
+  }
+
+  function ctxWith(meetingStore: MeetingStore, bot?: BotStub): MeetingCalendarRoutesContext {
     return {
       docStore: { get: () => undefined },
       meetingStore,
       dataDir,
+      recallRelay: {
+        hasLiveNotes: () => bot?.live ?? false,
+        noteMethodChange: (docId: string, label: string, by?: string) => {
+          bot?.said.push({ docId, label, ...(by ? { by } : {}) });
+          return bot?.live ?? false;
+        },
+      },
       j: (status: number, body: unknown) => Response.json(body, { status }),
       isValidDocId: () => true,
     } as unknown as MeetingCalendarRoutesContext;
   }
 
-  async function put(meetingStore: MeetingStore, docId: string): Promise<Response | undefined> {
+  async function put(
+    meetingStore: MeetingStore,
+    docId: string,
+    bot?: BotStub,
+  ): Promise<Response | undefined> {
     const rest = `docs/${docId}/notes-method`;
-    return handleMeetingCalendarRoutes(ctxWith(meetingStore), {
+    return handleMeetingCalendarRoutes(ctxWith(meetingStore, bot), {
       scope: { workspaceId: 'w-1', rest, board: {} } as never,
       req: new Request(`http://localhost/workspaces/w-1/${rest}`, {
         method: 'PUT',
@@ -357,6 +374,43 @@ describe('a live meeting keeps the at-rest route out', () => {
     const r = await put(store, 'd-quiet');
     expect(r?.status).toBe(200);
     expect(readNotesMethod(dataDir, 'd-quiet')).toBe('ledger-opus');
+  });
+
+  /**
+   * A BOT MEETING IS LIVE WITH NO SOCKET TO SEND IT OVER.
+   *
+   * The refusal above is addressed to a meeting whose audio websocket exists;
+   * a vendor bot meeting has none, because nobody in the room is listening.
+   * Refusing it here made the mid-meeting switch impossible for exactly the
+   * meetings a person watches from the doc rather than from the recording
+   * device.
+   */
+  it('takes the change for a LIVE BOT meeting, and the bot’s notes get the one line', async () => {
+    const store = new MeetingStore(dataDir);
+    expect(
+      store.start({ docId: 'd-bot', engine: 'bot', sampleRate: 16_000, mode: 'conversation' }),
+    ).not.toBeNull();
+    const bot: BotStub = { live: true, said: [] };
+    const r = await put(store, 'd-bot', bot);
+    expect(r?.status, await r?.clone().text()).toBe(200);
+    expect(readNotesMethod(dataDir, 'd-bot')).toBe('ledger-opus');
+    // The line is a report of the write, so it names the method that landed
+    // and the person who asked — the same two the socket path writes.
+    expect(bot.said).toEqual([
+      { docId: 'd-bot', label: notesMethodLabel('ledger-opus'), by: 'Maya' },
+    ]);
+  });
+
+  it('still refuses a live meeting the bot relay does not hold, and writes no line', async () => {
+    const store = new MeetingStore(dataDir);
+    expect(
+      store.start({ docId: 'd-mic', engine: 'mock', sampleRate: 16_000, mode: 'solo' }),
+    ).not.toBeNull();
+    const bot: BotStub = { live: false, said: [] };
+    const r = await put(store, 'd-mic', bot);
+    expect(r?.status).toBe(409);
+    expect(readNotesMethod(dataDir, 'd-mic')).toBe(DEFAULT_NOTES_METHOD);
+    expect(bot.said).toEqual([]);
   });
 });
 
