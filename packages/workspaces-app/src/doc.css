@@ -1019,6 +1019,51 @@ body.has-set .doc-switcher-caret {
   }
 }
 
+/* ========== the "Show resolved (n)" control (doc/resolved-visibility.ts) ==========
+   A word-shaped button in a bar of glyphs, because the count IS the reason to
+   press it — "how many settled comments am I not looking at" cannot be drawn.
+   It recedes to the weight of the chrome around it until hovered, and takes
+   the shared `.icon-btn[aria-pressed="true"]` look while the settled cards
+   are on the page — so it reads the same as the comments toggle beside it. */
+#toggle-resolved.resolved-toggle {
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+#toggle-resolved.resolved-toggle:hover {
+  color: var(--fg);
+}
+#toggle-resolved.resolved-toggle[aria-pressed="true"] {
+  color: #fff;
+}
+/* `.icon-btn` is inline-flex, which outranks the UA's `[hidden]` rule — so a
+   doc with nothing resolved would show an empty pill without this. */
+#toggle-resolved[hidden] {
+  display: none;
+}
+/* Above the phone tier the words say what pressing it does. */
+#toggle-resolved .rt-short {
+  display: none;
+}
+/* On a phone the topbar is already carrying the doc title, the comment nav
+   and the badge, and the words were measured overrunning them at 430. The
+   count stays, because the count is the half that changes. */
+@media (max-width: 720px) {
+  #toggle-resolved.resolved-toggle {
+    padding: 6px 8px;
+  }
+  #toggle-resolved .rt-long {
+    display: none;
+  }
+  #toggle-resolved .rt-short {
+    display: inline;
+    font-size: 13px;
+  }
+}
+
 /* ================= MEETING RECORD CHROME =================
    One Record Audio button in the top bar owns everything audio; the live
    transcript strip is #shell's second grid row, fused directly under the bar

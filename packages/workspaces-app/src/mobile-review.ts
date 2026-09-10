@@ -1,4 +1,5 @@
 import { type Thread, threadRenderKey } from '@claude-workspaces/core';
+import { anchoredThreads } from './doc/resolved-visibility.ts';
 import type { InlineThreadCard, ReviewSurface } from './review-surface.ts';
 import { prefersReducedMotion, sizeThreadSlots } from './thread-morph.ts';
 
@@ -86,6 +87,14 @@ export interface MobileReviewOpts {
   openSheet: () => void;
   closeSheet: () => void;
   isSheetOpen: () => boolean;
+  /**
+   * Are resolved threads drawn on the page right now
+   * (`doc/resolved-visibility.ts`)? The inline card is the phone's copy of
+   * the balloon margin, so it answers the same question the highlights do —
+   * a settled comment that stayed in the flow here while its tint left the
+   * sentence would be the worst of both.
+   */
+  showResolved: () => boolean;
   listen: (t: EventTarget, type: string, h: EventListenerOrEventListenerObject) => void;
   onCleanup?: (fn: () => void) => void;
 }
@@ -144,10 +153,10 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
 
   function inlineThreads(): Thread[] {
     const withPos: Array<{ t: Thread; from: number }> = [];
-    for (const t of opts.threads()) {
+    for (const t of anchoredThreads(opts.threads(), opts.showResolved())) {
       // An orphaned thread has no anchor at all — it lives in the sheet and
-      // only there. A resolved one keeps its highlight (a faint tick) and so
-      // keeps a card, folded to one faded line (approved: comments mock 3).
+      // only there. A settled one is off the page unless the reader has asked
+      // for it back, and then it is the same muted card it always was.
       if (t.anchor.kind !== 'text-range') continue;
       const r = opts.resolveRange(t.id);
       if (!r) continue;

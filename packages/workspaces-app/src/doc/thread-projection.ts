@@ -32,6 +32,7 @@ import type { SeenTracker } from '../comment-seen.ts';
 import type { ReviewSurface } from '../review-surface.ts';
 import { threadKind } from '../thread-kind.ts';
 import { threadCards } from '../thread-morph.ts';
+import { anchoredThreads } from './resolved-visibility.ts';
 
 export interface ThreadProjectionDeps {
   /** This document's CRDT. Its `threads` map is the only source read here. */
@@ -49,6 +50,16 @@ export interface ThreadProjectionDeps {
    * "generating…" state off the card.
    */
   onPendingExpiry: () => void;
+  /**
+   * Are resolved threads drawn on the page right now
+   * (`doc/resolved-visibility.ts`)?
+   *
+   * REQUIRED rather than defaulted, for the reason `whenSynced` is required
+   * on the chrome: three surfaces mount this projection, and a defaulted flag
+   * is how two of them would quietly keep painting settled comments over the
+   * prose while the control in the topbar says they are hidden.
+   */
+  showResolved: () => boolean;
 }
 
 /** One anchored thread as the editor surface wants it: absolute positions
@@ -223,7 +234,13 @@ export function createThreadProjection(deps: ThreadProjectionDeps): ThreadProjec
   let activeThreadId: string | null = null;
   function refreshDecorations(activeId: string | null): void {
     activeThreadId = activeId;
-    const ranges = collect()
+    // A settled thread leaves the PAGE by default (doc/resolved-visibility.ts)
+    // — and this is the single place that decides it for both anchored
+    // surfaces, because the balloon margin picks the threads it draws by
+    // looking for the highlight this pass just rendered. Drop the decoration
+    // and the card goes with it; reveal it and the card comes back muted,
+    // beside the same sentence.
+    const ranges = anchoredThreads(collect(), deps.showResolved())
       .filter((t) => t.anchor.kind === 'text-range')
       .map((t): ThreadDecoration | null => {
         const r = resolveRange(t.id);

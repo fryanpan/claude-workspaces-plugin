@@ -14,6 +14,11 @@ import { type SeenTracker, createSeenTracker } from './comment-seen.ts';
 import type { ChromeSelection } from './doc/anchor-body.ts';
 import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
+import {
+  onShowResolvedChange,
+  showResolved,
+  wireResolvedToggle,
+} from './doc/resolved-visibility.ts';
 import { wireReviewComposer } from './doc/review-composer.ts';
 import { createThreadActions } from './doc/thread-actions.ts';
 import { createThreadProjection } from './doc/thread-projection.ts';
@@ -335,6 +340,26 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
   // the fan-out below: which surfaces get repainted when that projection
   // changes.
 
+  // "Show resolved (n)" — the one control that decides whether settled
+  // comments are drawn on the page at all (`doc/resolved-visibility.ts`).
+  // Wired per mount rather than once per page, unlike the doc-list and
+  // placement toggles: its label carries THIS document's resolved count, so
+  // it has to be repainted from `redrawThreads` and torn down with the scope
+  // that owns that redraw.
+  const resolvedToggleEl = document.getElementById('toggle-resolved');
+  const resolvedToggle = resolvedToggleEl
+    ? wireResolvedToggle({
+        btn: resolvedToggleEl,
+        listen: (target, type, handler) => on(target, type, handler),
+      })
+    : null;
+  // Revealing or hiding is a repaint of every anchored surface at once: the
+  // highlights come off the prose, and the margin picks its balloons from the
+  // highlights, so one redraw moves all three.
+  const unsubscribeResolved = onShowResolvedChange(() => redrawThreads());
+  if (opts.scope) opts.scope.onCleanup(unsubscribeResolved);
+  else modalCleanups.push(unsubscribeResolved);
+
   // Per doc, per browser: which threads this reader has looked at. Drives the
   // red "new" dot on the card, the highlight and the off-screen hints.
   const seen = createSeenTracker({ docId });
@@ -343,6 +368,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     surface,
     seen,
     onPendingExpiry: () => redrawThreads(),
+    showResolved,
   });
   const {
     collect: collectThreads,
@@ -360,6 +386,10 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     const openCount = counts.open + counts.orphan;
     threadsCount.textContent = String(openCount);
     threadsCount.classList.toggle('has-count', openCount > 0);
+    // "Show resolved (n)" says how many there are to bring back — so it has
+    // to be repainted from the same signal the cards are, not once at mount:
+    // resolving the last open question changes both numbers at once.
+    resolvedToggle?.paint(counts.resolved);
     // The inline cards are a second rendering of the same threads. They go
     // stale exactly when the drawer would, so they refresh from the same
     // signal rather than a listener of their own.
@@ -561,6 +591,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     openSheet: openDrawer,
     closeSheet: closeDrawer,
     isSheetOpen: () => shell.classList.contains('threads-open'),
+    showResolved,
     listen: on,
     onCleanup: (fn) => opts.scope?.onCleanup(fn),
   });
