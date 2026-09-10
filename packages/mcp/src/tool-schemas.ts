@@ -690,7 +690,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unarchive_attachment_set',
       description:
-        'Bring an archived attachment set back: every member returns with its threads, its file bindings and its board tasks intact. This is what makes archive_attachment_set safe to call. restore-collision means a docId was re-minted while it was away and nothing moved.',
+        'Bring an archived attachment set back: every member returns with its threads, its file bindings and its board entries intact. This is what makes archive_attachment_set safe to call. restore-collision means a docId was re-minted while it was away and nothing moved.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -728,7 +728,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unarchive_doc',
       description:
-        'Bring an archived doc back with its threads, file binding and board tasks intact. This is what makes archive_doc safe to call.',
+        'Bring an archived doc back with its threads, file binding and its board entry intact. This is what makes archive_doc safe to call.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1479,7 +1479,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'create_tasks',
       description:
-        "File work on a board. Always takes a list; one task is a one-row list, so this is the only create verb. Per row: omit assignee and you own it, omit goal and it lands unplaced at the bottom of Backlog. Rows you file land in triage — on the board, but not in anyone's queue until somebody moves them out with task_transition. A bad row never rejects the batch; it comes back in failures by index. Anything on a row that will reach the reader's queue passes the board's quality gate — a `review` payload, and the row's own question when it is `needs: 'decision'`. A row that comes back `held: true` is filed but OFF that queue until you close the gap in `heldReason`; the result carries the exact revise_review_item(…) call that lifts it, and every revision is judged again.",
+        "File work on a board. Always takes a list; one task is a one-item list, so this is the only create verb. Per task: omit assignee and you own it, omit goal and it lands unplaced at the bottom of Backlog. Tasks you file land in triage — on the board, but not in anyone's queue until somebody moves them out with task_transition. A bad task never rejects the batch; it comes back in failures by index. Anything on a task that will reach the reader's queue passes the board's quality gate — a `review` payload, and the task's own question when it is `needs: 'decision'`. A task that comes back `held: true` is filed but OFF that queue until you close the gap in `heldReason`; the result carries the exact revise_review_item(…) call that lifts it, and every revision is judged again.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1518,7 +1518,7 @@ export const TOOL_LIST: ListToolsResult = {
                 assignee: {
                   type: 'string',
                   description:
-                    "Who owns this row: 'human', or a named person or agent. Omit it and you own it. The bare word 'agent' is refused — it names a category rather than somebody; that refusal means your session was launched without CW_AGENT_NAME.",
+                    "Who owns this task: 'human', or a named person or agent. Omit it and you own it. The bare word 'agent' is refused — it names a category rather than somebody; that refusal means your session was launched without CW_AGENT_NAME.",
                 },
                 assigneeKind: {
                   type: 'string',
@@ -1564,7 +1564,7 @@ export const TOOL_LIST: ListToolsResult = {
                 links: {
                   type: 'array',
                   description:
-                    "Refs this task mentions: {kind:'doc',docId} | {kind:'thread',docId,threadId} | {kind:'task',taskId} | {kind:'diff',workspaceId} | {kind:'url',url}. Use `url` for anything outside this server; http(s) only. A malformed ref is dropped into `ignoredLinks` rather than failing the row.",
+                    "Refs this task mentions: {kind:'doc',docId} | {kind:'thread',docId,threadId} | {kind:'task',taskId} | {kind:'diff',workspaceId} | {kind:'url',url}. Use `url` for anything outside this server; http(s) only. A malformed ref is dropped into `ignoredLinks` rather than failing the task.",
                   items: { type: 'object' },
                 },
                 quote: {
@@ -1686,7 +1686,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'next_tasks',
       description:
-        'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not the top row. Each row carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any row whose claimedBy is an active session that is not you. Triage rows are never returned; read those with list_tasks(status:"triage"). The todo rows on offer are TRIMMED to the board\'s free parallelism slots, so a short list is usually the cap rather than an empty band — `capacity` names the cap, the slots in use, and how many ready rows were held back. list_tasks(status:"todo") shows every one of them.',
+        'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not just the first task. Each task carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any task whose claimedBy is an active session that is not you. Triage tasks are never returned; read those with list_tasks(status:"triage"). The todo tasks on offer are TRIMMED to the board\'s free parallelism slots, so a short list is usually the cap rather than an empty band — `capacity` names the cap, the slots in use, and how many ready tasks were held back. list_tasks(status:"todo") shows every one of them.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1700,7 +1700,7 @@ export const TOOL_LIST: ListToolsResult = {
           includeArchived: {
             type: 'boolean',
             description:
-              'Include soft-deleted rows. Default false, and leave it false here: an archived task is one somebody decided is not going to happen, so it is not work to pick up. Use `list_tasks` with this flag to FIND archived rows.',
+              'Include soft-deleted tasks. Default false, and leave it false here: an archived task is one somebody decided is not going to happen, so it is not work to pick up. Use `list_tasks` with this flag to FIND archived tasks.',
           },
         },
         required: ['workspaceId'],
@@ -1741,7 +1741,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'task_transition',
       description:
-        "The single gate for status changes (triage | todo | in-progress | done), attributed to you on the task's trail. It is also the only way to clear a triage row. Takes a GOAL id as `taskId` too: a goal in triage is a band nobody has agreed to — every row under it is held out of next_tasks and the ready nudge, and the stall check does not judge them — so moving a goal to `todo` releases its band and moving it to `triage` holds it again. Say what you did in `note` — the commit, the PR, what you verified — because the note is the whole of what the trail keeps. Re-sending the same status refuses; there is nothing to change.",
+        "The single gate for status changes (triage | todo | in-progress | done), attributed to you on the task's trail. It is also the only way to clear a triage task. Takes a GOAL id as `taskId` too: a goal in triage is a band nobody has agreed to — every task under it is held out of next_tasks and the ready nudge, and the stall check does not judge them — so moving a goal to `todo` releases its band and moving it to `triage` holds it again. Say what you did in `note` — the commit, the PR, what you verified — because the note is the whole of what the trail keeps. Re-sending the same status refuses; there is nothing to change.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2226,7 +2226,7 @@ export const TOOL_LIST: ListToolsResult = {
             description:
               'The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to.',
           },
-          taskId: { type: 'string', description: 'The row the rule is set on.' },
+          taskId: { type: 'string', description: 'The task the rule is set on.' },
           rule: {
             description:
               'The rule object (see the description for the five kinds), or null to clear. Required — an absent rule is refused rather than read as a clear.',
@@ -2323,7 +2323,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_agent',
       description:
-        'Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged rows to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away. ACT ON `sentry`: it names the Sentry projects this deployment raises alarms into, and a raised alarm reaches you only if you hold the subscription — which is keyed on your LAUNCH path, so a session started somewhere new holds nothing and is told nothing. Call sentry_watch_project on each slug it returns (idempotent, so it is free when you already hold it); sentry_list_my_watches is the check.',
+        'Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged tasks to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away. ACT ON `sentry`: it names the Sentry projects this deployment raises alarms into, and a raised alarm reaches you only if you hold the subscription — which is keyed on your LAUNCH path, so a session started somewhere new holds nothing and is told nothing. Call sentry_watch_project on each slug it returns (idempotent, so it is free when you already hold it); sentry_list_my_watches is the check.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -2505,7 +2505,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unmount_folder',
       description:
-        "Stop serving a mounted folder. Nothing on disk is touched and no address is dropped — retention is the project's, and workspaces deletes nothing it did not create. The row keeps its dates, and re-mounting the same folder revives it with every file at the address it already had. Machine-scoped: no workspaceId.",
+        "Stop serving a mounted folder. Nothing on disk is touched and no address is dropped — retention is the project's, and workspaces deletes nothing it did not create. The mount keeps its dates, and re-mounting the same folder revives it with every file at the address it already had. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: 'object',
         properties: {

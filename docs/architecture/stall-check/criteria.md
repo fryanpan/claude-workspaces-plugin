@@ -1,7 +1,7 @@
 # The stall check — module criteria
 
 One block per module: what it must do, what it must never do, and the
-measurement that proves it. A module with no measurement is not done. Tasks
+measurement that proves it. A module with no measurement is not done. Modules
 marked *rebuild* change in the steps named in [README.md](README.md); the
 criteria are written for the shape after the rebuild, and a criterion that
 today's code fails is flagged.

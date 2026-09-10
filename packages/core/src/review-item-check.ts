@@ -265,7 +265,7 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
     const n = headline.trim().length;
     if (n > REVIEW_LIMITS.lineMaxChars) {
       fail(
-        `review.headline is ${n} characters; past ${REVIEW_LIMITS.lineMaxChars} it is a paragraph, not a row. Put the context in review.detail — the card renders all of it — and leave one line here.`,
+        `review.headline is ${n} characters; past ${REVIEW_LIMITS.lineMaxChars} it is a paragraph, not a line. Put the context in review.detail — the card renders all of it — and leave one line here.`,
       );
     } else if (n > REVIEW_LIMITS.headline) {
       gaps.push('headlineLength');

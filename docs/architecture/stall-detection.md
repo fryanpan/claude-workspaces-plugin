@@ -197,10 +197,10 @@ and the shape of a hold cannot drift apart:
 | `rewrite_task` / `POST …/tasks/:id/body` / `…/title` on a decision task | `task-review` | yes, on every words edit | same |
 | The allow-rule filer (`allow-rules.ts`, `store.addReviewItem` direct) | `task-review` | **exempt** — the words are the PRODUCT's, built by `buildAllowRuleReview` from a fixed template, and no agent authored them. Holding one would be the dead end this design forbids: the "filer" is the server, which cannot revise, and a held finding is a finding silently dropped | n/a |
 | Meeting research capture (`meeting-task-capture.ts`, same door) | `task-review` | **exempt**, same reason — template text the assistant fills in, with no author to send it back to | n/a |
-| An `unreplied` task (prose the server INFERRED asks a person) | `task-thread` / `doc-thread` | **exempt** — nobody declared it, so there are no authored words to judge; a held declaration's own comment is excluded from this band so a hold cannot leak back through it | n/a |
+| An `unreplied` task (prose the server INFERRED asks a person) | thread bands | **exempt** — nobody declared it, so there are no authored words to judge; a held declaration's own comment is excluded from this band so a hold cannot leak back through it | n/a |
 
 **The ticket that is itself the decision.** A `needs: 'decision'` task reaches
-the queue through the task `legacyReviewItem` DERIVES at read time, whose id is
+the queue through the item `legacyReviewItem` DERIVES at read time, whose id is
 the fixed `r-legacy` — so it was the last path that put a task in front of the
 reader with the judge never called (measured 2026-08-31: one `create_tasks`
 decision task, zero judge calls, one queue item). It is gated now by the same
@@ -209,7 +209,7 @@ out of the task having nothing of its own:
 
 - **The verdict lives on the TASK** (`Task.decisionJudge`), because the item is
   rebuilt on every read and a stamp on it would vanish. `listReviewItems` hangs
-  it back on the derived task, so `isReviewItemGated` — the one predicate the
+  it back on the derived item, so `isReviewItemGated` — the one predicate the
   queue consults — is unchanged.
 - **The version is `wordsRevisionOf`**, not a count of revisions, because the
   words being judged are the task's own title, body and options. Every door that
@@ -411,7 +411,7 @@ What stays:
   the identity `park-migration.ts` and `artifact-check.ts` already use. No
   session decided this and no person did.
 - **When the anchor stops holding, the item MOVES.** `taskReviewItems` skips a
-  done ticket's tasks, so an item left on a done or archived anchor would be
+  done ticket's items, so an item left on a done or archived anchor would be
   open forever and visible to nobody. It is withdrawn and re-filed on the
   worst task that still qualifies, in the same tick.
 - **Answered means heard.** An item the reader answered or withdrew is not

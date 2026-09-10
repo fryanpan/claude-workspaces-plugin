@@ -219,7 +219,7 @@ forever — orphaned docs pile up fast and make the review list useless.
 archive_doc({ docId: "auth-rfc", reason: "feedback applied, PR merged" })
 ```
 
-What it does: takes the doc off the home page and off any board task,
+What it does: takes the doc off the home page and off its entry on any board,
 stops its sync and its file poll — and **keeps the document**. The
 `.ydoc` moves into the server's archive rather than being deleted, so
 every comment in it still feeds the activity analyses, and

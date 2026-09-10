@@ -68,7 +68,7 @@ describe('create_tasks is the canonical create verb', () => {
     // the only thing an agent reads at the moment it is about to file work.
     const desc = mcp.tool('create_tasks')?.description ?? '';
     expect(desc).toContain('the only create verb');
-    expect(desc).toContain('one-row list');
+    expect(desc).toContain('one-item list');
   });
 
   it('carries the per-row field contract on its own schema', () => {
