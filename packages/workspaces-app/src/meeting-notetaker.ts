@@ -307,11 +307,22 @@ export function notetakerAcknowledged(
 ): NotetakerChoice {
   const pick = notetakerPendingPick(choice, ack);
   if (!pick) return choice;
-  // Everything asked for no later than this one is settled: on the socket
-  // they were answered before it, and a REST write still out that old can no
-  // longer be the doc's last word. Left in, an answer that never comes —
-  // the socket dropped under it — would hold the row open for good.
-  const pending = choice.pending.filter((p) => p.seq > pick.seq);
+  // WHAT ELSE THIS ANSWER SETTLES, and the two paths differ.
+  //
+  // A socket answer settles everything sent before it: one socket answers
+  // every frame it was given, in order, so anything older is either already
+  // answered or went down with the socket. Left pending, a frame whose
+  // answer never comes would hold the row open for good.
+  //
+  // A `fetch` answering says NOTHING about another `fetch`. The response
+  // order is not the order the server applied the writes, so an older
+  // request still out may be the one the doc keeps — and its answer is the
+  // only thing that can say so. Dropping it here is how the row came to show
+  // the newer method over a server holding the older one.
+  const settlesOlder = 'method' in ack;
+  const pending = choice.pending.filter((p) =>
+    settlesOlder ? p.seq > pick.seq : p.seq !== pick.seq,
+  );
   const confirmed = recorded ? pick.method : choice.confirmed;
   return {
     shown: pending.length > 0 ? choice.shown : confirmed,

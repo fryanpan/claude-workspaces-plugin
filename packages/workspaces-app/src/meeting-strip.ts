@@ -823,6 +823,13 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // other — and only the pick the person is looking at may complain.
       const ack = { seq };
       const mine = notetakerAnswersShownPick(methodChoice, ack);
+      // A REFUSED WRITE TAKES ITS "SINCE" WITH IT, the same way the socket's
+      // refusal does. A bot meeting stamps the time at the press, and left
+      // behind after the rollback that time hangs off the note-taker that
+      // never stopped being current — the fold then reads as though the OLD
+      // method had been chosen at the moment the new one was refused.
+      // Cleared before the row repaints, so no frame draws the stale line.
+      if (!ok && mine) choose.methodSince = '';
       showMethod(notetakerAcknowledged(methodChoice, ok, ack));
       if (ok || !mine) return;
       choose.chooseError = 'That note-taker could not be saved.';

@@ -312,6 +312,40 @@ describe('an answer that arrives for a pick nobody is showing any more', () => {
     expect(both.confirmed).toBe('original');
   });
 
+  /**
+   * THE OLDER WRITE CAN BE THE ONE THE SERVER KEEPS.
+   *
+   * Two at-rest writes go out; the second's response comes back first, which
+   * says nothing about the order the server applied them — the first request
+   * whose response is still out may be the one that lands last, and then the
+   * doc holds ITS method. Clearing a still-unanswered pick because a later
+   * one answered throws away the only answer that can say so, and the row
+   * then keeps a method the server replaced.
+   */
+  it('keeps an older REST pick pending when a newer one answers first', () => {
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
+    const second = notetakerPicked(first, 'ledger-opus');
+    const early = notetakerAcknowledged(second, true, { seq: second.seq });
+    // The first write has not answered, so nothing is settled yet.
+    expect(early.pending.map((p) => p.seq)).toEqual([first.seq]);
+    // Its answer arrives last, and it is the doc's last word.
+    const late = notetakerAcknowledged(early, true, { seq: first.seq });
+    expect(late.confirmed).toBe('ledger-haiku');
+    expect(late.shown).toBe('ledger-haiku');
+  });
+
+  it('a socket answer settles the picks sent before it, which answer in order', () => {
+    // The asymmetry is deliberate: one socket answers every frame it was
+    // sent, in order, so an answer is proof the earlier ones are done with —
+    // dropped with the socket if they never came. A `fetch` proves nothing
+    // about another `fetch`.
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
+    const second = notetakerPicked(first, 'ledger-opus');
+    const after = notetakerAcknowledged(second, true, { method: 'ledger-opus' });
+    expect(after.pending).toEqual([]);
+    expect(after.shown).toBe('ledger-opus');
+  });
+
   it('only the answer for the pick on the row may raise an error', () => {
     const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
     const second = notetakerPicked(first, 'ledger-opus');

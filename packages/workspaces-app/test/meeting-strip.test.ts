@@ -2545,6 +2545,47 @@ describe('two note-taker picks over a live meeting, answered out of step', () =>
     expect(shows(h)).toEqual({ head: 'Ledger · Opus', checked: 'ledger-opus' });
   });
 
+  /**
+   * A BOT MEETING ASKS OVER HTTP, and a refused write must take its "since"
+   * back with it.
+   *
+   * Nobody in this browser is listening to a bot meeting, so the switch goes
+   * on the REST route rather than an audio socket — but it is still a change
+   * made mid-meeting, so the row stamps the time at the press. When the write
+   * is refused the row rolls back, and a "since" left behind then hangs off
+   * the note-taker that never stopped being current: the fold reads as though
+   * the OLD method had been chosen at the moment the new one was refused.
+   */
+  it('a refused bot switch takes its "since" back with the method', async () => {
+    const bot = new FakeBot();
+    bot.set('recording', ['Ann']);
+    // Every write on this doc is refused, which is the path under test.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{}', { status: 500 }))),
+    );
+    // Put back before the next test mounts: nothing else in this file expects
+    // a server that refuses everything.
+    cleanups.push(() => vi.unstubAllGlobals());
+    const h = mount(undefined, { bot, offeredNotesMethods });
+    // A live bot puts the Record button on the MENU, where the fold lives.
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    h.pick('Ledger · Opus');
+    await vi.waitFor(() =>
+      expect(h.pop().querySelector('.meeting-notetaker .meeting-adv-value')?.textContent).toBe(
+        'Original',
+      ),
+    );
+    // The row that is current says what it costs and nothing else: no switch
+    // happened, so there is no moment for it to have happened at.
+    const rows = [...h.pop().querySelectorAll('.meeting-notetaker .meeting-choice')];
+    const current = rows.find((el) => el.querySelector('input')?.checked);
+    expect(current?.querySelector('.meeting-choice-detail')?.textContent ?? '').not.toContain(
+      'since',
+    );
+  });
+
   it('a single refused switch still puts the row back where it was', async () => {
     const h = await liveWithFold();
     h.pick('Ledger · Opus');
