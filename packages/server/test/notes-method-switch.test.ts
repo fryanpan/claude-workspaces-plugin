@@ -46,6 +46,7 @@ import {
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { TranscriptionEngine, TranscriptionSession } from '../src/transcribe.ts';
 import { ManualScheduler } from './notes-tick-harness.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -677,6 +678,66 @@ describe('the line the live session writes', () => {
     expect(traces).toHaveLength(1);
     expect(traces[0]?.op).toBe('insert_under_heading');
     expect(traces[0] && 'headingId' in traces[0] ? traces[0].headingId : '').toBe('h-mine');
+  });
+
+  /**
+   * THE LINE IS STAMPED WHEN THE PERSON CHOSE, NOT WHEN IT WAS WRITTEN.
+   *
+   * The trace step waits on the chain, and a compose already in flight holds
+   * that chain for as long as the model takes — tens of seconds on a long
+   * tick. Reading the clock down in the step would date the switch by when
+   * the doc was finally touched, which is both wrong as an audit record and
+   * a different time from the "since" the fold showed at the press.
+   *
+   * The clock is injected and moved by hand: nothing here waits on wall time.
+   */
+  it('stamps the switch at the press, not at the write behind an in-flight compose', async () => {
+    const writes: NotesUpdate[] = [];
+    const sched = new ManualScheduler();
+    let at = new Date(2026, 8, 9, 10, 38).getTime();
+    /** Resolves the compose that is holding the chain. */
+    let finishCompose: (() => void) | undefined;
+    const s = beginNotesSession(
+      {
+        composer: {
+          name: 'slow',
+          compose: () =>
+            new Promise((resolve) => {
+              finishCompose = () => resolve([{ op: 'insert_at_end', markdown: '- a bullet' }]);
+            }),
+        },
+        schedule: sched,
+        now: () => at,
+        readOutline: () => [],
+        notesHeadingId: () => 'h-mine',
+        onNotes: (u) => {
+          writes.push(u);
+          return true;
+        },
+      },
+      ids,
+    );
+    s.onTurn({ turn: 1, text: 'the boardwalk needs a survey', speaker: 'A', final: true });
+    sched.fire();
+    // The compose runs a chain step later, so wait for the observable — it
+    // has taken the chain and will not give it back until it is told to.
+    await waitFor(() => finishCompose !== undefined, {
+      describe: 'the compose to take the chain',
+    });
+    // 10:38 — the moment the person picked the new note-taker.
+    s.noteMethodChange(notesMethodLabel('ledger-opus'), 'Maya');
+    // The model takes another two minutes, and only then does the trace step
+    // get its turn.
+    at = new Date(2026, 8, 9, 10, 40).getTime();
+    finishCompose?.();
+    await s.end();
+    const traces = writes
+      .flatMap((w) => w.edits)
+      .filter((e) => 'markdown' in e && e.markdown.includes('Note-taker'));
+    expect(traces).toHaveLength(1);
+    expect(traces[0] && 'markdown' in traces[0] ? traces[0].markdown : '').toBe(
+      '- 10:38 Note-taker Ledger · Opus — Maya',
+    );
   });
 
   it('WAITS when this meeting has opened no section yet, rather than going to the doc end', async () => {

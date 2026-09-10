@@ -1830,6 +1830,15 @@ export function beginNotesSession(
       ticker.onTurn(turn);
     },
     noteMethodChange(label, by) {
+      // WHEN THE PERSON CHOSE, read here rather than inside the step below.
+      // The step waits for whatever is already on the chain, and a compose
+      // in flight holds it for as long as the model takes — so a clock read
+      // down there stamps the line with the moment it was WRITTEN, tens of
+      // seconds after the switch, and disagrees with the "since" time the
+      // fold showed the person at the press. This line is the audit record
+      // of when the note-taker changed; a record that is wrong by half a
+      // minute and contradicts the UI is worse than none.
+      const at = clock();
       // One line, on the chain, addressed to this meeting's own section.
       chain = chain.then(() => {
         let outline: readonly prose.OutlineEntry[] = [];
@@ -1851,7 +1860,7 @@ export function beginNotesSession(
         } catch {
           headingId = undefined;
         }
-        const markdown = `- ${notesMethodTraceLine(label, by, clock())}`;
+        const markdown = `- ${notesMethodTraceLine(label, by, at)}`;
         // No section yet: hold it rather than stranding it at the end of the
         // document, where the first compose would then open the section
         // underneath it.
