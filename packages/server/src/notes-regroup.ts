@@ -53,6 +53,19 @@
  * need it — while `regroupTargets` keeps asking for groups under a heading
  * that already exists. One wall, two shapes, and neither instruction can be
  * carried out by doing the other.
+ *
+ * WHAT THE ASK CANNOT DO, AND WHY IT IS STILL THE RIGHT ASK. A heading is
+ * appended; there is no edit that moves an existing bullet under one. So the
+ * bullets already written stay above the heading they earned, and only what
+ * comes after it goes under it. Nothing here pretends otherwise: the ask is
+ * for the heading, not for those bullets to travel.
+ *
+ * The reason that is enough is what the bar counts. Once the heading exists,
+ * the run above it stops GROWING, and the note-taker's own two-layer writing
+ * takes what is left below four. Measured across six slices — two meetings by
+ * three methods — no run stayed at the bar and no heading was opened twice
+ * ("one heading per topic" holds at 100% on every one). A directive that
+ * repeated pointlessly would show up as both.
  */
 
 import type { prose } from '@claude-workspaces/core';

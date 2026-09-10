@@ -162,16 +162,28 @@ describe('reading a nest_blocks out of a model reply', () => {
     expect(edits).toEqual([{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2', 'b3'] }]);
   });
 
-  test('drops the lead out of its own list rather than moving a bullet under itself', () => {
-    const { edits } = parseNotesEdits(
+  test('refuses one that names its own lead, rather than moving the rest', () => {
+    // Filtering the lead out and applying what is left is a regroup the model
+    // did not ask for, made silently: the bullets it named would be nested
+    // under a lead it meant to include, with nothing in `dropped` to say so.
+    const { edits, dropped } = parseNotesEdits(
       '[{"op":"nest_blocks","leadBlockId":"b1","blockIds":["b1","b2"]}]',
     );
-    expect(edits).toEqual([{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }]);
+    expect(edits).toEqual([]);
+    expect(dropped[0]).toContain('its own lead');
   });
 
-  test('discards one with nothing left to move, and says why', () => {
+  test('refuses one whose blockIds are not all text', () => {
     const { edits, dropped } = parseNotesEdits(
-      '[{"op":"nest_blocks","leadBlockId":"b1","blockIds":["b1"]}]',
+      '[{"op":"nest_blocks","leadBlockId":"b1","blockIds":["b2",7]}]',
+    );
+    expect(edits).toEqual([]);
+    expect(dropped[0]).toContain('not text');
+  });
+
+  test('discards one with nothing to move, and says why', () => {
+    const { edits, dropped } = parseNotesEdits(
+      '[{"op":"nest_blocks","leadBlockId":"b1","blockIds":[]}]',
     );
     expect(edits).toEqual([]);
     expect(dropped[0]).toContain('no blocks to move');
