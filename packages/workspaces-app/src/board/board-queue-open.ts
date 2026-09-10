@@ -112,9 +112,17 @@ export function createBoardQueueOpeners(deps: BoardQueueOpenDeps): BoardQueueOpe
     // The doc's canonical workspace address rather than the legacy `/review/`
     // one, so what lands in the reader's address bar is the shape every other
     // surface emits and the link-chip renderer titles.
+    //
+    // A MOCKUP goes to `/mockups/`, where the mock is a page you can look at
+    // and the widget docks the item on it. `/docs/` renders a mockup's stored
+    // HTML in the markdown editor: a 200, and the one surface on which "does
+    // this screen read right" cannot be answered. `docType` is absent on an
+    // older server's payload and the destination is then the one it always
+    // was.
+    const surface = t.docType === 'mockup' ? 'mockups' : 'docs';
     const back = returnItem ? `&item=${encodeURIComponent(returnItem)}` : '';
     location.assign(
-      `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(t.docId)}?thread=${encodeURIComponent(t.threadId)}${back}`,
+      `/workspaces/${encodeURIComponent(workspaceId)}/${surface}/${encodeURIComponent(t.docId)}?thread=${encodeURIComponent(t.threadId)}${back}`,
     );
     return false;
   }

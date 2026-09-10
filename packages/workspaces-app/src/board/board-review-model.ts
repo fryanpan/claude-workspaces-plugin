@@ -199,6 +199,15 @@ export interface ReviewThreadItem {
    *  it, so a thread with several declarations answers the right one. */
   commentId?: string;
   docId: string;
+  /**
+   * What KIND of doc a `doc-thread` row hangs on, when the server says.
+   *
+   * The one reader is `openReviewItem`: a question asked on a MOCKUP opens
+   * the mockup, not the editor's rendering of its HTML, where what the mock
+   * looks like cannot be seen at all. Absent from an older server's payload,
+   * which reads as the doc destination it always had.
+   */
+  docType?: string;
   threadId: string;
   taskId?: string;
   title: string;
