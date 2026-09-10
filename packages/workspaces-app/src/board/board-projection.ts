@@ -20,6 +20,7 @@ import type { BoardState } from './board-actions.ts';
 import { type BoardGoal, type BoardTask, DEFAULT_DONE_WINDOW } from './board-model.ts';
 import { boardTabTitle, paneForNav, tabForNav } from './board-presence-model.ts';
 import { renderWorkspaceIdentity } from './board-render.ts';
+import { mergeTaskDetail } from './board-task-detail.ts';
 import type { BoardLocation } from './board-url.ts';
 
 /**
@@ -37,6 +38,7 @@ export function initialBoardState(bootLoc: BoardLocation): BoardState {
     seat: null,
     info: null,
     tasks: new Map(),
+    taskDetail: new Map(),
     nav,
     pane: paneForNav(nav),
     settingsOpen: false,
@@ -97,7 +99,11 @@ export function createBoardProjection(deps: BoardProjectionDeps): BoardProjectio
     const { tasks: tasksMap, ws: wsMap } = maps();
     const next = new Map<string, BoardTask>();
     tasksMap.forEach((value, key) => {
-      next.set(key, value as unknown as BoardTask);
+      // A closed row arrives trimmed. `mergeTaskDetail` puts back the whole
+      // row when the panel has fetched one AND it is still the revision the
+      // projection is carrying — so every reader downstream sees one shape,
+      // and none of them has to know about the trim.
+      next.set(key, mergeTaskDetail(value as unknown as BoardTask, state.taskDetail));
     });
     state.tasks = next;
     if (wsMap.get('id')) {

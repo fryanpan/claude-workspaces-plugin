@@ -34,6 +34,7 @@ function panel(over: Partial<Parameters<typeof createBoardDetailPanel>[0]> = {})
   });
   const loadDiscussion = vi.fn(async () => {});
   const loadEvents = vi.fn(async () => {});
+  const loadTaskDetail = vi.fn(() => {});
   const noop = new Proxy({}, { get: () => () => undefined });
   const api = createBoardDetailPanel({
     state,
@@ -42,6 +43,7 @@ function panel(over: Partial<Parameters<typeof createBoardDetailPanel>[0]> = {})
     document,
     taskUrl: (id) => `https://board.example.com/workspaces/w-1?task=${id}`,
     goalUrl: (id) => `https://board.example.com/workspaces/w-1?goal=${id}`,
+    loadTaskDetail,
     actions: noop as BoardActions,
     review: noop as BoardReviewController,
     discussion: {
@@ -59,7 +61,7 @@ function panel(over: Partial<Parameters<typeof createBoardDetailPanel>[0]> = {})
     boot: { goal: () => null, threadPending: () => false, clearThread: () => {} },
     ...over,
   });
-  return { el, state, loadDiscussion, loadEvents, ...api };
+  return { el, state, loadDiscussion, loadEvents, loadTaskDetail, ...api };
 }
 
 beforeEach(() => {
@@ -100,6 +102,21 @@ describe('createBoardDetailPanel', () => {
     p.renderDetail();
     p.renderDetail();
     expect(p.loadDiscussion).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for the rest of the open row, and for nothing when nothing is open', () => {
+    // A CLOSED row arrives from the server without its body, notes, review
+    // items or original words; the panel is the reader that needs them back.
+    // The ask is idempotent per revision on its own side, so the panel is
+    // free to make it from the render path — but it must actually make it,
+    // and it must stop naming a row the reader has left.
+    const p = panel();
+    p.state.detailTaskId = 't-1';
+    p.renderDetail();
+    expect(p.loadTaskDetail).toHaveBeenCalledWith('t-1');
+    p.state.detailTaskId = null;
+    p.renderDetail();
+    expect(p.loadTaskDetail).toHaveBeenLastCalledWith(null);
   });
 
   it('fetches the audit rows once per open — never at boot, never per paint', () => {

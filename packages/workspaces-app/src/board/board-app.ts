@@ -58,6 +58,7 @@ import { type WalkSources, reviewQueue } from './board-review-model.ts';
 import { wireBoardSettingsPanel } from './board-settings-panel.ts';
 import { buildShell, wireNavCollapse } from './board-shell.ts';
 import { wireBoardShortcuts } from './board-shortcuts.ts';
+import { createTaskDetailLoads } from './board-task-detail.ts';
 import {
   type BoardLocation,
   buildBoardUrl,
@@ -499,6 +500,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     titleOf,
     knownAgentIds,
     loadEvents: () => loadEvents(),
+    loadTaskDetail: (taskId: string | null) => loadTaskDetail(taskId),
     syncBoardUrl,
     connectMarkdown: (docId) => connect(wsUrl(docId, 'markdown')),
     // Already awaited above — the description box is never live before the
@@ -595,6 +597,15 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   const repaintGuard = createRepaintGuard({ dom: document, win: window });
 
   // ── What the board keeps learning from the server ───────────────────────
+  // The rest of a CLOSED row, for the reader who opens one. Built here rather
+  // than inside `createBoardLoads` because it is not one of the three reads
+  // that fire on every board event — it fires once per ticket somebody opens.
+  const { loadTaskDetail } = createTaskDetailLoads({
+    state,
+    workspaceId,
+    schedule: (paint: () => void) => repaintGuard.schedule(paint),
+    renderDetail,
+  });
   const { loadReviewItems, loadAgents, loadEvents, repaintQueueRegions } = createBoardLoads({
     state,
     workspaceId,

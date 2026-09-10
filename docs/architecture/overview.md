@@ -307,6 +307,16 @@ it, because events come only from store mutations — and reasserts the whole
 projection from the store on hydrate, so a crash cannot leave forged board
 state standing. `isBoardOwnedDoc` (`doc-ids.ts`) is the prefix authority for
 which docs those are, `ws:` and `task:`, and none of them is ever file-bound.
+**What a projected row carries is a size decision, because sync-step-2 is one
+frame.** Opening a board costs the whole `ws:` doc, so the projection sends a
+CLOSED row out as a list row: `task-row-slim.ts` drops the five fields only the
+open panel renders, and `routes/task-detail.ts` hands the whole row back to the
+one reader who opens it. `board-doc-compaction.ts` sheds the doc's delete set
+at hydrate, which is safe for a `ws:` doc and nothing else because the sidecar
+is the record and the projection is reasserted after load. `slow-load-alarm.ts`
+reports a board load that crossed its budget. Measured together on the live
+board: 1.53 MB on the wire before, 0.22 MB after.
+
 That is why editing a task chip inside a document does not write the task —
 the edit is reverted a moment later and the board changes only through the
 named REST routes, which is the consequence [security.md](security.md) records

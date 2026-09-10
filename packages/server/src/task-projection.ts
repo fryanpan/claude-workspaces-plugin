@@ -1,6 +1,7 @@
 import { listThreads, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { DocStore } from './doc-store.ts';
+import { slimClosedRow } from './task-row-slim.ts';
 import { projectBody, projectTask, taskBodyDocId, taskIdOfBodyDoc } from './task-row.ts';
 
 export {
@@ -450,12 +451,23 @@ export class TaskProjection {
     // "N archived" count all needed a REST round trip to draw something the
     // board already holds, and an archive would visibly evict the row from
     // under the toast offering to put it back.
+    // …and a closed row rides out as a LIST row. The reason the two are
+    // separate steps: WHICH rows the board carries is the decision above, and
+    // HOW MUCH of a row it carries is `slimClosedRow`. Projecting an archived
+    // row is what keeps the Undo toast honest; projecting its body, its notes,
+    // its review items and the prose on every transition is what made opening
+    // this board a 1.6 MB download. The panel refetches when a reader opens
+    // one — see `routes/task-detail.ts`.
+    const now = Date.now();
     const want = new Map(
       this.tasks
         .listTasks(workspaceId, { includeArchived: true })
         .map((t) => [
           t.id,
-          projectTask(t, this.commentCount(t.id), ownerKindOf(t), this.tasks.ownerIdOf(t)),
+          slimClosedRow(
+            projectTask(t, this.commentCount(t.id), ownerKindOf(t), this.tasks.ownerIdOf(t)),
+            now,
+          ),
         ]),
     );
     // Each band rides out decorated with its goal ROW's status (and done
@@ -659,6 +671,28 @@ export class TaskProjection {
    * common case, since a doc is created lazily and an empty one has no
    * threads either way.
    */
+  /**
+   * One task's row, projected IN FULL — the shape the board's ydoc used to
+   * carry for every row, before `slimClosedRow` started sending closed ones
+   * out as list rows.
+   *
+   * Public because the detail route is the other half of that trim: the board
+   * drops five fields off a closed row on the way to every reader, and gets
+   * them back for the one reader who opens it. Built from the same
+   * `projectTask` call as `refresh`, deliberately — a second spelling of a
+   * row's fields is how the panel and the list start disagreeing about what a
+   * ticket says.
+   */
+  projectRowInFull(workspaceId: string, task: Task): Record<string, unknown> {
+    const ownerKindOf = this.ownerKindReader(workspaceId);
+    return projectTask(
+      task,
+      this.commentCount(task.id),
+      ownerKindOf(task),
+      this.tasks.ownerIdOf(task),
+    );
+  }
+
   private commentCount(rowId: string): number {
     const doc = this.docStore.get(taskBodyDocId(rowId));
     if (!doc) return 0;

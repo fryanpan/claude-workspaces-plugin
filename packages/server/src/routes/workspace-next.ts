@@ -14,6 +14,7 @@ import { join } from 'node:path';
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
 import { redactBoardEventForVisitor } from '../share/redact-board-events.ts';
+import type { LoadReportReading } from '../slow-load-alarm.ts';
 import { buildQueue } from '../task-queue.ts';
 import { eventsLogPath, isRetired, retiredNotice } from '../tasks.ts';
 import { SERVER_TICK_EVENT, analyzeUptime } from '../uptime.ts';
@@ -259,6 +260,11 @@ export async function handleWorkspaceNext(
       mkdirSync(join(dataDir, 'workspaces'), { recursive: true });
       trimLoadReportLog(logPath);
       appendFileSync(logPath, `${line}\n`);
+      // The log is the record; this is the alarm. Judged AFTER the write, so
+      // a raise that throws cannot cost the reading that caused it, and after
+      // the size refusal, so nothing gets to page somebody with a body the
+      // route would not store.
+      ctx.slowLoadAlarm.consider(workspaceId, body as LoadReportReading, row.ts);
       return j(200, { ok: true });
     }
     if (req.method === 'GET') {

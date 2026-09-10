@@ -78,11 +78,13 @@ import {
   refreshWorkspace as refreshWorkspaceImpl,
   setWorkspaceGroups as setWorkspaceGroupsImpl,
 } from './binds.ts';
+import { compactBoardState } from './board-doc-compaction.ts';
 import {
   type DocIdAuthority,
   ReservedDocIdError,
   isBoardOwnedDoc,
   isReservedDocId,
+  isWorkspaceProjectionDoc,
   newDocId,
 } from './doc-ids.ts';
 import {
@@ -3717,7 +3719,19 @@ export class DocStore {
     if (!existsSync(path)) return;
     try {
       const buf = readFileSync(path);
-      Y.applyUpdate(ydoc, new Uint8Array(buf));
+      // A BOARD doc sheds its history on the way in. It is a projection —
+      // the task sidecar is the source of truth and `TaskProjection.init`
+      // reasserts every row after load — so its past is cost with no reader,
+      // and it is paid by every browser on every page load in one sync frame.
+      // See board-doc-compaction.ts for why this is safe here and nowhere
+      // else, and for the three guards that keep it that way.
+      const state = isWorkspaceProjectionDoc(docId) ? compactBoardState(new Uint8Array(buf)) : null;
+      Y.applyUpdate(ydoc, state?.update ?? new Uint8Array(buf));
+      if (state?.compacted) {
+        console.log(
+          `[doc-store] compacted ${docId}: ${state.beforeBytes} → ${state.afterBytes} bytes`,
+        );
+      }
     } catch (err) {
       console.error(`[doc-store] failed to load ${docId}:`, err);
     }

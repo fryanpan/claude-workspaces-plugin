@@ -618,6 +618,12 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
 
 /** The per-task verbs, under `/workspaces/<id>/tasks/<taskId>/`. See BOARD_MEMBER_ROUTES. */
 const TASK_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
+  // One row in full, for the panel a reader opened. Not a widening: it
+  // answers with the same projected row the board's ydoc already hands
+  // every reader for an open task, minus nothing and plus nothing. A
+  // closed row is trimmed on the wire (`task-row-slim.ts`) and this is
+  // where the panel asks for the rest.
+  detail: ['GET'],
   transition: ['POST'],
   evidence: ['POST'],
   goal: ['POST'],
