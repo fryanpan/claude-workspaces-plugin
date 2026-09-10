@@ -28,6 +28,7 @@ import {
   checkableAttachments,
   readReleasedPluginVersion,
 } from '../plugin-release.ts';
+import { sentryWatchPlan } from '../sentry-projects.ts';
 import { isAttachmentRuntime } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
@@ -150,7 +151,18 @@ export async function handleWorkspaceAttachments(
     // count ships with the seat rather than on its own. Together they
     // are the two halves of "a rename took me off this board".
     const watching = agentWatches.list(res.attachment.agentId, watchKeyExists).watches.length;
-    return j(200, { ...res, watching, notes: attachNotes(res, watching) });
+    // Which Sentry projects this deployment raises into. Sent unconditionally
+    // rather than as a `notes` line, because unlike every other gap named in
+    // this response the server cannot see whether it is a gap: the watch
+    // lives in the session's own plugin store, keyed on its launch path, and
+    // nothing here can read it. So the slugs go out every time and the
+    // session compares them against `sentry_list_my_watches`.
+    return j(200, {
+      ...res,
+      watching,
+      notes: attachNotes(res, watching),
+      sentry: sentryWatchPlan(),
+    });
   }
   const wsAgentHeartbeatMatch = pathname.match(
     /^\/workspaces\/([^/]+)\/agents\/([^/]+)\/heartbeat$/,

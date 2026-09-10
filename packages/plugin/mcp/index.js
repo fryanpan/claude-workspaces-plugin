@@ -17063,7 +17063,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_agent",
-      description: "Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged rows to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away.",
+      description: "Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged rows to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away. ACT ON `sentry`: it names the Sentry projects this deployment raises alarms into, and a raised alarm reaches you only if you hold the subscription — which is keyed on your LAUNCH path, so a session started somewhere new holds nothing and is told nothing. Call sentry_watch_project on each slug it returns (idempotent, so it is free when you already hold it); sentry_list_my_watches is the check.",
       inputSchema: {
         type: "object",
         properties: {
@@ -18963,7 +18963,8 @@ async function handleWorkspaceTool(name, a, ctx) {
         ...res.notes !== undefined && res.notes.length > 0 ? { notes: res.notes } : {},
         ...res.watching !== undefined ? { watching: res.watching } : {},
         ...res.seat !== undefined ? { seat: res.seat } : {},
-        ...res.seatTakenFrom !== undefined ? { seatTakenFrom: res.seatTakenFrom } : {}
+        ...res.seatTakenFrom !== undefined ? { seatTakenFrom: res.seatTakenFrom } : {},
+        ...res.sentry !== undefined ? { sentry: res.sentry } : {}
       });
     }
     case "heartbeat": {
@@ -19415,7 +19416,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.199";
+var PLUGIN_VERSION = "0.1.200";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
