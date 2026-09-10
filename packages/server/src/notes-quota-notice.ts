@@ -61,8 +61,9 @@ function isOurNotice(entry: NoticeOutlineEntry): boolean {
   return entry.author !== undefined && entry.text.trimStart().startsWith(QUOTA_NOTICE_MARK);
 }
 
-/** Live for one notes session. `open` is true from the notice being written
- *  until a successful compose takes it away again. */
+/** Live for one notes session. `open` is true only while the doc is KNOWN to
+ *  be carrying the notice — set when a write is accepted, cleared when a
+ *  deletion is accepted, and never on the strength of an attempt. */
 export interface QuotaNoticeState {
   open: boolean;
 }
@@ -72,48 +73,70 @@ export function createQuotaNoticeState(): QuotaNoticeState {
 }
 
 /**
- * The edits that tell the doc about a quota refusal — one insert, or nothing
- * at all when this outage has already said its piece.
+ * How this module puts words in the doc: it hands over edits and is told
+ * whether they landed.
  *
- * `notesHeadingId` is where the meeting's section is; without one the notice
- * goes at the end of the doc, which is where a section that does not exist
- * yet would have been opened anyway.
+ * The boolean is the whole point of the seam. A notes sink can throw, answer
+ * `false`, or refuse on policy, and a state machine that assumed success
+ * would then be describing a doc that says something else — which is exactly
+ * how a notice gets suppressed forever, or a retraction gets lost.
  */
-export function quotaNoticeEdits(
+export type NoticeWriter = (edits: readonly prose.BlockEdit[]) => boolean;
+
+/**
+ * Tell the doc the note-taker is out of quota, unless it already says so.
+ *
+ * Nothing is remembered until the write is ACCEPTED. A refused write leaves
+ * the outage un-announced, so the next refusal tries again — the room being
+ * told late is a far smaller failure than the room never being told because
+ * one write bounced.
+ */
+export function announceQuotaOutage(
   state: QuotaNoticeState,
   outline: readonly NoticeOutlineEntry[],
   notesHeadingId: string | undefined,
-): prose.BlockEdit[] {
-  if (state.open) return [];
+  write: NoticeWriter,
+): void {
+  if (state.open) return;
   if (outline.some(isOurNotice)) {
     // Already in the doc from an earlier tick this session cannot remember.
     // Adopt it rather than adding a second one.
     state.open = true;
-    return [];
+    return;
   }
-  state.open = true;
-  return [
+  const edit: prose.BlockEdit =
     notesHeadingId === undefined
       ? { op: 'insert_at_end', markdown: QUOTA_NOTICE_TEXT }
-      : { op: 'insert_under_heading', headingId: notesHeadingId, markdown: QUOTA_NOTICE_TEXT },
-  ];
+      : { op: 'insert_under_heading', headingId: notesHeadingId, markdown: QUOTA_NOTICE_TEXT };
+  if (write([edit])) state.open = true;
 }
 
 /**
- * The edits that take the notice away once notes are flowing again — one
- * delete per notice block still standing, and nothing when there is none.
+ * Take the notice away now that notes are flowing again.
  *
- * Every match is deleted, not just the first: a session restarted mid-outage
- * can have written a second one before this module's outline check existed
- * to see the first, and leaving one behind is the failure this function is
- * for.
+ * IT READS THE OUTLINE RATHER THAN THIS SESSION'S MEMORY. A session that
+ * started after the outage began remembers writing nothing, and if quota
+ * recovered before its first compose, a guard on `open` would mean nobody
+ * ever looks and the doc claims an outage forever. What decides is what the
+ * doc actually says.
+ *
+ * Every match is deleted, not just the first, and `open` closes only once the
+ * deletion is accepted — a rejected delete leaves the session still believing
+ * the doc is claiming an outage, which is true, and the next successful tick
+ * tries again.
  */
-export function quotaNoticeClearEdits(
+export function retractQuotaNotice(
   state: QuotaNoticeState,
   outline: readonly NoticeOutlineEntry[],
-): prose.BlockEdit[] {
-  state.open = false;
-  return outline
+  write: NoticeWriter,
+): void {
+  const edits = outline
     .filter(isOurNotice)
     .map((entry) => ({ op: 'delete_block', blockId: entry.id }) satisfies prose.BlockEdit);
+  if (edits.length === 0) {
+    // The doc carries no notice, so there is nothing to be wrong about.
+    state.open = false;
+    return;
+  }
+  if (write(edits)) state.open = false;
 }

@@ -1868,6 +1868,16 @@ session's own memory, and a look for the sentence in the outline the tick
 already read, which covers a session that restarted mid-outage. The first tick
 that composes again deletes it, because a doc still claiming an outage under a
 paragraph of fresh notes teaches the reader to disbelieve the next notice.
+
+**What the session remembers follows what the doc ACCEPTED, never what was
+attempted.** The sink can throw, answer `false`, or refuse on policy, and each
+of those looks identical to a success from the calling line. Recording a
+bounced notice as written suppresses every later refusal for the rest of the
+meeting; recording a bounced deletion as done means nobody looks again and the
+sentence stays under fresh notes forever. So both flags move only on an
+accepted write, and the retraction runs on EVERY successful tick rather than
+only when this session remembers writing a notice — a session that started
+mid-outage remembers nothing, and the doc is the only thing that knows.
 Nothing from the refusal body reaches the doc, the log or the error message.
 
 ### Is it behaving? `bun run notes:eval`

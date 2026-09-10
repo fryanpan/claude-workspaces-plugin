@@ -3173,6 +3173,105 @@ describe('a quota outage is visible in the meeting doc', () => {
     expect(doc.notices()).toHaveLength(1);
   });
 
+  it('tells the room on the next refusal when the doc declined the notice', async () => {
+    // The sink bounced the notice, so the doc says nothing. A session that
+    // recorded it as written would suppress every later refusal, and the
+    // meeting would run to the end with the room none the wiser.
+    const doc = fakeDoc();
+    const schedule = new ManualScheduler();
+    const state = { message: 'notes compose HTTP 429 — out of quota' };
+    let accept = false;
+    const session = beginNotesSession(
+      {
+        composer: refusingComposer(state),
+        quietMs: 1000,
+        schedule,
+        readOutline: () => doc.blocks.map((b) => ({ ...b })),
+        notesHeadingId: () => 'h1',
+        onNotes: (u) => {
+          const isNotice = composedMarkdown(u).startsWith(QUOTA_NOTICE_MARK);
+          if (isNotice && !accept) return false;
+          doc.apply(u.edits);
+          return true;
+        },
+      },
+      ids,
+    );
+
+    session.onTurn({ turn: 0, text: 'First thing.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(doc.notices()).toHaveLength(0);
+
+    accept = true;
+    session.onTurn({ turn: 1, text: 'Second thing.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(1);
+  });
+
+  it('tries the retraction again when the doc declined the deletion', async () => {
+    // A rejected delete leaves the sentence standing under fresh notes. The
+    // session must keep believing the doc claims an outage until it does not.
+    const doc = fakeDoc();
+    const schedule = new ManualScheduler();
+    const state: { message: string | null } = {
+      message: 'notes compose HTTP 429 — out of quota',
+    };
+    let acceptDeletes = false;
+    const session = beginNotesSession(
+      {
+        composer: refusingComposer(state),
+        quietMs: 1000,
+        schedule,
+        readOutline: () => doc.blocks.map((b) => ({ ...b })),
+        notesHeadingId: () => 'h1',
+        onNotes: (u) => {
+          const isDelete = u.edits.some((e) => e.op === 'delete_block');
+          if (isDelete && !acceptDeletes) return false;
+          doc.apply(u.edits);
+          return true;
+        },
+      },
+      ids,
+    );
+
+    session.onTurn({ turn: 0, text: 'During the outage.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(doc.notices()).toHaveLength(1);
+
+    // Quota is back, but the first retraction bounces.
+    state.message = null;
+    session.onTurn({ turn: 1, text: 'After it.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(doc.notices()).toHaveLength(1);
+
+    acceptDeletes = true;
+    session.onTurn({ turn: 2, text: 'And more.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(0);
+  });
+
+  it('clears a notice left by a PREVIOUS session, which this one never wrote', async () => {
+    // The restart case. The outage began under a session that is gone; quota
+    // came back before this one composed anything. Nothing in this session's
+    // memory says a notice exists, so only reading the doc can find it.
+    const doc = fakeDoc();
+    doc.apply([{ op: 'insert_under_heading', headingId: 'h1', markdown: QUOTA_NOTICE_TEXT }]);
+    expect(doc.notices()).toHaveLength(1);
+
+    const state: { message: string | null } = { message: null };
+    const { session } = sessionOver(doc, refusingComposer(state));
+    session.onTurn({ turn: 0, text: 'A fresh meeting note.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(0);
+    expect(doc.blocks.some((b) => b.text.startsWith('- noted at tick'))).toBe(true);
+  });
+
   it('a failure that is not quota leaves the doc alone', async () => {
     // The control for the classification: an overloaded API is one tick's bad
     // luck, the words carry, and nothing is written about it.

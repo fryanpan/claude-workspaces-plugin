@@ -67,9 +67,9 @@ import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import {
+  announceQuotaOutage,
   createQuotaNoticeState,
-  quotaNoticeClearEdits,
-  quotaNoticeEdits,
+  retractQuotaNotice,
 } from './notes-quota-notice.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import {
@@ -1037,10 +1037,10 @@ export function beginNotesSession(
    * allowed to throw — the section-open path above treats a throw as a
    * refusal for the same reason.
    */
-  const writeQuotaNotice = (edits: readonly prose.BlockEdit[]): void => {
-    if (edits.length === 0) return;
+  const writeQuotaNotice = (edits: readonly prose.BlockEdit[]): boolean => {
+    if (edits.length === 0) return false;
     try {
-      deps.onNotes({
+      const answer = deps.onNotes({
         docId: ids.docId,
         meetingId: ids.meetingId,
         // No turns: these words are about the note-taker, not about anything
@@ -1049,8 +1049,13 @@ export function beginNotesSession(
         tick: { tick: lastTickNo, reason: 'pause', turns: [] },
         edits,
       });
+      // The same verdict a tick's own write is judged by. A sink that
+      // declined this one has not written it, and saying otherwise is how a
+      // notice goes missing for the rest of the meeting.
+      return answer !== false && answer !== 'refused';
     } catch (err) {
       deps.onError?.(err instanceof Error ? err.message : 'notes quota notice failed');
+      return false;
     }
   };
 
@@ -1549,7 +1554,10 @@ export function beginNotesSession(
         // write rather than a member of the batch above: the guard judges a
         // tick's edits as a set, and a refusal of the notes would then take
         // the retraction down with them.
-        if (quotaNotice.open) writeQuotaNotice(quotaNoticeClearEdits(quotaNotice, outline));
+        // UNCONDITIONALLY, not only when this session remembers writing one:
+        // a session that started mid-outage remembers nothing, and the doc
+        // would go on claiming an outage that ended before it began.
+        retractQuotaNotice(quotaNotice, outline, writeQuotaNotice);
       } catch (err) {
         carry = [...raw, ...carry];
         // Same reason as the refused-write path: an idea whose second look
@@ -1572,7 +1580,7 @@ export function beginNotesSession(
         // indistinguishable from a quiet meeting. Once per outage — see
         // `notes-quota-notice.ts`.
         if (isQuotaFailure(reason)) {
-          writeQuotaNotice(quotaNoticeEdits(quotaNotice, outline, notesHeadingId));
+          announceQuotaOutage(quotaNotice, outline, notesHeadingId, writeQuotaNotice);
         }
         // Only a size refusal is worth trying again at once; see
         // `retryAfterFailure`.
