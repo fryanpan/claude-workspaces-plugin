@@ -2629,7 +2629,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // (default 120s) and Bun pings them itself, which is why the `/y/*`
     // editing sockets were never affected — measured idle-surviving 30s on
     // the unfixed build, while SSE died at 9.7s.
-    idleTimeout: HTTP_IDLE_TIMEOUT_SEC,
+    idleTimeout: opts.httpIdleTimeoutSec ?? HTTP_IDLE_TIMEOUT_SEC,
     // `server` is gone from this signature and from `route`'s: the three
     // websocket upgrades were the only things in the route table that read
     // it, and they now reach it through the narrowed forward reference the

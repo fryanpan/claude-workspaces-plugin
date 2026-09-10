@@ -623,6 +623,14 @@ export function openSseStream(
   agentId?: string,
   lastEventId?: string,
   shareMember?: string,
+  /**
+   * The keepalive period, defaulting to the shipped one. A seam, in the shape
+   * `sse-mux.ts` already has (`opts.keepaliveMs ?? SSE_KEEPALIVE_MS`): the
+   * only way to watch this interval WRITE is to wait one out, and waiting out
+   * the shipped 15s cost the server suite nineteen seconds in one file. No
+   * production caller passes it.
+   */
+  keepaliveMs: number = SSE_KEEPALIVE_MS,
 ): Response {
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
   const encoder = new TextEncoder();
@@ -681,7 +689,7 @@ export function openSseStream(
         } catch {
           clearInterval(keepalive);
         }
-      }, SSE_KEEPALIVE_MS);
+      }, keepaliveMs);
       // attach cleanup on cancel
       (c as unknown as { _keepalive?: ReturnType<typeof setInterval> })._keepalive = keepalive;
     },
