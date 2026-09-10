@@ -12,7 +12,12 @@
 
 import { describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
-import { claimForCleanup, confineToSection, sectionIds } from '../src/notes-cleanup-scope.ts';
+import {
+  claimForCleanup,
+  confineToSection,
+  releaseClaims,
+  sectionIds,
+} from '../src/notes-cleanup-scope.ts';
 import { NOTES_AUTHOR_ID, type NotesDocStore } from '../src/notes-doc-access.ts';
 import { DOC, NOTES, docStoreFrom, idOf } from './notes-cleanup-fixture.ts';
 
@@ -249,12 +254,14 @@ describe('claiming what an admitted edit names', () => {
   it('claims only what an admitted edit names, and nothing while the marks live', () => {
     // Marks gone: the one block the edit names is claimed, and only it.
     const lost = docStoreFrom(NOTES, []);
-    expect(claimForCleanup(lost.ydoc, rewriteOne(lost.store, 'harbour run'))).toBe(1);
+    expect(claimForCleanup(lost.ydoc, rewriteOne(lost.store, 'harbour run'))).toEqual([
+      idOf(lost.store, 'harbour run'),
+    ]);
     expect(prose.readOutline(lost.ydoc).filter((b) => b.author !== undefined)).toHaveLength(1);
     // Marks live: the gate only ever admits blocks already marked ours, so
     // there is nothing left to claim and the doc is not written to.
     const live = docStoreFrom(NOTES, ['Meeting notes']);
-    expect(claimForCleanup(live.ydoc, rewriteOne(live.store, 'harbour run'))).toBe(0);
+    expect(claimForCleanup(live.ydoc, rewriteOne(live.store, 'harbour run'))).toEqual([]);
   });
 
   it('claims nothing on a block the gate admitted only as an offer', () => {
@@ -265,11 +272,29 @@ describe('claiming what an admitted edit names', () => {
     const { ydoc, store } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
     const edits = rewriteOne(store, 'Kestrel Lane');
     const theirs = idOf(store, 'Kestrel Lane');
-    expect(claimForCleanup(ydoc, edits, new Set([theirs]))).toBe(0);
+    expect(claimForCleanup(ydoc, edits, new Set([theirs]))).toEqual([]);
     expect(prose.readOutline(ydoc).find((b) => b.id === theirs)?.author).toBeUndefined();
     // Positive control: without the set, this very block IS claimed — so the
     // zero above is the exclusion working, not an unclaimable block.
-    expect(claimForCleanup(ydoc, edits)).toBe(1);
+    expect(claimForCleanup(ydoc, edits)).toEqual([theirs]);
     expect(prose.readOutline(ydoc).find((b) => b.id === theirs)?.author).toBe(NOTES_AUTHOR_ID);
+  });
+
+  it('hands a claim back, and hands back only its own', () => {
+    // A claim made for an edit that then failed has to be undone, or the next
+    // pass reads it as permission to rewrite a line this one never changed.
+    const { ydoc, store } = docStoreFrom(NOTES, []);
+    const mine = idOf(store, 'harbour run');
+    expect(claimForCleanup(ydoc, rewriteOne(store, 'harbour run'))).toEqual([mine]);
+    expect(releaseClaims(ydoc, [mine])).toBe(1);
+    expect(prose.readOutline(ydoc).find((b) => b.id === mine)?.author).toBeUndefined();
+
+    // Somebody else's mark is not this pass's to remove — releasing an id it
+    // never claimed changes nothing, and says so.
+    const held = idOf(store, 'Kestrel Lane');
+    const el = prose.findBlockById(prose.getProseFragment(ydoc), held);
+    if (el) prose.setBlockAuthor(el, 'some-other-agent');
+    expect(releaseClaims(ydoc, [held])).toBe(0);
+    expect(prose.readOutline(ydoc).find((b) => b.id === held)?.author).toBe('some-other-agent');
   });
 });

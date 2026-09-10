@@ -324,6 +324,77 @@ describe('a doc whose marks have all been lost', () => {
     expect(after).not.toContain('Rewritten by a robot');
   });
 
+  it('hands its claim back when the edit it claimed for fails', async () => {
+    // A CLAIM IS A WRITE. Claiming happens before the batch, because
+    // `applyBlockEdits` reads the mark to decide rewrite-or-redline — so an
+    // edit that then fails leaves the block marked as the pass's own, on a
+    // run that changed nothing. The next pass would read that mark as
+    // permission and rewrite in silence a line this one never touched.
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, []);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const target = idOf(store, 'harbour run');
+    const before = markdownNow();
+    const heading = idOf(store, 'Meeting notes');
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([{ op: 'replace_block', blockId: target, markdown: '   ' }]),
+        dataDir,
+        heading,
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.failed).toBe(1);
+    expect(result.touched).toBe(0);
+    expect(prose.readOutline(ydoc).find((b) => b.id === target)?.author).toBeUndefined();
+    expect(markdownNow()).toBe(before);
+
+    // Control: the same block and an edit that DOES land keeps its claim, so
+    // the release above is the failure and not a pass that never claims.
+    const landed = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          { op: 'replace_block', blockId: target, markdown: '- Harbour run: half-hourly' },
+        ]),
+        dataDir,
+        heading,
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(landed.applied).toBe(1);
+    expect(prose.readOutline(ydoc).find((b) => b.text.includes('half-hourly'))?.author).toBe(
+      NOTES_AUTHOR_ID,
+    );
+  });
+
+  it('keeps a claim on a block some OTHER edit in the batch did change', async () => {
+    // The batch nests the bullet and then fails to rewrite it. The block IS
+    // the pass's work now — it moved — so handing the claim back on account
+    // of the second edit would leave a block it wrote reading as nobody's.
+    const { store, ydoc } = docStoreFrom(NOTES, []);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const lead = idOf(store, 'harbour run');
+    const moved = idOf(store, 'Kestrel Lane');
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          { op: 'nest_blocks', leadBlockId: lead, blockIds: [moved] },
+          { op: 'replace_block', blockId: moved, markdown: '   ' },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.applied).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(prose.readOutline(ydoc).find((b) => b.id === moved)?.author).toBe(NOTES_AUTHOR_ID);
+  });
+
   it('may still ADD a point it heard, as it always could', async () => {
     const { store, markdownNow } = docStoreFrom(NOTES, []);
     const dataDir = freshDir();

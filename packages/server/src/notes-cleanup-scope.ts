@@ -208,13 +208,14 @@ export function claimable(scope: {
  * any caller that admits an offer; the default is empty so the two callers
  * that admit none do not have to say so.
  *
- * Returns how many it claimed, which is what a test asserts on.
+ * Returns the ids it claimed, so the caller can hand back the ones whose
+ * edit then failed — see {@link releaseClaims}.
  */
 export function claimForCleanup(
   ydoc: Y.Doc,
   edits: readonly prose.BlockEdit[],
   proposeOnly: ReadonlySet<string> = new Set<string>(),
-): number {
+): string[] {
   const wanted = new Set<string>();
   for (const edit of edits) {
     if (edit.op === 'replace_block' || edit.op === 'delete_block') wanted.add(edit.blockId);
@@ -224,18 +225,48 @@ export function claimForCleanup(
     }
   }
   for (const id of proposeOnly) wanted.delete(id);
-  if (wanted.size === 0) return 0;
+  if (wanted.size === 0) return [];
   const fragment = prose.getProseFragment(ydoc);
   const unmarked = [...wanted]
+    .map((id) => ({ id, el: prose.findBlockById(fragment, id) }))
+    .filter(
+      (b): b is { id: string; el: Y.XmlElement } =>
+        b.el !== undefined && prose.readBlockAuthor(b.el) === undefined,
+    );
+  if (unmarked.length === 0) return [];
+  ydoc.transact(() => {
+    for (const b of unmarked) prose.setBlockAuthor(b.el, NOTES_AUTHOR_ID);
+  }, 'agent');
+  return unmarked.map((b) => b.id);
+}
+
+/**
+ * Hand back a claim this pass made and then did not use.
+ *
+ * A CLAIM IS A WRITE TO THE DOCUMENT, so a claim on a block whose edit went
+ * on to FAIL is a write on a run that changed nothing — the thing criterion
+ * 2.4 rules out. Worse, the mark outlives the run: the block now reads as the
+ * note-taker's own, so the NEXT cleanup would rewrite in silence a line this
+ * one was only ever allowed to propose on. Claiming has to be undone when the
+ * edit it was for did not land.
+ *
+ * Only a mark this pass could have written is removed — a block carrying
+ * somebody else's id is left exactly as it is, because the claim that failed
+ * was never made on it. Returns how many it handed back.
+ */
+export function releaseClaims(ydoc: Y.Doc, ids: readonly string[]): number {
+  if (ids.length === 0) return 0;
+  const fragment = prose.getProseFragment(ydoc);
+  const held = ids
     .map((id) => prose.findBlockById(fragment, id))
     .filter(
-      (el): el is Y.XmlElement => el !== undefined && prose.readBlockAuthor(el) === undefined,
+      (el): el is Y.XmlElement => el !== undefined && prose.readBlockAuthor(el) === NOTES_AUTHOR_ID,
     );
-  if (unmarked.length === 0) return 0;
+  if (held.length === 0) return 0;
   ydoc.transact(() => {
-    for (const el of unmarked) prose.setBlockAuthor(el, NOTES_AUTHOR_ID);
+    for (const el of held) el.removeAttribute(prose.BLOCK_AUTHOR_ATTR);
   }, 'agent');
-  return unmarked.length;
+  return held.length;
 }
 
 /**

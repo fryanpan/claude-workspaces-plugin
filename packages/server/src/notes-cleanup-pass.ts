@@ -53,6 +53,7 @@ import {
   commentedBlockIds,
   confineToSection,
   notesMarksLive,
+  releaseClaims,
   sectionIds,
 } from './notes-cleanup-scope.ts';
 import {
@@ -207,6 +208,25 @@ export function cleanupTurns(
   }));
 }
 
+/**
+ * Whose each block is, as of this read of the doc.
+ *
+ * Called TWICE on purpose — once on the outline the model was shown, to say
+ * what the prompt claims, and once after the compose, to say what the gate
+ * enforces. They are the same three fields read the same way, and the whole
+ * point is that they can legitimately disagree by the time the model answers.
+ */
+function ownership(
+  outline: readonly prose.OutlineEntry[],
+  ydoc: Parameters<typeof notesMarksLive>[0],
+): { owned: Set<string>; attributed: Set<string>; marksLive: boolean } {
+  return {
+    owned: new Set(outline.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id)),
+    attributed: new Set(outline.filter((e) => e.author !== undefined).map((e) => e.id)),
+    marksLive: notesMarksLive(ydoc),
+  };
+}
+
 /** The names this meeting's record gave its voices. Empty for a record that
  *  cannot be read — a voice then reads as "Speaker A", which is what it read
  *  as in the notes too. */
@@ -224,6 +244,39 @@ function namesOf(
     // A record that will not read costs the pass its names, never itself.
   }
   return {};
+}
+
+/**
+ * The blocks this batch claimed and then did not change.
+ *
+ * `outcomes` is per edit and in the order they were sent, so a `failed` one
+ * names its own target. A block some OTHER edit in the same batch did change
+ * keeps its claim: it is the pass's own work now, whatever else failed
+ * alongside it. Absent outcomes mean the store refused the whole batch, so
+ * every claim goes back.
+ */
+function claimsToHandBack(
+  edits: readonly prose.BlockEdit[],
+  outcomes: readonly prose.BlockEditOutcome[] | undefined,
+  claimed: readonly string[],
+): string[] {
+  if (claimed.length === 0) return [];
+  const held = new Set(claimed);
+  if (outcomes === undefined) return [...held];
+  const targets = (edit: prose.BlockEdit): string[] =>
+    edit.op === 'replace_block' || edit.op === 'delete_block'
+      ? [edit.blockId]
+      : edit.op === 'nest_blocks'
+        ? [edit.leadBlockId, ...edit.blockIds]
+        : [];
+  const back = new Set<string>();
+  const kept = new Set<string>();
+  edits.forEach((edit, i) => {
+    const into = outcomes[i]?.status === 'failed' ? back : kept;
+    for (const id of targets(edit)) if (held.has(id)) into.add(id);
+  });
+  for (const id of kept) back.delete(id);
+  return [...back];
 }
 
 const refusal = (reason: NotesCleanupRefusal, line: string): NotesCleanupResult => ({
@@ -281,15 +334,12 @@ export async function runNotesCleanupPass(
   }
 
   const outline = readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS });
-  const scope = sectionIds(outline, headingId);
-  if (scope.blocks.size === 0) {
+  if (sectionIds(outline, headingId).blocks.size === 0) {
     return refusal('no-section', 'notes cleanup: the notes section is no longer in the doc');
   }
   const turns = cleanupTurns(transcript, namesOf(deps.dataDir, docId, meetingId));
-  const owned = new Set(outline.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id));
-  const attributed = new Set(outline.filter((e) => e.author !== undefined).map((e) => e.id));
-  const marksLive = notesMarksLive(doc.ydoc);
-  const ours = claimable({ owned, attributed, marksLive });
+  const shown = ownership(outline, doc.ydoc);
+  const ours = claimable({ ...shown, marksLive: shown.marksLive });
   // WHAT THE MODEL IS TOLD AND WHAT THE GATE ENFORCES ARE ONE ANSWER. A gate
   // that admits a block the prompt has just called a person's writing changes
   // nothing, because the model does as it is told; the outline's `theirs` is
@@ -300,8 +350,9 @@ export async function runNotesCleanupPass(
   // ours or because it sits outside this meeting's section, where nothing is.
   // Headings are left out of the list — it is about lines, and the outline
   // already says which heading each line sits under.
+  const shownSection = sectionIds(outline, headingId);
   const claimed = new Set(
-    outline.filter((e) => ours(e.id) && scope.blocks.has(e.id)).map((e) => e.id),
+    outline.filter((e) => ours(e.id) && shownSection.blocks.has(e.id)).map((e) => e.id),
   );
   const humanNotes = outline
     .filter(
@@ -332,23 +383,28 @@ export async function runNotesCleanupPass(
     );
   }
 
-  // Read AFTER the compose, not before: the doc is live, and somebody can
-  // leave a comment while the model is thinking.
-  const commented = commentedBlockIds(doc.ydoc);
+  // THE WHOLE GATE IS READ AFTER THE COMPOSE, NOT BEFORE. A model call takes
+  // seconds and the doc is live: somebody can leave a comment, type into a
+  // bullet, or move one out of the section while it runs, and a person typing
+  // in a block is exactly how the note-taker's mark comes OFF it
+  // (`clearAuthorshipOnPersonEdit`). A gate built from the pre-compose read
+  // would still have that block marked ours and would rewrite the words they
+  // just wrote. The prompt necessarily saw the older doc — that is the
+  // document the model answered about — but nothing is written on the
+  // strength of it.
+  const now = readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS });
   const { kept, proposeOnly, refused } = confineToSection(edits, {
-    ...scope,
-    owned,
-    attributed,
-    marksLive,
+    ...sectionIds(now, headingId),
+    ...ownership(now, doc.ydoc),
     headingId,
-    commented,
+    commented: commentedBlockIds(doc.ydoc),
   });
   // BOTH HALVES OF THE SAME SENTENCE. The blocks the gate called ours have to
   // be marked ours, or every one of them lands as a redline instead of a
   // rewrite; the blocks it admitted only as an OFFER must not be, or the
   // redline somebody is meant to accept or reject becomes a silent rewrite of
   // their line. See `claimForCleanup`.
-  claimForCleanup(doc.ydoc, kept, proposeOnly);
+  const claimedIds = claimForCleanup(doc.ydoc, kept, proposeOnly);
   // A store that refuses the whole batch — the doc has gone, or is not prose —
   // reports no counts at all. Reading that as zeros is the honest answer: it
   // changed nothing, which is what the numbers below say.
@@ -357,6 +413,16 @@ export async function runNotesCleanupPass(
     written !== null && 'applied' in written
       ? { applied: written.applied, suggested: written.suggested, failed: written.failed }
       : { applied: 0, suggested: 0, failed: written === null ? 0 : kept.length };
+  // A claim is a write, so one made for an edit that then failed has to go
+  // back — see `releaseClaims`.
+  releaseClaims(
+    doc.ydoc,
+    claimsToHandBack(
+      kept,
+      written !== null && 'outcomes' in written ? written.outcomes : undefined,
+      claimedIds,
+    ),
+  );
   const touched = result.applied + result.suggested;
   return {
     ok: true,

@@ -25,6 +25,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { prose, suggestOps } from '@claude-workspaces/core';
+import type { NotesComposer } from '../src/meeting-notes.ts';
 import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
 import {
   DOC,
@@ -158,6 +159,81 @@ describe("a person's bullet inside the section, on a doc whose marks are live", 
     expect(input?.claimed?.has(idOf(store, 'harbour run'))).toBe(true);
   });
 });
+/**
+ * A PERSON TYPING WHILE THE MODEL THINKS.
+ *
+ * A compose is a network call taking seconds, and the doc is live the whole
+ * time. Somebody typing into one of the note-taker's bullets is exactly how
+ * the mark comes off it (`clearAuthorshipOnPersonEdit`), so a gate built from
+ * the outline the PROMPT was given would still have that block marked ours
+ * and would rewrite the words they had just finished writing.
+ */
+describe('a block that changes hands while the compose is in flight', () => {
+  /** A composer that does something to the doc before it answers. */
+  const composerThat = (
+    beforeAnswering: () => void,
+    edits: readonly prose.BlockEdit[],
+  ): NotesComposer => ({
+    name: 'mid-compose',
+    compose: () => {
+      beforeAnswering();
+      return Promise.resolve(edits);
+    },
+  });
+
+  it('offers rather than rewrites, because the gate is read after the compose', async () => {
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const target = idOf(store, 'harbour run');
+    const rewrite: prose.BlockEdit[] = [
+      { op: 'replace_block', blockId: target, markdown: '- Harbour run: half-hourly from April' },
+    ];
+    const theyType = (): void => {
+      const el = prose.findBlockById(prose.getProseFragment(ydoc), target);
+      el?.removeAttribute(prose.BLOCK_AUTHOR_ATTR);
+    };
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(store, composerThat(theyType, rewrite), dataDir, idOf(store, 'Meeting notes')),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.applied).toBe(0);
+    expect(result.suggested).toBe(1);
+    const pending = suggestOps.listSuggestions(ydoc);
+    expect(pending).toHaveLength(1);
+    suggestOps.rejectSuggestion(ydoc, pending[0]?.sid ?? '');
+    expect(markdownNow()).toBe(before);
+  });
+
+  it('rewrites the same block when nobody touched it — the control', async () => {
+    // Same doc, same edit, same composer shape. The only difference is that
+    // the mark is still there when the answer comes back, which is what makes
+    // the offer above the person's edit rather than something else.
+    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        composerThat(() => {}, [
+          {
+            op: 'replace_block',
+            blockId: idOf(store, 'harbour run'),
+            markdown: '- Harbour run: half-hourly from April',
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.applied).toBe(1);
+    expect(result.suggested).toBe(0);
+    expect(markdownNow()).toContain('Harbour run: half-hourly from April');
+  });
+});
+
 /**
  * AND A BLOCK ANOTHER AGENT STILL HOLDS, on a doc whose marks are gone.
  *

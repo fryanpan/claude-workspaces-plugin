@@ -2274,6 +2274,26 @@ leaves every rewrite a redline; claiming while forgetting the offer set turns
 every offer into a rewrite. The two failures are opposite and the code is one
 line each, which is why they are said together everywhere they appear.
 
+**The whole gate is read AFTER the compose, and that is not a detail.** A
+model call takes seconds; the doc is live for every one of them. Somebody
+typing into a bullet is precisely how the note-taker's mark comes off it
+(`clearAuthorshipOnPersonEdit`), so a gate built from the outline the PROMPT
+was given would still have that block marked as the pass's own and would
+rewrite the sentence they had just finished. Section membership, ownership,
+`notesMarksLive` and the comment set are all re-read once the answer is back.
+The prompt necessarily saw the older document — that is what the model
+answered about — but nothing is WRITTEN on the strength of it. `ownership()`
+exists to be called twice for exactly this reason.
+
+**And a claim is a write, so one made for an edit that then failed goes
+back.** Claiming has to happen before the batch, because `applyBlockEdits`
+reads the mark to decide rewrite-or-redline; an edit that fails afterwards
+would otherwise leave its target marked as the pass's own on a run that
+changed nothing — and the NEXT cleanup would read that mark as permission to
+rewrite in silence a line this one never touched. `claimsToHandBack` reads
+the per-edit outcomes and `releaseClaims` undoes those claims, sparing any
+block some other edit in the same batch did change.
+
 **And the prompt is told the same thing the gate enforces.** The outline
 prints `theirs` straight off the mark, so on a marks-gone doc it would call
 every line a person's and the model would leave all of them alone whatever
