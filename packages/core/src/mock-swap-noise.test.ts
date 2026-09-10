@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type SwapScope,
-  declaredNames,
+  collidableNames,
   enterRecoverableInsert,
   insideRecoverableInsert,
   isRecoveredMockCollision,
@@ -119,27 +119,25 @@ describe('which reports name a declaration collision', () => {
   });
 });
 
-describe('the bindings a source declares', () => {
-  it('names every kind a second run can collide on', () => {
-    expect(declaredNames('const A = 1; let b = 2; class C {} var d = 3; function e() {}')).toEqual([
-      'A',
-      'b',
-      'C',
-      'd',
-      'e',
-    ]);
+describe('the identifiers a source could collide on', () => {
+  it.each([
+    ['a plain declaration', 'const LABELS = [1];', 'LABELS'],
+    // The three shapes a declaration parser missed, each of which would have
+    // made this script's own collision look like somebody else's and stopped
+    // the round being recovered at all.
+    ['a second declarator', 'const fresh = 1, existing = 2;', 'existing'],
+    ['a destructured binding', 'const { alpha, beta } = window.cfg;', 'beta'],
+    ['a declarator on its own line', 'let\n  wrapped = 1;', 'wrapped'],
+  ])('cannot miss the name in %s', (_shape, source, name) => {
+    expect(collidableNames(source)).toContain(name);
   });
 
-  it('gives up on a destructuring declaration rather than guessing', () => {
-    // Answering with a short list would be worse than answering "cannot tell":
-    // the real colliding name would be missing, the collision would look like
-    // somebody else's, and the noise this exists to stop would be filed again.
-    expect(declaredNames('const { a, b } = window.cfg;')).toBeNull();
-    expect(declaredNames('const [first] = rows;')).toBeNull();
+  it('lists each name once however often it is written', () => {
+    expect(collidableNames('const a = 1; a = a + 1;')).toEqual(['const', 'a']);
   });
 
-  it('has no names to give for a source that declares nothing', () => {
-    expect(declaredNames('document.title = "hi";')).toEqual([]);
+  it('has nothing to give for a source with no identifiers in it', () => {
+    expect(collidableNames('"12" + 34;')).toEqual([]);
   });
 });
 
@@ -199,13 +197,24 @@ describe('the verdict beforeSend reads', () => {
     ).toBe(true);
   });
 
-  it('drops a collision it cannot attribute, inside the window', () => {
-    // Neither half is readable — a source whose declarations could not be
-    // enumerated. Wide is the safe direction: the narrow answer files the
-    // noise again, and this is still inside an insert about to be retried.
+  it('drops a collision on a name only a destructuring pattern bound', () => {
+    // The shape a declaration parser could not enumerate, and the reason the
+    // set is every identifier the source mentions rather than the ones it can
+    // be proved to declare.
     const scope: SwapScope = {};
     enterRecoverableInsert('const { params } = cfg;', scope);
     expect(isRecoveredMockCollision(collision, scope)).toBe(true);
+  });
+
+  it('drops a collision whose message names no identifier it can read', () => {
+    // An engine wording none of the patterns match. Wide is the safe
+    // direction: the narrow answer files the noise again, and this is still
+    // inside an insert about to be retried.
+    const scope: SwapScope = {};
+    enterRecoverableInsert(SOURCE, scope);
+    expect(
+      isRecoveredMockCollision({ message: 'SyntaxError: cannot redeclare that thing' }, scope),
+    ).toBe(true);
   });
 
   it('sends a runtime SyntaxError even inside the window', () => {

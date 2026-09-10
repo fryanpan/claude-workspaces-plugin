@@ -64,10 +64,9 @@ const DEPTH_KEY = '__cwMockSwapRecoverableInsert';
  * the bindings THIS source declares", which is the thing that is actually
  * about to be retried.
  *
- * `null` means "could not enumerate them" — a destructuring declaration, whose
- * targets this does not parse — and reads as the whole window, which is the
+ * `null` — nothing published — reads as the whole window, which is the
  * behaviour before the names existed. Failing that way keeps the noise fix
- * intact; failing the other way would let it back.
+ * intact; failing the other way lets it back.
  */
 const NAMES_KEY = '__cwMockSwapRecoverableNames';
 
@@ -75,12 +74,25 @@ const NAMES_KEY = '__cwMockSwapRecoverableNames';
 const MAX_DEPTH = 8;
 
 /**
- * Every binding a source declares that a second run could collide on. A
- * SUPERSET on purpose: a name inside a nested block or a string costs nothing
- * (it can only widen what is recognised as this script's own collision),
- * whereas a name missed would file noise this exists to stop.
+ * Every identifier a source so much as mentions.
+ *
+ * Deliberately a bag of words rather than a list of DECLARATIONS. Parsing
+ * declarations invited exactly one failure mode, and it is the expensive one:
+ * a name missed — `const fresh = 1, existing = 2`, a destructured binding, a
+ * declarator list wrapped over lines — makes this script's own collision look
+ * like somebody else's, and the round stops being recovered at all. That is a
+ * regression in the feature PR 841 shipped, traded for a sharper answer to a
+ * much rarer question. A collision is on a binding this source declares, and a
+ * binding it declares is a word in its text, so this set CANNOT miss the name.
+ *
+ * What the width costs is only discrimination: a collision on a name that also
+ * appears in a comment, a string, or a property access here is attributed to
+ * this script. So a mock whose script carries another script's source inline
+ * and inserts it is still credited with that one's collision. A collision from
+ * code whose names are nowhere in this source — the page's other scripts, a
+ * library, a fetched module — is filed, which is the case worth separating.
  */
-const DECLARATION = /\b(?:const|let|class|var|function)\s+([A-Za-z_$][\w$]*|[{[])/g;
+const IDENTIFIER = /[A-Za-z_$][\w$]*/g;
 
 /** The identifier a redeclaration message names, per engine. Chrome's wrapped
  *  form puts `'insertBefore'` and `'Node'` in front of the real one, which is
@@ -93,15 +105,10 @@ const COLLIDED_NAME = [
   /redeclaration of (?:const|let|class|var|function)\s+([A-Za-z_$][\w$]*)/i,
 ];
 
-/** The names `source` declares, or `null` when they cannot all be enumerated. */
-export function declaredNames(source: string): string[] | null {
-  const names: string[] = [];
-  for (const m of source.matchAll(DECLARATION)) {
-    const target = m[1];
-    if (target === '{' || target === '[') return null;
-    names.push(target);
-  }
-  return names;
+/** The identifiers `source` mentions — every name its own collision could be
+ *  reported under. */
+export function collidableNames(source: string): string[] {
+  return [...new Set(source.match(IDENTIFIER) ?? [])];
 }
 
 function collidedName(message: string): string | null {
@@ -163,7 +170,7 @@ export function enterRecoverableInsert(
 ): RecoverableInsert {
   const before = { depth: depth(scope), names: names(scope) };
   scope[DEPTH_KEY] = Math.min(before.depth + 1, MAX_DEPTH);
-  scope[NAMES_KEY] = declaredNames(source);
+  scope[NAMES_KEY] = collidableNames(source);
   return before;
 }
 
@@ -236,10 +243,11 @@ export function isRecoveredMockCollision(
   return collisionIsOurs(reportText(event), names(scope));
 }
 
-/** Does this report name one of `declared`? `null` declarations, or a message
- *  with no identifier in it, answer yes. */
-export function collisionIsOurs(message: string, declared: string[] | null): boolean {
-  if (declared === null) return true;
+/** Does this report name one of `mentioned`? A `null` set (nothing published)
+ *  and a message with no readable identifier both answer yes — the wide
+ *  answer, which is the one that keeps a round recovered. */
+export function collisionIsOurs(message: string, mentioned: string[] | null): boolean {
+  if (mentioned === null) return true;
   const name = collidedName(message);
-  return name === null || declared.includes(name);
+  return name === null || mentioned.includes(name);
 }

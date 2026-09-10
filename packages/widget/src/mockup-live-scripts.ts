@@ -1,7 +1,7 @@
 import {
   REDECLARATION,
+  collidableNames,
   collisionIsOurs,
-  declaredNames,
   enterRecoverableInsert,
   leaveRecoverableInsert,
 } from '@claude-workspaces/core/mock-swap-noise';
@@ -108,7 +108,7 @@ function canRetryWrapped(el: HTMLScriptElement, source: string): boolean {
  * an insert is the browser's own exception, and a `SyntaxError` from another
  * realm is not an `instanceof` match for this one's.
  */
-function isRedeclaration(err: unknown, declared: string[] | null): boolean {
+function isRedeclaration(err: unknown, declared: string[]): boolean {
   const e = err as { name?: string; message?: string } | null;
   const message = e?.message ?? '';
   return (
@@ -130,7 +130,7 @@ function isRedeclaration(err: unknown, declared: string[] | null): boolean {
  * `error` is null when a browser withholds the exception object, so the
  * message carries both halves of the question in that case.
  */
-function isRedeclarationEvent(ev: Event, declared: string[] | null): boolean {
+function isRedeclarationEvent(ev: Event, declared: string[]): boolean {
   const e = ev as { error?: unknown; message?: string };
   if (e.error != null) return isRedeclaration(e.error, declared);
   const message = e.message ?? '';
@@ -183,7 +183,7 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
   const asWritten = reviveScript(src, source);
   const retryable = canRetryWrapped(src, source);
   let collided = false;
-  const declared = declaredNames(source);
+  const declared = collidableNames(source);
   const onError = (ev: Event): void => {
     if (!retryable || !isRedeclarationEvent(ev, declared)) return;
     collided = true;
