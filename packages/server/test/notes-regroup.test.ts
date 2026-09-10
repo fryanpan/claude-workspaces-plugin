@@ -12,7 +12,7 @@ import { buildNotesPrompt } from '../src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import { MAX_FLAT_RUN_BULLETS } from '../src/notes-quality.ts';
-import { regroupDirective, regroupTargets } from '../src/notes-regroup.ts';
+import { homelessRun, regroupDirective, regroupTargets } from '../src/notes-regroup.ts';
 
 let seq = 0;
 function heading(text: string, level = 3): prose.OutlineEntry {
@@ -135,7 +135,7 @@ describe('regroupTargets', () => {
     expect(targets).toEqual([]);
   });
 
-  test('says nothing about a run that sits above every heading — the control', () => {
+  test('never offers to group a run that sits above every heading', () => {
     // A homeless wall wants a heading, not a group, and the prompt asks for
     // one elsewhere. Firing here taught the note-taker to nest instead of
     // opening `### `, and cost the "organised under topics" bar outright.
@@ -168,6 +168,29 @@ describe('regroupTargets', () => {
   });
 });
 
+describe('homelessRun', () => {
+  test('names the run above every heading once it has reached the bar', () => {
+    const run = bullets(MAX_FLAT_RUN_BULLETS, 'homeless');
+    const found = homelessRun(run, { author: NOTES_AUTHOR_ID });
+    expect(found?.runLength).toBe(MAX_FLAT_RUN_BULLETS);
+    expect(found?.bullets.map((b) => b.id)).toEqual(run.map((b) => b.id));
+  });
+
+  test('is null while that run is still short — the control', () => {
+    expect(
+      homelessRun(bullets(MAX_FLAT_RUN_BULLETS - 1, 'homeless'), { author: NOTES_AUTHOR_ID }),
+    ).toBeNull();
+  });
+
+  test('is null once a heading stands over the notes', () => {
+    expect(
+      homelessRun([heading('A topic'), ...bullets(MAX_FLAT_RUN_BULLETS + 2)], {
+        author: NOTES_AUTHOR_ID,
+      }),
+    ).toBeNull();
+  });
+});
+
 describe('regroupDirective', () => {
   test('names the ids and hands over a nest_blocks call to copy', () => {
     const topic = heading('Remote control usability');
@@ -181,12 +204,38 @@ describe('regroupDirective', () => {
     );
   });
 
-  test('is null on a headingless run, so nothing competes with opening a heading', () => {
+  test('asks a run nobody has named for a heading, never for nesting', () => {
+    const run = bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless');
+    const text = regroupDirective(run, { author: NOTES_AUTHOR_ID });
+    expect(text).toContain('UNDER NO HEADING');
+    expect(text).toContain('### ');
+    // The remedy for a homeless wall is the heading. Offering to nest as well
+    // is what taught the note-taker to nest INSTEAD, and cost the "organised
+    // under topics" bar a measured 83% to 0% on ES2002a x ledger-haiku.
+    expect(text).not.toContain('nest_blocks');
+    for (const b of run) expect(text).toContain(b.id);
+  });
+
+  test('is null on a short run nobody has named — the control', () => {
     expect(
-      regroupDirective([...bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless')], {
+      regroupDirective([...bullets(MAX_FLAT_RUN_BULLETS - 1, 'homeless')], {
         author: NOTES_AUTHOR_ID,
       }),
     ).toBeNull();
+  });
+
+  test('asks for the heading before the groups when a doc has both walls', () => {
+    const topic = heading('A named topic');
+    const text =
+      regroupDirective(
+        [
+          ...bullets(MAX_FLAT_RUN_BULLETS, 'homeless'),
+          topic,
+          ...bullets(MAX_FLAT_RUN_BULLETS, 'named'),
+        ],
+        { author: NOTES_AUTHOR_ID },
+      ) ?? '';
+    expect(text.indexOf('UNDER NO HEADING')).toBeLessThan(text.indexOf('THESE TOPICS ARE FULL'));
   });
 
   test('is null on a short topic, so a quiet tick pays nothing for it', () => {
@@ -224,11 +273,17 @@ describe('the tick prompt', () => {
     expect(user).not.toContain('nest_blocks');
   });
 
-  test('carries nothing extra for a wall with no heading — the control', () => {
+  test('asks a wall with no heading for the heading, not for groups', () => {
     const homeless = bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless');
     const { user } = buildNotesPrompt(composeInput(homeless));
+    expect(user).toContain('UNDER NO HEADING');
     expect(user).not.toContain('GROUP THEM IN THIS UPDATE');
-    expect(user).not.toContain('nest_blocks');
+  });
+
+  test('carries nothing extra while the notes are still short — the control', () => {
+    const { user } = buildNotesPrompt(composeInput(bullets(MAX_FLAT_RUN_BULLETS - 1, 'early')));
+    expect(user).not.toContain('UNDER NO HEADING');
+    expect(user).not.toContain('GROUP THEM IN THIS UPDATE');
   });
 
   test('shows a nested point as a sub-bullet so a group can be told from a wall', () => {

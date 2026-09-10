@@ -33,20 +33,26 @@
  * run reaches the bar with at least two of the note-taker's own bullets in
  * it, which is the fewest that can become a group.
  *
- * AND IT NEVER FIRES ON A RUN WITH NO HEADING, WHICH COST A MEASURED BAR TO
- * LEARN. A headingless run is the same wall to `flatBulletRuns`, so the first
- * version reported it and asked for the same nesting. On the eval's ES2002a
- * ledger-haiku slice that took "notes are organised under topics" from 83% to
- * 0%: told at tick 1 that its four homeless bullets were a full topic to be
- * grouped in place, the note-taker nested them and never opened the `###`
- * heading the prompt asks for, and the meeting ran to its end with no topic in
- * it. The flat-run bar went to 92% and the notes got worse.
+ * AND A RUN NOBODY HAS NAMED IS ASKED FOR A HEADING, NOT A GROUP, WHICH COST
+ * TWO MEASURED BARS TO GET RIGHT. A run above every heading is the same wall
+ * to `flatBulletRuns`, so the first version reported it and asked for the same
+ * nesting. On the eval's ES2002a ledger-haiku slice that took "notes are
+ * organised under topics" from 83% to 0%: told at tick 1 that its four
+ * homeless bullets were a full topic to group in place, the note-taker nested
+ * them and never opened the `###` heading the prompt asks for.
  *
- * The cure for a homeless run is a HEADING, not a group, and the prompt
- * already asks for one. So this stays silent there and leaves that run to the
- * rule that is right about it — the two mechanisms cannot fight over the same
- * bullets, and the flat-run bar reads a headingless wall until a heading
- * arrives, which is the honest reading of a topic nobody has named.
+ * Staying silent there was no better, and the 43-tick ES2002b slice is where
+ * that shows: EVERY flat-run failure on it reads `under "(no heading)"`,
+ * because a ledger note-taker writes for several ticks before it names a
+ * topic. A directive that skips those says nothing about the only wall the
+ * meeting actually builds.
+ *
+ * So a homeless run gets the remedy that fits it. `homelessRun` names the
+ * bullets and the directive asks for the heading they belong under — the
+ * prompt's own "open a new `### ` heading" rule, aimed at the blocks that
+ * need it — while `regroupTargets` keeps asking for groups under a heading
+ * that already exists. One wall, two shapes, and neither instruction can be
+ * carried out by doing the other.
  */
 
 import type { prose } from '@claude-workspaces/core';
@@ -66,6 +72,15 @@ export interface RegroupTarget {
   /** The bullets of that run the note-taker may actually move: its own, still
    *  untouched. In document order. */
   movable: Array<{ id: string; text: string }>;
+}
+
+/** A run of top-level bullets sitting above every heading — a wall the room
+ *  cannot navigate because nothing says what it is about. */
+export interface HomelessRun {
+  /** How long the run is by the BAR's reckoning. */
+  runLength: number;
+  /** The bullets in it, in document order, the note-taker's own first. */
+  bullets: Array<{ id: string; text: string }>;
 }
 
 export interface RegroupOptions {
@@ -103,25 +118,52 @@ function sectionOf(
  * flat run" that disagree would make the directive fire on topics the eval
  * calls fine and stay silent on the ones it does not.
  */
-export function regroupTargets(
-  outline: readonly prose.OutlineEntry[],
-  opts: RegroupOptions,
-): RegroupTarget[] {
+interface Scan {
+  targets: RegroupTarget[];
+  homeless: HomelessRun | null;
+}
+
+/**
+ * One pass over the outline, splitting the runs that have reached the bar
+ * into the two kinds that need opposite remedies.
+ *
+ * The run boundaries mirror `flatBulletRuns` in `notes-quality.ts`, which is
+ * what the eval scores, so this cannot report a topic the bar would not: a
+ * heading of any level breaks a run, a sub-bullet breaks it AND takes the
+ * bullet above it out (that bullet is a group's lead, not a flat bullet), and
+ * a paragraph between two bullets breaks nothing. Two readings of "what is a
+ * flat run" that disagree would make the directive fire on topics the eval
+ * calls fine and stay silent on the ones it does not.
+ */
+function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOptions): Scan {
   const bar = opts.bar ?? MAX_FLAT_RUN_BULLETS;
   const targets: RegroupTarget[] = [];
+  let homeless: HomelessRun | null = null;
   const scoped = sectionOf(outline, opts.notesHeadingId);
   let heading = '';
   let headingId: string | undefined;
   let run: prose.OutlineEntry[] = [];
   const flush = (): void => {
-    const movable = run
-      .filter((e) => e.author === opts.author)
-      .map((e) => ({ id: e.id, text: e.text }));
-    // Two is the fewest bullets that can become a group. One movable bullet
-    // in a run of five is a topic the note-taker cannot fix, and telling it
-    // to anyway spends prompt on an instruction with no legal answer.
-    if (headingId !== undefined && run.length >= bar && movable.length >= 2) {
-      targets.push({ headingId, heading, runLength: run.length, movable });
+    const mine = run.filter((e) => e.author === opts.author);
+    if (run.length >= bar) {
+      if (headingId === undefined) {
+        // At most one run can be homeless — a heading, once seen, stands over
+        // everything after it — and the earliest is the one to name.
+        homeless ??= {
+          runLength: run.length,
+          bullets: mine.map((e) => ({ id: e.id, text: e.text })),
+        };
+        // Two is the fewest bullets that can become a group. One movable bullet
+        // in a run of five is a topic the note-taker cannot fix, and telling it
+        // to anyway spends prompt on an instruction with no legal answer.
+      } else if (mine.length >= 2) {
+        targets.push({
+          headingId,
+          heading,
+          runLength: run.length,
+          movable: mine.map((e) => ({ id: e.id, text: e.text })),
+        });
+      }
     }
     run = [];
   };
@@ -143,7 +185,23 @@ export function regroupTargets(
     run.push(entry);
   }
   flush();
-  return targets;
+  return { targets, homeless };
+}
+
+/** The topics under a heading that have filled up. */
+export function regroupTargets(
+  outline: readonly prose.OutlineEntry[],
+  opts: RegroupOptions,
+): RegroupTarget[] {
+  return scanRuns(outline, opts).targets;
+}
+
+/** The run above every heading that has filled up, if there is one. */
+export function homelessRun(
+  outline: readonly prose.OutlineEntry[],
+  opts: RegroupOptions,
+): HomelessRun | null {
+  return scanRuns(outline, opts).homeless;
 }
 
 /** How many bullets one group should gather, when the model is left to pick.
@@ -161,39 +219,61 @@ const SUGGESTED_GROUP_SIZE = 3;
  * meant will pick the wrong ones. The bullets it lists are the ones the
  * note-taker may move; a person's bullet in the same run is counted in the
  * length and left out of the list, so the group forms around it.
+ *
+ * A homeless run is named FIRST when there is one, because its remedy has to
+ * happen before the other can: bullets get a heading, and only then can that
+ * heading's run be grouped under it.
  */
 export function regroupDirective(
   outline: readonly prose.OutlineEntry[],
   opts: RegroupOptions,
 ): string | null {
-  const targets = regroupTargets(outline, opts);
-  if (targets.length === 0) return null;
+  const { targets, homeless } = scanRuns(outline, opts);
+  if (targets.length === 0 && homeless === null) return null;
   const bar = opts.bar ?? MAX_FLAT_RUN_BULLETS;
-  const lines: string[] = [
-    `THESE TOPICS ARE FULL — GROUP THEM IN THIS UPDATE. A topic may run ${bar}`,
-    'bullets flat; each one below has reached that. Do NOT add another bullet',
-    'to one of them: gather the bullets it already has into groups instead,',
-    'with nest_blocks, and put whatever this speech adds to that topic under',
-    'the group it belongs to on the next update.',
-    '',
-    'nest_blocks MOVES bullets under a lead bullet. It rewrites nothing and',
-    'deletes nothing, so it never costs a point and never breaks a comment',
-    'somebody has left on one. Pick the bullet that best introduces a group as',
-    `the lead and name the other ${SUGGESTED_GROUP_SIZE - 1} or so under it; repeat for the rest.`,
-  ];
-  for (const target of targets) {
-    lines.push('');
+  const lines: string[] = [];
+  if (homeless !== null) {
     lines.push(
-      `- "${target.heading}" (${target.headingId}) — ${target.runLength} flat ` +
-        'bullets. Yours, in order:',
+      `THE NOTES HAVE RUN TO ${homeless.runLength} BULLETS UNDER NO HEADING — OPEN ONE IN`,
+      `THIS UPDATE. A list ${bar} bullets long that nothing names is the wall these`,
+      'notes exist instead of, and what it is missing is the topic, not a',
+      'group: nesting bullets nobody has named leaves them just as homeless.',
+      "Insert the `### ` heading these belong under, then put this speech's",
+      'points under its id on the next update. Where they are two subjects,',
+      'open the heading for the one this speech is about.',
+      '',
+      'The bullets waiting for a heading:',
     );
-    for (const bullet of target.movable) lines.push(`    ${bullet.id} | ${bullet.text}`);
-    const lead = target.movable[0];
-    const rest = target.movable.slice(1, SUGGESTED_GROUP_SIZE).map((b) => b.id);
-    if (lead && rest.length > 0) {
+    for (const bullet of homeless.bullets) lines.push(`    ${bullet.id} | ${bullet.text}`);
+  }
+  if (targets.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push(
+      `THESE TOPICS ARE FULL — GROUP THEM IN THIS UPDATE. A topic may run ${bar}`,
+      'bullets flat; each one below has reached that. Do NOT add another bullet',
+      'to one of them: gather the bullets it already has into groups instead,',
+      'with nest_blocks, and put whatever this speech adds to that topic under',
+      'the group it belongs to on the next update.',
+      '',
+      'nest_blocks MOVES bullets under a lead bullet. It rewrites nothing and',
+      'deletes nothing, so it never costs a point and never breaks a comment',
+      'somebody has left on one. Pick the bullet that best introduces a group as',
+      `the lead and name the other ${SUGGESTED_GROUP_SIZE - 1} or so under it; repeat for the rest.`,
+    );
+    for (const target of targets) {
+      lines.push('');
       lines.push(
-        `  e.g. {"op":"nest_blocks","leadBlockId":"${lead.id}","blockIds":${JSON.stringify(rest)}}`,
+        `- "${target.heading}" (${target.headingId}) — ${target.runLength} flat ` +
+          'bullets. Yours, in order:',
       );
+      for (const bullet of target.movable) lines.push(`    ${bullet.id} | ${bullet.text}`);
+      const lead = target.movable[0];
+      const rest = target.movable.slice(1, SUGGESTED_GROUP_SIZE).map((b) => b.id);
+      if (lead && rest.length > 0) {
+        lines.push(
+          `  e.g. {"op":"nest_blocks","leadBlockId":"${lead.id}","blockIds":${JSON.stringify(rest)}}`,
+        );
+      }
     }
   }
   return lines.join('\n');
