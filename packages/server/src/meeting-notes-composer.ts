@@ -228,9 +228,8 @@ function renderOutline(input: NotesComposeInput): string {
     ...head,
     '',
     'The doc, block by block — "id kind whose | text". Only the most recent',
-    'blocks are listed; every heading is. A "sub-bullet" already sits under',
-    'the "bullet" above it: that topic has groups, so its points go into one',
-    'rather than onto the end of the list.',
+    'blocks are listed; every heading is. A "sub-bullet" sits under the',
+    '"bullet" above it.',
     ...lines,
   ].join('\n');
 }
