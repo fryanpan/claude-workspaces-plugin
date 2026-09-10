@@ -1,0 +1,321 @@
+{
+  "meeting": "ES2003d",
+  "listedBy": "claude-sonnet-5",
+  "listedAt": "2026-09-08T23:09:05.628Z",
+  "ticks": [
+    {
+      "tick": 4,
+      "ideas": [
+        "Use a list of criteria to rate the prototype",
+        "Evaluation uses a seven-point scale",
+        "Average ratings across criteria for overall confidence score",
+        "Criteria based on company goals and policies",
+        "Criteria based on marketing strategies",
+        "Criteria based on user requirements phase findings"
+      ]
+    },
+    {
+      "tick": 5,
+      "ideas": [
+        "Presented evaluation criteria for the product",
+        "Some criteria were poorly formulated",
+        "Certain features/aspects have been completely abandoned",
+        "Product will score badly on some criteria"
+      ]
+    },
+    {
+      "tick": 7,
+      "ideas": [
+        "Score each evaluation point as if straight line",
+        "How well does prototype realize goal of preventing lost remotes",
+        "How well does prototype help find remotes once lost",
+        "Question whether the locator/homing feature still works"
+      ]
+    },
+    {
+      "tick": 8,
+      "ideas": [
+        "Cannot prevent remote controls being lost (human element)",
+        "Goal is to help find lost remotes rather than prevent loss"
+      ]
+    },
+    {
+      "tick": 9,
+      "ideas": [
+        "Bright color helps find the remote",
+        "Suggestion to use purple color",
+        "Noise feature still included in design",
+        "Question: rate ease of finding lost remote on scale 1-7"
+      ]
+    },
+    {
+      "tick": 10,
+      "ideas": [
+        "Rank sounder first for the first criteria",
+        "Sound alone makes it hard to locate the device"
+      ]
+    },
+    {
+      "tick": 11,
+      "ideas": [
+        "Mobile could indicate which room it's in",
+        "Problem: TV volume too loud with no remote found",
+        "Option: go directly to TV to adjust volume"
+      ]
+    },
+    {
+      "tick": 12,
+      "ideas": ["Proposal to review evaluation criteria before product evaluation"]
+    },
+    {
+      "tick": 14,
+      "ideas": [
+        "Question: does any criteria need explaining or stand out",
+        "Real Reactions' goal strategy: products inspired by fashion/clothing trends",
+        "Fruit and veg popularity in home/clothing relates to fashion inspiration",
+        "Company slogan: 'we put the fashion in electronics' taken literally"
+      ]
+    },
+    {
+      "tick": 15,
+      "ideas": [
+        "Easy to use for visitors overlaps with easy to use interface",
+        "Condense the two points into one",
+        "Revisit this item later"
+      ]
+    },
+    {
+      "tick": 16,
+      "ideas": [
+        "Project is four Euros over budget",
+        "LCD accounts for about half of expenditure",
+        "Chip required in addition to LCD adds cost",
+        "Option: ditch the LCD to cut costs",
+        "Removing LCD would require more buttons for interface"
+      ]
+    },
+    {
+      "tick": 17,
+      "ideas": [
+        "Changed structure material to plastic",
+        "Solid unit with single curve design",
+        "Design change brings cost within proposed budget",
+        "Only 0.2 Euro margin remaining in budget",
+        "No criteria was defined for joystick",
+        "Used own judgment on joystick specification",
+        "Risk that joystick choice exceeds affordable cost"
+      ]
+    },
+    {
+      "tick": 18,
+      "ideas": [
+        "USB connection option no longer viable",
+        "Multi-language support feature",
+        "Advanced chip capability retained",
+        "LCD display usage retained"
+      ]
+    },
+    {
+      "tick": 19,
+      "ideas": [
+        "Multiple language communication remains a viable option",
+        "Need to decide how to proceed from here",
+        "Need an idea that others could continue if necessary"
+      ]
+    },
+    {
+      "tick": 20,
+      "ideas": [
+        "Offer to show the Excel sheet",
+        "May need to use plastic and solid design",
+        "LCD placement might not be optimal",
+        "LCD position could be compromise between left- and right-handed users"
+      ]
+    },
+    {
+      "tick": 21,
+      "ideas": [
+        "Make the design circular",
+        "Extend the pink portion over the pinkie finger",
+        "Design process requires making concessions"
+      ]
+    },
+    {
+      "tick": 22,
+      "ideas": [
+        "Question about cost of different prints",
+        "Question whether whole item can be printed with design",
+        "Clarification needed: printing on plastic material",
+        "No additional data available beyond what's shared"
+      ]
+    },
+    {
+      "tick": 23,
+      "ideas": [
+        "Battery options are very limited",
+        "Chose a cheaper battery option",
+        "Advanced chip required for needed functionality",
+        "Single curved design needed for ergonomics",
+        "Plastic case incurs no extra cost",
+        "Rubber costs only two Euros per unit, but not used",
+        "Problem exists with the interface"
+      ]
+    },
+    {
+      "tick": 24,
+      "ideas": [
+        "Possible saving of 0.5 Euro if not charged per push button",
+        "Numeric keypad cost around 4.5 Euros seems too high",
+        "That 4.5 Euro figure could be incorrect",
+        "Saving might just enable adding a colour option instead",
+        "Design uses an LCD display with advanced chip",
+        "Scroll wheel is integrated with push button, not a joystick",
+        "Integrated scroll wheel/button differs from original joystick intent"
+      ]
+    },
+    {
+      "tick": 25,
+      "ideas": [
+        "Questions why combined component costs more than separate button and scroll wheel",
+        "Claims the cost difference is quite significant"
+      ]
+    },
+    {
+      "tick": 26,
+      "ideas": [
+        "Component costs took up over half the price",
+        "Need to cut four Euros off desired price",
+        "Open to suggestions on how to proceed",
+        "This option comes in under budget",
+        "This option sacrificed case material and design to cut cost"
+      ]
+    },
+    {
+      "tick": 27,
+      "ideas": [
+        "Question whether speakers and transmitters were factored into plan",
+        "Speakers, receiver, and transmitter components not yet accounted for",
+        "Question of what form the extra device on the TV takes (e.g. a button)"
+      ]
+    },
+    {
+      "tick": 28,
+      "ideas": [
+        "Design concept could be reduced to just a button",
+        "Concern that the option may be too expensive",
+        "Observation that it looks like almost nothing",
+        "Item not included on the current list/reference"
+      ]
+    },
+    {
+      "tick": 29,
+      "ideas": [
+        "Question whether an advanced chip is required for the LCD",
+        "Using an LCD display requires the advanced chip",
+        "Question about what a hand dynamo is / requires winding"
+      ]
+    },
+    {
+      "tick": 30,
+      "ideas": ["The only new feature is the LCD screen"]
+    },
+    {
+      "tick": 31,
+      "ideas": [
+        "Remote is manipulated by joystick",
+        "Joystick defined as scroll wheel",
+        "Replacing joystick would need 4 directional buttons",
+        "Four buttons would cost more than a scroll wheel"
+      ]
+    },
+    {
+      "tick": 32,
+      "ideas": [
+        "Joystick lacked an actual definition",
+        "Joystick label used for evaluation purposes only",
+        "LCD display is the big selling point",
+        "Consider removing the LCD display"
+      ]
+    },
+    {
+      "tick": 33,
+      "ideas": [
+        "Removing the remote's originality could save costs",
+        "LCD display is what makes the remote original",
+        "Removing LCD display would make meetings pointless",
+        "Without LCD, could just rebrand an existing remote control"
+      ]
+    },
+    {
+      "tick": 34,
+      "ideas": [
+        "Regret about a missed opportunity",
+        "Increasing price could have allowed manufacturing closer to original design"
+      ]
+    },
+    {
+      "tick": 35,
+      "ideas": [
+        "Concern that pricing charged for 3 million components is excessive",
+        "Suggestion to raise pricing dispute with accountants"
+      ]
+    },
+    {
+      "tick": 36,
+      "ideas": [
+        "Must use existing figures for this meeting",
+        "Decision to keep the LCD display",
+        "LCD display differentiates the product"
+      ]
+    },
+    {
+      "tick": 37,
+      "ideas": [
+        "Group willing to accept extra cost of plastic solid case",
+        "Question about extra cost to keep articulation feature"
+      ]
+    },
+    {
+      "tick": 38,
+      "ideas": [
+        "Uncertainty about whether design requires double curvature",
+        "Question whether double curvature incorporates articulation idea",
+        "Claim that it needn't require double curvature"
+      ]
+    },
+    {
+      "tick": 39,
+      "ideas": [
+        "Case could still be single-curved",
+        "Case made in two parts joined by articulation",
+        "Consider dropping curved design",
+        "Focus on menu as the best interface",
+        "Software imposes restrictions to consider"
+      ]
+    },
+    {
+      "tick": 40,
+      "ideas": ["Joystick requires this feature", "Prototype grip lines are quite straight"]
+    },
+    {
+      "tick": 41,
+      "ideas": [
+        "Curve isn't strictly necessary, could be done without curves",
+        "Main needed curve is at the top near the hand",
+        "Curve should keep joystick in ergonomic position resting on hand"
+      ]
+    },
+    {
+      "tick": 42,
+      "ideas": [
+        "Reducing curve count wouldn't save much cost",
+        "Proposal: single curve still allows articulation",
+        "Proceed with single curve proposal unless objections arise"
+      ]
+    },
+    {
+      "tick": 43,
+      "ideas": ["Product likely won't meet C's criteria"]
+    }
+  ]
+}

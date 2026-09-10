@@ -6,6 +6,25 @@
  *   bun run notes:eval --smoke         # the CI slice, a few cents
  *   bun run notes:eval --meeting ES2002a
  *   bun run notes:eval --judge off     # programmatic checks only, no Sonnet
+ *   bun run notes:eval --no-ideas      # skip the lost-idea rate and its gate
+ *   bun run notes:eval --corpus <dir>  # a corpus that is NOT in this repo
+ *   bun run notes:eval --max-usd 0.25  # stop once the run has spent that much
+ *   bun run notes:eval --ratchet       # lower the lost-idea bar to this run's rate
+ *
+ * THE NUMBER THIS RUN EXISTS FOR IS THE LOST-IDEA RATE. Everything else here
+ * asks whether the notes are well FORMED; that one asks whether they are
+ * COMPLETE, which is the question a person asks when they say "I said that,
+ * where is it". It is measured against a list of the ideas in each tick,
+ * written down once beside the fixture and corrected by hand afterwards
+ * (`notes-eval-ideas.ts`), and it FAILS the run above the ratcheted bar in
+ * `notes-eval.baseline.json` (`--ratchet` lowers it to a better run; the target
+ * is five per cent) — unlike every other rate here, because its denominator is fixed rather than
+ * re-derived, so it means the same thing on two different days.
+ *
+ * REAL MEETINGS ARE NOT IN THIS REPO. `--corpus <dir>` reads fixtures and
+ * their ground truth from anywhere, which is how the rate is measured over
+ * private meetings without a line of them being committed, quoted or printed.
+ * Only counts and rates come out.
  *
  * WHY THIS EXISTS. Everything the note-taking behaviour asks for — paraphrase,
  * short bullets, one heading per topic, a marked guess, a link on a row that
@@ -22,12 +41,13 @@
  * not "how often did the model err". Read the failure lines, which name the
  * bullet, before concluding anything about frequency.
  *
- * THE SMOKE SLICE IS THE ONE THAT CAN FAIL. Every other run reports and
- * exits 0: a rate over a model's output is a reading, not a verdict, and one
- * bad meeting must not be able to turn a push red. The exception is the flat
- * wall of bullets — a topic left running past four with no sub-bullets and no
- * subheading under it is decidable, cheap to see, and the shape the notes are
- * not allowed to have — so `--smoke` exits 1 on one.
+ * WHAT CAN TURN A RUN RED is the lost-idea rate and nothing else about the
+ * notes' shape. A rate over a model's output is a reading, not a verdict, so
+ * every behaviour reports and exits 0. The flat wall of bullets — a topic
+ * left running past four with no sub-bullets and no subheading under it — is
+ * decidable and cheap to see, and it prints a WARNING, because the fix for it
+ * is open note-taker work: a daily job red every morning for a reason nobody
+ * is going to act on today hides the day something else breaks.
  *
  * ON DEMAND ONLY. It spends money and it talks to the network, so nothing
  * runs it on a push except the `--smoke` slice, which is sized to cost cents.
@@ -47,7 +67,8 @@
  * `notes-eval-fixtures.ts`. Speakers are letters; no fixture names a person.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { prose } from '../packages/core/src/index.ts';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NoteReference, NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
@@ -69,9 +90,22 @@ import {
 } from '../packages/server/src/notes-quality.ts';
 import { median } from '../packages/server/src/notes-timing.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
+import {
+  type SummaryCredential,
+  authHeader,
+  resolveCredentialFrom,
+} from '../packages/server/src/summarize.ts';
 import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
+import {
+  MIN_GATED_IDEAS,
+  type MeetingIdeaRate,
+  judgeCarried,
+  ratchetLostIdeaBar,
+  readTruth,
+  reportIdeaRates,
+  setIdeaUsageSink,
+} from './notes-eval-ideas.ts';
 
 const JUDGE_MODEL = 'claude-sonnet-5';
 const NOTES_MODEL = 'claude-haiku-4-5-20251001';
@@ -86,6 +120,60 @@ const PRICES: Record<string, { input: number; output: number }> = {
   [NOTES_MODEL]: { input: 1 / 1_000_000, output: 5 / 1_000_000 },
   [JUDGE_MODEL]: { input: 3 / 1_000_000, output: 15 / 1_000_000 },
 };
+
+/**
+ * What one run may spend before it stops, in dollars.
+ *
+ * Bryan's number: the CI runs must not cost more than a dollar a day. A cap
+ * is the only form of that promise a machine can keep — a measured estimate
+ * says what yesterday cost, and the run that matters is the one where a
+ * fixture grew, a retry loop misbehaved, or somebody pointed `--corpus` at
+ * three hundred meetings. So the run aborts rather than reporting an overrun
+ * afterwards.
+ */
+export const DEFAULT_MAX_USD = 1;
+
+/** Thrown when the cap is reached, so one `catch` in main ends the run. */
+export class SpendCapReached extends Error {
+  constructor(
+    readonly spent: number,
+    readonly cap: number,
+  ) {
+    super(`spend cap reached: $${spent.toFixed(4)} of $${cap.toFixed(2)}`);
+    this.name = 'SpendCapReached';
+  }
+}
+
+let maxUsd = DEFAULT_MAX_USD;
+
+/**
+ * Has this run spent past its cap?
+ *
+ * A cap of zero means UNCAPPED, not "spend nothing" — `--max-usd 0` is how a
+ * person says "I know what I am doing, run the whole corpus". A run that
+ * spent nothing at all is never over, whatever the cap.
+ */
+export function overBudget(spent: number, cap: number): boolean {
+  return cap > 0 && spent > cap;
+}
+
+/** What a set of token counts cost, at the prices this file knows. */
+export function costOf(
+  counts: Readonly<Record<string, { input: number; output: number }>>,
+  prices: Readonly<Record<string, { input: number; output: number }>> = PRICES,
+): number {
+  let sum = 0;
+  for (const [model, u] of Object.entries(counts)) {
+    const price = prices[model];
+    // A model with no price contributes nothing rather than throwing. A new
+    // judge model must not be able to abort a run by being unpriced — but it
+    // is then invisible to the cap, which is why adding one means adding its
+    // price in the same commit.
+    if (!price) continue;
+    sum += u.input * price.input + u.output * price.output;
+  }
+  return sum;
+}
 
 /**
  * A line typed by a person, seeded into every fixture's doc before the
@@ -176,16 +264,15 @@ function recordUsage(model: string, input: number, output: number): void {
   u.input += input;
   u.output += output;
   u.calls++;
+  // Checked AFTER the call is counted, not before: the cap is on what this
+  // run has actually spent, and a check beforehand would have to guess the
+  // size of a reply nobody has seen yet. So the overshoot is bounded by one
+  // call rather than by a guess.
+  if (overBudget(totalCost(), maxUsd)) throw new SpendCapReached(totalCost(), maxUsd);
 }
 
 function totalCost(): number {
-  let sum = 0;
-  for (const [model, u] of Object.entries(usage)) {
-    const price = PRICES[model];
-    if (!price) continue;
-    sum += u.input * price.input + u.output * price.output;
-  }
-  return sum;
+  return costOf(usage);
 }
 
 /**
@@ -291,7 +378,7 @@ interface JudgedField {
 }
 
 async function judge(
-  key: string,
+  key: SummaryCredential,
   before: string,
   after: string,
   transcript: string,
@@ -310,7 +397,7 @@ async function judge(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': key,
+      ...authHeader(key),
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -370,15 +457,24 @@ interface Options {
   smoke: boolean;
   meetings: string[];
   judgePerMeeting: number;
-  key: string;
+  key: SummaryCredential;
+  /** Where the fixtures live. `--corpus <dir>` points it at a corpus that is
+   *  NOT in this repo — real meetings are private and never committed. */
+  corpusDir: string;
+  /** Measure the lost-idea rate against the ground truth beside each fixture,
+   *  and let it fail the run. */
+  ideas: boolean;
 }
 
-function loadFixtures(only: readonly string[]): NotesEvalFixture[] {
-  return readdirSync(FIXTURE_DIR)
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(readFileSync(join(FIXTURE_DIR, f), 'utf8')) as NotesEvalFixture)
-    .filter((f) => only.length === 0 || only.includes(f.meeting))
-    .sort((a, b) => a.meeting.localeCompare(b.meeting));
+function loadFixtures(only: readonly string[], dir: string): NotesEvalFixture[] {
+  return (
+    readdirSync(dir)
+      // `.ideas.json` files are the ground truth beside a fixture, not fixtures.
+      .filter((f) => f.endsWith('.json') && !f.endsWith('.ideas.json'))
+      .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as NotesEvalFixture)
+      .filter((f) => only.length === 0 || only.includes(f.meeting))
+      .sort((a, b) => a.meeting.localeCompare(b.meeting))
+  );
 }
 
 /** `/workspaces/w-eval?task=t-3` → `t-3`, so the harness rebuilds the row's
@@ -392,9 +488,9 @@ async function runMeeting(
   opts: Options,
   behaviours: Record<string, Behaviour>,
   ticksWanted: number,
-): Promise<void> {
+): Promise<MeetingIdeaRate | null> {
   const composer = createHaikuNotesComposer({
-    apiKey: opts.key,
+    apiKey: opts.key.kind === 'key' ? opts.key.value : undefined,
     fetchImpl: countingFetch(NOTES_MODEL),
   });
   if (!composer) throw new Error('no composer: the dedicated key did not resolve');
@@ -546,6 +642,45 @@ async function runMeeting(
   }
   await harness.end();
 
+  // THE LOST-IDEA RATE, judged against the notes the meeting was LEFT with.
+  // That is what a person opens afterwards, and it is the only reading under
+  // which a retry that landed two ticks later counts as coverage rather than
+  // as a miss.
+  let rate: MeetingIdeaRate | null = null;
+  if (opts.ideas) {
+    const truth = readTruth(opts.corpusDir, fixture.meeting);
+    if (!truth) {
+      console.log(`  ${fixture.meeting}: no idea ground truth beside the fixture`);
+    } else {
+      const row: MeetingIdeaRate = {
+        meeting: fixture.meeting,
+        ideas: 0,
+        lost: 0,
+        unjudged: 0,
+        examples: [],
+      };
+      const finalNotes = harness.notes();
+      for (const entry of truth.ticks) {
+        // Only the ticks this run actually played. A slice measured against
+        // the whole meeting's ground truth would report every idea after the
+        // slice as lost.
+        if (entry.tick > ticks.length) continue;
+        const verdicts = await judgeCarried(opts.key, entry.ideas, finalNotes);
+        if (!verdicts) {
+          row.unjudged += entry.ideas.length;
+          continue;
+        }
+        entry.ideas.forEach((idea, i) => {
+          row.ideas++;
+          if (verdicts[i]) return;
+          row.lost++;
+          if (row.examples.length < 5) row.examples.push(`tick ${entry.tick}: ${idea}`);
+        });
+      }
+      rate = row;
+    }
+  }
+
   const marked = unconfirmedBullets(harness.notes()).length;
   // THE TWO NUMBERS THE LATENCY TICKET IS ABOUT, printed beside the coverage
   // number they trade against: a note-taker can always be faster by writing
@@ -580,9 +715,16 @@ async function runMeeting(
   for (const reason of new Set(harness.errors)) {
     console.log(`    ${fixture.meeting}: ${reason}`);
   }
+  return rate;
 }
 
-function report(behaviours: Record<string, Behaviour>, failOnWalls: boolean): number {
+function report(
+  behaviours: Record<string, Behaviour>,
+  ideaRows: readonly MeetingIdeaRate[],
+  gateIdeas: boolean,
+  quote: boolean,
+  ratchet = false,
+): number {
   console.log('\nBehaviour                                  examples   pass rate');
   console.log('-'.repeat(66));
   let thin = 0;
@@ -592,8 +734,15 @@ function report(behaviours: Record<string, Behaviour>, failOnWalls: boolean): nu
     if (b.examples < 25) thin++;
   }
   console.log('-'.repeat(66));
+  // A failure line quotes the bullet that failed, and a bullet is the meeting
+  // restated. Off-repo corpora are private meetings, so they get the count
+  // and nothing else.
   for (const b of Object.values(behaviours)) {
     if (b.failures.length === 0) continue;
+    if (!quote) {
+      console.log(`\n${b.what} — ${b.failures.length} failures. Text withheld: private corpus.`);
+      continue;
+    }
     console.log(`\n${b.what} — ${b.failures.length} failures, first five:`);
     for (const f of b.failures.slice(0, 5)) console.log(`  ${f}`);
   }
@@ -611,16 +760,32 @@ function report(behaviours: Record<string, Behaviour>, failOnWalls: boolean): nu
   }
   console.log(`  total: $${totalCost().toFixed(4)}`);
   if (thin > 0) console.log(`\n${thin} behaviour(s) saw fewer than 25 examples.`);
-  const walls = behaviours.flatRuns!;
-  if (failOnWalls && walls.failures.length > 0) {
-    console.log(
-      `\nFAILED: ${walls.failures.length} tick(s) left a topic running past ` +
-        `${MAX_FLAT_RUN_BULLETS} flat bullets. The instructions ask for the topic's points ` +
-        'to be gathered into groups once it passes the bar; raise the structure, not the bar.',
-    );
-    return 1;
+  // Both verdicts are computed, and both are printed, before either exits.
+  // A run that stopped at the first failure would hide the number the row is
+  // about behind a formatting one.
+  const ideaCode = reportIdeaRates(ideaRows, gateIdeas, quote);
+  if (ratchet && gateIdeas && ideaCode === 0 && ideaRows.length > 0) {
+    const ideas = ideaRows.reduce((n, r) => n + r.ideas, 0);
+    const lost = ideaRows.reduce((n, r) => n + r.lost, 0);
+    if (ideas >= MIN_GATED_IDEAS) {
+      const bar = ratchetLostIdeaBar(
+        lost / ideas,
+        `${new Date().toISOString().slice(0, 10)}: ${ideaRows.length} meeting(s), ${ideas} ideas, ${((lost / ideas) * 100).toFixed(1)}% lost`,
+      );
+      console.log(`Bar now ${(bar * 100).toFixed(1)}%.`);
+    }
   }
-  return 0;
+  const walls = behaviours.flatRuns!;
+  if (walls.failures.length > 0) {
+    console.log(
+      `\nWARNING: ${walls.failures.length} tick(s) left a topic running past ` +
+        `${MAX_FLAT_RUN_BULLETS} flat bullets. The instructions ask for the topic's points ` +
+        'to be gathered into groups once it passes the bar; raise the structure, not the bar. ' +
+        'Not failing the run: this is open note-taker work, and a daily job that is red for a ' +
+        'known reason hides the day something else breaks.',
+    );
+  }
+  return ideaCode;
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -630,11 +795,30 @@ async function main(argv: string[]): Promise<number> {
   const keyAt = argv.indexOf('--api-key');
   const judgeAt = argv.indexOf('--judge');
   const judgeOff = judgeAt >= 0 && argv[judgeAt + 1] === 'off';
-  const key = resolveKeyFrom(keyAt >= 0 ? argv[keyAt + 1] : undefined, readKeychainPassword);
+  const capAt = argv.indexOf('--max-usd');
+  if (capAt >= 0) {
+    const asked = Number(argv[capAt + 1]);
+    if (!Number.isFinite(asked) || asked < 0) {
+      console.error(`--max-usd wants a number of dollars, not "${argv[capAt + 1]}".`);
+      return 2;
+    }
+    maxUsd = asked;
+  }
+  // Every model call this run makes is priced against one budget, this file's
+  // and the idea judge's alike. The sink is cleared in the `finally` below so
+  // a second run in the same process cannot inherit it.
+  setIdeaUsageSink(recordUsage);
+  const key = resolveCredentialFrom(
+    keyAt >= 0 ? argv[keyAt + 1] : undefined,
+    readKeychainPassword,
+    process.env,
+  );
   if (!key) {
     console.error(
-      'No dedicated key. Set CW_SUMMARY_API_KEY, put one in the Keychain as\n' +
-        'claude-workspaces-summary-api-key, or pass --api-key. Nothing was run.',
+      'No credential. Set CW_SUMMARY_ACCESS_TOKEN (an already-exchanged access\n' +
+        'token, which is how CI runs), set CW_SUMMARY_API_KEY, put a key in the\n' +
+        'Keychain as claude-workspaces-summary-api-key, or pass --api-key.\n' +
+        'Nothing was run.',
     );
     return 2;
   }
@@ -656,7 +840,16 @@ async function main(argv: string[]): Promise<number> {
     unconfirmed: new Behaviour('1.4', 'Uncertain points marked unconfirmed'),
   };
 
-  const fixtures = loadFixtures(smoke ? ['ES2002a'] : meetings);
+  const corpusAt = argv.indexOf('--corpus');
+  const corpusDir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
+  // On by default for a full run, because the rate is the point of the corpus;
+  // `--no-ideas` is for a formatting-only pass that must not spend a judge, and
+  // `--judge off` means NO model judge at all — the idea judge included.
+  const ideas = !judgeOff && !argv.includes('--no-ideas');
+  const fixtures = loadFixtures(
+    smoke && corpusDir === FIXTURE_DIR ? ['ES2002a'] : meetings,
+    corpusDir,
+  );
   if (fixtures.length === 0) throw new Error('No fixtures matched. Run notes-eval-fixtures.ts?');
   const opts: Options = {
     smoke,
@@ -665,6 +858,8 @@ async function main(argv: string[]): Promise<number> {
     // harness still runs end to end, not to measure anything.
     judgePerMeeting: judgeOff ? 0 : smoke ? 1 : 6,
     key,
+    corpusDir,
+    ideas,
   };
   const ticksWanted = smoke ? 3 : Number.POSITIVE_INFINITY;
 
@@ -672,9 +867,41 @@ async function main(argv: string[]): Promise<number> {
     `${smoke ? 'Smoke slice' : 'Full run'}: ${fixtures.length} meeting(s), ` +
       `notes on ${NOTES_MODEL}, judge ${opts.judgePerMeeting > 0 ? JUDGE_MODEL : 'off'}`,
   );
-  for (const fixture of fixtures) await runMeeting(fixture, opts, behaviours, ticksWanted);
-  // Only the smoke slice can turn a verdict red — see the header.
-  return report(behaviours, smoke);
+  const ideaRows: MeetingIdeaRate[] = [];
+  try {
+    for (const fixture of fixtures) {
+      const row = await runMeeting(fixture, opts, behaviours, ticksWanted);
+      if (row) ideaRows.push(row);
+    }
+  } catch (err) {
+    if (!(err instanceof SpendCapReached)) throw err;
+    // Print what was spent before saying anything else: the number is the
+    // reason the run stopped, and a reader who sees only "aborted" goes
+    // looking for a bug.
+    console.log(`\nSpend before the cap stopped it: $${totalCost().toFixed(4)}`);
+    for (const [model, u] of Object.entries(usage)) {
+      console.log(`  ${model}: ${u.calls} calls, ${u.input} in / ${u.output} out`);
+    }
+    console.error(
+      `\nSTOPPED: this run reached its $${err.cap.toFixed(2)} cap and did not finish. ` +
+        'Nothing here is a verdict — the meetings it did not reach were not measured. ' +
+        'Raise it with --max-usd if the corpus genuinely grew; otherwise find what ' +
+        'started calling more than it used to.',
+    );
+    return 1;
+  } finally {
+    setIdeaUsageSink(null);
+  }
+  // One thing turns a verdict red: the lost-idea rate. It is measured against
+  // a fixed ground truth, so it means the same thing every run, and it gates
+  // on every run that measured it. The flat-wall check is a SHAPE the notes
+  // may not have, and it warns rather than fails until the note-taker fix
+  // lands, so a daily run is red only when the harness itself breaks.
+  // A corpus outside this repo is a private meeting corpus by construction —
+  // that is the only reason `--corpus` exists. Its examples never print.
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const quote = !relative(repoRoot, resolve(corpusDir)).startsWith('..');
+  return report(behaviours, ideaRows, ideas, quote, argv.includes('--ratchet'));
 }
 
 if (import.meta.main) {

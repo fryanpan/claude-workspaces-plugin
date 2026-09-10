@@ -190,9 +190,10 @@ export const MEMBERS: Member[] = [
  * anybody remembering to add its name here.
  */
 export const NON_GATE_JOBS: Record<string, string> = {
-  'notes-eval-smoke':
-    'spends money and reaches the network, runs `continue-on-error`, and skips itself when ' +
-    'no key is configured — it reports, it does not gate.',
+  // Empty, and that is the current truth rather than an oversight: every job
+  // ci.yml has is covered by a member. The note-taking smoke slice used to
+  // live here; it moved to its own daily workflow because it is the only
+  // thing in CI that spends money, and this file only reads ci.yml.
 };
 
 /**
