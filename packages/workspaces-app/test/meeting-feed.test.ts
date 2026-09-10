@@ -1,9 +1,10 @@
 import { RECORDING_CONSENT_NOTE } from '@claude-workspaces/core';
-import type { CaptureMode, MeetingBotStatus } from '@claude-workspaces/core';
+import type { CaptureMode, MeetingBotStatus, MeetingStreamId } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
 import { type MeetingFeed, createMeetingFeed } from '../src/meeting-feed.ts';
 import type { MeetingLiveZone } from '../src/meeting-live-zone.ts';
 import type { TranscriptTurn } from '../src/meeting-protocol.ts';
+import type { StreamAlarm } from '../src/meeting-stream-health.ts';
 import type { StripState } from '../src/meeting-strip.ts';
 
 /**
@@ -24,6 +25,9 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     mode: 'conversation' as CaptureMode,
     startNote: '' as string,
     standingNote: '' as string,
+    alarm: null as StreamAlarm | null,
+    restoredLine: '' as string,
+    reopened: [] as MeetingStreamId[],
     names: {} as Record<string, string>,
     liveBot: null as MeetingBotStatus | null,
     farewell: null as string | null,
@@ -41,6 +45,9 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     mode: () => h.mode,
     startNote: () => h.startNote,
     standingNote: () => h.standingNote,
+    streamAlarm: () => h.alarm,
+    restoredLine: () => h.restoredLine,
+    reopenStream: (stream) => h.reopened.push(stream),
     names: () => h.names,
     liveBot: () => h.liveBot,
     botFarewell: () => h.farewell,
@@ -59,6 +66,9 @@ interface Harness {
   mode: CaptureMode;
   startNote: string;
   standingNote: string;
+  alarm: StreamAlarm | null;
+  restoredLine: string;
+  reopened: MeetingStreamId[];
   names: Record<string, string>;
   liveBot: MeetingBotStatus | null;
   farewell: string | null;

@@ -28,7 +28,17 @@ const SECURE: OriginFacts = {
 };
 
 function track(kind: 'audio' | 'video') {
-  return { kind, stop: vi.fn(), applyConstraints: vi.fn(() => Promise.resolve()) };
+  // The listener pair and the two state fields are there because a real track
+  // is an EventTarget the capture now watches — see `meeting-track-watch.ts`.
+  return {
+    kind,
+    stop: vi.fn(),
+    applyConstraints: vi.fn(() => Promise.resolve()),
+    readyState: 'live',
+    muted: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
 }
 
 function shared(kinds: Array<'audio' | 'video'>): MediaStream {

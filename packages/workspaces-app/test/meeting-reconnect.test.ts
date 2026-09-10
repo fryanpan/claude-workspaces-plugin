@@ -153,7 +153,11 @@ async function recording(): Promise<{
     startCapture: () =>
       Promise.resolve({
         ok: true,
-        capture: { stop: stopMic, setEchoCancellation: () => Promise.resolve() },
+        capture: {
+          stop: stopMic,
+          setEchoCancellation: () => Promise.resolve(),
+          reopen: () => Promise.resolve({ ok: true as const }),
+        },
       } as MeetingCaptureStart),
   });
   cleanups.push(() => strip.destroy());

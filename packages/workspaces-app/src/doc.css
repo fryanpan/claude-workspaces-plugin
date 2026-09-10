@@ -1504,12 +1504,51 @@ body.has-set .doc-switcher-caret {
 .meeting-consent-note {
   font-style: italic;
 }
+/* The one line on this strip that reports something being LOST while the
+   meeting is still running: a capture died and words are going unrecorded.
+   It is not muted and not italic — every other note here is chrome or a
+   reminder, and this one is the strip interrupting the person mid-meeting
+   because seconds matter. Body size for the same reason `.meeting-note-start`
+   takes it: it is read at arm's length off an iPad while people are talking.
+   Colour comes from the token rather than a literal so it follows the theme
+   the same way every other warning in the app does. */
+.meeting-stream-alarm {
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--fg);
+  /* The words wrap at 430px rather than pushing the button off the line, and
+     the button stays beside the sentence it belongs to at every width. */
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+/* The way back, where only a person's press can take it — the share picker
+   cannot be opened without a gesture. A real control at rest, for the reason
+   `.meeting-note-start` is: hover answers nothing on a touch device, and the
+   words alone would read as more of the sentence. */
+.meeting-note-action {
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  /* A target somebody has to hit while the meeting runs. Padding, not a
+     min-height, so a label that wraps grows the target rather than centring a
+     fixed box inside it. */
+  padding-block: 7px;
+}
 /* And the row gives a held sentence the room, rather than clipping it at
    36px. The shell's strip track is `auto` — the strip RESERVES its height —
    so growing here shortens the editor by exactly this much and gives it
    straight back. Transient by construction: the rule stops applying the
    moment a settled turn arrives or the line is tapped away. */
-.meeting-strip:has(.meeting-note-dismiss) {
+.meeting-strip:has(.meeting-note-dismiss),
+.meeting-strip:has(.meeting-stream-alarm) {
   padding-block: 5px;
 }
 

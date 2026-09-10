@@ -40,10 +40,13 @@ import {
 import {
   type MeetingCapture,
   type MeetingCaptureStart,
+  type MeetingReopen,
   ROOM_AUDIO_DEFAULT,
   type RoomAudioProcessing,
   startMeetingCapture,
 } from './meeting-audio.ts';
+import { streamWords } from './meeting-stream-health.ts';
+import type { TrackLossReason } from './meeting-track-watch.ts';
 
 /** The one seam this module has: how a single stream is opened. */
 export type StartOneCapture = (opts: {
@@ -51,6 +54,7 @@ export type StartOneCapture = (opts: {
   mode: CaptureMode;
   room?: RoomAudioProcessing;
   source?: MeetingStreamId;
+  onLost?: (reason: TrackLossReason) => void;
 }) => Promise<MeetingCaptureStart>;
 
 /**
@@ -92,6 +96,13 @@ export type CaptureSetResult =
       /** Feed every open stream one frame each way — stop, echo cancellation. */
       stopAll(): void;
       setEchoCancellation(on: boolean): Promise<void>;
+      /**
+       * Open one stream's capture again after it died — see
+       * `MeetingCapture.reopen`. Naming a stream this set never opened is a
+       * refusal rather than a throw: the caller is a click handler, and the
+       * set it was rendered from can have been replaced underneath it.
+       */
+      reopen(stream: MeetingStreamId): Promise<MeetingReopen>;
     }
   | {
       ok: false;
@@ -100,11 +111,6 @@ export type CaptureSetResult =
       message: string;
       refusals: readonly CaptureRefusal[];
     };
-
-/** What a stream is called where a person reads it. */
-function streamWords(stream: MeetingStreamId): string {
-  return stream === 'system' ? "this Mac's audio" : 'the microphone';
-}
 
 /**
  * What the strip says when one of two streams was refused.
@@ -139,6 +145,12 @@ export async function openCaptureSet(opts: {
   mode: CaptureMode;
   room?: RoomAudioProcessing;
   onFrame: (pcm: Uint8Array | Int16Array) => void;
+  /**
+   * One of the streams stopped delivering audio while the meeting ran. The
+   * set does not act on it — recovery policy and the wording belong to the
+   * strip, which is the only thing that can show a person a button.
+   */
+  onStreamLost?: (stream: MeetingStreamId, reason: TrackLossReason) => void;
   startCapture?: StartOneCapture;
 }): Promise<CaptureSetResult> {
   const startOne = opts.startCapture ?? startMeetingCapture;
@@ -160,6 +172,7 @@ export async function openCaptureSet(opts: {
         );
       },
       mode: opts.mode,
+      onLost: (reason) => opts.onStreamLost?.(stream, reason),
       // The microphone in a combined meeting is listening to a room the Mac
       // is playing into; see `combinedMicRoom`.
       ...(stream === 'mic' && opts.source === COMBINED_SOURCE
@@ -196,6 +209,12 @@ export async function openCaptureSet(opts: {
     tagged: running.length > 1,
     stopAll() {
       for (const { capture } of captures) capture.stop();
+    },
+    async reopen(stream: MeetingStreamId): Promise<MeetingReopen> {
+      const entry = captures.find((c) => c.stream === stream);
+      if (!entry)
+        return { ok: false, message: `${streamWords(stream)} is not part of this recording.` };
+      return entry.capture.reopen();
     },
     async setEchoCancellation(on: boolean) {
       await Promise.all(captures.map(({ capture }) => capture.setEchoCancellation(on)));

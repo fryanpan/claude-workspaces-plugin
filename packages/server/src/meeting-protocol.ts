@@ -406,6 +406,15 @@ export class MeetingRelay {
       this.send(ws, { type: 'notes_method', method: msg.method, recorded });
       return;
     }
+    if (msg.type === 'stream_state') {
+      // ONLY THE RECORD. There is nothing to answer and nothing to change
+      // about the audio path: the frames on this socket are already only the
+      // frames the streams that are alive produce. What this buys is that the
+      // durable transcript says a stretch of the meeting was not heard,
+      // instead of running the words either side of it together.
+      conn.meeting?.recordGap(msg.stream, msg.state, msg.reason);
+      return;
+    }
     if (msg.type === 'name_speaker') {
       // Both the record and the notes pipeline learn the name; the strip
       // that sent it already knows. Nothing to answer.
