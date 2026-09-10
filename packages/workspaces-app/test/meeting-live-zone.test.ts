@@ -215,13 +215,30 @@ describe('the provisional live zone', () => {
     expect(turns()).toEqual(['carried words.']);
   });
 
-  it('clearSettled drops final lines and keeps the one being spoken (bot fallback)', () => {
+  it('an empty tick returns its words to the stream — no note carries them', () => {
+    // The tick composed nothing, so nothing was written up. The words are
+    // not carried either (that is `failed`), but they have still never
+    // reached the notes, so they stay where the reader can see them.
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'nothing worth noting.', final: true });
+    zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
+    expect(chunkEl()).not.toBeNull(); // control: it really was split off
+    zone.onProgress({ tick: 1, phase: 'empty', turns: [0] });
+    expect(chunkEl()).toBeNull();
+    expect(turns()).toEqual(['nothing worth noting.']);
+  });
+
+  it('clearSettled lifts final lines into a chunk and keeps the one being spoken', () => {
     const zone = createMeetingLiveZone({ parent, now });
     zone.begin(now());
     zone.onTurn({ turn: 0, text: 'written by the bot path.', final: true });
     zone.onTurn({ turn: 1, text: 'still talking', final: false });
     zone.clearSettled();
     expect(turns()).toEqual(['still talking']);
+    // Lifted, not deleted: the bot path leaves by the same fade every other
+    // path uses rather than blinking out of the stream.
+    expect(chunkEl()?.textContent).toContain('written by the bot path.');
   });
 
   it('end() hides and forgets; the wash stays armed for the grace window only', () => {
@@ -351,6 +368,61 @@ describe('a settled chunk fades where it sits, then collapses', () => {
     // Order on the page is the order they settled: the older one stays above.
     expect(slots[0]).toBe(slot);
     expect(slots[1]?.textContent).toContain('still talking, finished now.');
+  });
+
+  it('the bot fallback leaves by the same two beats: fade, then collapse', () => {
+    const zone = createMeetingLiveZone({ parent, now, reducedMotion: () => false });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'the bot wrote this up.', final: true });
+    // No progress frames on this path — a remote note insert is all the zone
+    // is told.
+    zone.clearSettled();
+    const slot = slotEl();
+    if (!slot) throw new Error('clearSettled took the words with no settle');
+    expect(slot.textContent).toContain('the bot wrote this up.');
+
+    vi.advanceTimersByTime(NOTE_LAND_MS - 1);
+    expect(chunkEl()?.classList.contains('is-fading')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(chunkEl()?.classList.contains('is-fading')).toBe(true);
+    vi.advanceTimersByTime(FADE_MS);
+    expect(slot.classList.contains('is-collapsing')).toBe(true);
+    vi.advanceTimersByTime(COLLAPSE_MS);
+    expect(slotEl()).toBeNull();
+  });
+
+  it('a note landing mid-compose does not tear the chunk off before its fade', () => {
+    // The doc's Yjs update and the `written` frame are the same event over
+    // two channels, and the update can win. The fallback used to delete the
+    // composing turn on that update, and the next render pulled the block off
+    // the page instantly — the words vanished a beat BEFORE the fade they
+    // were about to get.
+    const zone = createMeetingLiveZone({ parent, now, reducedMotion: () => false });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'the settled thought.', final: true });
+    zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
+    zone.clearSettled();
+    expect(chunkEl()?.textContent).toContain('the settled thought.');
+
+    zone.onProgress({ tick: 1, phase: 'written', turns: [0] });
+    const slot = slotEl();
+    if (!slot) throw new Error('the chunk was gone before the settle could start');
+    vi.advanceTimersByTime(NOTE_LAND_MS - 1);
+    expect(chunkEl()?.classList.contains('is-fading')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(chunkEl()?.classList.contains('is-fading')).toBe(true);
+  });
+
+  it('the fallback stands down once a meeting reports its ticks', () => {
+    // A doc insert says only "a note landed". On a meeting with frames the
+    // frames already say WHICH words it carried, and the words spoken since
+    // are not among them — sweeping them here faded away a sentence no note
+    // was about.
+    const { zone } = settling();
+    zone.onTurn({ turn: 1, text: 'still talking, finished now.', final: true });
+    zone.onTurn({ turn: 2, text: 'and a new thought', final: false });
+    zone.clearSettled();
+    expect(turns()).toEqual(['still talking, finished now.', 'and a new thought']);
   });
 
   it('the meeting ending drops a chunk mid-settle rather than leaving it behind', () => {

@@ -142,6 +142,13 @@ describe('parseMeetingServerMessage', () => {
         JSON.stringify({ type: 'notes_progress', tick: 2, phase: 'written', turns: [3, 'x'] }),
       ),
     ).toEqual({ type: 'notes_progress', tick: 2, phase: 'written', turns: [3] });
+    // A tick that composed nothing has a phase of its own; the zone returns
+    // its words to the stream instead of fading them away.
+    expect(
+      parseMeetingServerMessage(
+        JSON.stringify({ type: 'notes_progress', tick: 3, phase: 'empty', turns: [4] }),
+      ),
+    ).toEqual({ type: 'notes_progress', tick: 3, phase: 'empty', turns: [4] });
     expect(
       parseMeetingServerMessage(
         JSON.stringify({ type: 'notes_progress', tick: 1, phase: 'later', turns: [] }),
