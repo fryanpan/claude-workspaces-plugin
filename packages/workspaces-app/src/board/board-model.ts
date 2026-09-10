@@ -248,7 +248,8 @@ export interface BoardTask {
    * The panel reads it and asks `GET …/tasks/:id/detail` for the rest — see
    * `board-task-detail.ts`. Nothing else should branch on it: a surface that
    * renders a trimmed field should be reading the merged row, which is what
-   * `readProjection` hands it.
+   * `readProjection` hands it, and a merged row no longer carries this — the
+   * fields are back, so the sentence would be false.
    */
   detailTrimmed?: boolean;
   /** How many comments the task's discussion holds. Absent means none — the
