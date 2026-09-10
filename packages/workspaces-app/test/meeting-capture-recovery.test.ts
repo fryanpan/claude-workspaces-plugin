@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { type AudioPump, startMeetingCapture } from '../src/meeting-audio.ts';
+import { type AudioPump, CAPTURE_DIED_AT_OPEN, startMeetingCapture } from '../src/meeting-audio.ts';
 import { openCaptureSet } from '../src/meeting-capture-set.ts';
 import type { TrackLossReason } from '../src/meeting-track-watch.ts';
 import type { OriginFacts } from '../src/voice-capture.ts';
@@ -65,6 +65,7 @@ function rig() {
   const losses: TrackLossReason[] = [];
   const opens: number[] = [];
   let refuseNext: string | null = null;
+  let deadNext = false;
   const deps = {
     readOrigin: () => SECURE,
     getMedia: () => {
@@ -75,6 +76,10 @@ function rig() {
         return Promise.reject(err);
       }
       const t = fakeTrack();
+      if (deadNext) {
+        deadNext = false;
+        t.readyState = 'ended';
+      }
       tracks.push(t);
       return Promise.resolve(streamOf(t));
     },
@@ -93,6 +98,10 @@ function rig() {
     opens,
     refuse: (message: string) => {
       refuseNext = message;
+    },
+    /** The next device the browser hands back is over before it arrives. */
+    handBackDead: () => {
+      deadNext = true;
     },
     /** One block of real audio through whichever graph is current. */
     speak: () => (pumps[pumps.length - 1] as AudioPump).onBlock?.(new Float32Array(1600).fill(0.5)),
@@ -259,5 +268,42 @@ describe('a two-stream meeting losing one of its captures', () => {
     if (!set.ok) throw new Error('the set did not open');
     const answer = await set.reopen('system');
     expect(answer.ok).toBe(false);
+  });
+});
+
+describe('a reopen that lands on a device already over', () => {
+  it('refuses rather than reporting a recovery that did not happen', async () => {
+    // `watchTracks` checks the state a track was ALREADY in, so a device
+    // handed back dead reports its loss from inside the constructor — before
+    // `reopen` has returned. Answering `ok` there is the original bug with a
+    // record that now positively claims the audio came back: the strip clears
+    // the alarm, says "recording again", and closes the gap over a capture
+    // whose watch has spent its one report and will never speak again.
+    const r = rig();
+    const started = await startMeetingCapture({
+      onFrame: () => {},
+      onLost: (reason) => r.losses.push(reason),
+      deps: r.deps,
+    });
+    if (!started.ok) throw new Error(started.message);
+    (r.tracks[0] as { endFromOutside(): void }).endFromOutside();
+    expect(r.losses).toEqual(['ended']);
+
+    r.handBackDead();
+    const again = await started.capture.reopen();
+    expect(again.ok).toBe(false);
+    expect(again.ok === false && again.message).toBe(CAPTURE_DIED_AT_OPEN);
+    // And the leg it opened is released rather than left holding a device.
+    expect((r.tracks[1] as { stop: { mock: { calls: unknown[] } } }).stop.mock.calls.length).toBe(
+      1,
+    );
+    // One report, not two: the dead leg's was held rather than forwarded.
+    expect(r.losses).toEqual(['ended']);
+
+    // The capture is not spent — a device that IS alive still comes back.
+    const third = await started.capture.reopen();
+    expect(third.ok).toBe(true);
+    (r.tracks[2] as { endFromOutside(): void }).endFromOutside();
+    expect(r.losses).toEqual(['ended', 'ended']);
   });
 });

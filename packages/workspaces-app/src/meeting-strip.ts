@@ -626,6 +626,23 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const streamRetries = new Map<MeetingStreamId, ReconnectPlan>();
   /** Cancels the reopen waiting on each stream's backoff. */
   const streamRetryCancels = new Map<MeetingStreamId, () => void>();
+  /**
+   * Recoveries the socket was down for, waiting to be told.
+   *
+   * Held rather than dropped because an untold `restored` leaves a gap the
+   * server closes at stop with `to: null`, and the record then states that a
+   * capture never came back when it did — see `tellServerAboutStream`.
+   */
+  const heldRestored = new Set<MeetingStreamId>();
+  /**
+   * Whether the server has a meeting for a gap to hang on.
+   *
+   * `socketOpen` is not the same question. Between the socket opening and
+   * `ready` coming back there is a connection with no meeting behind it, and a
+   * `stream_state` sent into that window is dropped by the server with nothing
+   * said — so the strip would count it as delivered and never re-send it.
+   */
+  let serverHasMeeting = false;
   /** The "it is back" line, until `RESTORED_NOTE_MS` takes it down. */
   let restoredLine = '';
   let cancelRestoredLine: (() => void) | null = null;
@@ -1249,35 +1266,58 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   /**
    * Tell the server a stream went away, or came back.
    *
-   * Fire and forget: a socket that is down cannot be told, and the gap the
-   * server already has open is the right shape either way — a `lost` it never
-   * heard is re-sent when the socket comes back (`announceLostStreams`), and a
-   * `restored` it never heard leaves a gap open that the meeting's stop closes
-   * with `to: null`, which reads as "it did not come back". Wrong in the safe
-   * direction: the record over-reports a loss rather than hiding one.
+   * A socket that is down cannot be told, so BOTH halves are held and re-sent
+   * when one comes back (`announceStreamState`). A held `lost` only makes the
+   * record late. A held `restored` would make it WRONG — the gap the server
+   * still has open is closed at stop with `to: null`, which the raw transcript
+   * renders as "did not come back before the meeting ended" about a capture
+   * that did come back. Over-reporting a loss is the safe direction; asserting
+   * one that ended is not.
+   *
+   * Answers whether the frame actually went, so the caller can hold it.
    */
   function tellServerAboutStream(
     stream: MeetingStreamId,
     state: 'lost' | 'restored',
     reason?: TrackLossReason,
-  ): void {
-    if (!socketOpen) return;
+  ): boolean {
+    if (!socketOpen || !serverHasMeeting) return false;
     socket?.send(
       JSON.stringify({ type: 'stream_state', stream, state, ...(reason ? { reason } : {}) }),
     );
+    return true;
   }
 
   /**
    * Every stream still down, announced on a socket that has just come up.
    *
-   * `recordGap` is idempotent per stream, so a gap the server already knows
-   * about is not opened twice — and one it never heard because the socket was
-   * already gone when the track died is opened now, dated from this moment
-   * rather than from the death. Late is the honest failure here: the gap is
-   * real, and the alternative is a record that does not mention it at all.
+   * `recordGap` is idempotent in both directions, so a gap the server already
+   * knows about is not opened twice — and one it never heard because the
+   * socket was already gone when the track died is opened now, dated from this
+   * moment rather than from the death. Late is the honest failure here: the
+   * gap is real, and the alternative is a record that does not mention it at
+   * all. A recovery held over a dead socket goes in the same pass, for the
+   * stronger reason `tellServerAboutStream` gives.
    */
-  function announceLostStreams(): void {
+  function announceStreamState(): void {
     for (const lost of lostStreams) tellServerAboutStream(lost.stream, 'lost', lost.reason);
+    for (const stream of [...heldRestored]) {
+      if (tellServerAboutStream(stream, 'restored')) heldRestored.delete(stream);
+    }
+  }
+
+  /**
+   * Whether the captures this strip opened are this meeting's.
+   *
+   * `requesting` counts. The socket handshake is a window a track can die in —
+   * the capture is open, the server has not said `ready` yet — and the watch
+   * spends its one report whether or not anybody was listening, so a loss
+   * dropped here is dropped for the rest of the meeting rather than merely
+   * reported late. What waits for `ready` is telling the SERVER, which
+   * `announceStreamState` does.
+   */
+  function capturesLive(): boolean {
+    return state.kind === 'recording' || state.kind === 'requesting';
   }
 
   /** Which streams are still delivering audio — never which were asked for. */
@@ -1301,7 +1341,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * stream is asked for again where asking is possible without them.
    */
   function onStreamLost(stream: MeetingStreamId, reason: TrackLossReason): void {
-    if (disposed || state.kind !== 'recording') return;
+    if (disposed || !capturesLive()) return;
     // The watch reports once per leg, but a failed reopen can report again on
     // the leg it opened, and two entries for one stream would say it twice.
     if (lostStreams.some((l) => l.stream === stream)) return;
@@ -1350,9 +1390,15 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * `getDisplayMedia` simply succeeds from a click and fails without one.
    */
   async function attemptStreamReopen(stream: MeetingStreamId): Promise<void> {
-    if (disposed || state.kind !== 'recording') return;
+    if (disposed || !capturesLive()) return;
     const set = capture;
     if (!set) return;
+    // The meeting this attempt belongs to. A reopen is a round trip through
+    // the browser, and the person can have stopped and restarted recording
+    // inside it — `state.kind === 'recording'` is true of the NEXT meeting
+    // too, and reopening its healthy microphone would tear down a capture
+    // nothing was wrong with.
+    const era = generation;
     // A press while a backoff attempt is waiting takes over from it, so the
     // person never waits out a timer they just tried to skip.
     streamRetryCancels.get(stream)?.();
@@ -1362,9 +1408,21 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     lostStreams = lostStreams.map((l) => (l.stream === stream ? { ...l, recovering: true } : l));
     render();
     const result = await set.reopen(stream);
-    if (disposed || state.kind !== 'recording') return;
+    if (disposed || era !== generation || !capturesLive()) return;
     if (!result.ok) {
-      scheduleStreamRetry(stream);
+      // A REFUSED PRESS PUTS THE BUTTON BACK. Retrying a stream only a person
+      // can open is not a recovery attempt: `getDisplayMedia` without a fresh
+      // gesture rejects unseen every time, and while that ladder runs the line
+      // says "Trying to get it back" — which is the same lie as the silent
+      // recording — with the one control that could actually fix it hidden
+      // behind it. `meeting-stream-health.ts` owns which streams are which.
+      if (reopensWithoutGesture(stream)) scheduleStreamRetry(stream);
+      else {
+        lostStreams = lostStreams.map((l) =>
+          l.stream === stream ? { ...l, recovering: false } : l,
+        );
+        render();
+      }
       return;
     }
     onStreamRestored(stream);
@@ -1377,7 +1435,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     streamRetries.delete(stream);
     streamRetryCancels.get(stream)?.();
     streamRetryCancels.delete(stream);
-    tellServerAboutStream(stream, 'restored');
+    if (!tellServerAboutStream(stream, 'restored')) heldRestored.add(stream);
     restoredLine = restoredNote(stream);
     cancelRestoredLine?.();
     cancelRestoredLine = schedule(() => {
@@ -1393,6 +1451,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     for (const cancel of streamRetryCancels.values()) cancel();
     streamRetryCancels.clear();
     streamRetries.clear();
+    heldRestored.clear();
     lostStreams = [];
     cancelRestoredLine?.();
     cancelRestoredLine = null;
@@ -1421,6 +1480,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     sock.onmessage = null;
     sock.onclose = null;
     sock.onerror = null;
+    serverHasMeeting = false;
     sock.close();
   }
 
@@ -1447,9 +1507,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         const wasResuming = resuming;
         resuming = false;
         reconnect.succeeded();
-        // A capture that died while the socket was down: the server that is
-        // answering now has heard nothing about it.
-        announceLostStreams();
+        // A capture that died while the socket was down — or during the
+        // handshake that just finished: the server answering now has heard
+        // nothing about it.
+        serverHasMeeting = true;
+        announceStreamState();
         if (msg.meetingId) liveMeetingId = msg.meetingId;
         // The meeting now has a name, so anything keyed to one can hold
         // this meeting's roster rather than nothing.
@@ -1733,6 +1795,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     };
     sock.onclose = () => {
       socketOpen = false;
+      serverHasMeeting = false;
       // Whatever this drop turns into — a reconnect, or a meeting that never
       // opened saying so — a pick this socket was carrying has just lost the
       // only thing that could answer it. `closeSocket` says the same for the
@@ -1962,6 +2025,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       timing?.destroy();
       releaseAudio();
       closeSocket();
+      // Every capture timer with it: the restored-note's callback calls
+      // `render()`, which writes `root.hidden` on a strip whose children this
+      // teardown is about to take away.
+      forgetStreamLosses();
       stopClock?.();
       stopClock = null;
       transcript.clearTurnSpans();

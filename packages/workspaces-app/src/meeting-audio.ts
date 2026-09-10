@@ -318,6 +318,12 @@ export interface MeetingCapture {
   reopen(): Promise<MeetingReopen>;
 }
 
+/**
+ * What the strip says when a device opened and stopped in the same breath —
+ * its own sentence rather than a refusal's, because nothing was refused.
+ */
+export const CAPTURE_DIED_AT_OPEN = 'That capture stopped again as soon as it opened.';
+
 /** Whether a capture came back, with the strip's words when it did not. */
 export type MeetingReopen = { ok: true } | { ok: false; message: string };
 
@@ -394,11 +400,33 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
     // the one that went away.
     const resample = createResampler(pump.sampleRate, MEETING_SAMPLE_RATE);
     let pending: Int16Array = new Int16Array(0);
+    /**
+     * A LEG IS NOT OPEN UNTIL IT HAS SURVIVED BEING WATCHED. `watchTracks`
+     * checks the state a track was already in, so a device handed back dead
+     * reports its loss from inside this constructor — while the caller still
+     * believes it is opening something. Forwarding that would spend the leg's
+     * one report on a leg nobody has been given, and `reopen` would answer
+     * `ok` for a capture delivering silence: the original bug, plus a record
+     * claiming the audio came back. So the report is held until the leg is
+     * handed over, and anything earlier makes the open a refusal instead.
+     */
+    let bornDead: TrackLossReason | null = null;
+    let handedOver = false;
     const watch = watchTracks({
       tracks: stream.getAudioTracks() as unknown as WatchableTrack[],
-      onLost: (reason) => opts.onLost?.(reason),
+      onLost: (reason) => {
+        if (handedOver) opts.onLost?.(reason);
+        else bornDead = reason;
+      },
       ...(opts.now ? { now: opts.now } : {}),
     });
+    if (bornDead !== null) {
+      watch.stop();
+      pump.stop();
+      for (const track of stream.getTracks()) track.stop();
+      return { ok: false, message: CAPTURE_DIED_AT_OPEN };
+    }
+    handedOver = true;
     pump.onBlock = (block) => {
       // Before the samples, not after: this block may BE the silence a dead
       // track is producing, and forwarding it first would put another frame of

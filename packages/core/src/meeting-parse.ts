@@ -74,9 +74,12 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       m.stream === 'mic' || m.stream === 'system' ? (m.stream as MeetingStreamId) : null;
     if (!stream) return null;
     if (m.state !== 'lost' && m.state !== 'restored') return null;
-    // Bounded and dropped when empty, like every other free-text field on
-    // this socket: it is a short machine word, not a sentence.
-    const reason = typeof m.reason === 'string' ? m.reason.trim().slice(0, 40) : '';
+    // A CLOSED SET, not bounded free text. The field is a machine word the
+    // client picks from two, and it is written into the durable index, so
+    // there is no reason for the wire to accept anything a future reader
+    // would have to interpret. Anything else drops the word, not the frame:
+    // a loss reported without a reason is still a loss.
+    const reason = m.reason === 'ended' || m.reason === 'muted' ? m.reason : '';
     return reason
       ? { type: 'stream_state', stream, state: m.state, reason }
       : { type: 'stream_state', stream, state: m.state };

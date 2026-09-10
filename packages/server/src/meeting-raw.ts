@@ -235,6 +235,22 @@ export function formatGapBullet(gap: MeetingGap): string {
 }
 
 /**
+ * `- [HH:MM:SSZ] — the microphone came back after 3m 12s —`
+ *
+ * The other half of a gap that crossed a reconnect. The block before the
+ * restart was already written, and it reported this loss as still open,
+ * because at the time it was: an append-only file cannot go back and add the
+ * ending. So the recovery is stated HERE, dated when it happened, and the two
+ * bullets together say what one of them could not.
+ */
+export function formatGapReturn(gap: MeetingGap & { to: number }): string {
+  const words = gapStreamWords(gap.stream);
+  return `- [${utcClock(gap.to)}] — ${words} came back after ${formatGapDuration(
+    gap.to - gap.from,
+  )}; the loss it ends is the one the block above reports as still open —`;
+}
+
+/**
  * Who a bullet says spoke: the engine's label, shown as the name the person
  * gave it or as "Speaker A"; failing a label, the participant on the
  * socket; failing that, "Speaker 1" — one voice assumed, as a solo capture
@@ -269,6 +285,12 @@ export interface RawSegmentInput {
   /** Stretches with no audio from one capture, rendered in time order among
    *  the turns. Empty on every meeting that never lost one. */
   gaps?: readonly MeetingGap[];
+  /**
+   * Gaps that OPENED before this block and closed inside it — only ever on a
+   * continuation. The block that opened them is already in the file saying
+   * they never ended, so their recovery is stated here rather than nowhere.
+   */
+  carriedGaps?: ReadonlyArray<MeetingGap & { to: number }>;
   names: Readonly<Record<string, string>>;
   participant?: string;
 }
@@ -304,7 +326,8 @@ export function formatRawSegment(seg: RawSegmentInput): string {
     '',
   ];
   const gaps = seg.gaps ?? [];
-  if (seg.turns.length === 0 && gaps.length === 0) {
+  const carried = seg.carriedGaps ?? [];
+  if (seg.turns.length === 0 && gaps.length === 0 && carried.length === 0) {
     lines.push('_(no settled turns)_');
   } else {
     // Turns and gaps in ONE time-ordered run, because a gap's whole job is to
@@ -321,6 +344,9 @@ export function formatRawSegment(seg: RawSegmentInput): string {
         line: formatRawBullet(t.ts, speakerLineName(t.speaker, seg.names, seg.participant), t.text),
       })),
       ...gaps.map((g) => ({ at: g.from, turn: false, line: formatGapBullet(g) })),
+      // Dated when the capture CAME BACK, which is the moment this block is
+      // reporting — the loss itself belongs to the block above.
+      ...carried.map((g) => ({ at: g.to, turn: false, line: formatGapReturn(g) })),
     ];
     entries.sort((a, b) => a.at - b.at || Number(b.turn) - Number(a.turn));
     for (const entry of entries) lines.push(entry.line);
@@ -533,7 +559,31 @@ export function flushRawSegments(args: {
       const rest = readTranscript(dataDir, docId, record.meetingId).filter(
         (t) => t.turn >= (ended.resumedFrom as number),
       );
-      if (rest.length === 0) return;
+      const resumedAt = ended.resumedAt as number;
+      const all = record.gaps ?? [];
+      // Only the outages of THIS leg: the block before the restart already
+      // carries the ones that happened before it, and a gap printed twice
+      // reads as two separate losses.
+      const legGaps = all.filter((g) => g.from >= resumedAt);
+      // And the recoveries that block could not know about — a capture that
+      // was already down when the socket dropped and came back after it. That
+      // block states the loss as still open, so without this the file makes a
+      // claim the folded record contradicts.
+      const carriedGaps = all.filter(
+        (g): g is MeetingGap & { to: number } =>
+          g.from < resumedAt && typeof g.to === 'number' && g.to >= resumedAt,
+      );
+      // THE STORED SEGMENT IS UPDATED WHATEVER THE MARKDOWN DOES. It used to
+      // sit past the early return below, so a resumed leg whose capture was
+      // dead for all of it — the very meeting a gap matters most on, since the
+      // outage is WHY there are no turns — wrote its gaps to neither file.
+      const stored = json.segments.find((sg) => sg.meetingId === record.meetingId);
+      if (stored) {
+        stored.endedAt = record.endedAt;
+        stored.audio = audioOnDisk(dir, n, record.sampleRate);
+        if (all.length > 0) stored.gaps = [...all];
+      }
+      if (rest.length === 0 && legGaps.length === 0 && carriedGaps.length === 0) return;
       const source: MeetingSource = parseMeetingSource(record.source) ?? 'mic';
       appended += formatRawSegment({
         n,
@@ -547,19 +597,11 @@ export function flushRawSegments(args: {
         // sink counts only the bytes IT appended, and the file holds both.
         audio: audioOnDisk(dir, n, record.sampleRate),
         turns: rest,
-        // Only the outages of THIS leg: the block before the restart already
-        // carries the ones that happened before it, and a gap printed twice
-        // reads as two separate losses.
-        gaps: (record.gaps ?? []).filter((g) => g.from >= (ended.resumedAt as number)),
+        gaps: legGaps,
+        carriedGaps,
         names: record.speakers ?? {},
         ...(record.participant !== undefined ? { participant: record.participant } : {}),
       });
-      const stored = json.segments.find((sg) => sg.meetingId === record.meetingId);
-      if (stored) {
-        stored.endedAt = record.endedAt;
-        stored.audio = audioOnDisk(dir, n, record.sampleRate);
-        if (record.gaps && record.gaps.length > 0) stored.gaps = record.gaps;
-      }
       return;
     }
     if (args.liveMeetingIds.has(record.meetingId) && record.meetingId !== args.ended?.meetingId) {

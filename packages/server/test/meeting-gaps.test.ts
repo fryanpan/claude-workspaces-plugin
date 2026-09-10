@@ -235,6 +235,58 @@ describe('a meeting picked up again after its socket dropped', () => {
   });
 });
 
+describe('a gap that crossed the reconnect', () => {
+  it('has its recovery stated in the continuation, since the block above cannot say it', () => {
+    // The block written before the restart reported this loss as still open,
+    // because at the time it was, and an append-only file cannot go back and
+    // add the ending. Filtering the gap out of the continuation left the file
+    // permanently claiming the capture never came back.
+    const start = Date.UTC(2026, 8, 10, 9, 0, 0);
+    const block = formatRawSegment({
+      n: 1,
+      startedAt: start,
+      resumedAt: start + 200_000,
+      endedAt: start + 400_000,
+      engine: 'mock',
+      mode: 'conversation',
+      source: 'mic+system',
+      audio: [],
+      names: {},
+      turns: [{ turn: 4, text: 'Are we back?', ts: start + 260_000 }],
+      gaps: [],
+      carriedGaps: [{ stream: 'system', from: start + 12_000, to: start + 240_000 }],
+    });
+    const lines = block.split('\n').filter((l) => l.startsWith('- ['));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe(
+      "- [09:04:00Z] — this Mac's audio came back after 3m 48s; the loss it ends is the one the block above reports as still open —",
+    );
+    expect(lines[1]).toContain('Are we back?');
+  });
+
+  it('is written even when the resumed leg settled no turns at all', () => {
+    // The meeting a gap matters most on: the capture was dead for the whole
+    // leg, which is exactly WHY there are no turns to print. The block used to
+    // be skipped on the turn count alone, taking the gap with it.
+    const start = Date.UTC(2026, 8, 10, 9, 0, 0);
+    const block = formatRawSegment({
+      n: 1,
+      startedAt: start,
+      resumedAt: start + 200_000,
+      endedAt: start + 400_000,
+      engine: 'mock',
+      mode: 'conversation',
+      source: 'mic+system',
+      audio: [],
+      names: {},
+      turns: [],
+      gaps: [{ stream: 'mic', from: start + 210_000, to: null }],
+    });
+    expect(block).toContain('the microphone stopped here and did not come back');
+    expect(block).not.toContain('_(no settled turns)_');
+  });
+});
+
 describe('how long an outage is reported to have lasted', () => {
   it('reads in the units a person would say', () => {
     expect(formatGapDuration(45_000)).toBe('45s');

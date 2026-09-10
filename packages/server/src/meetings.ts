@@ -245,7 +245,10 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
         const open = [...gaps].reverse().find((g) => g.stream === row.gapStream && g.to === null);
         if (open) open.to = row.gapTo;
       }
-      existing.gaps = gaps;
+      // Only when there is one: the field's own doc says it is absent on
+      // every meeting that never lost a stream, and a close with no matching
+      // open would otherwise leave an empty array claiming otherwise.
+      if (gaps.length > 0) existing.gaps = gaps;
     }
     // One line per naming, merged in order: a rename is a later line for
     // the same label, and the last one is what the person meant.

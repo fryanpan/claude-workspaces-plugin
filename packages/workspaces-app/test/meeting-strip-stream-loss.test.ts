@@ -125,8 +125,8 @@ function mount(
   };
 }
 
-/** Start a mic + Mac-audio meeting and get it to `recording`. */
-async function record(h: ReturnType<typeof mount>): Promise<void> {
+/** Open the captures and the socket, and stop before the server says `ready`. */
+async function startRequesting(h: ReturnType<typeof mount>): Promise<void> {
   (h.root.querySelector('.meeting-record') as HTMLButtonElement).click();
   const card = [...h.root.querySelectorAll('.meeting-choice')].find(
     (el) => el.querySelector('.meeting-choice-title')?.textContent === 'Mac Audio',
@@ -138,6 +138,11 @@ async function record(h: ReturnType<typeof mount>): Promise<void> {
   (h.root.querySelector('.meeting-start-cta') as HTMLButtonElement).click();
   await settle();
   h.sockets[0]?.onopen?.();
+  await settle();
+}
+
+/** The server answers, and the meeting is running. */
+async function ready(h: ReturnType<typeof mount>): Promise<void> {
   h.sockets[0]?.serve({
     type: 'ready',
     meetingId: 'm-1',
@@ -146,6 +151,12 @@ async function record(h: ReturnType<typeof mount>): Promise<void> {
     mode: 'conversation',
   });
   await settle();
+}
+
+/** Start a mic + Mac-audio meeting and get it to `recording`. */
+async function record(h: ReturnType<typeof mount>): Promise<void> {
+  await startRequesting(h);
+  await ready(h);
 }
 
 describe('a share that kills the Mac-audio capture mid-meeting', () => {
@@ -208,6 +219,38 @@ describe('a share that kills the Mac-audio capture mid-meeting', () => {
     h.action()?.click();
     await settle();
     expect(h.alarm()).toContain("This Mac's audio stopped");
+  });
+
+  it('puts the button BACK after a refused press, and promises no retry', async () => {
+    // Cancelling the share picker is the ordinary outcome of that press, and
+    // it used to hide the only control that could fix the meeting behind a
+    // ladder of `getDisplayMedia` calls with no gesture behind them — each
+    // rejecting where nobody could see it, while the line said the strip was
+    // trying to get it back.
+    const h = mount({ reopen: () => Promise.resolve({ ok: false, message: 'no' }) });
+    await record(h);
+    h.kill('system');
+    h.action()?.click();
+    await settle();
+    expect(h.action()?.textContent).toBe("Share this Mac's audio again");
+    expect(h.alarm()).not.toContain('Trying to get it back');
+    expect(h.pending()).toBe(0);
+  });
+});
+
+describe('a capture that dies during the socket handshake', () => {
+  it('is still reported once the meeting is recording, and still opens a gap', async () => {
+    // The watch spends its ONE report whether or not anybody is listening, so
+    // a loss dropped in this window is dropped for the whole meeting rather
+    // than merely reported late. The window is the socket connect plus the
+    // `ready` round trip.
+    const h = mount();
+    await startRequesting(h);
+    h.kill('system');
+    expect(h.streamFrames()).toHaveLength(0);
+    await ready(h);
+    expect(h.alarm()).toContain("This Mac's audio stopped");
+    expect(h.streamFrames().filter((f) => f.state === 'lost')).toHaveLength(1);
   });
 });
 
