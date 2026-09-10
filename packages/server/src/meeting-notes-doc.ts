@@ -63,6 +63,7 @@ import {
   type MeetingNotesOptions,
   type NotesCorrection,
   type NotesCorrectionResult,
+  type NotesMeetingSummary,
   type NotesProjectContext,
   type NotesReattribution,
   type NotesRelabel,
@@ -677,6 +678,50 @@ export function applyNotesCorrection(
  * the pass edits text inside blocks the agent owns, and owning a block is an
  * attribute on the block rather than a record of its wording.
  */
+/**
+ * The one line a finished meeting leaves in the log, assembled.
+ *
+ * EXPORTED BECAUSE IT IS THE READING. What a meeting says about itself is
+ * behaviour a test should be able to drive, and the alternative was spying
+ * on `console`. The quality half arrives already built (`passLine`) and is
+ * appended after a bar, so a reader who wants the notes' own numbers and a
+ * reader who wants the pipeline's do not have to join two lines.
+ */
+export function meetingSummaryLine(
+  summary: NotesMeetingSummary,
+  qualityLine: string | undefined,
+): string {
+  const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
+  return (
+    `[meeting-notes] ${summary.docId} meeting ${summary.meetingId}: ` +
+    `${plural(summary.ticks, 'tick')} over ${plural(summary.turnsSettled, 'settled turn')}, ` +
+    `${plural(summary.turnsLost, 'turn')} in no note, ` +
+    // The number the "I said that and it is not in the notes" report is
+    // about. `turnsLost` counts what the composer never SAW; this counts
+    // what it saw and wrote nothing about, which is the same complaint
+    // from the reader's side and the one that used to be invisible.
+    `${summary.ideas.lost} of ${summary.ideas.seen} ideas in no note` +
+    (summary.ideas.retried > 0 ? ` (${summary.ideas.retried} retried)` : '') +
+    (summary.composeFailures > 0 ? `, ${plural(summary.composeFailures, 'failed compose')}` : '') +
+    // The gate's own count, said out loud. It reads next to the quality
+    // half's "N unknown speakers" on purpose: that one is phantoms the notes
+    // still carry, this one is phantoms the gate caught on the way in, and a
+    // reader chasing invented people needs both numbers or neither. Before
+    // it was here the gate spoke only through `onError`, so a meeting whose
+    // composer invented a voice on every tick reported "0 unknown speakers"
+    // on the one line anybody reads.
+    (summary.phantomTags > 0
+      ? `, ${plural(summary.phantomTags, 'invented speaker tag')} dropped`
+      : '') +
+    // The number Bryan actually feels, when the meeting was measured.
+    (summary.latencyMedianMs !== undefined
+      ? `, settled-to-written median ${Math.round(summary.latencyMedianMs)}ms / worst ` +
+        `${Math.round(summary.latencyWorstMs ?? summary.latencyMedianMs)}ms`
+      : '') +
+    (qualityLine === undefined ? '' : ` | ${qualityLine}`)
+  );
+}
+
 export function applyNotesReattribution(
   docStore: NotesDocStore,
   reattribution: NotesReattribution,
@@ -897,7 +942,6 @@ export function withServerNotesSinks(
     // so a meeting whose notes quietly covered half of what was said read
     // exactly like a healthy one. This is the coverage, stated at the stop.
     onMeetingSummary: (summary): void => {
-      const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
       // AND WHAT THE NOTES THEMSELVES CAME OUT LIKE. The line above says how
       // much of the meeting reached a compose, and a meeting once reported
       // every turn handled while its doc carried dozens of repeated lines,
@@ -906,25 +950,7 @@ export function withServerNotesSinks(
       // fact about the notes, and it rides the SAME line so that nobody has
       // to join two of them to ask the one question.
       const quality = qualityPass(summary);
-      const line =
-        `[meeting-notes] ${summary.docId} meeting ${summary.meetingId}: ` +
-        `${plural(summary.ticks, 'tick')} over ${plural(summary.turnsSettled, 'settled turn')}, ` +
-        `${plural(summary.turnsLost, 'turn')} in no note, ` +
-        // The number the "I said that and it is not in the notes" report is
-        // about. `turnsLost` counts what the composer never SAW; this counts
-        // what it saw and wrote nothing about, which is the same complaint
-        // from the reader's side and the one that used to be invisible.
-        `${summary.ideas.lost} of ${summary.ideas.seen} ideas in no note` +
-        (summary.ideas.retried > 0 ? ` (${summary.ideas.retried} retried)` : '') +
-        (summary.composeFailures > 0
-          ? `, ${plural(summary.composeFailures, 'failed compose')}`
-          : '') +
-        // The number Bryan actually feels, when the meeting was measured.
-        (summary.latencyMedianMs !== undefined
-          ? `, settled-to-written median ${Math.round(summary.latencyMedianMs)}ms / worst ` +
-            `${Math.round(summary.latencyWorstMs ?? summary.latencyMedianMs)}ms`
-          : '') +
-        (quality === null ? '' : ` | ${quality.line}`);
+      const line = meetingSummaryLine(summary, quality?.line);
       // Only a meeting that actually lost words — or whose notes went past a
       // quality bar — is an error. A clean one is still logged, because the
       // absence of a line is not evidence that a meeting went well; it is
