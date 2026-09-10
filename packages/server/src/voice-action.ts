@@ -80,6 +80,26 @@ export type VoiceActionPlan =
 const SELF_WORDS = new Set(['me', 'myself', 'i', 'mine']);
 
 /**
+ * The speaker's own name, or the empty string when they have none.
+ *
+ * `VoiceActor.name` is typed as a required string, but the value arrives from
+ * a request body through `authorFor`, which passes an author the roster does
+ * not know through exactly as claimed. So `{"author": {"id": "x"}}` reaches
+ * here as an actor with `name: undefined`, and the two places that resolve
+ * "me" used to call a string method on it and throw — turning a malformed
+ * request into a 500 rather than into the agent route this module degrades to
+ * everywhere else.
+ *
+ * Returning '' rather than a guard at the door is deliberate: a nameless
+ * speaker can still set a status or leave a comment, because neither needs to
+ * know who they are. It is only "assign this to me" that cannot be resolved,
+ * and both sites below read that as the refusal it is.
+ */
+function speakerName(actor: VoiceActor): string {
+  return typeof actor.name === 'string' ? actor.name.trim() : '';
+}
+
+/**
  * Openers that make an utterance a QUESTION rather than an instruction.
  *
  * This list, plus a trailing '?', is the whole test — deliberately blunt.
@@ -187,7 +207,10 @@ function speakerLicensesAction(
     const wanted = c.assignee.trim().toLowerCase();
     if (SELF_WORDS.has(wanted)) {
       // "assign this to me" — a self word has to actually be in the sentence.
-      return /\b(me|myself|i|mine|my)\b/.test(said) || said.includes(actor.name.toLowerCase());
+      const name = speakerName(actor);
+      return (
+        /\b(me|myself|i|mine|my)\b/.test(said) || (name !== '' && said.includes(name.toLowerCase()))
+      );
     }
     // Else the name, or at least the part of it a person would say out loud.
     const first = wanted.split(/\s+/)[0] ?? wanted;
@@ -260,7 +283,7 @@ export function resolveVoiceAction(args: {
       return { action: 'set-status', taskId: resource.id, status: c.status, actor };
     case 'set-assignee': {
       if (resource.kind !== 'task' || c.assignee === undefined) return null;
-      const assignee = SELF_WORDS.has(c.assignee.toLowerCase()) ? actor.name : c.assignee;
+      const assignee = SELF_WORDS.has(c.assignee.toLowerCase()) ? speakerName(actor) : c.assignee;
       if (assignee.trim().length === 0) return null;
       return { action: 'set-assignee', taskId: resource.id, assignee, actor };
     }

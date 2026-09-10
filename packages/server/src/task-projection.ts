@@ -2,7 +2,13 @@ import { listThreads, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { DocStore } from './doc-store.ts';
 import { slimClosedRow } from './task-row-slim.ts';
-import { projectBody, projectTask, taskBodyDocId, taskIdOfBodyDoc } from './task-row.ts';
+import {
+  projectGoalMeta,
+  projectTask,
+  projectWorkspaceFields,
+  taskBodyDocId,
+  taskIdOfBodyDoc,
+} from './task-row.ts';
 
 export {
   BODY_PROJECTION_LIMIT,
@@ -23,7 +29,6 @@ import {
   type Task,
   type TaskStore,
   type TaskStoreEvent,
-  goalStatusMeta,
 } from './tasks.ts';
 
 /**
@@ -505,66 +510,15 @@ export class TaskProjection {
     // described yet. That is the difference between a body and a body doc.
     for (const r of goalRows) this.ensureGoalBody(r);
     const goalMeta = new Map(
-      goalRows.map((r) => {
-        const comments = this.commentCount(r.id);
-        return [
-          r.id,
-          {
-            ...goalStatusMeta(r),
-            bodyDocId: taskBodyDocId(r.id),
-            ...projectBody(r.body),
-            // The docs this goal ties to (backfill + settle-time scan) —
-            // projected like a task's links so the goal panel can draw them.
-            // Conditional: an absent key is how "no linked docs" reads, and
-            // the refresh deletes keys this object stops carrying.
-            ...(r.links !== undefined && r.links.length > 0 ? { links: r.links } : {}),
-            ...(comments > 0 ? { commentCount: comments } : {}),
-            ...(r.assignee !== undefined
-              ? {
-                  assignee: r.assignee,
-                  ownerKind: resolveOwnerKind(r.assignee, undefined, isAttachedAgent),
-                }
-              : {}),
-            // A band that has been archived rides out SAYING so, the way an
-            // archived task does — projected rather than filtered here,
-            // because the restore list is drawn from the same projection the
-            // board is and a band the projection dropped could never be put
-            // back. `boardSections` is the one place "off the board" is
-            // applied, exactly as `taskVisible` is for a task.
-            ...(r.archivedAt !== undefined
-              ? {
-                  archivedAt: r.archivedAt,
-                  ...(r.archivedBy !== undefined ? { archivedBy: r.archivedBy } : {}),
-                  ...(r.archiveReason !== undefined ? { archiveReason: r.archiveReason } : {}),
-                }
-              : {}),
-          },
-        ];
-      }),
+      goalRows.map((r) => [r.id, projectGoalMeta(r, this.commentCount(r.id), isAttachedAgent)]),
     );
-    const wsFields: Record<string, unknown> = {
-      id: ws.id,
-      name: ws.name,
-      goals: ws.goals.map((g) => ({
-        ...g,
-        ...(goalMeta.get(g.id) ?? {}),
-      })),
-      docIds: ws.docIds,
-      // Who is responsible for this board. Conditional, never `undefined`:
-      // the refresh deletes projected keys that aren't in this object, so an
-      // absent lead removes the key and the surface renders the vacancy
-      // instead of a stale name. An agentId is not host-machine-describing —
-      // it already rides agent.attached on the visitor-facing SSE feed.
-      ...(ws.leadAgentId !== undefined ? { leadAgentId: ws.leadAgentId } : {}),
-      ...(ws.leadAgentSince !== undefined ? { leadAgentSince: ws.leadAgentSince } : {}),
-      // The board has been stood down. Conditional like the lead above and
-      // for the same reason — the refresh deletes projected keys absent from
-      // this object, so un-retiring removes the key and the badge goes away
-      // without anything having to clear it.
-      ...(ws.retiredAt !== undefined ? { retiredAt: ws.retiredAt } : {}),
-      ...(ws.retiredReason !== undefined ? { retiredReason: ws.retiredReason } : {}),
-      createdAt: ws.createdAt,
-    };
+    // Both halves of the map go out through the same projectors — the rows
+    // through `projectTask`, the board's own fields through this. That is
+    // what lets the sync-payload budget in
+    // `packages/server/test/board-payload-budget.test.ts` measure the whole
+    // frame: a field added to either one lands in the measurement instead of
+    // arriving unmeasured.
+    const wsFields: Record<string, unknown> = projectWorkspaceFields(ws, goalMeta);
     doc.ydoc.transact(() => {
       for (const key of Array.from(tasksMap.keys())) {
         if (!want.has(key)) tasksMap.delete(key);
