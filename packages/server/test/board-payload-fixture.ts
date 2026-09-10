@@ -225,21 +225,22 @@ export function boardFixture(): {
       // Bodies: every open row plus the fresh-window closed ones, which is
       // the live board's 135 of 774. One in ten is over the projection cap,
       // so the truncation path is exercised rather than assumed.
-      // THE DETAIL FIELDS ARE ON CLOSED ROWS TOO, and that is the point.
+      // THE DETAIL FIELDS ARE ON ROWS OF BOTH STATUSES, and that is the
+      // point.
       //
       // The store keeps every one of them forever — a ticket that closed in
       // March still holds its body, its notes, its review items and the prose
-      // on every transition, and before PR 848 the board shipped all of it:
-      // 3.22 MB of the live board's 3.58 MB of content belonged to rows the
-      // default view does not draw. `slimClosedRow` is what stops that
-      // reaching the wire. A fixture whose closed rows were empty would
-      // measure a board where the trim has nothing to do, and its control
-      // would prove nothing.
+      // on every transition, and an OPEN one that nobody has touched in a
+      // month holds exactly the same. `slimTaskRow` is what stops any of it
+      // reaching the wire: 42% of the live board's wire bytes were prose that
+      // no list surface renders, on rows of every status. A fixture whose
+      // rows were empty would measure a board where the trim has nothing to
+      // do, and its control would prove nothing.
       //
-      // So closed rows here carry what a real closed row carries, and the
-      // trimmed measurement is low because the trim WORKS, not because the
-      // fixture was thin. The untrimmed control reads the same rows with the
-      // trim skipped, which is the shape the regression would restore.
+      // So rows here carry what a real row carries, and the trimmed
+      // measurement is low because the trim WORKS, not because the fixture
+      // was thin. The untrimmed control reads the same rows with the trim
+      // skipped, which is the shape the regression would restore.
       ...{ body: filler(i % 25 === 0 ? 5_200 : 450 + (i % 600)) },
       ...(open
         ? nth % 5 === 0
@@ -280,6 +281,12 @@ export function boardFixture(): {
       // them a branch emits no bytes at all, so growth inside one is
       // invisible to a budget on the total — the same hole the workspace map
       // had, one level in.
+      // The body's own clock, and the reason it is not a rare branch: 229 of
+      // the live board's 777 rows carry it (every row whose description has
+      // been rewritten since it was filed), which is 147 at this scale. It is
+      // the revision token the trimmed row's refetch keys on, so it rides
+      // every one of those rows and the budget has to see it.
+      ...(i % 10 < 3 ? { bodyWrittenAt: FIXTURE_NOW - 11 * DAY } : {}),
       ...(i % 7 === 4 ? { unplacedSince: FIXTURE_NOW - 6 * DAY } : {}),
       ...(i % 17 === 5 ? { origin: { kind: 'doc' as const, docId: 'fixture-doc-0007' } } : {}),
       ...(i % 27 === 7 ? { possiblyStale: { docRevision: 4, ts: FIXTURE_NOW - 8 * DAY } } : {}),

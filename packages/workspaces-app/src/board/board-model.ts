@@ -238,16 +238,28 @@ export interface BoardTask {
   body?: string;
   bodyTruncated?: boolean;
   /**
-   * This row arrived as a LIST row: the server dropped `body`, `notes`,
-   * `reviews` and `quote` and stripped the prose off each transition, because
-   * the row is closed and has not moved in a day. Set by the server
-   * (`slimClosedRow`) and by nothing else; absent on every row that arrived
-   * whole and on any server older than the trim.
+   * When the description was last written, when it has been rewritten at all.
+   *
+   * The one clock that moves with the BODY. A body rewrite deliberately bumps
+   * neither `updatedAt` nor any event, so on a row whose body was trimmed
+   * this is the only thing that says the fetched copy is out of date — which
+   * is why `detailKey` is built from it. Absent means nobody has rewritten
+   * this description since it was filed, which is itself a stable key.
+   */
+  bodyWrittenAt?: number;
+  /**
+   * This row arrived as a LIST row: the server dropped the fields no list
+   * surface reads — `reviews` and `quote` always, `body` on everything but an
+   * unanswered decision, `notes` once the row has been still for a day — and
+   * stripped the prose off each transition. Set by the server (`slimTaskRow`)
+   * and by nothing else; absent on every row that arrived whole and on any
+   * server older than the trim.
    *
    * The panel reads it and asks `GET …/tasks/:id/detail` for the rest — see
    * `board-task-detail.ts`. Nothing else should branch on it: a surface that
    * renders a trimmed field should be reading the merged row, which is what
-   * `readProjection` hands it.
+   * `readProjection` hands it, and a merged row no longer carries this — the
+   * fields are back, so the sentence would be false.
    */
   detailTrimmed?: boolean;
   /** How many comments the task's discussion holds. Absent means none — the

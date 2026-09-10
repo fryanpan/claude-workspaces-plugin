@@ -144,6 +144,9 @@ type ProjectedTask = {
   bodyDocId: string;
   body?: string;
   bodyTruncated?: boolean;
+  bodyWrittenAt?: number;
+  updatedAt: number;
+  detailTrimmed?: boolean;
   transitions: Array<{
     by: Record<string, unknown>;
     from: string;
@@ -313,7 +316,22 @@ describe('ydoc projection + workspace doc', () => {
       evidence: { commit: 'b2ba21edef' },
     });
 
-    const row = (doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask).transitions.at(-1);
+    // On the WIRE the trail keeps its four list keys and loses its prose —
+    // `slimTaskRow` strips `note` and `usage` off every stop, on every row.
+    const onTheWire = (doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask).transitions.at(-1);
+    expect(onTheWire?.to).toBe('done');
+    expect(onTheWire?.by).toEqual({ name: 'Search Revamp', kind: 'agent' });
+    expect(onTheWire?.note).toBeUndefined();
+
+    // The FULL projection — what the detail route serves — is where the note
+    // survives, and it is the subject here: `evidence` and `amendments` are
+    // absent from a row that still carries everything else the caller sent.
+    // Positive control on that reading: the note IS there, so an absent
+    // `evidence` is a decision and not an empty row.
+    const stored = handle.tasks.getTask(taskId);
+    if (!stored) throw new Error('task went missing');
+    const full = handle.projection.projectRowInFull(wsId, stored) as unknown as ProjectedTask;
+    const row = full.transitions.at(-1);
     expect(row?.to).toBe('done');
     expect(row?.note).toBe('merged as #402');
     expect(row?.by).toEqual({ name: 'Search Revamp', kind: 'agent' });
@@ -411,18 +429,25 @@ describe('ydoc projection + workspace doc', () => {
   });
 
   /**
-   * The description travels WITH the task, so the board can render it in
-   * place. It deliberately did not, and the cost was that every task read as
-   * a bare title and "what is this for" meant opening a second page — the
-   * store-has-it/surface-can't-show-it failure this codebase has hit before.
+   * The description travels WITH the task, so the reader who opens it can
+   * render it in place. It deliberately did not, and the cost was that every
+   * task read as a bare title and "what is this for" meant opening a second
+   * page — the store-has-it/surface-can't-show-it failure this codebase has
+   * hit before.
    *
-   * The snapshot is what the board renders, so it also has to be pushed on
+   * The snapshot is what that reader renders, so it also has to be pushed on
    * change: `updateBodySnapshot` fires no task.* event by design (body typing
    * is not board activity), which means nothing else would ever refresh the
-   * projection and the board would show the description as of creation
-   * forever.
+   * snapshot and the description would read as of creation forever.
+   *
+   * Read through `projectRowInFull` — the shape `GET …/tasks/:id/detail`
+   * serves — because the BOARD's row no longer carries a body at all: no list
+   * surface renders one bar the walkthrough's decision card, so `slimTaskRow`
+   * drops it and the panel refetches. The assertion below that the ydoc row
+   * is bodiless is that fact, stated where somebody looking for the body
+   * would look for it.
    */
-  it('carries the description into the board projection, and keeps it current', async () => {
+  it('carries the description into the row a reader is handed, and keeps it current', async () => {
     const wsId = await makeWorkspace('body-on-the-board');
     const taskId = await makeTask(wsId, {
       title: 'Write the rollout note',
@@ -430,28 +455,89 @@ describe('ydoc projection + workspace doc', () => {
     });
     const doc = handle.docStore.get(workspaceDocId(wsId));
     if (!doc) throw new Error('ws doc missing');
-    const projected = doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask;
+    const full = (id: string): ProjectedTask => {
+      const stored = handle.tasks.getTask(id);
+      if (!stored) throw new Error('task went missing');
+      return handle.projection.projectRowInFull(wsId, stored) as unknown as ProjectedTask;
+    };
+    const projected = full(taskId);
     expect(projected.body).toContain('pick it up cold');
     expect(projected.bodyTruncated).toBeUndefined();
+    // …and not on the board's own row, which is the trim.
+    expect((doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask).body).toBeUndefined();
 
     const r = await post(`/workspaces/${wsId}/docs/${taskBodyDocId(taskId)}/content`, {
       markdown: 'Agent can read the revised description so that it stays current.\n',
     });
     expect(r.status).toBe(200);
     await settle(700);
-    const after = doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask;
-    expect(after.body).toContain('stays current');
+    expect(full(taskId).body).toContain('stays current');
+  });
+
+  /**
+   * The board row has to MOVE when a body is rewritten, even though the
+   * rewrite is deliberately not board activity.
+   *
+   * `updateBodySnapshot` bumps no row clock and fires no `task.*` event on
+   * purpose. While the projection carried the body that was invisible — the
+   * diff-aware refresh saw new text and pushed it. On a trimmed row there is
+   * no text to differ, so without a revision token the rewrite produces a
+   * byte-identical row, `refresh` pushes nothing, and the panel that fetched
+   * the old description has no way to learn it is stale. `bodyWrittenAt` is
+   * that token, and this is the test that it reaches the wire.
+   *
+   * MUTATION CONTROL: dropping the `bodyWrittenAt` line from `projectTask`
+   * fails the `after.bodyWrittenAt` assertion while every other assertion
+   * here — including the refetched body — stays green, which is exactly the
+   * silence the bug lived in.
+   */
+  it('moves the board row when a body is rewritten, though the row clock does not', async () => {
+    const wsId = await makeWorkspace('body-revision-token');
+    const taskId = await makeTask(wsId, {
+      title: 'Rewrite the rollout note',
+      body: 'Agent can read the first description so that it can start.\n',
+    });
+    const doc = handle.docStore.get(workspaceDocId(wsId));
+    if (!doc) throw new Error('ws doc missing');
+    const row = (): ProjectedTask => doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask;
+    const before = { ...row() };
+    // The premise: this row is trimmed, so there is no body on it to differ.
+    expect(before.detailTrimmed).toBe(true);
+    expect(before.body).toBeUndefined();
+    expect(before.bodyWrittenAt).toBeUndefined();
+
+    const r = await post(`/workspaces/${wsId}/docs/${taskBodyDocId(taskId)}/content`, {
+      markdown: 'Agent can read the SECOND description so that it stays current.\n',
+    });
+    expect(r.status).toBe(200);
+    await settle(700);
+
+    const after = row();
+    // Body typing is not board activity, and this is what makes the token
+    // necessary rather than redundant: the row clock has NOT moved.
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(typeof after.bodyWrittenAt).toBe('number');
+    // Ordering, not a wall-clock reading: the words were written after the
+    // row last moved, so the token sits at or past the row clock it replaces.
+    expect(after.bodyWrittenAt ?? 0).toBeGreaterThanOrEqual(before.updatedAt);
+    // Still no body on the board row — the trim is unchanged; what moved is
+    // only the token the browser keys its refetch on.
+    expect(after.body).toBeUndefined();
+    const stored = handle.tasks.getTask(taskId);
+    if (!stored) throw new Error('task went missing');
+    const fetched = handle.projection.projectRowInFull(wsId, stored) as unknown as ProjectedTask;
+    expect(fetched.body).toContain('stays current');
   });
 
   it('caps a runaway description and says it capped it', async () => {
     const wsId = await makeWorkspace('body-cap');
-    // A body doc is a live doc anyone can paste a plan into, and the ws doc
-    // syncs to every board viewer on every debounced snapshot.
+    // A body doc is a live doc anyone can paste a plan into, and the row the
+    // detail route serves is built from the same snapshot on every open.
     const long = `${'word '.repeat(1_200)}TAIL`;
     const taskId = await makeTask(wsId, { title: 'Pasted a whole plan in here', body: long });
-    const doc = handle.docStore.get(workspaceDocId(wsId));
-    if (!doc) throw new Error('ws doc missing');
-    const projected = doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask;
+    const stored = handle.tasks.getTask(taskId);
+    if (!stored) throw new Error('task went missing');
+    const projected = handle.projection.projectRowInFull(wsId, stored) as unknown as ProjectedTask;
     expect(projected.bodyTruncated).toBe(true);
     expect(projected.body?.length).toBe(BODY_PROJECTION_LIMIT);
     expect(projected.body).not.toContain('TAIL');

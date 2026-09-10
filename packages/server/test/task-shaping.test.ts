@@ -456,8 +456,15 @@ describe('triage shaping', () => {
     );
     const projected = doc.ydoc.getMap('tasks').get(task.id) as { title: string; quote?: string };
     expect(projected.title).toBe('Moving between shelves loses your place');
-    // …and the preserved words ride along, so the detail panel can show what
-    // the row came from next to what it became.
-    expect(projected.quote).toBe(CAPTURE.body);
+    // …and the preserved words go to the panel rather than to the board:
+    // `quote` is rendered by the "Original words" block and by nothing that
+    // draws a list, so `slimTaskRow` keeps it off every row and the detail
+    // route hands it back. Asserted on the SAME refresh, so a projection
+    // that never ran would fail this too.
+    expect(projected.quote).toBeUndefined();
+    const stored = handle?.tasks.getTask(task.id);
+    if (!stored) throw new Error('task went missing');
+    const full = handle?.projection.projectRowInFull(wsId, stored) as { quote?: string };
+    expect(full.quote).toBe(CAPTURE.body);
   });
 });

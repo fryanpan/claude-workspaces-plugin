@@ -20,11 +20,20 @@
  * row satisfies passes here and passes the budget, and the only thing that
  * catches it is the author adding a row — which is what the failure message
  * below asks for.
+ *
+ * Read over the UNTRIMMED projection, deliberately. `slimTaskRow` drops
+ * `reviews`, `quote` and (bar an open decision) `body` from every row, so a
+ * fixture that took those branches would show none of them here once trimmed
+ * — and the failure message would ask an author to add a row that cannot
+ * change the answer. Growth inside a trimmed branch costs the board's payload
+ * nothing, which is the whole point of the trim; it still reaches the detail
+ * route, which projects in full and has no budget over it. So: this test says
+ * the fixture exercises `projectTask`, and the budget next door says what
+ * survives the trim weighs.
  */
 import { describe, expect, it } from 'bun:test';
-import { slimClosedRow } from '../src/task-row-slim.ts';
 import { projectTask } from '../src/task-row.ts';
-import { FIXTURE_NOW, boardFixture } from './board-payload-fixture.ts';
+import { boardFixture } from './board-payload-fixture.ts';
 
 /**
  * Every key `projectTask` emits conditionally — the ones that vanish when the
@@ -71,9 +80,7 @@ describe('the payload fixture exercises the whole projector', () => {
   // A non-zero comment count on some rows, because `commentCount` is itself
   // one of the conditional keys and a fixture that always passed 0 would
   // leave that branch dark.
-  const rows = tasks.map((t) =>
-    slimClosedRow(projectTask(t, t.order % 3, 'agent', t.assigneeId), FIXTURE_NOW),
-  );
+  const rows = tasks.map((t) => projectTask(t, t.order % 3, 'agent', t.assigneeId));
 
   it('takes every conditional branch at least once', () => {
     const seen = new Set<string>();

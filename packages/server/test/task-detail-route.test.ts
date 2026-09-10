@@ -1,11 +1,12 @@
 /**
- * The refetch that makes the closed-row trim lossless.
+ * The refetch that makes the row trim lossless.
  *
- * The board's ydoc carries a closed row without its body, its notes, its
- * review items, its original words or the prose on its transitions — that is
- * what takes a board's sync from megabytes to hundreds of kilobytes. It is
- * only safe because the panel can ask for the rest, so what these drive is
- * that the ask ANSWERS: the same projected row, whole, for a row the board
+ * The board's ydoc carries a row without its review items, its original
+ * words, its body or the prose on its transitions — whatever the row's
+ * status, because none of those is read by any list surface. That is what
+ * takes a board's sync from megabytes to a hundred-odd kilobytes on the wire.
+ * It is only safe because the panel can ask for the rest, so what these drive
+ * is that the ask ANSWERS: the same projected row, whole, for a row the board
  * itself sent out short.
  *
  * The negative half matters as much: a row belonging to another board is not
@@ -146,28 +147,41 @@ describe('GET /workspaces/:ws/tasks/:taskId/detail', () => {
     return doc.ydoc.getMap('tasks').get(id) as Record<string, unknown>;
   };
 
-  it('is what a reader needs, because the board itself sends closed rows short', async () => {
-    // The wiring half: `slimClosedRow` is unit-tested next door, but nothing
-    // there says the PROJECTION applies it. Drive a real row all the way to
-    // done, age it past the fresh window, and read the map the socket encodes.
+  it('is what a reader needs, because the board sends an OPEN row short too', async () => {
+    // The wiring half: `slimTaskRow` is unit-tested next door, but nothing
+    // there says the PROJECTION applies it. This row is open, was filed
+    // seconds ago, and its body still does not reach the wire — which is the
+    // change this route now has to cover. The old trim gated on status, so
+    // this assertion could not have passed before.
+    handle.projection.refresh(ws);
+    const openOnTheWire = projectedRow(taskId);
+    expect(openOnTheWire.status).not.toBe('done');
+    expect(openOnTheWire.detailTrimmed).toBe(true);
+    expect(openOnTheWire.body).toBeUndefined();
+    // Positive control: the row IS there and the projection IS running — the
+    // list fields it computes over every row all arrived.
+    expect(openOnTheWire.title).toBe('Bryan can read a closed row');
+    expect(openOnTheWire.bodyDocId).toBe(`task:${taskId}`);
+
+    // …and the route hands the reader back exactly what the wire dropped.
+    expect((await detail(ws, taskId)).task?.body).toBe(BODY);
+  });
+
+  it('and still sends a closed row short, fresh window or not', async () => {
     await post(`/workspaces/${ws}/tasks/${taskId}/transition`, { author: PERSON, to: 'done' });
     const stored = handle.tasks.getTask(taskId);
     if (!stored) throw new Error('task went missing');
-    // Positive control on the fixture: a row still inside the fresh window
-    // rides out whole, so the assertion below would pass either way without
-    // this backdate actually taking effect.
     handle.projection.refresh(ws);
-    expect(projectedRow(taskId).body).toBe(BODY);
+    expect(projectedRow(taskId).body).toBeUndefined();
+    // Past the fresh window the notes go too — the one field whose rule is
+    // still the clock, because Home's Recent activity reads it off this row.
     stored.updatedAt = Date.now() - DETAIL_FRESH_MS * 2;
     handle.projection.refresh(ws);
-
     const onTheWire = projectedRow(taskId);
     expect(onTheWire.detailTrimmed).toBe(true);
-    expect(onTheWire.body).toBeUndefined();
+    expect(onTheWire.notes).toBeUndefined();
     expect(onTheWire.title).toBe('Bryan can read a closed row');
 
-    // …and the route hands the reader back exactly what the wire dropped.
-    const { task } = await detail(ws, taskId);
-    expect(task?.body).toBe(BODY);
+    expect((await detail(ws, taskId)).task?.body).toBe(BODY);
   });
 });
