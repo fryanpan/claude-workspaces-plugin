@@ -2,12 +2,21 @@
  * Stage timing for the live meeting pipeline: how long a spoken word takes to
  * become a word on the screen, and which hop spent it.
  *
- * OFF UNLESS ASKED. Nothing here runs on a normal meeting. The strip turns it
- * on with `?timing=1`, which puts `timing: true` on the `start` frame; a
- * server that was not asked attaches no timing block and allocates no ring.
- * That matters because the measurement is meant to run on PROD against a real
- * conversation, not against a synthetic harness — a flag that costs nothing
- * when it is off is a flag that can live in the shipped client.
+ * THE READOUT IS OFF UNLESS ASKED; THE LEDGER IS NOT. The strip turns the
+ * readout on with `?timing=1`, which puts `timing: true` on the `start` frame,
+ * and a server that was not asked attaches no timing block — the wire is
+ * unchanged, which is the property that let this flag live in the shipped
+ * client and be measured on PROD against a real conversation rather than a
+ * harness.
+ *
+ * `AudioChunkLedger` no longer waits for that flag. A second reader wants it
+ * and cannot be an opt-in: the notes pipeline resolves a word's audio offset
+ * back to the instant it was SPOKEN, and a latency number that only exists on
+ * instrumented meetings is not a claim about ordinary ones. The ring is four
+ * numbers a chunk, bounded at about two minutes, in memory, never serialized
+ * — so what "costs nothing when off" now means is that nothing reaches the
+ * client, not that nothing is allocated. Its arithmetic is only valid while
+ * one stream feeds it; the relay's `ledgerTrusted` is where that is tracked.
  *
  * TIMINGS ONLY, NEVER CONTENT. Every field below is a number. No transcript
  * text, no doc id, no title, no path crosses this module, and the CSV it
