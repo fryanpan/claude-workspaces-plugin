@@ -19,6 +19,7 @@ import {
   meetingSocketPath,
   prose,
 } from '@claude-workspaces/core';
+import { createHaikuNotesComposer } from '../src/meeting-notes-composer.ts';
 import {
   DEFAULT_NOTES_CADENCE_MS,
   DEFAULT_NOTES_ENDPOINT_CONFIRM_MS,
@@ -35,6 +36,7 @@ import {
   createPauseTicker,
   createStubNotesComposer,
 } from '../src/meeting-notes.ts';
+import { QUOTA_NOTICE_MARK, QUOTA_NOTICE_TEXT } from '../src/notes-quota-notice.ts';
 import { createNotesTimingLog } from '../src/notes-timing.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
@@ -2985,5 +2987,303 @@ describe('a compose refused for running past the output ceiling', () => {
     expect(session.stats().composeFailures).toBeGreaterThan(0);
     expect(session.stats().refusedTooLong).toBe(0);
     expect(errors.some((e) => /refused as too long/.test(e))).toBe(false);
+  });
+});
+
+describe('a quota outage is visible in the meeting doc', () => {
+  const ids = { docId: 'doc-quota', meetingId: 'm-quota' };
+
+  /**
+   * A doc small enough to assert on: blocks in order, and the two ops the
+   * notice path uses applied to them. It is a model of the doc rather than a
+   * real one because what is under test is the SEQUENCE of writes the session
+   * makes — one notice, then its retraction — not how Yjs stores a paragraph.
+   */
+  function fakeDoc() {
+    const blocks: prose.OutlineEntry[] = [
+      { id: 'h1', kind: 'heading', nodeName: 'heading', level: 2, text: 'Meeting notes' },
+    ];
+    let n = 0;
+    const apply = (edits: readonly prose.BlockEdit[]): void => {
+      for (const edit of edits) {
+        if (edit.op === 'delete_block') {
+          const at = blocks.findIndex((b) => b.id === edit.blockId);
+          if (at >= 0) blocks.splice(at, 1);
+          continue;
+        }
+        if (!('markdown' in edit)) continue;
+        blocks.push({
+          id: `b${++n}`,
+          kind: 'block',
+          nodeName: 'paragraph',
+          text: edit.markdown,
+          author: 'meeting-notes',
+        });
+      }
+    };
+    return {
+      blocks,
+      apply,
+      /** Every block whose words are the outage notice. */
+      notices: () => blocks.filter((b) => b.text.startsWith(QUOTA_NOTICE_MARK)),
+    };
+  }
+
+  /** A composer that refuses with whatever message the test wants, then (once
+   *  `failing` is cleared) writes a bullet like any other tick. */
+  function refusingComposer(state: { message: string | null }): NotesComposer {
+    return {
+      name: 'refusing',
+      compose(input) {
+        if (state.message !== null) return Promise.reject(new Error(state.message));
+        return Promise.resolve([
+          {
+            op: 'insert_under_heading',
+            headingId: 'h1',
+            markdown: `- noted at tick ${input.tick.tick}`,
+          } satisfies prose.BlockEdit,
+        ]);
+      },
+    };
+  }
+
+  function sessionOver(doc: ReturnType<typeof fakeDoc>, composer: NotesComposer) {
+    const schedule = new ManualScheduler();
+    const updates: NotesUpdate[] = [];
+    const session = beginNotesSession(
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        readOutline: () => doc.blocks.map((b) => ({ ...b })),
+        notesHeadingId: () => 'h1',
+        onNotes: (u) => {
+          updates.push(u);
+          doc.apply(u.edits);
+        },
+      },
+      ids,
+    );
+    return { schedule, session, updates };
+  }
+
+  it('says so once, not once per tick, while the outage lasts', async () => {
+    const doc = fakeDoc();
+    const state = { message: 'notes compose HTTP 429 — out of quota' };
+    const { schedule, session, updates } = sessionOver(doc, refusingComposer(state));
+
+    session.onTurn({ turn: 0, text: 'First thing.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    session.onTurn({ turn: 1, text: 'Second thing.', final: true });
+    schedule.fire();
+    await session.end();
+
+    // Two refusals; the reader is told once.
+    expect(doc.notices()).toHaveLength(1);
+    expect(doc.notices()[0]?.text).toBe(QUOTA_NOTICE_TEXT);
+    expect(updates.filter((u) => composedMarkdown(u).startsWith(QUOTA_NOTICE_MARK))).toHaveLength(
+      1,
+    );
+    expect(session.stats().composeFailures).toBeGreaterThan(1);
+  });
+
+  it('still says it once when the outline read cannot see the notice yet', async () => {
+    // The other half of "once per outage". Above, the doc read back what was
+    // written, so either guard could have held the line. Here the outline is
+    // frozen at what the meeting started with — a doc read that has not caught
+    // up, which is the ordinary case for a write made this same tick — so the
+    // session's own memory is the only thing that can stop a second notice.
+    const doc = fakeDoc();
+    const frozen = doc.blocks.map((b) => ({ ...b }));
+    const schedule = new ManualScheduler();
+    const state = { message: 'notes compose HTTP 429 — out of quota' };
+    const session = beginNotesSession(
+      {
+        composer: refusingComposer(state),
+        quietMs: 1000,
+        schedule,
+        readOutline: () => frozen.map((b) => ({ ...b })),
+        notesHeadingId: () => 'h1',
+        onNotes: (u) => doc.apply(u.edits),
+      },
+      ids,
+    );
+
+    session.onTurn({ turn: 0, text: 'First thing.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    session.onTurn({ turn: 1, text: 'Second thing.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    session.onTurn({ turn: 2, text: 'Third thing.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(1);
+  });
+
+  it('takes the notice away as soon as a tick composes again', async () => {
+    const doc = fakeDoc();
+    const state: { message: string | null } = { message: 'notes compose HTTP 400 — out of quota' };
+    const { schedule, session } = sessionOver(doc, refusingComposer(state));
+
+    session.onTurn({ turn: 0, text: 'During the outage.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(doc.notices()).toHaveLength(1);
+
+    state.message = null;
+    session.onTurn({ turn: 1, text: 'After it.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(0);
+    // And the notes themselves landed, so this is a recovery rather than a
+    // doc that lost both the notice and the note.
+    expect(doc.blocks.some((b) => b.text.startsWith('- noted at tick'))).toBe(true);
+  });
+
+  it('reaches the doc from a real API refusal, end to end', async () => {
+    // Every other test in this block hands the session a refusal message.
+    // This one starts where the outage did: an HTTP status from the API,
+    // through the composer that classifies it, to the sentence in the doc.
+    const doc = fakeDoc();
+    const schedule = new ManualScheduler();
+    const composer = createHaikuNotesComposer({
+      apiKey: 'k-test',
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
+          status: 429,
+        })) as unknown as typeof fetch,
+    });
+    expect(composer).not.toBeNull();
+    const session = beginNotesSession(
+      {
+        composer: composer as NotesComposer,
+        quietMs: 1000,
+        schedule,
+        readOutline: () => doc.blocks.map((b) => ({ ...b })),
+        notesHeadingId: () => 'h1',
+        onNotes: (u) => doc.apply(u.edits),
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'Something worth noting.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(1);
+  });
+
+  it('tells the room on the next refusal when the doc declined the notice', async () => {
+    // The sink bounced the notice, so the doc says nothing. A session that
+    // recorded it as written would suppress every later refusal, and the
+    // meeting would run to the end with the room none the wiser.
+    const doc = fakeDoc();
+    const schedule = new ManualScheduler();
+    const state = { message: 'notes compose HTTP 429 — out of quota' };
+    let accept = false;
+    const session = beginNotesSession(
+      {
+        composer: refusingComposer(state),
+        quietMs: 1000,
+        schedule,
+        readOutline: () => doc.blocks.map((b) => ({ ...b })),
+        notesHeadingId: () => 'h1',
+        onNotes: (u) => {
+          const isNotice = composedMarkdown(u).startsWith(QUOTA_NOTICE_MARK);
+          if (isNotice && !accept) return false;
+          doc.apply(u.edits);
+          return true;
+        },
+      },
+      ids,
+    );
+
+    session.onTurn({ turn: 0, text: 'First thing.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(doc.notices()).toHaveLength(0);
+
+    accept = true;
+    session.onTurn({ turn: 1, text: 'Second thing.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(1);
+  });
+
+  it('tries the retraction again when the doc declined the deletion', async () => {
+    // A rejected delete leaves the sentence standing under fresh notes. The
+    // session must keep believing the doc claims an outage until it does not.
+    const doc = fakeDoc();
+    const schedule = new ManualScheduler();
+    const state: { message: string | null } = {
+      message: 'notes compose HTTP 429 — out of quota',
+    };
+    let acceptDeletes = false;
+    const session = beginNotesSession(
+      {
+        composer: refusingComposer(state),
+        quietMs: 1000,
+        schedule,
+        readOutline: () => doc.blocks.map((b) => ({ ...b })),
+        notesHeadingId: () => 'h1',
+        onNotes: (u) => {
+          const isDelete = u.edits.some((e) => e.op === 'delete_block');
+          if (isDelete && !acceptDeletes) return false;
+          doc.apply(u.edits);
+          return true;
+        },
+      },
+      ids,
+    );
+
+    session.onTurn({ turn: 0, text: 'During the outage.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(doc.notices()).toHaveLength(1);
+
+    // Quota is back, but the first retraction bounces.
+    state.message = null;
+    session.onTurn({ turn: 1, text: 'After it.', final: true });
+    schedule.fire();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(doc.notices()).toHaveLength(1);
+
+    acceptDeletes = true;
+    session.onTurn({ turn: 2, text: 'And more.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(0);
+  });
+
+  it('clears a notice left by a PREVIOUS session, which this one never wrote', async () => {
+    // The restart case. The outage began under a session that is gone; quota
+    // came back before this one composed anything. Nothing in this session's
+    // memory says a notice exists, so only reading the doc can find it.
+    const doc = fakeDoc();
+    doc.apply([{ op: 'insert_under_heading', headingId: 'h1', markdown: QUOTA_NOTICE_TEXT }]);
+    expect(doc.notices()).toHaveLength(1);
+
+    const state: { message: string | null } = { message: null };
+    const { session } = sessionOver(doc, refusingComposer(state));
+    session.onTurn({ turn: 0, text: 'A fresh meeting note.', final: true });
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(0);
+    expect(doc.blocks.some((b) => b.text.startsWith('- noted at tick'))).toBe(true);
+  });
+
+  it('a failure that is not quota leaves the doc alone', async () => {
+    // The control for the classification: an overloaded API is one tick's bad
+    // luck, the words carry, and nothing is written about it.
+    const doc = fakeDoc();
+    const state = { message: 'notes compose HTTP 529' };
+    const { schedule, session } = sessionOver(doc, refusingComposer(state));
+
+    session.onTurn({ turn: 0, text: 'A point.', final: true });
+    schedule.fire();
+    await session.end();
+
+    expect(doc.notices()).toHaveLength(0);
+    expect(session.stats().composeFailures).toBeGreaterThan(0);
   });
 });
