@@ -75,6 +75,8 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -404,6 +406,40 @@ function saveYdoc(path: string, doc: Y.Doc): void {
 }
 
 /**
+ * Copy `path` to `backup`, via a temporary name.
+ *
+ * A plain `copyFileSync` that dies partway — a full disk is the ordinary
+ * way — leaves a truncated file at the backup path, and the NEXT run sees a
+ * backup already there, skips taking one, and rewrites the document. The
+ * rename makes the backup either absent or complete.
+ */
+function takeBackup(path: string, backup: string): void {
+  const tmp = `${backup}.partial`;
+  try {
+    copyFileSync(path, tmp);
+    renameSync(tmp, backup);
+  } catch (err) {
+    // Leaving a half-written `.partial` behind would make the next run's
+    // failure harder to read than this one's.
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Nothing to do about it, and it is not the failure worth reporting.
+    }
+    throw err;
+  }
+}
+
+/** Is there a regular file at `path`? A directory or a broken link is not. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Report — and with `apply`, repair — every gap site in a data directory.
  *
  * Nothing is destroyed: a document about to be rewritten is copied to
@@ -459,7 +495,21 @@ export function repairDataDir(dataDir: string, opts: DataDirOptions = {}): DataD
     if (!opts.apply) continue;
 
     const backup = `${path}${BACKUP_SUFFIX}`;
-    if (!existsSync(backup)) copyFileSync(path, backup);
+    // `existsSync` alone is not the question. Anything at that path that is
+    // not a regular file — a directory, a dangling symlink — would read as a
+    // backup already taken and let the document be rewritten with nothing
+    // behind it. Only a file counts.
+    if (!isFile(backup)) {
+      try {
+        takeBackup(path, backup);
+      } catch (err) {
+        // No copy, no rewrite. The document stays as it is and the run says
+        // so: replacing the only valid copy of somebody's document because
+        // the backup could not be written is the one outcome worth refusing.
+        log(`${id}: could not take a backup (${(err as Error).message}) — left alone`);
+        continue;
+      }
+    }
     const report = repairNoteListGaps(doc);
     saveYdoc(path, doc);
     result.docsRepaired++;

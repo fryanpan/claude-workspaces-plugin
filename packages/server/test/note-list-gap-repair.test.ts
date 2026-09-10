@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
@@ -369,6 +369,19 @@ describe('repairDataDir', () => {
     writeFileSync(path, Y.encodeStateAsUpdate(damagedDoc(['three', 'four'])));
     repairDataDir(dir, { apply: true, log: () => {} });
     expect(readFileSync(`${path}${BACKUP_SUFFIX}`)).toEqual(before);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('leaves the document alone when it cannot take a backup', () => {
+    const { dir, path } = corpus();
+    const before = readFileSync(path);
+    // A directory where the backup file belongs: the copy cannot land.
+    mkdirSync(`${path}${BACKUP_SUFFIX}`);
+    const lines: string[] = [];
+    const result = repairDataDir(dir, { apply: true, log: (line) => lines.push(line) });
+    expect(result.docsRepaired).toBe(0);
+    expect(readFileSync(path)).toEqual(before);
+    expect(lines.some((line) => line.includes('left alone'))).toBe(true);
     rmSync(dir, { recursive: true });
   });
 
