@@ -2597,6 +2597,118 @@ describe('two note-taker picks over a live meeting, answered out of step', () =>
     expect(shows(h).checked).toBe(applied[applied.length - 1]);
   });
 
+  /**
+   * THE SOCKET DIES BETWEEN THE FRAME AND ITS ANSWER.
+   *
+   * The pick was sent and nothing came back, and nothing ever will — that
+   * socket is gone. The server either applied the change or never saw it, and
+   * the row cannot tell from anything it holds. Left as it was, the fold goes
+   * on stating a note-taker with the same confidence it states a confirmed
+   * one, which is the exact thing the confirmed/pending split exists to
+   * prevent.
+   *
+   * Every test here asserts the same invariant — the row ends on the method
+   * THIS SERVER holds — and drives the two truths a drop can be hiding.
+   */
+  describe('a note-taker pick whose socket dies before the answer', () => {
+    /**
+     * The server's own note-taker, as its GET reports it. Only that route
+     * answers: everything else the mount asks for is left as unavailable, so
+     * this stub decides one thing and the rest of the strip behaves as it
+     * does under every other mount here.
+     */
+    function serveMethod(current: () => string): void {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((url: string, init?: { method?: string }) =>
+          Promise.resolve(
+            String(url).includes('/notes-method') &&
+              (init?.method === undefined || init.method === 'GET')
+              ? new Response(JSON.stringify({ method: current() }), { status: 200 })
+              : new Response('{}', { status: 404 }),
+          ),
+        ),
+      );
+      cleanups.push(() => vi.unstubAllGlobals());
+    }
+
+    /** The drop, the backoff, and the meeting coming back on a new socket. */
+    async function dropAndReconnect(h: Harness): Promise<void> {
+      h.sockets[0]?.onclose?.();
+      await settle();
+      h.fireRetry();
+      await settle();
+      h.sockets[1]?.onopen?.();
+      h.sockets[1]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+      await settle();
+    }
+
+    it('takes the change when the server did apply it', async () => {
+      let held = 'original';
+      serveMethod(() => held);
+      const h = await liveWithFold();
+      h.pick('Ledger · Opus');
+      // The frame arrived and was applied; the ANSWER is what the drop ate.
+      held = 'ledger-opus';
+      await dropAndReconnect(h);
+      await vi.waitFor(() => expect(shows(h).checked).toBe(held));
+      // And the row is SETTLED, not still waiting on a frame nobody will
+      // answer: a refusal on the new socket rolls back to what the server
+      // holds, which a pick left pending for ever would prevent.
+      h.pick('Ledger · Haiku');
+      h.sockets[1]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: false });
+      expect(shows(h).checked).toBe(held);
+    });
+
+    it('gives the change back when the server never saw it', async () => {
+      let held = 'original';
+      serveMethod(() => held);
+      const h = await liveWithFold();
+      h.pick('Ledger · Opus');
+      // The frame died in the socket: the doc is still on what it had.
+      held = 'original';
+      await dropAndReconnect(h);
+      await vi.waitFor(() => expect(shows(h).checked).toBe(held));
+    });
+
+    /**
+     * A DROP THAT IS NOT A RECONNECT. The socket can go away before the
+     * meeting ever says `ready` — the strip gives up on it and says the
+     * connection was lost, rather than retrying — and a pick made in that
+     * window went over the socket like any other. It is stranded the same
+     * way, so it is settled the same way.
+     */
+    it('settles a pick whose socket died before the meeting opened', async () => {
+      const held = 'original';
+      serveMethod(() => held);
+      const h = mount(undefined, { offeredNotesMethods });
+      h.pressStart({ pick: 'Just me' });
+      await settle();
+      h.sockets[0]?.onopen?.();
+      // Open but not yet `ready`: the Record button opens the menu, and the
+      // fold in it sends over the socket.
+      h.record().click();
+      h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+      h.pick('Ledger · Opus');
+      // The frame died in the socket, so the doc is still on what it had —
+      // the branch where a row left stranded states the wrong note-taker.
+      // No `ready` ever came, so this drop is not retried: the strip says the
+      // connection was lost and the meeting is over before it began.
+      h.sockets[0]?.onclose?.();
+      await settle();
+      // The person tries again. The meeting that opens has the fold in its
+      // menu, reading the same row the lost pick was made on.
+      h.startCta().click();
+      await settle();
+      h.sockets[1]?.onopen?.();
+      h.sockets[1]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 2_000, engine: 'test' });
+      await settle();
+      // The menu, with the fold still open from before the drop.
+      h.record().click();
+      await vi.waitFor(() => expect(shows(h).checked).toBe(held));
+    });
+  });
+
   it('holds the second press until the first write has answered', async () => {
     // The guarantee the row's correctness rests on: with one write out at a
     // time, the order the server applies them is the order they were pressed,

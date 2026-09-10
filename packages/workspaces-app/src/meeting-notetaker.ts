@@ -208,11 +208,20 @@ export interface NotetakerChoice {
   readonly pending: readonly NotetakerPick[];
 }
 
-/** One pick that has been asked for: its number and what it asked for. */
+/** One pick that has been asked for: its number, what it asked for, and the
+ *  way it was sent — which decides who can still answer it. */
 export interface NotetakerPick {
   readonly seq: number;
   readonly method: NotesMethod;
+  readonly via: NotetakerVia;
 }
+
+/**
+ * How a pick was sent. A `rest` write answers itself whatever happens to the
+ * meeting; a `socket` frame is answered by ONE socket and by nothing else, so
+ * when that socket goes away its answer is never coming.
+ */
+export type NotetakerVia = 'socket' | 'rest';
 
 /**
  * WHICH PICK AN ANSWER IS FOR, and the reason there are two forms.
@@ -248,7 +257,11 @@ export function notetakerMountAnswer(
 }
 
 /** Somebody picked. Optimistic: the row moves now and the answer settles it. */
-export function notetakerPicked(choice: NotetakerChoice, method: NotesMethod): NotetakerChoice {
+export function notetakerPicked(
+  choice: NotetakerChoice,
+  method: NotesMethod,
+  via: NotetakerVia,
+): NotetakerChoice {
   const seq = choice.seq + 1;
   return {
     shown: method,
@@ -257,7 +270,7 @@ export function notetakerPicked(choice: NotetakerChoice, method: NotesMethod): N
     confirmed: choice.confirmed,
     picked: true,
     seq,
-    pending: [...choice.pending, { seq, method }],
+    pending: [...choice.pending, { seq, method, via }],
   };
 }
 
@@ -327,6 +340,38 @@ export function notetakerAcknowledged(
   return {
     shown: pending.length > 0 ? choice.shown : confirmed,
     confirmed,
+    picked: true,
+    seq: choice.seq,
+    pending,
+  };
+}
+
+/**
+ * THE SOCKET THAT CARRIED SOME PICKS IS GONE, and the server has been asked
+ * what it actually holds.
+ *
+ * A frame sent and never answered is the one state the row cannot reason its
+ * way out of: the server either applied it or never saw it, and both look the
+ * same from here. Nothing will answer it either — that socket is the only
+ * thing that could have. So the doc's own answer settles those picks, whether
+ * it names the method that was asked for (it landed) or the one before it
+ * (it did not). Either way the row stops asserting something it does not
+ * know.
+ *
+ * `upTo` is the last number sent before the socket went away. Picks made
+ * AFTER it — on the new socket, or over REST while there was none — are
+ * still out and still theirs to answer, so the row goes on showing the newest
+ * of them and this answer only moves what the server is known to hold.
+ */
+export function notetakerReconciled(
+  choice: NotetakerChoice,
+  answer: NotesMethod,
+  upTo: number,
+): NotetakerChoice {
+  const pending = choice.pending.filter((p) => !(p.via === 'socket' && p.seq <= upTo));
+  return {
+    shown: pending.length > 0 ? choice.shown : answer,
+    confirmed: answer,
     picked: true,
     seq: choice.seq,
     pending,

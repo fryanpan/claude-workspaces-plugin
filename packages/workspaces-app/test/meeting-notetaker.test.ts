@@ -22,6 +22,7 @@ import {
   notetakerChoiceAtMount,
   notetakerMountAnswer,
   notetakerPicked,
+  notetakerReconciled,
 } from '../src/meeting-notetaker.ts';
 
 afterEach(() => {
@@ -188,7 +189,7 @@ describe('which note-taker the fold shows, and who may move it', () => {
     // The fetch is issued at mount and a person can pick before it lands. Its
     // answer describes the doc before the pick, so writing it in would show a
     // note-taker the server has already been told to replace.
-    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus', 'rest');
     const late = notetakerMountAnswer(picked, 'original');
     expect(late.shown).toBe('ledger-opus');
   });
@@ -199,7 +200,7 @@ describe('which note-taker the fold shows, and who may move it', () => {
   });
 
   it('a refused change puts the row back to what the server holds', () => {
-    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus', 'rest');
     expect(picked.shown).toBe('ledger-opus');
     const refused = notetakerAcknowledged(picked, false, { seq: picked.seq });
     expect(refused.shown).toBe('original');
@@ -207,7 +208,7 @@ describe('which note-taker the fold shows, and who may move it', () => {
   });
 
   it('MUTATION CONTROL: an accepted change keeps it, and that becomes what is held', () => {
-    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus', 'rest');
     const ok = notetakerAcknowledged(picked, true, { seq: picked.seq });
     expect(ok.shown).toBe('ledger-opus');
     expect(ok.confirmed).toBe('ledger-opus');
@@ -216,9 +217,9 @@ describe('which note-taker the fold shows, and who may move it', () => {
   it('a second refusal goes back to the confirmed one, not to the last thing shown', () => {
     // Two picks in a row with the first accepted: the second's rollback must
     // land on the accepted method, never on the doc's original.
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'rest');
     let c = notetakerAcknowledged(first, true, { seq: first.seq });
-    const second = notetakerPicked(c, 'ledger-opus');
+    const second = notetakerPicked(c, 'ledger-opus', 'rest');
     c = notetakerAcknowledged(second, false, { seq: second.seq });
     expect(c.shown).toBe('ledger-haiku');
   });
@@ -238,8 +239,8 @@ describe('which note-taker the fold shows, and who may move it', () => {
  */
 describe('an answer that arrives for a pick nobody is showing any more', () => {
   it('does not confirm a newer selection when an older success lands late', () => {
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
-    const second = notetakerPicked(first, 'ledger-opus');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'rest');
+    const second = notetakerPicked(first, 'ledger-opus', 'rest');
     // The first request's success, arriving after the second pick.
     const after = notetakerAcknowledged(second, true, { seq: first.seq });
     expect(after.shown).toBe('ledger-opus');
@@ -251,23 +252,23 @@ describe('an answer that arrives for a pick nobody is showing any more', () => {
   });
 
   it('does not roll back a newer selection when an older failure lands late', () => {
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
-    const second = notetakerPicked(first, 'ledger-opus');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'rest');
+    const second = notetakerPicked(first, 'ledger-opus', 'rest');
     const after = notetakerAcknowledged(second, false, { seq: first.seq });
     expect(after.shown).toBe('ledger-opus');
   });
 
   it('MUTATION CONTROL: the answer for the pick on the row still moves it', () => {
-    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus', 'rest');
     expect(notetakerAcknowledged(picked, false, { seq: picked.seq }).shown).toBe('original');
     expect(notetakerAcknowledged(picked, true, { seq: picked.seq }).confirmed).toBe('ledger-opus');
   });
 
   it('a pick takes the next number, and the socket answer finds it by method', () => {
     const mount = notetakerChoiceAtMount('original');
-    const one = notetakerPicked(mount, 'ledger-haiku');
+    const one = notetakerPicked(mount, 'ledger-haiku', 'socket');
     expect(one.seq).toBe(mount.seq + 1);
-    expect(notetakerPicked(one, 'ledger-opus').seq).toBe(one.seq + 1);
+    expect(notetakerPicked(one, 'ledger-opus', 'socket').seq).toBe(one.seq + 1);
     // The socket frame carries no number, only the method it recorded — and
     // that is enough to name the pick it is answering.
     expect(notetakerAcknowledged(one, true, { method: 'ledger-haiku' }).confirmed).toBe(
@@ -276,7 +277,7 @@ describe('an answer that arrives for a pick nobody is showing any more', () => {
   });
 
   it('an answer naming a method nobody asked for moves nothing', () => {
-    const one = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
+    const one = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'socket');
     const after = notetakerAcknowledged(one, false, { method: 'ledger-opus' });
     expect(after.shown).toBe('ledger-haiku');
     expect(after.confirmed).toBe('original');
@@ -289,8 +290,8 @@ describe('an answer that arrives for a pick nobody is showing any more', () => {
    * what the row has to settle on.
    */
   it('settles on the method the server kept when an earlier pick wins', () => {
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
-    const second = notetakerPicked(first, 'ledger-opus');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'socket');
+    const second = notetakerPicked(first, 'ledger-opus', 'socket');
     const kept = notetakerAcknowledged(second, true, { method: 'ledger-haiku' });
     // The person is still looking at their newer pick while its write is out.
     expect(kept.shown).toBe('ledger-opus');
@@ -304,8 +305,8 @@ describe('an answer that arrives for a pick nobody is showing any more', () => {
     // already safe there — but `confirmed` used to move at the PRESS, which
     // made the second rollback land on the first pick. Nothing was ever
     // recorded, so the doc still holds the method it opened with.
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
-    const second = notetakerPicked(first, 'ledger-opus');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'rest');
+    const second = notetakerPicked(first, 'ledger-opus', 'rest');
     const one = notetakerAcknowledged(second, false, { seq: first.seq });
     const both = notetakerAcknowledged(one, false, { seq: second.seq });
     expect(both.shown).toBe('original');
@@ -323,8 +324,8 @@ describe('an answer that arrives for a pick nobody is showing any more', () => {
    * then keeps a method the server replaced.
    */
   it('keeps an older REST pick pending when a newer one answers first', () => {
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
-    const second = notetakerPicked(first, 'ledger-opus');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'rest');
+    const second = notetakerPicked(first, 'ledger-opus', 'rest');
     const early = notetakerAcknowledged(second, true, { seq: second.seq });
     // The first write has not answered, so nothing is settled yet.
     expect(early.pending.map((p) => p.seq)).toEqual([first.seq]);
@@ -339,16 +340,55 @@ describe('an answer that arrives for a pick nobody is showing any more', () => {
     // sent, in order, so an answer is proof the earlier ones are done with —
     // dropped with the socket if they never came. A `fetch` proves nothing
     // about another `fetch`.
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
-    const second = notetakerPicked(first, 'ledger-opus');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'socket');
+    const second = notetakerPicked(first, 'ledger-opus', 'socket');
     const after = notetakerAcknowledged(second, true, { method: 'ledger-opus' });
     expect(after.pending).toEqual([]);
     expect(after.shown).toBe('ledger-opus');
   });
 
+  /**
+   * WHAT THE DOC SAYS, AFTER THE SOCKET THAT WAS ASKED WENT AWAY. It settles
+   * the frames that died with it and nothing else — a pick made since is
+   * still somebody's to answer.
+   */
+  it('settles the stranded frames against the doc, and leaves later picks alone', () => {
+    const stranded = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus', 'socket');
+    // The server had applied it; the answer was what the drop ate.
+    const settled = notetakerReconciled(stranded, 'ledger-opus', stranded.seq);
+    expect(settled.pending).toEqual([]);
+    expect(settled.shown).toBe('ledger-opus');
+    expect(settled.confirmed).toBe('ledger-opus');
+  });
+
+  it('a pick made after the drop is not settled by the doc read', () => {
+    const stranded = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus', 'socket');
+    const upTo = stranded.seq;
+    // Picked again once the meeting was back: this one still has an answer
+    // coming, so the row goes on showing it.
+    const again = notetakerPicked(stranded, 'ledger-haiku', 'socket');
+    const settled = notetakerReconciled(again, 'ledger-opus', upTo);
+    expect(settled.pending.map((p) => p.seq)).toEqual([again.seq]);
+    expect(settled.shown).toBe('ledger-haiku');
+    expect(settled.confirmed).toBe('ledger-opus');
+    // And its refusal now lands on what the doc actually said.
+    expect(notetakerAcknowledged(settled, false, { method: 'ledger-haiku' }).shown).toBe(
+      'ledger-opus',
+    );
+  });
+
+  it('a REST write still out is left to answer for itself', () => {
+    // Its `fetch` does not care that a socket went away, so the doc read has
+    // no business settling it — and the read can race the write anyway.
+    const rest = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'rest');
+    const settled = notetakerReconciled(rest, 'original', rest.seq);
+    expect(settled.pending.map((p) => p.seq)).toEqual([rest.seq]);
+    expect(settled.shown).toBe('ledger-haiku');
+  });
+
   it('only the answer for the pick on the row may raise an error', () => {
-    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
-    const second = notetakerPicked(first, 'ledger-opus');
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku', 'socket');
+    const second = notetakerPicked(first, 'ledger-opus', 'socket');
     expect(notetakerAnswersShownPick(second, { method: 'ledger-haiku' })).toBe(false);
     expect(notetakerAnswersShownPick(second, { method: 'ledger-opus' })).toBe(true);
     expect(notetakerAnswersShownPick(second, { method: 'original' })).toBe(false);

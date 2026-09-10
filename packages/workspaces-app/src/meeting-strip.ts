@@ -111,6 +111,7 @@ import {
   notetakerChoiceAtMount,
   notetakerMountAnswer,
   notetakerPicked,
+  notetakerReconciled,
   putNotesMethod,
 } from './meeting-notetaker.ts';
 import {
@@ -734,6 +735,18 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * documents. This is the at-rest half of the same guarantee.
    */
   let methodWrites: Promise<void> = Promise.resolve();
+  /**
+   * THE LAST PICK NUMBER SENT OVER A SOCKET THAT IS NOW GONE, or 0.
+   *
+   * A `set_notes_method` frame is answered by the socket it went out on and
+   * by nothing else, so a drop between the send and the answer leaves the row
+   * holding a pick nothing can ever settle — the server may have applied it
+   * or may never have seen it. The doc itself is asked instead, and its
+   * answer settles them. Held rather than acted on once because the read can
+   * fail for the same reason the socket did: it is retried when a socket next
+   * opens, and cleared only when an answer actually comes back.
+   */
+  let strandedUpTo = 0;
   const showMethod = (next: NotetakerChoice): void => {
     const moved = next.shown !== methodChoice.shown;
     methodChoice = next;
@@ -752,6 +765,63 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     if (disposed) return;
     showMethod(notetakerMountAnswer(methodChoice, method ?? null));
   });
+
+  /** The strand number a read is already queued for, or 0 — see below. */
+  let reconcileQueued = 0;
+
+  /**
+   * Ask the doc what it holds, and settle every pick the drop stranded.
+   *
+   * IN THE SAME QUEUE AS THE AT-REST WRITES, because it is one of them: a
+   * `PUT` still out has not necessarily reached the server, so a read taken
+   * beside it describes a doc that is about to change and would confirm the
+   * wrong method. Behind the queue the read runs when nothing is out, and
+   * the next press queues behind the read — so what comes back is the doc's
+   * own word here exactly as it is for a write's answer.
+   *
+   * Queued once per strand: two ways of ending a socket both come through
+   * here, and a second read racing the first could apply the older answer
+   * last.
+   *
+   * NOT CLOSED, and deliberately: a write whose answer lands in the window
+   * between this read being issued and its own answer coming back. The queue
+   * covers every case where the write is still out when the read runs, which
+   * is the shape a person can produce; the remainder needs the server to
+   * apply the write AFTER the read has read, and the browser to hear about it
+   * BEFORE the read answers, at which point this settles `confirmed` onto the
+   * value the doc held a moment earlier. It is left rather than guessed at
+   * because the fix is a comparison of what was pending at issue against what
+   * is pending at answer, and an untested rule about an ordering nobody has
+   * seen is worth less than a named gap.
+   */
+  function reconcileNotesMethod(): void {
+    if (disposed || strandedUpTo === 0 || reconcileQueued === strandedUpTo) return;
+    const upTo = strandedUpTo;
+    reconcileQueued = upTo;
+    const read = (): Promise<void> =>
+      fetchNotesMethod(docId).then((answer) => {
+        if (reconcileQueued === upTo) reconcileQueued = 0;
+        // Nothing learned — an old server, a share visitor, or the outage
+        // that took the socket. The picks stay stranded and the next open
+        // asks again; showing a guess would be the same false confidence as
+        // before.
+        if (disposed || answer === undefined) return;
+        if (strandedUpTo === upTo) strandedUpTo = 0;
+        showMethod(notetakerReconciled(methodChoice, answer, upTo));
+        // A drop that landed while this read was out stranded picks this
+        // answer predates. They get their own read; nothing else can loop
+        // here, because reaching this line again takes another drop.
+        reconcileNotesMethod();
+      });
+    methodWrites = methodWrites.then(read, read);
+  }
+
+  /** A socket is going away: whatever it was carrying is now unanswerable. */
+  function strandSocketPicks(): void {
+    if (!methodChoice.pending.some((p) => p.via === 'socket')) return;
+    strandedUpTo = Math.max(strandedUpTo, methodChoice.seq);
+    reconcileNotesMethod();
+  }
 
   const listEngines = opts.listEngines ?? defaultListEngines;
   void listEngines().then((info) => {
@@ -804,21 +874,24 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * panel the person happened to be looking at.
    */
   function pickNotesMethod(method: NotesMethod): void {
+    // WHICH WAY THIS ONE GOES, decided once: the row records it, because who
+    // is able to answer a pick is what a dropped socket changes.
+    const live = socketOpen ? socket : null;
     // Optimistic, because the fold is a preference and the sheet must not
     // sit on a spinner: the row moves now, and the two ways of asking below
     // are what make it true. A failure puts it back.
-    showMethod(notetakerPicked(methodChoice, method));
+    showMethod(notetakerPicked(methodChoice, method, live ? 'socket' : 'rest'));
     // The pick this request is for, read AFTER the row has taken its number.
     // Two writes can be out at once and their answers can arrive in either
     // order, so each one only speaks for itself.
     const seq = methodChoice.seq;
-    if (socketOpen && socket) {
+    if (live) {
       // Recording: over the audio socket, so the live session learns it —
       // the next tick composes with it and the doc gets its one line. The
       // server answers `notes_method`, and that answer is what confirms
       // this row or puts it back.
       choose.methodSince = clockLabel(Date.now());
-      socket.send(
+      live.send(
         JSON.stringify({
           type: 'set_notes_method',
           method,
@@ -1154,6 +1227,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   }
 
   function closeSocket(): void {
+    // Before the handlers come off: every way a socket ends comes through
+    // here, a drop under a live meeting included, and a pick it was carrying
+    // has just lost the only thing that could answer it.
+    strandSocketPicks();
     const sock = socket;
     socket = null;
     socketOpen = false;
@@ -1419,6 +1496,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     resuming = resume !== undefined;
     sock.onopen = () => {
       socketOpen = true;
+      // A read that failed while everything was down gets its retry here.
+      reconcileNotesMethod();
       // Opening the socket IS starting the meeting; this frame only tells the
       // server what shape the audio behind it will be.
       sock.send(
@@ -1470,6 +1549,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     };
     sock.onclose = () => {
       socketOpen = false;
+      // Whatever this drop turns into — a reconnect, or a meeting that never
+      // opened saying so — a pick this socket was carrying has just lost the
+      // only thing that could answer it. `closeSocket` says the same for the
+      // deliberate ends, and asking twice queues one read.
+      strandSocketPicks();
       // A deliberate close detaches these handlers first, so reaching here at
       // all means the connection went away on its own.
       if (state.kind === 'recording' && liveMeetingId) {
