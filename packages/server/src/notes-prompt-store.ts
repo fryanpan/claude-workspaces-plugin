@@ -97,8 +97,25 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  *
  * WHY REGROUPING STILL ASKS FOR SUB-BULLETS. Nesting costs the reader less
  * than a re-cut section: no block they have commented on is re-created, and
- * the ids stay valid. With `replace_block` it is also now cheap to express —
- * one edit rewrites the lead bullet with its points nested under it.
+ * the ids stay valid.
+ *
+ * IT ASKS FOR THEM THROUGH `nest_blocks` NOW, AND THAT CHANGED THE CLAIM
+ * ABOVE FROM A HOPE INTO A FACT. The rule used to be expressed with
+ * `replace_block` — rewrite one bullet as a lead carrying the others' words
+ * nested under it, then `delete_block` the ones folded in. Every folded point
+ * was retyped by the model on that route, so a paraphrase could drift, a
+ * speaker tag could be dropped, and every comment thread anchored to the old
+ * wording orphaned. `nest_blocks` moves the bullets instead: same words, same
+ * ids, threads recovered on their own text.
+ *
+ * AND IT NO LONGER RELIES ON THE MODEL NOTICING. The bar held on 2% to 17% of
+ * ticks with the rule written here in capitals, on all three shipped methods
+ * about equally — which is what a rule looks like when it cannot be acted on
+ * rather than one that is being ignored. Two mechanical things were missing
+ * and both are now supplied: the outline marks a nested bullet "sub-bullet"
+ * so a grouped topic can be told from a flat one, and the server counts the
+ * run itself and names the ids in the prompt (`notes-regroup.ts`). The words
+ * below are the rule; that block is the tick's own arithmetic.
  */
 export const DEFAULT_NOTES_INSTRUCTIONS = [
   'You are the live note-taker for a working meeting, writing in the doc the',
@@ -111,6 +128,7 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '  {"op":"insert_at_end","markdown":"## A heading"}',
   '  {"op":"replace_block","blockId":"<id>","markdown":"- better wording"}',
   '  {"op":"delete_block","blockId":"<id>"}',
+  '  {"op":"nest_blocks","leadBlockId":"<id>","blockIds":["<id>","<id>"]}',
   'Return [] when this speech deserves no note. Never return prose, never a',
   'code fence, never a whole rewritten section.',
   '',
@@ -179,14 +197,27 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '- When this speech continues a topic the doc already has, add under THAT',
   "  heading's id. Never open a second heading for a topic that already has",
   '  one.',
-  `- More than ${MAX_FLAT_RUN_BULLETS} bullets under one heading is the wall these notes exist`,
-  '  instead of. Regroup that topic: replace_block two or three of your own',
-  '  bullets with short lead bullets carrying their points nested under them',
-  '  as sub-bullets, and delete_block the ones you folded in. Like this:',
+  `- A TOPIC MAY RUN ${MAX_FLAT_RUN_BULLETS} BULLETS FLAT. The outline marks a nested point`,
+  '  "sub-bullet", so count the ones marked "bullet" under a heading. At',
+  `  ${MAX_FLAT_RUN_BULLETS} that topic is full: do not put a ${MAX_FLAT_RUN_BULLETS + 1}th bullet on the end of it.`,
+  '  Group it instead, in the SAME update, with nest_blocks — pick the bullet',
+  '  that best introduces two or three of the others and move them under it:',
+  '      {"op":"nest_blocks","leadBlockId":"b7","blockIds":["b8","b9"]}',
+  '  which turns',
+  '      - What the export dialog gets wrong',
+  '      - It forgets the range between sessions.',
+  '      - The CSV path uses a different dialog.',
+  '  into',
   '      - What the export dialog gets wrong',
   '        - It forgets the range between sessions.',
   '        - The CSV path uses a different dialog.',
-  '  Get under the number by GROUPING, never by dropping a point.',
+  '  nest_blocks MOVES bullets: it rewrites nothing and deletes nothing, so a',
+  '  point cannot be lost and a comment somebody left on a bullet stays on it.',
+  '  Never regroup by replace_block-ing the words into a new bullet and',
+  '  delete_block-ing the old one — that retypes a point somebody may have',
+  '  replied to. Get under the number by GROUPING, never by dropping a point,',
+  '  and once a topic has groups, put its next point under the group it',
+  '  belongs to rather than back at the top level.',
   '',
   'ACCURACY',
   '- Only what was said: never invent names, numbers, or decisions the',

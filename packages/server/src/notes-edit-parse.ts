@@ -113,6 +113,21 @@ function readEdit(entry: unknown, at: number): { edit: prose.BlockEdit } | { why
       if (blockId === undefined) return { why: `edit ${at}: delete_block without id` };
       return { edit: { op, blockId } };
     }
+    case 'nest_blocks': {
+      const leadBlockId = str(raw.leadBlockId);
+      if (leadBlockId === undefined) return { why: `edit ${at}: nest_blocks without a lead id` };
+      // Every id must be a string, and the lead must not be among them: a
+      // list that names its own lead would move a bullet under itself, which
+      // the applier refuses but which is cheaper to refuse here, where the
+      // reason can name what the model actually wrote.
+      const raws = Array.isArray(raw.blockIds) ? raw.blockIds : undefined;
+      if (raws === undefined) return { why: `edit ${at}: nest_blocks without blockIds` };
+      const blockIds = raws
+        .map((id) => str(id))
+        .filter((id): id is string => id !== undefined && id !== leadBlockId);
+      if (blockIds.length === 0) return { why: `edit ${at}: nest_blocks with no blocks to move` };
+      return { edit: { op, leadBlockId, blockIds } };
+    }
     default:
       return { why: `edit ${at}: unknown op ${JSON.stringify(op)}` };
   }

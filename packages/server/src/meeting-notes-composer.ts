@@ -33,9 +33,10 @@ import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import type { NotesComposeInput, NotesComposer, NotesTick, NotesTurn } from './meeting-notes.ts';
 import { refusalMessage } from './model-quota.ts';
-import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+import { MEETING_NOTES_HEADING, NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
+import { regroupDirective } from './notes-regroup.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { authHeader, resolveCredentialFrom } from './summarize.ts';
 
@@ -155,6 +156,14 @@ export function buildNotesPrompt(
   }
 
   if (input.extraPrompt) parts.push(input.extraPrompt);
+  // AFTER the material blocks and BEFORE the outline, because it is about the
+  // outline: a directive naming block ids reads as an instruction about the
+  // table that follows it rather than as one more piece of context.
+  const regroup = regroupDirective(input.outline, {
+    author: NOTES_AUTHOR_ID,
+    notesHeadingId: input.notesHeadingId,
+  });
+  if (regroup) parts.push(regroup);
   parts.push(renderOutline(input));
   parts.push(
     `New transcript since the last update:\n${input.tick.turns
@@ -192,7 +201,14 @@ function renderOutline(input: NotesComposeInput): string {
       entry.kind === 'heading'
         ? `h${entry.level ?? 2}`
         : entry.kind === 'listItem'
-          ? 'bullet'
+          ? // A GROUPED TOPIC HAS TO READ AS GROUPED. Every bullet used to
+            // print as `bullet`, so a topic already gathered under lead
+            // bullets was indistinguishable from a wall — which made the
+            // instruction to regroup one impossible to act on and impossible
+            // to stop acting on. `sub-bullet` is the whole difference.
+            (entry.depth ?? 0) > 0
+            ? 'sub-bullet'
+            : 'bullet'
           : 'para';
     const whose = entry.author === undefined ? 'theirs' : 'yours';
     const under =
@@ -212,7 +228,9 @@ function renderOutline(input: NotesComposeInput): string {
     ...head,
     '',
     'The doc, block by block — "id kind whose | text". Only the most recent',
-    'blocks are listed; every heading is.',
+    'blocks are listed; every heading is. A "sub-bullet" already sits under',
+    'the "bullet" above it: that topic has groups, so its points go into one',
+    'rather than onto the end of the list.',
     ...lines,
   ].join('\n');
 }
