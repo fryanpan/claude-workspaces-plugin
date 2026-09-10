@@ -3515,22 +3515,48 @@ body.redline-mode #toggle-suggest-mode {
   align-items: start;
 }
 
+/* `width: 100%` is the whole of why the measure holds still while a meeting
+   runs, and it is not tidiness. `#editor > .ProseMirror` centres itself with
+   `margin: 0 auto` (styles.css), and an auto INLINE margin on a grid item
+   makes the item size to fit-content instead of stretching to its area — so
+   in this grid the prose was as wide as its widest line and nothing else.
+   That is invisible on an ordinary doc, whose paragraphs run long enough that
+   fit-content reaches the whole column; it is the bug on a meeting doc, where
+   the note-taker writes short lines into an empty page. Measured at 1180x820:
+   an 824px column, and the prose sat at 393px the moment the first two bullets
+   landed — "just wide enough for the notes" — while the transcript beside it
+   stayed 824px. A definite width makes the auto margins do what they read as
+   doing: absorb the leftover of `max-width` and centre, rather than choose the
+   width. Reading-width mode still narrows to 36rem, because that is a
+   `max-width` and this is not.
+
+   None of the three max-widths on this surface was the cause, and each was
+   read at the time: `data-cards` was `balloon`, so the 900px inline-card cap
+   could not apply; `is-reading-width` was off; and the 1200px ceiling never
+   bound, since the column was 824. */
 #editor.redline-layout > .ProseMirror {
   min-width: 0;
+  width: 100%;
 }
 
 /* The provisional live zone (meeting-live-zone.ts) is appended after the
    prose, so here it auto-places into a second row under the prose column.
    The rows must not stretch to fill the pane (grid's default align-content
    is stretch, which parked the zone a screen below a short doc); only while
-   the zone shows, so the ordinary layout is untouched. Its WIDTH is matched
-   to the prose in JS: the prose shrink-wraps to its widest line in this
-   grid (auto margins in a cell), which no rule here can coincide with. */
+   the zone shows, so the ordinary layout is untouched.
+
+   Its WIDTH is still matched to the prose in JS (meeting-live-zone.ts), and
+   that match is now a belt beside a brace rather than the only rule that
+   could produce it: the zone carries the same `margin-inline: auto` and so
+   shrink-wrapped in this grid for the same reason the prose did, and takes
+   the same definite width to stop. Both surfaces now compute the column, so
+   the JS width it copies is the one CSS would have given it anyway. */
 #editor.redline-layout:has(> .live-zone:not([hidden])) {
   align-content: start;
 }
 #editor.redline-layout > .live-zone {
   grid-column: 1;
+  width: 100%;
 }
 
 .markup-margin {
