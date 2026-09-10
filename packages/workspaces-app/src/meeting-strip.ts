@@ -102,7 +102,16 @@ import { type ChooserState, createMeetingChooser } from './meeting-chooser.ts';
 import { type MeetingFeed, createMeetingFeed } from './meeting-feed.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import { type MeetingMenu, createMeetingMenu } from './meeting-menu.ts';
-import { clockLabel, fetchNotesMethod, putNotesMethod } from './meeting-notetaker.ts';
+import {
+  type NotetakerChoice,
+  clockLabel,
+  fetchNotesMethod,
+  notetakerAcknowledged,
+  notetakerChoiceAtMount,
+  notetakerMountAnswer,
+  notetakerPicked,
+  putNotesMethod,
+} from './meeting-notetaker.ts';
 import {
   type TranscriptTurn,
   formatElapsed,
@@ -690,13 +699,27 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     return state;
   }
 
+  /**
+   * Which note-taker the fold shows, and which one the server is known to
+   * hold. The rules for the three things that move it — the mount GET, a
+   * pick, the server's answer — are in `meeting-notetaker.ts`, because the
+   * bugs they close are orderings and an ordering is worth testing on its
+   * own.
+   */
+  let methodChoice = notetakerChoiceAtMount(choose.chooseMethod);
+  const showMethod = (next: NotetakerChoice): void => {
+    const moved = next.shown !== methodChoice.shown;
+    methodChoice = next;
+    choose.chooseMethod = next.shown;
+    if (moved && view === 'chooser') renderPop();
+  };
+
   // The doc's note-taker, asked for once at mount. Unanswered — an old
   // server, a share visitor, a failed fetch — the fold keeps the default,
   // which is what such a server composes with anyway.
   void fetchNotesMethod(docId).then((method) => {
-    if (disposed || !method || method === choose.chooseMethod) return;
-    choose.chooseMethod = method;
-    if (view === 'chooser') renderPop();
+    if (disposed) return;
+    showMethod(notetakerMountAnswer(methodChoice, method ?? null));
   });
 
   const listEngines = opts.listEngines ?? defaultListEngines;
@@ -744,11 +767,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // Optimistic, because the fold is a preference and the sheet must not
       // sit on a spinner: the row moves now, and the two ways of asking below
       // are what make it true. A failure puts it back.
-      const previous = choose.chooseMethod;
-      choose.chooseMethod = method;
+      showMethod(notetakerPicked(methodChoice, method));
       if (socketOpen && socket) {
         // Recording: over the audio socket, so the live session learns it —
-        // the next tick composes with it and the doc gets its one line.
+        // the next tick composes with it and the doc gets its one line. The
+        // server answers `notes_method`, and that answer is what confirms
+        // this row or puts it back.
         choose.methodSince = clockLabel(Date.now());
         socket.send(
           JSON.stringify({
@@ -763,8 +787,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // session to tell and no line to write.
       choose.methodSince = '';
       void putNotesMethod(docId, method, opts.participantName).then((ok) => {
+        showMethod(notetakerAcknowledged(methodChoice, ok));
         if (ok) return;
-        choose.chooseMethod = previous;
         choose.chooseError = 'That note-taker could not be saved.';
         renderPop();
       });
@@ -1170,6 +1194,18 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         break;
       case 'timing_pong':
         timing?.onPong(msg, recvMs);
+        break;
+      case 'notes_method':
+        // The live half of the same contract the at-rest PUT has always had.
+        // A record that could not be written leaves the session composing
+        // with the method it had, so the row goes back to what it showed and
+        // the line the notes would have carried was never written either.
+        showMethod(notetakerAcknowledged(methodChoice, msg.recorded));
+        if (!msg.recorded) {
+          choose.methodSince = '';
+          choose.chooseError = 'That note-taker could not be saved.';
+          if (view === 'chooser') renderPop();
+        }
         break;
       case 'tuned':
         // Only what the server actually applied earns the "Applied." note —

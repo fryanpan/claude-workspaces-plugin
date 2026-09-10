@@ -76,6 +76,7 @@ describe('the frame that changes the note-taker mid-meeting', () => {
     send: (frame: unknown) => void;
     changes: Change[];
     writes: NotesUpdate[];
+    sent: unknown[];
     stop: () => Promise<void>;
   }> {
     const changes: Change[] = [];
@@ -103,7 +104,13 @@ describe('the frame that changes the note-taker mid-meeting', () => {
         return recorded;
       },
     });
-    const ws: MeetingClient = { data: { docId }, send: () => {} };
+    const sent: unknown[] = [];
+    const ws: MeetingClient = {
+      data: { docId },
+      send: (frame: string) => {
+        sent.push(JSON.parse(frame));
+      },
+    };
     relay.onOpen(ws);
     relay.onText(ws, JSON.stringify({ type: 'start', sampleRate: 16000, encoding: 'pcm_s16le' }));
     await settle();
@@ -111,6 +118,7 @@ describe('the frame that changes the note-taker mid-meeting', () => {
       send: (frame) => relay.onText(ws, JSON.stringify(frame)),
       changes,
       writes,
+      sent,
       stop: async () => {
         relay.onText(ws, JSON.stringify({ type: 'stop' }));
         await settle();
@@ -151,6 +159,30 @@ describe('the frame that changes the note-taker mid-meeting', () => {
     expect(edit && 'markdown' in edit ? edit.markdown : '').toBe(
       '- 10:38 Note-taker Ledger · Opus — Maya',
     );
+  });
+
+  it('answers the frame, so the chooser is not left guessing', async () => {
+    const m = await live('d-ack', true);
+    m.send({ type: 'set_notes_method', method: 'ledger-opus', by: 'Maya' });
+    await settle();
+    await m.stop();
+    expect(m.sent).toContainEqual({
+      type: 'notes_method',
+      method: 'ledger-opus',
+      recorded: true,
+    });
+  });
+
+  it('MUTATION CONTROL: a record that could not be written answers recorded false', async () => {
+    const m = await live('d-ack-no', false);
+    m.send({ type: 'set_notes_method', method: 'ledger-opus', by: 'Maya' });
+    await settle();
+    await m.stop();
+    expect(m.sent).toContainEqual({
+      type: 'notes_method',
+      method: 'ledger-opus',
+      recorded: false,
+    });
   });
 
   it('MUTATION CONTROL: a method this server does not know changes nothing', async () => {

@@ -170,6 +170,67 @@ export function appendNotetakerFold(
   );
 }
 
+/**
+ * WHAT THE FOLD SHOWS, AND WHO IS ALLOWED TO MOVE IT.
+ *
+ * Three things move this row and they do not arrive in a fixed order: the
+ * mount's GET of the doc's current note-taker, a person's pick, and the
+ * server's answer to that pick. Held as one value with one rule each, because
+ * both bugs this shape exists to close were orderings rather than logic.
+ *
+ * - `shown` is the row. It moves the moment somebody picks, because a
+ *   preference must not sit on a spinner.
+ * - `confirmed` is the last method the server is known to hold. A refused
+ *   change goes back to it.
+ * - `picked` closes the mount question for good: once a person has chosen,
+ *   the doc's state as it was BEFORE they chose is not news.
+ */
+export interface NotetakerChoice {
+  readonly shown: NotesMethod;
+  readonly confirmed: NotesMethod;
+  readonly picked: boolean;
+}
+
+/** The row before anything has been asked or answered. */
+export function notetakerChoiceAtMount(method: NotesMethod): NotetakerChoice {
+  return { shown: method, confirmed: method, picked: false };
+}
+
+/**
+ * The mount GET came back.
+ *
+ * IGNORED ONCE SOMEBODY HAS PICKED. The fetch is issued at mount and a person
+ * can pick before it lands, so its answer describes the doc as it was before
+ * the pick — writing it in would show the old note-taker while the PUT or the
+ * socket frame carrying the new one had already reached the server, and the
+ * next tick would then use a method the fold denies.
+ */
+export function notetakerMountAnswer(
+  choice: NotetakerChoice,
+  answer: NotesMethod | null | undefined,
+): NotetakerChoice {
+  if (choice.picked || !answer) return choice;
+  return { shown: answer, confirmed: answer, picked: false };
+}
+
+/** Somebody picked. Optimistic: the row moves now and the answer settles it. */
+export function notetakerPicked(choice: NotetakerChoice, method: NotesMethod): NotetakerChoice {
+  return { shown: method, confirmed: choice.shown, picked: true };
+}
+
+/**
+ * The server answered the pick.
+ *
+ * `false` is a record that could not be written — a data dir that is full,
+ * read-only or gone. The write is swallowed there so that losing a preference
+ * never fails a tick, which is right, and it is exactly why the row has to
+ * come back: the session goes on composing with the method it had.
+ */
+export function notetakerAcknowledged(choice: NotetakerChoice, recorded: boolean): NotetakerChoice {
+  if (!recorded) return { shown: choice.confirmed, confirmed: choice.confirmed, picked: true };
+  return { shown: choice.shown, confirmed: choice.shown, picked: true };
+}
+
 /** "10:38" — the clock the trace line and the "since" row both read as. */
 export function clockLabel(at: number): string {
   const d = new Date(at);

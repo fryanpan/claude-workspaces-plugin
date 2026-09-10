@@ -391,6 +391,15 @@ export type MeetingServerMessage =
    * effect on the next recording instead.
    */
   | { type: 'tuned'; applied: string[] }
+  /**
+   * The answer to a `set_notes_method`, and the reason that frame has one at
+   * all: the record's write can fail (a data dir that is full, read-only or
+   * gone) and the failure is swallowed, because losing a preference must
+   * never fail a tick. Unanswered, the chooser would go on showing a
+   * note-taker the next tick is not going to use. `recorded: false` is the
+   * client's cue to put the row back.
+   */
+  | { type: 'notes_method'; method: NotesMethod; recorded: boolean }
   /** The meeting ended; its transcript is durable. */
   | { type: 'stopped'; meetingId: string; endedAt: number }
   /** Something went wrong mid-meeting. Distinct from `unavailable`. */

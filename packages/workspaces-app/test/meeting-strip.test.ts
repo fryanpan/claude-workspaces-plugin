@@ -2444,3 +2444,29 @@ describe('the transcript panel opens with the consent reminder', () => {
     expect(h.root.querySelector('.meeting-consent-note')).toBeNull();
   });
 });
+
+describe('the note-taker answer a running meeting sends back', () => {
+  const frame = (raw: Record<string, unknown>) => parseMeetingServerMessage(JSON.stringify(raw));
+
+  it('parses a recorded change', () => {
+    expect(frame({ type: 'notes_method', method: 'ledger-opus', recorded: true })).toEqual({
+      type: 'notes_method',
+      method: 'ledger-opus',
+      recorded: true,
+    });
+  });
+
+  it('a missing `recorded` reads as NOT recorded, never as success', () => {
+    // An older server that answers nothing about the write must not be taken
+    // for one that wrote: the row would then claim a switch that no tick uses.
+    expect(frame({ type: 'notes_method', method: 'ledger-opus' })).toEqual({
+      type: 'notes_method',
+      method: 'ledger-opus',
+      recorded: false,
+    });
+  });
+
+  it('MUTATION CONTROL: a note-taker this client has no row for is dropped', () => {
+    expect(frame({ type: 'notes_method', method: 'ledger-sonnet-9', recorded: true })).toBeNull();
+  });
+});

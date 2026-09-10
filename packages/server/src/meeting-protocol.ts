@@ -358,6 +358,11 @@ export class MeetingRelay {
       if (recorded && conn.state === 'live') {
         conn.notes?.noteMethodChange(notesMethodLabel(msg.method), msg.by);
       }
+      // AND THE CHOOSER IS TOLD EITHER WAY. It moved its row the moment the
+      // pick happened, because a preference must not sit on a spinner; this
+      // is what makes that optimism honest. The at-rest route has always
+      // answered — this is the same answer, one surface over.
+      this.send(ws, { type: 'notes_method', method: msg.method, recorded });
       return;
     }
     if (msg.type === 'name_speaker') {

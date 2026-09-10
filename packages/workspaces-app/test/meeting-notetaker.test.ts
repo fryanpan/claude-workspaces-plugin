@@ -13,7 +13,15 @@ import {
   notesMethodInfo,
 } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appendNotetakerFold, buildNotetakerFold, clockLabel } from '../src/meeting-notetaker.ts';
+import {
+  appendNotetakerFold,
+  buildNotetakerFold,
+  clockLabel,
+  notetakerAcknowledged,
+  notetakerChoiceAtMount,
+  notetakerMountAnswer,
+  notetakerPicked,
+} from '../src/meeting-notetaker.ts';
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -165,5 +173,58 @@ describe('what the sheet actually offers today', () => {
 
   it('every offered method is one the vocabulary has', () => {
     for (const id of OFFERED_NOTES_METHODS) expect(NOTES_METHODS).toContain(id);
+  });
+});
+
+describe('which note-taker the fold shows, and who may move it', () => {
+  it('the mount answer sets the row when nobody has picked', () => {
+    const c = notetakerMountAnswer(notetakerChoiceAtMount('original'), 'ledger-haiku');
+    expect(c.shown).toBe('ledger-haiku');
+    expect(c.confirmed).toBe('ledger-haiku');
+  });
+
+  it('a mount answer that arrives AFTER a pick is dropped', () => {
+    // The fetch is issued at mount and a person can pick before it lands. Its
+    // answer describes the doc before the pick, so writing it in would show a
+    // note-taker the server has already been told to replace.
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    const late = notetakerMountAnswer(picked, 'original');
+    expect(late.shown).toBe('ledger-opus');
+  });
+
+  it('MUTATION CONTROL: the same late answer with no pick before it does land', () => {
+    const late = notetakerMountAnswer(notetakerChoiceAtMount('ledger-opus'), 'original');
+    expect(late.shown).toBe('original');
+  });
+
+  it('a refused change puts the row back to what the server holds', () => {
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    expect(picked.shown).toBe('ledger-opus');
+    const refused = notetakerAcknowledged(picked, false);
+    expect(refused.shown).toBe('original');
+    expect(refused.confirmed).toBe('original');
+  });
+
+  it('MUTATION CONTROL: an accepted change keeps it, and that becomes what is held', () => {
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    const ok = notetakerAcknowledged(picked, true);
+    expect(ok.shown).toBe('ledger-opus');
+    expect(ok.confirmed).toBe('ledger-opus');
+  });
+
+  it('a second refusal goes back to the confirmed one, not to the last thing shown', () => {
+    // Two picks in a row with the first accepted: the second's rollback must
+    // land on the accepted method, never on the doc's original.
+    let c = notetakerAcknowledged(
+      notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku'),
+      true,
+    );
+    c = notetakerAcknowledged(notetakerPicked(c, 'ledger-opus'), false);
+    expect(c.shown).toBe('ledger-haiku');
+  });
+
+  it('an unanswered mount GET leaves the row exactly as it was', () => {
+    const c = notetakerChoiceAtMount('original');
+    expect(notetakerMountAnswer(c, null)).toEqual(c);
   });
 });

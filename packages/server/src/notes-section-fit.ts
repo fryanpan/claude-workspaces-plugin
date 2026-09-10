@@ -62,12 +62,34 @@ export function lastNotesHeadingIndex(outline: readonly prose.OutlineEntry[]): n
   return at;
 }
 
+/**
+ * Where the notes section STOPS: the first heading at the notes heading's own
+ * level or above, or the end of the doc.
+ *
+ * THE LEVEL IS THE WHOLE RULE, and neither "the next heading" nor "the end of
+ * the doc" is right on its own. Every topic heading a meeting writes lives
+ * INSIDE the section — the instructions ask for `###` under the `## Meeting
+ * notes` — so stopping at the next heading of any level would read a full set
+ * of minutes as an empty section and reuse it. Running to the end of the doc
+ * instead reads whatever section comes AFTER the notes as though it were part
+ * of them, so one authored paragraph in an unrelated section three headings
+ * later refuses a notes section that is genuinely free.
+ */
+export function notesSectionEnd(outline: readonly prose.OutlineEntry[], at: number): number {
+  const level = outline[at]?.level ?? 2;
+  for (let i = at + 1; i < outline.length; i++) {
+    const entry = outline[i];
+    if (entry?.kind === 'heading' && (entry.level ?? 0) <= level) return i;
+  }
+  return outline.length;
+}
+
 /** Whether anything at all sits under the doc's last notes heading. An empty
  *  section fits every topic, which is the case that shipped first. */
 export function notesSectionIsEmpty(outline: readonly prose.OutlineEntry[]): boolean {
   const at = lastNotesHeadingIndex(outline);
   if (at < 0) return false;
-  return at === outline.length - 1;
+  return notesSectionEnd(outline, at) === at + 1;
 }
 
 /**
@@ -89,6 +111,9 @@ export function notesSectionFits(
 ): boolean {
   const at = lastNotesHeadingIndex(outline);
   if (at < 0) return true;
+  // Where this section ends. Everything past it belongs to some other part of
+  // the doc and says nothing about whether these minutes may be written here.
+  const end = notesSectionEnd(outline, at);
   // NOTHING UNDER IT FITS EVERY TOPIC, AND THIS IS ASKED FIRST — before the
   // claim, deliberately. A meeting that opened a section and then wrote
   // nothing beneath it (it was cut short, every tick was refused, the room
@@ -101,13 +126,13 @@ export function notesSectionFits(
   // Nothing is lost by adopting it: an empty section holds no minutes to
   // merge two conversations into, so the 2026-08-31 rule has nothing to
   // protect here.
-  if (at === outline.length - 1) return true;
+  if (end === at + 1) return true;
   const id = outline[at]?.id;
   // A heading a meeting has already claimed AND WRITTEN UNDER is a meeting's
   // record, whatever the blocks are currently attributed to. This is the
   // clause that survives `releaseNotesAuthorship`.
   if (id !== undefined && claimed.has(id)) return false;
-  for (let i = at + 1; i < outline.length; i++) {
+  for (let i = at + 1; i < end; i++) {
     const entry = outline[i];
     if (!entry) continue;
     // Authorship is a WEAKER signal than the record and is kept only for the

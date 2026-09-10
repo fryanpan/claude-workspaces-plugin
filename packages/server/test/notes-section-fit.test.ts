@@ -3,18 +3,29 @@ import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { createNotesHeadingMemory, notesSectionForMeeting } from '../src/meeting-notes-doc.ts';
 import { NOTES_AUTHOR_ID, type NotesDocStore, readNotesOutline } from '../src/notes-doc-access.ts';
-import { lastNotesHeadingIndex, notesSectionFits } from '../src/notes-section-fit.ts';
+import {
+  lastNotesHeadingIndex,
+  notesSectionFits,
+  notesSectionIsEmpty,
+} from '../src/notes-section-fit.ts';
 import { oneDocStore } from './notes-doc-helpers.ts';
 
 const AGENT = 'agent:notes';
 
+/**
+ * Levels matter here, so they are the real ones rather than one flat number.
+ * A doc's `## Meeting notes` is level 2, and every topic heading a meeting
+ * writes under it is a `###` — that is what the note-taking instructions ask
+ * for — so any other heading defaults to 3, INSIDE the section. Pass a level
+ * explicitly for a heading that is meant to end the section.
+ */
 function outline(
-  rows: Array<[kind: 'heading' | 'bullet', text: string, author?: string]>,
+  rows: Array<[kind: 'heading' | 'bullet', text: string, author?: string, level?: number]>,
 ): readonly prose.OutlineEntry[] {
-  return rows.map(([kind, text, author], i) => ({
+  return rows.map(([kind, text, author, level], i) => ({
     id: `b${i}`,
     kind,
-    level: kind === 'heading' ? 2 : 0,
+    level: kind === 'heading' ? (level ?? (text === 'Meeting notes' ? 2 : 3)) : 0,
     text,
     author,
   })) as unknown as readonly prose.OutlineEntry[];
@@ -70,6 +81,56 @@ describe('a section new minutes may reuse', () => {
       ['bullet', 'was the note-taker’s, now rewritten by hand'],
     ]);
     expect(notesSectionFits(o)).toBe(true);
+  });
+});
+
+describe('the section stops where the next section starts', () => {
+  /**
+   * The doc shape that made this necessary: minutes, then a heading of the
+   * doc's own at the same level, then somebody's authored work under THAT.
+   * Read to the end of the doc, the authored block refuses a notes section
+   * that is genuinely free — and refusing it opens a second `Meeting notes`
+   * heading, which strands the first from every reader that takes the last.
+   */
+  const followed = outline([
+    ['heading', 'Meeting notes'],
+    ['bullet', 'my own line'],
+    ['heading', 'Action items', undefined, 2],
+    ['bullet', 'Devin: chase the ferry dock quote', AGENT],
+  ]);
+
+  test('an authored block in the NEXT section does not refuse this one', () => {
+    expect(notesSectionFits(followed)).toBe(true);
+  });
+
+  test('MUTATION CONTROL: move that same authored line inside the section and it refuses', () => {
+    const inside = outline([
+      ['heading', 'Meeting notes'],
+      ['bullet', 'my own line'],
+      ['bullet', 'Devin: chase the ferry dock quote', AGENT],
+      ['heading', 'Action items', undefined, 2],
+    ]);
+    expect(notesSectionFits(inside)).toBe(false);
+  });
+
+  test('a notes heading with only another section after it is empty', () => {
+    const empty = outline([
+      ['heading', 'Meeting notes'],
+      ['heading', 'Action items', undefined, 2],
+      ['bullet', 'Devin: chase the ferry dock quote', AGENT],
+    ]);
+    expect(notesSectionIsEmpty(empty)).toBe(true);
+    expect(notesSectionFits(empty, new Set(['b0']))).toBe(true);
+  });
+
+  test('CONTROL: a topic heading INSIDE the section does not end it', () => {
+    const topics = outline([
+      ['heading', 'Meeting notes'],
+      ['heading', 'Boardwalk survey', AGENT],
+      ['bullet', 'Maya: the survey lands first', AGENT],
+    ]);
+    expect(notesSectionIsEmpty(topics)).toBe(false);
+    expect(notesSectionFits(topics)).toBe(false);
   });
 });
 
