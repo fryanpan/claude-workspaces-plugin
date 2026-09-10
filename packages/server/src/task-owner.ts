@@ -18,7 +18,7 @@
  */
 import { agentIdCandidates } from '@claude-workspaces/core';
 import type { DeclaredOwnerKind } from '@claude-workspaces/core/task-wire';
-import { classifyActor } from './actor-identity.ts';
+import { authorFields, classifyActor } from './actor-identity.ts';
 import { SHARED_AGENT_IDS } from './agent-watches.ts';
 
 /** The old default. It names a category, not somebody, so it is not an owner. */
@@ -165,12 +165,28 @@ export function parseAssigneeKind(
 export function declaredAssigneeKind(
   assignee: string,
   explicitKind: unknown,
-  author: { id: string; name: string; kind?: string } | undefined,
+  author: { id: string; name?: string; kind?: string } | undefined,
 ): DeclaredOwnerKind | undefined {
   const stated = statedOwnerKind(explicitKind);
   if (stated) return stated;
   if (!author) return undefined;
-  if (author.name.trim().toLowerCase() !== assignee.trim().toLowerCase()) return undefined;
+  // `name` is optional because the value arrives from a request body: the
+  // type is a claim about the boundary, not a fact about the data. An author
+  // that EXISTS and carries no name walked past the `!author` guard and threw
+  // on `.trim()` — a real REST create, caught in production 2026-09-10. The
+  // same read is defended three lines away (`isCategoryAuthor`), and
+  // `authorFields` is the shared defensive reader both use, so a bare-string
+  // author is recovered here rather than discarded.
+  const name = authorFields(author).name?.trim().toLowerCase() ?? '';
+  // A nameless author is not merely unreadable, it is NOT EVIDENCE. The only
+  // thing this branch can say is "the owner IS the caller", and nothing that
+  // carries no name matches a name. Falling through to `classifyActor` would
+  // answer `agent` for every one of them — an unrecorded kind filed as a
+  // confident one, which is the direction this module's other rules exist to
+  // refuse (see `attachedAgentResolver`: a wrong attribution is worse than an
+  // absent one, because nothing downstream can tell that it is wrong).
+  if (name === '') return undefined;
+  if (name !== assignee.trim().toLowerCase()) return undefined;
   return classifyActor(author);
 }
 
