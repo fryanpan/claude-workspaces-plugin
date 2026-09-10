@@ -95,7 +95,10 @@ describe('which rows are trimmed', () => {
   });
 
   it('trims an archived row even when its status never reached done', () => {
-    const archived = heavyRow('t-arch', { status: 'triage', archivedAt: NOW - DETAIL_FRESH_MS * 3 });
+    const archived = heavyRow('t-arch', {
+      status: 'triage',
+      archivedAt: NOW - DETAIL_FRESH_MS * 3,
+    });
     expect(slimClosedRow(archived, NOW).detailTrimmed).toBe(true);
   });
 });

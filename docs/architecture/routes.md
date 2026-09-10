@@ -236,6 +236,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/tasks/:taskId/archive` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/assignee` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/body` | POST | `routes/task-fields.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/detail` | GET | `routes/task-detail.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/due` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/evidence` | POST | `routes/task-status-links.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/goal` | POST | `routes/task-status-links.ts` | share-scope |  |
