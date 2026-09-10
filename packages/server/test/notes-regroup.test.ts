@@ -135,6 +135,25 @@ describe('regroupTargets', () => {
     expect(targets).toEqual([]);
   });
 
+  test('says nothing about a run that sits above every heading — the control', () => {
+    // A homeless wall wants a heading, not a group, and the prompt asks for
+    // one elsewhere. Firing here taught the note-taker to nest instead of
+    // opening `### `, and cost the "organised under topics" bar outright.
+    const targets = regroupTargets([...bullets(MAX_FLAT_RUN_BULLETS + 3, 'homeless')], {
+      author: NOTES_AUTHOR_ID,
+    });
+    expect(targets).toEqual([]);
+  });
+
+  test('a run before the first heading is silent while the one after it is named', () => {
+    const topic = heading('A named topic');
+    const targets = regroupTargets(
+      [...bullets(MAX_FLAT_RUN_BULLETS, 'homeless'), topic, ...bullets(MAX_FLAT_RUN_BULLETS, 'x')],
+      { author: NOTES_AUTHOR_ID },
+    );
+    expect(targets.map((t) => t.headingId)).toEqual([topic.id]);
+  });
+
   test('a paragraph between bullets does not break the run', () => {
     const targets = regroupTargets(
       [
@@ -160,6 +179,14 @@ describe('regroupDirective', () => {
     expect(text).toContain(
       `{"op":"nest_blocks","leadBlockId":"${run[0]?.id}","blockIds":["${run[1]?.id}","${run[2]?.id}"]}`,
     );
+  });
+
+  test('is null on a headingless run, so nothing competes with opening a heading', () => {
+    expect(
+      regroupDirective([...bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless')], {
+        author: NOTES_AUTHOR_ID,
+      }),
+    ).toBeNull();
   });
 
   test('is null on a short topic, so a quiet tick pays nothing for it', () => {
@@ -193,6 +220,13 @@ describe('the tick prompt', () => {
   test('carries nothing extra while every topic is short — the control', () => {
     const short = [heading('One quick subject'), ...bullets(MAX_FLAT_RUN_BULLETS - 1)];
     const { user } = buildNotesPrompt(composeInput(short));
+    expect(user).not.toContain('GROUP THEM IN THIS UPDATE');
+    expect(user).not.toContain('nest_blocks');
+  });
+
+  test('carries nothing extra for a wall with no heading — the control', () => {
+    const homeless = bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless');
+    const { user } = buildNotesPrompt(composeInput(homeless));
     expect(user).not.toContain('GROUP THEM IN THIS UPDATE');
     expect(user).not.toContain('nest_blocks');
   });

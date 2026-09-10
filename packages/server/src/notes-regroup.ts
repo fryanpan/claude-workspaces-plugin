@@ -32,6 +32,21 @@
  * not been earned is its own defect; `regroupTargets` returns nothing until a
  * run reaches the bar with at least two of the note-taker's own bullets in
  * it, which is the fewest that can become a group.
+ *
+ * AND IT NEVER FIRES ON A RUN WITH NO HEADING, WHICH COST A MEASURED BAR TO
+ * LEARN. A headingless run is the same wall to `flatBulletRuns`, so the first
+ * version reported it and asked for the same nesting. On the eval's ES2002a
+ * ledger-haiku slice that took "notes are organised under topics" from 83% to
+ * 0%: told at tick 1 that its four homeless bullets were a full topic to be
+ * grouped in place, the note-taker nested them and never opened the `###`
+ * heading the prompt asks for, and the meeting ran to its end with no topic in
+ * it. The flat-run bar went to 92% and the notes got worse.
+ *
+ * The cure for a homeless run is a HEADING, not a group, and the prompt
+ * already asks for one. So this stays silent there and leaves that run to the
+ * rule that is right about it — the two mechanisms cannot fight over the same
+ * bullets, and the flat-run bar reads a headingless wall until a heading
+ * arrives, which is the honest reading of a topic nobody has named.
  */
 
 import type { prose } from '@claude-workspaces/core';
@@ -40,10 +55,10 @@ import { notesSectionEnd } from './notes-section-fit.ts';
 
 /** One topic that has filled up, and the bullets it filled up with. */
 export interface RegroupTarget {
-  /** The heading the run sits under; absent for bullets above every heading,
-   *  which is the wall in its purest form. */
-  headingId?: string;
-  /** Its words, for the directive to name. Empty when there is no heading. */
+  /** The heading the run sits under. Always present: a run above every
+   *  heading is not reported at all — see the header. */
+  headingId: string;
+  /** Its words, for the directive to name. */
   heading: string;
   /** How long the run is by the BAR's reckoning — every top-level bullet in
    *  it, a person's included. This is the number the eval counts. */
@@ -105,13 +120,8 @@ export function regroupTargets(
     // Two is the fewest bullets that can become a group. One movable bullet
     // in a run of five is a topic the note-taker cannot fix, and telling it
     // to anyway spends prompt on an instruction with no legal answer.
-    if (run.length >= bar && movable.length >= 2) {
-      targets.push({
-        ...(headingId !== undefined ? { headingId } : {}),
-        heading,
-        runLength: run.length,
-        movable,
-      });
+    if (headingId !== undefined && run.length >= bar && movable.length >= 2) {
+      targets.push({ headingId, heading, runLength: run.length, movable });
     }
     run = [];
   };
@@ -174,9 +184,8 @@ export function regroupDirective(
   for (const target of targets) {
     lines.push('');
     lines.push(
-      `- "${target.heading || '(no heading yet)'}"${
-        target.headingId ? ` (${target.headingId})` : ''
-      } — ${target.runLength} flat bullets. Yours, in order:`,
+      `- "${target.heading}" (${target.headingId}) — ${target.runLength} flat ` +
+        'bullets. Yours, in order:',
     );
     for (const bullet of target.movable) lines.push(`    ${bullet.id} | ${bullet.text}`);
     const lead = target.movable[0];
