@@ -1,12 +1,13 @@
 /**
  * Putting a trimmed row back together, in the browser.
  *
- * The server sends a closed task out as a list row and the panel asks for the
- * rest. Three rules make that invisible to every surface downstream, and each
- * of them is a bug this had on the way in: the fetched row is held against
- * the revision it was fetched at, the ask happens once per revision however
- * many times the render path calls it, and a failed ask leaves the list row
- * standing rather than blanking the panel.
+ * The server sends a task out as a list row — OPEN rows included, since the
+ * fields the trim drops are read by the panel and by no list surface — and
+ * the panel asks for the rest. Three rules make that invisible to every
+ * surface downstream, and each of them is a bug this had on the way in: the
+ * fetched row is held against the revision it was fetched at, the ask happens
+ * once per revision however many times the render path calls it, and a failed
+ * ask leaves the list row standing rather than blanking the panel.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardState } from '../src/board/board-actions.ts';
@@ -18,9 +19,11 @@ import {
 } from '../src/board/board-task-detail.ts';
 import { boardState, task } from './support/board-region-harness.ts';
 
-/** A row as the server sends a closed one: no body, marked. */
-function trimmed(id: string, updatedAt: number): BoardTask {
-  return { ...task(id), updatedAt, status: 'done', detailTrimmed: true, body: undefined };
+/** A row as the server sends one: no body, marked. `status` is a parameter
+ *  because it is no longer what decides the trim — an in-progress row reaches
+ *  the browser exactly as short as a closed one. */
+function trimmed(id: string, updatedAt: number, status = 'done'): BoardTask {
+  return { ...task(id), updatedAt, status, detailTrimmed: true, body: undefined } as BoardTask;
 }
 
 /** The same row as the detail route answers it — every field the trim drops. */
@@ -57,11 +60,28 @@ describe('mergeTaskDetail', () => {
   });
 
   it('never overlays a row that arrived whole', () => {
-    // An OPEN row is authoritative on the wire — an overlay winning over it
-    // would show a body the ydoc has already replaced.
+    // A row the server did not mark is authoritative on the wire — an
+    // overlay winning over it would show a body the ydoc has already
+    // replaced. An open DECISION arrives this way: its body is the one a
+    // list surface draws, so the trim leaves it on.
     const open = { ...task('t-1'), updatedAt: 10, body: 'live' } as BoardTask;
     const overlay = new Map([[detailKey('t-1', 10), whole('t-1', 10, 'fetched')]]);
     expect(mergeTaskDetail(open, overlay).body).toBe('live');
+  });
+
+  it('fills an OPEN trimmed row the same way it fills a closed one', () => {
+    // The marker is the whole contract — `mergeTaskDetail` reads it and not
+    // the status, which is what lets the server widen the trim to open rows
+    // without a client change. An in-progress ticket somebody is working on
+    // now arrives short and is filled here.
+    const live = trimmed('t-1', 10, 'in-progress');
+    expect(live.body).toBeUndefined();
+    const overlay = new Map([[detailKey('t-1', 10), whole('t-1', 10, 'the live description')]]);
+    const merged = mergeTaskDetail(live, overlay);
+    expect(merged.body).toBe('the live description');
+    expect(merged.reviews).toHaveLength(1);
+    expect(merged.notes).toHaveLength(1);
+    expect(merged.quote).toBe('what Bryan actually said');
   });
 });
 

@@ -1,7 +1,7 @@
 import { listThreads, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { DocStore } from './doc-store.ts';
-import { slimClosedRow } from './task-row-slim.ts';
+import { slimTaskRow } from './task-row-slim.ts';
 import {
   projectGoalMeta,
   projectTask,
@@ -456,20 +456,22 @@ export class TaskProjection {
     // "N archived" count all needed a REST round trip to draw something the
     // board already holds, and an archive would visibly evict the row from
     // under the toast offering to put it back.
-    // …and a closed row rides out as a LIST row. The reason the two are
-    // separate steps: WHICH rows the board carries is the decision above, and
-    // HOW MUCH of a row it carries is `slimClosedRow`. Projecting an archived
-    // row is what keeps the Undo toast honest; projecting its body, its notes,
-    // its review items and the prose on every transition is what made opening
-    // this board a 1.6 MB download. The panel refetches when a reader opens
-    // one — see `routes/task-detail.ts`.
+    // …and every row rides out as a LIST row: the fields no list surface
+    // reads leave it whatever its status. The reason the two are separate
+    // steps: WHICH rows the board carries is the decision above, and HOW MUCH
+    // of a row it carries is `slimTaskRow`, which names the reader behind each
+    // field it drops. Projecting an archived row is what keeps the Undo toast
+    // honest; projecting its body, its notes, its review items and the prose
+    // on every transition is what made opening this board a 1.6 MB download.
+    // The panel refetches when a reader opens one — see
+    // `routes/task-detail.ts`.
     const now = Date.now();
     const want = new Map(
       this.tasks
         .listTasks(workspaceId, { includeArchived: true })
         .map((t) => [
           t.id,
-          slimClosedRow(
+          slimTaskRow(
             projectTask(t, this.commentCount(t.id), ownerKindOf(t), this.tasks.ownerIdOf(t)),
             now,
           ),
@@ -627,12 +629,12 @@ export class TaskProjection {
    */
   /**
    * One task's row, projected IN FULL — the shape the board's ydoc used to
-   * carry for every row, before `slimClosedRow` started sending closed ones
-   * out as list rows.
+   * carry for every row, before `slimTaskRow` started sending them out as
+   * list rows.
    *
    * Public because the detail route is the other half of that trim: the board
-   * drops five fields off a closed row on the way to every reader, and gets
-   * them back for the one reader who opens it. Built from the same
+   * drops the panel-only fields off a row on the way to every reader, and
+   * gets them back for the one reader who opens it. Built from the same
    * `projectTask` call as `refresh`, deliberately — a second spelling of a
    * row's fields is how the panel and the list start disagreeing about what a
    * ticket says.

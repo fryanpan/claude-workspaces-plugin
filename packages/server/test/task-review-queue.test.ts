@@ -496,10 +496,22 @@ describe('the create response names visibility', () => {
 
 describe('the board projection', () => {
   /**
-   * The browser reads the board off the ydoc projection and nothing else, so a
-   * field only the store can see is the store-has-it/surface-can't-show-it bug
-   * this codebase keeps re-deriving. `options` and `answer` keep projecting —
-   * nothing is replaced, nothing is purged.
+   * A field only the store can see is the store-has-it/surface-can't-show-it
+   * bug this codebase keeps re-deriving, so what these three drive is that a
+   * review item REACHES A READER. Which surface carries it moved: `reviews`
+   * is rendered by the ticket panel and by nothing that draws a list, so
+   * `slimTaskRow` keeps it off every board row and `projectRowInFull` — the
+   * shape `GET …/tasks/:id/detail` serves — is where it arrives.
+   *
+   * The board row is still the trigger. `addReviewItem` moves the task's
+   * `updatedAt`, the panel's overlay is keyed on that, and a projection that
+   * did not refresh leaves the row at its old revision — so the reader with
+   * the ticket open never refetches and never sees the item. That is the same
+   * defect these tests were written for, one surface along, and it is what
+   * the `updatedAt` assertions below hold.
+   *
+   * `options` and `answer` keep projecting to the BOARD — nothing is
+   * replaced, nothing is purged.
    */
   it('projects `reviews` beside `options` and `answer`', async () => {
     const ws = await seedWorkspace();
@@ -521,13 +533,22 @@ describe('the board projection', () => {
     const projectedDecision = map.get(decision.id) as Record<string, unknown>;
     const projectedAction = map.get(action.id) as Record<string, unknown>;
 
-    // Unchanged: the legacy fields still project, on the legacy task.
+    // Unchanged: the legacy fields still project to the board, on the legacy
+    // task. They are what the decision strip and the walkthrough read.
     expect(Array.isArray(projectedDecision.options)).toBe(true);
     expect((projectedDecision.answer as { text: string }).text).toBe('Keep disk.');
     expect(projectedDecision.reviews).toBeUndefined();
 
-    // New: the sidecar rows reach the browser.
-    const reviews = projectedAction.reviews as Array<{ id: string; review: ReviewPayload }>;
+    // The board row says it is short — the positive control that the row is
+    // projected at all, and the marker the panel keys its refetch on.
+    expect(projectedAction.reviews).toBeUndefined();
+    expect(projectedAction.detailTrimmed).toBe(true);
+    const storedAction = handle.tasks.getTask(action.id);
+    if (!storedAction) throw new Error('task went missing');
+
+    // …and the sidecar rows reach the reader who opens it.
+    const full = handle.projection.projectRowInFull(ws, storedAction);
+    const reviews = full.reviews as Array<{ id: string; review: ReviewPayload }>;
     expect(reviews).toHaveLength(1);
     expect(reviews[0].review.headline).toBe(REVIEW.headline);
   });
@@ -538,9 +559,10 @@ describe('the board projection', () => {
    *
    * Both create doors attach the row after `createTask` has already emitted
    * `task.created`, which is what refreshes the projection; `addReviewItem`
-   * emits nothing. So the board doc showed the new ticket without its
-   * `reviews` until some unrelated store event happened to touch the
-   * workspace, which on a quiet board is never. Deliberately no
+   * emits nothing. So the board doc showed the new ticket at its pre-item
+   * revision until some unrelated store event happened to touch the
+   * workspace, which on a quiet board is never — and a reader's panel, keyed
+   * on that revision, never asked for the item. Deliberately no
    * `handle.projection.refresh(...)` here — calling it is what hid this.
    */
   it('projects a review item filed on the SINGLE create door, with no extra refresh', async () => {
@@ -554,11 +576,7 @@ describe('the board projection', () => {
         author: AGENT,
       }),
     );
-    const map = handle.docStore.get(`ws:${ws}`)?.ydoc.getMap('tasks');
-    const projected = map?.get(task.id) as Record<string, unknown> | undefined;
-    const reviews = projected?.reviews as Array<{ review: ReviewPayload }> | undefined;
-    expect(reviews).toHaveLength(1);
-    expect(reviews?.[0]?.review.headline).toBe(REVIEW.headline);
+    expectItemReachesTheReader(ws, task.id);
   });
 
   /**
@@ -589,10 +607,70 @@ describe('the board projection', () => {
     );
     const last = tasks.find((t) => t.title === 'rebuild the index');
     expect(last, JSON.stringify(tasks.map((t) => t.title))).toBeDefined();
+    expectItemReachesTheReader(ws, last?.id ?? '');
+  });
+
+  /**
+   * The row a reader opening the ticket is handed carries the item, and the
+   * row on the wire is the trimmed one that sends them to ask for it.
+   *
+   * Note what is NOT asserted: that the board row CHANGED when the item was
+   * filed. On the create doors it does not, and cannot — `reviews` no longer
+   * projects, and `addReviewItem` stamps `updatedAt` in the same millisecond
+   * `createTask` did. An `updatedAt` equality here reads like a control and
+   * is one only by accident: commenting the `ensureWorkspace` call out of
+   * `routes/tasks-list-create.ts` left it green. The refresh that a reader
+   * genuinely depends on is the one after a LATER add, which the test below
+   * drives with a backdated row so the two stamps cannot collide.
+   */
+  function expectItemReachesTheReader(ws: string, taskId: string): void {
+    const stored = handle.tasks.getTask(taskId);
+    if (!stored) throw new Error('task went missing');
     const map = handle.docStore.get(`ws:${ws}`)?.ydoc.getMap('tasks');
-    const projected = map?.get(last?.id ?? '') as Record<string, unknown> | undefined;
-    const reviews = projected?.reviews as Array<{ review: ReviewPayload }> | undefined;
+    const projected = map?.get(taskId) as Record<string, unknown> | undefined;
+    // Positive control: the row IS on the board, so an absent `reviews`
+    // below is the trim and not an unprojected ticket.
+    expect(projected?.title).toBe(stored.title);
+    expect(projected?.reviews).toBeUndefined();
+
+    const full = handle.projection.projectRowInFull(ws, stored);
+    const reviews = full.reviews as Array<{ review: ReviewPayload }> | undefined;
     expect(reviews).toHaveLength(1);
     expect(reviews?.[0]?.review.headline).toBe(REVIEW.headline);
+  }
+
+  /**
+   * The refetch trigger, driven where it can actually fail.
+   *
+   * A reader with the ticket open holds the row it fetched against
+   * `id@updatedAt` (`mergeTaskDetail`). An item filed on an EXISTING ticket
+   * moves that stamp, and the projection has to carry the move — otherwise
+   * the panel is still keyed on the old revision, never asks again, and the
+   * new item is invisible to the one person it is addressed to.
+   *
+   * The row is backdated first so the create's stamp and the add's stamp
+   * cannot land in the same millisecond, which is what made the same
+   * assertion vacuous on the create door.
+   */
+  it('moves the board row on to the revision a reader must refetch at', async () => {
+    const ws = await seedWorkspace();
+    const action = await seedAction(ws);
+    const stored = handle.tasks.getTask(action.id);
+    if (!stored) throw new Error('task went missing');
+    stored.updatedAt = Date.now() - 60 * 60_000;
+    handle.projection.refresh(ws);
+    const map = handle.docStore.get(`ws:${ws}`)?.ydoc.getMap('tasks');
+    const before = (map?.get(action.id) as Record<string, unknown>).updatedAt as number;
+    expect(before).toBe(stored.updatedAt);
+
+    await jj(
+      await post(`/workspaces/${ws}/tasks/${action.id}/review-items`, {
+        review: REVIEW,
+        author: AGENT,
+      }),
+    );
+    const after = (map?.get(action.id) as Record<string, unknown>).updatedAt as number;
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBe(handle.tasks.getTask(action.id)?.updatedAt);
   });
 });

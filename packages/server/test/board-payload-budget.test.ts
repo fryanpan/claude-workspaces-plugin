@@ -21,7 +21,7 @@
  *
  *   - **It drives the REAL projection — BOTH halves.** The fixture is `Task`
  *     rows and store-shaped goal rows; the bytes come out of `projectTask` +
- *     `slimClosedRow` for the rows and `projectWorkspaceFields` +
+ *     `slimTaskRow` for the rows and `projectWorkspaceFields` +
  *     `projectGoalMeta` for the board's own fields. So a field added to any
  *     of the four lands in the measurement whether or not anybody thought to
  *     add it to a fixture. The first version of this test hand-built the
@@ -58,18 +58,20 @@
  * of `scripts/test-audit.baseline.json`. Two assertions, because they catch
  * different sizes of regression — both were run red before this landed:
  *
- *   - Dropping `notes` from `TRIMMED_ROW_FIELDS` — one word off a list — took
- *     the fixture from 756,209 bytes to 1,132,881 and failed the CEILING.
- *   - Adding one extra string field to every projected row took it to
- *     767,509, which is UNDER the ceiling's 2% headroom and failed the DRIFT
- *     check instead. That is the division of labour: the ceiling refuses a
- *     payload that is simply too big, and the drift band makes a smaller
- *     move land in the baseline diff rather than being absorbed by headroom.
+ *   - Emptying `ACTIVITY_FIELDS` so `notes` stop being trimmed — one word off
+ *     a list — took the fixture from 444,625 bytes to 870,903 and failed the
+ *     CEILING.
+ *   - Adding one eight-character string field to every projected row took it
+ *     to 452,625, which is UNDER the ceiling's 2% headroom and failed the
+ *     DRIFT check instead. That is the division of labour: the ceiling
+ *     refuses a payload that is simply too big, and the drift band makes a
+ *     smaller move land in the baseline diff rather than being absorbed by
+ *     headroom.
  *   - Doubling what the `options` branch carries — a branch no fixture row
- *     took until the coverage pass — reads 771,179 and fails both. Before
+ *     took until the coverage pass — reads 455,425 and fails both. Before
  *     that pass it would have moved nothing at all.
  *   - A bare scalar on the WORKSPACE fields (`schemaVersion: 3`) moves the
- *     total by twenty-nine bytes in seven hundred thousand and passes every
+ *     total by twenty-nine bytes in four hundred thousand and passes every
  *     band above. It fails the exact assertion on that map instead:
  *     12,619 -> 12,648. That is why the workspace half has its own scale.
  *
@@ -79,8 +81,11 @@
  * on 2026-09-10 by a raw handshake that got
  * `Sec-WebSocket-Extensions: permessage-deflate` back, against a control
  * handshake offering nothing that got no such header), and the live board's
- * 1,006,719 bytes of state deflate to 253,839 — about 4:1. So what a reader
- * WAITS for is roughly a quarter of what this test measures.
+ * 1,001,594 bytes of projected state deflate to 245,920 — about 4:1. So what
+ * a reader WAITS for is roughly a quarter of what this test measures, and the
+ * two do not move together: the per-field trim took that board's raw bytes
+ * down 30.5% and its WIRE bytes down 42.0%, because the prose it drops is the
+ * part that was not already compressing 20:1 against its neighbours.
  *
  * Raw is still the right subject for a ratchet. A fixture's compressibility
  * is a property of its filler text rather than of the board — this one
@@ -95,7 +100,7 @@ import { join } from 'node:path';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
-import { slimClosedRow } from '../src/task-row-slim.ts';
+import { slimTaskRow } from '../src/task-row-slim.ts';
 import { projectGoalMeta, projectTask, projectWorkspaceFields } from '../src/task-row.ts';
 import { FIXTURE_NOW, boardFixture } from './board-payload-fixture.ts';
 
@@ -121,7 +126,7 @@ const MSG_SYNC = 0;
  * frame a fresh tab is answered with.
  *
  * `trim: false` is the positive control's door: it writes the same rows with
- * `slimClosedRow` skipped, which is what a regression that dropped the trim
+ * `slimTaskRow` skipped, which is what a regression that dropped the trim
  * would produce.
  */
 function syncStep2Bytes(trim: boolean, half: 'all' | 'workspace' = 'all'): number {
@@ -132,7 +137,7 @@ function syncStep2Bytes(trim: boolean, half: 'all' | 'workspace' = 'all'): numbe
     const tasksMap = doc.getMap('tasks');
     for (const task of half === 'workspace' ? [] : tasks) {
       const row = projectTask(task, 0, 'agent', task.assigneeId);
-      tasksMap.set(task.id, trim ? slimClosedRow(row, FIXTURE_NOW) : row);
+      tasksMap.set(task.id, trim ? slimTaskRow(row, FIXTURE_NOW) : row);
     }
     // The board's OWN fields go through the same projector `refresh` calls,
     // for the reason this whole test exists: a hand-built literal here would
@@ -248,7 +253,7 @@ describe('the workspace half of the map', () => {
 describe('the control — a payload nobody trimmed', () => {
   it('is far over the budget, so the fixture is heavy enough to mean something', () => {
     // Without this, a green budget proves only that the fixture was small.
-    // The same 500 rows with `slimClosedRow` skipped is what the board looked
+    // The same 500 rows with `slimTaskRow` skipped is what the board looked
     // like before PR 848, and it must fail the gate loudly.
     const untrimmed = syncStep2Bytes(false);
     expect(untrimmed).toBeGreaterThan(baseline.budgetBytes * 2);

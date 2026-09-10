@@ -238,11 +238,12 @@ export interface BoardTask {
   body?: string;
   bodyTruncated?: boolean;
   /**
-   * This row arrived as a LIST row: the server dropped `body`, `notes`,
-   * `reviews` and `quote` and stripped the prose off each transition, because
-   * the row is closed and has not moved in a day. Set by the server
-   * (`slimClosedRow`) and by nothing else; absent on every row that arrived
-   * whole and on any server older than the trim.
+   * This row arrived as a LIST row: the server dropped the fields no list
+   * surface reads — `reviews` and `quote` always, `body` on everything but an
+   * open decision, `notes` once the row has been still for a day — and
+   * stripped the prose off each transition. Set by the server (`slimTaskRow`)
+   * and by nothing else; absent on every row that arrived whole and on any
+   * server older than the trim.
    *
    * The panel reads it and asks `GET …/tasks/:id/detail` for the rest — see
    * `board-task-detail.ts`. Nothing else should branch on it: a surface that

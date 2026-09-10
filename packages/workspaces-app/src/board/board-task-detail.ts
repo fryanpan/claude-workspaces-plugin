@@ -1,14 +1,15 @@
 /**
- * The five fields a closed row does not arrive with, fetched for the one
- * reader who opened it.
+ * The fields a row does not arrive with, fetched for the one reader who
+ * opened it.
  *
- * The server sends a closed task out as a LIST row — no body, no notes, no
- * review items, no original words, and a transition trail without its prose
- * (`task-row-slim.ts` on the server names the fields and the measurements).
- * That is what takes the board's sync from megabytes to hundreds of
- * kilobytes, and it is only safe because of this module: the panel asks for
- * the rest of a row the moment somebody opens one, and every surface
- * downstream reads the whole row exactly as it did before.
+ * The server sends a task out as a LIST row — no review items, no original
+ * words, no body unless a list surface draws it, no notes once the row has
+ * been still for a day, and a transition trail without its prose
+ * (`task-row-slim.ts` on the server names the reader behind each field and
+ * the measurements). That is what takes the board's sync from megabytes to a
+ * hundred-odd kilobytes on the wire, and it is only safe because of this
+ * module: the panel asks for the rest of a row the moment somebody opens one,
+ * and every surface downstream reads the whole row exactly as it did before.
  *
  * Three rules, and each of them is a bug this had on the way in:
  *
@@ -74,7 +75,7 @@ export function createTaskDetailLoads(deps: TaskDetailDeps): TaskDetailLoads {
     if (!taskId) return;
     const row = state.tasks.get(taskId);
     // Nothing to ask for: the row is not on the board yet, or it arrived
-    // whole because it is open or it closed within the day.
+    // whole because every field the trim looks at was already absent.
     if (!row?.detailTrimmed) return;
     const key = detailKey(taskId, row.updatedAt);
     if (asked.has(key) || state.taskDetail.has(key)) return;

@@ -1,13 +1,14 @@
 /**
- * The other half of the closed-row trim: one task's row, in full.
+ * The other half of the row trim: one task's row, in full.
  *
- * The board's ydoc carries a closed row as a LIST row — no body, no notes, no
- * review items, no original words, and a transition trail without its prose
- * (`task-row-slim.ts` says why, and names the fields). Everything dropped
- * there has exactly one reader, the open detail panel, and this is where that
- * reader gets it back. One extra round trip when somebody opens a ticket that
- * closed more than a day ago; nothing at all for every other row, and 1.4 MB
- * off the download that every board reader pays on every load.
+ * The board's ydoc carries every row as a LIST row — no review items, no
+ * original words, no body (bar an open decision, whose card a list surface
+ * draws), no notes once it has been still for a day, and a transition trail
+ * without its prose (`task-row-slim.ts` says why, and names the reader behind
+ * each field). Everything dropped there has exactly one reader, the open
+ * detail panel, and this is where that reader gets it back. One extra round
+ * trip when somebody opens a ticket; nothing at all for anyone who does not,
+ * and 42% off the wire bytes that every board reader pays on every load.
  *
  * Gated like every other row-addressed task route — `share-scope`, resolved
  * once by `middleware/workspace-scope.ts` — because it answers with exactly
