@@ -5,6 +5,7 @@ import { fetchDocMeta } from './doc-meta.ts';
 import { docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
 import { el, showToast } from './doc/chrome-dom.ts';
 import { wireThreadRangeClicks } from './doc/chrome-panels.ts';
+import { marginComposerSlot } from './doc/composer-slot.ts';
 import { type CommentPillHandle, mountCommentPill } from './doc/doc-comment-pill.ts';
 import { mountDocFloats } from './doc/doc-floats.ts';
 import { wireDocGates } from './doc/doc-gates.ts';
@@ -288,6 +289,11 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
       (document.activeElement as HTMLElement | null)?.blur?.();
     },
     hidePill: () => pill?.hide(),
+    // The composer opens in the balloon margin, level with the words it is
+    // about, whenever that margin is on screen (doc/composer-slot.ts). The
+    // column is mounted just below this call, so it is looked up per open
+    // rather than captured here.
+    placeComposer: () => marginComposerSlot({ editor, editorMount, composer }),
     // The markdown surface mounts the balloon margin unconditionally below.
     hasBalloonMargin: true,
   });

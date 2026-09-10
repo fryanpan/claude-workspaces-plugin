@@ -77,14 +77,6 @@ function docText(docStore: DocStore, docId: string): string {
   return prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
 }
 
-let mtimeBump = 0;
-function writeExternal(path: string, content: string): void {
-  writeFileSync(path, content);
-  mtimeBump += 2;
-  const t = new Date(Date.now() + mtimeBump * 1000);
-  utimesSync(path, t, t);
-}
-
 const REL = 'docs/plans/triage.md';
 
 describe('doc origin repos through the binding', () => {
@@ -210,7 +202,7 @@ describe('doc origin repos through the binding', () => {
     // The checkout switches branches AND the file at the old path changes
     // (what a real `git checkout` does to tracked files).
     git(wt, 'checkout', '-b', 'feature-detour');
-    writeExternal(join(wt, REL), '# Somebody else\n\nfeature-branch copy\n');
+    writeFileSync(join(wt, REL), '# Somebody else\n\nfeature-branch copy\n');
     // timed: the assertion is that the poll (500ms) plus read debounce never
     // pulls those bytes in, so the whole read window has to elapse first.
     await sleep(pastExternalRead());
@@ -225,7 +217,7 @@ describe('doc origin repos through the binding', () => {
     docStore.flush();
     // Un-flushed live edit + immediate external write to the same file.
     setProse(docStore, 'd1', '# Triage\n\nlive edit wins\n');
-    writeExternal(join(wt, REL), '# Clobber\n\ndirect write\n');
+    writeFileSync(join(wt, REL), '# Clobber\n\ndirect write\n');
     await waitForFileText(join(wt, REL), 'live edit wins');
     expect(docText(docStore, 'd1')).toContain('live edit wins');
     expect(docText(docStore, 'd1')).not.toContain('direct write');
@@ -312,7 +304,7 @@ describe('doc origin repos through the binding', () => {
     // belongs to somebody else's feature work; the home branch has no
     // checkout anywhere.
     git(wt, 'checkout', '-b', 'feature-detour');
-    writeExternal(join(wt, REL), '# Somebody else\n\nfeature-branch copy\n');
+    writeFileSync(join(wt, REL), '# Somebody else\n\nfeature-branch copy\n');
 
     const res = docStore.reparseFromDisk('d1');
     expect(res.ok).toBe(false);

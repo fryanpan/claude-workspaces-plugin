@@ -8,9 +8,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { prose } from '@claude-workspaces/core';
-import { buildNotesPrompt } from '../src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
+import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import { MAX_FLAT_RUN_BULLETS } from '../src/notes-quality.ts';
 import { homelessRun, regroupDirective, regroupTargets } from '../src/notes-regroup.ts';
 

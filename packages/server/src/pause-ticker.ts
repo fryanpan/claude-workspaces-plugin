@@ -115,15 +115,36 @@ export const DEFAULT_NOTES_ENDPOINT_CONFIRM_MS = 1_000;
 
 /**
  * The longest any unwritten speech may wait for a note, however continuously
- * people are talking. Long enough that a tick still covers a stretch of
- * conversation worth summarizing rather than one sentence at a time — and
- * short enough that the notes read as keeping up rather than catching up
- * (owner's number, 2026-08-30: "about 15 seconds").
+ * people are talking.
  *
  * Unlike `DEFAULT_NOTES_QUIET_MS` this is a CEILING, not a threshold: a pause
  * still fires sooner whenever it comes.
+ *
+ * SIX SECONDS, AND WHY IT MOVED FROM FIFTEEN (Bryan, 2026-09-10). The board
+ * asks for a note within ten seconds. Measured over the 91 notes in every
+ * prod timing record, settled-words-to-note ran a median of 17.3s, p90 25.0s;
+ * 15.0s of that median was spent BEFORE the model was called and 2.2s was the
+ * call, so 87% of the wait is upstream of the model and this clock is what
+ * sets it.
+ *
+ * THE NUMBER THAT DECIDED IT: 48 of those 91 notes waited the FULL fifteen
+ * seconds, and 79% waited more than six. Fifteen was the MEDIAN wait, not a
+ * worst case. That is true even though most notes arrive on a pause rather
+ * than on this ceiling — 56 of the 91 — because the wait is measured from the
+ * OLDEST unwritten words, and a pause that comes after a minute of argument
+ * flushes words that settled a minute ago; pause ticks still ran a 9.5s
+ * median. So the ceiling binds the whole upper half of the distribution, not
+ * just the ticks it fires. Capping the wait at six seconds models out at a
+ * 8.0s median and a 9.7s p90, with 93% of notes inside ten seconds against
+ * 16% today.
+ *
+ * WHAT PAID FOR IT. Firing more than twice as often would have more than
+ * doubled the bill, because 98% of a tick is the prompt and the prompt was
+ * re-sent whole every time. It is now built stable-prefix-first and cached
+ * (`meeting-notes-composer.ts`), so the part that repeats is billed at a
+ * tenth. The two changes ship together and neither is sound alone.
  */
-export const DEFAULT_NOTES_CADENCE_MS = 15_000;
+export const DEFAULT_NOTES_CADENCE_MS = 6_000;
 
 export interface PauseTickerOpts {
   /** How long the transcript stream must be quiet before a tick fires, when

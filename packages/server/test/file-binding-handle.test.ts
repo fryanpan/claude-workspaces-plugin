@@ -197,8 +197,21 @@ describe('a binding drives its doc only through the host', () => {
     expect(bindings.pendingWriteDocIds()).toEqual([DOC_ID]);
     expect(bindings.hasPendingWrite(DOC_ID)).toBe(true);
 
+    // Two waits, because the bytes and the call are two different moments.
+    // The bytes become visible at the `rename` INSIDE the pool write; the host
+    // is told in the `.then()` of that write, once the completion reaches the
+    // event loop. A timer that fires in between sees the file and not the
+    // call — and timers run before I/O completions, so this is a window rather
+    // than a coincidence: it cost CI a red on a PR that never touched this
+    // file, and reproduces at 3/30 on the unchanged code under load.
     await waitFor(() => readFileSync(filePath, 'utf8').includes('live edit'), {
       describe: 'the write-back to reach disk',
+      timeout: DOC_STORE_TIMINGS.writeBackMs + 4000,
+    });
+    // Still a control — the bytes must be there — but the ORDER below is about
+    // the host, so wait for the host.
+    await waitFor(() => rec.calls.includes(`clearPendingFileWrite(${DOC_ID})`), {
+      describe: 'the host to be told the pending write is gone',
       timeout: DOC_STORE_TIMINGS.writeBackMs + 4000,
     });
 

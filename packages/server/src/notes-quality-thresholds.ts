@@ -110,12 +110,13 @@ export const MIN_IDEAS_FOR_COVERAGE = 10;
  * How long after a turn settles its note may land before the wait is late.
  *
  * A minute. The notes clocks are held at four seconds of quiet and a
- * fifteen-second cadence ceiling (Bryan, 2026-09-04, and
+ * six-second cadence ceiling (Bryan, 2026-09-10, and
  * `DEFAULT_NOTES_QUIET_MS` / `DEFAULT_NOTES_CADENCE_MS` are where they live),
  * so a healthy turn reaches a note inside one cadence window plus the compose
- * itself. Sixty seconds is four of those windows: long enough that ordinary
- * jitter and one slow compose never trip it, short enough that the notes
- * falling a topic behind the room does.
+ * itself. Sixty seconds was four of those windows when the ceiling was
+ * fifteen; against six it is ten, and it stays a minute deliberately — the
+ * threshold is the point at which the notes are a topic behind the room,
+ * which is a fact about the conversation rather than about the ceiling.
  *
  * WHAT THE NUMBER IS MEASURED FROM, which the four-windows reasoning above
  * understates. `settledToWrittenMs` is charged from the OLDEST turn on a

@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-method-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
@@ -97,7 +97,11 @@ instructions as a **thunk** and calls it per tick, so an edit made on
 deploy. The shipped default for each stays beside the code that builds the
 rest of its message (`notes-prompt-store.ts`, `meeting-capture-prompt.ts`,
 `voice-prompt.ts`, `core/summary-prompt.ts`), and the catalog imports them;
-the store never holds a default, only an override. Two of the six are
+the store never holds a default, only an override. The notes composer's own
+half of that — assembling the tick's whole prompt — came out to
+`notes-prompt-build.ts` when the compose started taking a prompt cache: it
+returns the prompt already split at the line the cache breakpoint is taken
+on, and `meeting-notes-composer.ts` is left with the HTTP seam. Two of the six are
 fields on a **board** rather than on the server and keep being written
 through `PUT /api/workspaces/<id>/settings` — `routes/prompts.ts` says so
 with `scope` rather than serving them twice, and the client hides the split.
@@ -252,6 +256,19 @@ that runs a subprocess and the only part holding state between calls: one
 `git log` per repository, memoized, because a corpus of thousands of documents
 cannot afford one per document.
 
+`note-list-gap-repair.ts` and `note-list-gap-corpus.ts` join that group and
+change nothing about the picture: another corpus walk nothing on the server
+calls, driven by `scripts/repair-note-list-gaps.ts`. They split the way the
+doc-identity pair does — the first decides and rewrites a `Y.Doc` it is
+handed and never sees a filesystem, the second walks a data directory, takes
+the backup and writes. It repairs the documents whose notes read
+with blank lines between them — an empty paragraph a browser left at a
+section end, which stopped each new note joining the list above it — by
+moving the stranded items into that list and re-minting the comment anchors
+at the offsets they held. The defect that made them is fixed in
+`packages/core/src/prose-batch.ts`; this is only the documents already
+written.
+
 **A bound mockup is a live surface, and it keeps its rounds.** A mockup's doc
 holds no content of its own — its surface is somebody's HTML file — so the four
 `mockup-*.ts` modules are what make that file behave like an attachment.
@@ -261,7 +278,10 @@ serve time, so review scaffolding never has to live in a file a build step
 writes or git tracks. `file-binding.ts` watches the source through the SAME
 shared mtime sweep every bound `.md` uses — a mockup binding is watch-only,
 never writes back, and touches no fragment — and hands each change up as a
-`mockup.updated` frame on the doc's own channels. An open page fetches the
+`mockup.updated` frame on the doc's own channels. What that sweep calls a
+change is one stamp, and `file-stamp.ts` is where it is read: the mtime in
+NANOSECONDS plus the byte count, so a same-length write landing in the same
+millisecond as the last one is still seen. An open page fetches the
 round it names and swaps its content in place, keeping the reader's scroll and
 letting the widget re-anchor its threads onto the new DOM, so a comment whose
 element is gone becomes an outdated one rather than a lost one. The page-side half of that script is two modules in the widget package rather
@@ -459,7 +479,7 @@ owns. It is named here only because it is the answer to a question the picture
 did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-invented-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-quota-notice.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-quota-notice.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 

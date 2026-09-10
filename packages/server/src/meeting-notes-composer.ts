@@ -31,12 +31,10 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
-import type { NotesComposeInput, NotesComposer, NotesTick, NotesTurn } from './meeting-notes.ts';
+import type { NotesComposeInput, NotesComposer } from './meeting-notes.ts';
 import { refusalMessage } from './model-quota.ts';
-import { MEETING_NOTES_HEADING, NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
-import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
-import { regroupDirective } from './notes-regroup.ts';
+import { buildNotesPrompt } from './notes-prompt-build.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { authHeader, resolveCredentialFrom } from './summarize.ts';
 
@@ -57,248 +55,6 @@ const API_URL = 'https://api.anthropic.com/v1/messages';
  */
 const MAX_TOKENS = 2_000;
 const TIMEOUT_MS = 30_000;
-
-/**
- * How much of the doc's body the outline may carry into one prompt.
- *
- * Headings are never dropped by the cap (`prose.readOutline`), so the model
- * can always see every topic and put a point under the right one; what this
- * bounds is the BULLETS, counted from the end of the doc. That is what keeps a
- * tick's prompt the size of the recent conversation rather than the size of
- * the meeting — the exact thing that made late ticks slow and then refused.
- * Eighty is generous against what a tick needs: a pause covers a minute or two
- * of speech and lands two or three bullets, so eighty is most of the last
- * half-hour of notes, and a point older than that belongs under a heading
- * rather than folded into a bullet the model can no longer see.
- */
-export const NOTES_OUTLINE_RECENT_BLOCKS = 80;
-
-/** The heading a meeting's section is opened under, as one markdown line. */
-const HEADING_LINE = `## ${MEETING_NOTES_HEADING}`;
-
-/**
- * How a tick's speech is introduced.
- *
- * A tick carries what was said SINCE the last one, which is what this says.
- * The at-stop cleanup pass carries the whole meeting instead
- * (`notes-cleanup-pass.ts`) and overrides it through `transcriptLabel`: a
- * model told these are the newest words, and handed an hour of them, reads
- * the opening of the meeting as something just said.
- */
-const DEFAULT_TRANSCRIPT_LABEL = 'New transcript since the last update';
-
-/**
- * Prompt building is pure and exported: what the transcript is asked to
- * become is behaviour worth pinning without a network in the test.
- *
- * `instructions` is the system prompt — the note-taking rules, which now come
- * from a store rather than from a literal here (`notes-prompt-store.ts`).
- * They default to the stored default, so every existing caller and every test
- * that built a prompt without one still gets the words it always got.
- */
-export function buildNotesPrompt(
-  input: NotesComposeInput,
-  instructions: string = DEFAULT_NOTES_INSTRUCTIONS,
-): { system: string; user: string } {
-  // A SOLO MEETING IS SENT NO ATTRIBUTION RULES. Its transcript lines carry
-  // no name — the session strips them until a second voice is heard — so
-  // rules demanding a speaker tag on every note, and spelling "Speaker B" as
-  // what such a name looks like, are asking for something the model can only
-  // supply by inventing it. That is the phantom, named in the prompt before
-  // the composer ever wrote it.
-  const system =
-    input.multiSpeaker === false ? withoutSpeakerAttribution(instructions) : instructions;
-
-  const parts: string[] = [];
-  const ctx = input.context;
-  const ctxLines: string[] = [];
-  if (ctx?.docTitle) ctxLines.push(`- Meeting doc: ${ctx.docTitle}`);
-  if (ctx?.repoRoot) ctxLines.push(`- Repository: ${ctx.repoRoot}`);
-  if (ctx?.docPaths?.length) ctxLines.push(`- Project docs: ${ctx.docPaths.join(', ')}`);
-  if (ctx?.taskTitles?.length) {
-    ctxLines.push('- Open board tasks (the work likely under discussion):');
-    for (const title of ctx.taskTitles) ctxLines.push(`  - ${title}`);
-  }
-  if (ctxLines.length > 0) parts.push(`Project context:\n${ctxLines.join('\n')}`);
-
-  if (input.taskLinks?.length) {
-    parts.push(
-      [
-        'Board tasks captured from this speech. Where a note covers one, cite',
-        'it as a markdown link — [its title](its url), or your own words as',
-        'the label when the note reads better that way. Keep links already in',
-        'the notes.',
-        ...input.taskLinks.map((l) => `- [${l.title}](${l.url}) — ${l.status}`),
-      ].join('\n'),
-    );
-  }
-
-  if (input.docLinks?.length) {
-    parts.push(
-      [
-        'Material somebody in this meeting asked to have pulled in, already',
-        'found. Cite it in the note that asked for it, as a markdown link.',
-        'Do not summarize what is inside it — you have not read it, and the',
-        'link is the answer.',
-        ...input.docLinks.map((l) => `- [${l.title}](${l.url})${l.when ? ` — ${l.when}` : ''}`),
-      ].join('\n'),
-    );
-  }
-
-  if (input.references?.length) {
-    parts.push(
-      [
-        'Named in this speech, and already on the board. Where a note covers',
-        'one, write its name as a markdown link — [its title](its url) — the',
-        'first time that note mentions it. Do not add one to a note that is',
-        'not about it, and do not link the same thing twice in one note.',
-        ...input.references.map(
-          (r) => `- [${r.title}](${r.url}) — ${r.kind}${r.when ? `, met ${r.when}` : ''}`,
-        ),
-      ].join('\n'),
-    );
-  }
-
-  if (input.missed?.length) {
-    parts.push(
-      [
-        'SAID EARLIER AND STILL IN NO NOTE. Each of these went past without',
-        'producing anything. Read them again with the notes above in front of',
-        'you: write the note each one should have produced, under the heading',
-        'it belongs to. Leave one out only if it is genuinely packaging — a',
-        'greeting, a false start, or a point the notes already carry in other',
-        'words. This is their last offer; nothing asks again.',
-        ...input.missed.map((t) => `- ${speakerPrefix(t)}${t.text}`),
-      ].join('\n'),
-    );
-  }
-
-  if (input.extraPrompt) parts.push(input.extraPrompt);
-  // AFTER the material blocks and BEFORE the outline, because it is about the
-  // outline: a directive naming block ids reads as an instruction about the
-  // table that follows it rather than as one more piece of context.
-  const regroup = regroupDirective(input.outline, {
-    author: NOTES_AUTHOR_ID,
-    notesHeadingId: input.notesHeadingId,
-  });
-  if (regroup) parts.push(regroup);
-  parts.push(renderOutline(input));
-  parts.push(
-    `${input.transcriptLabel ?? DEFAULT_TRANSCRIPT_LABEL}:\n${input.tick.turns
-      .map((t) => `- ${speakerPrefix(t)}${t.text}${turnSuffix(t, input.tick.reason)}`)
-      .join('\n')}`,
-  );
-  return { system, user: parts.join('\n\n') };
-}
-
-/**
- * The doc as the model addresses it: one line per block, carrying the id an
- * edit comes back with, what kind of block it is, whose it is, and its words.
- *
- * DELIBERATELY NOT MARKDOWN. Handing the model the section as prose is what
- * made it answer with prose — a whole rewritten section, indistinguishable
- * from the one it was given except where it had changed its mind. A table of
- * ids is a different question: it can only be answered by naming blocks.
- *
- * "yours" and "theirs" are read off `author`, which the doc clears the moment
- * a person edits a block (`clearAuthorshipOnPersonEdit`). So "yours" means
- * "you wrote this and nobody has touched it since", which is exactly the set
- * of blocks an edit may rewrite directly — anything else reaches them as a
- * suggestion, and the instructions say so.
- */
-function renderOutline(input: NotesComposeInput): string {
-  if (input.outline.length === 0) {
-    return [
-      'The doc is empty, and this meeting has no notes section yet.',
-      `Open one with a single insert_at_end carrying "${HEADING_LINE}", then`,
-      'insert_at_end the first notes under it.',
-    ].join('\n');
-  }
-  const lines = input.outline.map((entry) => {
-    const kind =
-      entry.kind === 'heading'
-        ? `h${entry.level ?? 2}`
-        : entry.kind === 'listItem'
-          ? // A GROUPED TOPIC HAS TO READ AS GROUPED. Every bullet used to
-            // print as `bullet`, so a topic already gathered under lead
-            // bullets was indistinguishable from a wall — which made the
-            // instruction to regroup one impossible to act on and impossible
-            // to stop acting on. `sub-bullet` is the whole difference.
-            (entry.depth ?? 0) > 0
-            ? 'sub-bullet'
-            : 'bullet'
-          : 'para';
-    const whose = entry.author === undefined ? 'theirs' : 'yours';
-    const under =
-      entry.kind === 'heading' || entry.underHeadingId === undefined
-        ? ''
-        : ` under=${entry.underHeadingId}`;
-    return `${entry.id} ${kind} ${whose}${under} | ${entry.text}`;
-  });
-  const head =
-    input.notesHeadingId === undefined
-      ? [
-          'This meeting has NO notes section in the doc below.',
-          `Open one with a single insert_at_end carrying "${HEADING_LINE}".`,
-        ]
-      : [`This meeting's notes are under heading ${input.notesHeadingId}.`];
-  return [
-    ...head,
-    '',
-    'The doc, block by block — "id kind whose | text". Only the most recent',
-    'blocks are listed; every heading is. A "sub-bullet" sits under the',
-    '"bullet" above it.',
-    ...lines,
-  ].join('\n');
-}
-
-/**
- * How an unfinished sentence is presented, and what makes it unfinished.
- *
- * Two things reach the composer as fragments now, and they are not the same
- * fact. The last sentence of a MEETING is cut off because the recording
- * stopped; a sentence carried by a ceiling tick is cut off because the
- * speaker is still saying it. A composer told the recording stopped, in the
- * middle of a meeting that is still going, is being misinformed — it was one
- * string when only the final tick could carry a fragment.
- *
- * Either way it is the engine's raw text: no punctuation, no sentence
- * casing, sometimes cut mid-word. Saying so is what stops the note-taker
- * rendering a fragment as a finished point — the instructions already ask it
- * to end a note it is unsure of with `(unconfirmed)`, and this is that case
- * named on the wire.
- */
-const PARTIAL_SUFFIX = ' [unfinished — the recording stopped mid-sentence]';
-const STILL_SPEAKING_SUFFIX = ' [unfinished — they are still saying it]';
-
-/**
- * And how the REST of a sentence is presented, once its earlier words have
- * already been written.
- *
- * A ceiling tick hands over as much of a long turn as the engine has
- * committed to, and the remainder arrives on a later tick. Without this the
- * remainder reads as a new thought and the note-taker opens a second point
- * for the second half of one sentence — which is the whole reason the ticker
- * marks it.
- */
-const CONTINUED_SUFFIX = ' [continues a sentence already in the notes]';
-
-/** The markers one transcript line carries, in reading order. */
-function turnSuffix(t: NotesTurn, reason: NotesTick['reason']): string {
-  const continued = t.continued ? CONTINUED_SUFFIX : '';
-  if (!t.partial) return continued;
-  return `${continued}${reason === 'end' ? PARTIAL_SUFFIX : STILL_SPEAKING_SUFFIX}`;
-}
-
-/**
- * "Devi (B): " — the name to write and the label to tag with, in the one
- * place the composer reads them from. A turn the session never mapped a
- * label onto keeps the bare name; a turn with no voice at all keeps none.
- */
-function speakerPrefix(turn: NotesTurn): string {
-  if (!turn.speaker) return '';
-  return turn.speakerLabel ? `${turn.speaker} (${turn.speakerLabel}): ` : `${turn.speaker}: `;
-}
 
 /**
  * A reply read as edits: fences stripped, malformed entries discarded with a
@@ -392,7 +148,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
             'api.anthropic.com. Turn off with CW_MEETING_NOTES=0.',
         );
       }
-      const { system, user } = buildNotesPrompt(input, opts.instructions?.());
+      const { system, stable, volatile, user } = buildNotesPrompt(input, opts.instructions?.());
       // Sizes and the model name, so a slow tick can be read back against
       // what it actually asked for. Reported BEFORE the call: a tick that
       // times out is exactly the one whose prompt size matters, and a report
@@ -413,7 +169,28 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
             model,
             max_tokens: maxTokens,
             system,
-            messages: [{ role: 'user', content: user }],
+            // TWO BLOCKS, AND THE BREAKPOINT BETWEEN THEM. The head is the
+            // instructions' company: project context and the doc as it
+            // stands, which read the same from tick to tick and grow at the
+            // end. The tail is this tick. One breakpoint, at the join.
+            //
+            // THE MARKER IS NOT A GUARANTEE. Every model has a minimum
+            // cacheable prefix — 4096 tokens on Haiku 4.5, this composer's
+            // model — and a marker on anything shorter is IGNORED IN SILENCE:
+            // no entry, no error, and a reply that looks exactly like a hit.
+            // The first ticks of a meeting are below it, because the doc has
+            // barely any notes in it yet, and there is nothing to do about
+            // that but say so: `NotesTokenUsage` records what was actually
+            // read from cache, so the share is measured rather than assumed.
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
+                  { type: 'text', text: volatile },
+                ],
+              },
+            ],
             ...(opts.effort ? { output_config: { effort: opts.effort } } : {}),
           }),
           signal: ctl.signal,
@@ -429,7 +206,28 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
         const body = (await res.json()) as {
           content?: Array<{ text?: string }>;
           stop_reason?: string | null;
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
         };
+        // WHAT IT COST, FROM THE ONLY PLACE THAT KNOWS. Reported before the
+        // reply is parsed, so a tick whose edit list is unreadable still
+        // prices itself — the money was spent either way, and a failure
+        // silently missing from the bill is how a cost report drifts.
+        const u = body.usage;
+        if (u) {
+          input.measure?.({
+            usage: {
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              cacheReadTokens: u.cache_read_input_tokens ?? 0,
+              cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+            },
+          });
+        }
         if (body.stop_reason === 'max_tokens') {
           throw new Error('notes compose hit max_tokens; refusing a truncated edit list');
         }

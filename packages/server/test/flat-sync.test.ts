@@ -58,14 +58,6 @@ async function waitForYdoc(dataDir: string, docId: string): Promise<void> {
   );
 }
 
-let mtimeBump = 0;
-function writeExternal(path: string, content: string): void {
-  writeFileSync(path, content);
-  mtimeBump += 2;
-  const t = new Date(Date.now() + mtimeBump * 1000);
-  require('node:fs').utimesSync(path, t, t);
-}
-
 const SRC = 'fun main() {\n    println("one")\n    println("two")\n}\n';
 
 /** The board this file's docs, tasks and reviews are filed under. */
@@ -110,7 +102,7 @@ describe('flat write-back', () => {
   it('external edits still flow in, and the write-back does not echo them back out', async () => {
     expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
     const changed = SRC.replace('two', 'three');
-    writeExternal(path, changed);
+    writeFileSync(path, changed);
     // The file poll (500ms) plus the read debounce (150ms) put the external
     // bytes into the doc; wait for the doc, not for the clock.
     await waitFor(() => docStore.get('c1')?.ydoc.getText('content').toString() === changed, {
@@ -127,7 +119,7 @@ describe('flat write-back', () => {
   it('conflict: un-flushed live edit + external write keeps live, backs up external, sets syncError', async () => {
     expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
     docStore.get('c1')?.ydoc.getText('content').insert(0, '// live edit\n');
-    writeExternal(path, SRC.replace('two', 'external'));
+    writeFileSync(path, SRC.replace('two', 'external'));
     expect(docStore.reconcileNow('c1')).toBe('conflict');
     // Live wins on disk...
     await waitForFile(path, (t) => t.includes('// live edit'));
@@ -397,7 +389,7 @@ describe('flat write-back through bindDiff', () => {
     doc.ydoc.getText('content').insert(0, readFileSync(file, 'utf8'));
     await waitForYdoc(dataDir, 'crash2');
     const downtimeEdit = '// written while the server was down\n';
-    writeExternal(file, downtimeEdit); // future mtime > .ydoc mtime
+    writeFileSync(file, downtimeEdit); // written after the .ydoc, so its mtime is newer
 
     const restarted = makeDocStore(dataDir);
     // `get` brings the doc back in this turn and its file binding a moment

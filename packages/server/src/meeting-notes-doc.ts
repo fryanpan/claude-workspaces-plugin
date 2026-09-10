@@ -56,7 +56,6 @@ import { contentKind, prose as proseNs } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { docLookupUrl } from './meeting-lookup.ts';
-import { NOTES_OUTLINE_RECENT_BLOCKS } from './meeting-notes-composer.ts';
 import { correctNotesSection } from './meeting-notes-correction.ts';
 import {
   type MeetingNotesDeps,
@@ -94,6 +93,7 @@ import {
   LEGACY_TRANSCRIPT_HEADING,
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
+import { NOTES_OUTLINE_DROP_STEP, NOTES_OUTLINE_RECENT_BLOCKS } from './notes-prompt-build.ts';
 import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
@@ -593,12 +593,17 @@ export function notesWriteSkipDetail(skip: NotesWriteSkip): string {
 }
 
 /** The doc as the composer addresses it, capped so a tick's prompt is the size
- *  of the recent conversation rather than of the meeting. */
+ *  of the recent conversation rather than of the meeting — and dropped in
+ *  steps rather than one at a time, so the head of it is the same text tick
+ *  after tick and the prompt cache can take it (`NOTES_OUTLINE_DROP_STEP`). */
 export function readNotesOutlineForTick(
   docStore: NotesDocStore,
   docId: string,
 ): readonly prose.OutlineEntry[] {
-  return readNotesOutline(docStore, docId, { recentBlocks: NOTES_OUTLINE_RECENT_BLOCKS });
+  return readNotesOutline(docStore, docId, {
+    recentBlocks: NOTES_OUTLINE_RECENT_BLOCKS,
+    recentBlocksStep: NOTES_OUTLINE_DROP_STEP,
+  });
 }
 
 /**

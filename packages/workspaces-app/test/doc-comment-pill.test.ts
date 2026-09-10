@@ -136,6 +136,15 @@ describe('a range selection', () => {
   });
 });
 
+/** Put the caret in the prose the way a tap does: the editor holds focus, the
+ *  selection is collapsed, and an arrow keyup settles it. That is the state
+ *  the lighter caret-mode pill appears in. */
+function caretInEditor(editor: EditorHandle, at: number): void {
+  (editor.editor.view.dom as HTMLElement).focus();
+  editor.editor.commands.setTextSelection({ from: at, to: at });
+  editor.editor.view.dom.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight' }));
+}
+
 describe('tapping the round pill', () => {
   it('opens the composer on the standing selection', () => {
     const { editor, editorMount, openComposer } = mount();
@@ -144,6 +153,37 @@ describe('tapping the round pill', () => {
     repositionViaScroll(editorMount);
     pill().click();
     expect(openComposer).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the composer in caret mode too — one press, not a second button', () => {
+    const { editor, openComposer, pointer } = mount();
+    caretInEditor(editor, 5);
+    expect(pill().classList.contains('caret')).toBe(true);
+    pill().click();
+    expect(openComposer).toHaveBeenCalledTimes(1);
+    expect(pointer.show).not.toHaveBeenCalled();
+  });
+
+  it('does the same on a huddle doc, where it used to hand over a second one', () => {
+    // The press used to select the sentence and grow the pointer pill's
+    // Comment button over it, so commenting cost two presses (Bryan,
+    // 2026-09-10). The round pill is the comment affordance on every surface.
+    const { editor, openComposer } = mount({ huddle: true });
+    caretInEditor(editor, 5);
+    expect(pill().classList.contains('caret')).toBe(true);
+    pill().click();
+    // It used to be zero here: the press ended in the pointer pill, and the
+    // composer waited for a press on THAT. (The pointer pill is still grown
+    // over the sentence the selection makes, and `openComposer` takes both
+    // pills down on its way in — `hidePill`, wired in review-chrome.)
+    expect(openComposer).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects the sentence the caret sits in before it opens', () => {
+    const { editor, handle } = mount();
+    caretInEditor(editor, 5);
+    pill().click();
+    expect(handle.currentSelection()?.snippet).toBe('One sentence.');
   });
 });
 
