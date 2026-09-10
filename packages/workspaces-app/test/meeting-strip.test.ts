@@ -10,7 +10,7 @@ import {
   meetingSocketPath,
   parseMeetingClientMessage,
 } from '@claude-workspaces/core';
-import type { MeetingTranscriptEvent } from '@claude-workspaces/core';
+import type { MeetingTranscriptEvent, NotesMethod } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RoomAudioProcessing } from '../src/meeting-audio.ts';
 import type { MeetingCaptureStart } from '../src/meeting-audio.ts';
@@ -307,6 +307,7 @@ function mount(
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
     botNamePrefill?: string;
+    offeredNotesMethods?: readonly NotesMethod[];
     toolbar?: HTMLElement | null;
     systemAudioOffered?: () => boolean;
   } = {},
@@ -2468,5 +2469,86 @@ describe('the note-taker answer a running meeting sends back', () => {
 
   it('MUTATION CONTROL: a note-taker this client has no row for is dropped', () => {
     expect(frame({ type: 'notes_method', method: 'ledger-sonnet-9', recorded: true })).toBeNull();
+  });
+});
+
+/**
+ * TWO NOTE-TAKER PICKS OVER ONE LIVE SOCKET, ANSWERED OUT OF STEP.
+ *
+ * The switch is optimistic — the row moves at the press — and the server
+ * answers each write separately. A person who changes their mind before the
+ * first answer lands has two writes out at once, and the answers name a
+ * method rather than a number. Reading them against whatever the row happens
+ * to show let an earlier success confirm the later pick and the later refusal
+ * then roll back onto that same pick, leaving the fold claiming a note-taker
+ * the server had thrown away — with nothing on screen to say so.
+ */
+describe('two note-taker picks over a live meeting, answered out of step', () => {
+  const offeredNotesMethods: readonly NotesMethod[] = ['original', 'ledger-haiku', 'ledger-opus'];
+
+  /** A recording meeting whose menu holds the note-taker fold, opened. */
+  async function liveWithFold(): Promise<Harness> {
+    const h = mount(undefined, { offeredNotesMethods });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    // The Record button over a running meeting opens the MENU, and the fold
+    // sits in it collapsed with the current note-taker on its head line.
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    return h;
+  }
+
+  /** What the fold says it is on: the head line, and the row that is checked. */
+  const shows = (h: Harness) => ({
+    head: h.pop().querySelector('.meeting-notetaker .meeting-adv-value')?.textContent ?? '',
+    checked:
+      h.pop().querySelector<HTMLInputElement>('.meeting-notetaker input:checked')?.value ?? '',
+  });
+
+  /** Every note-taker this socket was asked to switch to, in order. */
+  const asked = (h: Harness): string[] =>
+    h.sockets[0]?.sent
+      .filter((raw): raw is string => typeof raw === 'string')
+      .map((raw) => JSON.parse(raw) as { type: string; method?: string })
+      .filter((m) => m.type === 'set_notes_method')
+      .map((m) => m.method ?? '') ?? [];
+
+  it('ends on the note-taker the server kept, not on the one it refused', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    expect(asked(h)).toEqual(['ledger-haiku', 'ledger-opus']);
+    // Both writes are out. The first is kept and the second refused, so the
+    // server goes on composing with the FIRST.
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: true });
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-opus', recorded: false });
+    expect(shows(h)).toEqual({ head: 'Ledger · Haiku', checked: 'ledger-haiku' });
+  });
+
+  it('MUTATION CONTROL: with both kept, the row stays on the later pick', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: true });
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-opus', recorded: true });
+    expect(shows(h)).toEqual({ head: 'Ledger · Opus', checked: 'ledger-opus' });
+  });
+
+  it('the earlier answer alone does not settle the row the person is watching', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-haiku', recorded: true });
+    // The second write is still out: the person keeps looking at their pick.
+    expect(shows(h)).toEqual({ head: 'Ledger · Opus', checked: 'ledger-opus' });
+  });
+
+  it('a single refused switch still puts the row back where it was', async () => {
+    const h = await liveWithFold();
+    h.pick('Ledger · Opus');
+    h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-opus', recorded: false });
+    expect(shows(h)).toEqual({ head: 'Original', checked: 'original' });
   });
 });

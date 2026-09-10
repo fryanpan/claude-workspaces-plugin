@@ -176,34 +176,58 @@ export function appendNotetakerFold(
  * Three things move this row and they do not arrive in a fixed order: the
  * mount's GET of the doc's current note-taker, a person's pick, and the
  * server's answer to that pick. Held as one value with one rule each, because
- * both bugs this shape exists to close were orderings rather than logic.
+ * every bug this shape exists to close was an ordering rather than logic.
  *
  * - `shown` is the row. It moves the moment somebody picks, because a
  *   preference must not sit on a spinner.
- * - `confirmed` is the last method the server is known to hold. A refused
- *   change goes back to it.
+ * - `confirmed` is the last method the server is KNOWN to hold — moved only
+ *   by an answer, never by a pick. A change that is refused goes back to it.
  * - `picked` closes the mount question for good: once a person has chosen,
  *   the doc's state as it was BEFORE they chose is not news.
+ * - `pending` is every pick asked for and not yet answered.
  */
 export interface NotetakerChoice {
   readonly shown: NotesMethod;
   readonly confirmed: NotesMethod;
   readonly picked: boolean;
-  /**
-   * WHICH PICK THE ROW IS WAITING ON. Two REST writes can be in flight at
-   * once — a person changes their mind while the first is still out — and
-   * `fetch` promises settle in whatever order the responses arrive, not the
-   * order they were sent. Without this an older success confirms the newer
-   * selection, and an older failure rolls back a newer one that landed.
-   * Each pick takes the next number and only that number's answer moves the
-   * row; every other answer is about a choice nobody is showing any more.
-   */
+  /** The number the next pick takes; the last pick's own number. */
   readonly seq: number;
+  /**
+   * THE PICKS STILL OUT, oldest first. Two writes can be in flight at once —
+   * a person changes their mind while the first is still going — and neither
+   * path answers in the order it was asked: `fetch` promises settle when
+   * responses arrive, and the two paths can even be mixed across a socket
+   * that opened between picks.
+   *
+   * Holding them is what lets an answer speak for its OWN pick and nothing
+   * else. Reading the row instead is how the last bug here worked: pick B
+   * then C before either answers, B succeeds and C fails, and an answer read
+   * against the row confirmed C on B's success and then rolled back to C on
+   * C's failure — while the server had kept B.
+   */
+  readonly pending: readonly NotetakerPick[];
 }
+
+/** One pick that has been asked for: its number and what it asked for. */
+export interface NotetakerPick {
+  readonly seq: number;
+  readonly method: NotesMethod;
+}
+
+/**
+ * WHICH PICK AN ANSWER IS FOR, and the reason there are two forms.
+ *
+ * The REST path knows the number, because it holds the promise for its own
+ * write. The socket path does not: the server's `notes_method` frame carries
+ * the METHOD it recorded and no number, so the pick is found by what was
+ * asked for — the oldest one still out that asked for that method, since the
+ * one socket delivers its answers in the order it was asked.
+ */
+export type NotetakerAck = { readonly seq: number } | { readonly method: NotesMethod };
 
 /** The row before anything has been asked or answered. */
 export function notetakerChoiceAtMount(method: NotesMethod): NotetakerChoice {
-  return { shown: method, confirmed: method, picked: false, seq: 0 };
+  return { shown: method, confirmed: method, picked: false, seq: 0, pending: [] };
 }
 
 /**
@@ -220,36 +244,82 @@ export function notetakerMountAnswer(
   answer: NotesMethod | null | undefined,
 ): NotetakerChoice {
   if (choice.picked || !answer) return choice;
-  return { shown: answer, confirmed: answer, picked: false, seq: choice.seq };
+  return { ...choice, shown: answer, confirmed: answer };
 }
 
 /** Somebody picked. Optimistic: the row moves now and the answer settles it. */
 export function notetakerPicked(choice: NotetakerChoice, method: NotesMethod): NotetakerChoice {
-  return { shown: method, confirmed: choice.shown, picked: true, seq: choice.seq + 1 };
+  const seq = choice.seq + 1;
+  return {
+    shown: method,
+    // NOT moved by the pick. What the server holds is a fact only an answer
+    // can report, and a pick that is refused has to land back on it.
+    confirmed: choice.confirmed,
+    picked: true,
+    seq,
+    pending: [...choice.pending, { seq, method }],
+  };
+}
+
+/** The pick an answer is for, or `null` when it is for none of those out. */
+export function notetakerPendingPick(
+  choice: NotetakerChoice,
+  ack: NotetakerAck,
+): NotetakerPick | null {
+  const found =
+    'seq' in ack
+      ? choice.pending.find((p) => p.seq === ack.seq)
+      : choice.pending.find((p) => p.method === ack.method);
+  return found ?? null;
 }
 
 /**
- * The server answered the pick.
+ * Whether an answer is the one the ROW is waiting on — the pick the person is
+ * looking at rather than one they have already replaced. Only that one may
+ * raise an error: a complaint about an abandoned pick names a note-taker the
+ * sheet no longer shows.
+ */
+export function notetakerAnswersShownPick(choice: NotetakerChoice, ack: NotetakerAck): boolean {
+  const pick = notetakerPendingPick(choice, ack);
+  return pick !== null && pick.seq === choice.seq;
+}
+
+/**
+ * The server answered a pick — `ack` says WHICH, and an answer for a pick
+ * that is not out decides nothing.
  *
  * `false` is a record that could not be written — a data dir that is full,
- * read-only or gone. The write is swallowed there so that losing a preference
- * never fails a tick, which is right, and it is exactly why the row has to
- * come back: the session goes on composing with the method it had.
+ * read-only or gone, or a socket that may not write the doc at all. The write
+ * is swallowed there so that losing a preference never fails a tick, which is
+ * right, and it is exactly why the row has to come back: the session goes on
+ * composing with the method it had.
+ *
+ * The row itself only settles once NOTHING is out: while a later pick is
+ * still unanswered the person is looking at that pick, and an earlier answer
+ * moves only what the server is known to hold. When the last answer lands,
+ * the row becomes that known method — which is the pick if it was kept, and
+ * whatever survived if it was not.
  */
 export function notetakerAcknowledged(
   choice: NotetakerChoice,
   recorded: boolean,
-  seq?: number,
+  ack: NotetakerAck,
 ): NotetakerChoice {
-  // An answer to a pick that is no longer the one on the row decides
-  // nothing: the person has already chosen again, and the newer request is
-  // the one whose answer the row is waiting for.
-  if (seq !== undefined && seq !== choice.seq) return choice;
-  const { seq: at } = choice;
-  if (!recorded) {
-    return { shown: choice.confirmed, confirmed: choice.confirmed, picked: true, seq: at };
-  }
-  return { shown: choice.shown, confirmed: choice.shown, picked: true, seq: at };
+  const pick = notetakerPendingPick(choice, ack);
+  if (!pick) return choice;
+  // Everything asked for no later than this one is settled: on the socket
+  // they were answered before it, and a REST write still out that old can no
+  // longer be the doc's last word. Left in, an answer that never comes —
+  // the socket dropped under it — would hold the row open for good.
+  const pending = choice.pending.filter((p) => p.seq > pick.seq);
+  const confirmed = recorded ? pick.method : choice.confirmed;
+  return {
+    shown: pending.length > 0 ? choice.shown : confirmed,
+    confirmed,
+    picked: true,
+    seq: choice.seq,
+    pending,
+  };
 }
 
 /** "10:38" — the clock the trace line and the "since" row both read as. */

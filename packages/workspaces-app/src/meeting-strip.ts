@@ -107,6 +107,7 @@ import {
   clockLabel,
   fetchNotesMethod,
   notetakerAcknowledged,
+  notetakerAnswersShownPick,
   notetakerChoiceAtMount,
   notetakerMountAnswer,
   notetakerPicked,
@@ -198,6 +199,17 @@ export interface MeetingStripOpts {
    * strip — a solo capture asks the engine for none.
    */
   participantName?: string;
+  /**
+   * Which note-takers the fold offers, defaulting to the shipping list.
+   *
+   * The same parameter, and the same reason, `buildNotetakerFold` has: the
+   * fold draws nothing below two methods, so while the shipping list is one
+   * long, nothing that drives this mount can reach the running meeting's
+   * fold — including the tests that prove a switch mid-meeting settles on
+   * the note-taker the server kept. The day a second method is offered is
+   * the wrong day to find out that surface was never exercised.
+   */
+  offeredNotesMethods?: readonly NotesMethod[];
   now?: () => number;
   /** Run `fn` every `ms`; returns a canceller. Injectable so the clock is
    *  deterministic in tests. */
@@ -711,7 +723,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     const moved = next.shown !== methodChoice.shown;
     methodChoice = next;
     choose.chooseMethod = next.shown;
-    if (moved && view === 'chooser') renderPop();
+    // WHICHEVER POPOVER IS UP, not the start sheet alone: the socket path
+    // that rolls this row back only runs while a meeting is recording, and
+    // the fold is in the MENU then. `renderPop` does nothing with no popover
+    // open, so this is the whole rule.
+    if (moved) renderPop();
   };
 
   // The doc's note-taker, asked for once at mount. Unanswered — an old
@@ -777,8 +793,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // sit on a spinner: the row moves now, and the two ways of asking below
     // are what make it true. A failure puts it back.
     showMethod(notetakerPicked(methodChoice, method));
-    // The pick this request is for. Two writes can be out at once and their
-    // answers can arrive in either order, so each one only speaks for itself.
+    // The pick this request is for, read AFTER the row has taken its number.
+    // Two writes can be out at once and their answers can arrive in either
+    // order, so each one only speaks for itself.
     const seq = methodChoice.seq;
     if (socketOpen && socket) {
       // Recording: over the audio socket, so the live session learns it —
@@ -802,12 +819,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // it gets the same "since" the socket path shows.
     choose.methodSince = liveBot() ? clockLabel(Date.now()) : '';
     void putNotesMethod(docId, method, opts.participantName).then((ok) => {
-      const settled = notetakerAcknowledged(methodChoice, ok, seq);
-      // A stale answer moves nothing, and must not raise an error about a
-      // choice the person has already replaced.
-      if (settled === methodChoice) return;
-      showMethod(settled);
-      if (ok) return;
+      // This write's own number, so the answer settles this pick and no
+      // other — and only the pick the person is looking at may complain.
+      const ack = { seq };
+      const mine = notetakerAnswersShownPick(methodChoice, ack);
+      showMethod(notetakerAcknowledged(methodChoice, ok, ack));
+      if (ok || !mine) return;
       choose.chooseError = 'That note-taker could not be saved.';
       renderPop();
     });
@@ -858,6 +875,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     notetakerState: () => choose,
     onNotesMethodPicked: (method) => pickNotesMethod(method),
     renderPop,
+    ...(opts.offeredNotesMethods ? { offeredNotesMethods: opts.offeredNotesMethods } : {}),
   });
 
   function nameSpeaker(label: string): void {
@@ -1219,18 +1237,28 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       case 'timing_pong':
         timing?.onPong(msg, recvMs);
         break;
-      case 'notes_method':
+      case 'notes_method': {
         // The live half of the same contract the at-rest PUT has always had.
         // A record that could not be written leaves the session composing
         // with the method it had, so the row goes back to what it showed and
         // the line the notes would have carried was never written either.
-        showMethod(notetakerAcknowledged(methodChoice, msg.recorded));
-        if (!msg.recorded) {
+        //
+        // ANSWERED BY THE METHOD IT NAMES, never by whatever the row happens
+        // to show. The frame carries no number, so the method is what says
+        // which pick it settles: with two picks out at once, reading the row
+        // let an older success confirm the newer pick and the newer failure
+        // then roll back onto itself, leaving the fold on a note-taker the
+        // server had not kept.
+        const ack = { method: msg.method };
+        const mine = notetakerAnswersShownPick(methodChoice, ack);
+        showMethod(notetakerAcknowledged(methodChoice, msg.recorded, ack));
+        if (!msg.recorded && mine) {
           choose.methodSince = '';
           choose.chooseError = 'That note-taker could not be saved.';
-          if (view === 'chooser') renderPop();
+          renderPop();
         }
         break;
+      }
       case 'tuned':
         // Only what the server actually applied earns the "Applied." note —
         // a key it names is one that reached the live engine session. The
