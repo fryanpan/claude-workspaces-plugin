@@ -125,6 +125,7 @@ interface Reading {
   control: { worst: Overlap; line: number };
   meeting: DriveResult;
   unhurried: DriveResult;
+  voices: DriveResult;
 }
 
 /**
@@ -137,6 +138,7 @@ function measure(html: string, preset: 'ipad' | 'phone', runs: readonly DriveOpt
     control: JSON.parse(await window.liveZoneControl()),
     meeting: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[0])})),
     unhurried: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[1])})),
+    voices: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[2])})),
   }))()`;
   return JSON.parse(inBrowser(html, preset, probe)) as Reading;
 }
@@ -153,6 +155,7 @@ const MEETING: DriveOptions = {
   midSplit: false,
   backToBack: true,
   interleave: true,
+  voices: 1,
   scale: 0.25,
 };
 
@@ -165,6 +168,32 @@ const UNHURRIED: DriveOptions = {
   midSplit: true,
   backToBack: false,
   interleave: false,
+  voices: 1,
+  scale: 0.25,
+};
+
+/**
+ * The same awkward moments with more than one person talking.
+ *
+ * A separate arm rather than a flag on the two above, because the pill is a
+ * rendering path and not a variation: the zone draws one only once it has
+ * heard a second voice, and it is an inline element inside the turn's own span
+ * that moves every line break after it. The arms above cannot see a smear that
+ * needs a pill, which is the hole this closes.
+ *
+ * It reads a flat zero against the shipped module, with 48 pills on screen at
+ * 1180x820 and 55 at 430. Against the module as it stood before the fix
+ * (fccd2da4) the same arm smears 907px² at 1180x820 and 1096px² at 430 — so
+ * the pill path was carrying the bug too, and the fix covers it.
+ */
+const VOICES: DriveOptions = {
+  writes: 14,
+  emptyEvery: 4,
+  failEvery: 6,
+  midSplit: true,
+  backToBack: true,
+  interleave: true,
+  voices: 3,
   scale: 0.25,
 };
 
@@ -189,7 +218,8 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
           control: c,
           meeting,
           unhurried,
-        } = measure(buildPage(), preset, [MEETING, UNHURRIED]);
+          voices,
+        } = measure(buildPage(), preset, [MEETING, UNHURRIED, VOICES]);
 
         // The control first: the pre-fix offsets, painted on purpose. Without
         // it a sampler that measured nothing would pass every case below.
@@ -219,6 +249,14 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         expect(unhurried.stranded).toBeGreaterThan(0);
         expect(unhurried.streaming).toBeGreaterThanOrEqual(unhurried.stranded);
         expect(unhurried.worst.area).toBeLessThan(SMEAR_PX2);
+
+        // Three voices, so nearly every turn carries a speaker pill. Without
+        // this count a run in which the pill path never rendered would report
+        // the same clean zero as one in which it rendered and held.
+        expect(voices.pills).toBeGreaterThan(1);
+        expect(voices.compared).toBeGreaterThan(voices.written);
+        expect(voices.stranded).toBeGreaterThan(0);
+        expect(voices.worst.area).toBeLessThan(SMEAR_PX2);
       },
       BROWSER_CASE_MS,
     );
