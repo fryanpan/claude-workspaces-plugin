@@ -14,6 +14,7 @@
     "./asset-manifest": "./src/asset-manifest.ts",
     "./env-names": "./src/env-names.ts",
     "./machine-paths": "./src/machine-paths.ts",
+    "./mock-swap-noise": "./src/mock-swap-noise.ts",
     "./trace-privacy": "./src/trace-privacy.ts",
     "./types": "./src/types.ts",
     "./summary-prompt": "./src/summary-prompt.ts",
