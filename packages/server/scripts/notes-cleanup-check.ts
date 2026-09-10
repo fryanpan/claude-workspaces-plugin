@@ -36,15 +36,8 @@ import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { createHaikuNotesComposer } from '../src/meeting-notes-composer.ts';
-import {
-  type NotesComposer,
-  createStubNotesComposer,
-} from '../src/meeting-notes.ts';
-import {
-  meetingDirPath,
-  meetingIndexPath,
-  meetingTranscriptPath,
-} from '../src/meetings.ts';
+import { type NotesComposer, createStubNotesComposer } from '../src/meeting-notes.ts';
+import { meetingDirPath, meetingIndexPath, meetingTranscriptPath } from '../src/meetings.ts';
 import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
 import { NOTES_AUTHOR_ID, type NotesDocStore } from '../src/notes-doc-access.ts';
 
