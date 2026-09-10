@@ -2071,6 +2071,85 @@ three for the same reason it is the most likely to misfire: most of its rule
 is the line separating a correction from somebody changing their mind. Output
 is unchanged on the ticks that carry none of them, which is most of them.
 
+## One more read, when the meeting is over (`notes-cleanup-pass.ts`)
+
+Bryan already does this by hand: when a meeting finishes he asks for another
+pass over the notes. It is how you end up with GREAT notes while the live
+note-taker only has to be good — good enough to have the meeting with. So the
+tidy-up is not a better note-taker; it is the same note-taker asked once more,
+with the whole meeting in front of it and no clock behind it.
+
+**Nothing runs unasked.** When a recording ends the doc shows one button at
+the end of the prose (`meeting-cleanup-offer.ts`); the press is the approval,
+and there is no setting that turns it into a default. `POST
+/workspaces/:ws/docs/:docId/meetings/:meetingId/notes-cleanup` refuses a
+share visitor, refuses a meeting that is still recording, and 404s a meeting
+the doc never held.
+
+**It is the composer again, not a new subsystem.** Same `NotesComposer`, same
+prompt store, same `applyBlockEdits`, same authorship rules. What differs is
+what it is handed: the entire transcript instead of a tick's turns, a
+restraint directive appended to the operator's own instructions, and a
+transcript label saying which of the two it is reading. A transcript over
+120k characters is REFUSED rather than trimmed, so the pass is never silently
+worse on the meetings where it is hardest to tell.
+
+**Four refusals are structural, so no wording of a prompt can undo them.**
+`confineToSection` drops — never proposes — an edit that names a block the
+note-taker no longer owns, anything outside this meeting's own section, an
+`insert_at_end`, or a block somebody has left a comment on. The live path's
+answer to the first of those is a redline suggestion on the person's words,
+which is right during a meeting and wrong here: nobody asked for their own
+writing to be marked up, and a tidy-up leaving twelve redlines on somebody's
+paragraph is the disruption the feature exists to avoid. The fourth is about
+anchors: a `replace_block` re-creates the block's text and every relative
+position inside it stops resolving, so a commented bullet is out of reach and
+the pass adds beside it. `nest_blocks` stays allowed on one — nesting moves a
+block without re-creating its text.
+
+**The notes it writes highlight like every other note of the meeting.**
+`settle-wash.ts` asks the live zone whether a meeting is live at the instant a
+remote edit lands, and `WASH_GRACE_MS` (30s) has long run out by the time
+somebody presses the button. So the offer calls `liveZone.holdWash()` before
+the request; without it the one pass whose notes are the freshest thing on
+the page would be the only one that never tinted and never reached recent
+edits.
+
+### Does it actually leave good notes alone?
+
+`bun run packages/server/scripts/notes-cleanup-check.ts --arms N` is the
+measurement, and it is the number that says whether this is finished. Two
+arms against the same model, the same prompt and the same gate: a good record
+of an invented meeting (expect 0 blocks touched), and thin disordered notes of
+the SAME meeting (expect more than 0 — a zero on the first arm proves nothing
+without it).
+
+Measured 2026-09-10 on Haiku 4.5, 8 runs per arm: **restraint 0 blocks touched
+on all 8**, control 6 blocks on 6 of 8 and 0 on the other two. The pass is
+therefore restrained, and it is also not always helpful — a quarter of the
+control runs left thin notes exactly as they were.
+
+**What "good" turns out to mean is narrower than it sounds, and the harness is
+how that was found.** The first restraint fixture wrote its decision bullets
+without speaker tags, and the pass rewrote all three, every run, to add
+nothing but the tag. It was not churning: the note-taker's own instructions
+say a decision names who has it, so those bullets broke the house rules and
+the pass was right to fix them. What the measurement can claim is that the
+pass leaves alone notes that are good BY THE RULES THE LIVE NOTE-TAKER WRITES
+BY. A doc whose notes were written some other way will be brought into line
+with them.
+
+### Two limits worth knowing before relying on it
+
+`cwAuthor` is what tells a person's line from the note-taker's, and it is a
+Yjs attribute on the block. It does **not** survive a markdown round trip: a
+doc reparsed from disk comes back with no authorship at all, and the pass then
+owns nothing and changes nothing. And `releaseNotesAuthorship` drops the
+previous meeting's claim when a NEW recording starts, so a tidy-up asked for
+after the next recording has begun finds nothing of its own to touch. Both
+fail closed — the pass does less, never more — which is the right direction
+for a feature whose hard criterion is restraint.
+
 ## Is anybody listening — lead presence (`lead-presence.ts`)
 
 Every ask a meeting doc makes addresses the board's lead seat, and all of

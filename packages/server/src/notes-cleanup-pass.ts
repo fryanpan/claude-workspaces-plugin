@@ -67,7 +67,7 @@ import {
  * already says what was said is FINISHED"), and as the permitted answer ("an
  * empty list is a success"). A single polite request to be conservative reads
  * as a hedge on an instruction to improve; the measurement in
- * `scripts/notes-cleanup-check.ts` is what says whether the wording holds.
+ * `packages/server/scripts/notes-cleanup-check.ts` is what says whether the wording holds.
  */
 export const CLEANUP_DIRECTIVE = [
   'FINAL PASS OVER THE WHOLE MEETING. The recording has stopped and a person',
