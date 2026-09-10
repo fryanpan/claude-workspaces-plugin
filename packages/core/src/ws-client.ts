@@ -14,6 +14,17 @@ import * as Y from 'yjs';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
+/**
+ * Server → client: "the state you are holding is dead — start over."
+ *
+ * Sent only for a board doc the server rebuilt while this tab was away (see
+ * the server's `board-sync-gate.ts`). The doc this client holds cannot be
+ * reconciled with the one on the server: its structs are concurrent with the
+ * rebuild's, and a Yjs map resolves that by clientID magnitude — a coin flip
+ * per row. So there is nothing to merge and nothing to salvage; the surface
+ * is told, and decides what to do about it.
+ */
+const MSG_RESET = 2;
 
 /**
  * How long a single connection attempt gets before it is declared stuck and
@@ -59,6 +70,12 @@ export interface FeedbackClient {
   close(): void;
   /** Fires once, after the first sync-step-2/update lands (doc hydrated). */
   onReady(cb: () => void): void;
+  /**
+   * Fires when the server says this client's state is unreconcilable and it
+   * should start over. At most once per client — a surface's answer is to
+   * reload, and firing again after that helps nobody.
+   */
+  onReset(cb: () => void): void;
   /** Fires on every transition; also called immediately with the current status. */
   onStatus(cb: (s: ConnectionStatus) => void): void;
 }
@@ -69,6 +86,8 @@ export function connect(url: string): FeedbackClient {
   let ws: WebSocket;
   let closed = false;
   let gotInitialSync = false;
+  let resetAnnounced = false;
+  const resetCbs: (() => void)[] = [];
   let readyCbs: (() => void)[] = [];
   const statusCbs: ((s: ConnectionStatus) => void)[] = [];
   let status: ConnectionStatus = 'connecting';
@@ -194,6 +213,9 @@ export function connect(url: string): FeedbackClient {
         }
       } else if (kind === MSG_AWARENESS) {
         awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(dec), ws);
+      } else if (kind === MSG_RESET && !resetAnnounced) {
+        resetAnnounced = true;
+        for (const cb of resetCbs) cb();
       }
     });
 
@@ -243,6 +265,10 @@ export function connect(url: string): FeedbackClient {
     onReady(cb) {
       if (gotInitialSync) cb();
       else readyCbs.push(cb);
+    },
+    onReset(cb) {
+      if (resetAnnounced) cb();
+      else resetCbs.push(cb);
     },
     onStatus(cb) {
       statusCbs.push(cb);

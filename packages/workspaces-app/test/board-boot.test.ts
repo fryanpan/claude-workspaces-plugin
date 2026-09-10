@@ -193,6 +193,21 @@ describe('the board reads its workspace out of the address', () => {
   });
 });
 
+describe('a board whose doc was rebuilt while this tab was away', () => {
+  it("reloads the page when the server says the tab's state is dead", async () => {
+    // The server refuses to merge a state vector that shares nothing with a
+    // rebuilt board doc, and sends this. Refusing alone is not enough: the
+    // tab still holds its pre-restart structs, and Yjs resolves them against
+    // the rebuild's by clientID magnitude — a coin flip per row. Reloading is
+    // the whole answer, and it is safe because the board keeps no local state
+    // to lose: every mutation it makes goes through the REST gate.
+    const { sockets, location } = await boot(`https://board.test/workspaces/${WS}/tasks`);
+    expect(location.reloads.count).toBe(0);
+    sockets.first().reset();
+    expect(location.reloads.count).toBe(1);
+  });
+});
+
 describe('the board opens exactly one socket, at the address it derived', () => {
   it('connects once, to the workspace doc, over wss on an https page', async () => {
     const { sockets } = await boot(`https://board.test/workspaces/${WS}/tasks`);

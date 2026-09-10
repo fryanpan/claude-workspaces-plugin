@@ -245,6 +245,14 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // ── Realtime: the ws:<id> board doc ────────────────────────────────────
   const client = connect(boardSocketUrl(location, workspaceId));
   installStaleClientNotice(client);
+  // The server rebuilt this board doc while this tab was away, so what the tab
+  // holds cannot be reconciled with it — the two sets of structs are
+  // concurrent and a Yjs map resolves that by clientID magnitude, which is a
+  // coin flip per row. Reloading is the whole answer: the board keeps no local
+  // state to lose, `board-projection.ts` never writes to the ydoc, and every
+  // board mutation goes through the REST gate. It cannot loop — a reloaded tab
+  // comes back with an empty state vector, which the server never refuses.
+  client.onReset(() => location.reload());
   // The board had no reading of its own connection at all, in any viewport —
   // during a restart it just stopped updating. Wired here rather than in
   // renderAll: this subscribes once, to THIS client, and the banner it drives
