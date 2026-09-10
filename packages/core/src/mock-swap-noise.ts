@@ -200,6 +200,13 @@ export interface ErrorReport {
   exception?: { values?: Array<{ type?: string; value?: string }> };
 }
 
+/** Every string in the report that could carry the collision's message. */
+function reportText(event: ErrorReport): string {
+  const parts = [event.message ?? ''];
+  for (const v of event.exception?.values ?? []) parts.push(v.value ?? '');
+  return parts.join(' ');
+}
+
 /**
  * Does this report name a declaration collision — and only that?
  *
@@ -212,13 +219,6 @@ export interface ErrorReport {
  * collision is an early error, and only an early error is what the swap
  * retries.
  */
-/** Every string in the report that could carry the collision's message. */
-function reportText(event: ErrorReport): string {
-  const parts = [event.message ?? ''];
-  for (const v of event.exception?.values ?? []) parts.push(v.value ?? '');
-  return parts.join(' ');
-}
-
 export function isRedeclarationReport(event: ErrorReport): boolean {
   const message = event.message ?? '';
   for (const v of event.exception?.values ?? []) {
