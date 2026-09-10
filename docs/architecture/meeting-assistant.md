@@ -881,6 +881,23 @@ finding (Bryan, 2026-09-09). An empty tick's words therefore stay on screen for
 the rest of the meeting, which is the honest reading of "nothing was written
 up about this".
 
+**And a settle whose words are not the front of the stream cannot lift them.**
+A chunk is a block ABOVE the stream, so lifting words into one only tells the
+truth when they are the stream's head. After an empty tick they are not: the
+server drops those turns from its carry (`carry` is refilled on `failed`, not
+on `empty`), so they sit at the head for the rest of the meeting and every
+later tick composes turns with a survivor in front of them. Lifted anyway, the
+block was inserted above words spoken BEFORE it and the hold — which exists to
+put the stream back on a line the chunk's tail ends mid-way through — measured
+a whole line of drop with nothing to indent past, and pulled the stream up ONTO
+the chunk: 157.5px of one line painted over another, both runs fully opaque, at
+1180x820 and again at 430 (the smear Bryan read mid-meeting on 2026-09-10). So
+those words fade WHERE THEY ARE instead, inside the run, on the same two beats
+and the same colour step; nothing moves on the split frame at all, and the
+stream closes over the gap when they go. What that case loses is the eased
+collapse — a hole in the middle of a run cannot be eased shut by a margin on
+the block holding it — and that is the whole of the cost.
+
 The doc-insert fallback (`clearSettled`, for a bot meeting whose words arrive
 over the doc stream rather than the audio socket) settles through the same
 two beats, and it is INERT once a meeting has reported a tick. A note landing
