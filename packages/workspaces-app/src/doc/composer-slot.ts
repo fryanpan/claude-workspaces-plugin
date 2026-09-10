@@ -69,6 +69,8 @@ export interface MarginSlotOptions {
   composer: HTMLElement;
   /** Injected in a test; `balloonMarginVisible` in the product. */
   marginVisible?: () => boolean;
+  /** Injected in a test; `window.visualViewport` in the product. */
+  visualViewport?: { offsetTop: number; height: number } | null;
 }
 
 /**
@@ -76,8 +78,19 @@ export interface MarginSlotOptions {
  * sheet", the surface every caller had before this module existed.
  *
  * Null on every uncertainty: no margin on screen, no column rendered yet, a
- * column with no width (the grid track collapses below 1100px), or a
- * selection whose coordinates ProseMirror declines to give.
+ * column measuring nothing, or a selection whose coordinates ProseMirror
+ * declines to give. Note which question the width guard is NOT asking: the
+ * column is gated on `body[data-cards="balloon"]`, not on a width, and
+ * `balloonMarginVisible` stays true down to 901px — so the margin composer
+ * opens across the whole 901–1100 band, where the narrow rules also match.
+ * It survives that overlap because `#composer.composer--margin` out-specifies
+ * them on every property the two share.
+ *
+ * The band is the VISUAL viewport, not the editor's layout box. On an iPad
+ * the software keyboard takes the bottom of the screen without shrinking any
+ * layout box, so a slot clamped to the layout box alone opens behind the
+ * keyboard for any sentence below the fold — the same correction the comment
+ * pill makes for itself in `positionPill`.
  */
 export function marginComposerSlot(opts: MarginSlotOptions): ComposerSlot | null {
   const visible = opts.marginVisible ?? balloonMarginVisible;
@@ -90,10 +103,16 @@ export function marginComposerSlot(opts: MarginSlotOptions): ComposerSlot | null
     const view = opts.editor.editor.view;
     const anchorTop = view.coordsAtPos(view.state.selection.from).top;
     const scroller = opts.editorMount.getBoundingClientRect();
+    const vv = opts.visualViewport ?? window.visualViewport ?? null;
+    const vvTop = vv?.offsetTop ?? 0;
+    const vvBottom = vvTop + (vv?.height ?? window.innerHeight);
     return composerSlot({
       column: { left: colRect.left, width: colRect.width },
       anchorTop,
-      bounds: { top: scroller.top, bottom: scroller.bottom },
+      bounds: {
+        top: Math.max(scroller.top, vvTop),
+        bottom: Math.min(scroller.bottom, vvBottom),
+      },
       height: opts.composer.offsetHeight,
     });
   } catch {
@@ -130,10 +149,10 @@ export interface KeyboardClearMetrics {
  * screen allowed; the reference point is now the box itself, so the sentence
  * lands just above what the reader is typing however tall the keyboard is.
  *
- * The line height is read off the selection rather than assumed: a heading
- * commented on needs more room than a caption. A selection taller than the
- * gap is pinned to the top of the band instead — pushing it further up would
- * scroll the words being commented on off the screen entirely.
+ * The line height is read off the selection's LAST line rather than assumed:
+ * a heading commented on needs more room than a caption. A line taller than
+ * the gap is pinned to the top of the band instead — pushing it further up
+ * would scroll the words being commented on off the screen entirely.
  */
 export function keyboardClearDelta(m: KeyboardClearMetrics): number {
   const line = Math.max(16, m.selBottom - m.selTop);

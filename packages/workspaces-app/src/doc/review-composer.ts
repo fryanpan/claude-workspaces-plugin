@@ -178,15 +178,18 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     composer.classList.remove('hidden');
     composerScrim.classList.remove('hidden');
     document.body.classList.add('composer-open');
-    // Asked AFTER the box is unhidden: the slot is clamped against the
-    // composer's own height, and a hidden box measures zero.
-    placeComposer();
     opts.hidePill?.();
     composerText.value = prefill ?? '';
     // Setting the box in code is invisible to the editor, so it has to be
     // told — otherwise the previous comment is still sitting in the box the
     // reviewer just opened for a new one.
     refreshComposer();
+    // Placed LAST of the DOM work, and still inside the same click. The slot
+    // is clamped against the box's own height, so everything that changes
+    // that height has to have happened: unhiding it (a hidden box measures
+    // zero), and seeding the text (a stale draft from the previous open
+    // measures the previous open).
+    placeComposer();
     // SYNCHRONOUS, and it has to stay that way: everything above this line is
     // DOM work with nothing awaited, so the focus still sits inside the click
     // that opened the composer and iOS raises the keyboard on that tap rather
@@ -203,17 +206,28 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
    * only the running page can know.
    */
   function placeComposer(): void {
+    // The margin shape goes on BEFORE the surface measures: it is what takes
+    // the quote and the avatar out and narrows the box to the column, so a
+    // height read without it is the sheet's height and the clamp is wrong.
+    // Taken off again if the answer is null — synchronously, so no frame is
+    // ever painted with it.
+    composer.classList.toggle('composer--margin', opts.placeComposer !== undefined);
     const slot = opts.placeComposer?.() ?? null;
     composerScrim.classList.toggle('composer-scrim--clear', slot !== null);
     if (!slot) {
-      composer.classList.remove('composer--margin');
-      for (const prop of ['top', 'left', 'width']) composer.style.removeProperty(prop);
+      clearPlacement();
       return;
     }
-    composer.classList.add('composer--margin');
     composer.style.top = `${slot.top}px`;
     composer.style.left = `${slot.left}px`;
     composer.style.width = `${slot.width}px`;
+  }
+
+  /** Back to the bottom sheet: the shape, the geometry and the clear scrim. */
+  function clearPlacement(): void {
+    composer.classList.remove('composer--margin');
+    composerScrim.classList.remove('composer-scrim--clear');
+    for (const prop of ['top', 'left', 'width']) composer.style.removeProperty(prop);
   }
 
   function hideComposer(): void {
@@ -225,8 +239,25 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     composer.classList.add('hidden');
     composerScrim.classList.add('hidden');
     document.body.classList.remove('composer-open');
+    // A hidden `#composer` keeps `display: block` (only its opacity is
+    // zeroed), so a box left in the margin shape still reports a
+    // margin-sized rect mid-screen to anything that measures it. Every open
+    // re-places, but the invariant belongs here rather than in the next open.
+    clearPlacement();
   }
   on(composerScrim, 'click', hideComposer);
+  // A margin composer is clamped against the height it had when it opened,
+  // and `#composer-text` grows to 32vh as the reader types — so a box opened
+  // low on the page would walk its Send arrow below the fold, behind a scrim
+  // that stops the doc being scrolled to reach it. Re-place instead: the slot
+  // only moves when it has to, exactly as a growing balloon does. Same for a
+  // rotation or a keyboard, which move the band the slot is clamped into.
+  const replaceIfPlaced = (): void => {
+    if (composer.classList.contains('composer--margin')) placeComposer();
+  };
+  on(composerText, 'input', replaceIfPlaced);
+  on(window, 'resize', replaceIfPlaced);
+  if (window.visualViewport) on(window.visualViewport, 'resize', replaceIfPlaced);
   on(composerText, 'keydown', (ev) => {
     const ke = ev as KeyboardEvent;
     if (ke.key === 'Enter' && !ke.shiftKey && !ke.isComposing) {

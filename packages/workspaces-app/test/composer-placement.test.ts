@@ -49,7 +49,8 @@ function mountChromeDom(): void {
         <div id="composer-quote" class="composer-quote"></div>
         <div class="composer-inner">
           <div id="composer-avatar" class="composer-avatar"></div>
-          <textarea id="composer-text" rows="1"></textarea>
+          <textarea id="composer-text" rows="1"
+            placeholder="Comment, or ask for research, edits, or a task…"></textarea>
           <button id="composer-submit" class="submit-arrow">↑</button>
         </div>
       </div>
@@ -62,6 +63,43 @@ function mountChromeDom(): void {
       </div>
       <div id="toast" class="hidden"></div>
     </div>`;
+}
+
+/**
+ * The box a reader actually types a comment into on a doc. `md-composer.ts`
+ * puts a `.md-composer-surface` beside the textarea and Tiptap renders the
+ * empty paragraph that carries the placeholder; the textarea stays as the
+ * form value. Both halves of the min-height rules name both elements, but
+ * only this half can be read here: happy-dom does not implement
+ * `:placeholder-shown` (probed directly — `matches()` says false while a
+ * control property on the very same rule computes), so the textarea half is
+ * checked in the browser instead. Two-line hints and the clipping they cause
+ * are why these rules exist; see the PR body for the measurements.
+ */
+function emptyMarkdownParagraph(): HTMLElement {
+  const ta = document.getElementById('composer-text') as HTMLTextAreaElement;
+  const wrap = document.createElement('div');
+  wrap.className = 'md-composer md-composer-live';
+  ta.replaceWith(wrap);
+  wrap.innerHTML =
+    '<div class="md-composer-surface"><div class="ProseMirror">' +
+    '<p class="is-editor-empty"><br></p></div></div>';
+  wrap.prepend(ta);
+  return wrap.querySelector('p.is-editor-empty') as HTMLElement;
+}
+
+/**
+ * How many lines of the reader's own text the empty box reserves — the number
+ * the two min-height rules are arguing about. Read as a ratio of the box's
+ * own font size rather than a px literal, so it does not move when the type
+ * scale does.
+ */
+function reservedLines(el: HTMLElement): number {
+  const st = styleOf(el);
+  return (
+    Number.parseFloat(st.getPropertyValue('min-height')) /
+    Number.parseFloat(st.getPropertyValue('font-size'))
+  );
 }
 
 function fakeSurface(): ReviewSurface {
@@ -130,17 +168,58 @@ describe('the slot in the margin', () => {
 });
 
 describe('asking for the slot', () => {
-  function reader(marginVisible: boolean, column: HTMLElement | null) {
+  /**
+   * happy-dom has no layout engine: every `getBoundingClientRect` is all
+   * zeroes and every `offsetHeight` is 0. A fixture that does not say what
+   * its boxes are therefore trips `marginComposerSlot`'s zero-width guard
+   * before any of the reading it exists to do has happened — which is how
+   * the first version of this block passed with the whole try/catch deleted.
+   * So the boxes are stated here.
+   */
+  function boxed(el: HTMLElement, box: { left: number; width: number }): HTMLElement {
+    el.getBoundingClientRect = () =>
+      ({
+        left: box.left,
+        right: box.left + box.width,
+        width: box.width,
+        top: 0,
+        bottom: 0,
+        height: 0,
+        x: box.left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    return el;
+  }
+
+  function reader(opts: {
+    marginVisible: boolean;
+    column: { left: number; width: number } | null;
+    composerHeight?: number;
+    scroller?: { top: number; bottom: number };
+  }) {
     document.body.innerHTML = '<div id="editor"></div><div id="composer"></div>';
     const editorMount = document.getElementById('editor') as HTMLElement;
-    if (column) editorMount.appendChild(column);
+    const band = opts.scroller ?? { top: 100, bottom: 800 };
+    editorMount.getBoundingClientRect = () =>
+      ({ top: band.top, bottom: band.bottom, height: band.bottom - band.top }) as DOMRect;
+    if (opts.column) {
+      const col = document.createElement('div');
+      col.className = 'markup-margin';
+      editorMount.appendChild(boxed(col, opts.column));
+    }
+    const composer = document.getElementById('composer') as HTMLElement;
+    Object.defineProperty(composer, 'offsetHeight', { value: opts.composerHeight ?? 60 });
     return {
       editorMount,
-      composer: document.getElementById('composer') as HTMLElement,
-      marginVisible: () => marginVisible,
+      composer,
+      marginVisible: () => opts.marginVisible,
+      // No keyboard: the band is the scroller's own box.
+      visualViewport: { offsetTop: 0, height: 2000 },
     };
   }
-  /** An editor whose selection ProseMirror can place. */
+
+  /** An editor whose selection ProseMirror can place, 250px down the page. */
   const placeable = {
     editor: {
       view: {
@@ -150,22 +229,61 @@ describe('asking for the slot', () => {
     },
   } as never;
 
+  it('hands back the column’s own track, level with the sentence', () => {
+    const r = reader({ marginVisible: true, column: { left: 900, width: 260 } });
+    expect(marginComposerSlot({ ...r, editor: placeable })).toEqual<ComposerSlot>({
+      top: 250,
+      left: 900,
+      width: 260,
+    });
+  });
+
+  it('keeps the box out of the on-screen keyboard’s band', () => {
+    // The sentence sits at 700, which the layout box (bottom 800) has room
+    // for. The visual viewport says the reader can only see down to 420 —
+    // what an iPad keyboard does — so the box has to come up to 352 to stay
+    // whole and on screen.
+    const r = reader({
+      marginVisible: true,
+      column: { left: 900, width: 260 },
+      composerHeight: 60,
+      scroller: { top: 100, bottom: 800 },
+    });
+    const lowDown = {
+      editor: {
+        view: {
+          state: { selection: { from: 4 } },
+          coordsAtPos: () => ({ top: 700, bottom: 718, left: 0, right: 0 }),
+        },
+      },
+    } as never;
+    expect(
+      marginComposerSlot({ ...r, editor: lowDown, visualViewport: { offsetTop: 0, height: 2000 } })
+        ?.top,
+    ).toBe(700);
+    expect(
+      marginComposerSlot({ ...r, editor: lowDown, visualViewport: { offsetTop: 0, height: 420 } })
+        ?.top,
+    ).toBe(420 - 60 - 8);
+  });
+
   it('declines when the reader’s cards are not in the margin', () => {
-    const col = document.createElement('div');
-    col.className = 'markup-margin';
-    const r = reader(false, col);
+    const r = reader({ marginVisible: false, column: { left: 900, width: 260 } });
     expect(marginComposerSlot({ ...r, editor: placeable })).toBeNull();
   });
 
   it('declines when no column has been rendered', () => {
-    const r = reader(true, null);
+    const r = reader({ marginVisible: true, column: null });
+    expect(marginComposerSlot({ ...r, editor: placeable })).toBeNull();
+  });
+
+  it('declines when the column is collapsed to nothing', () => {
+    const r = reader({ marginVisible: true, column: { left: 900, width: 0 } });
     expect(marginComposerSlot({ ...r, editor: placeable })).toBeNull();
   });
 
   it('declines when ProseMirror cannot place the selection', () => {
-    const col = document.createElement('div');
-    col.className = 'markup-margin';
-    const r = reader(true, col);
+    const r = reader({ marginVisible: true, column: { left: 900, width: 260 } });
     const throwing = {
       editor: {
         view: {
@@ -268,6 +386,39 @@ describe('what the cascade does with the placement', () => {
     expect(styleOf(document.getElementById('composer-text') as HTMLElement).display).not.toBe(
       'none',
     );
+  });
+
+  it('at 430 the empty sheet is one line high, not the two styles.css reserves', () => {
+    setViewport(PHONE);
+    cleanups.push(installSheets('styles.css', 'doc.css'));
+    mountChromeDom();
+    composerEl().classList.remove('hidden');
+    // No reserved second line: the box is as tall as the one line in it.
+    expect(reservedLines(emptyMarkdownParagraph())).toBe(0);
+  });
+
+  it('below 430 the empty sheet keeps the two lines, because the hint wraps there', () => {
+    // The narrowest phones lose the bet the row above wins: 375px of screen
+    // cannot hold the hint on one line, and a wrapped hint is CLIPPED.
+    setViewport({ width: 375, height: 812 });
+    cleanups.push(installSheets('styles.css', 'doc.css'));
+    mountChromeDom();
+    composerEl().classList.remove('hidden');
+    expect(reservedLines(emptyMarkdownParagraph())).toBeGreaterThan(1);
+  });
+
+  it('at 430 the CODE surface keeps its quote and avatar — the sheet is scoped to markdown', () => {
+    // index.html is the shell for all three surfaces, and only the markdown
+    // one scrolls the sentence clear of the keyboard. On the code surface the
+    // quote is the only sign of which line is being commented.
+    setViewport(PHONE);
+    cleanups.push(installSheets('styles.css', 'doc.css'));
+    mountChromeDom();
+    document.body.classList.add('code-mode');
+    cleanups.push(() => document.body.classList.remove('code-mode'));
+    composerEl().classList.remove('hidden');
+    expect(styleOf(document.getElementById('composer-avatar') as HTMLElement).display).toBe('flex');
+    expect(reservedLines(emptyMarkdownParagraph())).toBeGreaterThan(1);
   });
 
   it('at 1180x820 the sheet keeps its avatar — the width control for the row above', () => {

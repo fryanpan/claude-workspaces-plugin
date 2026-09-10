@@ -378,7 +378,14 @@ export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
       let selBottom = 0;
       const winSel = window.getSelection();
       if (winSel && winSel.rangeCount > 0 && !winSel.isCollapsed) {
-        const r = winSel.getRangeAt(0).getBoundingClientRect();
+        // The LAST line of the selection, not the union of all of them. The
+        // gap below is counted in line heights, and a three-line selection's
+        // bounding box is three lines tall — asking for nine lines of
+        // clearance, which the clamp then answers by pinning it to the top.
+        const rects = winSel.getRangeAt(0).getClientRects();
+        const r =
+          (rects.length > 0 ? rects[rects.length - 1] : null) ??
+          winSel.getRangeAt(0).getBoundingClientRect();
         selTop = r.top;
         selBottom = r.bottom;
       } else {

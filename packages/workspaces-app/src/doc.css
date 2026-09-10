@@ -2667,9 +2667,17 @@ body.composer-open .composer-scrim.composer-scrim--clear {
   background: transparent;
 }
 
+/* MARKDOWN ONLY, and the negation is the point. `index.html` is the shell for
+   the code and redline surfaces too, so an unscoped `#composer` rule reaches
+   all three — and only the markdown surface scrolls the anchored sentence
+   clear of the keyboard (`onComposerOpened`, wired in app.ts and nowhere
+   else). The quote is what stands in for that everywhere it does not happen,
+   and on the code surface it is the ONLY confirmation of which line is being
+   commented: the gutter's comment button opens the box with no visible
+   selection at all. The router clears both classes between mounts. */
 @media (max-width: 1100px) {
-  #composer .composer-quote,
-  #composer .composer-avatar {
+  body:not(.code-mode):not(.redline-mode) #composer .composer-quote,
+  body:not(.code-mode):not(.redline-mode) #composer .composer-avatar {
     display: none;
   }
   /* Every pixel here is a pixel of typing surface, and the hint is the thing
@@ -2684,11 +2692,22 @@ body.composer-open .composer-scrim.composer-scrim--clear {
   .composer-inner {
     padding: 6px 8px 6px 10px;
   }
-  /* The two lines styles.css reserves for a wrapped hint below 640px were for
-     a box that still carried the avatar. It does not, so the empty box is one
-     line again — which is what Bryan asked the sheet to open as. */
-  #composer .md-composer-surface .ProseMirror p.is-editor-empty:first-child,
-  #composer-text:placeholder-shown {
+}
+
+/* The two lines styles.css reserves for a wrapped hint below 640px were for a
+   box that still carried the avatar. Without it the hint fits one line — but
+   only from 430 up: measured, the typing surface is ~350px against a 342.5px
+   hint at 430, ~334px at 414, ~313px at 393 and ~295px at 375, and the
+   placeholder is a zero-height float, so a hint that wraps is CLIPPED rather
+   than shown. So the one-line box is claimed at 430 and wider, and every
+   narrower phone keeps the two lines styles.css reserves. */
+@media (min-width: 430px) and (max-width: 1100px) {
+  body:not(.code-mode):not(.redline-mode)
+    #composer
+    .md-composer-surface
+    .ProseMirror
+    p.is-editor-empty:first-child,
+  body:not(.code-mode):not(.redline-mode) #composer-text:placeholder-shown {
     min-height: 0;
   }
 }
