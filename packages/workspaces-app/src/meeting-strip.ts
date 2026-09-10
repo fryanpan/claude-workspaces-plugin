@@ -354,14 +354,19 @@ export interface MeetingStripOpts {
    */
   onMeetingChange?: (meetingId: string | null) => void;
   /**
-   * A recording just ENDED, and this is the meeting it was.
+   * A recording just ENDED — cleanly or otherwise — and this is the meeting
+   * it was.
    *
    * Narrower than `onMeetingChange`, which also fires on every boundary a
    * doc crosses without a recording having run. What reads this is the
    * tidy-up offer (`meeting-cleanup-offer.ts`), and an offer to re-read a
-   * meeting only makes sense for one this browser just finished: it fires
-   * once per meeting, and never for a start, a reconnect, or a doc that is
-   * merely showing an old meeting's cast.
+   * meeting only makes sense for one this browser actually held: never for a
+   * start, a reconnect, or a doc merely showing an old meeting's cast.
+   *
+   * A BAD END IS STILL AN END. A dropped connection, a server error and a
+   * reconnect that gave up all fire this, because each leaves a transcript on
+   * disk and each leaves live notes with a gap in them — which is the case a
+   * tidy-up helps most. See `announceEnded`.
    */
   onMeetingEnded?: (meetingId: string) => void;
 }
@@ -1399,6 +1404,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         closeSocket();
         opts.liveZone?.end();
         opts.onMeetingChange?.(lastMeetingId);
+        announceEnded();
         setState({ kind: 'unavailable', reason: msg.reason, message: msg.message });
         break;
       case 'stopped':
@@ -1418,6 +1424,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         closeSocket();
         opts.liveZone?.end();
         opts.onMeetingChange?.(lastMeetingId);
+        announceEnded();
         setState({ kind: 'error', message: msg.message || 'The meeting ended unexpectedly.' });
         break;
     }
@@ -1574,6 +1581,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       }
       releaseAudio();
       opts.liveZone?.end();
+      announceEnded();
       setState({ kind: 'error', message: 'The connection to the meeting was lost.' });
     };
     // `error` is always followed by `close`; reporting both would overwrite the
@@ -1599,6 +1607,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     if (step.kind === 'give-up') {
       releaseAudio();
       opts.liveZone?.end();
+      announceEnded();
       setState({ kind: 'error', message: 'The connection to the meeting was lost.' });
       return;
     }
@@ -1613,16 +1622,27 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   }
 
   /**
-   * A recording ended.
+   * A recording ended — HOWEVER IT ENDED.
    *
-   * NOT DEDUPED, deliberately. Both paths that reach here — a press of Stop
-   * and the server's own `stopped` frame — close the socket first, and
-   * closing detaches its handlers, so no meeting can travel both. A dedupe
-   * set was written here and no mutation could make it go red, because
-   * nothing reaches it; and the offer it raises is idempotent anyway
-   * (`offer(id)` re-shows the same card). Untestable defence against an
-   * unreachable case is worse than none: it reads as a guarantee somebody
-   * will later rely on.
+   * Every terminal path calls this, not just the clean ones: a press of Stop,
+   * the server's `stopped`, an `error` or `unavailable` frame, a socket that
+   * dropped, and a reconnect that gave up. A meeting that lost its connection
+   * still leaves a transcript worth tidying, and the ask is "when a meeting
+   * ends" — a dropped connection is an end, just a worse one. Refusing the
+   * offer there would withhold it from exactly the meetings whose live notes
+   * are most likely to have gaps in them.
+   *
+   * `lastMeetingId` is the whole guard, and it is the right one: it is set by
+   * the `ready` frame, so a start that never became a meeting — a refused
+   * mic, a server with no engine, `already_recording` — names nothing to tidy
+   * and raises nothing.
+   *
+   * NOT DEDUPED, deliberately. Every path above closes or abandons the socket
+   * before reaching here, so no meeting can travel two of them. A dedupe set
+   * was written here and no mutation could make it go red, because nothing
+   * reaches it; and the offer it raises is idempotent anyway (`offer(id)`
+   * re-shows the same card). Untestable defence against an unreachable case
+   * is worse than none: it reads as a guarantee somebody will later rely on.
    */
   function announceEnded(): void {
     if (!lastMeetingId) return;

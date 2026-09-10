@@ -13,6 +13,8 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { prose } from '@claude-workspaces/core';
+import * as Y from 'yjs';
 import {
   CLEANUP_DIRECTIVE,
   CLEANUP_TRANSCRIPT_LABEL,
@@ -21,6 +23,7 @@ import {
   runNotesCleanupPass,
   sectionIds,
 } from '../src/notes-cleanup-pass.ts';
+import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import {
   DOC,
   MEETING,
@@ -276,5 +279,102 @@ describe('running a pass', () => {
     );
     expect(result.refused).toBe(1);
     expect(markdownNow()).toContain('the crew rota was agreed');
+  });
+});
+
+/**
+ * What happens on a doc where NOTHING is owned.
+ *
+ * `cwAuthor` is a Yjs attribute, so it does not survive a markdown round trip
+ * — a doc reparsed from disk comes back with no authorship at all — and
+ * `releaseNotesAuthorship` drops the previous meeting's claim the moment a new
+ * recording starts. Both leave the same state: notes the pass cannot prove are
+ * its own.
+ *
+ * That state has two opposite-looking outcomes and only one of them is
+ * acceptable, so it is asserted rather than reasoned about. The pass rewrites
+ * bullets that break the note-taker's house rules — the live measurement in
+ * `notes-cleanup-check.ts` found it adding speaker tags to untagged decisions,
+ * correctly. If ownership were not also required, that same behaviour would
+ * normalise a PERSON'S prose into the note-taker's conventions on any doc that
+ * had been through disk. It is required, and this says so.
+ */
+describe('a doc whose authorship has been lost', () => {
+  /** Round-trip a doc through markdown, the way a reparse from disk does. */
+  const reparsed = (ydoc: Y.Doc): Y.Doc => {
+    const markdown = prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
+    const fresh = new Y.Doc();
+    prose.applyMarkdownToFragment(prose.getProseFragment(fresh), markdown);
+    prose.readOutline(fresh);
+    return fresh;
+  };
+
+  it('really does lose cwAuthor through a markdown round trip', () => {
+    // The premise every assertion below rests on, measured rather than
+    // assumed — and with a positive control that it was there to begin with.
+    const { ydoc } = docStoreFrom(NOTES, ['Meeting notes']);
+    expect(prose.readOutline(ydoc).some((b) => b.author === NOTES_AUTHOR_ID)).toBe(true);
+    expect(prose.readOutline(reparsed(ydoc)).some((b) => b.author !== undefined)).toBe(false);
+  });
+
+  it("will not rewrite a person's prose into the note-taker's conventions", async () => {
+    // Every block is a person's as far as the doc can tell — which is exactly
+    // what a reparsed doc looks like.
+    const { store, markdownNow } = docStoreFrom(NOTES, []);
+    const before = markdownNow();
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'replace_block',
+            blockId: idOf(store, 'harbour run'),
+            markdown: '- [@Ivo](speaker:B) moves the harbour run to the half hour',
+          },
+          { op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(2);
+    // Not a redline either: nobody asked for their writing to be marked up.
+    expect(result.suggested).toBe(0);
+    expect(markdownNow()).toBe(before);
+  });
+
+  it('may still ADD a point it heard, beside writing it may not touch', async () => {
+    // The residue, and it is deliberate: an insert names a heading, not a
+    // block, so it takes nothing away from anyone. A pass that could do
+    // nothing at all on a reparsed doc would be the safer answer and the
+    // less useful one; this is where the line sits, so it is stated.
+    const { store, markdownNow } = docStoreFrom(NOTES, []);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The slipway closes in October.' }]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'insert_under_heading',
+            headingId: idOf(store, 'Ferry timetable'),
+            markdown: '- The slipway closes in October',
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(0);
+    expect(result.touched).toBe(1);
+    const after = markdownNow();
+    expect(after).toContain('The slipway closes in October');
+    // And the person's own lines are still theirs, word for word.
+    expect(after).toContain('My own line about the slipway, which nobody may rewrite.');
+    expect(after).toContain('- The harbour run moves to the half hour from April');
   });
 });

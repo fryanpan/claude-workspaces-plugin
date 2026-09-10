@@ -2081,7 +2081,11 @@ with the whole meeting in front of it and no clock behind it.
 
 **Nothing runs unasked.** When a recording ends the doc shows one button at
 the end of the prose (`meeting-cleanup-offer.ts`); the press is the approval,
-and there is no setting that turns it into a default. `POST
+and there is no setting that turns it into a default. **A bad end is still an
+end**: a server error, a dropped connection and a reconnect that gave up all
+raise the offer too, because each leaves a transcript on disk and each leaves
+live notes with a gap in them — which is the case a tidy-up helps most. A
+start that never became a meeting raises nothing, because it named none. `POST
 /workspaces/:ws/docs/:docId/meetings/:meetingId/notes-cleanup` refuses a
 share visitor, refuses a meeting that is still recording, and 404s a meeting
 the doc never held.
@@ -2139,16 +2143,35 @@ pass leaves alone notes that are good BY THE RULES THE LIVE NOTE-TAKER WRITES
 BY. A doc whose notes were written some other way will be brought into line
 with them.
 
-### Two limits worth knowing before relying on it
+### When a doc's authorship has been lost
 
 `cwAuthor` is what tells a person's line from the note-taker's, and it is a
-Yjs attribute on the block. It does **not** survive a markdown round trip: a
-doc reparsed from disk comes back with no authorship at all, and the pass then
-owns nothing and changes nothing. And `releaseNotesAuthorship` drops the
-previous meeting's claim when a NEW recording starts, so a tidy-up asked for
-after the next recording has begun finds nothing of its own to touch. Both
-fail closed — the pass does less, never more — which is the right direction
-for a feature whose hard criterion is restraint.
+Yjs attribute on the block. It does **not** survive a markdown round trip — a
+doc reparsed from disk comes back with no authorship at all — and
+`releaseNotesAuthorship` drops the previous meeting's claim the moment a new
+recording starts. Both leave the same state: notes the pass cannot prove are
+its own.
+
+**That state matters more than it looks, because the pass does rewrite
+bullets that break the note-taker's house rules.** The live measurement below
+caught it adding speaker tags to untagged decisions, correctly. If ownership
+were not ALSO required, that same behaviour would normalise a person's own
+prose into the note-taker's conventions on any doc that had been through
+disk — a doc whose notes somebody wrote by hand, quietly rewritten in a voice
+that is not theirs. Ownership is required, and
+`notes-cleanup-pass.test.ts`'s "a doc whose authorship has been lost" cases
+assert it rather than reason about it: a `replace_block` and a `delete_block`
+on such a doc are both refused, `suggested` is 0 so nothing arrives as a
+redline either, and the markdown is byte-identical afterwards. The same file
+measures the premise instead of assuming it — authorship present before a
+round trip, absent after.
+
+**One thing does still get through, deliberately.** `insert_under_heading`
+names a heading rather than a block, so it takes nothing away from anyone: on
+a doc where nothing is owned the pass may still ADD a point it heard, beside
+writing it may not touch. A pass that could do nothing at all there would be
+the safer answer and the less useful one, so the line is drawn here and
+tested here.
 
 ## Is anybody listening — lead presence (`lead-presence.ts`)
 
