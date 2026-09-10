@@ -109,6 +109,7 @@ import {
 } from './live-doc-fanout.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
+import { preCompactPath, writePreCompactBackup } from './pre-compact-backup.ts';
 import {
   deletePrivateMeta,
   liftPrivateMetaFromYdoc,
@@ -3725,11 +3726,25 @@ export class DocStore {
       // and it is paid by every browser on every page load in one sync frame.
       // See board-doc-compaction.ts for why this is safe here and nowhere
       // else, and for the three guards that keep it that way.
-      const state = isWorkspaceProjectionDoc(docId) ? compactBoardState(new Uint8Array(buf)) : null;
-      Y.applyUpdate(ydoc, state?.update ?? new Uint8Array(buf));
-      if (state?.compacted) {
+      const original = new Uint8Array(buf);
+      const state = isWorkspaceProjectionDoc(docId) ? compactBoardState(original) : null;
+      // The compacted state is what the next debounced save writes over the
+      // `.ydoc`, so the bytes it replaces are kept first — written and fsynced
+      // here, before the rebuild is applied to the live doc and long before a
+      // save can run. A backup that cannot be written is a reason to keep the
+      // original bytes, not a reason to fail the load: the doc is fine either
+      // way, it just stays big until someone looks at the log line.
+      const backup = state?.compacted ? writePreCompactBackup(path, original) : 'exists';
+      const useCompacted = state?.compacted === true && backup !== 'failed';
+      Y.applyUpdate(ydoc, useCompacted && state ? state.update : original);
+      if (useCompacted && state) {
         console.log(
-          `[doc-store] compacted ${docId}: ${state.beforeBytes} → ${state.afterBytes} bytes`,
+          `[doc-store] compacted ${docId}: ${state.beforeBytes} → ${state.afterBytes} bytes` +
+            (backup === 'written' ? ` (kept ${preCompactPath(path)})` : ''),
+        );
+      } else if (state?.compacted && backup === 'failed') {
+        console.error(
+          `[doc-store] ${docId} left uncompacted: could not keep its pre-compaction bytes`,
         );
       }
     } catch (err) {

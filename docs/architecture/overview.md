@@ -317,6 +317,17 @@ is the record and the projection is reasserted after load. `slow-load-alarm.ts`
 reports a board load that crossed its budget. Measured together on the live
 board: 1.53 MB on the wire before, 0.22 MB after.
 
+**`<docId>.ydoc.pre-compact` is that compaction's one safety copy.** The first
+time a board doc is compacted, the bytes that were on disk are written beside
+it and fsynced before the rebuild is applied, and never overwritten
+afterwards — a second compaction offering already-compacted bytes is refused,
+because replacing the copy with them is the one failure that would look like
+the backup working. A doc whose backup cannot be written is left uncompacted
+rather than compacted with nothing behind it. Nothing reads the file: it
+exists so the claim that compaction loses no content is falsifiable rather
+than merely argued. **It is safe to delete once someone trusts the
+compaction**, and it costs the doc's pre-compaction size once per board.
+
 That is why editing a task chip inside a document does not write the task —
 the edit is reverted a moment later and the board changes only through the
 named REST routes, which is the consequence [security.md](security.md) records
