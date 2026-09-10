@@ -241,6 +241,10 @@ export function buildNotesPrompt(
  * "you wrote this and nobody has touched it since", which is exactly the set
  * of blocks an edit may rewrite directly — anything else reaches them as a
  * suggestion, and the instructions say so.
+ *
+ * `input.claimed` overrides that per block, for a caller whose own gate has
+ * decided an unmarked block is nobody's rather than a person's. Only the
+ * cleanup pass sets it; a tick leaves it absent and reads exactly as before.
  */
 /**
  * The doc as the model reads it, cut in two at the line the cache is taken on.
@@ -285,7 +289,10 @@ function renderOutline(input: NotesComposeInput): { head: string; tail: string }
             ? 'sub-bullet'
             : 'bullet'
           : 'para';
-    const whose = entry.author === undefined ? 'theirs' : 'yours';
+    // `claimed` is the caller overriding the doc's marks — see
+    // `NotesComposeInput.claimed`. Nothing sets it on a tick.
+    const whose =
+      entry.author !== undefined || input.claimed?.has(entry.id) === true ? 'yours' : 'theirs';
     const under =
       entry.kind === 'heading' || entry.underHeadingId === undefined
         ? ''

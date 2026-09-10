@@ -19,13 +19,15 @@
  * FOUR THINGS IT REFUSES STRUCTURALLY, so no wording of a prompt can undo
  * them (`confineToSection`):
  *
- * - **A person's line is never addressed.** An edit naming a block the
- *   note-taker does not still own is DROPPED, not turned into a redline. The
+ * - **A person's line is never addressed.** An edit naming a block the doc
+ *   records as somebody else's is DROPPED, not turned into a redline. The
  *   live path's answer — a suggestion on their words — is right for a meeting
  *   in progress, where the note-taker is writing beside them. It is wrong
  *   here: nobody asked for their own writing to be marked up, and a tidy-up
  *   that leaves twelve redlines on somebody's paragraph is the disruption the
- *   feature exists to avoid.
+ *   feature exists to avoid. What "records as somebody else's" means is the
+ *   one thing this gate has to get right, and it is not the same question as
+ *   "does the note-taker still own it" — see `claimable`.
  * - **Nothing outside this meeting's own section moves.** The section is the
  *   heading the meeting opened plus its blocks; an edit naming anything else
  *   — an earlier meeting's notes, the doc's own body — is dropped.
@@ -42,9 +44,16 @@
  */
 
 import { prose, speakerDisplayName } from '@claude-workspaces/core';
-import * as Y from 'yjs';
 import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-notes.ts';
 import { listMeetings, readTranscript } from './meetings.ts';
+import {
+  claimForCleanup,
+  claimable,
+  commentedBlockIds,
+  confineToSection,
+  notesMarksLive,
+  sectionIds,
+} from './notes-cleanup-scope.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -161,141 +170,6 @@ export interface NotesCleanupDeps {
   headingIdOf: (docId: string, meetingId: string) => string | undefined;
 }
 
-/**
- * The ids inside one meeting's notes section: the heading itself, then every
- * block after it until a heading at that level or above.
- *
- * Returned as two sets because the gate asks two different questions of them
- * — "may an edit name this block?" and "is this a heading a bullet may be
- * inserted under?" — and answering the second by re-walking would let a
- * heading BELOW the section pass as one inside it.
- */
-export function sectionIds(
-  outline: readonly prose.OutlineEntry[],
-  headingId: string,
-): { blocks: Set<string>; headings: Set<string> } {
-  const blocks = new Set<string>();
-  const headings = new Set<string>();
-  const start = outline.findIndex((e) => e.id === headingId);
-  if (start < 0) return { blocks, headings };
-  const openLevel = outline[start]?.level ?? 2;
-  for (let i = start; i < outline.length; i++) {
-    const entry = outline[i];
-    if (entry === undefined) continue;
-    if (i > start && entry.kind === 'heading' && (entry.level ?? 1) <= openLevel) break;
-    blocks.add(entry.id);
-    if (entry.kind === 'heading') headings.add(entry.id);
-  }
-  return { blocks, headings };
-}
-
-/**
- * Which blocks somebody has left a comment on.
- *
- * A `replace_block` swaps the block's `Y.XmlText` for a new one, so every
- * relative position inside it stops resolving — and a comment thread whose
- * anchor stops resolving is a comment the reader has to be re-shown and
- * re-placed, on words that may no longer exist. The auto-reanchor sweep
- * recovers some of them by snippet, and a recovery is not the same as never
- * having moved.
- *
- * During a meeting that risk is worth taking: the note-taker is writing beside
- * the reader and a bullet a minute old has usually been read by nobody. At the
- * END of a meeting it is not. So a commented block is out of this pass's
- * reach, and the pass ADDS beside it instead. `nest_blocks` is deliberately
- * still allowed on one: nesting moves the block without re-creating its text,
- * which `notes-grouping.test.ts` proves keeps an anchor pointing at its own
- * words.
- *
- * Never throws: a doc whose threads map will not read reports no comments,
- * which is the same answer as a doc with none and costs only restraint.
- */
-export function commentedBlockIds(ydoc: Y.Doc): Set<string> {
-  const out = new Set<string>();
-  try {
-    const threads = ydoc.getMap('threads') as Y.Map<Y.Map<unknown>>;
-    if (threads.size === 0) return out;
-    const walk = prose.walkProse(prose.getProseFragment(ydoc));
-    const blockOf = new Map<unknown, string>();
-    for (const seg of walk.segments) {
-      // Climb from the text to the NEAREST ancestor carrying a block id. A
-      // bullet's words sit in a paragraph inside a list item inside a list,
-      // and only one of those three is the block an edit addresses — the
-      // innermost that has an id, which `seg.block` and `seg.topBlock` between
-      // them can miss in either direction.
-      let node: Y.XmlText | Y.XmlElement | Y.XmlFragment | null = seg.node;
-      while (node) {
-        const id = node instanceof Y.XmlElement ? prose.readBlockId(node) : undefined;
-        if (id !== undefined) {
-          blockOf.set(seg.node, id);
-          break;
-        }
-        node = node.parent as Y.XmlElement | Y.XmlFragment | null;
-      }
-    }
-    threads.forEach((thread) => {
-      const anchor = thread.get('anchor') as { kind?: string; startRel?: Uint8Array } | undefined;
-      if (anchor?.kind !== 'text-range' || !anchor.startRel) return;
-      const abs = Y.createAbsolutePositionFromRelativePosition(
-        Y.decodeRelativePosition(anchor.startRel),
-        ydoc,
-      );
-      const id = abs ? blockOf.get(abs.type) : undefined;
-      if (id !== undefined) out.add(id);
-    });
-  } catch {
-    return out;
-  }
-  return out;
-}
-
-/**
- * Keep only the edits a cleanup is allowed to make.
- *
- * `owned` is the set of block ids still marked as the note-taker's own. An
- * edit naming anything else is DROPPED rather than proposed — see the header
- * for why a redline on a person's line is the wrong answer here. `commented`
- * is the set a thread points into; see `commentedBlockIds`.
- */
-export function confineToSection(
-  edits: readonly prose.BlockEdit[],
-  scope: {
-    blocks: Set<string>;
-    headings: Set<string>;
-    owned: Set<string>;
-    headingId: string;
-    commented?: Set<string>;
-  },
-): { kept: prose.BlockEdit[]; refused: number } {
-  const kept: prose.BlockEdit[] = [];
-  // Ours to rewrite: inside the section, still the note-taker's, and not the
-  // section heading itself — deleting that orphans every note under it.
-  const mine = (id: string): boolean =>
-    scope.blocks.has(id) && scope.owned.has(id) && id !== scope.headingId;
-  const rewritable = (id: string): boolean => mine(id) && !scope.commented?.has(id);
-  for (const edit of edits) {
-    switch (edit.op) {
-      case 'insert_under_heading':
-        if (scope.headings.has(edit.headingId)) kept.push(edit);
-        break;
-      case 'replace_block':
-      case 'delete_block':
-        if (rewritable(edit.blockId)) kept.push(edit);
-        break;
-      // Nesting keeps every block's own text, so a comment inside one rides
-      // along — which is why this asks `mine` and not `rewritable`.
-      case 'nest_blocks':
-        if (mine(edit.leadBlockId) && edit.blockIds.every(mine)) kept.push(edit);
-        break;
-      // A cleanup has a section already; writing at the end of the doc is the
-      // one way to grow a second one.
-      case 'insert_at_end':
-        break;
-    }
-  }
-  return { kept, refused: edits.length - kept.length };
-}
-
 /** The meeting's transcript as the composer reads turns: the name a person
  *  gave each voice, with the engine's label kept beside it so a later rename
  *  still finds the tags this pass writes. */
@@ -391,6 +265,29 @@ export async function runNotesCleanupPass(
     return refusal('no-section', 'notes cleanup: the notes section is no longer in the doc');
   }
   const turns = cleanupTurns(transcript, namesOf(deps.dataDir, docId, meetingId));
+  const owned = new Set(outline.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id));
+  const attributed = new Set(outline.filter((e) => e.author !== undefined).map((e) => e.id));
+  const marksLive = notesMarksLive(doc.ydoc);
+  const ours = claimable({ owned, attributed, marksLive });
+  // WHAT THE MODEL IS TOLD AND WHAT THE GATE ENFORCES ARE ONE ANSWER. A gate
+  // that admits a block the prompt has just called a person's writing changes
+  // nothing, because the model does as it is told; the outline's `theirs` is
+  // read straight off the mark, so on a doc whose marks are gone it would
+  // call every line a person's. `claimed` is the same predicate the gate
+  // uses, and `humanNotes` is its complement among the unmarked lines: a line
+  // this pass may not claim, either because the marks are live and it is not
+  // ours or because it sits outside this meeting's section, where nothing is.
+  // Headings are left out of the list — it is about lines, and the outline
+  // already says which heading each line sits under.
+  const claimed = new Set(
+    outline.filter((e) => ours(e.id) && scope.blocks.has(e.id)).map((e) => e.id),
+  );
+  const humanNotes = outline
+    .filter(
+      (e) =>
+        e.kind !== 'heading' && e.text.length > 0 && e.author === undefined && !claimed.has(e.id),
+    )
+    .map((e) => e.text);
   const input: NotesComposeInput = {
     docId,
     meetingId,
@@ -399,7 +296,8 @@ export async function runNotesCleanupPass(
     notesHeadingId: headingId,
     extraPrompt: CLEANUP_DIRECTIVE,
     transcriptLabel: CLEANUP_TRANSCRIPT_LABEL,
-    humanNotes: outline.filter((e) => e.author === undefined).map((e) => e.text),
+    claimed,
+    ...(humanNotes.length > 0 ? { humanNotes } : {}),
     multiSpeaker: turns.some((t) => t.speaker !== undefined),
   };
 
@@ -413,11 +311,20 @@ export async function runNotesCleanupPass(
     );
   }
 
-  const owned = new Set(outline.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id));
   // Read AFTER the compose, not before: the doc is live, and somebody can
   // leave a comment while the model is thinking.
   const commented = commentedBlockIds(doc.ydoc);
-  const { kept, refused } = confineToSection(edits, { ...scope, owned, headingId, commented });
+  const { kept, refused } = confineToSection(edits, {
+    ...scope,
+    owned,
+    attributed,
+    marksLive,
+    headingId,
+    commented,
+  });
+  // The gate said these are ours; the write path has to be told, or every one
+  // of them lands as a redline instead of a rewrite. See `claimForCleanup`.
+  claimForCleanup(doc.ydoc, kept);
   // A store that refuses the whole batch — the doc has gone, or is not prose —
   // reports no counts at all. Reading that as zeros is the honest answer: it
   // changed nothing, which is what the numbers below say.

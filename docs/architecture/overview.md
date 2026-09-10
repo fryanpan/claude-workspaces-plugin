@@ -410,7 +410,11 @@ second note-taking path — it reuses `NotesComposer`, the shared
 `applyBlockEdits` and the same authorship rules, adding only the whole
 transcript, a restraint directive and the gate that decides which of the
 returned edits a cleanup is allowed to make. One route calls it
-(`routes/meetings-calendar.ts`); nothing else does.
+(`routes/meetings-calendar.ts`); nothing else does. `notes-cleanup-scope.ts`
+is that gate, split out because it answers a different question: not "run a
+pass" but "for a block the model has named, may this pass touch it at all" —
+section membership, comment anchors, and whose material it is. Pure, or a
+read of the doc; it composes nothing.
 
 `meeting-stream-set.ts` joins that services tier inside the `meeting-*`
 family and moves nothing in the picture: it is the fan-out one level below

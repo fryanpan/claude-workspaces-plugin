@@ -16,11 +16,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  commentedBlockIds,
-  confineToSection,
-  runNotesCleanupPass,
-} from '../src/notes-cleanup-pass.ts';
+import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
+import { commentedBlockIds, confineToSection } from '../src/notes-cleanup-scope.ts';
 import {
   DOC,
   MEETING,
@@ -89,6 +86,8 @@ describe('a bullet somebody has commented on', () => {
       blocks: new Set(['h1', 'b1', 'b2']),
       headings: new Set(['h1']),
       owned: new Set(['b1', 'b2']),
+      attributed: new Set(['b1', 'b2']),
+      marksLive: true,
       headingId: 'h1',
       commented: new Set(['b1']),
     };

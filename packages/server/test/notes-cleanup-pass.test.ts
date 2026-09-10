@@ -19,10 +19,9 @@ import {
   CLEANUP_DIRECTIVE,
   CLEANUP_TRANSCRIPT_LABEL,
   MAX_CLEANUP_TRANSCRIPT_CHARS,
-  confineToSection,
   runNotesCleanupPass,
-  sectionIds,
 } from '../src/notes-cleanup-pass.ts';
+import { notesMarksLive } from '../src/notes-cleanup-scope.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import {
   DOC,
@@ -38,89 +37,6 @@ import {
 } from './notes-cleanup-fixture.ts';
 
 afterEach(dropFreshDirs);
-
-describe('the section a cleanup may touch', () => {
-  it('runs from the meeting heading to the next section, and no further', () => {
-    const { store } = docStoreFrom(
-      ['## Meeting notes', '### Topic', '- one', '## Other section', '- outside'].join('\n'),
-      ['Meeting notes'],
-    );
-    const outline = store.readOutline(DOC)?.blocks ?? [];
-    const heading = outline.find((b) => b.text === 'Meeting notes');
-    const ids = sectionIds(outline, heading?.id ?? '');
-    expect([...ids.blocks].map((id) => outline.find((b) => b.id === id)?.text)).toEqual([
-      'Meeting notes',
-      'Topic',
-      'one',
-    ]);
-    expect(ids.headings.size).toBe(2);
-  });
-});
-
-describe('what the gate refuses', () => {
-  // `h1` is OWNED as well as being the section heading — that is the real
-  // state a meeting leaves behind, and the heading-delete case below is
-  // vacuous without it: an unowned heading is refused by the ownership
-  // check, so the guard it means to prove is never reached.
-  const scope = {
-    blocks: new Set(['h1', 'b1', 'b2']),
-    headings: new Set(['h1']),
-    owned: new Set(['h1', 'b1']),
-    headingId: 'h1',
-  };
-
-  it('drops an edit aimed at a block the note-taker does not own', () => {
-    const { kept, refused } = confineToSection(
-      [{ op: 'replace_block', blockId: 'b2', markdown: '- rewritten' }],
-      scope,
-    );
-    expect(kept).toEqual([]);
-    expect(refused).toBe(1);
-  });
-
-  it('drops an edit aimed outside the section', () => {
-    const { kept } = confineToSection([{ op: 'delete_block', blockId: 'elsewhere' }], scope);
-    expect(kept).toEqual([]);
-  });
-
-  it('refuses insert_at_end, which is how a second section gets opened', () => {
-    const { kept } = confineToSection(
-      [{ op: 'insert_at_end', markdown: '## Meeting notes' }],
-      scope,
-    );
-    expect(kept).toEqual([]);
-  });
-
-  it('refuses a delete of the section heading itself — it orphans every note under it', () => {
-    const { kept } = confineToSection([{ op: 'delete_block', blockId: 'h1' }], scope);
-    expect(kept).toEqual([]);
-    // And a rewrite of it, for the same reason: the heading is the address
-    // the meeting's own notes are found at.
-    expect(
-      confineToSection([{ op: 'replace_block', blockId: 'h1', markdown: '## Notes' }], scope).kept,
-    ).toEqual([]);
-  });
-
-  it("keeps a rewrite of the note-taker's own bullet, and an insert under its heading", () => {
-    const { kept, refused } = confineToSection(
-      [
-        { op: 'replace_block', blockId: 'b1', markdown: '- tightened' },
-        { op: 'insert_under_heading', headingId: 'h1', markdown: '- added' },
-      ],
-      scope,
-    );
-    expect(kept).toHaveLength(2);
-    expect(refused).toBe(0);
-  });
-
-  it("refuses a nest whose members are not all the note-taker's", () => {
-    const { kept } = confineToSection(
-      [{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }],
-      scope,
-    );
-    expect(kept).toEqual([]);
-  });
-});
 
 describe('running a pass', () => {
   it('leaves the document byte for byte identical when the model changes nothing', async () => {
@@ -283,23 +199,87 @@ describe('running a pass', () => {
 });
 
 /**
- * What happens on a doc where NOTHING is owned.
+ * A PERSON'S BULLET, INSIDE THE NOTE-TAKER'S OWN SECTION.
+ *
+ * This is the case criterion 2.3 is about and the one the loosened gate had
+ * to keep refusing. The doc still carries the note-taker's marks, and one
+ * bullet in the middle of its section carries none — because a person typed
+ * it there during the meeting, or because they edited one of the note-taker's
+ * and `clearAuthorshipOnPersonEdit` handed it back. The doc records those two
+ * the same way, and both are theirs.
+ *
+ * The section check does not cover it. The person's line in `NOTES` sits
+ * ABOVE the meeting heading, so it is out of reach on section membership
+ * alone and proves nothing about ownership; this one is inside the section,
+ * where only `claimable` stands between it and a rewrite.
+ */
+describe("a person's bullet inside the section, on a doc whose marks are live", () => {
+  it('is not rewritten, not deleted, and not marked up', async () => {
+    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'replace_block',
+            blockId: idOf(store, 'Kestrel Lane'),
+            markdown: '- [@Ivo](speaker:B) keeps the winter crew on Kestrel Lane',
+          },
+          { op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(2);
+    // Not a redline either: nobody asked for their writing to be marked up.
+    expect(result.suggested).toBe(0);
+    expect(result.touched).toBe(0);
+    expect(markdownNow()).toBe(before);
+  });
+
+  it('is named to the model as theirs, and is not in what the pass claims', async () => {
+    // A gate the prompt contradicts is only half a rule. The model is told
+    // the same thing the gate enforces, so it does not spend a pass proposing
+    // edits that will be dropped.
+    const { store } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    const composer = stubComposer([]);
+    await runNotesCleanupPass(depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')), {
+      docId: DOC,
+      meetingId: MEETING,
+    });
+    const input = composer.seen[0];
+    expect(input?.humanNotes).toContain('Kestrel Lane keeps the winter crew');
+    expect(input?.claimed?.has(idOf(store, 'Kestrel Lane'))).toBe(false);
+    // And the note-taker's own bullet beside it IS claimed.
+    expect(input?.claimed?.has(idOf(store, 'harbour run'))).toBe(true);
+  });
+});
+
+/**
+ * What happens on a doc where NOTHING is marked.
  *
  * `cwAuthor` is a Yjs attribute, so it does not survive a markdown round trip
  * — a doc reparsed from disk comes back with no authorship at all — and
  * `releaseNotesAuthorship` drops the previous meeting's claim the moment a new
- * recording starts. Both leave the same state: notes the pass cannot prove are
- * its own.
+ * recording starts. Both leave the same state, and it is not the state above:
+ * the doc records nothing about ANYBODY, so an unmarked block is unknown
+ * rather than a person's.
  *
- * That state has two opposite-looking outcomes and only one of them is
- * acceptable, so it is asserted rather than reasoned about. The pass rewrites
- * bullets that break the note-taker's house rules — the live measurement in
- * `notes-cleanup-check.ts` found it adding speaker tags to untagged decisions,
- * correctly. If ownership were not also required, that same behaviour would
- * normalise a PERSON'S prose into the note-taker's conventions on any doc that
- * had been through disk. It is required, and this says so.
+ * The gate used to read the two states identically and refuse both. It could
+ * then not change a single word on a reparsed doc — including words it had
+ * written itself — while still being free to append new bullets under the
+ * heading, because an insert names a heading and no owner. Able to add to a
+ * document it could not tidy was the worst of both, and Bryan chose the
+ * looser rule ("Bring into line") over gating on authorship.
  */
-describe('a doc whose authorship has been lost', () => {
+describe('a doc whose marks have all been lost', () => {
   /** Round-trip a doc through markdown, the way a reparse from disk does. */
   const reparsed = (ydoc: Y.Doc): Y.Doc => {
     const markdown = prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
@@ -314,14 +294,16 @@ describe('a doc whose authorship has been lost', () => {
     // assumed — and with a positive control that it was there to begin with.
     const { ydoc } = docStoreFrom(NOTES, ['Meeting notes']);
     expect(prose.readOutline(ydoc).some((b) => b.author === NOTES_AUTHOR_ID)).toBe(true);
+    expect(notesMarksLive(ydoc)).toBe(true);
     expect(prose.readOutline(reparsed(ydoc)).some((b) => b.author !== undefined)).toBe(false);
+    expect(notesMarksLive(reparsed(ydoc))).toBe(false);
   });
 
-  it("will not rewrite a person's prose into the note-taker's conventions", async () => {
-    // Every block is a person's as far as the doc can tell — which is exactly
-    // what a reparsed doc looks like.
+  it('brings an unmarked bullet in its own section into line', async () => {
+    // THE CASE THE OLD GATE REFUSED. Same edit, same doc, same section: all
+    // that differs from the case above is that no mark survives anywhere, so
+    // nothing here is recorded as a person's.
     const { store, markdownNow } = docStoreFrom(NOTES, []);
-    const before = markdownNow();
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
     const result = await runNotesCleanupPass(
@@ -331,26 +313,76 @@ describe('a doc whose authorship has been lost', () => {
           {
             op: 'replace_block',
             blockId: idOf(store, 'harbour run'),
-            markdown: '- [@Ivo](speaker:B) moves the harbour run to the half hour',
+            markdown: '- [@Ivo](speaker:B) moves the harbour run to the half hour from April',
           },
-          { op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') },
         ]),
         dataDir,
         idOf(store, 'Meeting notes'),
       ),
       { docId: DOC, meetingId: MEETING },
     );
-    expect(result.refused).toBe(2);
-    // Not a redline either: nobody asked for their writing to be marked up.
+    expect(result.refused).toBe(0);
+    // APPLIED, not suggested. There are two ownership rules and loosening the
+    // gate alone leaves the second one turning every rewrite into a redline —
+    // "Show me first" is the option Bryan did not pick.
+    expect(result.applied).toBe(1);
     expect(result.suggested).toBe(0);
-    expect(markdownNow()).toBe(before);
+    expect(result.touched).toBe(1);
+    expect(markdownNow()).toContain('moves the harbour run to the half hour from April');
+    expect(markdownNow()).not.toContain('The harbour run moves to the half hour from April');
   });
 
-  it('may still ADD a point it heard, beside writing it may not touch', async () => {
-    // The residue, and it is deliberate: an insert names a heading, not a
-    // block, so it takes nothing away from anyone. A pass that could do
-    // nothing at all on a reparsed doc would be the safer answer and the
-    // less useful one; this is where the line sits, so it is stated.
+  it('tells the model the section is its own, rather than calling every line theirs', async () => {
+    // Without this the loosening would be inert: the outline prints `theirs`
+    // straight off the mark, so on this doc every line would read as a
+    // person's and the model would leave all of them alone whatever the gate
+    // allowed.
+    const { store } = docStoreFrom(NOTES, []);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const composer = stubComposer([]);
+    await runNotesCleanupPass(depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')), {
+      docId: DOC,
+      meetingId: MEETING,
+    });
+    const input = composer.seen[0];
+    expect(input?.claimed?.has(idOf(store, 'harbour run'))).toBe(true);
+    expect(input?.humanNotes ?? []).not.toContain(
+      'The harbour run moves to the half hour from April',
+    );
+    // The doc's own body, outside the meeting's section, is still theirs —
+    // the pass has no business claiming a line it never wrote near.
+    expect(input?.claimed?.has(idOf(store, 'My own line about the slipway'))).toBe(false);
+    expect(input?.humanNotes).toContain('My own line about the slipway, which nobody may rewrite.');
+  });
+
+  it("still leaves the doc's own body alone, outside the meeting's section", async () => {
+    const { store, markdownNow } = docStoreFrom(NOTES, []);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'Something about the slipway.' }]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'replace_block',
+            blockId: idOf(store, 'My own line about the slipway'),
+            markdown: 'Rewritten by a robot',
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(1);
+    expect(result.suggested).toBe(0);
+    const after = markdownNow();
+    expect(after).toContain('My own line about the slipway, which nobody may rewrite.');
+    expect(after).not.toContain('Rewritten by a robot');
+  });
+
+  it('may still ADD a point it heard, as it always could', async () => {
     const { store, markdownNow } = docStoreFrom(NOTES, []);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The slipway closes in October.' }]);
@@ -371,10 +403,6 @@ describe('a doc whose authorship has been lost', () => {
     );
     expect(result.refused).toBe(0);
     expect(result.touched).toBe(1);
-    const after = markdownNow();
-    expect(after).toContain('The slipway closes in October');
-    // And the person's own lines are still theirs, word for word.
-    expect(after).toContain('My own line about the slipway, which nobody may rewrite.');
-    expect(after).toContain('- The harbour run moves to the half hour from April');
+    expect(markdownNow()).toContain('The slipway closes in October');
   });
 });

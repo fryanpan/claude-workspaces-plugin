@@ -355,6 +355,21 @@ export interface NotesComposeInput {
    */
   humanNotes?: readonly string[];
   /**
+   * Blocks the CALLER has decided are the agent's to edit, whatever the doc's
+   * marks say. `renderOutline` prints one as `yours` rather than `theirs`.
+   *
+   * It exists because the outline's `theirs` is read straight off `cwAuthor`,
+   * and on a doc whose marks are gone — a reparse from disk, or the next
+   * recording's release — that prints EVERY line as a person's. The cleanup
+   * pass's gate treats an unmarked block on such a doc as unknown rather than
+   * as somebody's (`notes-cleanup-pass.ts`), and a gate that admits a block
+   * the prompt has just called a person's writing changes nothing: the model
+   * does as it is told. So the two are said in one place and agree.
+   *
+   * Absent leaves every existing caller's prompt byte-identical.
+   */
+  claimed?: ReadonlySet<string>;
+  /**
    * Has this meeting heard more than one voice yet?
    *
    * The turns already say so implicitly — the solo path strips `speaker`

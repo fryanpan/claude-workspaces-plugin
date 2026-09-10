@@ -41,14 +41,21 @@ export const dropFreshDirs = (): void => {
  * A doc store over one Y.Doc that really applies edits, so a case asserts the
  * document rather than the count the pass reported about it.
  *
- * `ownedFrom` is the markdown offset at which the note-taker's own blocks
- * begin: every block from there on is stamped `cwAuthor`, and everything
- * before it reads as a person's writing — which is exactly how the live doc
- * distinguishes them (`clearAuthorshipOnPersonEdit`).
+ * `ownedHeadings` names the headings at which the note-taker's own blocks
+ * begin: every block from the first match on is stamped `cwAuthor`, and
+ * everything before it reads as a person's writing — which is exactly how the
+ * live doc distinguishes them (`clearAuthorshipOnPersonEdit`).
+ *
+ * `typedByHand` names blocks INSIDE that run whose mark is then removed: a
+ * bullet a person typed into the notes section during the meeting, or one of
+ * the note-taker's they edited afterwards. The doc cannot tell those two
+ * apart and neither can the gate; both are simply unmarked on a doc whose
+ * other marks are intact, which is the state that has to stay out of reach.
  */
 export function docStoreFrom(
   markdown: string,
   ownedHeadings: readonly string[],
+  typedByHand: readonly string[] = [],
 ): {
   store: NotesDocStore;
   ydoc: Y.Doc;
@@ -65,6 +72,7 @@ export function docStoreFrom(
     const text = el.toString();
     if (ownedHeadings.some((h) => text.includes(h))) owning = true;
     if (owning) el.setAttribute('cwAuthor', NOTES_AUTHOR_ID);
+    if (typedByHand.some((h) => text.includes(h))) el.removeAttribute('cwAuthor');
   }
   const doc = { ydoc, meta: { type: 'markdown' as const } };
   const store: NotesDocStore = {
