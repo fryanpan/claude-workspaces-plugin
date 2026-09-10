@@ -1,4 +1,8 @@
 import vm from 'node:vm';
+import {
+  insideRecoverableInsert,
+  isRecoveredMockCollision,
+} from '@claude-workspaces/core/mock-swap-noise';
 import { afterEach, describe, expect, it } from 'vitest';
 
 /**
@@ -102,11 +106,19 @@ function browserLikeScripts(reporting: Reporting = 'throw'): Page {
   };
 }
 
-/** A round that declares the five kinds of top-level binding a mock uses. */
-function declaringRound(n: number): string {
+/**
+ * A round that declares the five kinds of top-level binding a mock uses.
+ *
+ * `prologue` puts a directive in front of them: `"use strict"` makes the
+ * script one the swap must NOT retry, because a block's function declarations
+ * do not reach the global in strict mode and wrapping one would take the
+ * mock's own handlers away.
+ */
+function declaringRound(n: number, prologue = ''): string {
   return (
     `<!doctype html><html><body class="round-${n}"><h1 id="hero">Round ${n}</h1>` +
     '<script>' +
+    prologue +
     `const LABELS = ['round ${n}'];` +
     'let clicks = 0;' +
     'class Panel { label() { return LABELS[0]; } }' +
@@ -115,6 +127,49 @@ function declaringRound(n: number): string {
     'globalThis.onScreen = currentLabel();' +
     '</script></body></html>'
   );
+}
+
+/** An error event as the page's Sentry handler would have it: the report it
+ *  hands `beforeSend`. */
+function reportOf(ev: Event): { message: string } {
+  return { message: (ev as ErrorEvent).message };
+}
+
+/** A collision on a binding no round here declares — what a mock's own script
+ *  would raise by inserting code of its own while it runs. */
+const FOREIGN = { message: "SyntaxError: Identifier 'somethingElse' has already been declared" };
+
+interface Heard {
+  /** Would this event be dropped? */
+  own: boolean;
+  /** Would an unrelated collision, reported at the same moment, be dropped? */
+  foreign: boolean;
+}
+
+/**
+ * What a page-level `error` listener — Sentry's, registered in the shell's
+ * head long before the widget loads — decides about each error the swap
+ * raises. `true` means "the product recovered this, do not file it".
+ *
+ * It asks twice, because the state the swap publishes has to answer two
+ * questions at that same moment: this collision is ours, and one on a binding
+ * we never declared is not.
+ */
+function listenLikeSentry(run: () => void): Heard[] {
+  const heard: Heard[] = [];
+  const listener = (ev: Event): void => {
+    heard.push({
+      own: isRecoveredMockCollision(reportOf(ev)),
+      foreign: isRecoveredMockCollision(FOREIGN),
+    });
+  };
+  window.addEventListener('error', listener);
+  try {
+    run();
+  } finally {
+    window.removeEventListener('error', listener);
+  }
+  return heard;
 }
 
 describe("a mock's scripts across rounds", () => {
@@ -192,6 +247,46 @@ describe("a mock's scripts across rounds", () => {
     // installed before the swap still HEARS the event; `preventDefault` was
     // never able to unregister anyone.)
     expect(page.unhandled()).toEqual([]);
+  });
+
+  it('tells the page-level error listener that a recovered collision is recovered', async () => {
+    const { swapDocument } = await importLive();
+    page = browserLikeScripts('event');
+    paintRoundOne();
+
+    // Sentry cannot be beaten to the event — `window.onerror` keeps the
+    // position it was first assigned, and the shell assigns it in `<head>` —
+    // so the swap instead raises a flag the handler reads while deciding.
+    const heard = listenLikeSentry(() => {
+      swapDocument(declaringRound(1));
+      swapDocument(declaringRound(2));
+    });
+
+    expect(page.globals.onScreen).toBe('round 2');
+    // Its own collision is dropped; one on a binding this round never declared
+    // is not, even raised at the same instant. The window alone cannot tell
+    // them apart, and a script that does not collide RUNS inside it.
+    expect(heard).toEqual([{ own: true, foreign: false }]);
+    // And the flag is down again the moment the insert is over: a window left
+    // up would silence collisions nothing recovered.
+    expect(insideRecoverableInsert()).toBe(false);
+  });
+
+  it('still files a collision it will not retry', async () => {
+    const { swapDocument } = await importLive();
+    page = browserLikeScripts('event');
+    paintRoundOne();
+
+    // `"use strict"` is outside the retry, so this round LOSES its script and
+    // the reader needs to be told. The negative half of the case above: same
+    // collision, same listener, opposite verdict.
+    const heard = listenLikeSentry(() => {
+      swapDocument(declaringRound(1, '"use strict";'));
+      swapDocument(declaringRound(2, '"use strict";'));
+    });
+
+    expect(page.globals.onScreen).toBe('round 1');
+    expect(heard).toEqual([{ own: false, foreign: false }]);
   });
 
   it('does not re-run a script whose SyntaxError came from its own runtime', async () => {

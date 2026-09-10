@@ -1,3 +1,11 @@
+import {
+  REDECLARATION,
+  collidableNames,
+  collisionIsOurs,
+  enterRecoverableInsert,
+  leaveRecoverableInsert,
+} from '@claude-workspaces/core/mock-swap-noise';
+
 /**
  * Re-running a mock's own inline scripts, round after round.
  *
@@ -87,16 +95,6 @@ function canRetryWrapped(el: HTMLScriptElement, source: string): boolean {
 }
 
 /**
- * The message a redeclaration gets, in the three engines this ships to.
- *
- * V8: `Identifier 'X' has already been declared`. JavaScriptCore, which is
- * what Bryan's iPad runs: `Cannot declare a const variable twice: 'X'.`, or
- * `Cannot redeclare ...`. SpiderMonkey: `redeclaration of const X`.
- */
-const REDECLARATION =
-  /already been declared|cannot declare a (?:let|const|class) variable twice|cannot redeclare|redeclaration of/i;
-
-/**
  * Is this the early error a redeclaration raises — and only that?
  *
  * The name alone is not enough, and reading it as enough was a bug: a mock's
@@ -110,9 +108,12 @@ const REDECLARATION =
  * an insert is the browser's own exception, and a `SyntaxError` from another
  * realm is not an `instanceof` match for this one's.
  */
-function isRedeclaration(err: unknown): boolean {
+function isRedeclaration(err: unknown, declared: string[]): boolean {
   const e = err as { name?: string; message?: string } | null;
-  return e?.name === 'SyntaxError' && REDECLARATION.test(e.message ?? '');
+  const message = e?.message ?? '';
+  return (
+    e?.name === 'SyntaxError' && REDECLARATION.test(message) && collisionIsOurs(message, declared)
+  );
 }
 
 /**
@@ -129,11 +130,15 @@ function isRedeclaration(err: unknown): boolean {
  * `error` is null when a browser withholds the exception object, so the
  * message carries both halves of the question in that case.
  */
-function isRedeclarationEvent(ev: Event): boolean {
+function isRedeclarationEvent(ev: Event, declared: string[]): boolean {
   const e = ev as { error?: unknown; message?: string };
-  if (e.error != null) return isRedeclaration(e.error);
+  if (e.error != null) return isRedeclaration(e.error, declared);
   const message = e.message ?? '';
-  return /SyntaxError/i.test(message) && REDECLARATION.test(message);
+  return (
+    /SyntaxError/i.test(message) &&
+    REDECLARATION.test(message) &&
+    collisionIsOurs(message, declared)
+  );
 }
 
 /**
@@ -164,22 +169,27 @@ function reviveScript(src: HTMLScriptElement, source: string): HTMLScriptElement
  * `preventDefault()` runs only on the event this will retry, and does exactly
  * one thing: it suppresses the browser's DEFAULT reporting of an error the
  * reader never sees. It does NOT unregister anyone else — a page-level `error`
- * listener installed before the swap (Sentry's is) still hears the event, so a
- * recovered round on Chrome still files one CLAUDE-WORKSPACES-8. Measured, not
- * assumed: the headless probe recorded that message with the round recovered
- * and `#hero` reading round two. An error this does NOT retry is left to
- * propagate exactly as it did before.
+ * listener installed before the swap (Sentry's is) still hears the event, and
+ * for as long as that was the whole story a recovered round on Chrome filed
+ * one CLAUDE-WORKSPACES-8 anyway. So the insert that WILL be retried also
+ * raises the window `enterRecoverableInsert` opens, which is what
+ * `/app/sentry.js` reads in `beforeSend` to tell a collision the product
+ * handled from one it did not. It is lowered in the same `finally` as the
+ * listener is removed: an error this does NOT retry — the wrapped retry
+ * itself included — is left to propagate and be reported exactly as before.
  */
 export function insertScript(src: HTMLScriptElement, before: Node | null): void {
   const source = src.textContent ?? '';
   const asWritten = reviveScript(src, source);
   const retryable = canRetryWrapped(src, source);
   let collided = false;
+  const declared = collidableNames(source);
   const onError = (ev: Event): void => {
-    if (!retryable || !isRedeclarationEvent(ev)) return;
+    if (!retryable || !isRedeclarationEvent(ev, declared)) return;
     collided = true;
     ev.preventDefault();
   };
+  const restore = retryable ? enterRecoverableInsert(source) : null;
   window.addEventListener('error', onError, true);
   let threw: { err: unknown } | null = null;
   try {
@@ -188,8 +198,9 @@ export function insertScript(src: HTMLScriptElement, before: Node | null): void 
     threw = { err };
   } finally {
     window.removeEventListener('error', onError, true);
+    if (restore) leaveRecoverableInsert(restore);
   }
-  if (threw && !(retryable && isRedeclaration(threw.err))) throw threw.err;
+  if (threw && !(retryable && isRedeclaration(threw.err, declared))) throw threw.err;
   if (!threw && !collided) return;
   asWritten.remove();
   // The newlines matter: a source ending in a `// line comment` would

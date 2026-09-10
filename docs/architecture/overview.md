@@ -498,6 +498,14 @@ a link edits the stored doc and calls the board. `core` is three tiers: wire typ
 is spelled — server writes it, browser reads it back, one definition so the
 two cannot drift into a suggestion nobody can accept).
 
+`mock-swap-noise.ts` joins that third tier for the same reason and an unusual
+pair of readers: the widget's mockup swap raises a flag there while it inserts
+a script it is about to retry, and the page's Sentry init reads it in
+`beforeSend` to drop the redeclaration the swap already recovered from. They
+are separate bundles that share nothing but the page, so the flag's name and
+the "is this a declaration collision" test have to have one definition — and
+the narrowness is the point, since a collision nothing recovers still files.
+
 `meeting-streams.ts` belongs to core's wire-types tier beside `meeting.ts`, and
 is there for the usual core reason: a two-stream meeting's group names and
 namespaced speaker labels are rendered by the browser, written by the server
