@@ -93,7 +93,7 @@ import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { type SummaryCredential, authHeader } from '../packages/server/src/summarize.ts';
 import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
 import { EVAL_CREDENTIAL_HELP, resolveEvalCredentialFrom } from './eval-credential.ts';
-import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
+import { FIXTURE_DIR, type NotesEvalFixture, staleClockWarning } from './notes-eval-fixtures.ts';
 import {
   MIN_GATED_IDEAS,
   type MeetingIdeaRate,
@@ -547,14 +547,20 @@ interface Options {
 }
 
 function loadFixtures(only: readonly string[], dir: string): NotesEvalFixture[] {
-  return (
-    readdirSync(dir)
-      // `.ideas.json` files are the ground truth beside a fixture, not fixtures.
-      .filter((f) => f.endsWith('.json') && !f.endsWith('.ideas.json'))
-      .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as NotesEvalFixture)
-      .filter((f) => only.length === 0 || only.includes(f.meeting))
-      .sort((a, b) => a.meeting.localeCompare(b.meeting))
-  );
+  const fixtures = readdirSync(dir)
+    // `.ideas.json` files are the ground truth beside a fixture, not fixtures.
+    .filter((f) => f.endsWith('.json') && !f.endsWith('.ideas.json'))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as NotesEvalFixture)
+    .filter((f) => only.length === 0 || only.includes(f.meeting))
+    .sort((a, b) => a.meeting.localeCompare(b.meeting));
+  // A FIXTURE OUTLIVES THE CLOCKS IT WAS CUT WITH, and a rate read off the
+  // wrong tick rate is wrong without looking wrong. Said before the run rather
+  // than in the report, so nobody spends an hour of model calls on it first.
+  for (const fixture of fixtures) {
+    const stale = staleClockWarning(fixture);
+    if (stale) console.log(`WARNING: ${stale}`);
+  }
+  return fixtures;
 }
 
 /** `/workspaces/w-eval?task=t-3` → `t-3`, so the harness rebuilds the row's

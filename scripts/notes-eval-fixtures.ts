@@ -102,6 +102,26 @@ export interface NotesEvalFixture {
   source: string;
   window: { fromSeconds: number; seconds: number };
   /**
+   * The two clocks this fixture's ticks were CUT WITH.
+   *
+   * A fixture is a recording of how the live pipeline would have grouped the
+   * speech, and it takes that grouping from `pause-ticker.ts`'s constants AT
+   * BUILD TIME. So a fixture outlives the constants: when PR 872 took the
+   * cadence ceiling from 15s to 6s, every fixture on disk kept the 15s cut and
+   * went on reporting an eval of a system that no longer ships. Measured on
+   * 2026-09-10 — the same hour of EN2001a is 173 ticks at 15s and 306 at 6s,
+   * so cost per meeting-hour, the compose latency and the failed-write rate
+   * were all being read off roughly half the tick rate the server runs at, and
+   * nothing said so.
+   *
+   * Stamping the clocks is what lets `notes-eval.ts` say so. Optional because
+   * the eight committed fixtures predate the stamp: an ABSENT field means
+   * "cut before this existed", which for those eight means 15s — they have not
+   * been recut, because recutting them moves every baseline in
+   * `notes-eval.baseline.json` and the ratcheted lost-idea bar with them.
+   */
+  clocks?: { quietMs: number; cadenceMs: number };
+  /**
    * A board for this meeting, built from phrases the meeting itself uses.
    *
    * Reference hygiene cannot be measured against an invented board: a title
@@ -198,6 +218,7 @@ function buildOne(spec: (typeof MEETINGS)[number]): NotesEvalFixture {
     licence: 'CC BY 4.0',
     source: 'https://groups.inf.ed.ac.uk/ami/corpus/',
     window: { fromSeconds: spec.fromSeconds, seconds: spec.seconds },
+    clocks: { quietMs: DEFAULT_NOTES_QUIET_MS, cadenceMs: DEFAULT_NOTES_CADENCE_MS },
     board: [...SCENARIO_BOARD],
     ticks: ticksOf(window),
   };
@@ -217,6 +238,30 @@ function buildOne(spec: (typeof MEETINGS)[number]): NotesEvalFixture {
  * Returns null for an argument that is not one, so the existing
  * "just this meeting" form still reads as a meeting name.
  */
+/**
+ * What to say about the clocks a fixture was cut with, or nothing.
+ *
+ * Null is "say nothing", and it covers two cases deliberately: a fixture whose
+ * clocks match what ships, and one that carries no clocks at all. The second
+ * is the eight committed fixtures, which predate the stamp — a line on every
+ * CI smoke run would be a nag about work this function is not doing, and a
+ * warning that fires always is a warning nobody reads.
+ */
+export function staleClockWarning(
+  fixture: { meeting: string; clocks?: { quietMs: number; cadenceMs: number } },
+  quietMs: number = DEFAULT_NOTES_QUIET_MS,
+  cadenceMs: number = DEFAULT_NOTES_CADENCE_MS,
+): string | null {
+  const cut = fixture.clocks;
+  if (!cut) return null;
+  if (cut.quietMs === quietMs && cut.cadenceMs === cadenceMs) return null;
+  return (
+    `${fixture.meeting}: cut at quiet ${cut.quietMs}ms / cadence ${cut.cadenceMs}ms, ` +
+    `but the server now ticks at quiet ${quietMs}ms / cadence ${cadenceMs}ms. ` +
+    'Its tick rate is not the shipped one — rebuild it before reading any rate off this run.'
+  );
+}
+
 export function parseWindowSpec(
   arg: string,
 ): { meeting: string; fromSeconds: number; seconds: number } | null {
