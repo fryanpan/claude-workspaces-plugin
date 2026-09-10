@@ -60,6 +60,14 @@ export interface DriveOptions {
   /** Leave no quiet gap between one write and the next. */
   backToBack: boolean;
   /**
+   * How many people are speaking. Two or more is a different rendering path,
+   * not a variation on one: the zone only draws a speaker pill once it has
+   * heard a second voice, and a pill is an inline element inside the turn's
+   * own span — it changes where every line after it breaks. A measurement
+   * taken with one voice cannot see a smear that needs a pill to happen.
+   */
+  voices: number;
+  /**
    * Scale every cadence — the settle's own JS steps and the CSS transitions
    * they wait on — by one factor, so a thirty-write meeting fits a test's
    * runtime with every ratio preserved. The same trick, and the same reason,
@@ -92,6 +100,12 @@ export interface DriveResult {
   stranded: number;
   /** Turns left in the stream at the end, stranded ones included. */
   streaming: number;
+  /**
+   * The most speaker pills on screen in any one sample. Zero from a run that
+   * asked for two voices means the pill path never rendered and the reading
+   * below is about a stream that never grew one.
+   */
+  pills: number;
 }
 
 const opacityOf = (el: Element | null): number => {
@@ -256,6 +270,7 @@ async function drive(o: DriveOptions): Promise<string> {
 
   let samples = 0;
   let compared = 0;
+  let pills = 0;
   let sampling = true;
   let mark = 'start';
   let worst: Overlap = { area: 0, width: 0, height: 0 };
@@ -264,6 +279,7 @@ async function drive(o: DriveOptions): Promise<string> {
     samples++;
     const runs = painted();
     if (runs.length >= 2) compared++;
+    pills = Math.max(pills, document.querySelectorAll('.lz-speaker').length);
     const w = worstOverlap(runs);
     if (w.area > worst.area) worst = { ...w, mark };
   };
@@ -294,11 +310,14 @@ async function drive(o: DriveOptions): Promise<string> {
   /** One utterance: partial, partial, final — under one id, as the engine does. */
   async function utter(words: number): Promise<void> {
     const id = nextId++;
-    zone.onTurn({ turn: id, text: speech(2), final: false, speaker: 'A' });
+    // A new voice every utterance where the meeting has more than one, which
+    // is what puts a pill on the front of nearly every turn.
+    const speaker = String.fromCharCode(65 + (id % Math.max(1, o.voices)));
+    zone.onTurn({ turn: id, text: speech(2), final: false, speaker });
     await sleep(ms(60));
-    zone.onTurn({ turn: id, text: speech(words), final: false, speaker: 'A' });
+    zone.onTurn({ turn: id, text: speech(words), final: false, speaker });
     await sleep(ms(60));
-    zone.onTurn({ turn: id, text: speech(2), final: true, speaker: 'A' });
+    zone.onTurn({ turn: id, text: speech(2), final: true, speaker });
     unwritten.push(id);
   }
   /** A note lands in the doc — which is also what changes the prose's size. */
@@ -391,7 +410,7 @@ async function drive(o: DriveOptions): Promise<string> {
   sampling = false;
   const streaming = document.querySelectorAll('.lz-lines .lz-turn').length;
   zone.destroy();
-  const result: DriveResult = { samples, compared, worst, written, stranded, streaming };
+  const result: DriveResult = { samples, compared, worst, written, stranded, streaming, pills };
   return JSON.stringify(result);
 }
 
