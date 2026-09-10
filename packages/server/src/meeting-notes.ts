@@ -813,7 +813,20 @@ export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
 };
 
 export interface MeetingNotesSession {
-  onTurn(turn: EngineTurn): void;
+  /**
+   * Every transcript frame.
+   *
+   * `spokenAt` is the server-clock instant the LAST WORD of this frame was
+   * actually said, which only the relay can work out — it knows which chunk
+   * of audio carried `turn.audioEndMs` and when that chunk arrived. It is the
+   * start of the wait a person feels, and without it this pipeline can only
+   * measure from the moment the words came BACK from the engine, which is
+   * already past endpointing and transcription. Omitted by every caller that
+   * has no audio behind it (the harnesses, the replay scripts) and by an
+   * engine that reports no word offsets; the timing record then reports the
+   * spoken clock as null rather than guessing at it.
+   */
+  onTurn(turn: EngineTurn, spokenAt?: number): void;
   /**
    * "Label `speaker` is `name`" — backwards as well as forwards.
    *
@@ -1096,6 +1109,21 @@ export function beginNotesSession(
    * the last revision of it. That is the number the ceiling exists to bound.
    */
   const settledAtOf = new Map<number, number>();
+  /**
+   * When each turn's words were SPOKEN — the opening of it, and the latest
+   * end of it — on the server's clock.
+   *
+   * Two maps and not one because they answer the two halves of "how late was
+   * that note": `spokenAtOf` is stamped from the first frame of a turn, so it
+   * pairs with `settledAtOf` and their difference is the endpointing leg;
+   * `spokenEndOf` is overwritten by every later frame, so it ends up holding
+   * the moment the speaker actually stopped, which is the clock the ten-second
+   * goal is written against.
+   *
+   * Empty on any caller that passes no `spokenAt` — see `onTurn`.
+   */
+  const spokenAtOf = new Map<number, number>();
+  const spokenEndOf = new Map<number, number>();
   /** When each tick fired, and how many ticks' words it ended up carrying. */
   const firedAt = new WeakMap<NotesTick, number>();
   const mergedOf = new WeakMap<NotesTick, number>();
@@ -1227,6 +1255,14 @@ export function beginNotesSession(
         .map((t) => settledAtOf.get(t.turn))
         .filter((v): v is number => v !== undefined);
       const settledAt = settled.length > 0 ? Math.min(...settled) : null;
+      const spokenStarts = raw
+        .map((t) => spokenAtOf.get(t.turn))
+        .filter((v): v is number => v !== undefined);
+      const spokenEnds = raw
+        .map((t) => spokenEndOf.get(t.turn))
+        .filter((v): v is number => v !== undefined);
+      const spokenAt = spokenStarts.length > 0 ? Math.min(...spokenStarts) : null;
+      const lastSpokenAt = spokenEnds.length > 0 ? Math.max(...spokenEnds) : null;
       let measured: NotesComposeMeasure = {};
       let composeMs = 0;
       let applyMs = 0;
@@ -1242,11 +1278,17 @@ export function beginNotesSession(
           reason: tick.reason,
           turns: raw.map((t) => t.turn),
           settledAt,
+          spokenAt,
+          lastSpokenAt,
           startedAt,
           waitedMs: composeStart - startedAt,
           promptChars: measured.promptChars ?? null,
           replyChars: measured.replyChars ?? null,
           firstTokenMs: measured.firstTokenMs ?? null,
+          inputTokens: measured.usage?.inputTokens ?? null,
+          outputTokens: measured.usage?.outputTokens ?? null,
+          cacheReadTokens: measured.usage?.cacheReadTokens ?? null,
+          cacheWriteTokens: measured.usage?.cacheWriteTokens ?? null,
           composeMs,
           model: measured.model ?? null,
           applyMs,
@@ -1255,6 +1297,9 @@ export function beginNotesSession(
           merged: mergeCount(tick),
           outcome,
           settledToWrittenMs: outcome === 'written' && settledAt !== null ? end - settledAt : null,
+          spokenToWrittenMs: outcome === 'written' && spokenAt !== null ? end - spokenAt : null,
+          lastSpokenToWrittenMs:
+            outcome === 'written' && lastSpokenAt !== null ? end - lastSpokenAt : null,
         });
       };
       // Speaker tags belong to multi-speaker sessions only (owner's call,
@@ -1869,13 +1914,20 @@ export function beginNotesSession(
   });
 
   return {
-    onTurn: (turn) => {
+    onTurn: (turn, spokenAt) => {
       if (turn.speaker !== undefined) seen.add(turn.speaker);
       if (turn.final) settledTurns.add(turn.turn);
       // Stamped on the FIRST frame of a turn, not the last. A ceiling tick
       // carries words out of a turn still being spoken, and the latency
       // those words are owed is counted from when they were said.
       if (!settledAtOf.has(turn.turn)) settledAtOf.set(turn.turn, clock());
+      if (spokenAt !== undefined && Number.isFinite(spokenAt)) {
+        if (!spokenAtOf.has(turn.turn)) spokenAtOf.set(turn.turn, spokenAt);
+        // Every later frame moves the end forward; a revision that shortens a
+        // turn must not move it BACK, or a re-emitted earlier frame would
+        // report the speaker as still talking.
+        spokenEndOf.set(turn.turn, Math.max(spokenEndOf.get(turn.turn) ?? spokenAt, spokenAt));
+      }
       ticker.onTurn(turn);
     },
     noteMethodChange(label, by) {

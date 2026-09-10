@@ -238,6 +238,26 @@ export interface OutlineOptions {
    *  are never dropped. This is what keeps a tick's prompt the size of the
    *  conversation rather than the size of the meeting. */
   recentBlocks?: number;
+  /**
+   * How many body entries the window drops at a time, once `recentBlocks`
+   * bites.
+   *
+   * WHY A WINDOW WOULD RATHER JUMP THAN SLIDE. A caller that reads this
+   * outline into a model prompt every few seconds is paying for a prefix
+   * match: the same leading text two reads running is billed at a tenth, and
+   * one changed byte at the front costs the whole prompt. A window that keeps
+   * "the last 80" drops its oldest line every time a new one is written, so
+   * the front changes on every read and nothing ever matches. Dropping in
+   * whole steps instead means the front is IDENTICAL for a step's worth of
+   * reads and moves once — and what it holds only ever grows in between,
+   * which is the shape a cache is cheap on.
+   *
+   * The cost is that the window is `recentBlocks` to `recentBlocks + step - 1`
+   * entries rather than exactly `recentBlocks`: it never shows fewer than the
+   * cap, only up to a step more. Absent, or not a positive number, the window
+   * slides one at a time exactly as it always did.
+   */
+  recentBlocksStep?: number;
 }
 
 /**
@@ -277,6 +297,25 @@ export function readOutline(doc: Y.Doc, opts: OutlineOptions = {}): OutlineEntry
   if (cap === undefined || cap < 0) return entries;
   const bodyCount = entries.filter((e) => e.kind !== 'heading').length;
   if (bodyCount <= cap) return entries;
+  const step = opts.recentBlocksStep;
+  if (step !== undefined && Number.isFinite(step) && step > 0) {
+    // Drop from the FRONT, in whole steps. Counting the drop rather than the
+    // keep is what makes the retained front stand still: `dropped` is
+    // unchanged for a step's worth of new entries, so every read in between
+    // begins with the same words.
+    const dropped = Math.floor((bodyCount - cap) / step) * step;
+    if (dropped <= 0) return entries;
+    let skip = dropped;
+    const kept: OutlineEntry[] = [];
+    for (const entry of entries) {
+      if (entry.kind !== 'heading' && skip > 0) {
+        skip--;
+        continue;
+      }
+      kept.push(entry);
+    }
+    return kept;
+  }
   let allowed = cap;
   const keep: OutlineEntry[] = [];
   for (let i = entries.length - 1; i >= 0; i--) {

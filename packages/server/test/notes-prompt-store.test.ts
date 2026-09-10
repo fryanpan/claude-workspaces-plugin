@@ -14,8 +14,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildNotesPrompt, createHaikuNotesComposer } from '../src/meeting-notes-composer.ts';
+import { createHaikuNotesComposer } from '../src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
+import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, NOTES_PROMPT_FILENAME } from '../src/notes-prompt-store.ts';
 import { PROMPTS_FILENAME, createPromptStore } from '../src/prompt-store.ts';
 

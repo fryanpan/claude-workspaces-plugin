@@ -22,9 +22,9 @@
  * The transcript below is invented. The repo is public.
  */
 import { readFileSync } from 'node:fs';
-import { buildNotesPrompt } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
 import { NOTES_AUTHOR_ID } from '../packages/server/src/notes-doc-access.ts';
+import { buildNotesPrompt } from '../packages/server/src/notes-prompt-build.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from '../packages/server/src/notes-prompt-store.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { resolveKeyFrom } from '../packages/server/src/summarize.ts';

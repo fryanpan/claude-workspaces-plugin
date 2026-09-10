@@ -19,17 +19,24 @@ import {
   hypothesisFor,
   median,
 } from '../src/notes-timing.ts';
+import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 const row = (over: Partial<NotesTickTiming> = {}): NotesTickTiming => ({
   tick: 1,
   reason: 'pause',
   turns: [0],
   settledAt: 1000,
+  spokenAt: null,
+  lastSpokenAt: null,
   startedAt: 1200,
   waitedMs: 0,
   promptChars: null,
   replyChars: null,
   firstTokenMs: null,
+  inputTokens: null,
+  outputTokens: null,
+  cacheReadTokens: null,
+  cacheWriteTokens: null,
   composeMs: 800,
   model: null,
   applyMs: 5,
@@ -38,6 +45,8 @@ const row = (over: Partial<NotesTickTiming> = {}): NotesTickTiming => ({
   merged: 1,
   outcome: 'written',
   settledToWrittenMs: 2000,
+  spokenToWrittenMs: null,
+  lastSpokenToWrittenMs: null,
   ...over,
 });
 
@@ -132,6 +141,57 @@ describe('the per-tick timing log', () => {
     expect(median([])).toBeNull();
     expect(median([1, 2, 3, 4])).toBe(3);
     expect(median([5])).toBe(5);
+  });
+});
+
+describe('the clock the person is actually on', () => {
+  /**
+   * Everything else in this file measures from `settledAt` — the moment the
+   * transcript stopped changing. That is not the moment anybody stopped
+   * talking: endpointing and transcription sit in between, and the whole
+   * point of the second clock is that the leg it hides was never instrumented
+   * at all. These two tests are what says the row carries the SPOKEN instant
+   * and derives its wait from it, rather than relabelling the settled one.
+   */
+  it('records when the words were spoken, and measures the wait from there', async () => {
+    const spokenAt = Date.now() - 30_000;
+    const h = createNotesTickHarness({ compose: (input) => addNotes(input, '- a point') });
+    h.say({ text: 'we should ship the six second ceiling', spokenAt });
+    await h.tick();
+
+    const [written] = h.timing().rows();
+    expect(written?.spokenAt).toBe(spokenAt);
+    // The last frame of the turn is a millisecond later — the harness's stand
+    // -in for a turn whose words keep arriving.
+    expect(written?.lastSpokenAt).toBe(spokenAt + 1);
+    // The algebra, not the wall clock: both waits end at the same write, so
+    // the difference between them IS the leg the settled clock cannot see.
+    // A row that had quietly derived its spoken wait from `settledAt` would
+    // fail this by exactly the 30 seconds the words spent in the engine.
+    const settledAt = written?.settledAt ?? 0;
+    expect((written?.spokenToWrittenMs ?? 0) - (written?.settledToWrittenMs ?? 0)).toBe(
+      settledAt - spokenAt,
+    );
+    expect((written?.lastSpokenToWrittenMs ?? 0) - (written?.settledToWrittenMs ?? 0)).toBe(
+      settledAt - (spokenAt + 1),
+    );
+  });
+
+  it('reports nothing rather than a guess when the engine gives it no offsets', async () => {
+    // The control, and the case most meetings are in: no spoken clock is
+    // available, and the row must say so. A zero here would read as "the note
+    // was instant" on every report in the repo.
+    const h = createNotesTickHarness({ compose: (input) => addNotes(input, '- a point') });
+    await h.speak('we should ship the six second ceiling');
+
+    const [written] = h.timing().rows();
+    expect(written?.spokenAt).toBeNull();
+    expect(written?.lastSpokenAt).toBeNull();
+    expect(written?.spokenToWrittenMs).toBeNull();
+    expect(written?.lastSpokenToWrittenMs).toBeNull();
+    // And the settled clock still works, so the null is about the new clock
+    // rather than about a broken row.
+    expect(written?.settledToWrittenMs).not.toBeNull();
   });
 });
 
