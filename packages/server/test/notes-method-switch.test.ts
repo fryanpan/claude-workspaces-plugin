@@ -67,18 +67,41 @@ describe('the frame that changes the note-taker mid-meeting', () => {
   }
 
   /** One live meeting, and every change the relay recorded on it. */
-  async function live(docId: string): Promise<{
+  async function live(
+    docId: string,
+    /** What the record's own write answers. `false` is a data dir that could
+     *  not be written — full, read-only, gone. */
+    recorded = true,
+  ): Promise<{
     send: (frame: unknown) => void;
     changes: Change[];
+    writes: NotesUpdate[];
     stop: () => Promise<void>;
   }> {
     const changes: Change[] = [];
+    const writes: NotesUpdate[] = [];
     const relay = new MeetingRelay({
       store: new MeetingStore(dataDir),
       engines: [silentEngine()],
-      notes: null,
+      // A real notes session, so the trace line the switch writes is
+      // observable rather than inferred: `onNotes` is the only place a line
+      // reaches the doc from.
+      notes: {
+        composer: { name: 'never', compose: () => Promise.resolve([]) },
+        schedule: new ManualScheduler(),
+        now: () => new Date(2026, 8, 9, 10, 38).getTime(),
+        readOutline: () => [],
+        notesHeadingId: () => 'h-mine',
+        onNotes: (u: NotesUpdate) => {
+          writes.push(u);
+          return true;
+        },
+      },
       broadcast: () => {},
-      setNotesMethod: (c) => changes.push(c),
+      setNotesMethod: (c) => {
+        changes.push(c);
+        return recorded;
+      },
     });
     const ws: MeetingClient = { data: { docId }, send: () => {} };
     relay.onOpen(ws);
@@ -87,6 +110,7 @@ describe('the frame that changes the note-taker mid-meeting', () => {
     return {
       send: (frame) => relay.onText(ws, JSON.stringify(frame)),
       changes,
+      writes,
       stop: async () => {
         relay.onText(ws, JSON.stringify({ type: 'stop' }));
         await settle();
@@ -105,6 +129,28 @@ describe('the frame that changes the note-taker mid-meeting', () => {
     // "changed it while the room was talking".
     expect(m.changes[0]?.meetingId).toBeTruthy();
     await m.stop();
+  });
+
+  it('writes no trace line when the record could not be written', async () => {
+    // A data dir that is full, read-only or gone. The write is swallowed on
+    // purpose — a preference must never fail a tick — but the doc must not
+    // then claim a switch that the next tick will not honour.
+    const m = await live('d-nowrite', false);
+    m.send({ type: 'set_notes_method', method: 'ledger-opus', by: 'Maya' });
+    await settle();
+    await m.stop();
+    expect(m.writes.flatMap((w) => w.edits)).toEqual([]);
+  });
+
+  it('MUTATION CONTROL: the same frame on a dir that CAN be written writes the line', async () => {
+    const m = await live('d-wrote', true);
+    m.send({ type: 'set_notes_method', method: 'ledger-opus', by: 'Maya' });
+    await settle();
+    await m.stop();
+    const edit = m.writes.flatMap((w) => w.edits)[0];
+    expect(edit && 'markdown' in edit ? edit.markdown : '').toBe(
+      '- 10:38 Note-taker Ledger · Opus — Maya',
+    );
   });
 
   it('MUTATION CONTROL: a method this server does not know changes nothing', async () => {

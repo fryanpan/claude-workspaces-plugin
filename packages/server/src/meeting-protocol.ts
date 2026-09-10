@@ -103,13 +103,21 @@ export interface MeetingRelayDeps {
    * is an HTTP route that writes through the same function. Absent — a relay
    * built without it, every test that does not care — leaves the frame a
    * no-op and the doc on the method it had.
+   *
+   * IT ANSWERS WHETHER THE RECORD ACTUALLY MOVED, and the trace line in the
+   * notes is written only on `true`. A data dir that is full or read-only
+   * makes the write fail; the implementation swallows that, because losing a
+   * preference must never fail a tick. But a swallowed failure that still
+   * wrote "Note-taker Ledger · Opus — Bryan" into the doc leaves the notes
+   * asserting a switch that did not happen, and every later tick still
+   * composing with the method the record kept.
    */
   setNotesMethod?: (change: {
     docId: string;
     meetingId?: string;
     method: NotesMethod;
     by?: string;
-  }) => void;
+  }) => boolean;
 }
 
 /**
@@ -337,13 +345,17 @@ export class MeetingRelay {
       // same fact. Nothing already written is touched, and no answer goes
       // back — the fold that sent it already shows the row it picked.
       const meeting = conn.meeting;
-      this.deps.setNotesMethod?.({
-        docId: ws.data.docId,
-        ...(meeting ? { meetingId: meeting.meetingId } : {}),
-        method: msg.method,
-        ...(msg.by ? { by: msg.by } : {}),
-      });
-      if (conn.state === 'live') {
+      const recorded =
+        this.deps.setNotesMethod?.({
+          docId: ws.data.docId,
+          ...(meeting ? { meetingId: meeting.meetingId } : {}),
+          method: msg.method,
+          ...(msg.by ? { by: msg.by } : {}),
+        }) ?? false;
+      // ONLY WHAT WAS RECORDED IS ANNOUNCED. A doc that says a switch
+      // happened while the next tick composes on the old method is worse
+      // than a switch that visibly did nothing.
+      if (recorded && conn.state === 'live') {
         conn.notes?.noteMethodChange(notesMethodLabel(msg.method), msg.by);
       }
       return;

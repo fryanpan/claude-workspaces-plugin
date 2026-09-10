@@ -73,6 +73,38 @@ describe('a section new minutes may reuse', () => {
   });
 });
 
+describe('a claimed heading with nothing under it', () => {
+  /**
+   * The shape a meeting leaves when it opens its section and then writes
+   * nothing: cut short, every tick refused, or a room that said nothing worth
+   * a bullet. The claim outlives the meeting, so the next one meets a heading
+   * that is somebody's record and is also completely empty.
+   */
+  const emptyClaimed = outline([
+    ['heading', 'Agenda'],
+    ['bullet', 'the boardwalk'],
+    ['heading', 'Meeting notes'],
+  ]);
+
+  test('fits, so no second identical heading is opened under it', () => {
+    expect(notesSectionFits(emptyClaimed, new Set(['b2']))).toBe(true);
+  });
+
+  test('MUTATION CONTROL: give that same claimed heading one line and it does not fit', () => {
+    const withMinutes = outline([
+      ['heading', 'Agenda'],
+      ['bullet', 'the boardwalk'],
+      ['heading', 'Meeting notes'],
+      ['bullet', 'a previous meeting’s bullet'],
+    ]);
+    expect(notesSectionFits(withMinutes, new Set(['b2']))).toBe(false);
+  });
+
+  test('CONTROL: unclaimed and empty fits too, which it always did', () => {
+    expect(notesSectionFits(emptyClaimed, new Set())).toBe(true);
+  });
+});
+
 describe('a section new minutes must NOT reuse', () => {
   test('a previous meeting’s minutes', () => {
     const o = outline([

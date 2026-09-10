@@ -454,11 +454,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           ...(change.by ? { by: change.by } : {}),
           ...(change.meetingId ? { meetingId: change.meetingId } : {}),
         });
+        return true;
       } catch (err) {
         // The method is a preference, never a dependency of taking notes: a
         // record that cannot be written leaves the doc on the method it had
-        // and the meeting composing.
+        // and the meeting composing. Answering `false` is what keeps the
+        // notes from claiming the switch anyway.
         console.error(`[meeting-notes] notes method not recorded for ${change.docId}:`, err);
+        return false;
       }
     },
   });

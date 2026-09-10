@@ -89,14 +89,24 @@ export function notesSectionFits(
 ): boolean {
   const at = lastNotesHeadingIndex(outline);
   if (at < 0) return true;
-  const id = outline[at]?.id;
-  // A heading a meeting has already claimed is a meeting's record, whatever
-  // its body now looks like and whoever the blocks are currently attributed
-  // to. This is the clause that survives `releaseNotesAuthorship`.
-  if (id !== undefined && claimed.has(id)) return false;
-  // Nothing under it: fits every topic, and this is true even for a heading
-  // a meeting opened and never wrote beneath.
+  // NOTHING UNDER IT FITS EVERY TOPIC, AND THIS IS ASKED FIRST — before the
+  // claim, deliberately. A meeting that opened a section and then wrote
+  // nothing beneath it (it was cut short, every tick was refused, the room
+  // said nothing worth a bullet) leaves a claimed but empty heading. Asked
+  // the other way round, the claim rejected it and the next meeting opened a
+  // SECOND `Meeting notes` heading directly under an identical empty one —
+  // which is precisely the duplicate-heading shape this whole rule exists to
+  // prevent, arrived at from the other side.
+  //
+  // Nothing is lost by adopting it: an empty section holds no minutes to
+  // merge two conversations into, so the 2026-08-31 rule has nothing to
+  // protect here.
   if (at === outline.length - 1) return true;
+  const id = outline[at]?.id;
+  // A heading a meeting has already claimed AND WRITTEN UNDER is a meeting's
+  // record, whatever the blocks are currently attributed to. This is the
+  // clause that survives `releaseNotesAuthorship`.
+  if (id !== undefined && claimed.has(id)) return false;
   for (let i = at + 1; i < outline.length; i++) {
     const entry = outline[i];
     if (!entry) continue;
