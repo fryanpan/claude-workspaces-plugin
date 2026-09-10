@@ -627,8 +627,33 @@ export class MeetingRelay {
     // Held as a local for the same reason `notes` is: `stop()` detaches the
     // conn's fields before awaiting the engine close, and the flushed final
     // turn still deserves a mark.
-    const ledger = conn.wantsTiming ? new AudioChunkLedger(sampleRate) : null;
+    // BUILT FOR EVERY MEETING NOW, not only a `?timing=1` one. Two different
+    // readers want it and only one of them is opt-in: the strip's stage
+    // readout still needs `wantsTiming` (and `timingFor` below still checks
+    // it, so no frame gains a timing block it did not before), while the
+    // notes pipeline needs the same ledger to say when a word was SPOKEN —
+    // which is the start of the wait the ten-second goal is written against,
+    // and cannot be an opt-in on a number that has to be true of ordinary
+    // meetings. It is a bounded ring of four numbers a chunk, about two
+    // minutes deep.
+    const ledger = new AudioChunkLedger(sampleRate);
     conn.ledger = ledger;
+    /**
+     * When the last word of a frame was said, on this server's clock.
+     *
+     * The chunk that carried the word arrived at `recvMs` and closed at
+     * `chunkAudioEndMs` of the audio stream; the word ended `chunkAudioEndMs
+     * - audioEndMs` of audio earlier, and audio runs in real time, so that
+     * difference is real elapsed time. Undefined when the engine reports no
+     * word offsets or the chunk has aged out of the ring — the notes timing
+     * record then says it does not know, rather than guessing.
+     */
+    const spokenAtOf = (audioEndMs: number | undefined): number | undefined => {
+      if (audioEndMs === undefined) return undefined;
+      const chunk = ledger.chunkAt(audioEndMs);
+      if (!chunk) return undefined;
+      return chunk.recvMs - (chunk.audioEndMs - audioEndMs);
+    };
     // A local for the same reason `notes` and `ledger` are: `stop()` detaches
     // the conn's fields before the engine's flush settles the final turn, and
     // that turn still has to be numbered under this meeting.
@@ -681,7 +706,7 @@ export class MeetingRelay {
           // progress, which is exactly the evidence that defers a pause tick.
           // Under the meeting's numbering, not the session's: the ids it
           // reports back on `notes_progress` are the ones the strip has.
-          notes?.onTurn({ ...turn, turn: turnId });
+          notes?.onTurn({ ...turn, turn: turnId }, spokenAtOf(turn.audioEndMs));
         },
         onError: (message) => {
           this.send(ws, { type: 'error', message });

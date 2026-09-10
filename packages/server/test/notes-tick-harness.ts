@@ -88,7 +88,20 @@ export class ManualScheduler implements TickScheduler {
 }
 
 /** One utterance in a script: bare words, or words with a voice behind them. */
-export type Utterance = string | { speaker: string; text: string };
+export type Utterance =
+  | string
+  | {
+      speaker?: string;
+      text: string;
+      /**
+       * When the words were SPOKEN, on the server clock — what the relay
+       * derives from the audio chunk that carried them. Absent is the
+       * ordinary case here and the one every other script runs: an engine
+       * that reports no word offsets, and a timing row whose spoken clock is
+       * null rather than guessed.
+       */
+      spokenAt?: number;
+    };
 
 /** The doc, and the tick's own inputs, immediately after that tick's write. */
 export interface TickSnapshot {
@@ -332,15 +345,24 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
         const turn = turnNo++;
         const text = typeof u === 'string' ? u : u.text;
         const speaker = typeof u === 'string' ? undefined : u.speaker;
+        const spokenAt = typeof u === 'string' ? undefined : u.spokenAt;
         // A partial first, then the settled turn: the ticker treats any frame
-        // as speech in progress, which is how a real turn arrives.
-        session.onTurn({ turn, text: text.slice(0, Math.max(1, text.length - 1)), final: false });
-        session.onTurn({
-          turn,
-          text,
-          final: true,
-          ...(speaker !== undefined ? { speaker } : {}),
-        });
+        // as speech in progress, which is how a real turn arrives. The partial
+        // carries the spoken clock too, because in a meeting that frame is
+        // where the first words of the turn actually reach the server.
+        session.onTurn(
+          { turn, text: text.slice(0, Math.max(1, text.length - 1)), final: false },
+          spokenAt,
+        );
+        session.onTurn(
+          {
+            turn,
+            text,
+            final: true,
+            ...(speaker !== undefined ? { speaker } : {}),
+          },
+          spokenAt === undefined ? undefined : spokenAt + 1,
+        );
       }
     },
     async tick() {
