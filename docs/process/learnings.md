@@ -1001,6 +1001,28 @@ under `node`, was the only test that could see it, because every other
   `git status --porcelain`. Check the tree the path names, not merely that the
   path is absolute.
 
+## A branch made inside a worktree is not private to it — the ref store is shared
+
+- **What happened (2026-09-10):** two agents working the same board each
+  created a branch from inside their own linked worktree and both landed
+  commits on `fix/sentry-watch-inherit`, writing the same paragraph twice.
+  Each had assumed a branch cut in its own worktree was its own.
+- **Why:** a linked worktree gets its own `--git-dir`
+  (`.git/worktrees/<name>`) but shares `--git-common-dir` with every other
+  worktree, and `refs/heads` lives in the common dir. Measured here: two
+  branches created inside two different worktrees are both listed by a plain
+  `git branch` run in the primary checkout. The worktree isolates the INDEX
+  and the working files. It isolates no ref, no object, and no stash.
+- **What git does tell you:** `git branch` marks a branch checked out in
+  another worktree with `+`, and `git branch -D` refuses it. So the collision
+  is not silent if you look — but nothing warns the agent that *creates* a
+  name somebody else already holds, which is the moment that matters.
+- **What to do:** put something unique to your dispatch in the branch name,
+  and before the first commit run `git -C <your-worktree> branch --list
+  '<name>'` and `git ls-remote --heads origin '<name>'`. Never reason from
+  "my worktree, therefore my branch, therefore unpushed" — the same mistake
+  in the stash is already written up above, and it has the same cause.
+
 ## Prod no longer serves the client out of a working tree — publish, then switch
 
 - **Two entries above say prod serves `packages/markdown-app/dist` from the
