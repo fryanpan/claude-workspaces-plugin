@@ -244,6 +244,26 @@ describe('repairNoteListGaps', () => {
     expect(anchorText(doc, 't-stayed')).toBe('dialog forgets');
   });
 
+  it('keeps the rest of an anchor — the view it belongs to, the text a redline cut', () => {
+    const doc = damagedDoc(['the dialog forgets the range', 'the export button is grey']);
+    anchorThread(doc, 't', 'export button');
+    const entry = (doc.getMap('threads') as Y.Map<Y.Map<unknown>>).get('t') as Y.Map<unknown>;
+    const before = entry.get('anchor') as Record<string, unknown>;
+    entry.set('anchor', {
+      ...before,
+      context: { view: 'redline', file: 'notes.md' },
+      deletedSnippet: 'what the reviewer was asking about',
+    });
+
+    expect(repairNoteListGaps(doc).anchorsRebuilt).toBe(1);
+
+    const after = entry.get('anchor') as Record<string, unknown>;
+    expect(after.context).toEqual({ view: 'redline', file: 'notes.md' });
+    expect(after.deletedSnippet).toBe('what the reviewer was asking about');
+    expect(after.snippet).toEqual(before.snippet);
+    expect(anchorText(doc, 't')).toBe('export button');
+  });
+
   it('is what makes the anchor survive — a bare move loses it', () => {
     // The control for the test above: this is the move without the rebuild,
     // and it is why `repairNoteListGaps` does more than splice two lists.

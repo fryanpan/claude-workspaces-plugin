@@ -172,7 +172,12 @@ interface AnchorSnapshot {
   start: number;
   end: number;
   text: string;
-  snippet: unknown;
+  /** The stored anchor as it was. A rebuild writes this back with only
+   *  `startRel` and `endRel` replaced: a text-range anchor may also carry
+   *  `context` (which view the thread belongs to) and `deletedSnippet` (what
+   *  a redline comment was actually about), and rebuilding the object from
+   *  its positions alone would drop both. */
+  original: unknown;
 }
 
 /** Doc offset of a resolved relative position, or null when it is outside the
@@ -201,7 +206,7 @@ function offsetOf(
 function snapshotAnchors(
   doc: Y.Doc,
   map: Y.Map<Y.Map<unknown>>,
-  read: (entry: Y.Map<unknown>) => { startRel: unknown; endRel: unknown; snippet: unknown } | null,
+  read: (entry: Y.Map<unknown>) => { startRel: unknown; endRel: unknown; original: unknown } | null,
 ): AnchorSnapshot[] {
   const { plainText, segments } = prose.walkProse(doc.getXmlFragment('prose'));
   const out: AnchorSnapshot[] = [];
@@ -219,7 +224,7 @@ function snapshotAnchors(
       start: lo,
       end: hi,
       text: plainText.slice(lo, hi),
-      snippet: raw.snippet,
+      original: raw.original,
     });
   });
   return out;
@@ -268,7 +273,7 @@ function restoreAnchors(
       unverified++;
       continue;
     }
-    doc.transact(() => write(entry, startRel, endRel, snap.snippet), REPAIR_ORIGIN);
+    doc.transact(() => write(entry, startRel, endRel, snap.original), REPAIR_ORIGIN);
     rebuilt++;
   }
   return { rebuilt, unverified };
@@ -299,10 +304,10 @@ export function repairNoteListGaps(doc: Y.Doc): RepairReport {
 
   const threads = snapshotAnchors(doc, doc.getMap('threads') as Y.Map<Y.Map<unknown>>, (entry) => {
     const anchor = entry.get('anchor') as
-      | { kind?: string; startRel?: unknown; endRel?: unknown; snippet?: unknown }
+      | { kind?: string; startRel?: unknown; endRel?: unknown }
       | undefined;
     if (!anchor || anchor.kind !== 'text-range') return null;
-    return { startRel: anchor.startRel, endRel: anchor.endRel, snippet: anchor.snippet };
+    return { startRel: anchor.startRel, endRel: anchor.endRel, original: anchor };
   });
   const agentAnchors = snapshotAnchors(
     doc,
@@ -311,7 +316,7 @@ export function repairNoteListGaps(doc: Y.Doc): RepairReport {
       const startRel = entry.get('startRel');
       const endRel = entry.get('endRel');
       if (!startRel || !endRel) return null;
-      return { startRel, endRel, snippet: undefined };
+      return { startRel, endRel, original: undefined };
     },
   );
 
@@ -331,8 +336,11 @@ export function repairNoteListGaps(doc: Y.Doc): RepairReport {
     }
   }, REPAIR_ORIGIN);
 
-  const threadResult = restoreAnchors(doc, threads, (entry, startRel, endRel, snippet) => {
-    entry.set('anchor', { kind: 'text-range', startRel, endRel, snippet });
+  const threadResult = restoreAnchors(doc, threads, (entry, startRel, endRel, original) => {
+    // Spread, never rebuild: `context` and `deletedSnippet` are optional
+    // fields of a text-range anchor that only the thread that wrote them can
+    // supply, and composing a fresh object from the positions drops them.
+    entry.set('anchor', { ...(original as object), startRel, endRel });
   });
   const agentResult = restoreAnchors(doc, agentAnchors, (entry, startRel, endRel) => {
     entry.set('startRel', startRel);
