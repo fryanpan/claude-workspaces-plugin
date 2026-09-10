@@ -36,6 +36,8 @@ import type { prose } from '@claude-workspaces/core';
 import { type HaikuNotesComposerOpts, createHaikuNotesComposer } from './meeting-notes-composer.ts';
 import type { NotesComposeInput, NotesComposer } from './meeting-notes.ts';
 import { type NotesLedger, createNotesLedger, nestedNotesInstructions } from './notes-ledger.ts';
+import { readKeychainPassword } from './share/keychain.ts';
+import { resolveKeyFrom } from './summarize.ts';
 
 /** The model each method composes on. `undefined` is the composer's own
  *  default, which is Haiku — the two cheap methods differ in whether they run
@@ -90,10 +92,20 @@ const MAX_LIVE_LEDGERS = 64;
 export interface NotesMethodComposerDeps {
   /** The doc's method as it stands RIGHT NOW, read per tick. */
   methodFor: (docId: string) => NotesMethod;
-  /** The key the ledger's extract calls with. Absent, no ledger runs and
-   *  every method composes as the original — the same degradation a failed
-   *  extract gets. */
+  /**
+   * The key BOTH halves call with — the ledger's extract and the compose it
+   * feeds. Absent, it is resolved from the Keychain here, exactly as
+   * `createHaikuNotesComposer` would have resolved it for itself.
+   *
+   * IT HAS TO BE RESOLVED IN ONE PLACE. Left to each half, the compose read
+   * the Keychain and the extract read this field, which the server never set
+   * — so both ledger methods built their two-layer prompt, ran no extract at
+   * all, and composed as one-pass note-takers on their advertised model. The
+   * feature looked wired from every angle except the only one that counts.
+   */
   apiKey?: string | null;
+  /** Test seam for that Keychain read, following `recall-calendar.ts`. */
+  readKey?: (service: string) => string | null;
   /** Passed through to each underlying composer: the instructions store, the
    *  test key, the test fetch. */
   composerOpts?: HaikuNotesComposerOpts;
@@ -115,6 +127,31 @@ function outlineText(outline: readonly prose.OutlineEntry[]): string {
  */
 export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesComposer | null {
   const base = deps.composerOpts ?? {};
+  // RESOLVED HERE, ONCE, FOR BOTH HALVES — because only one of them could
+  // ever resolve it for itself. `undefined` means "nobody said", which is the
+  // Keychain; an explicit `null` or `''` means "there is no key" and must
+  // never fall through to a read that would find one.
+  //
+  // The read is memoised across the two calls below so a boot still shells
+  // out to `security` at most once per service name.
+  const read = ((): ((service: string) => string | null) => {
+    const from = deps.readKey ?? readKeychainPassword;
+    const held = new Map<string, string | null>();
+    return (service) => {
+      if (!held.has(service)) held.set(service, from(service));
+      return held.get(service) ?? null;
+    };
+  })();
+  // The compose half. Unchanged in effect: this is the resolution
+  // `createHaikuNotesComposer` was already doing for itself, lifted so the
+  // ledger can be given the same answer.
+  const composeKey = resolveKeyFrom(base.apiKey, read);
+  // The extract half. A ledger key said to be absent turns the LEDGER off and
+  // leaves the notes composing as the original, which is a state worth
+  // keeping; what the server was hitting instead was `undefined` reaching the
+  // extract as "no key" while the compose quietly read the Keychain, so both
+  // ledger methods ran their two-layer prompt with no checklist behind it.
+  const ledgerKey = resolveKeyFrom(deps.apiKey === undefined ? base.apiKey : deps.apiKey, read);
   // Built once each, not per tick: each carries a resolved key and an
   // announcement latch, and constructing one per compose would re-resolve
   // the Keychain on every tick of every meeting.
@@ -133,6 +170,9 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
     const instructions = base.instructions;
     const composer = createHaikuNotesComposer({
       ...base,
+      // After `...base` on purpose: the resolved key IS the one base asked
+      // for, read through the same seam the ledger's key came through.
+      apiKey: composeKey,
       ...composeSettings(method),
       ...(notesMethodUsesLedger(method) && instructions
         ? {
@@ -153,11 +193,7 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
 
   const ledgers = new Map<string, NotesLedger>();
   function ledgerFor(meetingId: string): NotesLedger | null {
-    // `undefined` means "not said, use the composer's"; an explicit `null`
-    // means "there is no key for the ledger", and the two must not collapse:
-    // `?? base.apiKey` would hand a deliberate null the compose key back.
-    const key = deps.apiKey === undefined ? base.apiKey : deps.apiKey;
-    if (!key) return null;
+    if (!ledgerKey) return null;
     const held = ledgers.get(meetingId);
     if (held) return held;
     if (ledgers.size >= MAX_LIVE_LEDGERS) {
@@ -167,7 +203,7 @@ export function createNotesMethodComposer(deps: NotesMethodComposerDeps): NotesC
       if (!oldest.done) ledgers.delete(oldest.value);
     }
     const made = createNotesLedger({
-      apiKey: key,
+      apiKey: ledgerKey,
       ...(deps.ledgerFetch ? { fetchImpl: deps.ledgerFetch } : {}),
       ...(deps.onError ? { onError: deps.onError } : {}),
     });

@@ -82,6 +82,69 @@ function composerFor(method: NotesMethod | ((docId: string) => NotesMethod), h =
 const composes = (seen: Seen[]): Seen[] => seen.filter((s) => s.tool !== 'record_points');
 const extracts = (seen: Seen[]): Seen[] => seen.filter((s) => s.tool === 'record_points');
 
+describe('the key the server never passed, resolved where both halves read it', () => {
+  /**
+   * The production shape, which every other test in this file skips past:
+   * `server-deps.ts` names no key at all, because the compose half has always
+   * resolved its own from the Keychain. The extract half cannot, so unless
+   * one resolution is handed to both, a ledger method runs its two-layer
+   * prompt with no checklist behind it and is a one-pass note-taker wearing
+   * the ledger's name.
+   */
+  function asTheServerBuildsIt(readKey: () => string | null) {
+    const seen: Array<{ tool?: string; key: string }> = [];
+    const impl = (async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { tools?: Array<{ name: string }> };
+      const tool = body.tools?.[0]?.name;
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      seen.push({ ...(tool ? { tool } : {}), key: headers['x-api-key'] ?? '' });
+      if (tool === 'record_points') {
+        return new Response(
+          JSON.stringify({
+            content: [
+              { type: 'tool_use', name: 'record_points', input: { points: ['Maya (A): survey'] } },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: '[]' }] }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+    // No `apiKey` on the deps and none on `composerOpts` — exactly what the
+    // composition root passes.
+    const composer = createNotesMethodComposer({
+      methodFor: () => 'ledger-haiku',
+      composerOpts: { fetchImpl: impl },
+      ledgerFetch: impl,
+      readKey,
+    });
+    return { composer, seen };
+  }
+
+  test('a ledger method still runs its extract, on the key the Keychain holds', async () => {
+    const { composer, seen } = asTheServerBuildsIt(() => 'k-keychain');
+    if (!composer) throw new Error('no composer built');
+    await composer.compose(input());
+    const extract = seen.filter((c) => c.tool === 'record_points');
+    expect(extract).toHaveLength(1);
+    expect(extract[0]?.key).toBe('k-keychain');
+  });
+
+  test('the compose half is on that same key, not a second read', async () => {
+    const { composer, seen } = asTheServerBuildsIt(() => 'k-keychain');
+    if (!composer) throw new Error('no composer built');
+    await composer.compose(input());
+    expect(seen.filter((c) => c.tool !== 'record_points')[0]?.key).toBe('k-keychain');
+  });
+
+  test('MUTATION CONTROL: no key anywhere and there is no composer at all', () => {
+    const { composer } = asTheServerBuildsIt(() => null);
+    expect(composer).toBeNull();
+  });
+});
+
 describe('the original runs no extract', () => {
   test('one call, and it is the compose', async () => {
     const { composer, seen } = composerFor('original');
