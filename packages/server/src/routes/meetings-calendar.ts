@@ -204,19 +204,32 @@ export async function handleMeetingCalendarRoutes(
     // switch impossible for exactly the meetings a person watches from the
     // doc. Written here instead, and the live bot's notes session takes the
     // same one trace line the socket path writes.
-    const botLive = meetingStore.active(docId) && recallRelay.hasLiveNotes(docId);
-    if (meetingStore.active(docId) && !botLive) {
+    const live = meetingStore.active(docId);
+    const botLive = live !== undefined && recallRelay.hasLiveNotes(docId);
+    if (live && !botLive) {
       return j(409, { error: 'meeting is live — change it over the audio socket' });
     }
     const by = typeof body?.by === 'string' ? body.by.trim().slice(0, MAX_SPEAKER_NAME) : '';
+    // NAMED WITH THE MEETING IT WAS MADE IN, when there is one. That is what
+    // separates "changed the doc's default" from "changed it while the room
+    // was talking" in the history — and it is also what stops the store
+    // dropping a re-affirmation of the current method as a no-op repeat,
+    // which would leave a trace line in the notes with no record behind it.
+    const meetingId = botLive ? live?.meetingId : undefined;
+    const beforeCount = readNotesMethodRecord(dataDir, docId)?.changes.length ?? 0;
     const record = writeNotesMethod(dataDir, docId, {
       method,
       at: Date.now(),
       ...(by ? { by } : {}),
+      ...(meetingId ? { meetingId } : {}),
     });
-    // Only on a recorded change, exactly as the socket path does it: the
-    // record is written first, and the line is a report of that write.
-    if (botLive) recallRelay.noteMethodChange(docId, notesMethodLabel(method), by || undefined);
+    // ONLY ON A RECORDED CHANGE, the rule the socket path and the trace
+    // writer both hold: the record is written first and the line is a report
+    // of that write, never an announcement of one that did not happen.
+    const recorded = record.changes.length > beforeCount;
+    if (botLive && recorded) {
+      recallRelay.noteMethodChange(docId, notesMethodLabel(method), by || undefined);
+    }
     return j(200, { docId, method: record.method, changes: record.changes });
   }
   // --- Naming a voice AFTER the meeting ---

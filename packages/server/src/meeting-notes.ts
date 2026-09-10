@@ -1568,16 +1568,29 @@ export function beginNotesSession(
         if (written && heldMethodLines.length > 0) {
           // Asked AFTER the write, because the write is what opens the
           // section: the id read before composing is `undefined` on exactly
-          // the tick that creates it. The outline is the one already in hand,
-          // so this costs no extra doc read, and it is asked at all only when
-          // something is actually being held.
+          // the tick that creates it.
+          //
+          // AND OVER THE POST-WRITE OUTLINE, for the same reason. `outline`
+          // is the snapshot this tick composed from, taken before the edits
+          // were applied, so the heading the write just created is not in it
+          // — resolving from it on the one tick that opens the section finds
+          // nothing, and the held line then waits for a tick that may never
+          // come. A meeting that ends after that tick would drop it at `end`
+          // with the section sitting right there. The re-read costs a doc
+          // read and happens only when a line is actually being held.
           let landing = notesHeadingId;
           if (landing === undefined) {
+            let after: readonly prose.OutlineEntry[] = outline;
+            try {
+              after = deps.readOutline?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? outline;
+            } catch {
+              after = outline;
+            }
             try {
               landing = deps.notesHeadingId?.({
                 docId: ids.docId,
                 meetingId: ids.meetingId,
-                outline,
+                outline: after,
               });
             } catch {
               landing = undefined;

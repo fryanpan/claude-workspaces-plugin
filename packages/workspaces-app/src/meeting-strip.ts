@@ -777,6 +777,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // sit on a spinner: the row moves now, and the two ways of asking below
     // are what make it true. A failure puts it back.
     showMethod(notetakerPicked(methodChoice, method));
+    // The pick this request is for. Two writes can be out at once and their
+    // answers can arrive in either order, so each one only speaks for itself.
+    const seq = methodChoice.seq;
     if (socketOpen && socket) {
       // Recording: over the audio socket, so the live session learns it —
       // the next tick composes with it and the doc gets its one line. The
@@ -799,7 +802,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // it gets the same "since" the socket path shows.
     choose.methodSince = liveBot() ? clockLabel(Date.now()) : '';
     void putNotesMethod(docId, method, opts.participantName).then((ok) => {
-      showMethod(notetakerAcknowledged(methodChoice, ok));
+      const settled = notetakerAcknowledged(methodChoice, ok, seq);
+      // A stale answer moves nothing, and must not raise an error about a
+      // choice the person has already replaced.
+      if (settled === methodChoice) return;
+      showMethod(settled);
       if (ok) return;
       choose.chooseError = 'That note-taker could not be saved.';
       renderPop();

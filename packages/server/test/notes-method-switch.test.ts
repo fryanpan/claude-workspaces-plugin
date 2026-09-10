@@ -24,6 +24,7 @@ import {
   notesMethodLabel,
   notesMethodTraceLine,
   parseMeetingClientMessage,
+  type prose,
 } from '@claude-workspaces/core';
 import {
   type MeetingNotesSession,
@@ -32,7 +33,11 @@ import {
 } from '../src/meeting-notes.ts';
 import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import { MeetingStore } from '../src/meetings.ts';
-import { readNotesMethod, readNotesMethodRecord } from '../src/notes-method-store.ts';
+import {
+  readNotesMethod,
+  readNotesMethodRecord,
+  writeNotesMethod,
+} from '../src/notes-method-store.ts';
 import {
   type MeetingCalendarRoutesContext,
   handleMeetingCalendarRoutes,
@@ -401,6 +406,54 @@ describe('a live meeting keeps the at-rest route out', () => {
     ]);
   });
 
+  it('names the meeting it was made in, so the history is not read as at-rest', async () => {
+    const store = new MeetingStore(dataDir);
+    const started = store.start({
+      docId: 'd-botid',
+      engine: 'bot',
+      sampleRate: 16_000,
+      mode: 'conversation',
+    });
+    expect(started).not.toBeNull();
+    const bot: BotStub = { live: true, said: [] };
+    expect((await put(store, 'd-botid', bot))?.status).toBe(200);
+    const held = readNotesMethodRecord(dataDir, 'd-botid');
+    expect(held?.changes.at(-1)?.meetingId).toBe(started?.meetingId);
+  });
+
+  /**
+   * PICKING THE METHOD THAT IS ALREADY ON, during a bot meeting.
+   *
+   * Without the meeting's id the store reads it as a no-op repeat and keeps
+   * it out of the history — while the trace line went into the notes anyway,
+   * claiming a switch the record does not carry. Named with the meeting, it
+   * is a re-affirmation made inside a recording, which is exactly what the
+   * trace line is written from.
+   */
+  it('records picking the current method again during a bot meeting, and writes its line', async () => {
+    const store = new MeetingStore(dataDir);
+    // Already on the method the PUT asks for.
+    writeNotesMethod(dataDir, 'd-bsame', { method: 'ledger-opus', at: 1 });
+    expect(
+      store.start({ docId: 'd-bsame', engine: 'bot', sampleRate: 16_000, mode: 'conversation' }),
+    ).not.toBeNull();
+    const bot: BotStub = { live: true, said: [] };
+    expect((await put(store, 'd-bsame', bot))?.status).toBe(200);
+    const held = readNotesMethodRecord(dataDir, 'd-bsame');
+    expect(held?.changes).toHaveLength(2);
+    expect(held?.changes.at(-1)?.by).toBe('Maya');
+    expect(bot.said).toHaveLength(1);
+  });
+
+  it('MUTATION CONTROL: the same repeat at rest is neither recorded nor announced', async () => {
+    const store = new MeetingStore(dataDir);
+    writeNotesMethod(dataDir, 'd-qsame', { method: 'ledger-opus', at: 1 });
+    const bot: BotStub = { live: false, said: [] };
+    expect((await put(store, 'd-qsame', bot))?.status).toBe(200);
+    expect(readNotesMethodRecord(dataDir, 'd-qsame')?.changes).toHaveLength(1);
+    expect(bot.said).toEqual([]);
+  });
+
   it('still refuses a live meeting the bot relay does not hold, and writes no line', async () => {
     const store = new MeetingStore(dataDir);
     expect(
@@ -499,6 +552,57 @@ describe('the line the live session writes', () => {
     expect(traces[0] && 'markdown' in traces[0] ? traces[0].markdown : '').toBe(
       '- 10:38 Note-taker Ledger · Opus — Maya',
     );
+  });
+
+  /**
+   * THE SECTION THE TICK JUST CREATED IS NOT IN THE OUTLINE THE TICK READ.
+   *
+   * A resolver that derives the heading from the outline it is handed — which
+   * is what the server's does — is handed a snapshot taken BEFORE the edits
+   * were applied. Resolving the held line from it on the one tick that opens
+   * the section finds nothing, so the line waits for a tick that may never
+   * come, and a meeting that ends there drops it with the section sitting
+   * right in the doc.
+   */
+  it('lands the held line on the opening tick even when the heading comes from the outline', async () => {
+    const writes: NotesUpdate[] = [];
+    const sched = new ManualScheduler();
+    const opened: prose.OutlineEntry[] = [
+      { id: 'h-mine', kind: 'heading', nodeName: 'h2', level: 2, text: 'Meeting notes' },
+    ];
+    // Flipped by the write itself, so the two outlines are the real before
+    // and after of the compose that opens the section.
+    let applied = false;
+    const s = beginNotesSession(
+      {
+        composer: {
+          name: 'opens',
+          compose: () => Promise.resolve([{ op: 'insert_at_end', markdown: '- a first bullet' }]),
+        },
+        schedule: sched,
+        now: () => new Date(2026, 8, 9, 10, 38).getTime(),
+        readOutline: () => (applied ? opened : []),
+        notesHeadingId: ({ outline }) => outline.find((e) => e.id === 'h-mine')?.id,
+        onNotes: (u) => {
+          writes.push(u);
+          if (u.tick.turns.length > 0) applied = true;
+          return true;
+        },
+      },
+      ids,
+    );
+    s.noteMethodChange(notesMethodLabel('ledger-opus'), 'Maya');
+    s.onTurn({ turn: 1, text: 'the boardwalk needs a survey', speaker: 'A', final: true });
+    sched.fire();
+    // The meeting ends on the same tick that opened the section: there is no
+    // second tick to carry the line, which is the case that lost it.
+    await s.end();
+    const traces = writes
+      .flatMap((w) => w.edits)
+      .filter((e) => 'markdown' in e && e.markdown.includes('Note-taker'));
+    expect(traces).toHaveLength(1);
+    expect(traces[0]?.op).toBe('insert_under_heading');
+    expect(traces[0] && 'headingId' in traces[0] ? traces[0].headingId : '').toBe('h-mine');
   });
 
   it('WAITS when this meeting has opened no section yet, rather than going to the doc end', async () => {

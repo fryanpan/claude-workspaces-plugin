@@ -228,3 +228,46 @@ describe('which note-taker the fold shows, and who may move it', () => {
     expect(notetakerMountAnswer(c, null)).toEqual(c);
   });
 });
+
+/**
+ * TWO WRITES IN FLIGHT AT ONCE.
+ *
+ * A person changes their mind while the first REST write is still out, and
+ * `fetch` promises settle in the order the responses arrive rather than the
+ * order they were sent. Each answer speaks only for the pick it was sent for.
+ */
+describe('an answer that arrives for a pick nobody is showing any more', () => {
+  it('does not confirm a newer selection when an older success lands late', () => {
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
+    const second = notetakerPicked(first, 'ledger-opus');
+    // The first request's success, arriving after the second pick.
+    const after = notetakerAcknowledged(second, true, first.seq);
+    expect(after).toBe(second);
+    expect(after.shown).toBe('ledger-opus');
+    // And the row is still waiting: the second answer still moves it.
+    expect(notetakerAcknowledged(after, true, second.seq).confirmed).toBe('ledger-opus');
+  });
+
+  it('does not roll back a newer selection when an older failure lands late', () => {
+    const first = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-haiku');
+    const second = notetakerPicked(first, 'ledger-opus');
+    const after = notetakerAcknowledged(second, false, first.seq);
+    expect(after.shown).toBe('ledger-opus');
+  });
+
+  it('MUTATION CONTROL: the answer for the pick on the row still moves it', () => {
+    const picked = notetakerPicked(notetakerChoiceAtMount('original'), 'ledger-opus');
+    expect(notetakerAcknowledged(picked, false, picked.seq).shown).toBe('original');
+    expect(notetakerAcknowledged(picked, true, picked.seq).confirmed).toBe('ledger-opus');
+  });
+
+  it('a pick takes the next number, so the socket path can go on unnumbered', () => {
+    const mount = notetakerChoiceAtMount('original');
+    const one = notetakerPicked(mount, 'ledger-haiku');
+    expect(one.seq).toBe(mount.seq + 1);
+    expect(notetakerPicked(one, 'ledger-opus').seq).toBe(one.seq + 1);
+    // No number given: the frame came down the one socket that carries them
+    // in order, so it is about whatever the row is showing.
+    expect(notetakerAcknowledged(one, true).confirmed).toBe('ledger-haiku');
+  });
+});

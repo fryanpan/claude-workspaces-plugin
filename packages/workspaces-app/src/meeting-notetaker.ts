@@ -189,11 +189,21 @@ export interface NotetakerChoice {
   readonly shown: NotesMethod;
   readonly confirmed: NotesMethod;
   readonly picked: boolean;
+  /**
+   * WHICH PICK THE ROW IS WAITING ON. Two REST writes can be in flight at
+   * once — a person changes their mind while the first is still out — and
+   * `fetch` promises settle in whatever order the responses arrive, not the
+   * order they were sent. Without this an older success confirms the newer
+   * selection, and an older failure rolls back a newer one that landed.
+   * Each pick takes the next number and only that number's answer moves the
+   * row; every other answer is about a choice nobody is showing any more.
+   */
+  readonly seq: number;
 }
 
 /** The row before anything has been asked or answered. */
 export function notetakerChoiceAtMount(method: NotesMethod): NotetakerChoice {
-  return { shown: method, confirmed: method, picked: false };
+  return { shown: method, confirmed: method, picked: false, seq: 0 };
 }
 
 /**
@@ -210,12 +220,12 @@ export function notetakerMountAnswer(
   answer: NotesMethod | null | undefined,
 ): NotetakerChoice {
   if (choice.picked || !answer) return choice;
-  return { shown: answer, confirmed: answer, picked: false };
+  return { shown: answer, confirmed: answer, picked: false, seq: choice.seq };
 }
 
 /** Somebody picked. Optimistic: the row moves now and the answer settles it. */
 export function notetakerPicked(choice: NotetakerChoice, method: NotesMethod): NotetakerChoice {
-  return { shown: method, confirmed: choice.shown, picked: true };
+  return { shown: method, confirmed: choice.shown, picked: true, seq: choice.seq + 1 };
 }
 
 /**
@@ -226,9 +236,20 @@ export function notetakerPicked(choice: NotetakerChoice, method: NotesMethod): N
  * never fails a tick, which is right, and it is exactly why the row has to
  * come back: the session goes on composing with the method it had.
  */
-export function notetakerAcknowledged(choice: NotetakerChoice, recorded: boolean): NotetakerChoice {
-  if (!recorded) return { shown: choice.confirmed, confirmed: choice.confirmed, picked: true };
-  return { shown: choice.shown, confirmed: choice.shown, picked: true };
+export function notetakerAcknowledged(
+  choice: NotetakerChoice,
+  recorded: boolean,
+  seq?: number,
+): NotetakerChoice {
+  // An answer to a pick that is no longer the one on the row decides
+  // nothing: the person has already chosen again, and the newer request is
+  // the one whose answer the row is waiting for.
+  if (seq !== undefined && seq !== choice.seq) return choice;
+  const { seq: at } = choice;
+  if (!recorded) {
+    return { shown: choice.confirmed, confirmed: choice.confirmed, picked: true, seq: at };
+  }
+  return { shown: choice.shown, confirmed: choice.shown, picked: true, seq: at };
 }
 
 /** "10:38" — the clock the trace line and the "since" row both read as. */
