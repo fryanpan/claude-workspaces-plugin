@@ -87,6 +87,20 @@ export function createTaskDetailLoads(deps: TaskDetailDeps): TaskDetailLoads {
       // the panel keeps rendering the list row rather than blanking it.
       if (!res?.task) return;
       state.taskDetail.set(key, res.task);
+      // …and fold it into the row the RENDER reads. `readProjection` merges
+      // the overlay on its way out, but it only runs on a board update — so
+      // storing the answer and repainting would paint the trimmed row again,
+      // and go on painting it until some unrelated event moved the board. On
+      // a quiet board that is never, which made an old closed ticket open to
+      // a permanently empty panel: the primary detail path for exactly the
+      // rows the trim exists to make cheap.
+      //
+      // Through `mergeTaskDetail` rather than by assignment, so the revision
+      // guard is the same one line in both places: an answer that arrived
+      // after the projection moved past the row it describes is dropped here
+      // too, rather than putting a stale body on screen.
+      const projected = state.tasks.get(taskId);
+      if (projected) state.tasks.set(taskId, mergeTaskDetail(projected, state.taskDetail));
       schedule(repaintDetail);
     });
   }

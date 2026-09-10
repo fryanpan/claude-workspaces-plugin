@@ -23,9 +23,17 @@ function trimmed(id: string, updatedAt: number): BoardTask {
   return { ...task(id), updatedAt, status: 'done', detailTrimmed: true, body: undefined };
 }
 
-/** The same row as the detail route answers it. */
+/** The same row as the detail route answers it — every field the trim drops. */
 function whole(id: string, updatedAt: number, body: string): BoardTask {
-  return { ...task(id), updatedAt, status: 'done', body };
+  return {
+    ...task(id),
+    updatedAt,
+    status: 'done',
+    body,
+    notes: [{ ts: updatedAt, by: 'agent', text: 'what happened' }],
+    reviews: [{ id: 'r-1', ask: 'does this read right?' }],
+    quote: 'what Bryan actually said',
+  } as unknown as BoardTask;
 }
 
 describe('mergeTaskDetail', () => {
@@ -107,6 +115,56 @@ describe('asking for the rest of a row', () => {
     loads().loadTaskDetail('t-2');
     await settle();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('has the whole row in render-visible state by the time it repaints', async () => {
+    // The bug this closes: the fetched row was written to `state.taskDetail`
+    // only, and `renderDetail` reads `state.tasks`. The overlay is folded into
+    // `state.tasks` by the PROJECTION, which runs on a board update — so on a
+    // board where nothing else is happening the repaint scheduled right here
+    // painted the trimmed row, and went on painting it until some unrelated
+    // event fired a projection. On a quiet board that is never.
+    //
+    // Hence no projection anywhere in this test, and the assertion reads what
+    // the render read AT THE MOMENT it was called: a check made afterwards
+    // would pass against a state some later tick had repaired.
+    const seen: Array<BoardTask | undefined> = [];
+    renderDetail = vi.fn(() => {
+      seen.push(state.tasks.get('t-1'));
+    });
+    loads().loadTaskDetail('t-1');
+    await settle();
+
+    expect(renderDetail).toHaveBeenCalled();
+    const painted = seen[0];
+    expect(painted?.body).toBe('the whole description');
+    // Every field the trim drops, not just the one the panel shows first.
+    expect(painted?.notes?.length).toBe(1);
+    expect(painted?.reviews?.length).toBe(1);
+    expect(painted?.quote).toBe('what Bryan actually said');
+  });
+
+  it('leaves the projected row alone once the projection has moved past it', async () => {
+    // The revision guard still holds on this path. An agent's note bumps
+    // `updatedAt` while the fetch is in flight, and the answer that lands
+    // describes a row that no longer exists — folding it in would put a stale
+    // body on screen, which is the failure `detailKey` exists to prevent.
+    let inFlight: () => void = () => {};
+    fetchMock.mockImplementation(
+      async () =>
+        await new Promise((resolve) => {
+          inFlight = () =>
+            resolve({ ok: true, json: async () => ({ task: whole('t-1', 10, 'stale body') }) });
+        }),
+    );
+    loads().loadTaskDetail('t-1');
+    await settle();
+    state.tasks.set('t-1', trimmed('t-1', 11));
+    inFlight();
+    await settle();
+
+    expect(state.tasks.get('t-1')?.body).toBeUndefined();
+    expect(state.tasks.get('t-1')?.updatedAt).toBe(11);
   });
 
   it('leaves the list row standing when the ask never reaches the server', async () => {
