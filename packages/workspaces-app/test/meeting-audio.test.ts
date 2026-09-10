@@ -106,7 +106,17 @@ const SECURE = {
 const INSECURE = { ...SECURE, isSecureContext: false, protocol: 'http:', port: '8787' };
 
 function fakeStream(applyConstraints = vi.fn(() => Promise.resolve())): MediaStream {
-  const track = { stop: vi.fn(), applyConstraints };
+  // A real track is an EventTarget, and the capture now watches it for the
+  // end that killed the Dr Gupta recording — see `meeting-track-watch.ts`. A
+  // fake without the listener pair is an incomplete track, not a smaller one.
+  const track = {
+    stop: vi.fn(),
+    applyConstraints,
+    readyState: 'live',
+    muted: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
   return {
     getTracks: () => [track],
     getAudioTracks: () => [track],

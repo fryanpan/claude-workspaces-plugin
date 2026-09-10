@@ -677,9 +677,7 @@ export class MeetingStore {
           // lines this leg appended and the ones an earlier leg appended are
           // one meeting's gaps, and only the fold sees both.
           ...(() => {
-            const gaps = listMeetings(dataDir, docId).find(
-              (m) => m.meetingId === meetingId,
-            )?.gaps;
+            const gaps = listMeetings(dataDir, docId).find((m) => m.meetingId === meetingId)?.gaps;
             return gaps && gaps.length > 0 ? { gaps } : {};
           })(),
         };

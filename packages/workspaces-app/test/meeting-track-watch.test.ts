@@ -26,7 +26,10 @@ function track(): WatchableTrack & {
       listeners.set(type, [...(listeners.get(type) ?? []), fn]);
     },
     removeEventListener(type: string, fn: () => void) {
-      listeners.set(type, (listeners.get(type) ?? []).filter((l) => l !== fn));
+      listeners.set(
+        type,
+        (listeners.get(type) ?? []).filter((l) => l !== fn),
+      );
     },
     /** `fire: false` is the end that dispatches nothing — `track.stop()`. */
     end(fire = true) {

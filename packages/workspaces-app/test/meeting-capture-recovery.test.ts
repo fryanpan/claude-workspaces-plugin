@@ -35,7 +35,10 @@ function fakeTrack() {
     addEventListener: (t: string, fn: () => void) =>
       listeners.set(t, [...(listeners.get(t) ?? []), fn]),
     removeEventListener: (t: string, fn: () => void) =>
-      listeners.set(t, (listeners.get(t) ?? []).filter((l) => l !== fn)),
+      listeners.set(
+        t,
+        (listeners.get(t) ?? []).filter((l) => l !== fn),
+      ),
     /** What macOS taking the capture away looks like to the page. */
     endFromOutside() {
       self.readyState = 'ended';

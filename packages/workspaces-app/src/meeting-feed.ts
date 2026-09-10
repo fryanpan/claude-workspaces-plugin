@@ -26,7 +26,6 @@
  */
 
 import type { CaptureMode, MeetingBotStatus, MeetingStreamId } from '@claude-workspaces/core';
-import type { StreamAlarm } from './meeting-stream-health.ts';
 import {
   RECORDING_CONSENT_NOTE,
   describeBotState,
@@ -34,6 +33,7 @@ import {
 } from '@claude-workspaces/core';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import { type TranscriptTurn, diffTurnWords } from './meeting-protocol.ts';
+import type { StreamAlarm } from './meeting-stream-health.ts';
 import type { StripState } from './meeting-strip.ts';
 
 /**

@@ -13,13 +13,13 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import {
   formatGapDuration,
   formatRawSegment,
   rawTranscriptPath,
   readMeetingJson,
 } from '../src/meeting-raw.ts';
-import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import { MeetingStore, listMeetings } from '../src/meetings.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
 

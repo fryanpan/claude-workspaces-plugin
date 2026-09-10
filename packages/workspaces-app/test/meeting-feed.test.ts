@@ -3,8 +3,8 @@ import type { CaptureMode, MeetingBotStatus, MeetingStreamId } from '@claude-wor
 import { describe, expect, it } from 'vitest';
 import { type MeetingFeed, createMeetingFeed } from '../src/meeting-feed.ts';
 import type { MeetingLiveZone } from '../src/meeting-live-zone.ts';
-import type { StreamAlarm } from '../src/meeting-stream-health.ts';
 import type { TranscriptTurn } from '../src/meeting-protocol.ts';
+import type { StreamAlarm } from '../src/meeting-stream-health.ts';
 import type { StripState } from '../src/meeting-strip.ts';
 
 /**
