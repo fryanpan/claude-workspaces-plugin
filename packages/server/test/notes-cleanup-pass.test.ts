@@ -74,7 +74,7 @@ describe('running a pass', () => {
     expect(markdownNow()).toContain('The slipway closes in October');
   });
 
-  it("leaves a person's line alone, and files no redline on it either", async () => {
+  it("leaves the doc's own body alone, and files no redline there either", async () => {
     const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'Something about the slipway.' }]);
@@ -88,6 +88,10 @@ describe('running a pass', () => {
       ),
       { docId: DOC, meetingId: MEETING },
     );
+    // Outside the meeting's own section nothing is offered on either: the
+    // pass has no business redlining the doc's prose. Inside the section a
+    // person's line DOES get an offer — see the suggestion cases below, which
+    // is what makes this zero a boundary rather than a blanket.
     expect(result.refused).toBe(1);
     expect(result.touched).toBe(0);
     expect(result.suggested).toBe(0);
@@ -199,70 +203,6 @@ describe('running a pass', () => {
 });
 
 /**
- * A PERSON'S BULLET, INSIDE THE NOTE-TAKER'S OWN SECTION.
- *
- * This is the case criterion 2.3 is about and the one the loosened gate had
- * to keep refusing. The doc still carries the note-taker's marks, and one
- * bullet in the middle of its section carries none — because a person typed
- * it there during the meeting, or because they edited one of the note-taker's
- * and `clearAuthorshipOnPersonEdit` handed it back. The doc records those two
- * the same way, and both are theirs.
- *
- * The section check does not cover it. The person's line in `NOTES` sits
- * ABOVE the meeting heading, so it is out of reach on section membership
- * alone and proves nothing about ownership; this one is inside the section,
- * where only `claimable` stands between it and a rewrite.
- */
-describe("a person's bullet inside the section, on a doc whose marks are live", () => {
-  it('is not rewritten, not deleted, and not marked up', async () => {
-    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
-    const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
-    const before = markdownNow();
-    const result = await runNotesCleanupPass(
-      depsFor(
-        store,
-        stubComposer([
-          {
-            op: 'replace_block',
-            blockId: idOf(store, 'Kestrel Lane'),
-            markdown: '- [@Ivo](speaker:B) keeps the winter crew on Kestrel Lane',
-          },
-          { op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') },
-        ]),
-        dataDir,
-        idOf(store, 'Meeting notes'),
-      ),
-      { docId: DOC, meetingId: MEETING },
-    );
-    expect(result.refused).toBe(2);
-    // Not a redline either: nobody asked for their writing to be marked up.
-    expect(result.suggested).toBe(0);
-    expect(result.touched).toBe(0);
-    expect(markdownNow()).toBe(before);
-  });
-
-  it('is named to the model as theirs, and is not in what the pass claims', async () => {
-    // A gate the prompt contradicts is only half a rule. The model is told
-    // the same thing the gate enforces, so it does not spend a pass proposing
-    // edits that will be dropped.
-    const { store } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
-    const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
-    const composer = stubComposer([]);
-    await runNotesCleanupPass(depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')), {
-      docId: DOC,
-      meetingId: MEETING,
-    });
-    const input = composer.seen[0];
-    expect(input?.humanNotes).toContain('Kestrel Lane keeps the winter crew');
-    expect(input?.claimed?.has(idOf(store, 'Kestrel Lane'))).toBe(false);
-    // And the note-taker's own bullet beside it IS claimed.
-    expect(input?.claimed?.has(idOf(store, 'harbour run'))).toBe(true);
-  });
-});
-
-/**
  * What happens on a doc where NOTHING is marked.
  *
  * `cwAuthor` is a Yjs attribute, so it does not survive a markdown round trip
@@ -324,7 +264,9 @@ describe('a doc whose marks have all been lost', () => {
     expect(result.refused).toBe(0);
     // APPLIED, not suggested. There are two ownership rules and loosening the
     // gate alone leaves the second one turning every rewrite into a redline —
-    // "Show me first" is the option Bryan did not pick.
+    // "Show me first" is the option Bryan did not pick, and it is the answer
+    // for a line the doc records as SOMEBODY's, not for one it records as
+    // nobody's.
     expect(result.applied).toBe(1);
     expect(result.suggested).toBe(0);
     expect(result.touched).toBe(1);

@@ -16,18 +16,19 @@
  * empty edit list is a documented success, and this module counts what it
  * touched so the number can be measured rather than asserted.
  *
- * FOUR THINGS IT REFUSES STRUCTURALLY, so no wording of a prompt can undo
- * them (`confineToSection`):
+ * WHAT NO WORDING OF A PROMPT CAN UNDO (`confineToSection`):
  *
- * - **A person's line is never addressed.** An edit naming a block the doc
- *   records as somebody else's is DROPPED, not turned into a redline. The
- *   live path's answer — a suggestion on their words — is right for a meeting
- *   in progress, where the note-taker is writing beside them. It is wrong
- *   here: nobody asked for their own writing to be marked up, and a tidy-up
- *   that leaves twelve redlines on somebody's paragraph is the disruption the
- *   feature exists to avoid. What "records as somebody else's" means is the
- *   one thing this gate has to get right, and it is not the same question as
- *   "does the note-taker still own it" — see `claimable`.
+ * - **A person's line is never REWRITTEN — and it may still be argued
+ *   with.** An edit naming a block the doc records as somebody else's never
+ *   changes their words; a `replace_block` on one lands as a redline
+ *   SUGGESTION they accept or reject, and their line stays byte-identical
+ *   until they do (Bryan, 2026-09-10: *"the rule was do not rewrite human
+ *   text. But if you spot an improvement, use the suggest and edit tool to
+ *   suggest an edit"*). Only the replace is offered that way — a proposed
+ *   deletion or nesting of their line is dropped, because neither is an
+ *   improvement to what they wrote. What "records as somebody else's" means
+ *   is the one thing this gate has to get right, and it is not the same
+ *   question as "does the note-taker still own it" — see `claimable`.
  * - **Nothing outside this meeting's own section moves.** The section is the
  *   heading the meeting opened plus its blocks; an edit naming anything else
  *   — an earlier meeting's notes, the doc's own body — is dropped.
@@ -77,6 +78,13 @@ import {
  * empty list is a success"). A single polite request to be conservative reads
  * as a hedge on an instruction to improve; the measurement in
  * `packages/server/scripts/notes-cleanup-check.ts` is what says whether the wording holds.
+ *
+ * AND ONE CLAUSE PULLS THE OTHER WAY ON PURPOSE. A person's line may be
+ * argued with, as a suggestion. Said as a flat prohibition — which is how
+ * this read until 2026-09-10 — the model proposed nothing at all on their
+ * lines, so the suggestion path underneath it never fired and the feature
+ * Bryan asked for did not exist. The restraint that matters is on their
+ * WORDS, and the doc enforces that whatever the prompt says.
  */
 export const CLEANUP_DIRECTIVE = [
   'FINAL PASS OVER THE WHOLE MEETING. The recording has stopped and a person',
@@ -102,8 +110,17 @@ export const CLEANUP_DIRECTIVE = [
   '  under the wrong heading, a topic left as a wall of bullets past the',
   '  regrouping bar. Bullets that read fine where they are stay where they',
   '  are.',
-  '- Lines marked "theirs" were written by a PERSON. Never rewrite, delete,',
-  '  move or nest one — work around them, and do not repeat what they say.',
+  '- Lines marked "theirs" were written by a PERSON. Never delete one, never',
+  '  move or nest one, and do not repeat what they say.',
+  '- YOU MAY STILL OFFER AN IMPROVEMENT ON A LINE MARKED "theirs", and you',
+  '  cannot rewrite one by accident: name it in a replace_block with your',
+  '  better wording and it reaches them as a SUGGESTION on their own line,',
+  '  which they accept or reject. Their words do not change unless they say',
+  '  so. Offer one only where the meeting shows something real — a figure or',
+  '  a name the transcript contradicts, a point the room settled differently,',
+  '  a note left hanging — never to restyle a line you would have worded',
+  '  another way. One offer at most per line, and none at all if the line is',
+  '  simply fine.',
   '- Do not open a new section, do not restate the transcript, and do not',
   '  write a summary of the meeting at the end.',
 ].join('\n');
@@ -141,10 +158,14 @@ export interface NotesCleanupResult {
   reason?: NotesCleanupRefusal;
   /** Edits the model returned. */
   proposed: number;
-  /** Edits `confineToSection` dropped — outside the section, or aimed at a
-   *  person's line. */
+  /** Edits `confineToSection` dropped — outside the section, aimed at the
+   *  section heading, at a commented bullet, or proposing to delete or move
+   *  somebody else's line. An edit it turned into an offer is NOT one of
+   *  these: it was kept, and comes back under `suggested`. */
   refused: number;
   applied: number;
+  /** Edits that reached somebody's line as a redline to accept or reject,
+   *  rather than as a rewrite of it. */
   suggested: number;
   failed: number;
   /**
@@ -314,7 +335,7 @@ export async function runNotesCleanupPass(
   // Read AFTER the compose, not before: the doc is live, and somebody can
   // leave a comment while the model is thinking.
   const commented = commentedBlockIds(doc.ydoc);
-  const { kept, refused } = confineToSection(edits, {
+  const { kept, proposeOnly, refused } = confineToSection(edits, {
     ...scope,
     owned,
     attributed,
@@ -322,9 +343,12 @@ export async function runNotesCleanupPass(
     headingId,
     commented,
   });
-  // The gate said these are ours; the write path has to be told, or every one
-  // of them lands as a redline instead of a rewrite. See `claimForCleanup`.
-  claimForCleanup(doc.ydoc, kept);
+  // BOTH HALVES OF THE SAME SENTENCE. The blocks the gate called ours have to
+  // be marked ours, or every one of them lands as a redline instead of a
+  // rewrite; the blocks it admitted only as an OFFER must not be, or the
+  // redline somebody is meant to accept or reject becomes a silent rewrite of
+  // their line. See `claimForCleanup`.
+  claimForCleanup(doc.ydoc, kept, proposeOnly);
   // A store that refuses the whole batch — the doc has gone, or is not prose —
   // reports no counts at all. Reading that as zeros is the honest answer: it
   // changed nothing, which is what the numbers below say.
@@ -346,6 +370,7 @@ export async function runNotesCleanupPass(
     line:
       `notes cleanup ${docId}/${meetingId}: ${turns.length} turns read, ` +
       `${edits.length} edits proposed, ${refused} refused, ${touched} blocks touched` +
+      (result.suggested > 0 ? `, ${result.suggested} offered as suggestions` : '') +
       (result.failed > 0 ? `, ${result.failed} failed` : ''),
   };
 }

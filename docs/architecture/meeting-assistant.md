@@ -2102,19 +2102,51 @@ transcript label saying which of the two it is reading. A transcript over
 120k characters is REFUSED rather than trimmed, so the pass is never silently
 worse on the meetings where it is hardest to tell.
 
-**Four refusals are structural, so no wording of a prompt can undo them.**
-`confineToSection` (`notes-cleanup-scope.ts`) drops — never proposes — an edit
-that names a block the doc records as somebody else's, anything outside this
-meeting's own section, an `insert_at_end`, or a block somebody has left a
-comment on. The live path's
-answer to the first of those is a redline suggestion on the person's words,
-which is right during a meeting and wrong here: nobody asked for their own
-writing to be marked up, and a tidy-up leaving twelve redlines on somebody's
-paragraph is the disruption the feature exists to avoid. The fourth is about
-anchors: a `replace_block` re-creates the block's text and every relative
-position inside it stops resolving, so a commented bullet is out of reach and
-the pass adds beside it. `nest_blocks` stays allowed on one — nesting moves a
-block without re-creating its text.
+**A person's line is never rewritten — and it may still be argued with.**
+Bryan's rule (2026-09-10): *"do not rewrite human text. But if you spot an
+improvement, use the suggest and edit tool to suggest an edit."* Those are
+three outcomes, not two, and `confineToSection` (`notes-cleanup-scope.ts`)
+sorts every edit into one of them:
+
+| the block | `replace_block` | `delete_block` / `nest_blocks` |
+| --- | --- | --- |
+| the pass's own | rewritten | applied |
+| somebody else's, in this meeting's section | **offered as a suggestion** | dropped |
+| commented on, outside the section, or the section heading | dropped | dropped |
+
+An offer is a redline on their own line, to accept or reject; their words are
+byte-identical until they answer, and rejecting it restores the document byte
+for byte. A deletion or a move is not an improvement to what somebody wrote —
+and `applyBlockEdits` cannot express a move as a suggestion at all — so those
+stay dropped whatever the model asks for.
+
+**The first version of this pass dropped all three**, on the reasoning that
+nobody asked for their writing to be marked up and a tidy-up leaving twelve
+redlines on somebody's paragraph is the disruption the feature exists to
+avoid. That is still the argument against a rewrite; it is not an argument
+against an offer, and dropping the offer left the pass unable to say anything
+at all about a line it could see was wrong.
+
+**And the prompt has to permit it, or the path underneath is dead.** Said as a
+flat prohibition — *"never rewrite, delete, move or nest one"*, which is how
+`CLEANUP_DIRECTIVE` read until 2026-09-10 — the model proposes nothing on
+their lines and the suggestion path never fires. The wording now separates the
+two: never delete or move one, never rewrite one, and name it in a
+`replace_block` when you have a real improvement, because that is how it
+reaches them as a suggestion.
+
+**Two refusals stay absolute.** An `insert_at_end` — a cleanup has a section
+already, and writing at the end of the doc is the one way to grow a duplicate
+one — and anything outside this meeting's own section, offers included: the
+pass has no business redlining the doc's prose.
+
+**A commented bullet is out of reach both ways.** The rewrite argument is
+about anchors: a `replace_block` re-creates the block's text and every
+relative position inside it stops resolving. A suggestion re-creates nothing,
+so that argument does not reach it — the offer is dropped anyway, because at
+the end of a meeting a bullet somebody is already discussing is the last one
+to reopen. `nest_blocks` stays allowed on one's OWNER — nesting moves a block
+without re-creating its text.
 
 **The notes it writes highlight like every other note of the meeting.**
 `settle-wash.ts` asks the live zone whether a meeting is live at the instant a
@@ -2148,6 +2180,14 @@ Measured 2026-09-10 on Haiku 4.5:
 | CONTROL, marks live | 8 | 48 | 24 | 8 |
 | RESTRAINT, marks gone | 24 | 9 | 5 | 5 |
 | CONTROL, marks gone | 8 | 48 | 24 | 8 |
+
+**The arms carry no human line inside the notes section**, so the table below
+measures the rewrite path and says nothing about the offer path — every block
+under `## Meeting notes` in both fixtures is the note-taker's (marks live) or
+nobody's (marks gone). What a suggestion does to somebody's line is proven by
+`notes-cleanup-pass.test.ts` instead, which can assert the thing that matters
+— their text byte-identical until they answer — and a sampled measurement
+never could.
 
 **Restraint is perfect while the marks live and merely good once they are
 gone**, and that gap is the price of the looser gate rather than a defect in
@@ -2216,16 +2256,23 @@ because an insert names a heading and no owner. Able to add to a document it
 could not tidy was the worst of both, and Bryan chose the looser rule ("Bring
 into line") over gating on authorship.
 
-**There are two ownership rules in the write path, not one, and loosening the
-first alone achieves nothing.** `confineToSection` decides which edits are
-proposed; `prose.applyBlockEdits` then compares each target's `cwAuthor`
-against the writing agent and turns an unmatched one into a SUGGESTION rather
-than a rewrite. `claimForCleanup` is what makes them agree: it stamps the
-note-taker's mark on exactly the blocks an admitted edit NAMES — never a
-whole section, because a pass that stamped everything it might touch would
-write to the doc on a run that changed nothing, and a run that changes
-nothing has to leave the doc alone. When the marks are live that set is empty
-by construction, so the live path writes nothing there at all.
+**There are two ownership rules in the write path, not one, and the pass has
+to steer both.** `confineToSection` decides which edits are proposed;
+`prose.applyBlockEdits` then compares each target's `cwAuthor` against the
+writing agent and turns an unmatched one into a SUGGESTION rather than a
+rewrite. Making them agree is `claimForCleanup`: it stamps the note-taker's
+mark on exactly the blocks an admitted edit NAMES — never a whole section,
+because a pass that stamped everything it might touch would write to the doc
+on a run that changed nothing, and a run that changes nothing has to leave the
+doc alone.
+
+Keeping them deliberately APART is `proposeOnly`, the ids `confineToSection`
+admitted as offers. Those are never claimed, and that is the only thing
+standing between the redline somebody is meant to accept or reject and a
+silent rewrite of their line. Loosening the gate while forgetting the claim
+leaves every rewrite a redline; claiming while forgetting the offer set turns
+every offer into a rewrite. The two failures are opposite and the code is one
+line each, which is why they are said together everywhere they appear.
 
 **And the prompt is told the same thing the gate enforces.** The outline
 prints `theirs` straight off the mark, so on a marks-gone doc it would call
@@ -2235,13 +2282,17 @@ the gate allowed — a loosening that measured as no change. `claimed` on
 among the unmarked lines. Nothing sets `claimed` on a tick.
 
 `notes-cleanup-scope.test.ts` drives all of it directly: the same unmarked
-block, the same edit, the same section, refused in one state and admitted in
-the other. `notes-cleanup-pass.test.ts` proves the pass end to end — a
-person's bullet inside the section is not rewritten, not deleted and not
-marked up while the marks live; an unmarked one on a marks-gone doc is
-rewritten rather than redlined (`suggested` is 0); and the premise itself is
-measured rather than assumed, authorship present before a markdown round trip
-and absent after.
+block, the same edit, the same section, rewritten in one state and merely
+offered on in the other. `notes-cleanup-suggestions.test.ts` is the half a
+gate-level test cannot show — a person's bullet inside the section comes back
+as a pending suggestion whose deleted half is their own words, the block still
+unclaimed, and rejecting it restores the document byte for byte, while a
+delete or a nest of the same bullet is dropped and files nothing.
+`notes-cleanup-pass.test.ts` holds the rest: an unmarked bullet on a
+marks-gone doc is rewritten rather than redlined (`suggested` is 0), the
+doc's own body outside the section is neither rewritten nor offered on, and
+the premise itself is measured rather than assumed, authorship present before
+a markdown round trip and absent after.
 
 ## Is anybody listening — lead presence (`lead-presence.ts`)
 

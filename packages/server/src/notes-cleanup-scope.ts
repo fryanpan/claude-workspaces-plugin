@@ -11,9 +11,12 @@
  * THE ORDERING RULE THE WHOLE FILE TURNS ON. There are two ownership rules in
  * the write path, not one — `confineToSection` decides which edits are
  * proposed, and `prose.applyBlockEdits` then decides whether each lands as a
- * rewrite or as a redline. `claimForCleanup` is what makes them agree. A
- * change to either that forgets the other produces a gate that looks loosened
- * and behaves exactly as it did.
+ * rewrite or as a redline. Making them agree is `claimForCleanup`; keeping
+ * them deliberately APART, on the blocks this pass may only ask about, is
+ * `proposeOnly`. A change to either that forgets the other produces a gate
+ * that looks loosened and behaves exactly as it did — or, in the other
+ * direction, a suggestion on somebody's line that quietly becomes a rewrite
+ * of it.
  */
 
 import { prose } from '@claude-workspaces/core';
@@ -194,13 +197,24 @@ export function claimable(scope: {
  * ONLY THE BLOCKS AN ADMITTED EDIT NAMES, and never a whole section: a pass
  * that stamped everything it MIGHT touch would write to the doc on a run
  * that changed nothing, and a run that changes nothing has to leave the doc
- * alone (criterion 2.4). When the marks are live this set is empty by
- * construction — the gate admits only blocks already marked ours — so the
- * live path writes nothing here at all.
+ * alone (criterion 2.4).
+ *
+ * AND NEVER A BLOCK THE GATE ADMITTED AS AN OFFER. `proposeOnly` is
+ * `confineToSection`'s set of blocks this pass may propose on but may not
+ * rewrite — somebody else's writing. Claiming one would hand it to
+ * `applyBlockEdits` as the pass's own and turn the redline it is supposed to
+ * file into a silent rewrite of their line, which is the exact failure this
+ * whole file exists to prevent. Passing the set is therefore not optional in
+ * any caller that admits an offer; the default is empty so the two callers
+ * that admit none do not have to say so.
  *
  * Returns how many it claimed, which is what a test asserts on.
  */
-export function claimForCleanup(ydoc: Y.Doc, edits: readonly prose.BlockEdit[]): number {
+export function claimForCleanup(
+  ydoc: Y.Doc,
+  edits: readonly prose.BlockEdit[],
+  proposeOnly: ReadonlySet<string> = new Set<string>(),
+): number {
   const wanted = new Set<string>();
   for (const edit of edits) {
     if (edit.op === 'replace_block' || edit.op === 'delete_block') wanted.add(edit.blockId);
@@ -209,6 +223,7 @@ export function claimForCleanup(ydoc: Y.Doc, edits: readonly prose.BlockEdit[]):
       for (const id of edit.blockIds) wanted.add(id);
     }
   }
+  for (const id of proposeOnly) wanted.delete(id);
   if (wanted.size === 0) return 0;
   const fragment = prose.getProseFragment(ydoc);
   const unmarked = [...wanted]
@@ -224,14 +239,30 @@ export function claimForCleanup(ydoc: Y.Doc, edits: readonly prose.BlockEdit[]):
 }
 
 /**
- * Keep only the edits a cleanup is allowed to make.
+ * Sort the model's edits into the ones this pass may make, the ones it may
+ * only OFFER, and the ones it may not raise at all.
  *
  * Whether a block is the pass's to rewrite is {@link claimable}, which is not
  * the same question as "does the note-taker still own it" — see the reasoning
- * on {@link notesMarksLive}. An edit naming a block the doc records as
- * somebody else's is DROPPED rather than proposed; see the module header for
- * why a redline on a person's line is the wrong answer here. `commented` is
- * the set a thread points into; see `commentedBlockIds`.
+ * on {@link notesMarksLive}. A block that is somebody else's is not out of
+ * the conversation, though: a `replace_block` naming one is KEPT and its id
+ * returned in `proposeOnly`, which is how it reaches `applyBlockEdits` as a
+ * redline suggestion on their own words rather than as a rewrite of them
+ * (Bryan, 2026-09-10: *"the rule was do not rewrite human text. But if you
+ * spot an improvement, use the suggest and edit tool to suggest an edit"*).
+ * Their text is byte-identical until they accept.
+ *
+ * ONLY A REPLACE IS OFFERED THAT WAY. A `delete_block` on somebody's line
+ * proposes striking the whole of it and a `nest_blocks` proposes moving it
+ * under something else; neither is an improvement to their writing, and
+ * `applyBlockEdits` cannot express the second as a suggestion at all. Both
+ * are dropped, which is also what the prompt asks for.
+ *
+ * `commented` is the set a thread points into; see `commentedBlockIds`. A
+ * commented block is out of reach BOTH ways — the pass adds beside it — which
+ * is a stricter rule than the anchor argument alone requires (a suggestion
+ * re-creates no text), and it is deliberate: at the end of a meeting a bullet
+ * somebody is already discussing is the last one to reopen.
  */
 export function confineToSection(
   edits: readonly prose.BlockEdit[],
@@ -244,19 +275,32 @@ export function confineToSection(
     headingId: string;
     commented?: Set<string>;
   },
-): { kept: prose.BlockEdit[]; refused: number } {
+): { kept: prose.BlockEdit[]; proposeOnly: Set<string>; refused: number } {
   const kept: prose.BlockEdit[] = [];
+  const proposeOnly = new Set<string>();
   const ours = claimable(scope);
-  // Ours to rewrite: inside the section, ours or nobody's, and not the
-  // section heading itself — deleting that orphans every note under it.
-  const mine = (id: string): boolean => scope.blocks.has(id) && ours(id) && id !== scope.headingId;
+  // Inside this meeting's own notes, and not the section heading itself —
+  // deleting that orphans every note under it, and rewriting it moves the
+  // address the notes are found at.
+  const inSection = (id: string): boolean => scope.blocks.has(id) && id !== scope.headingId;
+  const mine = (id: string): boolean => inSection(id) && ours(id);
   const rewritable = (id: string): boolean => mine(id) && !scope.commented?.has(id);
+  // Somebody else's, and still inside the notes this pass is tidying: a
+  // rewrite is out of the question and an offer is not.
+  const offerable = (id: string): boolean =>
+    inSection(id) && !ours(id) && !scope.commented?.has(id);
   for (const edit of edits) {
     switch (edit.op) {
       case 'insert_under_heading':
         if (scope.headings.has(edit.headingId)) kept.push(edit);
         break;
       case 'replace_block':
+        if (rewritable(edit.blockId)) kept.push(edit);
+        else if (offerable(edit.blockId)) {
+          kept.push(edit);
+          proposeOnly.add(edit.blockId);
+        }
+        break;
       case 'delete_block':
         if (rewritable(edit.blockId)) kept.push(edit);
         break;
@@ -271,5 +315,5 @@ export function confineToSection(
         break;
     }
   }
-  return { kept, refused: edits.length - kept.length };
+  return { kept, proposeOnly, refused: edits.length - kept.length };
 }
