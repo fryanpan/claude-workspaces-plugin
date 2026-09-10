@@ -13,7 +13,7 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -22,9 +22,17 @@ import {
   type MeetingTimingMark,
   meetingSocketPath,
 } from '@claude-workspaces/core';
+import {
+  type NotesUpdate,
+  type TickScheduler,
+  createStubNotesComposer,
+} from '../src/meeting-notes.ts';
+import { meetingTimingPath } from '../src/meetings.ts';
+import type { NotesTickTiming } from '../src/notes-timing.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { audioEndMsFromTurn } from '../src/transcribe-assemblyai.ts';
 import type { TranscriptionEngine } from '../src/transcribe.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 /** 100ms of 16 kHz mono PCM16. */
@@ -162,6 +170,130 @@ async function makeServer(engine: TranscriptionEngine): Promise<{
 
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
+
+describe('the spoken clock is not the opt-in', () => {
+  /**
+   * `?timing=1` is a debugging switch a client sets: it asks the relay to
+   * attach a per-frame block of vendor timings to the transcript. The clock
+   * that says WHEN A PERSON SPOKE is not that — it is the input to every
+   * latency number the notes are judged on, so it has to be there in an
+   * ordinary meeting nobody instrumented. The two used to be the same
+   * decision, because the ledger the clock is read out of was only built
+   * when the block was asked for.
+   *
+   * So this drives a meeting with the switch OFF and asserts both halves:
+   * the frames still carry no block, and the timing row still knows when the
+   * words were said.
+   */
+  let handle: ServerHandle;
+  let dataDir: string;
+  let base: string;
+  const updates: NotesUpdate[] = [];
+  const timers: Array<() => void> = [];
+  /** Fire the notes tick by hand, exactly as the other meeting suites do. */
+  const schedule: TickScheduler = {
+    set(fn) {
+      timers.push(fn);
+      return timers.length;
+    },
+    clear() {},
+  };
+
+  /**
+   * An engine that settles a turn and says where in the audio its last word
+   * ended — the shape AssemblyAI reports, and the only shape a spoken clock
+   * can be derived from at all.
+   */
+  const spokenEngine: TranscriptionEngine = {
+    name: 'spoken-mock',
+    open(opts) {
+      let bytes = 0;
+      return Promise.resolve({
+        send(audio: Uint8Array): void {
+          bytes += audio.byteLength;
+          const audioEndMs = bytes / BYTES_PER_MS - WORD_LAG_MS;
+          opts.onTurn({ turn: 0, text: 'we should ship it', final: false, audioEndMs });
+          opts.onTurn({ turn: 0, text: 'We should ship it.', final: true, audioEndMs });
+        },
+        close: () => Promise.resolve(),
+      });
+    },
+  };
+
+  beforeAll(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-spoken-'));
+    handle = createServer({
+      port: 0,
+      dataDir,
+      transcription: spokenEngine,
+      meetingNotes: {
+        composer: createStubNotesComposer(),
+        quietMs: 1_000,
+        schedule,
+        onNotes: (u) => {
+          updates.push(u);
+        },
+      },
+    });
+    base = `http://localhost:${handle.port}`;
+    WS = await seedBoard(base);
+  });
+  afterAll(async () => {
+    await handle.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('knows when the words were said in a meeting that never asked to be measured', async () => {
+    const path = join(dataDir, 'unmeasured-meeting.md');
+    writeFileSync(path, '# unmeasured\n\nNotes go here.\n');
+    const created = await fetch(`${base}/workspaces/${WS}/docs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        docId: 'unmeasured-meeting',
+        sourceUrl: path,
+        title: 'unmeasured-meeting',
+      }),
+    });
+    expect(created.status, await created.clone().text()).toBe(200);
+    const { docId } = (await created.json()) as { docId: string };
+
+    const client = await AudioClient.open(`ws://localhost:${handle.port}`, docId);
+    client.start(false);
+    await client.waitFor('ready');
+    client.speak(3);
+    const turns = await client.waitForCount('transcript', 3);
+
+    // Half one: the switch really is off. Without this the row below could
+    // be passing because the meeting was measured after all.
+    for (const t of turns) expect(t.timing).toBeUndefined();
+
+    for (const fire of timers.splice(0)) fire();
+    await waitFor(() => updates.length > 0, { describe: 'the notes tick to write' });
+    const list = (await (
+      await fetch(`${base}/workspaces/${WS}/docs/${docId}/meetings`)
+    ).json()) as { meetings: Array<{ meetingId: string }> };
+    const meetingId = list.meetings[0]?.meetingId ?? '';
+    const rows = readFileSync(meetingTimingPath(dataDir, docId, meetingId), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as NotesTickTiming);
+
+    const written = rows.find((r) => r.outcome === 'written');
+    expect(written?.spokenAt).toBeGreaterThan(0);
+    expect(written?.lastSpokenAt ?? 0).toBeGreaterThanOrEqual(written?.spokenAt ?? 0);
+    // The words were spoken before the transcript settled — which is the leg
+    // the settled clock cannot see, and the reason the field exists.
+    expect(written?.spokenAt ?? 0).toBeLessThanOrEqual(written?.settledAt ?? 0);
+    // And the wait derived from it is the longer of the two, by exactly that
+    // leg. Algebra rather than a stopwatch: both end at the same write.
+    expect((written?.spokenToWrittenMs ?? 0) - (written?.settledToWrittenMs ?? 0)).toBe(
+      (written?.settledAt ?? 0) - (written?.spokenAt ?? 0),
+    );
+
+    client.close();
+  });
+});
 
 describe('the relay measures only when it is asked', () => {
   let env: Awaited<ReturnType<typeof makeServer>>;

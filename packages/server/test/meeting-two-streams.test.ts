@@ -18,9 +18,11 @@ import {
   type MeetingStreamId,
   tagAudioFrame,
 } from '@claude-workspaces/core';
+import { createStubNotesComposer } from '../src/meeting-notes.ts';
 import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import { rawTranscriptPath, readMeetingJson } from '../src/meeting-raw.ts';
 import { MeetingStore, meetingDirPath } from '../src/meetings.ts';
+import { createNotesTimingLog } from '../src/notes-timing.ts';
 import type {
   TranscriptionEngine,
   TranscriptionOpenOpts,
@@ -211,6 +213,79 @@ describe('a meeting that hears the room and the Mac at once', () => {
     expect(existsSync(join(meetingDirPath(dataDir, 'one-system'), 'segment-1-system.pcm'))).toBe(
       true,
     );
+  });
+
+  /**
+   * A meeting driven far enough to write one timing row, so the notes side of
+   * the ledger can be read back.
+   *
+   * The two readers of the ledger are the client's timing block and the notes
+   * pipeline's spoken clock, and only the first is an opt-in — so a test that
+   * checks the block alone says nothing about the second, which is the one
+   * every latency number in the repo is built on.
+   */
+  async function timingRowsOf(docId: string, source: string | undefined) {
+    const { engine, sessions } = twoSessionEngine();
+    const timing = createNotesTimingLog();
+    const fire: Array<() => void> = [];
+    const relay = new MeetingRelay({
+      store: new MeetingStore(dataDir),
+      engines: [engine],
+      notes: {
+        composer: createStubNotesComposer(),
+        schedule: {
+          set(fn) {
+            fire.push(fn);
+            return fire.length;
+          },
+          clear() {},
+        },
+        openTiming: () => timing,
+        onNotes: () => {},
+      },
+      broadcast: () => {},
+    });
+    const ws: MeetingClient = { data: { docId }, send: () => {} };
+    relay.onOpen(ws);
+    relay.onText(
+      ws,
+      JSON.stringify({
+        type: 'start',
+        sampleRate: 16_000,
+        encoding: 'pcm_s16le',
+        mode: 'conversation',
+        ...(source !== undefined ? { source } : {}),
+      }),
+    );
+    await settle();
+    relay.onAudio(ws, source === COMBINED_SOURCE ? tagAudioFrame('mic', pcm(1)) : pcm(1));
+    sessions[0]?.opts.onTurn({ turn: 0, text: 'we should ship it', final: true, audioEndMs: 10 });
+    for (const fn of fire.splice(0)) fn();
+    await settle();
+    relay.onText(ws, JSON.stringify({ type: 'stop' }));
+    await settle();
+    return timing.rows();
+  }
+
+  it('tells the notes pipeline it does not know when a two-stream turn was spoken', async () => {
+    // The ledger counts the bytes of BOTH streams while each engine numbers
+    // audio from its own byte zero, so an offset resolves to about half the
+    // elapsed time and the error grows all meeting. A wrong answer here is
+    // worse than none: it would put a fabricated number under every latency
+    // report the repo produces.
+    const rows = await timingRowsOf('two-spoken', COMBINED_SOURCE);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.spokenAt).toBeNull();
+      expect(r.spokenToWrittenMs).toBeNull();
+    }
+  });
+
+  it('and does know on a single-stream meeting — the control', async () => {
+    // Without this, the null above would pass on a relay that never resolves
+    // a spoken instant at all.
+    const rows = await timingRowsOf('one-spoken', undefined);
+    expect(rows.some((r) => r.spokenAt !== null)).toBe(true);
   });
 
   it('refuses to measure a two-stream meeting, rather than measuring the wrong stream', async () => {
