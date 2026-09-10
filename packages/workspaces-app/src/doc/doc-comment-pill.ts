@@ -20,6 +20,7 @@ import { trackGesture } from '../gesture.ts';
 import type { MountScope } from '../mount-scope.ts';
 import type { ChromeSelection } from './anchor-body.ts';
 import { showToast } from './chrome-dom.ts';
+import { keyboardClearDelta } from './composer-slot.ts';
 import type { PointerPillLayer } from './doc-pointer-pill.ts';
 
 export interface CommentPillOptions {
@@ -365,22 +366,37 @@ export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
   // =========================================================================
 
   function scrollSelectionAboveKeyboard(): void {
+    // Nothing to clear when the composer opened in the margin: the keyboard
+    // is not up, the box is not over the prose, and scrolling the doc would
+    // move the sentence out from under a composer pinned beside it.
+    if (composer.classList.contains('composer--margin')) return;
     try {
       const vv = window.visualViewport;
       const vvTop = vv?.offsetTop ?? 0;
       const vvHeight = vv?.height ?? window.innerHeight;
-      // 20% from the top of the visible-above-keyboard area
-      const desiredTop = vvTop + vvHeight * 0.2;
       let selTop = 0;
+      let selBottom = 0;
       const winSel = window.getSelection();
       if (winSel && winSel.rangeCount > 0 && !winSel.isCollapsed) {
-        selTop = winSel.getRangeAt(0).getBoundingClientRect().top;
+        const r = winSel.getRangeAt(0).getBoundingClientRect();
+        selTop = r.top;
+        selBottom = r.bottom;
       } else {
         const { from } = editor.editor.state.selection;
-        selTop = editor.editor.view.coordsAtPos(from).top;
+        const c = editor.editor.view.coordsAtPos(from);
+        selTop = c.top;
+        selBottom = c.bottom;
       }
-      const deltaY = selTop - desiredTop;
-      if (Math.abs(deltaY) < 20) return;
+      const composerTop = composer.getBoundingClientRect().top;
+      const deltaY = keyboardClearDelta({
+        selTop,
+        selBottom,
+        // A composer that has not been laid out (a stripped test document)
+        // reports 0; the bottom of the visible band stands in for it.
+        composerTop: composerTop > 0 ? composerTop : vvTop + vvHeight,
+        bandTop: vvTop,
+      });
+      if (deltaY === 0) return;
       const scroller = document.getElementById('editor');
       if (scroller) scroller.scrollBy({ top: deltaY, behavior: 'smooth' });
     } catch {}

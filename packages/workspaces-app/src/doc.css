@@ -2607,6 +2607,92 @@ button.lz-speaker:hover .lz-speaker-pill {
   }
 }
 
+/* ================= THE NEW-COMMENT COMPOSER, PLACED =================
+   `#composer` itself is shared chrome and its base rules live in styles.css;
+   only the DOCUMENT can reach the two placements below, because only the
+   document page carries a `#composer` at all (the board, sign-in and settings
+   shells render none) and only `doc/composer-slot.ts` adds `.composer--margin`.
+
+   WIDE — the composer opens in the balloon margin, level with the sentence it
+   is about, in the slot the posted comment's balloon will take. Fitts's law
+   (Bryan, 2026-09-10): the box is where his eyes already are, and posting
+   becomes a fade in place rather than a jump from the bottom of the screen.
+   Geometry — top / left / width — is written inline by the module that
+   measures the column; what is here is only the shape.
+
+   NARROW — the sheet stays at the bottom, riding the keyboard on --kb-bottom
+   as it always has, but opens as ONE LINE: the quote and the avatar go, so
+   the box starts at the height of the text being typed into it. The commented
+   sentence is scrolled to just above it (`keyboardClearDelta`), which is what
+   makes the quote redundant rather than merely small. */
+
+#composer.composer--margin {
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  max-width: none;
+  border-radius: 12px;
+  /* The sheet slides up from off-screen; a margin card has nowhere to slide
+     from, so it arrives by fading where it already is. */
+  transform: none;
+  transition: opacity 140ms ease;
+}
+/* The words are RIGHT THERE, one column over, and the balloon that replaces
+   this box shows no quote either. */
+#composer.composer--margin .composer-quote {
+  display: none;
+}
+/* The avatar goes with it. A 260px column has 148px of typing surface left
+   once a 32px avatar and the send arrow have taken their share, which wraps
+   the hint to three lines and clips it; without the avatar the same hint
+   takes two. Nothing is lost — the balloon that replaces this box names its
+   author, and nobody needs telling whose comment they are typing. */
+#composer.composer--margin .composer-avatar {
+  display: none;
+}
+/* The same cut the phone tier already buys its way out of in styles.css: the
+   placeholder is a zero-height float, so a hint that wraps is clipped rather
+   than growing the box. The hint measures ~342px and the typing surface is
+   190px wide once the avatar is gone, so the EMPTY box is given two lines.
+   It collapses back to one line the moment anything is typed. Measured in
+   headless Chromium at 1180x820. */
+#composer.composer--margin .md-composer-surface .ProseMirror p.is-editor-empty:first-child,
+#composer.composer--margin #composer-text:placeholder-shown {
+  min-height: 2.7em;
+}
+/* Nothing is dimmed while the composer sits beside the prose: the reader is
+   reading the prose. The scrim stays present, and still closes the composer
+   on a click outside it. */
+body.composer-open .composer-scrim.composer-scrim--clear {
+  background: transparent;
+}
+
+@media (max-width: 1100px) {
+  #composer .composer-quote,
+  #composer .composer-avatar {
+    display: none;
+  }
+  /* Every pixel here is a pixel of typing surface, and the hint is the thing
+     being fitted: at 430 it measures 342.5px against 338px of box, so it wrapped
+     to a second line and the "one line" the sheet is meant to open as was two.
+     Four pixels off each inset and two off the left padding buy the ten it was
+     short of. Measured in headless Chromium at 430x932. */
+  #composer {
+    left: 8px;
+    right: 8px;
+  }
+  .composer-inner {
+    padding: 6px 8px 6px 10px;
+  }
+  /* The two lines styles.css reserves for a wrapped hint below 640px were for
+     a box that still carried the avatar. It does not, so the empty box is one
+     line again — which is what Bryan asked the sheet to open as. */
+  #composer .md-composer-surface .ProseMirror p.is-editor-empty:first-child,
+  #composer-text:placeholder-shown {
+    min-height: 0;
+  }
+}
+
 /* ================= FULL-SCREEN THREAD VIEW =================
    Tapping a highlight in the doc opens this — Notion's "Diskussion"
    pattern. Focused single-thread view, dismissable with X or Esc. */

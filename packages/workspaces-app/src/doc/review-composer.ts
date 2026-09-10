@@ -23,6 +23,7 @@ import type { ReviewSurface } from '../review-surface.ts';
 import type { ThreadPanel } from '../threads.ts';
 import { type ChromeSelection, anchorBody } from './anchor-body.ts';
 import { el, makeBtn, showToast } from './chrome-dom.ts';
+import type { ComposerSlot } from './composer-slot.ts';
 
 /** An idempotency key for one comment-composer submit attempt — unique
  *  enough to dedupe against, not a security token, so `Math.random` is
@@ -62,6 +63,15 @@ export interface ComposerOptions {
   threadLineLabel: (id: string) => string | null;
   getSelection: () => ChromeSelection | null;
   selectHint: string;
+  /**
+   * Where the composer should open, asked once per open with the box already
+   * on screen so it can be measured. Null — and an absent hook — is the
+   * bottom sheet, which is what the board, the code surface and the redline
+   * surface all still get. The markdown document passes
+   * `doc/composer-slot.ts`, which answers with the balloon margin's slot
+   * whenever the margin is on screen.
+   */
+  placeComposer?: () => ComposerSlot | null;
   hidePill?: () => void;
   onComposerOpened?: () => void;
   onPosted?: () => void;
@@ -168,6 +178,9 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     composer.classList.remove('hidden');
     composerScrim.classList.remove('hidden');
     document.body.classList.add('composer-open');
+    // Asked AFTER the box is unhidden: the slot is clamped against the
+    // composer's own height, and a hidden box measures zero.
+    placeComposer();
     opts.hidePill?.();
     composerText.value = prefill ?? '';
     // Setting the box in code is invisible to the editor, so it has to be
@@ -183,6 +196,26 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     focusMarkdownComposer(composerText, null, { scroll: false });
     opts.onComposerOpened?.();
   }
+  /**
+   * Put the box where the surface says it goes. The class is what the
+   * stylesheet keys off — it turns the bottom sheet's full-width slide-up
+   * into a margin card — and the three inline properties are the geometry
+   * only the running page can know.
+   */
+  function placeComposer(): void {
+    const slot = opts.placeComposer?.() ?? null;
+    composerScrim.classList.toggle('composer-scrim--clear', slot !== null);
+    if (!slot) {
+      composer.classList.remove('composer--margin');
+      for (const prop of ['top', 'left', 'width']) composer.style.removeProperty(prop);
+      return;
+    }
+    composer.classList.add('composer--margin');
+    composer.style.top = `${slot.top}px`;
+    composer.style.left = `${slot.left}px`;
+    composer.style.width = `${slot.width}px`;
+  }
+
   function hideComposer(): void {
     // The composer is going away; the caret must not stay in a box nobody can
     // see. A real browser blurs a focused element it hides, and happy-dom

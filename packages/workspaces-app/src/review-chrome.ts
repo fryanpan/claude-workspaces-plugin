@@ -14,6 +14,7 @@ import { type SeenTracker, createSeenTracker } from './comment-seen.ts';
 import type { ChromeSelection } from './doc/anchor-body.ts';
 import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
+import type { ComposerSlot } from './doc/composer-slot.ts';
 import {
   onShowResolvedChange,
   showResolved,
@@ -90,6 +91,9 @@ export interface ChromeOpts {
   /** Runs right after the composer sheet opens (markdown scrolls the
    *  selection above the keyboard here). */
   onComposerOpened?: () => void;
+  /** Where the composer opens, asked once per open (`doc/composer-slot.ts`).
+   *  Absent — every surface but the markdown document — is the bottom sheet. */
+  placeComposer?: () => ComposerSlot | null;
   /** Runs after a comment posts successfully (markdown blurs the editor). */
   onPosted?: () => void;
   /** Hide the surface's comment pill (called when the composer or the
@@ -680,6 +684,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
       getSelection: opts.getSelection,
       selectHint: opts.selectHint,
       ...(opts.hidePill ? { hidePill: opts.hidePill } : {}),
+      ...(opts.placeComposer ? { placeComposer: opts.placeComposer } : {}),
       ...(opts.onComposerOpened ? { onComposerOpened: opts.onComposerOpened } : {}),
       ...(opts.onPosted ? { onPosted: opts.onPosted } : {}),
     });
