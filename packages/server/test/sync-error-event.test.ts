@@ -26,16 +26,6 @@ import { seedBoard } from './workspace-seed.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Write + force a strictly newer mtime (temp filesystems can land rapid
- *  writes in the same mtime tick, invisible to the poll). */
-let mtimeBump = 0;
-function writeExternal(path: string, content: string): void {
-  writeFileSync(path, content);
-  mtimeBump += 2;
-  const t = new Date(Date.now() + mtimeBump * 1000);
-  require('node:fs').utimesSync(path, t, t);
-}
-
 const DOC = `# Title
 
 Intro paragraph.
@@ -105,7 +95,7 @@ describe('doc.sync_error broadcast (in-process DocStore)', () => {
         replace: 'Live edit, not yet flushed.',
       }).ok,
     ).toBe(true);
-    writeExternal(path, EXT_ONE);
+    writeFileSync(path, EXT_ONE);
     expect(docStore.reconcileNow('d1')).toBe('conflict');
 
     const events = syncErrorEvents('d1');
@@ -132,7 +122,7 @@ describe('doc.sync_error broadcast (in-process DocStore)', () => {
     // timed: the write has to land INSIDE the 800ms window; the delay is the
     // setup for the race, not a wait for a result.
     await sleep(insideWriteBack());
-    writeExternal(path, EXT_ONE);
+    writeFileSync(path, EXT_ONE);
 
     const events = await waitFor(
       () => {
@@ -148,7 +138,7 @@ describe('doc.sync_error broadcast (in-process DocStore)', () => {
   });
 
   it('a clean reconcile broadcasts nothing', () => {
-    writeExternal(path, EXT_ONE);
+    writeFileSync(path, EXT_ONE);
     expect(docStore.reconcileNow('d1')).toBe('apply');
     expect(syncErrorEvents('d1').length).toBe(0);
   });
@@ -215,7 +205,7 @@ describe('doc.sync_error reaches a watching SSE stream (HTTP end-to-end)', () =>
     expect(
       handle.docStore.findAndReplace(h1, { find: 'Intro paragraph.', replace: 'Un-flushed.' }).ok,
     ).toBe(true);
-    writeExternal(path, EXT_ONE);
+    writeFileSync(path, EXT_ONE);
     expect(handle.docStore.reconcileNow(h1)).toBe('conflict');
 
     // timed: a failure DEADLINE, not a wait — the race settles the instant the

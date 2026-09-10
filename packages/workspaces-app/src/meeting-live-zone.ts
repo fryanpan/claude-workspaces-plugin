@@ -132,6 +132,8 @@ interface ZoneTurn {
   speaker?: string;
   /** Set while a tick that carries this turn is composing. */
   composing: boolean;
+  /** Set while an in-place settle is fading this turn out of the stream. */
+  fading?: boolean;
 }
 
 /** How far below the pane's visible edge the zone's bottom may sit and
@@ -266,7 +268,18 @@ export function createMeetingLiveZone(opts: {
    */
   function spanFor(t: ZoneTurn, prev: ZoneTurn | null): HTMLElement {
     const span = document.createElement('span');
-    span.className = t.final ? 'lz-turn' : 'lz-turn lz-partial';
+    const cls = ['lz-turn'];
+    if (!t.final) cls.push('lz-partial');
+    // Only an IN-PLACE settle renders a composing turn here — the lift puts
+    // them in a chunk body that already carries `lz-chunk` — so this is the
+    // one path where the span itself has to wear the colour and the fade.
+    // `fading` as well as `composing`: a tick's terminal frame names the
+    // turns it CARRIED as well as its own, and a carried one is no longer
+    // flagged composing — without this it would fade from the stream's colour
+    // while the word beside it faded from the chunk's.
+    if (t.composing || t.fading) cls.push('lz-chunk');
+    if (t.fading) cls.push('is-fading');
+    span.className = cls.join(' ');
     const opens = voices.size >= 2 && t.speaker !== prev?.speaker;
     if (opens && t.speaker) span.append(speakerPill(t.speaker, names, opts.nameSpeaker));
     const parts = t.text.split('\n');
@@ -302,8 +315,66 @@ export function createMeetingLiveZone(opts: {
   /** Chunks whose note has landed and that are fading / collapsing out. */
   const settling = new Set<Chunk>();
 
+  /**
+   * THE SETTLE THAT CANNOT LIFT, and why there has to be one.
+   *
+   * A chunk is a block ABOVE the stream, so lifting words into one only tells
+   * the truth when those words are the FRONT of the stream. A tick that
+   * composed nothing reports `empty`, its words go back to the stream — and
+   * the server drops them from its own carry, so no later tick ever names
+   * them again (meeting-notes.ts: `carry` is refilled on `failed`, not on
+   * `empty`). They sit at the head of the stream for the rest of the meeting,
+   * and every settle after that one composes turns with a survivor in front
+   * of them.
+   *
+   * Lifted anyway, those words leave the middle of the run: the chunk block
+   * is inserted ABOVE words that were spoken BEFORE it, and the hold — which
+   * exists to put a stream back on a line the chunk's tail ends mid-way
+   * through — measures a whole line of drop with nothing to indent past, so
+   * it pulls the stream up ONTO the chunk. Measured in Chrome before this
+   * change, at the third note-write of a meeting with one empty tick: 157.5px
+   * of one line painted over another, both runs fully opaque, at 1180x820 and
+   * again at 430.
+   *
+   * So a settle whose words are not the front of the stream does not lift
+   * them. They fade WHERE THEY ARE, inside the run, on the same two beats and
+   * the same colour step: nothing moves on the split frame at all, and the
+   * stream closes over the gap when they go. What is lost is the eased
+   * collapse — a hole in the middle of a run cannot be eased shut by a margin
+   * on the block that holds it. The RESERVE is not the other half of that
+   * cost: an in-place removal is above the reader's line, where the pane's
+   * own clamp at its foot already holds them still.
+   *
+   * WHICH SETTLE A SPLIT GETS IS DERIVED, NEVER LATCHED. The server announces
+   * `composing` per FIRING and reports the outcome per COMPOSE, so two ticks
+   * are outstanding at once whenever one fires while another is composing
+   * (meeting-notes.ts `composeTick`). A remembered answer from the first goes
+   * stale inside the second — and the way it went stale mounted a chunk for a
+   * set that was not the front of the stream, which is the bug again. Every
+   * other decision in this module is re-derived from `turns` on each render;
+   * this one is too.
+   */
+  function liftable(): boolean {
+    const all = ordered();
+    const composing = all.filter((t) => t.composing).length;
+    return all.slice(0, composing).every((t) => t.composing);
+  }
+
+  /** The turns an in-place settle is on its way to removing, and its clock.
+   *  One batch: a second `written` inside the window joins it rather than
+   *  starting a second clock over the same run. */
+  let inPlacePending: readonly number[] = [];
+  let inPlaceTimer: ReturnType<typeof setTimeout> | null = null;
+
   /** Holds the stream still across a split — meeting-live-hold.ts. */
   const streamHold = createStreamHold(lines);
+
+  /** What `lines` renders: the stream, and — where the composing words could
+   *  not be lifted out of it — those words too, still in their place. */
+  function streamTurns(): ZoneTurn[] {
+    const all = ordered();
+    return liftable() ? all.filter((t) => !t.composing) : all;
+  }
 
   /**
    * Where the words that will STILL be streaming after this split sit now.
@@ -312,12 +383,13 @@ export function createMeetingLiveZone(opts: {
    * anchoring on it holds the stream to a position its own words are about to
    * vacate. The turn to hold is the first survivor — `leaving` names who is
    * going, and everything already composing left on an earlier tick.
+   *
+   * Indexed against what `lines` actually renders rather than against the
+   * turn list, because those two differ while an in-place settle is running.
    */
   function survivorAnchor(leaving: readonly number[]): DOMRect | null {
     const going = new Set(leaving);
-    const i = ordered()
-      .filter((t) => !t.composing)
-      .findIndex((t) => !going.has(t.turn));
+    const i = streamTurns().findIndex((t) => !going.has(t.turn) && !t.composing);
     return i < 0 ? null : streamHold.rectAt(i);
   }
 
@@ -381,6 +453,7 @@ export function createMeetingLiveZone(opts: {
   /** Drop every chunk on the floor, mid-settle or not: the meeting is over,
    *  restarting, or the zone is going away. */
   function clearChunks(): void {
+    stopInPlace();
     streamHold.clear();
     for (const c of [...settling]) discard(c);
     if (openChunk) {
@@ -396,10 +469,9 @@ export function createMeetingLiveZone(opts: {
     }
     const all = ordered();
     const splitting = all.filter((t) => t.composing);
-    const streaming = all.filter((t) => !t.composing);
     // A chunk mid-settle still has words on screen after its turns are gone.
     root.hidden = all.length === 0 && settling.size === 0;
-    if (splitting.length > 0) {
+    if (splitting.length > 0 && liftable()) {
       openChunk ??= mountChunk();
       openChunk.body.replaceChildren(...runOf(splitting));
     } else if (openChunk) {
@@ -410,7 +482,7 @@ export function createMeetingLiveZone(opts: {
       openChunk.slot.remove();
       openChunk = null;
     }
-    lines.replaceChildren(...runOf(streaming));
+    lines.replaceChildren(...runOf(streamTurns()));
     streamHold.trim();
     matchProseWidth();
     // Before keepInView, not after: following mode scrolls to whatever the
@@ -426,15 +498,93 @@ export function createMeetingLiveZone(opts: {
    */
   function split(ids: readonly number[]): void {
     // Where the surviving stream sits BEFORE the split, for the hold to
-    // restore. Read before the turns are flagged: `composing` is what tells
-    // `render` who is leaving.
-    splitAnchor = survivorAnchor(ids);
+    // restore. Read first, while the DOM still holds the pre-split render:
+    // `composing` is what tells `render` who is leaving, and flagging is what
+    // makes this measurement historical.
+    const anchor = survivorAnchor(ids);
     for (const id of ids) {
       const t = turns.get(id);
       if (t) t.composing = true;
     }
+    // An in-place settle breaks no line, so there is nothing for the hold to
+    // compensate and it is not asked for one — see `liftable` above.
+    splitAnchor = liftable() ? anchor : null;
     render();
     splitAnchor = null; // consumed, or dropped if render bailed
+  }
+
+  /**
+   * Give up the in-place settle, KEEPING its words: the tick that was taking
+   * them has withdrawn, or the meeting is over.
+   *
+   * Every turn in the batch comes back to the stream, not just the ones the
+   * withdrawing frame named. The batch is one clock, so abandoning it leaves
+   * no beat coming for the rest — and a turn left flagged composing with no
+   * beat is stranded there for the remainder of the meeting.
+   */
+  function stopInPlace(): void {
+    if (inPlaceTimer !== null) clearTimeout(inPlaceTimer);
+    inPlaceTimer = null;
+    for (const id of inPlacePending) {
+      const t = turns.get(id);
+      if (t) {
+        t.fading = false;
+        t.composing = false;
+      }
+    }
+    inPlacePending = [];
+  }
+
+  /**
+   * A tick has withdrawn words an in-place settle was taking — `empty` or
+   * `failed` after its `written`, or a retry naming them again.
+   *
+   * Scoped to the batch the frame actually names: another tick's fade is
+   * running on its own words, and cancelling that one left them flagged as
+   * composing with no beat coming to remove them — stranded in the stream,
+   * and re-lifted into a chunk by every tick after.
+   */
+  function withdrawInPlace(ids: readonly number[]): void {
+    const named = new Set(ids);
+    if (inPlacePending.some((id) => named.has(id))) stopInPlace();
+  }
+
+  /** The fade is over: the words leave the run and the stream closes over
+   *  the gap. */
+  function finishInPlace(): void {
+    if (inPlaceTimer !== null) clearTimeout(inPlaceTimer);
+    inPlaceTimer = null;
+    for (const id of inPlacePending) turns.delete(id);
+    inPlacePending = [];
+  }
+
+  /**
+   * The in-place settle's two beats — the same two the lift uses, minus the
+   * collapse it cannot have. The note lands and the page settles
+   * (`NOTE_LAND_MS`), the words fade where they sit (`FADE_MS`), and only
+   * then do they leave the run and the stream close over the gap.
+   *
+   * A second `written` inside that window JOINS the batch rather than
+   * starting a second clock: two clocks over one run left whichever finished
+   * first deleting only its own half, and the other half flagged composing
+   * for the rest of the meeting.
+   */
+  function landInPlace(ids: readonly number[]): void {
+    const going = [...new Set([...inPlacePending, ...ids.filter((id) => turns.has(id))])];
+    if (going.length === 0) return;
+    if (inPlaceTimer !== null) clearTimeout(inPlaceTimer);
+    inPlacePending = going;
+    inPlaceTimer = setTimeout(() => {
+      for (const id of going) {
+        const t = turns.get(id);
+        if (t) t.fading = true;
+      }
+      render();
+      inPlaceTimer = setTimeout(() => {
+        finishInPlace();
+        render();
+      }, FADE_MS);
+    }, NOTE_LAND_MS);
   }
 
   /**
@@ -444,6 +594,13 @@ export function createMeetingLiveZone(opts: {
    * space.
    */
   function land(ids: readonly number[]): void {
+    // Which settle these words get is not a flag to remember either: it is
+    // whether a chunk was mounted for them. A `written` for turns no split
+    // ever named takes the plain path it always did.
+    if (openChunk === null && ids.some((id) => turns.get(id)?.composing === true)) {
+      landInPlace(ids);
+      return;
+    }
     for (const id of ids) turns.delete(id);
     const done = openChunk;
     openChunk = null;
@@ -472,6 +629,9 @@ export function createMeetingLiveZone(opts: {
         final: t.final,
         ...(t.speaker !== undefined ? { speaker: t.speaker } : {}),
         composing: known?.composing ?? false,
+        // Carried like `composing`: a re-sent turn used to come back at full
+        // opacity in the middle of its own fade and then be cut without one.
+        fading: known?.fading ?? false,
       });
       render();
     },
@@ -492,6 +652,7 @@ export function createMeetingLiveZone(opts: {
       // nothing has been written up, so they go back to the stream rather
       // than fading out of it — the fade means "this is in the notes now",
       // and on an empty tick that would be a lie the reader cannot check.
+      withdrawInPlace(e.turns);
       for (const id of e.turns) {
         const t = turns.get(id);
         if (t) t.composing = false;
