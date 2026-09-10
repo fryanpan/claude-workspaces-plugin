@@ -25,14 +25,35 @@ import { spawnSync } from 'node:child_process';
  * so a run in which the notes happened to be long enough to fill the column
  * anyway fails HERE rather than passing the real assertions vacuously.
  */
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { DEFAULT_CHROME_BIN, RUN_ID_ENV, profilesOfRun } from '../../../scripts/ui-shot-lib.ts';
+import { RUN_ID_ENV, profilesOfRun, resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
 import { BALLOON_ROOM_QUERY, BALLOON_SHEET_QUERY } from '../src/card-placement.ts';
 
-const CHROME = process.env.CW_CHROME_BIN ?? DEFAULT_CHROME_BIN;
+/**
+ * Is there a browser to launch — asked the way `ui-shot.ts` itself asks.
+ *
+ * `CW_CHROME_BIN ?? DEFAULT_CHROME_BIN` was the wrong question and it made
+ * these cases decorative: that constant is the macOS `/Applications` path, so
+ * on the `client` job (ubuntu-latest, nothing named) it does not exist and
+ * `skipIf` skipped both. `resolveChromeBin` reaches `CHROME_CANDIDATES`, which
+ * is how the gates job's `check:client-boot` step already finds the runner's
+ * own Chrome with no path named.
+ *
+ * It THROWS when nothing resolves, and a throw here would take the file down
+ * at load rather than skipping it, so the miss is caught. That keeps the old
+ * behaviour for a `CW_CHROME_BIN` pointing at nothing — it skipped before this
+ * change too — and adds the candidate list underneath.
+ */
+const CHROME = ((): string | null => {
+  try {
+    return resolveChromeBin(undefined);
+  } catch {
+    return null;
+  }
+})();
 const SRC = join(import.meta.dirname, '../src');
 const SHOT = join(import.meta.dirname, '../../../scripts/ui-shot.ts');
 
@@ -172,7 +193,7 @@ afterAll(() => {
   }
 });
 
-describe.skipIf(!existsSync(CHROME))('the meeting page keeps its width while notes arrive', () => {
+describe.skipIf(CHROME === null)('the meeting page keeps its width while notes arrive', () => {
   it(
     'holds the prose measure through the zone and the first notes at 1180x820',
     () => {
