@@ -143,6 +143,16 @@ export function buildNotesPrompt(
   const stable = parts.join('\n\n');
   parts.length = 0;
   if (doc.tail.length > 0) parts.push(doc.tail);
+  // IMMEDIATELY AFTER THE TABLE, because it is about the table: a directive
+  // naming block ids reads as an instruction about the rows above it, and
+  // three blocks of board material in between is what made it read as
+  // background. It cannot go in the cached head — it is recomputed from the
+  // outline every tick and turns on and off as a topic fills up.
+  const regroup = regroupDirective(input.outline, {
+    author: NOTES_AUTHOR_ID,
+    notesHeadingId: input.notesHeadingId,
+  });
+  if (regroup) parts.push(regroup);
 
   if (input.taskLinks?.length) {
     parts.push(
@@ -197,16 +207,6 @@ export function buildNotesPrompt(
   }
 
   if (input.extraPrompt) parts.push(input.extraPrompt);
-  // LAST BEFORE THE TRANSCRIPT, because it is about the doc: a directive
-  // naming block ids has to sit next to the words it is telling the model to
-  // write, not buried among the context. It used to sit immediately ABOVE the
-  // table it names; the table is now the last thing in the cached head, so
-  // this is still the block that follows it.
-  const regroup = regroupDirective(input.outline, {
-    author: NOTES_AUTHOR_ID,
-    notesHeadingId: input.notesHeadingId,
-  });
-  if (regroup) parts.push(regroup);
   parts.push(
     `New transcript since the last update:\n${input.tick.turns
       .map((t) => `- ${speakerPrefix(t)}${t.text}${turnSuffix(t, input.tick.reason)}`)
@@ -244,9 +244,10 @@ export function buildNotesPrompt(
  * the LIVE end of the doc out of the cached half costs a few hundred tokens
  * at full rate and buys the rest of it back.
  *
- * The two are rendered as one table and joined back in order, so the model
- * sees exactly what it saw before: this is a billing seam, not a change to
- * what is asked.
+ * The two are rendered as one table and joined back in order, so the rows the
+ * model reads are the same rows in the same order — what changes is that a
+ * blank line falls between the settled part and the live end, and that on the
+ * wire they are two content blocks.
  */
 function renderOutline(input: NotesComposeInput): { head: string; tail: string } {
   if (input.outline.length === 0) {
