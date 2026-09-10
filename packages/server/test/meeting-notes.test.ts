@@ -3124,7 +3124,7 @@ describe('a quota outage is visible in the meeting doc', () => {
 
   it('takes the notice away as soon as a tick composes again', async () => {
     const doc = fakeDoc();
-    const state = { message: 'notes compose HTTP 400 — out of quota' };
+    const state: { message: string | null } = { message: 'notes compose HTTP 400 — out of quota' };
     const { schedule, session } = sessionOver(doc, refusingComposer(state));
 
     session.onTurn({ turn: 0, text: 'During the outage.', final: true });
@@ -3153,7 +3153,7 @@ describe('a quota outage is visible in the meeting doc', () => {
       fetchImpl: (async () =>
         new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
           status: 429,
-        })) as typeof fetch,
+        })) as unknown as typeof fetch,
     });
     expect(composer).not.toBeNull();
     const session = beginNotesSession(
