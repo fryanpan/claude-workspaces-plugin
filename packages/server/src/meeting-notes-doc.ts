@@ -784,7 +784,6 @@ export function meetingSummaryLine(
   );
 }
 
-
 export function applyNotesReattribution(
   docStore: NotesDocStore,
   reattribution: NotesReattribution,

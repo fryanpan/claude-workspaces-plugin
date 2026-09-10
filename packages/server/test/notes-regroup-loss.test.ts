@@ -71,6 +71,32 @@ describe('a regroup that moves nothing', () => {
     expect(skip).toBe('all-edits-failed');
   });
 
+  // THE OTHER TWO OPS THAT CARRY WORDS. Without these, `failedCarryingWords`
+  // can be narrowed to `insert_under_heading` alone and the file stays green —
+  // measured, by making exactly that cut. A rewrite is the one that would hurt
+  // most: `replace_block` is how a bullet is corrected, and a correction that
+  // silently reports success is a correction the meeting never sees and never
+  // retries.
+  test('still reports a failure when a rewrite named a block that is gone', () => {
+    const { store } = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
+    const skip = applyNotesUpdate(
+      store,
+      update([{ op: 'replace_block', blockId: 'b-gone', markdown: '- the corrected point' }]),
+      createNotesHeadingMemory(),
+    );
+    expect(skip).toBe('all-edits-failed');
+  });
+
+  test('still reports a failure when an append carried nothing to append', () => {
+    const { store } = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
+    const skip = applyNotesUpdate(
+      store,
+      update([{ op: 'insert_at_end', markdown: '   ' }]),
+      createNotesHeadingMemory(),
+    );
+    expect(skip).toBe('all-edits-failed');
+  });
+
   test('reports a failure when a failed move rides with a note that also failed', () => {
     const { store, bullets } = notesDoc(
       '## Meeting notes\n\n### Topic\n\n- one\n- two\n- three\n- four\n',
