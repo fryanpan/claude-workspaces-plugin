@@ -95,7 +95,7 @@ One element + one script tag, in a file git does not track:
 ## Comments need a signed-in reviewer
 
 The workspace refuses a comment from a browser that has not signed in
-(owner decision on the security row, 2026-09-02). Reading is never gated: a
+(owner decision on the security task, 2026-09-02). Reading is never gated: a
 viewer who declines still sees every pin and thread. The widget handles the
 sign-in itself — you do not add anything to the embed for it:
 

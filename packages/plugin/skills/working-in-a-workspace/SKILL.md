@@ -20,17 +20,17 @@ The purpose of a workspace is to provide a significantly better agent and human 
       1. Ways to ask for review
          1. `add_review_item(taskId, review)` adds a review item to a task as the last comment
          2. Use the `review` payload on `create_thread` or `post_reply`
-         3. A `create_tasks` row that is itself the decision (`needs: "decision"`) is the ask, so it is judged as one — revise it with `revise_review_item(taskId)`, no item id
+         3. A task filed with `create_tasks` that is itself the decision (`needs: "decision"`) is the ask, so it is judged as one — revise it with `revise_review_item(taskId)`, no item id
          4. Every one of these is judged by the board's quality gate, whichever verb filed it. `held: true` in the result means the item is off the reviewer's queue until you close the gap the reason names — the result and the `workspace.review_item_held` wake both carry the exact `revise_review_item(…)` call for that item, and every revision is judged again.
-         5. The gate holds a question the reader has already answered on that row. A retest after you shipped a fix is NOT that — but only if the item says what shipped since their answer (the PR or deploy) and asks them to try again on it. A retest that names nothing shipped is held as a repeat; a plain reply is not a filed ask. The same goes for the NEXT step of a flow on one row — they approved building the fixes, now you ask to push; a new review round; a different set of options: name the earlier answer and the step it did not cover, in the headline. Never downgrade a held ask to a plain comment — the second hold's message says the next revision reaches the reader either way.
+         5. The gate holds a question the reader has already answered on that task. A retest after you shipped a fix is NOT that — but only if the item says what shipped since their answer (the PR or deploy) and asks them to try again on it. A retest that names nothing shipped is held as a repeat; a plain reply is not a filed ask. The same goes for the NEXT step of a flow on one task — they approved building the fixes, now you ask to push; a new review round; a different set of options: name the earlier answer and the step it did not cover, in the headline. Never downgrade a held ask to a plain comment — the second hold's message says the next revision reaches the reader either way.
       2. Payload Types
          1. `review_type: "decision"` offers 2–6 options to pick between
          2. `review_type: "question"` asks for a look and an answer in their own words
       3. Where the ask goes
          1. A question that arose mid-work belongs on the task that raised it — `add_review_item(taskId, review)`
          2. A question ABOUT A DOC goes on the sentence it is about — one `create_thread(docId, { find: "<that sentence>", review })` per question, so the reader meets each one where it applies and answers it there. Never a list of questions in one comment: a plan request that came back as one comment holding twelve questions left the reader answering four, losing the thread, and never finding the other eight (Bryan, 2026-09-01). Twelve questions are twelve anchored threads, each carrying its own `review` payload.
-         3. A decision that stands alone as a unit of work may be its own row
-         4. Either way the ask carries the context of the work it came from. Ten decisions filed as ten fresh rows, each severed from the work behind it, read as a quiz instead of a plan
+         3. A decision that stands alone as a unit of work may be its own task
+         4. Either way the ask carries the context of the work it came from. Ten decisions filed as ten fresh tasks, each severed from the work behind it, read as a quiz instead of a plan
       4. Writing the ask
          1. The option label is the contract — the reviewer answers the label, not the reasoning under it. Plain words, phone-readable.
          2. The item has to be actionable on its own. The Home card renders the payload and nothing around it, so every link the reviewer needs goes in the payload's `detail` as an inline markdown link (`[the diff](/workspaces/w-xxxx/docs/d-xxxx)`) — a link that lives only in the surrounding comment text never reaches the card, and the reviewer is left scrolling the comments for it.
@@ -61,10 +61,10 @@ other agent needs your progress either.
 
 `next_tasks(workspaceId)` is the queue, already filtered to what you can do.
 
-**Take the whole ready set, not the top row.** Start every ready row that does
+**Take the whole ready set, not just the first task.** Start every ready task that does
 not collide with another; holding one task while the rest of the queue waits is
-the slowest way to work a board. Each row carries its full description, and
-whether two rows touch the same code is a judgment you make from that text —
+the slowest way to work a board. Each task carries its full description, and
+whether two tasks touch the same code is a judgment you make from that text —
 there is no field for it. Call it again whenever a line of work finishes,
 because priorities move while you work.
 
@@ -76,46 +76,46 @@ and carries those comments verbatim in `notes` — a previous reader may already
 have reproduced the thing for you, and what they found routinely changes the
 size of the work. It says nothing about whether the task is done. Clear it by
 rewriting the body once you know what is true, dating and attributing the
-correction and keeping what the row originally claimed.
+correction and keeping what the task originally claimed.
 
-**Check who is already on a row.** Two fields carry it: `ownerSession`, the
-session behind the row's owner, and `claimedBy`, the session that last moved it
-to in-progress. `claimedBy` is the one that exists on a row nobody assigned,
+**Check who is already on a task.** Two fields carry it: `ownerSession`, the
+session behind the task's owner, and `claimedBy`, the session that last moved it
+to in-progress. `claimedBy` is the one that exists on a task nobody assigned,
 since a transition never touches `assignee` — read the owner instead and you
 learn who FILED the ticket, not who is working it.
 
-`state: "active"` on a session that is not you means DO NOT START THAT ROW.
+`state: "active"` on a session that is not you means DO NOT START THAT TASK.
 Message that session over claude-hive, agree which of you has it, and take
 something else if they do — starting it anyway is how two sessions each build a
 complete answer to one task and neither finds out until a PR.
-Nothing refuses a second taker, because two agents on one row is occasionally
+Nothing refuses a second taker, because two agents on one task is occasionally
 right; it just has to be a decision rather than a collision neither side can
 see. `away` is an
 owner in name only and `unresponsive` is a wedged session somebody probably
 should take over from. These are recency reads, never identity: a session that
-thinks for an hour produces nothing and still holds its row.
+thinks for an hour produces nothing and still holds its task.
 
-**Triage rows never appear here.** That is the answer to "I filed a task and my
+**Triage tasks never appear here.** That is the answer to "I filed a task and my
 queue does not show it": an agent filed it and nobody has vetted it, so it is
-not yet agreed to be work — and it is also where a deliberately-deferred row
+not yet agreed to be work — and it is also where a deliberately-deferred task
 sits, since parking a task moves it there. Read those with
 `list_tasks(status: "triage")`, and read the task's comments before picking one
 up: that is where a park says why it was deferred and when to come back.
 
 **A UI change an agent filed waits for an answer before you build it.** If the
-row you are about to start changes what somebody sees on screen — a button, a
+task you are about to start changes what somebody sees on screen — a button, a
 screen, a layout, a mockup, a badge, a banner, anything they will look at —
 and an agent filed it rather than a person, file a review item with
 `add_review_item(taskId, review)` naming the options and what each costs, and
 stop there. The answer is the thing you build against, so there is nothing to
 build before it arrives. Not "start now and ask in parallel". Not "build it
 and show them the result". Not "this one is obviously right". Not "it is small
-enough to redo". A row a person filed already carries their answer; a row an
-agent filed carries nobody's. Post the item, take another row, come back when
+enough to redo". A task a person filed already carries their answer; a task an
+agent filed carries nobody's. Post the item, take another task, come back when
 it is answered.
 
-File a batch of rows in ONE `create_tasks` call rather than one call per row.
-A bad row comes back in `failures` by index instead of rejecting the batch.
+File a batch of tasks in ONE `create_tasks` call rather than one call per task.
+A bad task comes back in `failures` by index instead of rejecting the batch.
 
 Your session needs an agent name before it can do anything on the board: a
 create whose owner resolves to the bare word `agent`, a comment or reply
@@ -126,7 +126,7 @@ launch environment names the board your end-of-turn notes land on:
 `CW_WORKSPACE_ID`. Without it the Stop hook posts nothing and the Activity
 tab stays empty for your turns, and `post_status` without a `taskId` needs
 `workspaceId` passed by hand. Old comments
-that were signed that way stay and show as "Unnamed agent". When you hand a row to somebody
+that were signed that way stay and show as "Unnamed agent". When you hand a task to somebody
 else by name, pass `assigneeKind` — nothing can tell a person from an agent of
 the same name, and an unclassified owner shows as "not recorded".
 
@@ -152,9 +152,9 @@ Someone who was not in the conversation should be able to see a task, know why i
 - Update task status as you work
   - `in-progress` when you **start**, not when you report.
   - `done` means **merged AND deployed** (Bryan, 2026-09-01, fleet-wide): the PR is in `main` and the production deploy that carries it reports a healthy verification. Every acceptance criterion is met on the deployed build. Nothing else is done — not "CI green", not "merged, deploy pending", not "verified on staging".
-  - Work sitting in an unmerged PR stays `in-progress`. So does a merged PR until its deploy verification reads healthy; if the deploy is batched or blocked, the row waits with it and the `note` says so.
+  - Work sitting in an unmerged PR stays `in-progress`. So does a merged PR until its deploy verification reads healthy; if the deploy is batched or blocked, the task waits with it and the `note` says so.
   - Name the deploy verdict in the `done` transition note: the merge commit and the deploy that carried it. A `done` without that note is a claim nobody can check.
-  - Work that is waiting on ANOTHER TICKET is `block_task(taskId, blockedBy)` — name what has to close first. The row reads as Blocked from that moment, leaves `next_tasks` and the stall check, and returns to `todo` by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. The edge is the state: there is no status to set and no un-block to remember. **A row waiting on a person is not blocked.** Waiting on the primary user's answer, test, or sign-off is work in flight: leave it `in-progress` and file the ask with `add_review_item` so it sits on their queue. And a row you have simply not started is not blocked either — `triage` is for rows nobody has vetted yet, and inventing an edge to quiet the ready-work nudge makes the board say something untrue.
+  - Work that is waiting on ANOTHER TICKET is `block_task(taskId, blockedBy)` — name what has to close first. The task reads as Blocked from that moment, leaves `next_tasks` and the stall check, and returns to `todo` by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. The edge is the state: there is no status to set and no un-block to remember. **A task waiting on a person is not blocked.** Waiting on the primary user's answer, test, or sign-off is work in flight: leave it `in-progress` and file the ask with `add_review_item` so it sits on their queue. And a task you have simply not started is not blocked either — `triage` is for tasks nobody has vetted yet, and inventing an edge to quiet the ready-work nudge makes the board say something untrue.
   - Say what you did in the transition `note` — the PR, what you verified and what you couldn't. The note is the whole of what the trail keeps, so a move with an empty note is a move nobody can read back.
 - Share progress on a task with `post_status` at each milestone — these are
   handover notes, shaped below. A status is movement to the stall clock; a
@@ -177,20 +177,20 @@ parts, under 70 words:
 3. WHERE — branch name, last commit hash, worktree path.
 
 Picking up a task that already has notes? Read its Activity tab (`notes` on
-the row) FIRST and resume from the newest handover instead of restarting.
+the task) FIRST and resume from the newest handover instead of restarting.
 
 ## When You Are Blocked
 
 A blockage is recorded on the board, never held in your head:
 
-- Blocked on another row → an `after` edge (`set_task_dependencies`), so the
+- Blocked on another task → an `after` edge (`set_task_dependencies`), so the
   queue stops offering the task and offers it again the moment the edge
   clears.
 - Blocked on a decision or an answer → a review item on the task it blocks,
   naming exactly what is needed (see "ask for human help" above).
 
 When nothing is ready and every blockage is filed, **end the turn and wait
-to be woken**. Every resume source pushes — replies, new rows, cleared
+to be woken**. Every resume source pushes — replies, new tasks, cleared
 edges — so never poll for work: a timed board re-read reloads your whole
 context to learn nothing changed. "Never go dark" does not forbid being
 idle; it forbids standing down with asks that exist only in chat, which the

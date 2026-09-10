@@ -345,8 +345,8 @@ describe('the capture prompt states the convention it is guarded by', () => {
     expect(said).toContain('carrying both ("Claude, can you create a task") is LATER');
     expect(said).toContain('One cued line asks for as many things as it NAMES');
     // The plural cue's own half of the convention, so the model is not
-    // asked for rows the guard will then throw away.
-    expect(said).toContain('asks for a row per thing they THEN NAME');
+    // asked for tasks the guard will then throw away.
+    expect(said).toContain('asks for a task per thing they THEN NAME');
   });
 });
 

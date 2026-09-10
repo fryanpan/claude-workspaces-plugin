@@ -43,7 +43,7 @@ describe('readyIdleLine', () => {
       },
     });
     expect(line).toContain(
-      '3 open rows checked; held: 1 claimed, 2 parallelism-cap (cap 1, set by Cartographer 45m ago, was 4)',
+      '3 open tasks checked; held: 1 claimed, 2 parallelism-cap (cap 1, set by Cartographer 45m ago, was 4)',
     );
   });
 
@@ -143,7 +143,7 @@ describe('readyIdleLine states what the pass examined', () => {
       consideredCount: 5,
       held: { 'awaiting-person': 2, backlog: 1, blocked: 1 },
     });
-    expect(line).toContain('5 open rows checked');
+    expect(line).toContain('5 open tasks checked');
     expect(line).toContain('2 awaiting-person');
     expect(line).toContain('1 backlog');
     expect(line).toContain('1 blocked');
@@ -154,12 +154,12 @@ describe('readyIdleLine states what the pass examined', () => {
     // `readyCount` would make a stated denominator indistinguishable from an
     // absent one exactly on the boards where it agrees.
     const line = readyIdleLine({ ...IDLE, readyCount: 3, consideredCount: 3 });
-    expect(line).toContain('3 open rows checked');
+    expect(line).toContain('3 open tasks checked');
   });
 
   it('reads as one row rather than "1 open rows"', () => {
     expect(readyIdleLine({ ...IDLE, readyCount: 1, consideredCount: 1 })).toContain(
-      '1 open row checked',
+      '1 open task checked',
     );
   });
 
@@ -433,7 +433,7 @@ describe('stalledLine', () => {
     // Nine open rows checked, five judged — the four beyond the cap are idle
     // by rule, and a reader must not count them as healthy.
     expect(stalledLine({ ...STALL, beyondCapacity: 4 })).toContain(
-      '9 open row(s) checked; 4 beyond the parallelism cap and not judged',
+      '9 open task(s) checked; 4 beyond the parallelism cap and not judged',
     );
     expect(stalledLine(STALL)).not.toContain('beyond the parallelism cap');
   });
@@ -454,7 +454,7 @@ describe('stalledLine', () => {
       },
     });
     expect(line).toContain(
-      '9 open row(s) checked; 4 beyond the parallelism cap of 1, set by Jordan 2h ago (was 4), and not judged',
+      '9 open task(s) checked; 4 beyond the parallelism cap of 1, set by Jordan 2h ago (was 4), and not judged',
     );
   });
 
@@ -560,7 +560,7 @@ const UNGATED_ROW = {
 describe('stalledLine names rows built past the UI gate as their own finding', () => {
   it('names the row, the word that made it UI work, and what clears it', () => {
     const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, ungatedUi: [UNGATED_ROW] });
-    expect(line).toContain('1 UI row is being built past the review gate');
+    expect(line).toContain('1 UI task is being built past the review gate');
     expect(line).toContain('t-u1');
     expect(line).toContain('matched: badge');
     expect(line).toContain('answered review item');
@@ -571,13 +571,13 @@ describe('stalledLine names rows built past the UI gate as their own finding', (
     // this reader had never heard of the field; that is the regression
     // pinned here.
     const line = stalledLine({ ungatedUi: [UNGATED_ROW] });
-    expect(line).not.toContain('no rows on it');
+    expect(line).not.toContain('no tasks on it');
     expect(line).toContain('review gate');
   });
 
   it('a gate breach new since the last wake is called out first', () => {
     const line = stalledLine({ ...STALL, changed: { ungatedUi: [UNGATED_ROW] } });
-    expect(line).toContain('NEW since the last wake: 1 row built past the UI gate');
+    expect(line).toContain('NEW since the last wake: 1 task built past the UI gate');
   });
 
   it('the control: a frame with no ungated list says nothing about the gate', () => {
@@ -598,7 +598,7 @@ describe('stalledLine names held review items as their own finding', () => {
 
   it('a held item on an otherwise quiet board is not a bare slug', () => {
     const line = stalledLine({ heldItems: [HELD_ROW] });
-    expect(line).not.toContain('no rows on it');
+    expect(line).not.toContain('no tasks on it');
     expect(line).toContain('HELD');
   });
 

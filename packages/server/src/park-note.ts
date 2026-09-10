@@ -48,7 +48,7 @@ export function parkNoteText(note: ParkNote): string {
   const why = note.reason?.trim();
   const body = why ? `\n\n${why}` : '';
   const tail = note.migrated
-    ? '\n\nCarried over from the removed `parked` state — the date and reason above are the ones the row was parked with.'
+    ? '\n\nCarried over from the removed `parked` state — the date and reason above are the ones the task was parked with.'
     : '';
   return `${head}${body}${tail}`;
 }

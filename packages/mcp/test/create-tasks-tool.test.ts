@@ -68,7 +68,7 @@ describe('create_tasks is the canonical create verb', () => {
     // the only thing an agent reads at the moment it is about to file work.
     const desc = mcp.tool('create_tasks')?.description ?? '';
     expect(desc).toContain('the only create verb');
-    expect(desc).toContain('one-row list');
+    expect(desc).toContain('one-item list');
   });
 
   it('carries the per-row field contract on its own schema', () => {
@@ -86,7 +86,7 @@ describe('create_tasks is the canonical create verb', () => {
 
   it('documents the batch-local dependency reference on the row schema', () => {
     const schema = JSON.stringify(mcp.tool('create_tasks')?.inputSchema ?? {});
-    expect(schema).toContain('`key` labels a row'); // the field that makes a reference possible
+    expect(schema).toContain('`key` labels a task'); // the field that makes a reference possible
     expect(schema).toContain('#seed'); // the spelling
     expect(schema).toContain('depend on one above it'); // and the direction rule
   });

@@ -520,6 +520,6 @@ describe('the words a reader sees', () => {
       rows: [...rows, { id: 't-2', title: 'Rank results', bucket: 'in-progress', quietMs: 60_000 }],
       deadForMs: 60 * 60_000,
     });
-    expect(review.headline).toBe('Nobody is on this board, and 2 rows are stuck');
+    expect(review.headline).toBe('Nobody is on this board, and 2 tasks are stuck');
   });
 });

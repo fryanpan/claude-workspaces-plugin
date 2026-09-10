@@ -1,7 +1,7 @@
 # Working From a Claude Workspaces Board
 
 **The contract now ships with the plugin.** How to work a board — the task
-standard, keeping rows current, sharing progress and asking for review in
+standard, keeping tasks current, sharing progress and asking for review in
 the workspace — lives in the `claude-workspaces:working-in-a-workspace`
 skill (`packages/plugin/skills/working-in-a-workspace/SKILL.md`), and the
 lead seat’s duties — goals, ranking, priority order, registering as lead — in
@@ -91,7 +91,7 @@ board task that proposed it; what follows is the operating rule.
   lead's judgment" clause; the judgment call is withdrawn for now). When
   everything above the backlog is blocked or waiting on Bryan, the correct
   state is idle capacity plus filed review items naming what it is blocked
-  on — not a backlog pick. A `ready_idle` nudge naming a backlog row is
+  on — not a backlog pick. A `ready_idle` nudge naming a backlog task is
   awareness, not a dispatch order.
 - **Complex tasks clear a human gate first.** When an agent files a task that
   is complex by the usual risk assessment — or includes UI design — its
@@ -126,8 +126,8 @@ board task that proposed it; what follows is the operating rule.
   lane queues behind it. Peers discuss overlap and coordination directly with
   each other over hive messages, not through Bryan.
 - **Re-rank the band on a trigger** (Bryan's chosen mechanism for band
-  order): when a row is filed above the band's median, a goal is edited, or
-  several rows have arrived since the last pass, the lead re-reads the whole
-  band against the current goal and rewrites the order — never moving a row a
+  order): when a task is filed above the band's median, a goal is edited, or
+  several tasks have arrived since the last pass, the lead re-reads the whole
+  band against the current goal and rewrites the order — never moving a task a
   person placed without asking, documenting what moved and why, and folding
   duplicates / minor extensions into their covering ticket as it goes.

@@ -6,7 +6,7 @@ attention is left, and roughly when it lands. The arithmetic is four files in
 contributes), `effort-calibration.ts` (the ratios and their priors),
 `goal-effort.ts` (the rollup and the projected date) and `effort-format.ts`
 (the readouts). All pure, and in `core` rather than the server, because the
-board recomputes them in the browser off rows it already holds.
+board recomputes them in the browser off tasks it already holds.
 
 This file is the **product rules**: the questions someone reading a date on
 the board would ask, answered once. The mechanics, the priors and the reasons
@@ -22,8 +22,8 @@ flowchart LR
   T["A ticket write<br/>create · retitle · body edit · re-triage"] --> SC["effort-scoring.ts<br/>when to ask, and the boot re-ask pass"]
   SC --> ES["effort-estimator.ts<br/>the Haiku call: key, HTTP, timeout"]
   ES --> EP["core/effort-estimate-prompt.ts<br/>prompt and parser, both pure"]
-  ES --> TR["task-row.ts<br/>the estimate, stored on the row"]
-  TR --> WIRE[("task rows, over REST and SSE")]
+  ES --> TR["task-row.ts<br/>the estimate, stored on the task"]
+  TR --> WIRE[("tasks, over REST and SSE")]
   WIRE --> BM["board/board-model.ts<br/>recomputes in the browser"]
   BM --> ET["core/effort-task.ts<br/>what one ticket contributes"]
   ET --> EC["core/effort-calibration.ts<br/>actual ÷ estimate, with priors"]
@@ -33,7 +33,7 @@ flowchart LR
 ```
 
 The server asks for the estimate and stores it; every number a reader sees is
-computed in the browser from rows it already holds. That is why the four
+computed in the browser from tasks it already holds. That is why the four
 `effort-*` files are in `core` and not in the server.
 
 ## The chain
@@ -127,7 +127,7 @@ floor** alike.
 
 Nobody watched it being worked, so there is no wall-clock actual to learn a
 correction from; that half was always excluded. The other two halves were
-not, and that was the bug: closing five stale rows in one afternoon added
+not, and that was the bug: closing five stale tasks in one afternoon added
 five closes and their whole estimate to the numerator of a rate that is
 supposed to describe throughput, and the goal's projected finish jumped
 forward on an afternoon of bookkeeping. Sweeping a backlog is not a
@@ -143,7 +143,7 @@ goal whose only three closes skipped `in-progress` gets no date, and the
 header says so.
 
 The one thing this does **not** narrow is hands-on calibration. Attention is
-measured directly, off the reading time folded onto the row, and needs no
+measured directly, off the reading time folded onto the task, and needs no
 `in-progress` transition to be real: somebody read the ticket or they did
 not. Only the wall-clock trail depends on the transition that a sweep skips.
 

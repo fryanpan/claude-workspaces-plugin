@@ -232,7 +232,7 @@ export class TaskLifecycleStore {
       return {
         ok: false,
         error: 'same-status',
-        message: `${task.title} is already ${to}. Nothing to do — a status change is the only thing this gate records, and the row is already there.`,
+        message: `${task.title} is already ${to}. Nothing to do — a status change is the only thing this gate records, and the task is already there.`,
       };
     }
 
@@ -247,7 +247,7 @@ export class TaskLifecycleStore {
         error: 'plan-unapproved',
         message:
           `${task.title} is a draft derived from a plan doc (${task.planHold.docId}) that has not been approved. ` +
-          'It stays in triage until the plan is approved — which releases it — or the row is archived.',
+          'It stays in triage until the plan is approved — which releases it — or the task is archived.',
       };
     }
 

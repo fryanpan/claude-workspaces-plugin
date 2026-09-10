@@ -264,7 +264,7 @@ function reasonsClause(p: NudgePayload): string {
  */
 function denominatorClause(p: NudgePayload): string {
   if (p.consideredCount === undefined) return '';
-  const parts = [`${p.consideredCount} open ${p.consideredCount === 1 ? 'row' : 'rows'} checked`];
+  const parts = [`${p.consideredCount} open ${p.consideredCount === 1 ? 'task' : 'tasks'} checked`];
   const held = Object.entries(p.held ?? {})
     .filter(([, n]) => typeof n === 'number' && n > 0)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -304,7 +304,7 @@ export function readyIdleLine(p: NudgePayload): string {
   const unread = undeterminedCount(p);
   if (count === 0 && unread > 0) {
     const of = p.consideredCount === undefined ? `${unread}` : `${unread} of ${p.consideredCount}`;
-    return `[workspace.ready_idle] nothing is ready to hand over, and this pass could not establish that the board is quiet: ${of} open row(s) could not be evaluated (${reasonsClause(p)}). Read them with list_tasks before treating this board as clear.`;
+    return `[workspace.ready_idle] nothing is ready to hand over, and this pass could not establish that the board is quiet: ${of} open task(s) could not be evaluated (${reasonsClause(p)}). Read them with list_tasks before treating this board as clear.`;
   }
   const one = count === 1;
   const subject =
@@ -358,7 +358,7 @@ const STALL_ROWS_SHOWN = 5;
  *  stalled kinds, and the word "in-progress" beside a title reads as status
  *  rather than as diagnosis. */
 function stalledRowClause(row: StalledRowPayload): string {
-  const named = row.title ? `"${truncate(row.title, 50)}" (${row.id})` : (row.id ?? 'a row');
+  const named = row.title ? `"${truncate(row.title, 50)}" (${row.id})` : (row.id ?? 'a task');
   return row.quietMs === undefined ? named : `${named} quiet ${humanDuration(row.quietMs)}`;
 }
 
@@ -391,9 +391,9 @@ function changedClause(changed: StallPayload['changed']): string {
   const held = changed.heldItems ?? [];
   if (held.length > 0) bits.push(`${held.length} review item(s) newly held`);
   const ungated = changed.ungatedUi ?? [];
-  if (ungated.length > 0) bits.push(`${ungated.length} row built past the UI gate`);
+  if (ungated.length > 0) bits.push(`${ungated.length} task built past the UI gate`);
   if (changed.escalated === true)
-    bits.push('the board\u2019s quietest row crossed another repeat window');
+    bits.push('the board\u2019s quietest task crossed another repeat window');
   if (bits.length === 0) return '';
   return `NEW since the last wake: ${bits.join('; ')}.`;
 }
@@ -432,7 +432,7 @@ export function stalledLine(p: StallPayload): string {
   const denominator =
     p.consideredCount === undefined
       ? ''
-      : ` (of ${p.consideredCount} open row(s) checked${beyond})`;
+      : ` (of ${p.consideredCount} open task(s) checked${beyond})`;
   if (count > 0) {
     const subject = count === 1 ? '1 task has' : `${count} tasks have`;
     const list = rows.length > 0 ? ` — ${stalledRowsClause(rows)}` : '';
@@ -443,7 +443,7 @@ export function stalledLine(p: StallPayload): string {
   }
   const unfiled = p.unfiled ?? [];
   if (unfiled.length > 0) {
-    const noun = unfiled.length === 1 ? 'row is' : 'rows are';
+    const noun = unfiled.length === 1 ? 'task is' : 'tasks are';
     parts.push(
       `${unfiled.length} ${noun} waiting on a person with NO question filed — ` +
         `${stalledRowsClause(unfiled)}. File the ask where they will see it, or the wait is invisible.`,
@@ -453,7 +453,7 @@ export function stalledLine(p: StallPayload): string {
   if (unread > 0) {
     const reasons = p.undetermined?.reasons ?? [];
     parts.push(
-      `${unread} open row(s) could NOT be evaluated (${
+      `${unread} open task(s) could NOT be evaluated (${
         reasons.length > 0 ? reasons.join(', ') : 'reason not reported'
       }) and are not counted healthy. Read them with list_tasks before treating this board as fine.`,
     );
@@ -468,7 +468,7 @@ export function stalledLine(p: StallPayload): string {
   }
   const ungated = p.ungatedUi ?? [];
   if (ungated.length > 0) {
-    const noun = ungated.length === 1 ? 'UI row is' : 'UI rows are';
+    const noun = ungated.length === 1 ? 'UI task is' : 'UI tasks are';
     parts.push(
       `${ungated.length} ${noun} being built past the review gate — an agent filed it, it reads as ` +
         `UI work, and nobody answered a review item on it — ${ungatedRowsClause(ungated)}. ` +
@@ -484,7 +484,7 @@ export function stalledLine(p: StallPayload): string {
   if (changed) parts.unshift(changed);
   const body =
     parts.join(' ') ||
-    'the board reported a stall with no rows on it — treat this as a bug in the wake, not as a clear board.';
+    'the board reported a stall with no tasks on it — treat this as a bug in the wake, not as a clear board.';
   // FIRST, when it is there. The reader of an escalated wake is not the lead:
   // before it can weigh the rows it has to know that it is standing in, and
   // that the board's own addressee is unreachable — which is a finding of its

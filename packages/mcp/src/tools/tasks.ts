@@ -496,7 +496,7 @@ export async function handleTaskTool(
       });
     }
     /* REMOVED 2026-09-03: `park_task`, replaced by `block_task` above.
-       "Not now" is spelled by naming what the row is waiting for, and triage
+       "Not now" is spelled by naming what the task is waiting for, and triage
        goes back to meaning "nobody has vetted this".
 
        Removing the tool cannot break a peer: every session launches its own

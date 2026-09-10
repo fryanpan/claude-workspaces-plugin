@@ -77,7 +77,7 @@ function suggestionAuthor(): { id: string; name: string; color: string } {
  * bundle than the deploy source would install. A second literal would be a
  * fourth version site, and this file's history is that version sites drift.
  */
-const PLUGIN_VERSION = '0.1.201';
+const PLUGIN_VERSION = '0.1.202';
 
 /**
  * One nonce per PROCESS, minted at module load and sent on every attach.
@@ -189,7 +189,7 @@ const server = new Server(
       '',
       'WORKSPACE BOARD: a board workspace is a goal + a task board + linked docs.',
       'create_workspace mints one; attach_doc links existing docs/attachments to it;',
-      'create_tasks (ALWAYS a list — one idea is a one-row list) and',
+      'create_tasks (ALWAYS a list — one idea is a one-item list) and',
       'spin_off_task add work (omit `goal` and the task lands UNPLACED in',
       'Backlog awaiting triage — the create says so and hands you the goal',
       'bands, and placing it with set_task_goal IS the triage:',

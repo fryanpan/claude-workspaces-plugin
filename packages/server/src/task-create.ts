@@ -247,17 +247,17 @@ export function createdVisibility(
     // transitioned out, so naming task_transition as the way forward would
     // send the caller to a door that refuses.
     parts.push(
-      'This row is a plan draft: visible on the board, in no dispatch read, and held in triage until the plan doc is approved — approval releases it to todo.',
+      'This task is a plan draft: visible on the board, in no dispatch read, and held in triage until the plan doc is approved — approval releases it to todo.',
     );
   } else if (triage) {
     parts.push(
-      'This row is in triage: no dispatch read returns it until task_transition moves it to todo or in-progress.',
+      'This task is in triage: no dispatch read returns it until task_transition moves it to todo or in-progress.',
     );
   }
   if (hasReview) {
     parts.push(
       triage
-        ? "Its review item IS on the addressee's Home review queue already — the ask is visible even while the row is unvetted."
+        ? "Its review item IS on the addressee's Home review queue already — the ask is visible even while the task is unvetted."
         : "Its review item is on the addressee's Home review queue now.",
     );
   }

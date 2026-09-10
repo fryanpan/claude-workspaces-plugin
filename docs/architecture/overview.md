@@ -147,20 +147,20 @@ request, and all three take an injected `now` so a test moves the clock
 instead of waiting: the two board wakes in the Keep-moving group (the
 stall tick also records `keep-moving-verdict.ts`, the PASS/FAIL measurement
 of that group, off the same snapshot the wake reads, and reads
-`ui-review-gate.ts` — the one finding in the group about a row that is
-MOVING, an agent-filed UI row being built with nobody's answer on it —
+`ui-review-gate.ts` — the one finding in the group about a task that is
+MOVING, an agent-filed UI task being built with nobody's answer on it —
 [stall-check/](stall-check/README.md)), and
-`task-scheduler.ts`, which files an instance each time a row's schedule comes
+`task-scheduler.ts`, which files an instance each time a task's schedule comes
 due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
 `task-run-record.ts` read each rule's last run back — recording the success,
 and filing one review item when a rule has gone stale — and
 `task-scheduled-wake.ts` get somebody onto the instance: an addressed frame
 to an attached owner, one spawn request to the fleet's spawner for a detached
 one, bounded retries, then a review item. What the loop reads — every rule
-row with its cursor resolved, including the last change of the doc or task an
+task with its cursor resolved, including the last change of the doc or task an
 on-change rule watches — is `task-scheduler-rows.ts`. All of them join the
 Board group under its `task-*.ts` glob rather than changing the picture — they
-read and write the same rows through the same store, and only the clock is
+read and write the same tasks through the same store, and only the clock is
 new. The two
 wake frames render in `mcp` through `scheduled-line.ts`, beside the other
 line modules.
@@ -172,7 +172,7 @@ change, and its quiet window), `schedule-parse.ts` (a rule read off the
 wire), `schedule-timezone.ts` (instant ⇄ wall clock),
 `schedule-missed.ts` (what a rule wants done about an occurrence the server
 missed — catch up, skip, or fold into the open catch-up that is the lock),
-`schedule-run-record.ts` (what the row says about its last run, and when a
+`schedule-run-record.ts` (what the task says about its last run, and when a
 rule's last success is old enough to call it stale — one derivation the board
 and the server both read), `schedule-wake.ts` (the wake's retry schedule and
 what one instance's wake records, which the run record reads as answered or
@@ -290,8 +290,8 @@ page it was raised on, opens it with every earlier ROUND still readable, and
 answers it through the route the doc page already answers through
 (`…/threads/:id/answer`). It joins no new data flow: a review item IS a
 payload on a comment, so the dock reads the same synced threads the pins read
-and adds no fetch of its own. The Home-queue row for such an item deep-links
-to `/workspaces/<ws>/mockups/<doc>?thread=<id>`, which is why a queue row now
+and adds no fetch of its own. The Home-queue entry for such an item deep-links
+to `/workspaces/<ws>/mockups/<doc>?thread=<id>`, which is why a queue entry now
 carries the doc's `type`.
 
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
@@ -312,7 +312,7 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
-**Board state is server-owned, and Yjs only mirrors it.** The rows live in the
+**Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`
 doc's `tasks` and `workspace` maps are a read-only PROJECTION of that store
 (`task-projection.ts`), so the board renders in realtime without Yjs becoming
@@ -322,10 +322,10 @@ it, because events come only from store mutations — and reasserts the whole
 projection from the store on hydrate, so a crash cannot leave forged board
 state standing. `isBoardOwnedDoc` (`doc-ids.ts`) is the prefix authority for
 which docs those are, `ws:` and `task:`, and none of them is ever file-bound.
-**What a projected row carries is a size decision, because sync-step-2 is one
+**What a projected task carries is a size decision, because sync-step-2 is one
 frame.** Opening a board costs the whole `ws:` doc, so the projection sends a
-CLOSED row out as a list row: `task-row-slim.ts` drops the five fields only the
-open panel renders, and `routes/task-detail.ts` hands the whole row back to the
+CLOSED task out in slim form: `task-row-slim.ts` drops the five fields only the
+open panel renders, and `routes/task-detail.ts` hands the whole task back to the
 one reader who opens it. `board-doc-compaction.ts` sheds the doc's delete set
 at hydrate, which is safe for a `ws:` doc and nothing else because the sidecar
 is the record and the projection is reasserted after load. `slow-load-alarm.ts`
@@ -407,7 +407,7 @@ their filename), `notes-quality-store.ts` and `notes-tick-timing.ts` read and
 write under the data dir the way the rest of the `meeting-*` family does, and
 `notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
 meeting's stop runs — read the notes, judge them, store the reading, file a
-bad one on the row the doc belongs to. Nothing under `routes/` is added: the
+bad one on the task the doc belongs to. Nothing under `routes/` is added: the
 week's rollup rides the existing `GET /api/metrics` reply, for the reason
 `uptimeSec` does.
 

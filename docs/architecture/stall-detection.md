@@ -21,12 +21,12 @@ summary; the design reasoning lives in the file headers of
 ```mermaid
 flowchart TB
   W["stall-wiring.ts<br/>snapshots · both nudgers · composition"]
-  W --> KM["keep-moving.ts<br/>shared row classifier"]
+  W --> KM["keep-moving.ts<br/>shared task classifier"]
   W --> RN["ready-nudge.ts + ready-gate.ts<br/>the ready-work half"]
   KM --> G["stall-gate.ts<br/>stalled · unfiled · undetermined"]
   W --> G
   G --> RJ["review-judge.ts<br/>Haiku judge (prompt in core)"]
-  G --> N["stall-nudge.ts<br/>stamps · told rows · wakes"]
+  G --> N["stall-nudge.ts<br/>stamps · told tasks · wakes"]
   LP["lead-presence.ts<br/>is the seat still listening"] --> N
   N --> ST[("stall-nudge-stamps.json")]
   N -->|wake frame| NL["mcp/nudge-line.ts → lead agent"]
@@ -39,86 +39,86 @@ Every module is named again, with what it owns, under
 
 ## What counts as a finding
 
-The loop runs every 60s and sorts every open row into three lists, one
+The loop runs every 60s and sorts every open task into three lists, one
 frame per board:
 
 | List | Meaning | Gate |
 |---|---|---|
 | `stalled` | todo/in-progress, not dependency-blocked, no pending human review item, quiet ≥ threshold | 20 min quiet (`CW_STALL_NUDGE_MINUTES`) |
 | `unfiled` | waiting on the owner but with NO review item on their queue — an ask that exists nowhere they read; a protocol violation | same 20-min quiet (#411) — a fresh ask gets a grace window for the lead to file it |
-| `undetermined` | rows whose review data could not be read — the one thing that could have explained the silence | none; unreadable is always reported |
+| `undetermined` | tasks whose review data could not be read — the one thing that could have explained the silence | none; unreadable is always reported |
 
-Deliberate exclusions: **triage** rows (unvetted work shouldn't nag),
-rows with a **pending review item** (that's legitimately waiting on the
+Deliberate exclusions: **triage** tasks (unvetted work shouldn't nag),
+tasks with a **pending review item** (that's legitimately waiting on the
 owner — their Home queue is the surface), and the **backlog** on boards
 with goal bands. Boards without goal bands carry whole columns as
 stall-eligible; structure the board to scope the watcher.
 
-**A row already named is not named again until it changes.** The stamp is the
-board's CURRENT finding set, so a row that left it was forgotten and its next
+**A task already named is not named again until it changes.** The stamp is the
+board's CURRENT finding set, so a task that left it was forgotten and its next
 quiet window read as a brand-new stall — one wake per window on any board
 whose owner keeps reporting (measured 2026-09-04: five wakes in sixty-five
-minutes over two rows that were being worked the whole time). `stall-nudge.ts`
-now remembers which rows a board's lead has been told about, across the row's
-own absence and across a restart, and forgets a row that has not been a
-finding for a whole repeat window. A remembered row is news again only when it
-comes back under a different BUCKET — a dispatched row whose builder then died
+minutes over two tasks that were being worked the whole time). `stall-nudge.ts`
+now remembers which tasks a board's lead has been told about, across the task's
+own absence and across a restart, and forgets a task that has not been a
+finding for a whole repeat window. A remembered task is news again only when it
+comes back under a different BUCKET — a dispatched task whose builder then died
 returns as `builder-silent`, which is a different ask. Every repeat wake
-carries `changed`: the rows, holds, unreadable rows and escalation that are
+carries `changed`: the tasks, holds, unreadable tasks and escalation that are
 new since the last one, rendered ahead of the full lists.
 
-**An open question counts wherever it was asked.** A row's own `task:<id>`
+**An open question counts wherever it was asked.** A task's own `task:<id>`
 doc is read for both things a discussion can say — somebody is talking,
-somebody is waiting on an answer — and so is every doc the row LINKS. Reading
+somebody is waiting on an answer — and so is every doc the task LINKS. Reading
 a linked doc for its prose alone missed the common case: thread writes carry
 no transaction origin, `lastContentChangeFor` refuses an unnamed one, so a
-question asked on a mock or a design doc left its row reading as quiet with
+question asked on a mock or a design doc left its task reading as quiet with
 nobody waiting while the reader had it on their queue.
 
 On a LINKED doc the ask is SCOPED, because a doc is a shared surface: without
-a scope one unanswered question on a design doc would park every row linking
+a scope one unanswered question on a design doc would park every task linking
 it, for as long as the question stayed open. Two ways an ask can count for a
-row. **Nothing else links the doc** — then the question cannot be about any
-other row, whoever typed it, so a builder's ask on a lead-owned row parks it.
-**Otherwise the asker must be the row's owner**, resolved through
-`taskStore.ownerIdOf`, which is the only signal separating the rows of a
+task. **Nothing else links the doc** — then the question cannot be about any
+other task, whoever typed it, so a builder's ask on a lead-owned task parks it.
+**Otherwise the asker must be the task's owner**, resolved through
+`taskStore.ownerIdOf`, which is the only signal separating the tasks of a
 shared design doc from each other. Owner-matching alone was the first rule and
-missed the first case, leaving a row waking while a person owed it an answer;
-matching the row's ASSIGNEE instead is rejected on purpose, because it
-over-exonerates the moment one agent holds two rows. The row's own `task:<id>`
+missed the first case, leaving a task waking while a person owed it an answer;
+matching the task's ASSIGNEE instead is rejected on purpose, because it
+over-exonerates the moment one agent holds two tasks. The task's own `task:<id>`
 doc needs no scope at all, because a task-body thread belongs to exactly one
-row. Two consequences to know: on a doc several rows link, an ask by a person
+task. Two consequences to know: on a doc several tasks link, an ask by a person
 or by an agent the roster cannot place parks nobody, and a linked doc's plain
 COMMENTS
-and edits still count for every row that links it — that exoneration expires
+and edits still count for every task that links it — that exoneration expires
 with the quiet window rather than lasting as long as a question does. Reading
 those threads goes through `docStore.listThreads`, which hydrates an evicted doc
-from disk rather than peeking, so a board whose rows link many cold docs pulls
+from disk rather than peeking, so a board whose tasks link many cold docs pulls
 them back into memory on the loop's schedule.
 
-**Task notes count as movement.** A row's quiet time is measured from the
+**Task notes count as movement.** A task's quiet time is measured from the
 newest of: its status change, its last workspace event, its last thread
 activity, and its newest note in `task.notes` — the end-of-turn message the
 Stop hook posts, an explicit `post_status`, or a denial. Notes are read from
-the row itself: `task.noted` is deliberately kept out of the workspace event
+the task itself: `task.noted` is deliberately kept out of the workspace event
 stream and the board trail, so a talking agent resets its own task's stall
 clock without lighting up every board it is attached to. The board-level
 ready-idle clock (`ready-nudge.ts`) ignores notes on purpose — that wake
 exists to catch a session that keeps talking without moving anything.
 
 **A note that says the agent is waiting on a person is still just a note.**
-Waiting is DECLARED, never inferred (rebuild step 2, 2026-09-08). A row is
+Waiting is DECLARED, never inferred (rebuild step 2, 2026-09-08). A task is
 `blocked-on-owner` only while a filed ask on the person's queue excuses it,
-and the snapshot carries the ADDRESS of every such ask on the row
+and the snapshot carries the ADDRESS of every such ask on the task
 (`waitingOn`: a ticket item by id, or a comment-borne item by doc, thread and
 comment), read from the three places an ask can be filed — the ticket's own
 items, a payload on a comment in the ticket's body doc, and a payload on a
-comment in a doc the row links. Whether an item still excuses the row is the
+comment in a doc the task links. Whether an item still excuses the task is the
 Home queue's own predicate (`isReviewItemOnQueue` for ticket items,
 `pendingDeclaration` minus a gated payload for comment-borne ones), so an
-answered, withdrawn, held or reader-asked-back item excuses nothing. A row
+answered, withdrawn, held or reader-asked-back item excuses nothing. A task
 whose status says the owner is waiting with nothing filed is
-`blocked-on-owner-unfiled`; a row whose NOTE says "waiting on Bryan" with
+`blocked-on-owner-unfiled`; a task whose NOTE says "waiting on Bryan" with
 nothing filed is a plain stall, and the lead hears about it on the ordinary
 clock. Between 2026-09-04 and 2026-09-08 a prose reader (`note-ask.ts`, a
 prefilter plus a Haiku confirmation) tried to recover the unfiled ask from
@@ -127,23 +127,23 @@ prose is a wait nobody filed, and the fix for that is to file it.
 
 Known gap, deliberately open: nothing ages review items sitting unanswered
 on the owner's queue. That is a different signal (ask-aging, not
-row-stalling) and gets its own design if it proves needed. The one kind of
+task-stalling) and gets its own design if it proves needed. The one kind of
 review item the loop DOES age is the held one, below — an ask the reader
 cannot see is not waiting on the reader.
 
-**An ask only excuses a row while the reader can still act on it.** The count
+**An ask only excuses a task while the reader can still act on it.** The count
 the loop reads (`reviewState.open`) has to agree, item for item, with the Home
 queue's own filter — so it drops the same four: answered, held or still being
 judged, WITHDRAWN by its asker, and WAITING because the reader asked back and
-it is now the owner's turn. When the two disagree the row parks forever: the
+it is now the owner's turn. When the two disagree the task parks forever: the
 ask is off the queue, so nobody can answer it, so nothing ever clears it and
-the watchdog stays off that row. Withdrawn and waiting were exactly that bug.
+the watchdog stays off that task. Withdrawn and waiting were exactly that bug.
 Both surfaces call the same predicates rather than re-deriving the rule, for
 the reason the bug demonstrates — a second spelling of "on the queue" is free
 to disagree with the first.
 
 **A held review item is a finding of its own.** Every filing path that can
-put a row on the reader's queue passes a quality gate: a Haiku judge reads the board's
+put a task on the reader's queue passes a quality gate: a Haiku judge reads the board's
 `reviewItemCriteria` (a natural-language prompt; `set_review_item_criteria`,
 or `PUT /workspaces/:id/settings`) and the item, and answers
 `{ok, reason}`. Not ok → the item is HELD: it stays on the ticket with the
@@ -165,7 +165,7 @@ the hold in one call. A hold still standing at the quiet window
 frame as `heldItems`, arm the stamp, or count as told — a board with
 nothing else wrong still wakes on one. The verdict's `held` line counts
 under the same window, so the frame and the measurement name the same
-items. Held rows enter the stall stamp under their ticket's id, so a later
+items. Held tasks enter the stall stamp under their ticket's id, so a later
 stall or unfiled finding on the same ticket while it stays held re-wakes
 nothing: one complaint per item, not per pass. Revising re-judges; a pass clears
 the hold, keeps the original filing time, and forgets the filer stamp, so
@@ -182,7 +182,7 @@ earned. One implementation now serves all THREE surfaces (`runReviewGate` in
 and a ticket's own decision), so the order of operations, the failure policy
 and the shape of a hold cannot drift apart:
 
-| Filing path | Where the row lands | Judged? | How a hold is lifted |
+| Filing path | Where the task lands | Judged? | How a hold is lifted |
 |---|---|---|---|
 | `add_review_item` → `POST /workspaces/:workspaceId/tasks/:id/review-items` | `task-review` | yes | `revise_review_item(taskId, reviewItemId)` |
 | `create_tasks` / `POST …/tasks` with `review` | `task-review` | yes (batched, bounded concurrency) | same |
@@ -194,32 +194,32 @@ and the shape of a hold cannot drift apart:
 | `…/threads/:id/withdraw/undo` (reinstate) | as above | **exempt** — no new words | the hold placed on those words still stands, so a reinstated held item stays off the queue and is not announced |
 | `…/review-items/:id/release` (the reader overruling) | `task-review` | **exempt by design** — see below | n/a |
 | `create_tasks` / `POST …/tasks` with `needs: 'decision'` — the ticket that IS the ask (`r-legacy`) | `task-review` | yes | `revise_review_item(taskId)`, no item id |
-| `rewrite_task` / `POST …/tasks/:id/body` / `…/title` on a decision row | `task-review` | yes, on every words edit | same |
+| `rewrite_task` / `POST …/tasks/:id/body` / `…/title` on a decision task | `task-review` | yes, on every words edit | same |
 | The allow-rule filer (`allow-rules.ts`, `store.addReviewItem` direct) | `task-review` | **exempt** — the words are the PRODUCT's, built by `buildAllowRuleReview` from a fixed template, and no agent authored them. Holding one would be the dead end this design forbids: the "filer" is the server, which cannot revise, and a held finding is a finding silently dropped | n/a |
 | Meeting research capture (`meeting-task-capture.ts`, same door) | `task-review` | **exempt**, same reason — template text the assistant fills in, with no author to send it back to | n/a |
-| An `unreplied` row (prose the server INFERRED asks a person) | thread rows | **exempt** — nobody declared it, so there are no authored words to judge; a held declaration's own comment is excluded from this band so a hold cannot leak back through it | n/a |
+| An `unreplied` task (prose the server INFERRED asks a person) | thread bands | **exempt** — nobody declared it, so there are no authored words to judge; a held declaration's own comment is excluded from this band so a hold cannot leak back through it | n/a |
 
-**The ticket that is itself the decision.** A `needs: 'decision'` row reaches
-the queue through the row `legacyReviewItem` DERIVES at read time, whose id is
-the fixed `r-legacy` — so it was the last path that put a row in front of the
+**The ticket that is itself the decision.** A `needs: 'decision'` task reaches
+the queue through the item `legacyReviewItem` DERIVES at read time, whose id is
+the fixed `r-legacy` — so it was the last path that put a task in front of the
 reader with the judge never called (measured 2026-08-31: one `create_tasks`
-decision row, zero judge calls, one queue row). It is gated now by the same
+decision task, zero judge calls, one queue item). It is gated now by the same
 `runReviewGate`, through a third adapter, with two differences that both fall
-out of the row having nothing of its own:
+out of the task having nothing of its own:
 
 - **The verdict lives on the TASK** (`Task.decisionJudge`), because the item is
   rebuilt on every read and a stamp on it would vanish. `listReviewItems` hangs
-  it back on the derived row, so `isReviewItemGated` — the one predicate the
+  it back on the derived item, so `isReviewItemGated` — the one predicate the
   queue consults — is unchanged.
 - **The version is `wordsRevisionOf`**, not a count of revisions, because the
-  words being judged are the row's own title, body and options. Every door that
+  words being judged are the task's own title, body and options. Every door that
   writes those already moves that counter, which is what makes a verdict that
   outlived them refusable.
 
 The same fact is why the hold is not a dead end and why lifting it needed no
 new verb: revising the decision means rewriting the ticket's words, so
 `revise_review_item(taskId=…)` — `reviewItemId` omitted, the shape
-`answer_decision` has always taken for this row — delegates into
+`answer_decision` has always taken for this task — delegates into
 `reviseTaskDecision`, which writes through the ordinary title/body doors. The
 `r-legacy` REST address delegates the same way, exactly as `answerTaskReview`
 delegates it into `answerDecision`. And because those words have other writers,
@@ -233,7 +233,7 @@ the same reason `revisions` lives on it. `reviewFromBody` strips `judge` from
 anything a caller sends: it is written by the gate and restored from the CRDT,
 and accepting it at the door would be a one-key bypass. Both surfaces' holds
 are enumerated for the stall loop (`taskStore.heldReviewItems` +
-`heldThreadReviewItems`), and the row, the filer's wake and the filing route's
+`heldThreadReviewItems`), and the task, the filer's wake and the filing route's
 result all carry the same paste-ready `revise_review_item(…)` call — three
 copies of an address is how one of them ends up naming a verb that refuses.
 
@@ -247,7 +247,7 @@ found the note had no interactive element at all, so a reader looking at a
 question they could answer in ten seconds could only wait for an agent.
 
 It takes a ticket's own decision too (`r-legacy`), where the verdict lands on
-the task instead of on an item. That row is worth releasing precisely because
+the task instead of on an item. That task is worth releasing precisely because
 the reader CAN see it: a held decision is still a ticket on the board, and the
 held note renders on it.
 
@@ -260,7 +260,7 @@ is a UI decision rather than a gate one.
 
 A release can be issued while the judge is still out, and it wins. The
 verdict a judge comes back with is refused unless the `pending` stamp it
-placed before asking is still on the row: a release does not change the
+placed before asking is still on the task: a release does not change the
 item's words, so the version check alone would have let a late `held`
 overwrite it and take the item off the queue seconds after the reader was
 told it was on.
@@ -272,43 +272,43 @@ measured ~800k tokens, because a woken lead takes several turns to read,
 act, and stand back down. Every design decision below exists to price
 wakes correctly:
 
-- **One frame per board**, never per row. The frame carries the full lists;
-  the plugin renders the top rows plus "and N more". (Pre-0.1.116 bundles
+- **One frame per board**, never per task. The frame carries the full lists;
+  the plugin renders the top tasks plus "and N more". (Pre-0.1.116 bundles
   render a single task id — an updated plugin, then a session restart,
   fixes the rendering.)
 - **A stamp per board dedupes wakes.** The stamp is the board's repeat
-  bucket plus the sorted finding-row ids. Stamps persist to disk, so a
+  bucket plus the sorted finding-task ids. Stamps persist to disk, so a
   server restart does not re-bill every board. (Any stamp FORMAT change
   re-bills each board exactly one wake on the first tick after deploy —
   expected, one-off, not a rate.)
-- **Wakes fire on growth only** (#411): a new finding row, a bucket
-  escalation, or a newly unreadable row. Never on shrink — before this, a
+- **Wakes fire on growth only** (#411): a new finding task, a bucket
+  escalation, or a newly unreadable task. Never on shrink — before this, a
   lead FILING the ask changed the set and re-armed the wake, a
   self-sustaining loop measured at 6 wakes on one board in an evening,
   3 inside 5 minutes. A lead's response can only shrink the set, so the
-  loop is now structurally impossible. Per-row bucket transitions also
-  left the stamp: a lead's own dispatch moves a row's classification, and
+  loop is now structurally impossible. Per-task bucket transitions also
+  left the stamp: a lead's own dispatch moves a task's classification, and
   that must not read as growth.
 - **The repeat window escalates a board that stays bad**: the oldest quiet
-  row's silence, quantized by `CW_STALL_REPEAT_HOURS` (default 4h), so an
+  task's silence, quantized by `CW_STALL_REPEAT_HOURS` (default 4h), so an
   unchanged board is re-said at most once per window. The default repeat
   floor across a 9-board fleet prices at roughly 43M tokens/day — the knob
   exists because that floor has to be tunable faster than a release.
 - **The repeat bucket is HELD, never lowered by a flicker**: a
-  remembered row that drops off the findings for one pass used to take the
+  remembered task that drops off the findings for one pass used to take the
   armed bucket down with it, so its return read as another window crossed and
-  woke the lead about a row nothing had changed on — two wakes three minutes
-  apart on one 12h `ready-unpicked` row, measured 2026-09-04. What made
-  a row flicker without moving: an escalation item used to mask its anchor
-  row from the gate until it was withdrawn (gone since rebuild step 3), and a
-  row on the parallelism cap's boundary still leaves the judged set whenever
-  another row starts or stops being runnable. The bucket is held UP with the
-  row that earned it, and
-  the hold expires with that row: `told` forgets a row that has been off the
-  list for a whole repeat window, and the next row then escalates on its own
+  woke the lead about a task nothing had changed on — two wakes three minutes
+  apart on one 12h `ready-unpicked` task, measured 2026-09-04. What made
+  a task flicker without moving: an escalation item used to mask its anchor
+  task from the gate until it was withdrawn (gone since rebuild step 3), and a
+  task on the parallelism cap's boundary still leaves the judged set whenever
+  another task starts or stops being runnable. The bucket is held UP with the
+  task that earned it, and
+  the hold expires with that task: `told` forgets a task that has been off the
+  list for a whole repeat window, and the next task then escalates on its own
   clock. Holding until the board went wholly clean was tried first and is a
   ratchet — on a board that always has a finding, a number set hours ago
-  swallows every later row's repeat window, which is the repeat switched off.
+  swallows every later task's repeat window, which is the repeat switched off.
 - **An unreachable lead escalates, and only then costs nothing**: the wake
   goes to any other session holding a stream on that board, carrying
   `escalatedFrom: <lead>` so the stand-in knows why it was told. The frame
@@ -334,10 +334,10 @@ Everything above ends at the lead. That is the right first addressee and the
 wrong last one: a lead session that has died cannot act on a wake, and every
 later wake is addressed to the same silence. Nothing in the wake loop tells
 that apart from a board being driven — and it must not try, because the one
-signal it has (a row that stays quiet after the lead was told) is also what a
-live lead's rows look like while it waits on a person. Measured on this
+signal it has (a task that stays quiet after the lead was told) is also what a
+live lead's tasks look like while it waits on a person. Measured on this
 board before the rebuild: 22 of 27 escalations went past a lead that was
-alive and reachable, over rows waiting on the owner.
+alive and reachable, over tasks waiting on the owner.
 
 So escalation runs on **liveness, and on nothing else** (`stall-escalation.ts`,
 rebuild step 3). A board is DEAD when both are true:
@@ -345,16 +345,16 @@ rebuild step 3). A board is DEAD when both are true:
 - no session attached to it is deliverable — `hasLiveAttachment`: a stream
   open, or observed inside the store's delivery window — and
 - nothing has written to it or heartbeated on it for the escalation window:
-  the newest agent note or agent transition on any row (`agentActiveAt`) and
+  the newest agent note or agent transition on any task (`agentActiveAt`) and
   the newest heartbeat or tool call the store recorded for any attachment
   (`sessionObservedAt`) are both older than `CW_STALL_ESCALATE_MINUTES`.
 
 `boardDeadFor` is that test, exported; the snapshot carries the three reads
 (`sessionLive`, `sessionObservedAt`, `agentActiveAt`) beside the findings. A
 board none of them has ever touched is dead from its first finding. A board
-with a live session is never dead, whatever its rows say: a live lead that
+with a live session is never dead, whatever its tasks say: a live lead that
 has been told and is slow is the WAKE's problem, and going over its head
-hands a person a row the lead is reachable about.
+hands a person a task the lead is reachable about.
 
 What a dead board says, and to whom — in order:
 
@@ -366,15 +366,15 @@ What a dead board says, and to whom — in order:
   cannot act immediately is reminded rather than flooded. Team Lead is the
   party that can restart the lead, and it costs a person nothing.
 - **The reader only when Team Lead is unreachable too.** Then the board files
-  ONE review item on the reader's queue, naming every stuck row — unfiled
-  rows first, then stalled ones — each with a relative link
+  ONE review item on the reader's queue, naming every stuck task — unfiled
+  tasks first, then stalled ones — each with a relative link
   (`/workspaces/<id>?task=<taskId>`), what kind of stuck it is in plain words
-  and how long it has been quiet. Rows joining or leaving revise that item;
-  they never file a second one. A queue that grows an entry per stuck row is
+  and how long it has been quiet. Tasks joining or leaving revise that item;
+  they never file a second one. A queue that grows an entry per stuck task is
   the wake's own failure mode wearing a different hat.
-- **A row waiting on a person with its ask filed is never in it.** Such a row
+- **A task waiting on a person with its ask filed is never in it.** Such a task
   is `waiting`, not a finding (rebuild step 2), so it is not on the lists this
-  module reads. The item is about rows nobody has asked anybody about.
+  module reads. The item is about tasks nobody has asked anybody about.
 
 What is gone with the trigger, and why it could go:
 
@@ -383,16 +383,16 @@ What is gone with the trigger, and why it could go:
   the old trigger's memory and nothing else read them. The stamp file still
   parses older copies and ignores those maps.
 - **The anchor mask.** A review item has to hang on a ticket, and an open item
-  used to make that row `blocked-on-owner` — invisible to the gate for as
+  used to make that task `blocked-on-owner` — invisible to the gate for as
   long as the item stood, so the module needed a private re-read of the
   anchor's ticket to know whether it was still stuck. The wiring now skips the
   board's own items (by the actor name, the one mark an item keeps of who
-  wrote it) when it reads a row's asks, and skips the row's `updatedAt` when
+  wrote it) when it reads a task's asks, and skips the task's `updatedAt` when
   the last thing to bump it was the board's own filing, revision or
   withdrawal. The anchor stays `stalled` or `unfiled` on every tick and the
   verdict keeps naming it. Measured before this: an item's own write read as
-  the row moving, the row left the findings, the item was withdrawn as *"the
-  rows it named are no longer stuck"*, and a window later it was filed again.
+  the task moving, the task left the findings, the item was withdrawn as *"the
+  tasks it named are no longer stuck"*, and a window later it was filed again.
 - **The settle window and the re-file cooldown.** Both guarded against a
   trigger that flickered — a note resetting a quiet clock, an anchor leaving
   the findings because of the item itself. "Alive" does not flicker: the item
@@ -411,11 +411,11 @@ What stays:
   the identity `park-migration.ts` and `artifact-check.ts` already use. No
   session decided this and no person did.
 - **When the anchor stops holding, the item MOVES.** `taskReviewItems` skips a
-  done ticket's rows, so an item left on a done or archived anchor would be
+  done ticket's items, so an item left on a done or archived anchor would be
   open forever and visible to nobody. It is withdrawn and re-filed on the
-  worst row that still qualifies, in the same tick.
+  worst task that still qualifies, in the same tick.
 - **Answered means heard.** An item the reader answered or withdrew is not
-  re-filed for rows it already named during the same dead stretch; a row it
+  re-filed for tasks it already named during the same dead stretch; a task it
   did not name files afresh. A retired board withdraws unconditionally.
 - **The verdict counts it.** `escalated` in the keep-moving verdict is the
   number of items the board filed to the reader in the last day; the target
@@ -429,7 +429,7 @@ What stays:
 ## Field results (first night, 2026-08-28)
 
 9 wakes across 4 boards. The stall class worked (a board woken for 2
-genuinely stalled rows; next frame showed them cleared). The unfiled class
+genuinely stalled tasks; next frame showed them cleared). The unfiled class
 caught 2 real protocol violations (asks done-but-unfiled; both filed, both
 answered same night) — and also exposed the shrink-loop and the missing
 grace window that #411 fixed.
@@ -438,7 +438,7 @@ grace window that #411 fixed.
 
 | Env (server launch) | Default | Meaning |
 |---|---|---|
-| `CW_STALL_NUDGE_MINUTES` | 20 | quiet time before a row is a finding |
+| `CW_STALL_NUDGE_MINUTES` | 20 | quiet time before a task is a finding |
 | `CW_STALL_REPEAT_HOURS` | 4 | how often an unchanged bad board is re-said |
 | `CW_HELD_ITEM_MINUTES` | 5 | how long a held review item may stand before its filer is told; the lead hears at the quiet window (`CW_STALL_NUDGE_MINUTES`) |
 | `CW_STALL_ESCALATE_MINUTES` | 60 | how long a board must be without any live session — no stream, no heartbeat, no agent write — before it files past its lead: to Team Lead first, the reader only if Team Lead is unreachable too |
@@ -454,13 +454,13 @@ the default rather than firing every tick (`positiveEnvDuration` in
 the two nudgers, the lead-presence monitor and the comment-queue bridge —
 `createServer` composes it and arms the nudgers, it derives none of it) ·
 `packages/server/src/stall-gate.ts` (classification) ·
-`packages/server/src/stall-nudge.ts` (stamps, told rows, wakes, logging) ·
+`packages/server/src/stall-nudge.ts` (stamps, told tasks, wakes, logging) ·
 `packages/server/src/stall-escalation.ts` (a dead board's frame to Team Lead,
 the review item filed when Team Lead is unreachable, and its sidecar
 `stall-escalations.json`) ·
 `packages/server/src/review-judge.ts` (the Haiku judge; prompt in
 `packages/core/src/review-judge-prompt.ts`) ·
-`packages/server/src/keep-moving.ts` (shared row classifier — the report
+`packages/server/src/keep-moving.ts` (shared task classifier — the report
 counts unfiled asks with NO age gate on purpose; only the wake path has
 the grace) · `packages/mcp/src/nudge-line.ts` (frame rendering) ·
 protocol: `docs/product/plans/g2-keep-moving-plan.md`.

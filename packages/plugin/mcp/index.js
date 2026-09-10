@@ -13781,7 +13781,7 @@ function claimWarning(row, selfAgentId, now) {
     return;
   const seen = `last seen ${humanDuration(Math.max(0, now - holder.lastToolCallAt))} ago`;
   const held = claim ? `is already IN PROGRESS under session ${holder.agentId} (${seen}, claimed ${humanDuration(Math.max(0, now - claim.at))} ago)` : `is owned by session ${holder.agentId}, which is live (${seen})`;
-  return `[claim] ${namedRow(row)} ${held}. Do not start this row blind — message that session over claude-hive, agree who has it, and take a different row if they do. Nothing here refuses you: two sessions on one row is sometimes right, but it has to be a decision rather than a collision neither side can see.`;
+  return `[claim] ${namedRow(row)} ${held}. Do not start this task blind — message that session over claude-hive, agree who has it, and take a different task if they do. Nothing here refuses you: two sessions on one task is sometimes right, but it has to be a decision rather than a collision neither side can see.`;
 }
 
 // packages/mcp/src/attachments.ts
@@ -14046,7 +14046,7 @@ function reasonsClause(p) {
 function denominatorClause(p) {
   if (p.consideredCount === undefined)
     return "";
-  const parts = [`${p.consideredCount} open ${p.consideredCount === 1 ? "row" : "rows"} checked`];
+  const parts = [`${p.consideredCount} open ${p.consideredCount === 1 ? "task" : "tasks"} checked`];
   const held = Object.entries(p.held ?? {}).filter(([, n]) => typeof n === "number" && n > 0).sort(([a], [b]) => a.localeCompare(b)).map(([reason, n]) => `${n} ${reason}${reason === "parallelism-cap" ? capClause(p.parallelismCap, p.ts, "ready") : ""}`);
   if (held.length > 0)
     parts.push(`held: ${held.join(", ")}`);
@@ -14061,7 +14061,7 @@ function readyIdleLine(p) {
   const unread = undeterminedCount(p);
   if (count === 0 && unread > 0) {
     const of = p.consideredCount === undefined ? `${unread}` : `${unread} of ${p.consideredCount}`;
-    return `[workspace.ready_idle] nothing is ready to hand over, and this pass could not establish that the board is quiet: ${of} open row(s) could not be evaluated (${reasonsClause(p)}). Read them with list_tasks before treating this board as clear.`;
+    return `[workspace.ready_idle] nothing is ready to hand over, and this pass could not establish that the board is quiet: ${of} open task(s) could not be evaluated (${reasonsClause(p)}). Read them with list_tasks before treating this board as clear.`;
   }
   const one = count === 1;
   const subject = count === undefined ? "ready work has" : `${count} ${one ? "task has" : "tasks have"}`;
@@ -14080,7 +14080,7 @@ function reviewAnsweredLine(p) {
 }
 var STALL_ROWS_SHOWN = 5;
 function stalledRowClause(row) {
-  const named = row.title ? `"${truncate3(row.title, 50)}" (${row.id})` : row.id ?? "a row";
+  const named = row.title ? `"${truncate3(row.title, 50)}" (${row.id})` : row.id ?? "a task";
   return row.quietMs === undefined ? named : `${named} quiet ${humanDuration2(row.quietMs)}`;
 }
 function stalledRowsClause(rows) {
@@ -14103,9 +14103,9 @@ function changedClause(changed) {
     bits.push(`${held.length} review item(s) newly held`);
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0)
-    bits.push(`${ungated.length} row built past the UI gate`);
+    bits.push(`${ungated.length} task built past the UI gate`);
   if (changed.escalated === true)
-    bits.push("the board’s quietest row crossed another repeat window");
+    bits.push("the board’s quietest task crossed another repeat window");
   if (bits.length === 0)
     return "";
   return `NEW since the last wake: ${bits.join("; ")}.`;
@@ -14115,7 +14115,7 @@ function stalledLine(p) {
   const rows = p.rows ?? [];
   const count = p.stalledCount ?? rows.length;
   const beyond = p.beyondCapacity !== undefined && p.beyondCapacity > 0 ? `; ${p.beyondCapacity} beyond the parallelism cap${capClause(p.parallelismCap, p.ts, "stall")} and not judged` : "";
-  const denominator = p.consideredCount === undefined ? "" : ` (of ${p.consideredCount} open row(s) checked${beyond})`;
+  const denominator = p.consideredCount === undefined ? "" : ` (of ${p.consideredCount} open task(s) checked${beyond})`;
   if (count > 0) {
     const subject = count === 1 ? "1 task has" : `${count} tasks have`;
     const list = rows.length > 0 ? ` — ${stalledRowsClause(rows)}` : "";
@@ -14123,13 +14123,13 @@ function stalledLine(p) {
   }
   const unfiled = p.unfiled ?? [];
   if (unfiled.length > 0) {
-    const noun = unfiled.length === 1 ? "row is" : "rows are";
+    const noun = unfiled.length === 1 ? "task is" : "tasks are";
     parts.push(`${unfiled.length} ${noun} waiting on a person with NO question filed — ` + `${stalledRowsClause(unfiled)}. File the ask where they will see it, or the wait is invisible.`);
   }
   const unread = p.undetermined?.count ?? p.undetermined?.reasons?.length ?? 0;
   if (unread > 0) {
     const reasons = p.undetermined?.reasons ?? [];
-    parts.push(`${unread} open row(s) could NOT be evaluated (${reasons.length > 0 ? reasons.join(", ") : "reason not reported"}) and are not counted healthy. Read them with list_tasks before treating this board as fine.`);
+    parts.push(`${unread} open task(s) could NOT be evaluated (${reasons.length > 0 ? reasons.join(", ") : "reason not reported"}) and are not counted healthy. Read them with list_tasks before treating this board as fine.`);
   }
   const held = p.heldItems ?? [];
   if (held.length > 0) {
@@ -14138,13 +14138,13 @@ function stalledLine(p) {
   }
   const ungated = p.ungatedUi ?? [];
   if (ungated.length > 0) {
-    const noun = ungated.length === 1 ? "UI row is" : "UI rows are";
+    const noun = ungated.length === 1 ? "UI task is" : "UI tasks are";
     parts.push(`${ungated.length} ${noun} being built past the review gate — an agent filed it, it reads as ` + `UI work, and nobody answered a review item on it — ${ungatedRowsClause(ungated)}. ` + "Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.");
   }
   const changed = changedClause(p.changed);
   if (changed)
     parts.unshift(changed);
-  const body = parts.join(" ") || "the board reported a stall with no rows on it — treat this as a bug in the wake, not as a clear board.";
+  const body = parts.join(" ") || "the board reported a stall with no tasks on it — treat this as a bug in the wake, not as a clear board.";
   if (p.escalatedFrom !== undefined && p.escalatedFrom !== "") {
     return `[workspace.stalled] You are not this board's lead — ${p.escalatedFrom} holds the seat and ` + "is not reachable, so this came to you instead. Nothing addressed to that seat is arriving: " + "take it (attach_agent) or hand it to a session that is here. Then, on the board itself: " + body;
   }
@@ -14191,12 +14191,12 @@ function reviewItemHeldLine(p) {
 // packages/mcp/src/scheduled-line.ts
 var quoted = (title, id) => title ? `"${title}" (${id ?? "?"})` : id ?? "a scheduled run";
 function scheduledRunLine(p) {
-  const nth = p.attempt !== undefined && p.attempt > 1 ? ` This is wake ${p.attempt}${p.attempts !== undefined ? ` of ${p.attempts}` : ""}; the board files a review item on the row after the last.` : "";
+  const nth = p.attempt !== undefined && p.attempt > 1 ? ` This is wake ${p.attempt}${p.attempts !== undefined ? ` of ${p.attempts}` : ""}; the board files a review item on the task after the last.` : "";
   return `[task.scheduled_run] ${quoted(p.title, p.taskId)} is due — the board filed it from rule ${p.ruleId ?? "?"} and it is yours. Take it with task_transition(${p.taskId ?? "<taskId>"}, "in-progress"), do the work, and close it done.${nth}`;
 }
 function spawnRequestedLine(p) {
   const who = p.agentName ?? p.agentId ?? "its owner";
-  return `[task.spawn_requested] ${who} is not attached to board ${p.workspaceId ?? "?"}, and its scheduled run ${quoted(p.title, p.taskId)} is waiting. Spawn a session for ${who} to run that one row, and spin it down when the row closes. The board asks once per run; if nobody answers it files a review item on the row instead.`;
+  return `[task.spawn_requested] ${who} is not attached to board ${p.workspaceId ?? "?"}, and its scheduled run ${quoted(p.title, p.taskId)} is waiting. Spawn a session for ${who} to run that one task, and spin it down when the task closes. The board asks once per run; if nobody answers it files a review item on the task instead.`;
 }
 
 // packages/mcp/src/self-authored.ts
@@ -15084,7 +15084,7 @@ var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
 // packages/mcp/src/tool-schemas.ts
 var REVIEW_ITEM_SCHEMA = {
   type: "object",
-  description: "Declares this a Review Item, putting it on the reviewer's Home queue once it passes the board's quality gate. Omit it for ordinary comments — status notes and closing remarks are not review items. headline is the row title; missing or multi-line is refused, over-long files anyway with advice. Everything else goes in detail, in whatever shape the ask wants to read.",
+  description: "Declares this a Review Item, putting it on the reviewer's Home queue once it passes the board's quality gate. Omit it for ordinary comments — status notes and closing remarks are not review items. headline is the item title; missing or multi-line is refused, over-long files anyway with advice. Everything else goes in detail, in whatever shape the ask wants to read.",
   properties: {
     review_type: {
       type: "string",
@@ -15134,7 +15134,7 @@ var TASK_REVIEW_ITEM_SCHEMA = {
 };
 var NEW_TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
-  description: "A question about the work this row creates — for when you are filing the work and the question together. If the question came up while working a task that already exists, hang it there with add_review_item instead, so the ask keeps the context of the work that raised it. The ticket title names the work; headline names the ask."
+  description: "A question about the work this task creates — for when you are filing the work and the question together. If the question came up while working a task that already exists, hang it there with add_review_item instead, so the ask keeps the context of the work that raised it. The ticket title names the work; headline names the ask."
 };
 var TOOL_LIST = {
   tools: [
@@ -15260,12 +15260,12 @@ var TOOL_LIST = {
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD the row is on — every note is addressed under one. With taskId it goes to /workspaces/<workspaceId>/tasks/<taskId>/notes; without, to your own notes on that board, where the server pins it to your current claim there. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board."
+            description: "The BOARD the task is on — every note is addressed under one. With taskId it goes to /workspaces/<workspaceId>/tasks/<taskId>/notes; without, to your own notes on that board, where the server pins it to your current claim there. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board."
           },
           text: { type: "string" },
           taskId: {
             type: "string",
-            description: "The row to report on. Omit it and the note lands on your current in-progress task; with none, it is kept on your own recent-activity list only."
+            description: "The task to report on. Omit it and the note lands on your current in-progress task; with none, it is kept on your own recent-activity list only."
           }
         },
         required: ["text"]
@@ -15627,7 +15627,7 @@ var TOOL_LIST = {
     },
     {
       name: "unarchive_attachment_set",
-      description: "Bring an archived attachment set back: every member returns with its threads, its file bindings and its board rows intact. This is what makes archive_attachment_set safe to call. restore-collision means a docId was re-minted while it was away and nothing moved.",
+      description: "Bring an archived attachment set back: every member returns with its threads, its file bindings and its board entries intact. This is what makes archive_attachment_set safe to call. restore-collision means a docId was re-minted while it was away and nothing moved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15661,7 +15661,7 @@ var TOOL_LIST = {
     },
     {
       name: "unarchive_doc",
-      description: "Bring an archived doc back with its threads, file binding and board rows intact. This is what makes archive_doc safe to call.",
+      description: "Bring an archived doc back with its threads, file binding and its board entry intact. This is what makes archive_doc safe to call.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16337,32 +16337,32 @@ var TOOL_LIST = {
     },
     {
       name: "create_tasks",
-      description: "File work on a board. Always takes a list; one task is a one-row list, so this is the only create verb. Per row: omit assignee and you own it, omit goal and it lands unplaced at the bottom of Backlog. Rows you file land in triage — on the board, but not in anyone's queue until somebody moves them out with task_transition. A bad row never rejects the batch; it comes back in failures by index. Anything on a row that will reach the reader's queue passes the board's quality gate — a `review` payload, and the row's own question when it is `needs: 'decision'`. A row that comes back `held: true` is filed but OFF that queue until you close the gap in `heldReason`; the result carries the exact revise_review_item(…) call that lifts it, and every revision is judged again.",
+      description: "File work on a board. Always takes a list; one task is a one-item list, so this is the only create verb. Per task: omit assignee and you own it, omit goal and it lands unplaced at the bottom of Backlog. Tasks you file land in triage — on the board, but not in anyone's queue until somebody moves them out with task_transition. A bad task never rejects the batch; it comes back in failures by index. Anything on a task that will reach the reader's queue passes the board's quality gate — a `review` payload, and the task's own question when it is `needs: 'decision'`. A task that comes back `held: true` is filed but OFF that queue until you close the gap in `heldReason`; the result carries the exact revise_review_item(…) call that lifts it, and every revision is judged again.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string" },
           tasks: {
             type: "array",
-            description: 'The rows, at most 100 — an oversized batch is refused whole; a tracker that big belongs in import_tasks_markdown. `title` is the only required field. `key` labels a row so a later row in the same batch can reference it: unique in the batch, not all digits, no leading "#". Rows are created in order, so a row can only depend on one above it; a forward reference is refused.',
+            description: 'The tasks, at most 100 — an oversized batch is refused whole; a tracker that big belongs in import_tasks_markdown. `title` is the only required field. `key` labels a task so a later task in the same batch can reference it: unique in the batch, not all digits, no leading "#". Tasks are created in order, so a task can only depend on one above it; a forward reference is refused.',
             items: {
               type: "object",
               properties: {
                 title: {
                   type: "string",
-                  description: "One line naming the work, in the form `<persona> can <do x> so that <goal y>` — one persona (Agent, Bryan, Collaborator), 20 words or less. A title that states an observation rather than an outcome gives a column of rows nothing to prioritise by. Never refused; the lead's shape review is where a rough one gets rewritten."
+                  description: "One line naming the work, in the form `<persona> can <do x> so that <goal y>` — one persona (Agent, Bryan, Collaborator), 20 words or less. A title that states an observation rather than an outcome gives a column of tasks nothing to prioritise by. Never refused; the lead's shape review is where a rough one gets rewritten."
                 },
                 body: {
                   type: "string",
-                  description: "What the row is for, as a compact user story — `<persona> can <do x> so that <goal y>`, one persona (Agent, Bryan, Collaborator) — plus \"done when\" criteria for anything you hand over or park. Markdown; it comes back whole from next_tasks. On a `needs:'decision'` row this is required and must contain the actual question, the stakes, and what each option costs; a body with no question in it is refused."
+                  description: "What the task is for, as a compact user story — `<persona> can <do x> so that <goal y>`, one persona (Agent, Bryan, Collaborator) — plus \"done when\" criteria for anything you hand over or park. Markdown; it comes back whole from next_tasks. On a `needs:'decision'` task this is required and must contain the actual question, the stakes, and what each option costs; a body with no question in it is refused."
                 },
                 key: {
                   type: "string",
-                  description: 'An optional label THIS batch uses to reference the row from a later row\'s `after` / `afterEnforce`. Unique within the batch; not all digits; must not start with "#". Means nothing outside this call.'
+                  description: 'An optional label THIS batch uses to reference the task from a later task\'s `after` / `afterEnforce`. Unique within the batch; not all digits; must not start with "#". Means nothing outside this call.'
                 },
                 assignee: {
                   type: "string",
-                  description: "Who owns this row: 'human', or a named person or agent. Omit it and you own it. The bare word 'agent' is refused — it names a category rather than somebody; that refusal means your session was launched without CW_AGENT_NAME."
+                  description: "Who owns this task: 'human', or a named person or agent. Omit it and you own it. The bare word 'agent' is refused — it names a category rather than somebody; that refusal means your session was launched without CW_AGENT_NAME."
                 },
                 assigneeKind: {
                   type: "string",
@@ -16376,24 +16376,24 @@ var TOOL_LIST = {
                 },
                 options: {
                   type: "array",
-                  description: "Candidate answers for this row's one decision: [{label, detail?}]. `label` is recorded verbatim as the answer if picked; `detail` is what picking it costs. Two or more. They are a shortcut, not a closed set — writing a different answer stays available, so do not pad the list.",
+                  description: "Candidate answers for this task's one decision: [{label, detail?}]. `label` is recorded verbatim as the answer if picked; `detail` is what picking it costs. Two or more. They are a shortcut, not a closed set — writing a different answer stays available, so do not pad the list.",
                   items: { type: "object" }
                 },
                 review: NEW_TASK_REVIEW_ITEM_SCHEMA,
                 goal: {
                   type: "string",
-                  description: 'Goal id, or "chores". OMIT to leave this row UNPLACED at the bottom of Backlog for the lead to place. An explicit goal — even "chores" — is a placement.'
+                  description: 'Goal id, or "chores". OMIT to leave this task UNPLACED at the bottom of Backlog for the lead to place. An explicit goal — even "chores" — is a placement.'
                 },
                 order: { type: "number", description: "Fractional position within the goal." },
                 after: {
                   type: "array",
                   items: { type: "string" },
-                  description: 'What this row waits on ("don\'t start yet" is a dependency, not a status). An existing task id, or a row of THIS batch by index (`0`) or by another row\'s `key` (`"#seed"`).'
+                  description: 'What this task waits on ("don\'t start yet" is a dependency, not a status). An existing task id, or a task of THIS batch by index (`0`) or by another task\'s `key` (`"#seed"`).'
                 },
                 afterEnforce: {
                   type: "array",
                   items: { type: "string" },
-                  description: "Subset of `after` that hard-blocks transitions while open. Every entry must also appear in `after`, or the row is refused rather than silently widening the gate."
+                  description: "Subset of `after` that hard-blocks transitions while open. Every entry must also appear in `after`, or the task is refused rather than silently widening the gate."
                 },
                 dueAt: {
                   type: "number",
@@ -16401,7 +16401,7 @@ var TOOL_LIST = {
                 },
                 links: {
                   type: "array",
-                  description: "Refs this task mentions: {kind:'doc',docId} | {kind:'thread',docId,threadId} | {kind:'task',taskId} | {kind:'diff',workspaceId} | {kind:'url',url}. Use `url` for anything outside this server; http(s) only. A malformed ref is dropped into `ignoredLinks` rather than failing the row.",
+                  description: "Refs this task mentions: {kind:'doc',docId} | {kind:'thread',docId,threadId} | {kind:'task',taskId} | {kind:'diff',workspaceId} | {kind:'url',url}. Use `url` for anything outside this server; http(s) only. A malformed ref is dropped into `ignoredLinks` rather than failing the task.",
                   items: { type: "object" }
                 },
                 quote: {
@@ -16415,7 +16415,7 @@ var TOOL_LIST = {
           },
           sourceDoc: {
             type: "object",
-            description: "The doc these rows were derived from — set it whenever you are filing tasks out of a doc, and every row gets a structured origin ref back to it (no separate link call). `mode` says what kind of doc: 'plan' (the default for an ordinary doc) files the rows as DRAFTS — visible on the board, in no dispatch read, held in triage until a person approves the plan on the doc page, which releases them; 'discussion' (the default for a meeting notes doc) files them live immediately. A later edit to the doc flags still-open derived rows as possibly stale.",
+            description: "The doc these tasks were derived from — set it whenever you are filing tasks out of a doc, and every task gets a structured origin ref back to it (no separate link call). `mode` says what kind of doc: 'plan' (the default for an ordinary doc) files the tasks as DRAFTS — visible on the board, in no dispatch read, held in triage until a person approves the plan on the doc page, which releases them; 'discussion' (the default for a meeting notes doc) files them live immediately. A later edit to the doc flags still-open derived tasks as possibly stale.",
             properties: {
               docId: { type: "string" },
               mode: { type: "string", enum: ["plan", "discussion"] }
@@ -16442,7 +16442,7 @@ var TOOL_LIST = {
           body: { type: "string", description: "Override the drafted body." },
           assignee: {
             type: "string",
-            description: "Who owns it. Omit and you do — same rule as a create_tasks row's assignee."
+            description: "Who owns it. Omit and you do — same rule as a create_tasks entry's assignee."
           },
           assigneeKind: {
             type: "string",
@@ -16478,7 +16478,7 @@ var TOOL_LIST = {
     },
     {
       name: "get_workspace",
-      description: "Read a board's goals in priority order, with per-goal task counts, plus the parallelism cap — its value, slots in use and free, and who last moved it and when. First row is the highest band. Call it before deciding what to work on — list_tasks returns goal ids only, so without this the ordering is invisible. Cheap by design: pair it with next_tasks, which carries the tasks themselves.",
+      description: "Read a board's goals in priority order, with per-goal task counts, plus the parallelism cap — its value, slots in use and free, and who last moved it and when. First goal is the highest band. Call it before deciding what to work on — list_tasks returns goal ids only, so without this the ordering is invisible. Cheap by design: pair it with next_tasks, which carries the tasks themselves.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16509,7 +16509,7 @@ var TOOL_LIST = {
     },
     {
       name: "next_tasks",
-      description: 'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not the top row. Each row carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any row whose claimedBy is an active session that is not you. Triage rows are never returned; read those with list_tasks(status:"triage"). The todo rows on offer are TRIMMED to the board\'s free parallelism slots, so a short list is usually the cap rather than an empty band — `capacity` names the cap, the slots in use, and how many ready rows were held back. list_tasks(status:"todo") shows every one of them.',
+      description: 'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not just the first task. Each task carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any task whose claimedBy is an active session that is not you. Triage tasks are never returned; read those with list_tasks(status:"triage"). The todo tasks on offer are TRIMMED to the board\'s free parallelism slots, so a short list is usually the cap rather than an empty band — `capacity` names the cap, the slots in use, and how many ready tasks were held back. list_tasks(status:"todo") shows every one of them.',
       inputSchema: {
         type: "object",
         properties: {
@@ -16522,7 +16522,7 @@ var TOOL_LIST = {
           },
           includeArchived: {
             type: "boolean",
-            description: "Include soft-deleted rows. Default false, and leave it false here: an archived task is one somebody decided is not going to happen, so it is not work to pick up. Use `list_tasks` with this flag to FIND archived rows."
+            description: "Include soft-deleted tasks. Default false, and leave it false here: an archived task is one somebody decided is not going to happen, so it is not work to pick up. Use `list_tasks` with this flag to FIND archived tasks."
           }
         },
         required: ["workspaceId"]
@@ -16530,7 +16530,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_tasks",
-      description: "List a board's tasks, filtered by goal / status / assignee / needs. Rows are trimmed — no body, no transition history. Pass fields to narrow further; the default rows run large on a big board. Archived rows need includeArchived: true.",
+      description: "List a board's tasks, filtered by goal / status / assignee / needs. Tasks come back trimmed — no body, no transition history. Pass fields to narrow further; the default shape runs large on a big board. Archived tasks need includeArchived: true.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16539,18 +16539,18 @@ var TOOL_LIST = {
           status: {
             type: "string",
             enum: [...TASK_STATUSES],
-            description: 'status:"triage" is the sweep for rows an agent filed that nobody has vetted. next_tasks never returns them, so this filter is the only way to enumerate what is waiting on a look.'
+            description: 'status:"triage" is the sweep for tasks an agent filed that nobody has vetted. next_tasks never returns them, so this filter is the only way to enumerate what is waiting on a look.'
           },
           assignee: { type: "string" },
           needs: { type: "string", enum: ["action", "decision"] },
           fields: {
             type: "array",
             items: { type: "string" },
-            description: "Project each row to just these keys (`id` always included). Use it for board-wide sweeps so heavy per-row fields — reviews, infoRequests, options — don't overflow the result: fields:['title','status','assignee'] answers most triage questions in a few KB."
+            description: "Project each task to just these keys (`id` always included). Use it for board-wide sweeps so heavy per-task fields — reviews, infoRequests, options — don't overflow the result: fields:['title','status','assignee'] answers most triage questions in a few KB."
           },
           includeArchived: {
             type: "boolean",
-            description: 'Include soft-deleted rows, which are hidden by default. Each comes back carrying `archivedAt`, `archivedBy` and `archiveReason`, so this is the read behind "what did we archive, and why". `unarchive_task` puts one back.'
+            description: 'Include soft-deleted tasks, which are hidden by default. Each comes back carrying `archivedAt`, `archivedBy` and `archiveReason`, so this is the read behind "what did we archive, and why". `unarchive_task` puts one back.'
           }
         },
         required: ["workspaceId"]
@@ -16558,7 +16558,7 @@ var TOOL_LIST = {
     },
     {
       name: "task_transition",
-      description: "The single gate for status changes (triage | todo | in-progress | done), attributed to you on the task's trail. It is also the only way to clear a triage row. Takes a GOAL id as `taskId` too: a goal in triage is a band nobody has agreed to — every row under it is held out of next_tasks and the ready nudge, and the stall check does not judge them — so moving a goal to `todo` releases its band and moving it to `triage` holds it again. Say what you did in `note` — the commit, the PR, what you verified — because the note is the whole of what the trail keeps. Re-sending the same status refuses; there is nothing to change.",
+      description: "The single gate for status changes (triage | todo | in-progress | done), attributed to you on the task's trail. It is also the only way to clear a triage task. Takes a GOAL id as `taskId` too: a goal in triage is a band nobody has agreed to — every task under it is held out of next_tasks and the ready nudge, and the stall check does not judge them — so moving a goal to `todo` releases its band and moving it to `triage` holds it again. Say what you did in `note` — the commit, the PR, what you verified — because the note is the whole of what the trail keeps. Re-sending the same status refuses; there is nothing to change.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16606,7 +16606,7 @@ var TOOL_LIST = {
     },
     {
       name: "block_task",
-      description: 'Say what a task is waiting for: name the ticket or tickets that have to close first. The row reads as Blocked on the board from that moment — the edge IS the state, there is no status to set — it leaves next_tasks and the stall check, and it comes free by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. A todo row and an in-progress row both read as Blocked; blocking one you are already working on is legitimate and says so on the board rather than silently dropping it from the queue. Adds to whatever the row already waits on; remove an edge with set_task_dependencies. This replaces park_task: "not now" belongs to whatever the work is waiting for, and triage is for rows nobody has vetted yet. A row waiting on a PERSON is not blocked — leave it in-progress and file the ask with add_review_item.',
+      description: 'Say what a task is waiting for: name the ticket or tickets that have to close first. The task reads as Blocked on the board from that moment — the edge IS the state, there is no status to set — it leaves next_tasks and the stall check, and it comes free by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. A todo task and an in-progress task both read as Blocked; blocking one you are already working on is legitimate and says so on the board rather than silently dropping it from the queue. Adds to whatever the task already waits on; remove an edge with set_task_dependencies. This replaces park_task: "not now" belongs to whatever the work is waiting for, and triage is for tasks nobody has vetted yet. A task waiting on a PERSON is not blocked — leave it in-progress and file the ask with add_review_item.',
       inputSchema: {
         type: "object",
         properties: {
@@ -16616,7 +16616,7 @@ var TOOL_LIST = {
           },
           taskId: { type: "string" },
           blockedBy: {
-            description: "The task id, or ids, this row waits on. Each must be a task on the same board; an unknown id is refused rather than recorded, because a dangling edge blocks nothing and says it does.",
+            description: "The task id, or ids, this task waits on. Each must be a task on the same board; an unknown id is refused rather than recorded, because a dangling edge blocks nothing and says it does.",
             oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }]
           }
         },
@@ -16625,7 +16625,7 @@ var TOOL_LIST = {
     },
     {
       name: "archive_task",
-      description: "Take a task off the board without destroying it — the soft delete, and the only removal a task has. Reach for it freely for a duplicate, a row the goal moved past, or a capture that turned out not to be work. It writes three fields and nothing else, so unarchive_task is a field clear rather than a restore. Archiving is not completing — if the work happened, use done. Write a reason.",
+      description: "Take a task off the board without destroying it — the soft delete, and the only removal a task has. Reach for it freely for a duplicate, a task the goal moved past, or a capture that turned out not to be work. It writes three fields and nothing else, so unarchive_task is a field clear rather than a restore. Archiving is not completing — if the work happened, use done. Write a reason.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16636,7 +16636,7 @@ var TOOL_LIST = {
           taskId: { type: "string" },
           reason: {
             type: "string",
-            description: 'Why, in one line — e.g. "duplicate of the index row" or "the goal moved past this". Capped at 200 characters. Optional, and the row is archived either way; it is the half a later reader acts on.'
+            description: 'Why, in one line — e.g. "duplicate of the index task" or "the goal moved past this". Capped at 200 characters. Optional, and the task is archived either way; it is the half a later reader acts on.'
           }
         },
         required: ["workspaceId", "taskId"]
@@ -16644,7 +16644,7 @@ var TOOL_LIST = {
     },
     {
       name: "unarchive_task",
-      description: "Put an archived task back — it rejoins its band at the position, status and owner it always had. Find archived rows with list_tasks(includeArchived: true). A row that was not archived answers changed: false rather than erroring.",
+      description: "Put an archived task back — it rejoins its band at the position, status and owner it always had. Find archived tasks with list_tasks(includeArchived: true). A task that was not archived answers changed: false rather than erroring.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16659,7 +16659,7 @@ var TOOL_LIST = {
     },
     {
       name: "rewrite_task",
-      description: "Rewrite a task's title, body, or both, with a reason that rides the audit trail. Body is a whole-body replace — send the full markdown. The row's original words are preserved to quote automatically, so a rewrite is never the only record of what was said. When the words are a person's deliberate phrasing, ask on the task instead of replacing them.",
+      description: "Rewrite a task's title, body, or both, with a reason that rides the audit trail. Body is a whole-body replace — send the full markdown. The task's original words are preserved to quote automatically, so a rewrite is never the only record of what was said. When the words are a person's deliberate phrasing, ask on the task instead of replacing them.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16678,7 +16678,7 @@ var TOOL_LIST = {
           },
           reason: {
             type: "string",
-            description: 'Why you are rewriting, in one line — e.g. "title named the artifact, not the outcome". Recorded on the audit row and rendered in the activity feed, so the filer can see what the rewrite was for.'
+            description: 'Why you are rewriting, in one line — e.g. "title named the artifact, not the outcome". Recorded on the audit entry and rendered in the activity feed, so the filer can see what the rewrite was for.'
           }
         },
         required: ["workspaceId", "taskId", "reason"]
@@ -16686,7 +16686,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_task_goal",
-      description: "Place a task under a goal at an exact position — pick the spot, not just the bucket. position is fractional, so there is always room between two rows; omit it for the bottom of the band. Every move is recorded, so regroup freely. When your move crosses a placement a person made, say why in a comment on the task.",
+      description: "Place a task under a goal at an exact position — pick the spot, not just the bucket. position is fractional, so there is always room between two tasks; omit it for the bottom of the band. Every move is recorded, so regroup freely. When your move crosses a placement a person made, say why in a comment on the task.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16758,7 +16758,7 @@ var TOOL_LIST = {
     },
     {
       name: "reorder_goals",
-      description: "Change the priority order of a board's goals — order is priority. Permutation only: order must be exactly the ids the board already holds, so nothing can be created, renamed or lost. Take the ids from get_workspace and send every row whose reorderable is true. Use set_goal_list only when you actually mean to add or remove a band.",
+      description: "Change the priority order of a board's goals — order is priority. Permutation only: order must be exactly the ids the board already holds, so nothing can be created, renamed or lost. Take the ids from get_workspace and send every goal whose reorderable is true. Use set_goal_list only when you actually mean to add or remove a band.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16766,7 +16766,7 @@ var TOOL_LIST = {
           order: {
             type: "array",
             items: { type: "string" },
-            description: "EVERY reorderable goal id, in the new priority order, highest first. Leaving one out is an error, not a demotion; including a non-reorderable row (Backlog) is an error too."
+            description: "EVERY reorderable goal id, in the new priority order, highest first. Leaving one out is an error, not a demotion; including a non-reorderable goal (Backlog) is an error too."
           }
         },
         required: ["workspaceId", "order"]
@@ -16774,7 +16774,7 @@ var TOOL_LIST = {
     },
     {
       name: "add_review_item",
-      description: "Hang a question on a ticket that already exists — the verb for a question that came up while working it, so the ask stays attached to the work that raised it. A ticket carries several at once, each answered on its own, so the title keeps naming the work and a second question needs no second ticket. When you are filing the work and the question together, use review on a create_tasks row instead. Every item passes a quality gate (the board’s criteria, see set_review_item_criteria): a result with `held: true` means it is on the ticket but OFF the reader’s queue — fix the gap in `heldReason` with revise_review_item, which judges it again.",
+      description: "Hang a question on a ticket that already exists — the verb for a question that came up while working it, so the ask stays attached to the work that raised it. A ticket carries several at once, each answered on its own, so the title keeps naming the work and a second question needs no second ticket. When you are filing the work and the question together, use review on a create_tasks entry instead. Every item passes a quality gate (the board’s criteria, see set_review_item_criteria): a result with `held: true` means it is on the ticket but OFF the reader’s queue — fix the gap in `heldReason` with revise_review_item, which judges it again.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16834,7 +16834,7 @@ var TOOL_LIST = {
     },
     {
       name: "revise_review_item",
-      description: "Rewrite one of your review items in place — the answer to a question somebody asked ON it, or the fix for an item the quality gate HELD (`held: true` from add_review_item, or a workspace.review_item_held wake). Pass only the fields that change; the previous words are kept as history. Address the item wherever you raised it: on a TICKET, `taskId` + `reviewItemId` (the id rides with the question on the task's thread); for the TICKET'S OWN decision — a `needs: 'decision'` row, which has no item id because its words ARE the title, body and options — `taskId` alone, the shape answer_decision takes for the same row; on a DOC THREAD, `docId` + `threadId` + `commentId` — the review is a payload on one comment, and `commentId` is the `thread.comments[].id` that create_thread / post_reply already handed you when you raised it. Half a doc address is refused, not guessed. EVERY form re-judges every revision — a held item reaches the reader's queue when it passes, and a revision that still misses the mark comes back `held: true` with the gap named. The ticket form additionally returns an already-queued item marked Revised, with their question quoted and the changed span highlighted, and `reply` posts on the asking thread in the same call. Revising a ticket's own decision rewrites the row's words, so rewrite_task does the same job and is judged the same way. The doc form has no `reply`; it rewrites the item, judges it, and tells the thread's watchers.",
+      description: "Rewrite one of your review items in place — the answer to a question somebody asked ON it, or the fix for an item the quality gate HELD (`held: true` from add_review_item, or a workspace.review_item_held wake). Pass only the fields that change; the previous words are kept as history. Address the item wherever you raised it: on a TICKET, `taskId` + `reviewItemId` (the id rides with the question on the task's thread); for the TICKET'S OWN decision — a `needs: 'decision'` task, which has no item id because its words ARE the title, body and options — `taskId` alone, the shape answer_decision takes for the same task; on a DOC THREAD, `docId` + `threadId` + `commentId` — the review is a payload on one comment, and `commentId` is the `thread.comments[].id` that create_thread / post_reply already handed you when you raised it. Half a doc address is refused, not guessed. EVERY form re-judges every revision — a held item reaches the reader's queue when it passes, and a revision that still misses the mark comes back `held: true` with the gap named. The ticket form additionally returns an already-queued item marked Revised, with their question quoted and the changed span highlighted, and `reply` posts on the asking thread in the same call. Revising a ticket's own decision rewrites the task's words, so rewrite_task does the same job and is judged the same way. The doc form has no `reply`; it rewrites the item, judges it, and tells the thread's watchers.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16848,7 +16848,7 @@ var TOOL_LIST = {
           },
           reviewItemId: {
             type: "string",
-            description: "Which item to revise. Alone — no taskId — it addresses the item wherever it lives, a doc-thread item included. With taskId, one of the items filed on that ticket. Omit for the ticket's own decision — the question a `needs: 'decision'` row asks in its title and body, which carries no item id."
+            description: "Which item to revise. Alone — no taskId — it addresses the item wherever it lives, a doc-thread item included. With taskId, one of the items filed on that ticket. Omit for the ticket's own decision — the question a `needs: 'decision'` task asks in its title and body, which carries no item id."
           },
           docId: {
             type: "string",
@@ -16969,7 +16969,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_task_schedule",
-      description: "Set, replace or clear the rule that says WHEN a task's work starts — the row files one occurrence per firing and the scheduler wakes its owner (docs/architecture/scheduled-tasks.md). Five rule kinds: once {kind:'once', at: <epoch ms>}; every {kind:'every', everyMs: 86400000}; calendar {kind:'calendar', times:[{hour:6, minute:47}], weekdays:[1]} (0 = Sunday; omit weekdays for every day; timezone is an IANA zone, absent reads as UTC); after-completion {kind:'after-completion', delayMs: 3600000} (the delay runs from the last instance closing); on-change {kind:'on-change', source:{kind:'doc', docId} | {kind:'task', taskId}, debounceMs?}. rule: null clears. Re-arming an UNCHANGED rule keeps its run history, so the floor stays at the last occurrence — but a rule that has not fired yet has no last occurrence, and its floor moves to the new arm time (a slot between the old arm time and now is lost); a CHANGED rule always starts from the arm time. Either way check nextAt in the reply. on-change is the newest kind (2026-09) and the only one that is not a clock. The reply is the stored schedule read back plus nextAt, the next firing — check it says what you meant. A validation refusal is the server's own message. Read a schedule later with list_tasks fields:['schedule']; not a due date, which is when work should be finished.",
+      description: "Set, replace or clear the rule that says WHEN a task's work starts — the task files one occurrence per firing and the scheduler wakes its owner (docs/architecture/scheduled-tasks.md). Five rule kinds: once {kind:'once', at: <epoch ms>}; every {kind:'every', everyMs: 86400000}; calendar {kind:'calendar', times:[{hour:6, minute:47}], weekdays:[1]} (0 = Sunday; omit weekdays for every day; timezone is an IANA zone, absent reads as UTC); after-completion {kind:'after-completion', delayMs: 3600000} (the delay runs from the last instance closing); on-change {kind:'on-change', source:{kind:'doc', docId} | {kind:'task', taskId}, debounceMs?}. rule: null clears. Re-arming an UNCHANGED rule keeps its run history, so the floor stays at the last occurrence — but a rule that has not fired yet has no last occurrence, and its floor moves to the new arm time (a slot between the old arm time and now is lost); a CHANGED rule always starts from the arm time. Either way check nextAt in the reply. on-change is the newest kind (2026-09) and the only one that is not a clock. The reply is the stored schedule read back plus nextAt, the next firing — check it says what you meant. A validation refusal is the server's own message. Read a schedule later with list_tasks fields:['schedule']; not a due date, which is when work should be finished.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16977,7 +16977,7 @@ var TOOL_LIST = {
             type: "string",
             description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
           },
-          taskId: { type: "string", description: "The row the rule is set on." },
+          taskId: { type: "string", description: "The task the rule is set on." },
           rule: {
             description: "The rule object (see the description for the five kinds), or null to clear. Required — an absent rule is refused rather than read as a clear."
           },
@@ -17063,7 +17063,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_agent",
-      description: "Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged rows to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away. ACT ON `sentry`: it names the Sentry projects this deployment raises alarms into, and a raised alarm reaches you only if you hold the subscription — which is keyed on your LAUNCH path, so a session started somewhere new holds nothing and is told nothing. Call sentry_watch_project on each slug it returns (idempotent, so it is free when you already hold it); sentry_list_my_watches is the check.",
+      description: "Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged tasks to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away. ACT ON `sentry`: it names the Sentry projects this deployment raises alarms into, and a raised alarm reaches you only if you hold the subscription — which is keyed on your LAUNCH path, so a session started somewhere new holds nothing and is told nothing. Call sentry_watch_project on each slug it returns (idempotent, so it is free when you already hold it); sentry_list_my_watches is the check.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17102,7 +17102,7 @@ var TOOL_LIST = {
     },
     {
       name: "register_dispatch",
-      description: "Tell the board a builder is working a task in a private git worktree, so the stall loop can read the worktree's file activity as the row moving instead of waking the lead over silence it cannot see. Call it when you spawn a builder; re-registering the same task replaces the old worktree. Close it with close_dispatch when the builder reaches terminal (done or died) — a worktree that is deleted closes its own dispatch.",
+      description: "Tell the board a builder is working a task in a private git worktree, so the stall loop can read the worktree's file activity as the task moving instead of waking the lead over silence it cannot see. Call it when you spawn a builder; re-registering the same task replaces the old worktree. Close it with close_dispatch when the builder reaches terminal (done or died) — a worktree that is deleted closes its own dispatch.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17174,7 +17174,7 @@ var TOOL_LIST = {
     },
     {
       name: "unregister_worktree",
-      description: "Retire a checkout before it goes away. Any document with unsaved edits in it is written out FIRST — which is the whole reason to call this rather than deleting the directory and hoping — and the answer says how many were flushed. Nothing is destroyed: the row stays with its dates, every doc keeps its id and its comments, and a doc bound to that checkout falls back to another copy of the same file. Call it just before `git worktree remove`. Machine-scoped: no workspaceId.",
+      description: "Retire a checkout before it goes away. Any document with unsaved edits in it is written out FIRST — which is the whole reason to call this rather than deleting the directory and hoping — and the answer says how many were flushed. Nothing is destroyed: the checkout stays with its dates, every doc keeps its id and its comments, and a doc bound to that checkout falls back to another copy of the same file. Call it just before `git worktree remove`. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17227,7 +17227,7 @@ var TOOL_LIST = {
     },
     {
       name: "unmount_folder",
-      description: "Stop serving a mounted folder. Nothing on disk is touched and no address is dropped — retention is the project's, and workspaces deletes nothing it did not create. The row keeps its dates, and re-mounting the same folder revives it with every file at the address it already had. Machine-scoped: no workspaceId.",
+      description: "Stop serving a mounted folder. Nothing on disk is touched and no address is dropped — retention is the project's, and workspaces deletes nothing it did not create. The mount keeps its dates, and re-mounting the same folder revives it with every file at the address it already had. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17488,7 +17488,7 @@ async function handleDocsTool(name, a, ctx) {
         const given = typeof a.workspaceId === "string" ? a.workspaceId.trim() : "";
         const ws = given !== "" ? given : (process.env.CW_WORKSPACE_ID ?? process.env.FEEDBACK_WORKSPACE_ID ?? "").trim();
         if (ws === "") {
-          return err2("post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose row it lands on");
+          return err2("post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose task it lands on");
         }
         path = `/workspaces/${encodeURIComponent(ws)}/agents/${encodeURIComponent(AUTHOR.name)}/notes`;
       }
@@ -17503,7 +17503,7 @@ async function handleDocsTool(name, a, ctx) {
         ...res.taskId !== undefined ? { taskId: res.taskId } : {},
         ...res.workspaceId !== undefined ? { workspaceId: res.workspaceId } : {},
         ...res.taskId === undefined ? {
-          note: "no in-progress task of yours to pin this to — kept on your own recent-activity list; pass taskId to put it on a row"
+          note: "no in-progress task of yours to pin this to — kept on your own recent-activity list; pass taskId to put it on a task"
         } : {}
       });
     }
@@ -19416,7 +19416,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.201";
+var PLUGIN_VERSION = "0.1.202";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
@@ -19512,7 +19512,7 @@ var server = new Server({
     "",
     "WORKSPACE BOARD: a board workspace is a goal + a task board + linked docs.",
     "create_workspace mints one; attach_doc links existing docs/attachments to it;",
-    "create_tasks (ALWAYS a list — one idea is a one-row list) and",
+    "create_tasks (ALWAYS a list — one idea is a one-item list) and",
     "spin_off_task add work (omit `goal` and the task lands UNPLACED in",
     "Backlog awaiting triage — the create says so and hands you the goal",
     "bands, and placing it with set_task_goal IS the triage:",

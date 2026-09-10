@@ -1,30 +1,30 @@
 # The stall check — module criteria
 
 One block per module: what it must do, what it must never do, and the
-measurement that proves it. A module with no measurement is not done. Rows
+measurement that proves it. A module with no measurement is not done. Modules
 marked *rebuild* change in the steps named in [README.md](README.md); the
 criteria are written for the shape after the rebuild, and a criterion that
 today's code fails is flagged.
 
 ## `keep-moving.ts` — the classifier
 
-- **Must:** put every open row in exactly one bucket from explicit state
+- **Must:** put every open task in exactly one bucket from explicit state
   (status, dependency edges, a filed item's address, a schedule rule), and
   measure quiet time from the newest of status change, board event, thread
   activity and Activity note.
-- **Must never:** read prose to decide a bucket. A row's wait is declared
+- **Must never:** read prose to decide a bucket. A task's wait is declared
   by the filed item it carries the address of (`waitingOn`), never read out
   of a note (step 2).
 - **Measured by:** its unit tests, and the verdict's `unfiled` line reading
-  zero on a board where every waiting row carries an item address.
+  zero on a board where every waiting task carries an item address.
 
 ## `stall-gate.ts` — the findings
 
 - **Must:** produce `stalled`, `unfiled` and `undetermined` from the
   classifier, gated on the same quiet window, and name a watched builder's
   silence as `builder-silent`.
-- **Must never:** report a row the parallelism cap keeps out of flight, or
-  a row under a triage band, or a schedule rule row.
+- **Must never:** report a task the parallelism cap keeps out of flight, or
+  a task under a triage band, or a schedule rule task.
 - **Measured by:** unit tests per exclusion; the verdict's `considered`
   denominator.
 
@@ -76,17 +76,17 @@ today's code fails is flagged.
 
 ## `ui-review-gate.ts` — the UI gate — *rebuild step 5*
 
-- **Must:** name every row that an agent filed, that is in flight, whose
+- **Must:** name every task that an agent filed, that is in flight, whose
   words read as UI work, and that carries no answered review item on either
   surface — in the lead's stall frame as `ungatedUi` and on the verdict's
   `ungatedUi` line, off the same snapshot, so the frame and the measurement
-  cannot name different rows. *Passes since step 5:* the wired test
-  (`ui-gate-finding.test.ts`) files a UI row as an attached agent, takes it
+  cannot name different tasks. *Passes since step 5:* the wired test
+  (`ui-gate-finding.test.ts`) files a UI task as an attached agent, takes it
   in-progress, and asserts the lead's frame and the verdict both name it with
-  the word that matched; its three controls are the same row with an answered
-  item, the same row filed by a person, and a row with no UI words.
-- **Must never:** name a row a person filed, a row nobody has started, a row
-  somebody answered an item on, or a row whose words say nothing about a
+  the word that matched; its three controls are the same task with an answered
+  item, the same task filed by a person, and a task with no UI words.
+- **Must never:** name a task a person filed, a task nobody has started, a task
+  somebody answered an item on, or a task whose words say nothing about a
   screen. A finding here costs a lead turn about work that is going fine, so
   a false positive is the expensive failure and a miss is the cheap one.
 - **Measured by:** the verdict's `ungatedUi` line at zero, and — because this
@@ -97,10 +97,10 @@ today's code fails is flagged.
 ### The heuristic, and what it cannot see
 
 Three of the four reads are explicit state the store holds: the roster
-answers whether the filer is an agent, the row's transitions answer whether
+answers whether the filer is an agent, the task's transitions answer whether
 anybody started it, and the two review-item surfaces answer whether anybody
 was asked and answered. The fourth — "is this a UI change" — is read out of
-the row's title and body against a thirteen-word list (button, screen, page,
+the task's title and body against a thirteen-word list (button, screen, page,
 layout, mockup, UI, CSS, tap, banner, indicator, badge, panel, float), whole
 words, case folded, with a plural or gerund counting as the same word.
 
@@ -108,15 +108,15 @@ Nothing on a task declares which surface it touches, so there is no honest
 alternative to reading the prose. Four things this therefore misses, written
 down rather than hidden:
 
-1. **A row that changes a screen without saying so.** "Agent can see why a
+1. **A task that changes a screen without saying so.** "Agent can see why a
    task is blocked" is a UI change and matches nothing. This is the common
    miss and it is accepted: the board catches nothing at all today.
-2. **A row whose filer never attached.** "Filed by an agent" is answered by
+2. **A task whose filer never attached.** "Filed by an agent" is answered by
    the roster, and a name it cannot place reads as not-an-agent — the safe
-   direction, since guessing from a name is how a person's row becomes an
+   direction, since guessing from a name is how a person's task becomes an
    agent's.
-3. **A row that shipped before anybody looked.** The check names a row in
-   flight; a row taken and finished between two ticks is never seen.
+3. **A task that shipped before anybody looked.** The check names a task in
+   flight; a task taken and finished between two ticks is never seen.
 4. **The words "design", "view", "render", "style" and "component"**, each
    left out because it is at least as common in server prose here as in UI
    prose, and a finding people learn to dismiss is worse than none.
@@ -127,14 +127,14 @@ down rather than hidden:
   no board write and no heartbeat inside the window. Address Team Lead
   first, the owner only when Team Lead is unreachable too. Withdraw the
   moment a session is alive again.
-- **Must never:** file about a row that is waiting on the owner with an item
+- **Must never:** file about a task that is waiting on the owner with an item
   filed, file while any session on the board is alive, hide its own anchor
-  row from the check, or keep an item open on a settle or cooldown after the
+  task from the check, or keep an item open on a settle or cooldown after the
   board has come back. *Passes since step 3* — the trigger is liveness alone
-  (`boardDeadFor`), a waiting row is not on the lists it reads, the wiring
+  (`boardDeadFor`), a waiting task is not on the lists it reads, the wiring
   skips the board's own item and its own writes when it reads the anchor,
   and the item withdraws on the first tick a session is alive. Before it:
-  the trigger was "told and quiet an hour", true of a live lead's rows
+  the trigger was "told and quiet an hour", true of a live lead's tasks
   waiting on the owner 22 times out of 27 on the measured board.
 - **Measured by:** the verdict's `escalated` line at zero on every board for
   a week, plus one dead-lead drill per release that reaches Team Lead
@@ -144,7 +144,7 @@ down rather than hidden:
 
 ## `note-ask.ts` + `note-ask-judge.ts` — *removed in step 2*
 
-- Gone, with the `waiting-on-you` prompt. A row's waiting state is
+- Gone, with the `waiting-on-you` prompt. A task's waiting state is
   declared, so there is nothing to read. The measurement that stands in
-  its place is the verdict's `waiting` line: every excused row names the
+  its place is the verdict's `waiting` line: every excused task names the
   item excusing it, so a wait with no address cannot exist.

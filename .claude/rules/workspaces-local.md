@@ -20,7 +20,7 @@ residue that is true of THIS repo and nowhere else.
   by structured results, parallel review lenses tailored to the feature's risks,
   a verify-then-fix agent) and the finding that an independent `codex review`
   afterwards still caught bugs every lens had passed.
-- **Board work has its own two rules files.** How to run a task, keep rows
+- **Board work has its own two rules files.** How to run a task, keep tasks
   current and ask for review is in `workspace-board.md`; which surface a doc or
   dev server gets bound to is in `workspaces-default.md`. Neither has a fleet
   twin.

@@ -75,7 +75,7 @@ export async function handleTaskStatusAndLinks(
         // Said only when the cut left the caller with nothing, because a
         // refusal that names no reason at all reads as a bug in the board.
         ...(hidden > 0 && seen?.length === 0
-          ? { message: 'This row is held by work on another board.' }
+          ? { message: 'This task is held by work on another board.' }
           : {}),
       });
     }

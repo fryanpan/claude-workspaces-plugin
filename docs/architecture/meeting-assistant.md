@@ -763,7 +763,7 @@ reach an LLM.
 
 **What the note-taker is asked to write** is a settings file rather than a
 code path (`notes-prompt-store.ts`), and the words in it are the behaviour.
-They ask for what a good notetaker does in a shared meeting (Bryan's row,
+They ask for what a good notetaker does in a shared meeting (Bryan's task,
 2026-09-03: *"the doc is the room's shared memory instead of a transcript
 with headings"*):
 
@@ -818,7 +818,7 @@ with headings"*):
   beats no note.
 - **Keep the speaker on a decision and on an open question.** Who decided and
   who is asking is part of what those notes say.
-- **Link what it names**: a board row or doc the tick's speech named arrives
+- **Link what it names**: a board task or doc the tick's speech named arrives
   in the prompt with its URL (below), and the note cites it inline.
 
 A person's line is protected by the DOC rather than by any of this. The
@@ -877,7 +877,7 @@ compose them again, `empty` because the compose ran and wrote nothing. The
 server used to report `written` for both of the last two states, so a tick
 that composed no edits took the speaker's words off the screen with no note
 to show for them: eleven of seventeen ticks on the meeting that produced this
-row (Bryan, 2026-09-09). An empty tick's words therefore stay on screen for
+finding (Bryan, 2026-09-09). An empty tick's words therefore stay on screen for
 the rest of the meeting, which is the honest reading of "nothing was written
 up about this".
 
@@ -1181,9 +1181,9 @@ wrote something does not get to rewrite it.
 ### What a note may link: the board, searched per tick
 
 A note-taker links the ticket somebody just named. Doing that needs the board,
-and the board is hundreds of rows — handing all of them to every tick would
+and the board is hundreds of tasks — handing all of them to every tick would
 cost more prompt than the notes. So the catalogue is assembled ONCE per
-meeting (`resolveReferences`: every open row with its `taskCaptureUrl`, every
+meeting (`resolveReferences`: every open task with its `taskCaptureUrl`, every
 doc the board holds with its `docLookupUrl` and the date it last carried a
 meeting) and SEARCHED per tick (`notes-references.ts`). Only what this tick's
 words actually named reaches the prompt, with its URL, and the composer's job
@@ -1196,20 +1196,20 @@ missed link costs a reader one search. So a match needs a contiguous run of
 the title's own significant words: three words is distinctive by itself, two
 only when they are half the title or more, and one only when it is eight
 characters or longer. That coverage rule is what refuses "meeting notes" as a
-match for a six-word row about meeting notes — the pair every row on a board
+match for a six-word task about meeting notes — the pair every task on a board
 about this product shares. Words are stemmed on both sides, because a board
 writes "Export dialog forgets the chosen range" and the room says "the export
 dialog's forgetting the chosen range".
 
-Four references per tick, at most. Rows the capture pass FILED from this
+Four references per tick, at most. Tasks the capture pass FILED from this
 speech arrive separately as `taskLinks`; these were merely mentioned, and most
 ticks name none.
 
 ### "Link that to the existing task" — the loose matcher, and the question
 
-The precision bar above is right for a row nobody asked about, and wrong the
+The precision bar above is right for a task nobody asked about, and wrong the
 moment somebody asks. "Link that to the existing task" is a person saying they
-know the row exists; answering "no contiguous run of significant words" to
+know the task exists; answering "no contiguous run of significant words" to
 that is a refusal to look. And the ask is exactly when the description is
 loosest — a person who could quote the title would have quoted it.
 
@@ -1217,19 +1217,19 @@ So there are two matchers with opposite bars, and which one is allowed to
 answer depends on whether anybody asked (`notes-link-intent.ts`, deterministic
 and testable with no model in the loop):
 
-- **Asked.** `detectLinkAsk` reads a link verb followed by a row noun
+- **Asked.** `detectLinkAsk` reads a link verb followed by a task noun
   ("link that to the ticket", "hook this up to the card"), and refuses when
   the noun is preceded by *new* / *another* / *separate* — "file a new ticket"
   is the capture pass's job, not this one. The rest of the tick's words then
   go through `scoreRelatedWork`, the SAME scorer behind the board's
-  `find_related_work` verb, over the row titles AND their bodies. The ask's
-  own vocabulary is blanked out of the query first, or a row called "Task
+  `find_related_work` verb, over the task titles AND their bodies. The ask's
+  own vocabulary is blanked out of the query first, or a task called "Task
   capture" outranks the subject in every sentence containing the word "task".
-  The top row is linked when it clears a low bar and beats the runner-up by a
+  The top task is linked when it clears a low bar and beats the runner-up by a
   margin; a near-tie is not guessed at, it is offered.
 - **Not asked.** Nothing. No scoring runs at all.
 
-**The unasked half was removed on 2026-09-08.** A row that merely scored well
+**The unasked half was removed on 2026-09-08.** A task that merely scored well
 used to be written into the note as a question. One planning huddle came out
 with twelve of those on a single bullet and four on another, and the owner's
 verdict was *"just a bunch of garbage… I did not ask for any tickets to be
@@ -1242,9 +1242,9 @@ was considered. That is the difference from the strict matcher, which is
 silent by design.
 
 **A question is a link, not a caption.** It is written as ordinary markdown
-pointing at the row, with `suggest=1` on the href
+pointing at the task, with `suggest=1` on the href
 (`core/note-suggestion.ts`) and the words "related: <title>?". So it survives
-the `.md` on disk and a browser with no script running, it opens the right row
+the `.md` on disk and a browser with no script running, it opens the right task
 either way, and in the editor one tap turns it into the citation it was asking
 about — the link the reader touched is the link they are left with, which is
 why it needs no chip and no confirm step. Suggestions are appended
@@ -1253,13 +1253,13 @@ marker the model has to spell exactly is a marker it will eventually spell
 wrong.
 
 **Every link a tick writes is undoable.** A spoken link puts a
-`{kind:'doc'}` ref on the row (`spokenLinkRef`, the same shape the note's own
-undo control deletes), and the row's backlink is computed from that ref rather
+`{kind:'doc'}` ref on the task (`spokenLinkRef`, the same shape the note's own
+undo control deletes), and the task's backlink is computed from that ref rather
 than stored beside it — so removing the ref removes both sides at once. The
 control sits beside the link in the notes and appears only where the doc
 actually holds a ref, which is why its presence always means there is
 something to take back. Undoing removes the link, not the words: the composer
-weaves a row's title into the middle of a sentence, and deleting the text
+weaves a task's title into the middle of a sentence, and deleting the text
 would take a clause of somebody's meeting record with it.
 
 ### A rename reaches backwards (owner's call, 2026-08-29: "rewrite them")
@@ -1504,18 +1504,18 @@ before the compose: a second Haiku call — same dedicated-key consent, off
 switch `CW_MEETING_TASKS=0` — extracts explicit task requests and references
 to tracked work from the new speech. Find-or-create is guarded
 deterministically (a model-claimed reference must share words with the tick's
-own transcript; a request that duplicates open work links the row instead of
+own transcript; a request that duplicates open work links the task instead of
 twinning it), because a wrong link is worse than no link. The pass reads the
 same speaker-prefixed transcript the composer does and may return a
 `requester` for a request — guarded on the same law, so it must be a voice
-that tick actually carried; the created row's body then says who asked,
+that tick actually carried; the created task's body then says who asked,
 which is the half of "who said what" a task can still answer a week later,
 once the strip is gone.
 
 **Each pass also reads the tail of the one before it**, marked as already
 read — the boundary between two ticks falls where the room went quiet, which
 is nowhere near where an ask ends. Measured live, both halves: "…that is the
-real cost" / boundary / "can you file a ticket for that one?" filed a row
+real cost" / boundary / "can you file a ticket for that one?" filed a task
 titled *"file a ticket for that one, a small spike would do"*, and "we should
 file tickets for the next few things I mention" / boundary / the things
 themselves lost the ask entirely. The window is the previous tick's TAIL —
@@ -1523,7 +1523,7 @@ themselves lost the ask entirely. The window is the previous tick's TAIL —
 raw so a voice named since then reads under its new name. Marking is what
 stops a second filing: the prompt says those lines were read last pass and
 that every item must draw part of itself from the new ones, and the board's
-own find-or-create folds a re-file into a link to the row the previous pass
+own find-or-create folds a re-file into a link to the task the previous pass
 created. Both the guards and the model see exactly the same window, or the
 reference guard would reject the very matches the overlap exists to enable.
 Cost, measured on the capture model with `count_tokens` rather than estimated
@@ -1543,13 +1543,13 @@ capture pass are one path with two triggers: both build the body with
 `spinoffBody` and read readiness with `readyToWork` (`packages/core/src/
 spinoff.ts`), and both go through `parseTaskCreate` — the parse every create
 route runs — with `origin: {kind: 'doc'}` and the transcript's own line as
-the row's quote. The first version hand-built its options and drifted from
+the task's quote. The first version hand-built its options and drifted from
 the pill (a different body, a different readiness rule), and "create a task"
 said aloud did nothing for a subtler reason: the pass scoped itself on the
 doc's `setId`, which a huddle doc never has — it is HELD by a board workspace,
 not owned by one. `withServerNotesSinks` now takes `boardOf`, wired to the
 doc page's own back-target lookup, so the board a huddle's asks land on is
-the board its back arrow points at. New rows are attributed to the `Meeting
+the board its back arrow points at. New tasks are attributed to the `Meeting
 Assistant` agent actor and enter triage; a request judged actionable by the
 model AND ready by the pill's rule is PLACED — `TaskStore.placeSpinoff`: the
 goal of the task the doc BELONGS TO (a huddle started with `taskId` links
@@ -1560,10 +1560,10 @@ triage — owned by the lead when the seat is held, moved to `todo`, and wakes
 the board's lead through `ReadyWorkNudger.taskReady`. The pill's Create Task
 asks for the same placement with `spinoff: true` on its create, its origin
 doc naming which huddle (Bryan, 2026-09-01: *"tasks were created in Backlog
-and not automatically started"*). Every such row's body quotes the whole
+and not automatically started"*). Every such task's body quotes the whole
 line and links back to the doc (`spinoffDocHref`, core); the title is a
 trimmed reading of the same words.
-The composer never claims `in-progress` itself. A repeated mention links the row the board
+The composer never claims `in-progress` itself. A repeated mention links the task the board
 already has (find-or-create on a normalized title, then two shared
 significant words) rather than filing twice. The composer receives the resolved links and writes
 plain markdown links into the notes; the doc editor's `TaskLinkChips`
@@ -1584,7 +1584,7 @@ because Bryan pressed Review with the agent offline and the receipt said
 
 Four more intents ride the SAME capture call — no router, no second pass, per
 the 2026-08-30 decision *"One call per tick carries every intent"*. One reply,
-one `items` array, a `kind` per intent, rows parsed independently so a
+one `items` array, a `kind` per intent, tasks parsed independently so a
 malformed one never costs the others. The module is still called
 `meeting-task-capture.ts`; its name predates most of what it carries.
 
@@ -1620,7 +1620,7 @@ it:
 | Said in the room | Read as | What happens |
 | --- | --- | --- |
 | "**Claude, can you** look into the retry loop" — the wake word, then "can you" / "could you" / "would you" | an ask for NOW | acted on during the meeting — research, lookup or review |
-| "**Create a task** for the retry loop" opening the clause (also "make a task", "file a ticket", "add a ticket") | an ask for LATER | a row is filed, quoting the words, and nothing is started |
+| "**Create a task** for the retry loop" opening the clause (also "make a task", "file a ticket", "add a ticket") | an ask for LATER | a task is filed, quoting the words, and nothing is started |
 | "Bob, can you pass the water" · "we can add tasks later" · "the retry loop wakes the sync" | neither | a note, and only a note |
 
 - **The prompt and the guard say the same thing, and the guard is the one
@@ -1669,15 +1669,15 @@ it:
   retry loop wakes the sync" — so a cue with no words in common with the ask
   still qualifies. Spending, not adjacency, is what keeps that from being a
   licence to reuse it.
-- **A PLURAL later cue stands, and its rows must name something SPOKEN.**
-  "File tickets for the next few things I mention" asks for however many rows
+- **A PLURAL later cue stands, and its tasks must name something SPOKEN.**
+  "File tickets for the next few things I mention" asks for however many tasks
   follow it, and was measured doing exactly that across a tick boundary, so it
   is not spent on its first ask. Spending is therefore not what bounds it, and
   for a while nothing was: in review one such cue licensed four requests, two
   of whose subjects nobody had said. So a request filed under a standing cue
   must clear `phraseSpokenOnTick` — the same spoken-subject guard research,
   lookup and review have always stood on, and the one intent that lacked it. A
-  singular cue is exempt: it is spent on its one row, and a deictic "make that
+  singular cue is exempt: it is spent on its one task, and a deictic "make that
   a task" names its subject nowhere.
 - **A reference and a correction need no cue.** Neither is an ask: one names
   work the board already tracks, the other fixes a note already written.
@@ -1698,8 +1698,8 @@ comment channel Make Plan and Review ride — and inserts `## Research:
 that line (`researchPlaceholderMarkdown`, huddle.ts). The thread names the
 section so the agent writes there and resolves the thread when it has.
 
-The SPOKEN ask below still files the lead's row as well as the section: a
-meeting has no selection to anchor on, and the row is what wakes the lead
+The SPOKEN ask below still files the lead's task as well as the section: a
+meeting has no selection to anchor on, and the task is what wakes the lead
 through the ready-nudge channel. Both leave the same section shape.
 
 The ask this catches almost never contains the word *research*: it is "go
@@ -1715,7 +1715,7 @@ What lands is **what the pointer pill's Research files** (2026-09-01,
 superseding the 2026-08-31 "confirm before it is spent" gate — owner's plan:
 *"the agent writes a placeholder section immediately, then fills it"*):
 
-- **A row titled `Research: <topic>`, the lead's errand.** Filed through
+- **A task titled `Research: <topic>`, the lead's errand.** Filed through
   `parseTaskCreate` with `assignToLead: true`, exactly as the pill posts it:
   the board's lead owns it and it is `todo`, woken through
   `ReadyWorkNudger.taskReady`; with nobody in the seat it sits at `triage`
@@ -1724,11 +1724,11 @@ superseding the 2026-08-31 "confirm before it is spent" gate — owner's plan:
   section the findings are expected in.
 - **A placeholder section in the doc, at once.** `appendResearchPlaceholder`
   (meeting-notes-doc.ts) adds `## Research: <topic>` with one line linking
-  the row, idempotent by heading, so the person who asked can see where the
+  the task, idempotent by heading, so the person who asked can see where the
   answer will land before the lead has started.
 
 A second ask for the same topic — in the same tick or a later one — links
-the row rather than filing a second one, on the board's own find-or-create,
+the task rather than filing a second one, on the board's own find-or-create,
 and leaves the one section.
 
 ### "Ask the team whether…" — a review ask
@@ -1748,10 +1748,10 @@ open a second thread; a new recording on the doc is a new meeting.
 ### "Pull in last week's notes" — lookup
 
 Resolution lives in `meeting-lookup.ts`, and reaches docs and past meetings,
-not only board rows:
+not only board tasks:
 
 1. **By title** — the board's docs (huddles included: a huddle IS a doc,
-   filed on the board like any other) and its task rows, in ONE pool through
+   filed on the board like any other) and its tasks, in ONE pool through
    `resolveByTitle`, the matcher voice navigation already uses. One pool so
    its spoken kind word ("the DOC about x") can narrow.
 2. **By when** — "last week", "yesterday", "Tuesday", "this morning", "the
@@ -1946,7 +1946,7 @@ failing on the meeting it was built for.
 **Two kinds of judge, and the split is the point.** Anything decidable is
 decided in code (`notes-quality.ts`, unit-tested): bullet length, a topic
 opened twice, a topic left running past four bullets with no nesting and no
-heading inside it, a decision with no voice on it, a named row left unlinked,
+heading inside it, a decision with no voice on it, a named task left unlinked,
 a bullet copied verbatim out of the transcript, and the seeded human bullet
 still reading character for character. Only reading comprehension goes to a
 model (Sonnet): was the paraphrase faithful, does the note say what was
@@ -1987,7 +1987,7 @@ Full run, 273 ticks, judge on 48 of them:
 | One heading per topic | 273 | 100% |
 | Notes are organised under topics | 264 | 100% |
 | A new heading means a new topic | 46 | 87% |
-| A named board row is linked | 36 | 81% |
+| A named board task is linked | 36 | 81% |
 | Decisions and questions keep a speaker | 273 | 86% |
 | Uncertain points marked unconfirmed | 46 | 78% |
 
@@ -2054,7 +2054,7 @@ that is **+$0.108 per meeting-hour**, taking the figure above from about $0.95
 to about **$1.06**. The tick model is unchanged (Haiku 4.5), and prompts under
 4096 tokens never cache there, so the whole delta is paid every tick. The
 per-tick reference block is not in that number: it appears only on the ticks
-whose speech named a board row, and costs about 20 tokens per row cited.
+whose speech named a board task, and costs about 20 tokens per task cited.
 
 About a fifth of that delta buys one rule: **every note is a markdown list
 item beginning with `- `**. Saying "one point per bullet" and never naming the
@@ -2445,8 +2445,8 @@ latency measurement) · `scripts/room-labels-check.ts` +
 `room-labels-score.ts` + `ami-truth.ts` (the room measurement, its
 arithmetic, and the AMI corpus reference it scores against) ·
 `packages/server/src/notes-prompt-store.ts` (what the note-taker is told to
-do) + `notes-references.ts` (which board rows this tick's speech named) +
-`notes-link-intent.ts` (whether anybody ASKED for a link, and which row
+do) + `notes-references.ts` (which board tasks this tick's speech named) +
+`notes-link-intent.ts` (whether anybody ASKED for a link, and which task
 answers a loose description) + `notes-quality.ts` (the decidable half of "did
 it behave") · `packages/core/src/note-suggestion.ts` +
 `packages/workspaces-app/src/notes-link-affordance.ts` +
