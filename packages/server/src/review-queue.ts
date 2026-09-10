@@ -22,6 +22,7 @@
  */
 import type {
   Comment,
+  DocType,
   ReviewItemState,
   ReviewPayload,
   TaskReviewItem,
@@ -91,6 +92,11 @@ export interface ReviewThreadItem {
   kind: 'task-thread' | 'goal-thread' | 'doc-thread';
   band: ReviewBand;
   docId: string;
+  /** The doc's kind, on a `doc-thread` row — see `ReviewDocRef.type`. It is
+   *  what lets the reader be taken to the MOCK rather than to the editor
+   *  rendering of its HTML. Absent on the two task-shaped kinds, whose docs
+   *  are always ticket bodies. */
+  docType?: DocType;
   threadId: string;
   /** The comment this row is about: the declaration if there is one, else the
    *  comment being quoted. Needed to stamp an answer back onto the item. */
@@ -236,6 +242,21 @@ export interface ReviewTaskRef {
 export interface ReviewDocRef {
   docId: string;
   title: string;
+  /**
+   * What KIND of doc this is — `mockup`, `markdown`, `diff`, … — so a row
+   * can be opened on the surface the question was asked on.
+   *
+   * A mockup's review URL and a markdown doc's are different pages: the
+   * editor at `/docs/:id` renders a mockup's stored HTML as text, and a
+   * question asked about what a mock LOOKS like is unanswerable there. The
+   * kind rides the row rather than being re-derived by the client, which has
+   * no doc meta of its own.
+   *
+   * Optional: a caller with no meta to hand (store-only tests) ships rows
+   * exactly as it did before, and a client that has never heard of the field
+   * keeps its old destination.
+   */
+  type?: DocType;
 }
 
 export interface ThreadSource {
@@ -364,6 +385,7 @@ export function reviewThreadItems(args: {
     docId: string,
     rawTitle: string,
     taskId?: string,
+    docType?: DocType,
   ) => {
     // Both bands share one title, so it is normalized once at the door.
     const title = decodeEntities(rawTitle);
@@ -394,6 +416,7 @@ export function reviewThreadItems(args: {
           kind,
           band: 'declared',
           docId,
+          ...(docType ? { docType } : {}),
           threadId: thread.id,
           commentId: declaring.id,
           reviewItemId: threadReviewItemId(docId, thread.id, declaring.id),
@@ -442,6 +465,7 @@ export function reviewThreadItems(args: {
         kind,
         band: 'unreplied',
         docId,
+        ...(docType ? { docType } : {}),
         threadId: thread.id,
         commentId: asked.id,
         ...(taskId ? { taskId } : {}),
@@ -465,7 +489,7 @@ export function reviewThreadItems(args: {
     if (goal.done) continue;
     collect('goal-thread', goal.bodyDocId, goal.title, goal.id);
   }
-  for (const doc of args.docs) collect('doc-thread', doc.docId, doc.title);
+  for (const doc of args.docs) collect('doc-thread', doc.docId, doc.title, undefined, doc.type);
 
   return items.sort((a, b) => a.since - b.since || a.threadId.localeCompare(b.threadId));
 }
