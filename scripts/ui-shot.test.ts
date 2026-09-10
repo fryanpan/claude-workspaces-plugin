@@ -339,6 +339,12 @@ describe.skipIf(!existsSync(CHROME))('ui-shot against real headless Chrome', () 
       const summary = JSON.parse(r.stdout) as { result: string };
       expect(JSON.parse(summary.result)).toEqual({ h: hover, c: coarse });
     },
+    // The two cases beside this one already carry it; this pair was left on
+    // vitest's 5s default while a launch plus a load is 4-6s on this machine,
+    // so it lost to load rather than to an assertion whenever anything else
+    // wanted the CPU. `meeting-prose-measure-css.test.ts` puts two more Chrome
+    // launches in the same suite, which is what made the coin land.
+    60_000,
   );
 
   it('screenshots a data: URL at 430px and the page reports innerWidth 430', () => {

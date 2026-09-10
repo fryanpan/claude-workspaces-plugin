@@ -192,6 +192,13 @@ jobs:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile
       - name: Test (client + unit)
+        # The same pair the gates job's client-boot step sets, and for the same
+        # reason: `meeting-prose-measure-css.test.ts` launches the runner's own
+        # Chrome to measure a used width, and a container needs both flags to
+        # let it start. Without them that file's cases would fail here rather
+        # than skip, which is the state this variable exists to prevent.
+        env:
+          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
         run: |
           bun run test:vitest --shard=${{ matrix.shard }}/4 \
             --coverage.enabled --coverage.reporter=lcovonly \
