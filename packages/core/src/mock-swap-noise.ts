@@ -29,11 +29,15 @@
  *
  * A filter that dropped every redeclaration would be a regression, not a fix:
  * the collisions the swap does NOT retry — a `"use strict"` source, a
- * `type="module"`, an `src` script — still lose the mock's script and still
- * need reporting. So the window is exactly the insert that will be retried,
- * raised immediately before it and lowered immediately after, and the event
- * must ALSO look like a declaration collision. Everything outside that pair of
- * conditions files exactly as it did before.
+ * `type="module"`, an `src` script, and the wrapped retry itself — still lose
+ * the mock's script and still need reporting. So three things have to be true
+ * at once, and each is checked below: the report names a declaration collision
+ * rather than any other `SyntaxError`; an insert that WILL be retried is on
+ * the stack, the window being raised immediately before it and lowered in the
+ * same `finally`; and the collision is on a binding the source being inserted
+ * could have declared, since a script that does not collide RUNS inside that
+ * window and may raise collisions of its own. Everything outside all three
+ * files exactly as it did before.
  */
 
 /**
