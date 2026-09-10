@@ -719,6 +719,21 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * own.
    */
   let methodChoice = notetakerChoiceAtMount(choose.chooseMethod);
+  /**
+   * THE AT-REST WRITES, ONE AT A TIME.
+   *
+   * The server applies a `PUT` when it arrives and the browser hears about it
+   * when the response comes back, and those are not the same order — so with
+   * two presses out at once, no answer can be trusted to describe the doc.
+   * Taking them in turn is what makes the server's write order the person's
+   * press order, and the last answer the doc's own last word, by
+   * construction rather than by hope.
+   *
+   * The socket path needs none of this: one socket delivers what it was sent
+   * in order and answers in order, which is the asymmetry `meeting-notetaker`
+   * documents. This is the at-rest half of the same guarantee.
+   */
+  let methodWrites: Promise<void> = Promise.resolve();
   const showMethod = (next: NotetakerChoice): void => {
     const moved = next.shown !== methodChoice.shown;
     methodChoice = next;
@@ -818,23 +833,29 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // live bot's notes session for us. That is a change during a meeting, so
     // it gets the same "since" the socket path shows.
     choose.methodSince = liveBot() ? clockLabel(Date.now()) : '';
-    void putNotesMethod(docId, method, opts.participantName).then((ok) => {
-      // This write's own number, so the answer settles this pick and no
-      // other — and only the pick the person is looking at may complain.
-      const ack = { seq };
-      const mine = notetakerAnswersShownPick(methodChoice, ack);
-      // A REFUSED WRITE TAKES ITS "SINCE" WITH IT, the same way the socket's
-      // refusal does. A bot meeting stamps the time at the press, and left
-      // behind after the rollback that time hangs off the note-taker that
-      // never stopped being current — the fold then reads as though the OLD
-      // method had been chosen at the moment the new one was refused.
-      // Cleared before the row repaints, so no frame draws the stale line.
-      if (!ok && mine) choose.methodSince = '';
-      showMethod(notetakerAcknowledged(methodChoice, ok, ack));
-      if (ok || !mine) return;
-      choose.chooseError = 'That note-taker could not be saved.';
-      renderPop();
-    });
+    const write = (): Promise<void> =>
+      putNotesMethod(docId, method, opts.participantName).then((ok) => {
+        // This write's own number, so the answer settles this pick and no
+        // other — and only the pick the person is looking at may complain.
+        const ack = { seq };
+        const mine = notetakerAnswersShownPick(methodChoice, ack);
+        // A REFUSED WRITE TAKES ITS "SINCE" WITH IT, the same way the
+        // socket's refusal does. A bot meeting stamps the time at the press,
+        // and left behind after the rollback that time hangs off the
+        // note-taker that never stopped being current — the fold then reads
+        // as though the OLD method had been chosen at the moment the new one
+        // was refused. Cleared before the row repaints, so no frame draws
+        // the stale line.
+        if (!ok && mine) choose.methodSince = '';
+        showMethod(notetakerAcknowledged(methodChoice, ok, ack));
+        if (ok || !mine) return;
+        choose.chooseError = 'That note-taker could not be saved.';
+        renderPop();
+      });
+    // BEHIND THE ONE BEFORE IT, whether that one landed or threw. A press
+    // dropped because its predecessor failed would leave the doc on a method
+    // nobody is showing.
+    methodWrites = methodWrites.then(write, write);
   }
 
   /**

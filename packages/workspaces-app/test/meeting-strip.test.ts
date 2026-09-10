@@ -2546,6 +2546,90 @@ describe('two note-taker picks over a live meeting, answered out of step', () =>
   });
 
   /**
+   * TWO AT-REST WRITES, AND THE ROW MUST END WHERE THE DOC DID.
+   *
+   * The server applies a `PUT` when it arrives; the browser learns of it when
+   * the response comes back, and those are not the same order. So response
+   * order cannot be allowed to decide anything — the fold read the LAST
+   * answer as the doc's state, and with both writes allowed out at once the
+   * last answer could be the EARLIER write, leaving the row on a method the
+   * doc had already replaced and every later compose ignoring it.
+   *
+   * The harness is the shape that broke it: the newest outstanding request
+   * answers first. What it asserts is the invariant itself — the row shows
+   * the last method this server actually wrote — so it holds whichever way
+   * the client chooses to keep its writes in step.
+   */
+  it('ends on the last method the server wrote, whatever order the answers come back in', async () => {
+    /** Every write this server applied, in the order it applied them. */
+    const applied: string[] = [];
+    /** Requests it has taken but not yet answered. */
+    const outstanding: Array<() => void> = [];
+    const bot = new FakeBot();
+    bot.set('recording', ['Ann']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: { method?: string; body?: string }) => {
+        if (init?.method !== 'PUT') return Promise.resolve(new Response('{}', { status: 404 }));
+        const body = JSON.parse(init.body ?? '{}') as { method?: string };
+        // Applied on ARRIVAL, which is what makes the last one here the one
+        // the doc holds — whenever its answer happens to get back.
+        applied.push(body.method ?? '');
+        return new Promise<Response>((resolve) => {
+          outstanding.push(() => resolve(new Response('{}', { status: 200 })));
+        });
+      }),
+    );
+    cleanups.push(() => vi.unstubAllGlobals());
+    const h = mount(undefined, { bot, offeredNotesMethods });
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    await vi.waitFor(() => expect(outstanding.length).toBeGreaterThan(0));
+    // Newest first, until the server has nothing left in hand.
+    while (outstanding.length > 0) {
+      outstanding.pop()?.();
+      await settle();
+      await settle();
+    }
+    expect(applied).toEqual(['ledger-haiku', 'ledger-opus']);
+    expect(shows(h).checked).toBe(applied[applied.length - 1]);
+  });
+
+  it('holds the second press until the first write has answered', async () => {
+    // The guarantee the row's correctness rests on: with one write out at a
+    // time, the order the server applies them is the order they were pressed,
+    // so its last write is the last press and the last answer describes it.
+    const applied: string[] = [];
+    const outstanding: Array<() => void> = [];
+    const bot = new FakeBot();
+    bot.set('recording', ['Ann']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: { method?: string; body?: string }) => {
+        if (init?.method !== 'PUT') return Promise.resolve(new Response('{}', { status: 404 }));
+        applied.push((JSON.parse(init.body ?? '{}') as { method?: string }).method ?? '');
+        return new Promise<Response>((resolve) => {
+          outstanding.push(() => resolve(new Response('{}', { status: 200 })));
+        });
+      }),
+    );
+    cleanups.push(() => vi.unstubAllGlobals());
+    const h = mount(undefined, { bot, offeredNotesMethods });
+    h.record().click();
+    h.pop().querySelector<HTMLButtonElement>('.meeting-notetaker .meeting-adv-head')?.click();
+    h.pick('Ledger · Haiku');
+    h.pick('Ledger · Opus');
+    await vi.waitFor(() => expect(applied).toEqual(['ledger-haiku']));
+    await settle();
+    // Still just the one: the second press is waiting its turn, not racing.
+    expect(applied).toEqual(['ledger-haiku']);
+    outstanding.pop()?.();
+    await vi.waitFor(() => expect(applied).toEqual(['ledger-haiku', 'ledger-opus']));
+  });
+
+  /**
    * A BOT MEETING ASKS OVER HTTP, and a refused write must take its "since"
    * back with it.
    *
