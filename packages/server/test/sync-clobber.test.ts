@@ -64,17 +64,6 @@ const AUTHOR = { id: 'u1', kind: 'known' as const, name: 'Reviewer', color: '#00
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Write + force a strictly newer mtime (learnings: temp filesystems can land
- *  rapid writes in the same mtime tick, making them invisible to the poll). */
-let mtimeBump = 0;
-function writeExternal(path: string, content: string): void {
-  writeFileSync(path, content);
-  mtimeBump += 2;
-  const t = new Date(Date.now() + mtimeBump * 1000);
-  // utimes wants seconds resolution to be strictly increasing across calls
-  require('node:fs').utimesSync(path, t, t);
-}
-
 const DOC = `# Title
 
 Intro paragraph.
@@ -160,13 +149,13 @@ describe('sync-clobber regressions', () => {
 
   describe('RC1 — serializer-space bookkeeping', () => {
     it('applies a second external edit instead of misjudging it a conflict', async () => {
-      writeExternal(path, EXT_ONE);
+      writeFileSync(path, EXT_ONE);
       expect(docStore.reconcileNow('d1')).toBe('apply');
 
       // The live doc has NO un-flushed edits — the only "divergence" is that
       // the serializer normalizes the extra blank lines. The next external
       // edit must therefore be an apply, not a conflict.
-      writeExternal(path, EXT_TWO);
+      writeFileSync(path, EXT_TWO);
       expect(docStore.reconcileNow('d1')).toBe('apply');
       expect(docStore.getDoc('d1')?.plainText).toContain('second external edit');
 
@@ -185,7 +174,7 @@ describe('sync-clobber regressions', () => {
           replace: 'Live edit, not yet flushed.',
         }).ok,
       ).toBe(true);
-      writeExternal(path, EXT_ONE);
+      writeFileSync(path, EXT_ONE);
       expect(docStore.reconcileNow('d1')).toBe('conflict');
 
       // The agent decides disk should win and force-pulls it. The conflict
@@ -209,7 +198,7 @@ describe('sync-clobber regressions', () => {
           replace: 'Live edit, not yet flushed.',
         }).ok,
       ).toBe(true);
-      writeExternal(path, EXT_ONE);
+      writeFileSync(path, EXT_ONE);
       expect(docStore.reconcileNow('d1')).toBe('conflict');
 
       // Policy: live wins on disk...
@@ -240,7 +229,7 @@ describe('sync-clobber regressions', () => {
       // timed: the write has to land INSIDE the 800ms window, after the
       // poll's last tick — the delay is the thing being set up, not a wait.
       await sleep(insideWriteBack());
-      writeExternal(path, EXT_ONE);
+      writeFileSync(path, EXT_ONE);
 
       const backupDir = join(dataDir, 'clobber-backups');
       const backedUp = await waitFor(
@@ -275,7 +264,7 @@ describe('sync-clobber regressions', () => {
       // not a slow arrival.
       docStore.simulateCrash();
       // …the file is edited while it's away.
-      writeExternal(path, EXT_ONE.replace('first external edit', 'edited while server was down'));
+      writeFileSync(path, EXT_ONE.replace('first external edit', 'edited while server was down'));
 
       // Fresh process over the same dataDir. attachFile used to skip the
       // non-empty fragment entirely and re-baseline the mtime poll — the
@@ -435,7 +424,7 @@ describe('sync-clobber regressions', () => {
         docStore.findAndReplace('d1', { find: 'Intro paragraph.', replace: 'Live edit pending.' })
           .ok,
       ).toBe(true);
-      writeExternal(path, DOC.replace(/\n\n/g, '\n\n\n'));
+      writeFileSync(path, DOC.replace(/\n\n/g, '\n\n\n'));
       expect(docStore.reconcileNow('d1')).toBe('catch-up');
       expect(docStore.getSyncError('d1')).toBeUndefined();
       expect(existsSync(join(dataDir, 'clobber-backups'))).toBe(false);
@@ -447,7 +436,7 @@ describe('sync-clobber regressions', () => {
       // formatting-only save that breaks anchors in blocks whose content is
       // identical. Semantically-equal disk must read as in-sync (and the
       // file keeps the external formatting at rest).
-      writeExternal(path, DOC.replace(/\n\n/g, '\n\n\n'));
+      writeFileSync(path, DOC.replace(/\n\n/g, '\n\n\n'));
       expect(docStore.reconcileNow('d1')).toBe('in-sync');
       expect(docStore.getSyncError('d1')).toBeUndefined();
     });
@@ -579,7 +568,7 @@ describe('sync-clobber HTTP surface', () => {
     expect(
       handle.docStore.findAndReplace(h2, { find: 'Intro paragraph.', replace: 'Un-flushed.' }).ok,
     ).toBe(true);
-    writeExternal(path, EXT_ONE);
+    writeFileSync(path, EXT_ONE);
     expect(handle.docStore.reconcileNow(h2)).toBe('conflict');
 
     const res = await fetch(`${base}/workspaces/${WS}/docs/h2/find_and_replace`, {

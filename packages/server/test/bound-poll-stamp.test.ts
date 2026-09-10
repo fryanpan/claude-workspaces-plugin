@@ -11,8 +11,10 @@
  * That is not a hypothetical granule. `statSync().mtimeMs` moves in whole
  * milliseconds under Bun, so two writes less than a millisecond apart already
  * collided; it is what made `git-ops-vs-bound.test.ts` time out on CI at
- * ~5.02s while passing locally, and it is why `flat-sync.test.ts` used to
- * carry a `writeExternal` helper that pushed the mtime forward by hand.
+ * ~5.02s while passing locally, and it is why four test files each carried a
+ * `writeExternal` helper that pushed every external write's mtime seconds
+ * into the future by hand. All four are gone: the poll can see the writes
+ * where they actually landed.
  *
  * The stamp is now (mtime, size), and the mtime is read from the file's
  * NANOSECOND stamp — six distinct values where `mtimeMs` gave one. These

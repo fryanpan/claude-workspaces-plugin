@@ -44,6 +44,15 @@ describe('a bound file’s stamp', () => {
   it('is still a whole-millisecond count, so it compares against an ordinary stat', () => {
     // The `.ydoc`-versus-file arbitration compares this number against a plain
     // `statSync().mtimeMs`; a bigint there would throw on the compare.
+    //
+    // The mtime is PLACED rather than taken as it comes: a double resolves
+    // ~244ns here, so a stamp in the top ~122ns of a millisecond rounds up to
+    // the next one and this would fail once in several thousand runs on an
+    // arbitrary file. 0.9ms into the millisecond is far outside that window,
+    // which is what makes the truncates-not-rounds claim a control rather
+    // than a coin flip. `diskNewerThanState` names the window it leaves.
+    const placed = Math.floor(Date.now() / 1000) + 0.2509;
+    utimesSync(path, placed, placed);
     const stamp = statStampSync(path);
     expect(typeof stamp.mtimeMs).toBe('number');
     expect(Math.trunc(stamp.mtimeMs)).toBe(statSync(path).mtimeMs);

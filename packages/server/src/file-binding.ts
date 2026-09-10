@@ -1927,9 +1927,16 @@ export class FileBindings {
    * Is the bound file at least as new as the persisted `.ydoc`?
    *
    * The `.ydoc` half stays a whole-millisecond `mtimeMs` while the file's is
-   * read to the nanosecond, so the two are only ever compared with `>=` and a
-   * tie still goes to disk — the same verdict this returned before the file's
-   * stamp got finer.
+   * read to the nanosecond, and the two are only ever compared with `>=`, so a
+   * tie still goes to disk exactly as it did before the file's stamp got
+   * finer. One window is not identical: a fractional-millisecond double
+   * resolves ~244ns at today's epoch, so a file mtime in the top ~122ns of a
+   * millisecond rounds UP to the next one while a plain `statSync().mtimeMs`
+   * truncates down. Inside that window a same-millisecond file now reads as
+   * newer where it used to read as older. It errs toward disk — the
+   * documented source of truth at rest, and the side a tie already went to —
+   * and `liveWins` is what a caller holding un-flushed content passes instead
+   * of arguing about clocks.
    *
    * `knownMtimeMs` is the preread's, and passing it is what keeps this off
    * the main thread: the caller has already paid for that stat on the pool,
@@ -1944,7 +1951,7 @@ export class FileBindings {
       const stateMtime = statSync(ydocPath).mtimeMs;
       if (knownMtimeMs !== undefined) return knownMtimeMs >= stateMtime;
       if (boundFiles.quarantined(filePath)) return true;
-      return statSync(filePath).mtimeMs >= stateMtime;
+      return statStampSync(filePath).mtimeMs >= stateMtime;
     } catch {
       return true;
     }
