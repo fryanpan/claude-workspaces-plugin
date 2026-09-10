@@ -353,6 +353,17 @@ export interface MeetingStripOpts {
    * The same boundaries the live zone is told about, for the same reason.
    */
   onMeetingChange?: (meetingId: string | null) => void;
+  /**
+   * A recording just ENDED, and this is the meeting it was.
+   *
+   * Narrower than `onMeetingChange`, which also fires on every boundary a
+   * doc crosses without a recording having run. What reads this is the
+   * tidy-up offer (`meeting-cleanup-offer.ts`), and an offer to re-read a
+   * meeting only makes sense for one this browser just finished: it fires
+   * once per meeting, and never for a start, a reconnect, or a doc that is
+   * merely showing an old meeting's cast.
+   */
+  onMeetingEnded?: (meetingId: string) => void;
 }
 
 /**
@@ -1398,6 +1409,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         // The meeting that just ended is the doc's current one: its cast is
         // the right answer again, and it is the record a late rename lands on.
         opts.onMeetingChange?.(lastMeetingId);
+        announceEnded();
         setState({ kind: 'idle' });
         break;
       case 'error':
@@ -1600,6 +1612,17 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     }, step.delayMs);
   }
 
+  /** Meetings already announced as ended, so the two paths that can see the
+   *  same end — a local stop and a `stopped` frame — announce it once. */
+  const announcedEnds = new Set<string>();
+
+  /** A recording ended. Fires at most once for a given meeting. */
+  function announceEnded(): void {
+    if (!lastMeetingId || announcedEnds.has(lastMeetingId)) return;
+    announcedEnds.add(lastMeetingId);
+    opts.onMeetingEnded?.(lastMeetingId);
+  }
+
   /** Whatever retry is waiting, called off — a stop, a dispose, a new start. */
   function cancelReconnect(): void {
     cancelRetry?.();
@@ -1613,6 +1636,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     releaseAudio();
     closeSocket();
     opts.liveZone?.end();
+    // The socket's handlers are detached above, so the server's own `stopped`
+    // frame may never be read here: a press of Stop is an end in its own
+    // right. `announceEnded` is what keeps the two from counting twice.
+    announceEnded();
     setState({ kind: 'idle' });
   }
 

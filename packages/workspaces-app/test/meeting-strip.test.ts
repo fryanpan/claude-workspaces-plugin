@@ -310,6 +310,7 @@ function mount(
     listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
     loadSpeakers?: () => Promise<DocSpeakers | null>;
     onMeetingChange?: (meetingId: string | null) => void;
+    onMeetingEnded?: (meetingId: string) => void;
     loadTranscript?: () => Promise<{ lines: string[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
@@ -942,6 +943,25 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
     h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
     expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null, 'm2', 'm2']);
+  });
+
+  /**
+   * The tidy-up offer is raised by this callback, so a doc that merely SHOWS
+   * an old meeting's cast must never see it fire — and an end reported twice
+   * (a press of Stop, then the server's own frame) must not raise two offers.
+   */
+  it('reports a recording ending exactly once, however the end arrives', async () => {
+    const onMeetingEnded = vi.fn();
+    const h = mount(undefined, { onMeetingEnded });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
+    // A live meeting has ended nothing yet.
+    expect(onMeetingEnded).not.toHaveBeenCalled();
+    h.pressStop();
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
+    expect(onMeetingEnded.mock.calls.map((c) => c[0])).toEqual(['m2']);
   });
 
   it('settles to idle when the server reports the meeting stopped', async () => {
