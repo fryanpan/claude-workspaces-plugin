@@ -236,6 +236,31 @@ export interface TaskNote {
  *  not user content, so the oldest fall off rather than being archived. */
 export const TASK_NOTES_STORE_CAP = 200;
 
+/**
+ * The fields the board's projection may DROP from a row on its way into the
+ * ydoc, and the one it narrows in place.
+ *
+ * Here rather than beside the trim (`task-row-slim.ts` on the server) because
+ * both ends of the trim have to agree about the list and they are in
+ * different packages: the server decides per field whether to send one, and
+ * the browser's detail overlay decides which fields a fetched row may put
+ * back over the projected one. A list that lived on one side would be copied
+ * to the other, and the copy that drifts leaves a field the panel silently
+ * never shows.
+ *
+ * A row that lost anything says so with `detailTrimmed`, and
+ * `GET /workspaces/:ws/tasks/:taskId/detail` answers with all of it.
+ */
+export const TRIMMED_ROW_FIELDS = ['reviews', 'quote', 'body', 'bodyTruncated', 'notes'] as const;
+
+/**
+ * The field the trim keeps but SHORTENS: every stop survives, its `note` and
+ * `usage` do not. Separate from the list above because the projected row
+ * still carries the key, so an overlay merge that only filled absent fields
+ * would leave the prose behind.
+ */
+export const NARROWED_ROW_FIELDS = ['transitions'] as const;
+
 export interface TaskTransition {
   ts: number;
   from: TaskStatus;

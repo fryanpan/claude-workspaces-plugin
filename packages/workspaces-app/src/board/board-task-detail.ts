@@ -27,6 +27,7 @@
  *     is an overlay `readProjection` merges on the way out, so the next
  *     projection tick cannot be fought by a client write.
  */
+import { NARROWED_ROW_FIELDS, TRIMMED_ROW_FIELDS } from '@claude-workspaces/core/task-wire';
 import type { BoardState } from './board-actions.ts';
 import { fetchJson } from './board-actions.ts';
 import type { BoardTask } from './board-model.ts';
@@ -54,8 +55,24 @@ export function detailKey(taskId: string, updatedAt: number): string {
 }
 
 /**
- * The row a surface should render: the fetched whole one when it matches the
- * projected row's revision, otherwise the projected row itself.
+ * The row a surface should render: the PROJECTED row, with the fields the
+ * trim took out of it filled from the fetched one.
+ *
+ * The fetched row is never handed back wholesale, and that is the bug this
+ * shape exists to prevent rather than a preference. A fetched row is a
+ * snapshot of the whole ticket; the projection keeps moving under it, and not
+ * every move bumps `updatedAt` — a body rewrite (`updateBodySnapshot`)
+ * stamps `quote`, clears `possiblyStale` and touches nothing the key is built
+ * from. Returning the snapshot whole therefore froze every OTHER field at the
+ * revision the fetch happened at: the drift notice a rewrite had just
+ * cleared stayed on screen until something unrelated moved the row. Taking
+ * only `TRIMMED_ROW_FIELDS` and `NARROWED_ROW_FIELDS` from it leaves every
+ * field the board still sends live, so the snapshot can only be stale about
+ * the fields it is the sole source of.
+ *
+ * The marker comes off the merged row: it says "something is missing", and
+ * nothing is once this has run — which is also what makes `loadTaskDetail`
+ * idempotent on a row it has already filled.
  *
  * Exported because `readProjection` is the only caller and a test is the
  * other — the merge is the half of this design that is easy to get subtly
@@ -63,7 +80,18 @@ export function detailKey(taskId: string, updatedAt: number): string {
  */
 export function mergeTaskDetail(projected: BoardTask, overlay: Map<string, BoardTask>): BoardTask {
   if (!projected.detailTrimmed) return projected;
-  return overlay.get(detailKey(projected.id, projected.updatedAt)) ?? projected;
+  const whole = overlay.get(detailKey(projected.id, projected.updatedAt));
+  if (!whole) return projected;
+  const merged = { ...projected } as BoardTask & Record<string, unknown>;
+  const fetched = whole as unknown as Record<string, unknown>;
+  for (const field of [...TRIMMED_ROW_FIELDS, ...NARROWED_ROW_FIELDS]) {
+    // `undefined` is the fetched row saying the ticket does not have one, so
+    // it must not overwrite — a row with no notes and a row whose notes were
+    // trimmed both arrive here with the key absent.
+    if (fetched[field] !== undefined) merged[field] = fetched[field];
+  }
+  merged.detailTrimmed = undefined;
+  return merged;
 }
 
 export function createTaskDetailLoads(deps: TaskDetailDeps): TaskDetailLoads {

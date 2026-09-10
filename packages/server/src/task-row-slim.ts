@@ -54,6 +54,8 @@
  * the whole row back to the one surface that wants it.
  */
 
+import { TRIMMED_ROW_FIELDS } from '@claude-workspaces/core/task-wire';
+
 /** A projected row, as `projectTask` returns it. */
 export type ProjectedTaskRow = Record<string, unknown>;
 
@@ -76,15 +78,13 @@ export const BODY_FIELDS = ['body', 'bodyTruncated'] as const;
 export const ACTIVITY_FIELDS = ['notes'] as const;
 
 /**
- * Every field this module may drop, named once so the test, the client's
- * refetch and this module cannot disagree about the list. Each is dropped
- * under its own rule — the union is not a set any single row loses.
+ * Every field this module may drop, named once in `@claude-workspaces/core`
+ * so the trim and the browser's refetch cannot disagree about the list — the
+ * groups above are this module's own rules, and the test pins their union
+ * against it. Each field is dropped under its own rule: the union is not a
+ * set any single row loses.
  */
-export const TRIMMED_ROW_FIELDS = [
-  ...ALWAYS_TRIMMED_FIELDS,
-  ...BODY_FIELDS,
-  ...ACTIVITY_FIELDS,
-] as const;
+export { TRIMMED_ROW_FIELDS };
 
 /**
  * Does a list surface still render this row's description?

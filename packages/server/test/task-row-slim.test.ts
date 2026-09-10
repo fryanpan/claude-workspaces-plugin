@@ -202,6 +202,13 @@ describe('what every trimmed row keeps, and what it says about itself', () => {
     expect([...dropped].sort()).toEqual(['body', 'bodyTruncated', 'notes', 'quote', 'reviews']);
     for (const field of TRIMMED_ROW_FIELDS) expect(slim[field]).toBeUndefined();
     expect(slim.detailTrimmed).toBe(true);
+    // The list lives in core because the browser's overlay reads it too, and
+    // this module's three rules must add up to exactly it: a field this trim
+    // drops that the shared list does not name is a field the panel would
+    // never put back, silently. Sorted on both sides — the groups are ordered
+    // by rule, the shared list by nothing in particular.
+    const rules: readonly string[] = [...ALWAYS_TRIMMED_FIELDS, ...BODY_FIELDS, ...ACTIVITY_FIELDS];
+    expect([...rules].sort()).toEqual([...dropped].sort());
   });
 
   it('keeps the list fields the board computes over every row', () => {

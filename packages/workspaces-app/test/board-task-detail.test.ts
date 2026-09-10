@@ -23,7 +23,17 @@ import { boardState, task } from './support/board-region-harness.ts';
  *  because it is no longer what decides the trim — an in-progress row reaches
  *  the browser exactly as short as a closed one. */
 function trimmed(id: string, updatedAt: number, status = 'done'): BoardTask {
-  return { ...task(id), updatedAt, status, detailTrimmed: true, body: undefined } as BoardTask;
+  return {
+    ...task(id),
+    updatedAt,
+    status,
+    detailTrimmed: true,
+    body: undefined,
+    // The trail as the wire carries it: the stop, without the words on it.
+    transitions: [
+      { ts: updatedAt, from: 'todo', to: 'in-progress', by: { name: 'Ada', kind: 'agent' } },
+    ],
+  } as unknown as BoardTask;
 }
 
 /** The same row as the detail route answers it — every field the trim drops. */
@@ -36,6 +46,15 @@ function whole(id: string, updatedAt: number, body: string): BoardTask {
     notes: [{ ts: updatedAt, by: 'agent', text: 'what happened' }],
     reviews: [{ id: 'r-1', ask: 'does this read right?' }],
     quote: 'what Bryan actually said',
+    transitions: [
+      {
+        ts: updatedAt,
+        from: 'todo',
+        to: 'in-progress',
+        by: { name: 'Ada', kind: 'agent' },
+        note: 'why it moved',
+      },
+    ],
   } as unknown as BoardTask;
 }
 
@@ -45,7 +64,7 @@ describe('mergeTaskDetail', () => {
     expect(mergeTaskDetail(row, new Map())).toBe(row);
   });
 
-  it('hands back the fetched row for the revision it was fetched at', () => {
+  it('fills the projected row from the fetch made at its revision', () => {
     const row = trimmed('t-1', 10);
     const full = whole('t-1', 10, 'the whole description');
     const overlay = new Map([[detailKey('t-1', 10), full]]);
@@ -69,6 +88,43 @@ describe('mergeTaskDetail', () => {
     expect(mergeTaskDetail(open, overlay).body).toBe('live');
   });
 
+  it('never lets the snapshot overrule a field the board still sends', () => {
+    // The whole reason the fetched row is merged FIELD BY FIELD rather than
+    // handed back whole. `updateBodySnapshot` — the choke point every body
+    // rewrite passes through — stamps `quote`, clears `possiblyStale`, and
+    // deliberately does not bump `updatedAt`, so the overlay key does not
+    // move. Returning the snapshot whole therefore kept re-asserting the
+    // drift notice the rewrite had just cleared, on a panel the reader was
+    // looking at, until something unrelated moved the row.
+    //
+    // MUTATION CONTROL: `return overlay.get(...) ?? projected` fails the
+    // first assertion; dropping the loop over the trimmed fields fails the
+    // second.
+    const flagged = {
+      ...whole('t-1', 10, 'the description before the rewrite'),
+      possiblyStale: { docRevision: 3, ts: 9 },
+    } as BoardTask;
+    const overlay = new Map([[detailKey('t-1', 10), flagged]]);
+    // The projection has since dropped the flag — the refresh deletes keys
+    // the row no longer has — and the fetched snapshot still carries it.
+    const cleared = trimmed('t-1', 10, 'in-progress');
+    expect(cleared.possiblyStale).toBeUndefined();
+
+    const merged = mergeTaskDetail(cleared, overlay);
+    expect(merged.possiblyStale).toBeUndefined();
+    expect(merged.quote).toBe('what Bryan actually said');
+  });
+
+  it('takes the marker off the row it filled', () => {
+    // `detailTrimmed` says something is missing, and nothing is once this has
+    // run — which is also what keeps `loadTaskDetail` from asking again for a
+    // revision it already holds.
+    const overlay = new Map([[detailKey('t-1', 10), whole('t-1', 10, 'filled')]]);
+    expect(mergeTaskDetail(trimmed('t-1', 10), overlay).detailTrimmed).toBeFalsy();
+    // Positive control: the row that was NOT filled keeps saying so.
+    expect(mergeTaskDetail(trimmed('t-1', 10), new Map()).detailTrimmed).toBe(true);
+  });
+
   it('fills an OPEN trimmed row the same way it fills a closed one', () => {
     // The marker is the whole contract — `mergeTaskDetail` reads it and not
     // the status, which is what lets the server widen the trim to open rows
@@ -79,6 +135,11 @@ describe('mergeTaskDetail', () => {
     const overlay = new Map([[detailKey('t-1', 10), whole('t-1', 10, 'the live description')]]);
     const merged = mergeTaskDetail(live, overlay);
     expect(merged.body).toBe('the live description');
+    // The trail comes back with its prose, which the trim shortens in place
+    // rather than removing — a field an overlay that only filled ABSENT keys
+    // would leave narrowed. The projected row's own stop carries no note.
+    expect(live.transitions[0]?.note).toBeUndefined();
+    expect(merged.transitions[0]?.note).toBe('why it moved');
     expect(merged.reviews).toHaveLength(1);
     expect(merged.notes).toHaveLength(1);
     expect(merged.quote).toBe('what Bryan actually said');
