@@ -12,13 +12,13 @@
  * the compacted ones.
  */
 import { describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
 import { COMPACT_FLOOR_BYTES, compactBoardState } from '../src/board-doc-compaction.ts';
 import { DocStore } from '../src/doc-store.ts';
-import { preCompactPath, writePreCompactBackup } from '../src/pre-compact-backup.ts';
+import { type WriteFn, preCompactPath, writePreCompactBackup } from '../src/pre-compact-backup.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
 
@@ -59,6 +59,44 @@ describe('the pre-compaction backup', () => {
     // what a save arriving immediately afterwards would find.
     expect(statSync(preCompactPath(path)).size).toBe(bytes.byteLength);
     sameBytes(new Uint8Array(readFileSync(preCompactPath(path))), bytes);
+  });
+
+  it('writes every byte even when the syscall keeps coming up short', () => {
+    const d = dir();
+    const path = join(d, 'ws:w-test.ydoc');
+    const bytes = churnedBoardBytes();
+    // A filesystem that never writes more than 4 KB at a time. Real ones do
+    // not do this on demand, which is why the seam exists at all.
+    let calls = 0;
+    const shortWrite: WriteFn = (fd, buf, offset, length) => {
+      calls++;
+      return writeSync(fd, buf, offset, Math.min(length, 4096));
+    };
+
+    expect(writePreCompactBackup(path, bytes, shortWrite)).toBe('written');
+    // The control on the fixture: if one call had satisfied the whole buffer
+    // the loop would never have been exercised and this would pass vacuously.
+    expect(calls).toBeGreaterThan(1);
+    sameBytes(new Uint8Array(readFileSync(preCompactPath(path))), bytes);
+  });
+
+  it('leaves no truncated file behind when the write cannot finish', () => {
+    const d = dir();
+    const path = join(d, 'ws:w-test.ydoc');
+    const bytes = churnedBoardBytes();
+    // Writes the first chunk, then reports zero forever — a write that
+    // cannot make progress rather than one that is merely short.
+    let done = false;
+    const stalls: WriteFn = (fd, buf, offset, length) => {
+      if (done) return 0;
+      done = true;
+      return writeSync(fd, buf, offset, Math.min(length, 4096));
+    };
+
+    expect(writePreCompactBackup(path, bytes, stalls)).toBe('failed');
+    // Nothing is left claiming to be the backup, so a later attempt can still
+    // write a real one rather than being refused by `wx` forever.
+    expect(existsSync(preCompactPath(path))).toBe(false);
   });
 
   it('refuses to overwrite, so a second compaction cannot eat the only copy', () => {
