@@ -65,10 +65,14 @@ export function detailKey(taskId: string, updatedAt: number): string {
  * stamps `quote`, clears `possiblyStale` and touches nothing the key is built
  * from. Returning the snapshot whole therefore froze every OTHER field at the
  * revision the fetch happened at: the drift notice a rewrite had just
- * cleared stayed on screen until something unrelated moved the row. Taking
- * only `TRIMMED_ROW_FIELDS` and `NARROWED_ROW_FIELDS` from it leaves every
- * field the board still sends live, so the snapshot can only be stale about
- * the fields it is the sole source of.
+ * cleared stayed on screen until something unrelated moved the row.
+ *
+ * So the snapshot fills HOLES and nothing else. Every field the board still
+ * sends stays the board's, which is not the same rule as "the trimmed fields
+ * come from the snapshot": `detailTrimmed` says something went, never which
+ * thing, and `body` is on a row whose `reviews` went. The one field that is
+ * replaced rather than filled is the trail, because the trim shortens it in
+ * place — see the loop.
  *
  * The marker comes off the merged row: it says "something is missing", and
  * nothing is once this has run — which is also what makes `loadTaskDetail`
@@ -88,10 +92,24 @@ export function mergeTaskDetail(projected: BoardTask, overlay: Map<string, Board
   // `never` rather than to the value each key holds.
   const filled = merged as unknown as Record<string, unknown>;
   const fetched = whole as unknown as Record<string, unknown>;
-  for (const field of [...TRIMMED_ROW_FIELDS, ...NARROWED_ROW_FIELDS]) {
-    // `undefined` is the fetched row saying the ticket does not have one, so
-    // it must not overwrite — a row with no notes and a row whose notes were
-    // trimmed both arrive here with the key absent.
+  for (const field of TRIMMED_ROW_FIELDS) {
+    // A field the PROJECTION still carries is the live one, and the marker is
+    // no promise that this particular field went: an open decision keeps its
+    // `body` for the walkthrough's card and is still marked, because its
+    // `reviews` and `quote` went. Overwriting there would put a snapshot body
+    // on a card the projection is keeping current — and permanently, since a
+    // body rewrite moves nothing this key is built from. So the snapshot only
+    // ever fills a HOLE.
+    if (filled[field] === undefined && fetched[field] !== undefined) {
+      filled[field] = fetched[field];
+    }
+  }
+  for (const field of NARROWED_ROW_FIELDS) {
+    // The exception, and why these are a separate list: the trail is
+    // SHORTENED rather than removed, so the projected row has the key and
+    // fill-the-hole would never restore the prose. Safe to replace because
+    // every write to a trail is a transition, and a transition bumps
+    // `updatedAt` — this key moves before the trail can disagree.
     if (fetched[field] !== undefined) filled[field] = fetched[field];
   }
   merged.detailTrimmed = undefined;

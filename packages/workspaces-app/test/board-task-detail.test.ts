@@ -115,6 +115,36 @@ describe('mergeTaskDetail', () => {
     expect(merged.quote).toBe('what Bryan actually said');
   });
 
+  it('leaves a KEPT body alone on a row that is marked for other reasons', () => {
+    // The marker says something went, never which thing. An open unanswered
+    // decision keeps its `body` — the walkthrough's card draws it off the
+    // projection and never refetches — and is still marked, because its
+    // `reviews` and `quote` went. Filling the body from the snapshot there
+    // would put the fetched copy on a card the projection is keeping current,
+    // and permanently: a body rewrite moves nothing this key is built from.
+    //
+    // MUTATION CONTROL: dropping the `filled[field] === undefined` guard
+    // fails the first assertion.
+    const decision = {
+      ...task('t-1'),
+      updatedAt: 10,
+      status: 'in-progress',
+      needs: 'decision',
+      detailTrimmed: true,
+      body: 'the description as the board is carrying it NOW',
+    } as unknown as BoardTask;
+    const overlay = new Map([
+      [detailKey('t-1', 10), whole('t-1', 10, 'the body as it was fetched')],
+    ]);
+
+    const merged = mergeTaskDetail(decision, overlay);
+    expect(merged.body).toBe('the description as the board is carrying it NOW');
+    // Positive control: the fields that DID go are still filled from the
+    // snapshot, so this is not passing because the merge did nothing.
+    expect(merged.quote).toBe('what Bryan actually said');
+    expect(merged.reviews).toHaveLength(1);
+  });
+
   it('takes the marker off the row it filled', () => {
     // `detailTrimmed` says something is missing, and nothing is once this has
     // run — which is also what keeps `loadTaskDetail` from asking again for a
