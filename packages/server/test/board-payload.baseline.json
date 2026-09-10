@@ -1,0 +1,12 @@
+{
+  "_comment": "Ratchet for the board's sync-step-2 payload, in the style of scripts/test-audit.baseline.json: budgetBytes is a CEILING and the measurement may only fall. A commit that takes bytes out of the projection lowers both lines. Raising budgetBytes is a product decision, not a fix — the number is what a fresh tab downloads before the board can draw a list, and over a 10 Mbps link it is most of the wait.",
+  "_subject": "packages/server/test/board-payload-fixture.ts driven through the real projectTask + slimClosedRow and encoded as the sync-step-2 message a fresh tab is answered with. 500 rows: 100 open, 400 closed, 12 of the closed ones inside the trim's fresh window.",
+  "_measured": "measuredBytes is what the test read on the commit that last touched this file. It is asserted only through driftPct, so a change that MOVES the number without crossing the ceiling still has to land the new reading in this diff rather than being absorbed by headroom.",
+  "_headroom": "budgetBytes sits 2% over measuredBytes — about 14 KB. Enough that a longer title or one more transition does not fail a build; far too little for a dropped trim (that fixture measures 1,730,542), a new per-row field, or an un-slimmed body to hide in.",
+  "budgetBytes": 737000,
+  "measuredBytes": 722484,
+  "driftPct": 1,
+  "rows": 500,
+  "openRows": 100,
+  "closedRows": 400
+}
