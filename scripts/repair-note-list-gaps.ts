@@ -3,11 +3,13 @@
  * Repair the documents whose notes read with blank lines between them.
  *
  *   bun scripts/repair-note-list-gaps.ts --data-dir <dir>             # dry run
- *   bun scripts/repair-note-list-gaps.ts --data-dir <dir> --apply
- *   bun scripts/repair-note-list-gaps.ts --data-dir <dir> --doc d-xxx --apply
+ *   bun scripts/repair-note-list-gaps.ts --data-dir <dir> --doc <id> --apply
  *
- * Dry first, always: the report a dry run prints is the plan `--apply`
- * executes, doc by doc and site by site.
+ * The survey is corpus-wide; the repair is not. `--apply` needs at least one
+ * `--doc`, because a gap site is a strong signal rather than a proof — an
+ * empty paragraph a person typed into and cleared reads exactly like the
+ * browser's — and repairing one restructures a document. So the dry run is
+ * the plan, and a person reads it and names the documents.
  *
  * `--force` proceeds while a server is live. Only pass it knowing which
  * server that is and that it does not hold this corpus — one that does
@@ -44,11 +46,24 @@ function parseArgs(argv: string[]): Args {
     else throw new Error(`unknown argument: ${flag}`);
   }
   if (!args.dataDir) throw new Error('--data-dir is required');
+  // A gap site is a strong signal, not a proof — an empty paragraph a person
+  // cleared reads exactly like the browser's — and repairing one RESTRUCTURES
+  // a document. So the survey is corpus-wide and the repair is not: somebody
+  // reads the dry run and names the documents.
+  if (args.apply && args.docs.length === 0) {
+    throw new Error('--apply needs at least one --doc: run the dry survey first and name them');
+  }
   if (!existsSync(args.dataDir)) throw new Error(`no such data dir: ${args.dataDir}`);
   return args;
 }
 
-const args = parseArgs(process.argv.slice(2));
+let args: Args;
+try {
+  args = parseArgs(process.argv.slice(2));
+} catch (err) {
+  console.error((err as Error).message);
+  process.exit(2);
+}
 
 // A server holding a document rewrites it from memory on its next flush, so a
 // repair written under one is thrown away with no error anywhere. The
@@ -74,5 +89,5 @@ console.log(
         `${result.itemsMoved} item(s) moved, ${result.anchorsRebuilt} anchor(s) rebuilt, ` +
         `${result.anchorsUnverified} left alone.`
     : `\n${result.docsWithSites} doc(s) carry ${result.sitesFound} site(s). ` +
-        'Re-run with --apply to repair them.',
+        'Name the ones to repair with --doc, then re-run with --apply.',
 );

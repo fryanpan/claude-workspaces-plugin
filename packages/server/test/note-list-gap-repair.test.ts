@@ -149,6 +149,18 @@ describe('findGapSites', () => {
     ]);
   });
 
+  it('reports whether the stranded items are agent-written, as evidence', () => {
+    // Authorship is what a person reads before naming a document for repair.
+    // The damaged doc is the agent's own; a hand-parsed one carries none, and
+    // that is NOT evidence of the opposite — it is the absence of evidence.
+    expect(findGapSites(damagedDoc(['one', 'two']))[0]?.authored).toBe(true);
+    const parsed = docOf('- one\n');
+    const fragment = prose.getProseFragment(parsed);
+    fragment.push([new Y.XmlElement('paragraph')]);
+    fragment.push(prose.parseMarkdownBlocks('- two\n'));
+    expect(findGapSites(parsed)[0]?.authored).toBe(false);
+  });
+
   it('finds nothing in a doc a person wrote by hand', () => {
     const doc = docOf('## Notes\n\n- one\n- two\n\nA paragraph with words.\n\n- three\n');
     expect(findGapSites(doc)).toEqual([]);

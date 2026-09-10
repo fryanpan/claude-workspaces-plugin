@@ -38,6 +38,21 @@
  *   or which did not resolve to begin with, is left exactly as it was and
  *   counted — this module never orphans a thread and never guesses.
  *
+ * ## What the shape does NOT prove
+ *
+ * An empty paragraph a person typed into and then cleared is byte-identical
+ * to the browser's: person edits strip authorship
+ * (`clearAuthorshipOnPersonEdit`) and a person's own block never carried it.
+ * So a gap site is a strong signal, not a proof, and this repair RESTRUCTURES
+ * a document rather than merely reading it. Measured on the corpus this was
+ * written for: three of nine sites carried no authorship anywhere, because a
+ * document parsed from a `.md` file has none — so an authorship filter would
+ * have skipped a meeting that plainly needed repairing, which is why
+ * `GapSite.authored` is reported as evidence for a person to read rather than
+ * used as a gate. The gate is `scripts/repair-note-list-gaps.ts` refusing to
+ * `--apply` across a whole directory: somebody reads the dry run and names
+ * the documents.
+ *
  * The one identity that is genuinely retired is the emptied list WRAPPER's
  * own `cwId`. Nothing addresses a list wrapper by id: `readOutline` emits
  * headings, list ITEMS and non-list blocks, so no id a caller has ever been
@@ -82,6 +97,12 @@ export interface GapSite {
   items: number;
   /** How many blank paragraphs sit between the two. */
   paragraphs: number;
+  /** Every item of the stranded list carries a `cwAuthor` — evidence that an
+   *  agent wrote them and no person has touched them since
+   *  (`clearAuthorshipOnPersonEdit` strips authorship when one does). False
+   *  is not evidence of the opposite: a document parsed from a `.md` file
+   *  carries no authorship anywhere. */
+  authored: boolean;
 }
 
 export interface RepairReport {
@@ -128,12 +149,14 @@ export function findGapSites(doc: Y.Doc): GapSite[] {
     while (j < tops.length && prose.isUnclaimedBlankParagraph(tops[j])) j++;
     const stranded = tops[j];
     if (j > i + 1 && isList(stranded) && stranded.nodeName === (tops[i] as Y.XmlElement).nodeName) {
+      const items = stranded.toArray() as Y.XmlElement[];
       sites.push({
         hostIndex: i,
         strandedIndex: j,
         nodeName: stranded.nodeName,
-        items: stranded.length,
+        items: items.length,
         paragraphs: j - i - 1,
+        authored: items.length > 0 && items.every((it) => prose.readBlockAuthor(it) !== undefined),
       });
       i = j;
       continue;
@@ -417,7 +440,13 @@ export function repairDataDir(dataDir: string, opts: DataDirOptions = {}): DataD
     result.sitesFound += sites.length;
     log(
       `${id}: ${sites.length} site(s) — ` +
-        sites.map((s) => `${s.items} item(s) behind ${s.paragraphs} blank`).join('; '),
+        sites
+          .map(
+            (s) =>
+              `${s.items} item(s) behind ${s.paragraphs} blank` +
+              (s.authored ? ', agent-written' : ', authorship unknown'),
+          )
+          .join('; '),
     );
     if (!opts.apply) continue;
 
