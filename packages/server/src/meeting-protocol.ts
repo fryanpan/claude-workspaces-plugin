@@ -20,12 +20,17 @@
  * emits that many words in about a minute — broadcasting partials would
  * evict every real doc event from the buffer for the length of a meeting.
  *
- * STAGE TIMING IS OFF UNLESS THE CLIENT ASKS. A `start` frame carrying
- * `timing: true` (the strip's `?timing=1`) makes this relay keep a ledger of
- * what it forwarded and when, and attach a block of timestamps to each
- * transcript frame. Without it no ledger is allocated, no clock is read per
- * chunk, and the wire is byte-for-byte what it was. Nothing in that block is
- * content — see `meeting-timing.ts`.
+ * STAGE TIMING IS OFF UNLESS THE CLIENT ASKS, BUT THE LEDGER IS NOT. A
+ * `start` frame carrying `timing: true` (the strip's `?timing=1`) is what
+ * attaches a block of timestamps to each transcript frame; without it the
+ * wire is byte-for-byte what it was, which is the property that matters to a
+ * client. The ledger BEHIND that block is now kept for every meeting,
+ * because a second reader wants it and is not an opt-in: the notes pipeline
+ * resolves a word's audio offset back to the instant it was SPOKEN, which is
+ * where the wait a person feels starts, and a latency number that only exists
+ * on instrumented meetings cannot be a claim about ordinary ones. It is four
+ * numbers a chunk in a bounded ring, in memory, never serialized. Nothing in
+ * either is content — see `meeting-timing.ts`.
  */
 
 import {
@@ -150,12 +155,32 @@ interface Conn {
   pending: Uint8Array[];
   /**
    * When each of those buffered chunks arrived, parallel to `pending`, so the
-   * hold shows up as its own leg rather than inside the vendor's. Populated
-   * only on a timing meeting; `pending` itself is untouched.
+   * hold shows up as its own leg rather than inside the vendor's. `pending`
+   * itself is untouched. Filled on EVERY meeting now that the ledger is: the
+   * words spoken while the handshake is open are the opening seconds of the
+   * meeting, and replaying them at the flush instant would report them as
+   * having been said later than they were — which understates the very wait
+   * the spoken clock exists to measure.
    */
   pendingRecv: number[];
-  /** This connection asked to be measured. Set synchronously from `start`. */
+  /** This connection asked for the stage-timing readout. Set synchronously
+   *  from `start`. It is a permission, not a claim that the ledger is
+   *  correlatable — that is `ledgerTrusted`. */
   wantsTiming: boolean;
+  /**
+   * Whether an offset into the engine's stream can still be resolved against
+   * this connection's ledger.
+   *
+   * False for the two shapes that break the correlation: a combined capture,
+   * whose two engines each number audio from their own byte zero while one
+   * ledger counts both, and a connection that dropped a buffered frame, after
+   * which the two sides count different audio. It gates BOTH readers — the
+   * client's timing block and the notes pipeline's spoken clock — because the
+   * arithmetic they share is the thing that stopped being true. Refuse to
+   * measure rather than measure wrongly: null is the honest answer, and a
+   * number that is wrong by minutes is not.
+   */
+  ledgerTrusted: boolean;
   /**
    * The engine this connection's meeting runs on, once one is chosen — what
    * a mid-meeting `tune` frame is sanitized against. Null while idle.
@@ -254,6 +279,7 @@ export class MeetingRelay {
       pending: [],
       pendingRecv: [],
       wantsTiming: false,
+      ledgerTrusted: true,
       engineName: null,
       tagged: false,
       ledger: null,
@@ -410,8 +436,8 @@ export class MeetingRelay {
       // without limit — roughly a few seconds of 16 kHz audio.
       if (conn.pending.length < 256) {
         conn.pending.push(chunk);
-        if (conn.wantsTiming) conn.pendingRecv.push(Date.now());
-      } else if (conn.wantsTiming) {
+        conn.pendingRecv.push(Date.now());
+      } else if (conn.ledgerTrusted) {
         // The buffer is full, so this frame is being dropped — and the two
         // sides count frames independently: the client numbers what it SENT,
         // the ledger numbers what we FORWARDED. From the first dropped frame
@@ -419,7 +445,7 @@ export class MeetingRelay {
         // be priced against an emit one frame per drop too early, with
         // nothing on screen to say so. Refuse to measure rather than measure
         // wrongly; the transcript itself is unaffected.
-        conn.wantsTiming = false;
+        conn.ledgerTrusted = false;
         conn.pendingRecv = [];
       }
       return;
@@ -598,11 +624,15 @@ export class MeetingRelay {
     conn.meeting = meeting;
     conn.engineName = engine.name;
     conn.tagged = streams.length > 1;
-    // Stage timing measures ONE audio stream: the ledger correlates a turn to
-    // the chunk it ended in by an offset into the engine's own stream, and two
-    // engines have two of those. A combined capture is not measured rather
-    // than measured against whichever stream wrote the ledger last.
-    if (conn.tagged) conn.wantsTiming = false;
+    // ONE LEDGER CANNOT MEASURE TWO STREAMS. It correlates a turn to the chunk
+    // it ended in by an offset into the ENGINE's own stream, and a combined
+    // capture opens one engine per stream, each numbering audio from its own
+    // byte zero, while this ledger counts the bytes of both. So an offset
+    // resolves to about half the elapsed time and the error grows without
+    // bound over the meeting. Neither reader may use it: not the client's
+    // block, and not the spoken clock, which would otherwise report a word as
+    // spoken minutes before it was.
+    if (conn.tagged) conn.ledgerTrusted = false;
     // The notes pipeline exists for exactly the meeting's lifetime. Created
     // before the handshake so the closure below can feed it, but it holds no
     // resource until a turn arrives — abandoning it on a failed handshake
@@ -636,8 +666,37 @@ export class MeetingRelay {
     // Held as a local for the same reason `notes` is: `stop()` detaches the
     // conn's fields before awaiting the engine close, and the flushed final
     // turn still deserves a mark.
-    const ledger = conn.wantsTiming ? new AudioChunkLedger(sampleRate) : null;
+    // BUILT FOR EVERY MEETING NOW, not only a `?timing=1` one. Two different
+    // readers want it and only one of them is opt-in: the strip's stage
+    // readout still needs `wantsTiming` (and `timingFor` below still checks
+    // it, so no frame gains a timing block it did not before), while the
+    // notes pipeline needs the same ledger to say when a word was SPOKEN —
+    // which is the start of the wait the ten-second goal is written against,
+    // and cannot be an opt-in on a number that has to be true of ordinary
+    // meetings. It is a bounded ring of four numbers a chunk, about two
+    // minutes deep.
+    const ledger = new AudioChunkLedger(sampleRate);
     conn.ledger = ledger;
+    /**
+     * When the last word of a frame was said, on this server's clock.
+     *
+     * The chunk that carried the word arrived at `recvMs` and closed at
+     * `chunkAudioEndMs` of the audio stream; the word ended `chunkAudioEndMs
+     * - audioEndMs` of audio earlier, and audio runs in real time, so that
+     * difference is real elapsed time. Undefined when the engine reports no
+     * word offsets or the chunk has aged out of the ring — the notes timing
+     * record then says it does not know, rather than guessing.
+     */
+    const spokenAtOf = (audioEndMs: number | undefined): number | undefined => {
+      if (audioEndMs === undefined || !conn.ledgerTrusted) return undefined;
+      const chunk = ledger.chunkAt(audioEndMs);
+      if (!chunk) return undefined;
+      // `chunkAt` clamps an offset past the newest chunk to that chunk, so an
+      // engine whose stream clock runs ahead of our byte count would
+      // extrapolate FORWARD past the moment the audio arrived. Nobody speaks
+      // in the future; the arrival is the floor.
+      return Math.min(chunk.recvMs, chunk.recvMs - (chunk.audioEndMs - audioEndMs));
+    };
     // A local for the same reason `notes` and `ledger` are: `stop()` detaches
     // the conn's fields before the engine's flush settles the final turn, and
     // that turn still has to be numbered under this meeting.
@@ -681,7 +740,11 @@ export class MeetingRelay {
             // off the connection every frame: the ledger is built before the
             // handshake is awaited, and audio dropped during that wait
             // withdraws the permission after the fact.
-            ...timingFor(conn.wantsTiming ? ledger : null, turn.audioEndMs, turn.engineMs),
+            ...timingFor(
+              conn.wantsTiming && conn.ledgerTrusted ? ledger : null,
+              turn.audioEndMs,
+              turn.engineMs,
+            ),
           });
           // Only settled turns reach the file. A partial is a view of a turn
           // still being revised, and the record keeps what the turn became.
@@ -690,7 +753,7 @@ export class MeetingRelay {
           // progress, which is exactly the evidence that defers a pause tick.
           // Under the meeting's numbering, not the session's: the ids it
           // reports back on `notes_progress` are the ones the strip has.
-          notes?.onTurn({ ...turn, turn: turnId });
+          notes?.onTurn({ ...turn, turn: turnId }, spokenAtOf(turn.audioEndMs));
         },
         onError: (message) => {
           this.send(ws, { type: 'error', message });

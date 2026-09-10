@@ -15,6 +15,7 @@
  */
 import * as Y from 'yjs';
 import { decodeRelativePositionSafe } from './anchor/validate.ts';
+import { readBlockAuthor } from './prose-identity.ts';
 
 export const PROSE_FRAGMENT_KEY = 'prose';
 
@@ -185,4 +186,63 @@ export function resolveRelativePositionRaw(
 export function headingLevelOf(el: Y.XmlElement): number {
   const raw = Number(el.getAttribute('level') ?? 1);
   return Number.isFinite(raw) ? Math.min(6, Math.max(1, raw)) : 1;
+}
+
+/**
+ * A paragraph with nothing in it that nobody has claimed — which in this
+ * document can only be the one a browser puts at the end.
+ *
+ * Tiptap's StarterKit registers `TrailingNode`, which keeps an empty
+ * paragraph after the last block whenever that block is not one, so a person
+ * has somewhere to click and type. Nothing else in the system mints an empty
+ * unclaimed paragraph: every block this file inserts is claimed for its
+ * author on the way in, and a paragraph a person actually typed into has
+ * words in it.
+ *
+ * The two halves of the test, and what each one is worth:
+ *
+ * - **Empty** is read from the CRDT, not from a serialization: every child
+ *   must be a `Y.XmlText` whose text is blank. An inline element — an image,
+ *   a hard break — is content, and a `Y.XmlText` carrying marks serializes
+ *   its wrappers, so both stop the paragraph counting as empty. The test
+ *   errs towards saying "not empty", which costs a merge rather than a
+ *   person's spacing.
+ * - **Unclaimed** is `cwAuthor` absent. An agent's own empty paragraph is
+ *   NOT stepped over: it is a block the agent may still address by id, and
+ *   walking past it would let a later insert reach behind something the
+ *   agent deliberately put at the section end.
+ *
+ * What it cannot tell apart: a paragraph a person typed into and then
+ * cleared. Person edits clear authorship (`clearAuthorshipOnPersonEdit`)
+ * and a person's own block never carried it, so an emptied paragraph is
+ * byte-identical to the browser's. Such a paragraph used as a deliberate
+ * spacer above a list would be stepped over and the new items would join
+ * the list above it. Nothing is deleted or rewritten either way — the
+ * paragraph stays exactly where it is — so the cost is one bullet joining
+ * a list rather than opening a new one.
+ */
+export function isUnclaimedBlankParagraph(el: Y.XmlElement | Y.XmlText | undefined): boolean {
+  if (!(el instanceof Y.XmlElement) || el.nodeName !== 'paragraph') return false;
+  if (readBlockAuthor(el) !== undefined) return false;
+  for (const child of el.toArray() as (Y.XmlElement | Y.XmlText)[]) {
+    if (!(child instanceof Y.XmlText)) return false;
+    if (child.toString().trim().length > 0) return false;
+  }
+  return true;
+}
+
+/**
+ * The block a merge should treat as preceding `index` in `siblings`.
+ *
+ * That is `index - 1` unless the browser's trailing paragraphs are in the
+ * way — see `isUnclaimedBlankParagraph` for why they are there and why
+ * stepping over them is safe. Returns `undefined` when nothing is left.
+ */
+export function precedingBlock(
+  siblings: readonly (Y.XmlElement | Y.XmlText)[],
+  index: number,
+): Y.XmlElement | Y.XmlText | undefined {
+  let scan = index - 1;
+  while (scan >= 0 && isUnclaimedBlankParagraph(siblings[scan])) scan--;
+  return siblings[scan];
 }

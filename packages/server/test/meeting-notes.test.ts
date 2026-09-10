@@ -131,22 +131,25 @@ describe('the notes clocks', () => {
    * The two numbers that decide when a meeting's notes get written, spelled
    * out so moving either has to be a deliberate edit to this line.
    *
-   * They are pinned because of what was DELIBERATELY left alone. Work on the
-   * wait between speaking and reading a note keeps arriving, and the standing
-   * decision (Bryan, 2026-09-04) is that these two stay where they are and
-   * the latency work happens upstream of them — in the engine's endpoint
-   * detector. A change that quietly shaved the quiet threshold would show up
-   * as the same improvement on every latency report in the repo while being
-   * the one thing that was not allowed, so the assertion lives here rather
-   * than in a reviewer's memory.
+   * They are pinned because each is a decision rather than a tuning knob.
+   * The quiet threshold is still the one that was DELIBERATELY left alone:
+   * shaving it would show up as an improvement on every latency report in
+   * the repo while being the one thing nobody chose. The ceiling moved once,
+   * on 2026-09-10, when the measurement showed that in a real meeting nobody
+   * is silent for four seconds, so the quiet tick almost never fires and
+   * every note pays the ceiling in full — 87% of the wait before a note is
+   * the wait before the model is even called. Bryan's call was six seconds,
+   * paid for by the prompt cache the compose now takes. Either number moving
+   * again should be a deliberate edit to this line rather than a diff a
+   * reviewer has to notice.
    *
    * Nothing else asserts them: `doc-store-timings.test.ts` pins the DOC's
    * debounces (file poll, write-back, persist) and has never had these two
    * in it.
    */
-  it('are the shipped 4s quiet threshold and 15s cadence ceiling', () => {
+  it('are the shipped 4s quiet threshold and 6s cadence ceiling', () => {
     expect(DEFAULT_NOTES_QUIET_MS).toBe(4_000);
-    expect(DEFAULT_NOTES_CADENCE_MS).toBe(15_000);
+    expect(DEFAULT_NOTES_CADENCE_MS).toBe(6_000);
     // The ceiling is a ceiling: quiet has to be able to fire first, or the
     // pause tick would be unreachable and every note would arrive on cadence.
     expect(DEFAULT_NOTES_QUIET_MS).toBeLessThan(DEFAULT_NOTES_CADENCE_MS);

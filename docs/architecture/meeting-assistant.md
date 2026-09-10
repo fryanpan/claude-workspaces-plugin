@@ -3,7 +3,7 @@
 **Goal:** a person opens a doc, presses one button, and talks. Words appear
 live in a compact strip while they speak; meeting notes compose themselves
 into the doc at the natural pauses in the conversation — and, when there are
-none, at least every fifteen seconds. The transcript is
+none, at least every six seconds. The transcript is
 durable; the doc body stays the person's own writing plus the notes section.
 
 Shipped 2026-08-28 (capture PR #408, notes PR #410). This doc is the summary
@@ -898,11 +898,15 @@ earlier of the two wipe the very chunk the later one was about to fade.
 - **The quiet fallback** — `DEFAULT_NOTES_QUIET_MS` (4s). Every frame replaces
   the countdown. It is no longer the primary pause detector: it is what
   answers a stream of partials that never endpoints at all.
-- **The cadence ceiling** — `DEFAULT_NOTES_CADENCE_MS` (15s), armed by the
+- **The cadence ceiling** — `DEFAULT_NOTES_CADENCE_MS` (6s), armed by the
   first unwritten **word** and **not** reset by speech. Added 2026-08-30
   (owner: *"waits too long to update notes"*); armed on a word rather than on
   a settled turn 2026-09-08, which is the fix that made it reachable at all
-  in the case it exists for. A turn is one person talking until they stop —
+  in the case it exists for; lowered from 15s to 6s 2026-09-10, because 48 of
+  the 91 notes in the prod timing records waited the FULL fifteen seconds and
+  79% waited more than six — 87% of the wait before a note was spent before
+  the model was called. Firing more than twice as often is paid for by
+  the prompt cache the compose now takes — the two are one change. A turn is one person talking until they stop —
   somebody making an argument talks for a minute — and while the ceiling
   armed only on a SETTLED turn, that whole minute ran with no clock going.
 

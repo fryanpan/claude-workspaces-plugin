@@ -20,6 +20,20 @@ interface Seen {
  * answers an empty edit list, which is a legitimate answer and keeps the test
  * about dispatch rather than about parsing.
  */
+/**
+ * The words of a request's user message, whichever shape it is in.
+ *
+ * The compose call sends its prompt as CONTENT BLOCKS so a cache breakpoint
+ * can sit between the part that repeats and the part that does not; the
+ * extract call still sends one string. A reader that knew only about the
+ * string read the compose call as an empty prompt and passed every
+ * `not.toContain` in this file for the wrong reason.
+ */
+function userTextOf(content: string | Array<{ text: string }> | undefined): string {
+  if (content === undefined) return '';
+  return typeof content === 'string' ? content : content.map((b) => b.text).join('\n\n');
+}
+
 function harness(points: string[] = ['Maya (A): survey the boardwalk']): {
   impl: typeof fetch;
   seen: Seen[];
@@ -30,14 +44,14 @@ function harness(points: string[] = ['Maya (A): survey the boardwalk']): {
       model: string;
       system: string;
       tools?: Array<{ name: string }>;
-      messages: Array<{ content: string }>;
+      messages: Array<{ content: string | Array<{ text: string }> }>;
       output_config?: { effort?: string };
     };
     const tool = body.tools?.[0]?.name;
     seen.push({
       model: body.model,
       system: body.system,
-      user: body.messages[0]?.content ?? '',
+      user: userTextOf(body.messages[0]?.content),
       ...(tool ? { tool } : {}),
       ...(body.output_config?.effort ? { effort: body.output_config.effort } : {}),
     });
