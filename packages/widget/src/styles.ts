@@ -23,13 +23,13 @@ import { STATUS_COLORS } from '@claude-workspaces/core';
  *   bounded upstream.
  */
 export const widgetStyles = `
-:host { all: initial; --cw-vv-bottom: 0px; }
+:host { all: initial; --cw-vv-bottom: 0px; --cw-dock-h: 0px; }
 * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif; }
 
 .fab {
   position: fixed;
   right: max(18px, env(safe-area-inset-right));
-  bottom: calc(var(--cw-vv-bottom) + max(18px, env(safe-area-inset-bottom)));
+  bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(18px, env(safe-area-inset-bottom)));
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -57,7 +57,7 @@ export const widgetStyles = `
 .fab-list {
   position: fixed;
   right: max(20px, calc(env(safe-area-inset-right) + 2px));
-  bottom: calc(var(--cw-vv-bottom) + max(74px, calc(env(safe-area-inset-bottom) + 74px)));
+  bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px, calc(env(safe-area-inset-bottom) + 74px)));
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -93,7 +93,7 @@ export const widgetStyles = `
 .panel {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
-  bottom: calc(var(--cw-vv-bottom) + max(128px, calc(env(safe-area-inset-bottom) + 128px)));
+  bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(128px, calc(env(safe-area-inset-bottom) + 128px)));
   width: 340px;
   max-height: 70vh;
   background: #fff;
@@ -384,6 +384,7 @@ export const widgetStyles = `
   justify-content: center;
   flex: 0 0 auto;
 }
+
 
 .thread-popover .actions textarea {
   flex: 1 1 100%;

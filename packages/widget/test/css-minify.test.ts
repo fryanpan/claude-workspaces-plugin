@@ -28,11 +28,12 @@ import { minifyCss } from '../scripts/minify-css.ts';
 // minifier — only exists in the live file.
 // audit: not-source — parser input, not the subject; every assertion is a
 // relation between the input and the transform's output
-const stylesSource = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles.ts'),
-  'utf8',
-);
-const rawCss = stylesSource.match(/export const widgetStyles = `([\s\S]*?)`;/)?.[1];
+const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+/** Every sheet the build feeds the minifier — its filter is `styles*.ts`. */
+const SHEETS = ['styles.ts', 'styles-dock.ts'];
+const rawCss = SHEETS.map(
+  (f) => readFileSync(join(srcDir, f), 'utf8').match(/export const \w+ = `([\s\S]*?)`;/)?.[1],
+).join('\n');
 
 describe('minifyCss', () => {
   it('drops comments, newlines and indentation', () => {
@@ -71,35 +72,41 @@ describe('minifyCss', () => {
   });
 
   describe('over the stylesheet the build actually feeds it', () => {
-    it('found the literal to test', () => {
-      expect(rawCss).toBeTypeOf('string');
+    it('found a literal in every sheet the build minifies', () => {
+      // A renamed or reshaped sheet would otherwise silently narrow every
+      // case below to whatever still matched — and the build's own filter
+      // would keep minifying a file these assertions no longer read.
+      for (const f of SHEETS) {
+        const one = readFileSync(join(srcDir, f), 'utf8').match(/export const \w+ = `([\s\S]*?)`;/);
+        expect(one?.[1], `no stylesheet literal in ${f}`).toBeTypeOf('string');
+      }
     });
 
     it('preserves every interpolation the source declares', () => {
-      const source = rawCss?.match(/\$\{[^}]*\}/g) ?? [];
+      const source = rawCss.match(/\$\{[^}]*\}/g) ?? [];
       expect(source.length).toBeGreaterThan(0);
-      expect(minifyCss(rawCss as string).match(/\$\{[^}]*\}/g)).toEqual(source);
+      expect(minifyCss(rawCss).match(/\$\{[^}]*\}/g)).toEqual(source);
     });
 
     it('preserves every selector block', () => {
       const braces = (s: string) => (s.match(/\{/g) ?? []).length;
       // `${...}` contributes an opening brace of its own; count only rule blocks.
       const rules = (s: string) => braces(s) - (s.match(/\$\{/g) ?? []).length;
-      expect(rules(minifyCss(rawCss as string))).toBe(rules(rawCss as string));
+      expect(rules(minifyCss(rawCss))).toBe(rules(rawCss as string));
     });
 
     it('preserves every declaration', () => {
       const decls = (s: string) => (s.match(/[a-z-]+\s*:\s*[^;{}]+/g) ?? []).length;
-      expect(decls(minifyCss(rawCss as string))).toBe(decls(rawCss as string));
+      expect(decls(minifyCss(rawCss))).toBe(decls(rawCss as string));
     });
 
     it('gets meaningfully smaller', () => {
-      const min = minifyCss(rawCss as string);
-      expect(min.length).toBeLessThan((rawCss as string).length * 0.9);
+      const min = minifyCss(rawCss);
+      expect(min.length).toBeLessThan(rawCss.length * 0.9);
     });
 
     it('leaves no minifier sentinel behind', () => {
-      expect(minifyCss(rawCss as string)).not.toContain('__CSSHOLE');
+      expect(minifyCss(rawCss)).not.toContain('__CSSHOLE');
     });
   });
 });
