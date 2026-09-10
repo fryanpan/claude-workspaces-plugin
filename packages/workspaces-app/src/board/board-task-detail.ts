@@ -82,13 +82,17 @@ export function mergeTaskDetail(projected: BoardTask, overlay: Map<string, Board
   if (!projected.detailTrimmed) return projected;
   const whole = overlay.get(detailKey(projected.id, projected.updatedAt));
   if (!whole) return projected;
-  const merged = { ...projected } as BoardTask & Record<string, unknown>;
+  const merged: BoardTask = { ...projected };
+  // Both sides through a string-keyed view: the field names are a union of
+  // `BoardTask` keys, and indexing the row with the union resolves to
+  // `never` rather than to the value each key holds.
+  const filled = merged as unknown as Record<string, unknown>;
   const fetched = whole as unknown as Record<string, unknown>;
   for (const field of [...TRIMMED_ROW_FIELDS, ...NARROWED_ROW_FIELDS]) {
     // `undefined` is the fetched row saying the ticket does not have one, so
     // it must not overwrite — a row with no notes and a row whose notes were
     // trimmed both arrive here with the key absent.
-    if (fetched[field] !== undefined) merged[field] = fetched[field];
+    if (fetched[field] !== undefined) filled[field] = fetched[field];
   }
   merged.detailTrimmed = undefined;
   return merged;
