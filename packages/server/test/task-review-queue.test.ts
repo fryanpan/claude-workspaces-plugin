@@ -671,6 +671,8 @@ describe('the board projection', () => {
     );
     const after = (map?.get(action.id) as Record<string, unknown>).updatedAt as number;
     expect(after).toBeGreaterThan(before);
-    expect(after).toBe(handle.tasks.getTask(action.id)?.updatedAt);
+    const reread = handle.tasks.getTask(action.id);
+    if (!reread) throw new Error('task went missing');
+    expect(after).toBe(reread.updatedAt);
   });
 });

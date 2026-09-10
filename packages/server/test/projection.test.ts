@@ -479,10 +479,7 @@ describe('ydoc projection + workspace doc', () => {
     const taskId = await makeTask(wsId, { title: 'Pasted a whole plan in here', body: long });
     const stored = handle.tasks.getTask(taskId);
     if (!stored) throw new Error('task went missing');
-    const projected = handle.projection.projectRowInFull(
-      wsId,
-      stored,
-    ) as unknown as ProjectedTask;
+    const projected = handle.projection.projectRowInFull(wsId, stored) as unknown as ProjectedTask;
     expect(projected.bodyTruncated).toBe(true);
     expect(projected.body?.length).toBe(BODY_PROJECTION_LIMIT);
     expect(projected.body).not.toContain('TAIL');

@@ -138,7 +138,9 @@ describe('body — kept only where a list surface draws it', () => {
 
   it('drops it again once that decision is answered, or archived, or done', () => {
     const answered = { answer: { text: 'yes', by: 'Bryan', ts: NOW } };
-    expect(slimTaskRow(liveRow('t-a', { needs: 'decision', ...answered }), NOW).body).toBeUndefined();
+    expect(
+      slimTaskRow(liveRow('t-a', { needs: 'decision', ...answered }), NOW).body,
+    ).toBeUndefined();
     expect(
       slimTaskRow(liveRow('t-b', { needs: 'decision', archivedAt: NOW - 1000 }), NOW).body,
     ).toBeUndefined();
@@ -162,8 +164,9 @@ describe('notes — kept while Home may still be drawing them', () => {
   it('drops them once the row has been still for a day', () => {
     expect([...ACTIVITY_FIELDS]).toEqual(['notes']);
     expect(slimTaskRow(heavyRow('t-old'), NOW).notes).toBeUndefined();
-    expect(slimTaskRow(liveRow('t-stale', { updatedAt: NOW - 2 * DETAIL_FRESH_MS }), NOW).notes)
-      .toBeUndefined();
+    expect(
+      slimTaskRow(liveRow('t-stale', { updatedAt: NOW - 2 * DETAIL_FRESH_MS }), NOW).notes,
+    ).toBeUndefined();
   });
 });
 
@@ -192,9 +195,11 @@ describe('what every trimmed row keeps, and what it says about itself', () => {
   const slim = slimTaskRow(heavyRow('t-1'), NOW);
 
   it('drops every field in the union and says that it did', () => {
-    expect([...TRIMMED_ROW_FIELDS].sort()).toEqual(
-      ['body', 'bodyTruncated', 'notes', 'quote', 'reviews'].sort(),
-    );
+    // Widened to `string[]` on purpose: the literal on the right is what a
+    // reader checks the union against, and comparing it to its own element
+    // type would make the assertion agree with whatever the constant says.
+    const dropped: readonly string[] = TRIMMED_ROW_FIELDS;
+    expect([...dropped].sort()).toEqual(['body', 'bodyTruncated', 'notes', 'quote', 'reviews']);
     for (const field of TRIMMED_ROW_FIELDS) expect(slim[field]).toBeUndefined();
     expect(slim.detailTrimmed).toBe(true);
   });
@@ -251,9 +256,7 @@ describe('the sync payload budget', () => {
    */
   const BYTES_PER_ROW = 1_800;
   const rows = Array.from({ length: 200 }, (_, i) =>
-    i % 2 === 0
-      ? heavyRow(`t-${i}`)
-      : liveRow(`t-${i}`, { updatedAt: NOW - 2 * DETAIL_FRESH_MS }),
+    i % 2 === 0 ? heavyRow(`t-${i}`) : liveRow(`t-${i}`, { updatedAt: NOW - 2 * DETAIL_FRESH_MS }),
   );
 
   it('keeps 200 rows under the per-row budget', () => {
