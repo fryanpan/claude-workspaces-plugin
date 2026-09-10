@@ -411,6 +411,12 @@ is handed a checklist — and every failure in it degrades to the original
 rather than to no notes. `notes-section-fit.ts` is the DOMAIN-tier rule for
 whether new minutes may write into the `Meeting notes` section that is
 already there; it sits beside `notes-edit-guard.ts` in the row below.
+`notes-regroup.ts` joins that DOMAIN tier too, and is arithmetic rather than
+policy: it reads the outline a tick is about to be composed against, finds the
+topics whose flat run has reached the bar `notes-quality.ts` scores, and writes
+the block ids into the prompt so the note-taker groups that topic instead of
+extending it. It counts runs the way `flatBulletRuns` does, deliberately, so
+the directive can never fire on a topic the eval calls fine.
 
 `notes-edit-guard.ts` joins the DOMAIN tier below as well, and it moves no
 boundary either: it is one function over values — a tick's edit list and the
@@ -541,7 +547,10 @@ two attributes a block can carry — its stable id, and the agent that wrote it.
 and text, and installs the observer that drops the authorship attribute the
 moment a person edits the block. `prose-batch.ts` applies a list of scoped
 edits in one transaction, refusing to rewrite what the agent no longer owns and
-raising a suggestion instead. Server-side they are reached through
+raising a suggestion instead. `prose-nest.ts` is one of those edits given a
+module of its own: `nest_blocks` MOVES existing list items under a lead bullet
+rather than restating them, which is what lets a note-taker regroup a topic
+without retyping a point or orphaning the comment threads anchored to it. Server-side they are reached through
 `doc-outline-ops.ts`, which sits beside `doc-edit-ops.ts` in the services tier
 for the reason that module already gives: `doc-edit-ops.ts` was at the
 500-line bar, and the outline verbs are a family of their own.
