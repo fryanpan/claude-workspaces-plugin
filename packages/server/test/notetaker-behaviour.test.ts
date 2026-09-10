@@ -31,8 +31,8 @@
 import { describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
-import { buildNotesPrompt } from '../src/meeting-notes-composer.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
+import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import {
   MAX_BULLET_WORDS,
   MAX_FLAT_RUN_BULLETS,

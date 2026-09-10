@@ -65,6 +65,44 @@ describe('readOutline', () => {
     expect(outline.map((e) => e.text)).toEqual(['Topic', 'three', 'four']);
   });
 
+  it('with a step, the front of the window stands still while the doc grows', () => {
+    // The behaviour a prompt cache is bought with: a caller reading this
+    // outline every few seconds is billed on how much of the leading text is
+    // unchanged, and a window that lets go of one entry per read changes its
+    // first line every time. Growing to `cap + step` and dropping `step` at
+    // once means the front is the same words for a step's worth of writes.
+    const bullets = (n: number): string =>
+      `## Topic\n\n${Array.from({ length: n }, (_, i) => `- item ${i}`).join('\n')}\n`;
+    const front = (n: number): string[] =>
+      readOutline(docOf(bullets(n)), { recentBlocks: 4, recentBlocksStep: 2 })
+        .filter((e) => e.kind !== 'heading')
+        .map((e) => e.text);
+
+    // Under the cap and just over it: nothing is dropped yet.
+    expect(front(4)).toEqual(['item 0', 'item 1', 'item 2', 'item 3']);
+    expect(front(5)).toEqual(['item 0', 'item 1', 'item 2', 'item 3', 'item 4']);
+    // The first drop takes a whole step, and then stands still for one more
+    // write — which is the property, not the size.
+    expect(front(6)[0]).toBe('item 2');
+    expect(front(7)[0]).toBe('item 2');
+    expect(front(8)[0]).toBe('item 4');
+    // And it never shows less than the cap.
+    for (let n = 4; n <= 20; n++) expect(front(n).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('without a step it still slides one at a time, as every other caller wants', () => {
+    // The control: the stepped window is opt-in, so a caller that did not ask
+    // for it must see exactly the old behaviour.
+    const bullets = (n: number): string =>
+      `## Topic\n\n${Array.from({ length: n }, (_, i) => `- item ${i}`).join('\n')}\n`;
+    const front = (n: number): string =>
+      readOutline(docOf(bullets(n)), { recentBlocks: 4 }).filter((e) => e.kind !== 'heading')[0]
+        ?.text as string;
+    expect(front(5)).toBe('item 1');
+    expect(front(6)).toBe('item 2');
+    expect(front(7)).toBe('item 3');
+  });
+
   it('survives a Yjs round trip — the ids are in the CRDT, not in memory', () => {
     const doc = docOf('## Topic\n\n- one\n');
     const before = readOutline(doc).map((e) => e.id);
