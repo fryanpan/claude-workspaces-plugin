@@ -58,6 +58,18 @@ export const NOTES_OUTLINE_RECENT_BLOCKS = 80;
  */
 export const NOTES_OUTLINE_DROP_STEP = 40;
 
+/**
+ * How many blocks at the live end of the doc stay OUT of the cached half.
+ *
+ * The note-taker revises what it just wrote, so the bottom of the table is
+ * the part that changes; the cached prefix has to stop above it. Twelve is
+ * about four ticks' worth of bullets — comfortably more than the one or two
+ * blocks a tick touches, and about 400 tokens of a five-thousand-token
+ * prompt, so what it costs at full rate is a rounding error against what a
+ * broken prefix costs.
+ */
+export const NOTES_OUTLINE_LIVE_BLOCKS = 12;
+
 /** The heading a meeting's section is opened under, as one markdown line. */
 const HEADING_LINE = `## ${MEETING_NOTES_HEADING}`;
 
@@ -124,10 +136,13 @@ export function buildNotesPrompt(
   }
   if (ctxLines.length > 0) parts.push(`Project context:\n${ctxLines.join('\n')}`);
   // THE CACHE LINE. Everything above reads the same all meeting; the doc
-  // below it grows. Everything after them is about this tick.
-  parts.push(renderOutline(input));
+  // table below it only grows at its end. The doc's LIVE end and everything
+  // about this tick go after the line, because those are what change.
+  const doc = renderOutline(input);
+  parts.push(doc.head);
   const stable = parts.join('\n\n');
   parts.length = 0;
+  if (doc.tail.length > 0) parts.push(doc.tail);
 
   if (input.taskLinks?.length) {
     parts.push(
@@ -216,13 +231,33 @@ export function buildNotesPrompt(
  * of blocks an edit may rewrite directly — anything else reaches them as a
  * suggestion, and the instructions say so.
  */
-function renderOutline(input: NotesComposeInput): string {
+/**
+ * The doc as the model reads it, cut in two at the line the cache is taken on.
+ *
+ * `head` is every block but the last `NOTES_OUTLINE_LIVE_BLOCKS`; `tail` is
+ * those. The cut exists because of what a note-taker DOES: it revises the
+ * bullet it wrote a moment ago. Measured over 395 consecutive tick pairs of
+ * ten prod meetings, 31% of them changed the doc somewhere other than its
+ * end — and a prompt cache is a prefix match, so one revised line near the
+ * bottom threw the whole prompt back to full price. Every one of those breaks
+ * was inside the last few blocks (the common prefix ran to 95%), so holding
+ * the LIVE end of the doc out of the cached half costs a few hundred tokens
+ * at full rate and buys the rest of it back.
+ *
+ * The two are rendered as one table and joined back in order, so the model
+ * sees exactly what it saw before: this is a billing seam, not a change to
+ * what is asked.
+ */
+function renderOutline(input: NotesComposeInput): { head: string; tail: string } {
   if (input.outline.length === 0) {
-    return [
-      'The doc is empty, and this meeting has no notes section yet.',
-      `Open one with a single insert_at_end carrying "${HEADING_LINE}", then`,
-      'insert_at_end the first notes under it.',
-    ].join('\n');
+    return {
+      head: [
+        'The doc is empty, and this meeting has no notes section yet.',
+        `Open one with a single insert_at_end carrying "${HEADING_LINE}", then`,
+        'insert_at_end the first notes under it.',
+      ].join('\n'),
+      tail: '',
+    };
   }
   const lines = input.outline.map((entry) => {
     const kind =
@@ -245,21 +280,28 @@ function renderOutline(input: NotesComposeInput): string {
         : ` under=${entry.underHeadingId}`;
     return `${entry.id} ${kind} ${whose}${under} | ${entry.text}`;
   });
-  const head =
+  const preamble =
     input.notesHeadingId === undefined
       ? [
           'This meeting has NO notes section in the doc below.',
           `Open one with a single insert_at_end carrying "${HEADING_LINE}".`,
         ]
       : [`This meeting's notes are under heading ${input.notesHeadingId}.`];
-  return [
-    ...head,
-    '',
-    'The doc, block by block — "id kind whose | text". Only the most recent',
-    'blocks are listed; every heading is. A "sub-bullet" sits under the',
-    '"bullet" above it.',
-    ...lines,
-  ].join('\n');
+  // Never cut so deep that the head is a preamble with no table under it: a
+  // short doc stays whole and the tail is empty, which is the same prompt the
+  // whole thing was before.
+  const cut = Math.max(0, lines.length - NOTES_OUTLINE_LIVE_BLOCKS);
+  return {
+    head: [
+      ...preamble,
+      '',
+      'The doc, block by block — "id kind whose | text". Only the most recent',
+      'blocks are listed; every heading is. A "sub-bullet" sits under the',
+      '"bullet" above it.',
+      ...lines.slice(0, cut),
+    ].join('\n'),
+    tail: lines.slice(cut).join('\n'),
+  };
 }
 
 /**

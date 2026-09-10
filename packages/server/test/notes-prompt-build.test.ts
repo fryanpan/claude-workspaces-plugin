@@ -9,8 +9,28 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
+import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import { input } from './notes-compose-input.ts';
+
+/** `input`'s doc, grown to `n` bullets under its heading — a meeting long
+ *  enough that the outline has a settled part as well as a live end. */
+function withBullets(n: number): NotesComposeInput {
+  return {
+    ...input,
+    outline: [
+      input.outline[0] as (typeof input.outline)[number],
+      ...Array.from({ length: n }, (_, i) => ({
+        id: `b${i}`,
+        kind: 'listItem' as const,
+        nodeName: 'listItem',
+        text: `point ${i}`,
+        author: 'meeting-notes',
+        underHeadingId: 'h1',
+      })),
+    ],
+  };
+}
 
 describe('notes prompt', () => {
   it('carries the delta, the doc as addressable blocks, and the project context', () => {
@@ -102,8 +122,10 @@ describe('notes prompt', () => {
     const { system, stable, volatile, user } = buildNotesPrompt(input);
     expect(user).toBe(`${stable}\n\n${volatile}`);
     expect(system).toContain('insert_under_heading');
-    // The doc, in the head.
-    expect(stable).toContain('b1 bullet yours under=h1 | earlier point');
+    // The doc's settled part, in the head. `input` is a two-block doc, which
+    // is entirely LIVE, so the doc a head has to hold is a longer one.
+    const long = buildNotesPrompt(withBullets(30));
+    expect(long.stable).toContain('b0 bullet yours under=h1 | point 0');
     expect(stable).toContain('Q3 planning');
     // This tick's speech, in the tail — and NOT in the head, which is the
     // assertion that fails if the two blocks ever swap back.
@@ -132,22 +154,44 @@ describe('notes prompt', () => {
   it('the head changes when the doc does, and only by growing at the end', () => {
     // The other half: a note written between two ticks must appear, and must
     // appear AFTER everything the previous head held, or the prefix is gone.
-    const grown = buildNotesPrompt({
-      ...input,
+    const before = buildNotesPrompt(withBullets(30));
+    const grown = buildNotesPrompt(withBullets(31));
+    expect(grown.stable.startsWith(before.stable)).toBe(true);
+    // And the new bullet is in the prompt, wherever the cut put it.
+    expect(grown.user).toContain('b30 bullet yours under=h1 | point 30');
+  });
+
+  it('a revision to the live end of the doc leaves the head alone', () => {
+    // WHY THE CUT IS NOT AT THE END OF THE DOC. A note-taker revises the
+    // bullet it wrote a moment ago, and measured over 395 consecutive tick
+    // pairs of ten prod meetings, 31% of them changed the doc somewhere other
+    // than its end. With the cut at the bottom of the table every one of
+    // those threw the whole prompt back to full price.
+    const before = buildNotesPrompt(withBullets(30));
+    const revised = withBullets(30);
+    const last = revised.outline[revised.outline.length - 1];
+    const after = buildNotesPrompt({
+      ...revised,
       outline: [
-        ...input.outline,
-        {
-          id: 'b2',
-          kind: 'listItem',
-          nodeName: 'listItem',
-          text: 'the newest point',
-          author: 'meeting-notes',
-          underHeadingId: 'h1',
-        },
+        ...revised.outline.slice(0, -1),
+        { ...(last as (typeof revised.outline)[number]), text: 'point 29, said better' },
       ],
     });
-    expect(grown.stable.startsWith(buildNotesPrompt(input).stable)).toBe(true);
-    expect(grown.stable).toContain('b2 bullet yours under=h1 | the newest point');
+    expect(after.stable).toBe(before.stable);
+    // The control: the revision really did reach the prompt. Without this the
+    // assertion above would pass on a builder that dropped the block.
+    expect(after.user).toContain('point 29, said better');
+    expect(after.volatile).not.toBe(before.volatile);
+  });
+
+  it('a doc too short to have a settled part is still shown whole', () => {
+    // The other control. The cut may never eat the table: a meeting three
+    // ticks old has fewer blocks than the live window, and the model has to
+    // see all of them.
+    const { user, stable, volatile } = buildNotesPrompt(input);
+    expect(user).toContain('b1 bullet yours under=h1 | earlier point');
+    expect(stable).not.toContain('b1 bullet');
+    expect(volatile).toContain('b1 bullet');
   });
 
   it('names which heading is this meeting’s, so a bullet has an id to go under', () => {
