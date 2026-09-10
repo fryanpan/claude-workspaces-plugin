@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { NotesMethod } from '@claude-workspaces/core';
+import { NOTES_METHODS, type NotesMethod } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import { LEDGER_FLAT_RUN_ANCHOR } from '../src/notes-ledger.ts';
 import { createNotesMethodComposer } from '../src/notes-method-composer.ts';
@@ -382,5 +382,68 @@ describe('a ledger method writes in two layers, and the original does not', () =
     });
     expect(system).toBe('Write the meeting notes.');
     expect(said).toBe('reported');
+  });
+});
+
+/**
+ * THE MEASURED INVENTION THIS CLOSES. On AMI ES2002b tick 14 the room was
+ * untangling cables to plug in a laptop, and B's fragments assembled to
+ * "it'd be a nice knot if everything now was wireless wouldn't it". All
+ * three shipped methods turned that into a claim about the product:
+ * `original` wrote "Wireless control should be considered for the remote
+ * design", `ledger-haiku` wrote "proposes wireless design" and linked it to
+ * the remote-control board row, and `ledger-opus` added "the remote itself
+ * would be wireless anyway" on the following tick. So the rule that refuses
+ * the upgrade has to reach EVERY method, and the ledger methods reach the
+ * model through a prompt swap that rewrites a whole block — which is exactly
+ * where a rule can be eaten without anything failing.
+ */
+describe('every shipped method is told not to write a point stronger than the speech', () => {
+  const STRENGTH_RULE = 'NEVER WRITE A POINT STRONGER THAN THE SPEECH MADE IT';
+
+  test('it reaches the compose on all three methods, the block-swapping ones included', async () => {
+    for (const method of NOTES_METHODS) {
+      const h = harness();
+      const { composer } = composerFor(method, h);
+      await composer.compose(input());
+      const system = composes(h.seen)[0]?.system ?? '';
+      expect(system).toContain(STRENGTH_RULE);
+      // The three upgrades it names, each one a move measured in the corpus.
+      expect(system).toContain('a remark about THE ROOM');
+      expect(system).toContain('is not a commitment');
+    }
+  });
+
+  test('the ledger extract carries the same bar, because it decides what a point IS', async () => {
+    // "D: Committed to current approach" came back from this pass, out of D
+    // saying "I'm all in [a knot]". The writer can only write what it is
+    // handed, so the bar that stops the upgrade has to sit on both passes.
+    const h = harness();
+    const { composer } = composerFor('ledger-opus', h);
+    await composer.compose(input());
+    const extract = extracts(h.seen);
+    expect(extract).toHaveLength(1);
+    expect(extract[0]?.system).toContain('WRITE EACH POINT AT THE STRENGTH IT WAS SAID');
+    expect(extract[0]?.system).toContain('is not a commitment');
+  });
+
+  test('MUTATION CONTROL: instructions without the rule reach the model without it', async () => {
+    // The same wire, the same reader. If this passed too, the two above would
+    // be asserting that a string exists somewhere rather than that it is what
+    // the note-taker was actually sent.
+    const h = harness();
+    const composer = createNotesMethodComposer({
+      methodFor: () => 'ledger-opus',
+      apiKey: 'k-test',
+      composerOpts: {
+        apiKey: 'k-test',
+        fetchImpl: h.impl,
+        instructions: () => 'Write the meeting notes.',
+      },
+      ledgerFetch: h.impl,
+    });
+    if (!composer) throw new Error('no composer built');
+    await composer.compose(input());
+    expect(composes(h.seen)[0]?.system ?? '').not.toContain(STRENGTH_RULE);
   });
 });

@@ -25,6 +25,16 @@
  *    what shipped, because a point raised once and never repeated then lands
  *    a tick late or, on the last tick, not at all.
  *
+ * 3. THE EXTRACT CARRIES THE STRENGTH BAR TOO. It is the pass that decides
+ *    what a point IS, and the writer can only write what it hands over. On
+ *    AMI ES2002b tick 14 — the room untangling cables — it returned
+ *    "D: Committed to current approach" out of D saying "I'm all in [a
+ *    knot]", and "B: Suggested wireless setup would be nice" out of a joke
+ *    about the room's own wiring. Both reached the notes as claims about the
+ *    product. `EXTRACT_SYSTEM` now says an aside is not a proposal and an
+ *    unfinished fragment is not a commitment, in the same words the writer's
+ *    accuracy block uses, so the bar is one bar on both passes.
+ *
  * IT IS ONE HAIKU CALL PER TICK whichever method is running: `ledger-opus`
  * changes what COMPOSES, not what enumerates. A ledger that paid the big
  * model for its own bookkeeping would be a bigger bill rather than a better
@@ -78,6 +88,15 @@ const EXTRACT_SYSTEM = [
   'speaker. Skip pure social noise and abandoned half-sentences. If the',
   'speech genuinely put nothing on the table, write nothing at all — a padded',
   'list is worse than a short one.',
+  '',
+  'WRITE EACH POINT AT THE STRENGTH IT WAS SAID, never one step up. An aside',
+  'is not a proposal, an unfinished fragment is not a commitment, and a',
+  'remark about the room — the cables, the seats, the projector — is not a',
+  'point about the thing being designed. Where two speakers talk over each',
+  'other, do not assemble their fragments into an intention neither of them',
+  'finished. The second pass can only write what you hand it, so a line you',
+  'strengthen here becomes a note nobody said. Leave it out rather than',
+  'finish it for them.',
   '',
   'Answer with the record_points tool.',
 ].join('\n');

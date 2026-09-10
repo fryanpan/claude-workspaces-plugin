@@ -74,6 +74,27 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  * questions have a FIXED heading for the reason a fixed place always beats a
  * good place: the room stops hunting.
  *
+ * WHY THE STRENGTH RULE IS IN ACCURACY, AND WHAT IT COST TO FIND. The
+ * accuracy block used to say only "never invent names, numbers, or
+ * decisions", and all three shipped methods still invented on the same tick
+ * of AMI ES2002b. The room was plugging in a laptop; B's fragments assembled
+ * to "it'd be a nice knot if everything now was wireless wouldn't it", a joke
+ * about the cables. The original wrote "Wireless control should be considered
+ * for the remote design", ledger-haiku wrote "proposes wireless design" and
+ * LINKED it to the remote-control board row, and ledger-opus wrote the remark
+ * honestly and then a second bullet saying "the remote itself would be
+ * wireless anyway". Nobody said that. On ES2002a the same move turned "I'm
+ * all in [a knot]" into "commits to the move", and on a tick whose entire
+ * speech was "Right okay Um" it restated a framing already in the notes as a
+ * fresh decision at that turn.
+ *
+ * Every one of those is the SAME error and it is not fabrication: the idea
+ * was really there, one step weaker. So the rule names the move — never
+ * write a point stronger than the speech made it — rather than adding a
+ * fourth category to an enumeration a model pattern-matches narrowly. It
+ * costs no coverage by construction, because writing the point at its actual
+ * strength still writes the point.
+ *
  * WHY REGROUPING STILL ASKS FOR SUB-BULLETS. Nesting costs the reader less
  * than a re-cut section: no block they have commented on is re-created, and
  * the ids stay valid. With `replace_block` it is also now cheap to express —
@@ -170,6 +191,20 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   'ACCURACY',
   '- Only what was said: never invent names, numbers, or decisions the',
   '  transcript does not contain.',
+  '- NEVER WRITE A POINT STRONGER THAN THE SPEECH MADE IT. Writing the idea',
+  '  is the job; finishing it for the speaker is not. An aside is not a',
+  '  proposal, an unfinished fragment is not a commitment, and "right, okay"',
+  '  is not a decision. Three upgrades to refuse:',
+  '    - a remark about THE ROOM — the cables, the seats, the projector, who',
+  '      sits where — rewritten as a claim about the thing being designed.',
+  '      Note it as what it was: a remark about the room.',
+  '    - words pieced together out of two speakers talking over each other,',
+  '      read as an intention neither of them finished saying.',
+  '    - a point the notes already carry, restated as a fresh decision',
+  '      because somebody said "right" or "okay" after it.',
+  '  Write the point at the strength it was said. Where that strength is',
+  '  what you cannot tell, the note still gets written — marked',
+  '  "(unconfirmed)", which is the rule below and is always available.',
   '- Transcription is imperfect — where a word is garbled, prefer the reading',
   '  that fits the project context.',
   '- Where you cannot tell what was meant, or the point rests on a word you',
