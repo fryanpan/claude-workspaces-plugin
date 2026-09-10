@@ -46,6 +46,8 @@ export {
   PROSE_FRAGMENT_KEY,
   getProseFragment,
   walkProse,
+  isUnclaimedBlankParagraph,
+  precedingBlock,
   resolveRelativePosition,
   resolveRelativePositionRaw,
   headingLevelOf,
