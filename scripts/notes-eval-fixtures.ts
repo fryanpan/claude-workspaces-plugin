@@ -102,6 +102,26 @@ export interface NotesEvalFixture {
   source: string;
   window: { fromSeconds: number; seconds: number };
   /**
+   * The two clocks this fixture's ticks were CUT WITH.
+   *
+   * A fixture is a recording of how the live pipeline would have grouped the
+   * speech, and it takes that grouping from `pause-ticker.ts`'s constants AT
+   * BUILD TIME. So a fixture outlives the constants: when PR 872 took the
+   * cadence ceiling from 15s to 6s, every fixture on disk kept the 15s cut and
+   * went on reporting an eval of a system that no longer ships. Measured on
+   * 2026-09-10 — the same hour of EN2001a is 173 ticks at 15s and 306 at 6s,
+   * so cost per meeting-hour, the compose latency and the failed-write rate
+   * were all being read off roughly half the tick rate the server runs at, and
+   * nothing said so.
+   *
+   * Stamping the clocks is what lets `notes-eval.ts` say so. Optional because
+   * the eight committed fixtures predate the stamp: an ABSENT field means
+   * "cut before this existed", which for those eight means 15s — they have not
+   * been recut, because recutting them moves every baseline in
+   * `notes-eval.baseline.json` and the ratcheted lost-idea bar with them.
+   */
+  clocks?: { quietMs: number; cadenceMs: number };
+  /**
    * A board for this meeting, built from phrases the meeting itself uses.
    *
    * Reference hygiene cannot be measured against an invented board: a title
@@ -198,20 +218,82 @@ function buildOne(spec: (typeof MEETINGS)[number]): NotesEvalFixture {
     licence: 'CC BY 4.0',
     source: 'https://groups.inf.ed.ac.uk/ami/corpus/',
     window: { fromSeconds: spec.fromSeconds, seconds: spec.seconds },
+    clocks: { quietMs: DEFAULT_NOTES_QUIET_MS, cadenceMs: DEFAULT_NOTES_CADENCE_MS },
     board: [...SCENARIO_BOARD],
     ticks: ticksOf(window),
   };
 }
 
+/**
+ * A meeting and window named on argv rather than picked from {@link MEETINGS}.
+ *
+ * `EN2001a:0:3600` — the meeting, where to start, how long. It exists because
+ * the eight committed fixtures are fifteen-minute windows, and the question
+ * "do the notes still keep up at the end of an hour" cannot be asked of a
+ * fifteen-minute one. AMI's non-scenario set holds real hour-long meetings
+ * (EN2001a and EN2009d run past eighty minutes), so an hour of continuous
+ * real speech needs no synthesis at all — it needs a window this builder
+ * would otherwise never cut.
+ *
+ * Returns null for an argument that is not one, so the existing
+ * "just this meeting" form still reads as a meeting name.
+ */
+/**
+ * What to say about the clocks a fixture was cut with, or nothing.
+ *
+ * Null is "say nothing", and it covers two cases deliberately: a fixture whose
+ * clocks match what ships, and one that carries no clocks at all. The second
+ * is the eight committed fixtures, which predate the stamp — a line on every
+ * CI smoke run would be a nag about work this function is not doing, and a
+ * warning that fires always is a warning nobody reads.
+ */
+export function staleClockWarning(
+  fixture: { meeting: string; clocks?: { quietMs: number; cadenceMs: number } },
+  quietMs: number = DEFAULT_NOTES_QUIET_MS,
+  cadenceMs: number = DEFAULT_NOTES_CADENCE_MS,
+): string | null {
+  const cut = fixture.clocks;
+  if (!cut) return null;
+  if (cut.quietMs === quietMs && cut.cadenceMs === cadenceMs) return null;
+  return (
+    `${fixture.meeting}: cut at quiet ${cut.quietMs}ms / cadence ${cut.cadenceMs}ms, ` +
+    `but the server now ticks at quiet ${quietMs}ms / cadence ${cadenceMs}ms. ` +
+    'Its tick rate is not the shipped one — rebuild it before reading any rate off this run.'
+  );
+}
+
+export function parseWindowSpec(
+  arg: string,
+): { meeting: string; fromSeconds: number; seconds: number } | null {
+  const m = arg.match(/^([A-Za-z0-9]+):(\d+):(\d+)$/);
+  if (!m) return null;
+  return { meeting: m[1]!, fromSeconds: Number(m[2]), seconds: Number(m[3]) };
+}
+
 if (import.meta.main) {
-  const only = process.argv.slice(2);
-  const specs = only.length > 0 ? MEETINGS.filter((m) => only.includes(m.meeting)) : MEETINGS;
-  if (specs.length === 0) throw new Error(`No such meeting: ${only.join(', ')}`);
-  mkdirSync(FIXTURE_DIR, { recursive: true });
+  const argv = process.argv.slice(2);
+  // WHERE THE FIXTURE LANDS, because an hour-long one does not belong in the
+  // repo. The committed eight are small and CI reads them; an hour of speech
+  // is several hundred kilobytes each and nothing in CI runs it. `--out`
+  // keeps those runs beside the corpus they measure, which is the same place
+  // `notes-eval.ts --corpus` already reads from.
+  const outAt = argv.indexOf('--out');
+  const outDir = outAt >= 0 && argv[outAt + 1] ? resolve(argv[outAt + 1]!) : FIXTURE_DIR;
+  const rest = argv.filter((_, i) => i !== outAt && i !== outAt + 1);
+  const windows = rest.map(parseWindowSpec).filter((w): w is NonNullable<typeof w> => w !== null);
+  const names = rest.filter((a) => parseWindowSpec(a) === null);
+  const specs =
+    windows.length > 0
+      ? windows
+      : names.length > 0
+        ? MEETINGS.filter((m) => names.includes(m.meeting))
+        : MEETINGS;
+  if (specs.length === 0) throw new Error(`No such meeting: ${names.join(', ')}`);
+  mkdirSync(outDir, { recursive: true });
   let ticks = 0;
   for (const spec of specs) {
     const fixture = buildOne(spec);
-    const path = join(FIXTURE_DIR, `${spec.meeting}.json`);
+    const path = join(outDir, `${spec.meeting}.json`);
     writeFileSync(path, `${JSON.stringify(fixture, null, 2)}\n`);
     ticks += fixture.ticks.length;
     const turns = fixture.ticks.reduce((n, t) => n + t.turns.length, 0);
