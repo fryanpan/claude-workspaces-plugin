@@ -283,6 +283,46 @@ describe('the dock on the page', () => {
     const err = q(el, '.cw-answer-err');
     expect(err?.hidden).toBe(false);
     expect(err?.textContent).toContain('try again');
+    // And the one-at-a-time guard released, so the item can be answered
+    // again. A guard that never released would leave the reader looking at
+    // an open item whose buttons do nothing.
+    (q(el, '.cw-answer-opt') as HTMLButtonElement).click();
+    await settle();
+    expect(posts.filter((p) => p.url.endsWith('/answer'))).toHaveLength(2);
+  });
+
+  it('a double tap on an option answers ONCE', async () => {
+    // Nothing here is disabled on click, so on a slow connection the second
+    // tap would answer the same item again — and whichever option landed last
+    // would overwrite the first answer.
+    const { el, posts } = await mountWidget('d-twice');
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const seen = posts;
+    (globalThis as unknown as { fetch: unknown }).fetch = (async (
+      url: string,
+      init?: RequestInit,
+    ) => {
+      if (init?.method === 'POST') {
+        seen.push({ url: String(url), body: JSON.parse(String(init.body ?? '{}')) });
+      }
+      await gate;
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    seedAsk(el, { threadId: 'th-twice', commentId: 'c-twice', review: payload() });
+    el.renderThreads();
+    (q(el, '.cw-dock-item') as HTMLButtonElement).click();
+    const opts = Array.from(el.shadow.querySelectorAll('.cw-answer-opt')) as HTMLButtonElement[];
+    opts[0]?.click();
+    opts[1]?.click();
+    await settle();
+    expect(seen.filter((p) => p.url.endsWith('/answer'))).toHaveLength(1);
+    release();
+    await settle();
   });
 
   it('an answered item reads as answered rather than still asking', async () => {

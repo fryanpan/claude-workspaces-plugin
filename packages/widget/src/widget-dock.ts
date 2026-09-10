@@ -204,9 +204,15 @@ export function openDockItem(el: FeedbackWidgetEl, item: DockItem): void {
   const err = scrim.querySelector('.cw-answer-err') as HTMLElement | null;
   const reason = (): string =>
     (scrim.querySelector('.cw-answer-text') as HTMLTextAreaElement | null)?.value.trim() ?? '';
+  // One answer at a time. Nothing here is disabled on click, so a double tap
+  // on a slow connection would answer the same item twice — and the second
+  // answer would overwrite the first with whichever option landed last.
+  let inFlight = false;
   const send = async (text: string, optionId?: string): Promise<void> => {
-    if (!text) return;
+    if (inFlight || !text) return;
+    inFlight = true;
     const ok = await el.postAnswer(item.threadId, item.commentId, text, optionId);
+    inFlight = false;
     if (!ok) {
       if (err) {
         err.hidden = false;

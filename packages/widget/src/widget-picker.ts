@@ -332,9 +332,15 @@ function showComposer(
   const submit = composer.querySelector('.submit') as HTMLButtonElement;
   // Say it before the first attempt when the widget already knows.
   if (el.signInToWrite && !el.authToken) composerSignIn(el, composer, submit);
+  // One post at a time. Disabling the button stops a second CLICK and nothing
+  // else: the textarea's Enter handler is still live, and a key held down
+  // auto-repeats, so a slow connection could post the same comment several
+  // times over. The flag is what both doors read.
+  let inFlight = false;
   const post = async (): Promise<void> => {
     const text = ta.value.trim();
-    if (!text || !el.user) return;
+    if (inFlight || !text || !el.user) return;
+    inFlight = true;
     // A silent await reads as a dead button — say the click landed.
     submit.disabled = true;
     submit.textContent = 'Posting…';
@@ -344,6 +350,7 @@ function showComposer(
     try {
       posted = replyTo ? await el.postReply(replyTo, text) : await el.postNewThread(anchor, text);
     } catch {}
+    inFlight = false;
     if (!posted) {
       // Kept on failure, with the text still in it.
       submit.disabled = false;

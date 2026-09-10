@@ -267,6 +267,89 @@ describe('comment mode', () => {
       expect(notCancelled).toBe(true);
     });
 
+    it('a held Enter posts ONCE, not once per repeat', async () => {
+      // Disabling the Post button stops a second click and nothing else — the
+      // textarea's own handler is still live, and a held key auto-repeats. On
+      // a slow connection that is the same comment several times over.
+      const { el, posts } = await mount(TABLET);
+      let release = (): void => {};
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      (globalThis as unknown as { fetch: unknown }).fetch = (async (
+        _url: string,
+        init?: RequestInit,
+      ) => {
+        if (init?.method === 'POST') posts.push(JSON.parse(String(init.body ?? '{}')));
+        await gate;
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof fetch;
+      enterFeedbackMode(el);
+      const ta = field(el) as HTMLTextAreaElement;
+      ta.value = 'one cup, one comment';
+      enter(ta, false);
+      enter(ta, false);
+      enter(ta, false);
+      await settle();
+      expect(posts).toHaveLength(1);
+      release();
+      await settle();
+    });
+
+    it('CONTROL: after a REFUSAL the same composer will try again', async () => {
+      // The guard has to RELEASE, and the only path where that is observable
+      // is a refusal: an accepted post replaces the composer, so a guard that
+      // never released would still look fine on the next comment. Without
+      // this, "posted once" would pass on a composer that goes dead the
+      // moment a post fails — with the words still in it and Post inert.
+      const { el, posts } = await mount(TABLET);
+      let refuse = true;
+      (globalThis as unknown as { fetch: unknown }).fetch = (async (
+        _url: string,
+        init?: RequestInit,
+      ) => {
+        if (init?.method === 'POST') posts.push(JSON.parse(String(init.body ?? '{}')));
+        return refuse
+          ? new Response('{}', { status: 500 })
+          : new Response(JSON.stringify({ ok: true }), {
+              headers: { 'content-type': 'application/json' },
+            });
+      }) as unknown as typeof fetch;
+      enterFeedbackMode(el);
+      const ta = field(el) as HTMLTextAreaElement;
+      ta.value = 'one cup, one comment';
+      enter(ta, false);
+      await settle();
+      expect(posts).toHaveLength(1);
+      refuse = false;
+      enter(field(el) as HTMLTextAreaElement, false);
+      await settle();
+      expect(posts).toHaveLength(2);
+      // The retry was accepted, so the refused draft is gone and the mode is
+      // back at rest — not still holding the words it could not send.
+      expect(field(el)?.value).toBe('');
+      expect(composer(el)?.textContent).not.toContain('try again');
+    });
+
+    it('several comments in a row cost one entry into the mode', async () => {
+      const { el, posts } = await mount(TABLET);
+      enterFeedbackMode(el);
+      const first = field(el) as HTMLTextAreaElement;
+      first.value = 'one cup, one comment';
+      enter(first, false);
+      await settle();
+      const second = field(el) as HTMLTextAreaElement;
+      second.value = 'and the sign, separately';
+      enter(second, false);
+      await settle();
+      expect(posts.map((p) => p.text)).toEqual([
+        'one cup, one comment',
+        'and the sign, separately',
+      ]);
+    });
+
     it('CONTROL: an IME Enter picks a candidate and posts nothing', async () => {
       const { el, posts } = await mount(TABLET);
       enterFeedbackMode(el);
