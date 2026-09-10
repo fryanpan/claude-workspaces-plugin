@@ -16,16 +16,17 @@
  * rewrites every document it has open from memory, throwing the repair away
  * with no error anywhere.
  *
- * The repair is `packages/server/src/note-list-gap-repair.ts`; this file is
- * the only thing that names a real data directory, which is what keeps a test
- * run and a stray import from rewriting a corpus. Read that module's header
- * for what the move does to block ids, authorship and comment anchors, and
- * for how to revert one document.
+ * The repair is `packages/server/src/note-list-gap-repair.ts` and the corpus
+ * walk `note-list-gap-corpus.ts`; this file is the only thing that names a
+ * real data directory, which is what keeps a test run and a stray import from
+ * rewriting a corpus. Read the first module's header for what the move does
+ * to block ids, authorship and comment anchors, and the second's for how to
+ * revert one document.
  */
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { pidIsAlive, readDiscovery } from '../packages/core/src/discovery-file.ts';
-import { repairDataDir } from '../packages/server/src/note-list-gap-repair.ts';
+import { repairDataDir } from '../packages/server/src/note-list-gap-corpus.ts';
 
 interface Args {
   dataDir: string;

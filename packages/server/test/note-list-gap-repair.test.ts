@@ -4,12 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  BACKUP_SUFFIX,
-  findGapSites,
-  repairDataDir,
-  repairNoteListGaps,
-} from '../src/note-list-gap-repair.ts';
+import { BACKUP_SUFFIX, repairDataDir } from '../src/note-list-gap-corpus.ts';
+import { findGapSites, repairNoteListGaps } from '../src/note-list-gap-repair.ts';
 
 /**
  * The repair for documents already carrying a note-list gap.
@@ -19,6 +15,12 @@ import {
  * then check the three things the repair claims: the notes end up in one
  * list, nothing a person put there is fused, and a comment anchored to a
  * moved bullet still points at the same words.
+ *
+ * Both halves are here rather than in two files: `note-list-gap-corpus.ts`
+ * is exercised through `repairDataDir` in the last describe, and it can only
+ * be driven by a corpus built out of the same damaged documents the repair
+ * itself is tested with — splitting the file would duplicate every helper
+ * above and leave two copies to drift.
  */
 
 const AGENT = 'meeting-notes';
