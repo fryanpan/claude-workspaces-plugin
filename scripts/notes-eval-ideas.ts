@@ -37,11 +37,8 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import {
-  type SummaryCredential,
-  authHeader,
-  resolveCredentialFrom,
-} from '../packages/server/src/summarize.ts';
+import { type SummaryCredential, authHeader } from '../packages/server/src/summarize.ts';
+import { EVAL_CREDENTIAL_HELP, resolveEvalCredentialFrom } from './eval-credential.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -522,12 +519,10 @@ if (import.meta.main) {
   const at = argv.indexOf('--meeting');
   const corpusAt = argv.indexOf('--corpus');
   const dir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
-  const key = resolveCredentialFrom(undefined, readKeychainPassword, process.env);
+  // The eval's credential, not prod's — the judge is part of the same sweep.
+  const key = resolveEvalCredentialFrom(undefined, readKeychainPassword, process.env);
   if (!key) {
-    console.error(
-      'No credential. Set CW_SUMMARY_ACCESS_TOKEN, set CW_SUMMARY_API_KEY, or use the ' +
-        'Keychain entry.',
-    );
+    console.error(EVAL_CREDENTIAL_HELP);
     process.exit(2);
   }
   if (!argv.includes('--build')) {

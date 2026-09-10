@@ -90,12 +90,9 @@ import {
 } from '../packages/server/src/notes-quality.ts';
 import { median } from '../packages/server/src/notes-timing.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import {
-  type SummaryCredential,
-  authHeader,
-  resolveCredentialFrom,
-} from '../packages/server/src/summarize.ts';
+import { type SummaryCredential, authHeader } from '../packages/server/src/summarize.ts';
 import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
+import { EVAL_CREDENTIAL_HELP, resolveEvalCredentialFrom } from './eval-credential.ts';
 import { FIXTURE_DIR, type NotesEvalFixture } from './notes-eval-fixtures.ts';
 import {
   MIN_GATED_IDEAS,
@@ -808,18 +805,16 @@ async function main(argv: string[]): Promise<number> {
   // and the idea judge's alike. The sink is cleared in the `finally` below so
   // a second run in the same process cannot inherit it.
   setIdeaUsageSink(recordUsage);
-  const key = resolveCredentialFrom(
+  // THE EVAL'S OWN CREDENTIAL, never the live meeting's — see
+  // `eval-credential.ts`. A sweep that could exhaust prod's key is a
+  // measurement job with the power to stop a meeting taking notes.
+  const key = resolveEvalCredentialFrom(
     keyAt >= 0 ? argv[keyAt + 1] : undefined,
     readKeychainPassword,
     process.env,
   );
   if (!key) {
-    console.error(
-      'No credential. Set CW_SUMMARY_ACCESS_TOKEN (an already-exchanged access\n' +
-        'token, which is how CI runs), set CW_SUMMARY_API_KEY, put a key in the\n' +
-        'Keychain as claude-workspaces-summary-api-key, or pass --api-key.\n' +
-        'Nothing was run.',
-    );
+    console.error(EVAL_CREDENTIAL_HELP);
     return 2;
   }
 
