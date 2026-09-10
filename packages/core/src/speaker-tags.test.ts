@@ -99,10 +99,10 @@ describe('a name with markdown in it', () => {
     expect(out.renamed).toBe(0);
   });
 
-  it('keeps the words when the voice turns out to be unknown', () => {
+  it('takes an unknown voice out entirely — a tag whose text is all there was', () => {
     const md = renderSpeakerTag('C', { C: 'Sam [PM]' });
     const out = normalizeSpeakerTags(md, { names: {}, known: new Set(['B']) });
-    expect(out.markdown).toBe('Sam PM');
+    expect(out.markdown).toBe('');
     expect(out.unknown).toEqual(['C']);
   });
 });
@@ -148,12 +148,16 @@ describe('normalizeSpeakerTags — the gate on what the model claims', () => {
     expect(out.renamed).toBe(0);
   });
 
-  it('unwraps a voice the meeting never carried, keeping the words and reporting the label', () => {
+  it('drops a voice the meeting never carried — NAME AND ALL — and reports the label', () => {
+    // The name is the half a person reads. Unwrapping the link and leaving
+    // "Priya" in the sentence removed the machine-readable claim and kept
+    // the invented person, which is the failure this gate exists to stop.
     const out = normalizeSpeakerTags('- [@Priya](speaker:C) volunteered.', {
       names: {},
       known,
     });
-    expect(out.markdown).toBe('- Priya volunteered.');
+    expect(out.markdown).toBe('- Volunteered.');
+    expect(out.markdown).not.toContain('Priya');
     expect(out.unknown).toEqual(['C']);
   });
 
@@ -305,12 +309,12 @@ describe('normalizeSpeakerTags — stamping this tick', () => {
     expect(out.renamed).toBe(1);
   });
 
-  it('unwraps an invented voice whatever it claims to have been composed from', () => {
+  it('drops an invented voice whatever it claims to have been composed from', () => {
     const out = normalizeSpeakerTags('- [@Priya](speaker:C?t=10) volunteered.', {
       names: {},
       known,
     });
-    expect(out.markdown).toBe('- Priya volunteered.');
+    expect(out.markdown).toBe('- Volunteered.');
     expect(out.unknown).toEqual(['C']);
   });
 
@@ -379,12 +383,16 @@ describe('reattributeSpeakerTags — the engine changes its mind late', () => {
     expect(out.unsure).toBe(0);
   });
 
-  it('takes the claim off when the words are now attributed to nobody', () => {
+  it('takes the claim off — name included — when the words are attributed to nobody', () => {
+    // A voice the engine has withdrawn its words from is a phantom by the
+    // same arithmetic as one it never had, and gets the same remedy: the
+    // note keeps its words, the meeting keeps no name against them.
     const out = reattributeSpeakerTags('- [@Devi](speaker:B?t=10) asked about staging.', {
       revisions: revisions({ 10: null }),
       names,
     });
-    expect(out.markdown).toBe('- Devi asked about staging.');
+    expect(out.markdown).toBe('- Asked about staging.');
+    expect(out.markdown).not.toContain('Devi');
     expect(out.unwrapped).toBe(1);
   });
 

@@ -42,10 +42,17 @@
  * A TAG IS NOT EVIDENCE, IT IS A CLAIM THE MODEL MAKES. The composer is an
  * LLM, so `normalizeSpeakerTags` is the deterministic gate every composed
  * section passes through before it reaches a doc: a tag naming a voice the
- * meeting never carried is unwrapped to plain words, and a tag naming a real
+ * meeting never carried is DROPPED — name and all — and a tag naming a real
  * one is re-rendered from the name map rather than trusted to spell it. Same
  * law the task capture's `requester` is held to — a model-claimed
  * attribution must name something the tick's own transcript contained.
+ *
+ * Dropping the name rather than merely the link is the whole point of the
+ * gate, and it took a real meeting to learn it: unwrapping left the words
+ * behind, so a solo huddle came out of the pass reading "Speaker A: ..." and
+ * "Speaker B: ..." with the tags gone and the two invented people still in
+ * the notes. A gate that removes the machine-readable half of a false claim
+ * and keeps the half a person reads has removed nothing.
  *
  * Pure string work, in core, because three processes need to agree about it:
  * the server composes and renames, the editor renders the chip, and the
@@ -380,6 +387,111 @@ function rewriteTags(
   return { markdown: out + markdown.slice(at), changed };
 }
 
+/**
+ * What a caller returns to say "this attribution is not one this meeting can
+ * make — take it out, NAME AND ALL".
+ *
+ * WHY IT IS NOT JUST THE EMPTY STRING. Withdrawing a claim used to mean
+ * unwrapping the link and keeping its words, which left the invented person
+ * standing in the sentence: `[@Speaker B](speaker:B): the locator beeps`
+ * became `Speaker B: the locator beeps`, and a reader of the notes met a
+ * voice the meeting never had, spelled exactly as if it had. The tag was
+ * gone and the phantom was not. So a drop is a LINE-level edit, not a
+ * span-level one: the name goes, the punctuation that only existed to
+ * introduce it goes with it, and a sentence the name was opening gets its
+ * capital back.
+ */
+const DROP_TAG = Symbol('drop-speaker-tag');
+type TagRewrite = string | typeof DROP_TAG | null;
+
+/**
+ * `rewriteTags`, but line by line and able to DROP a tag rather than replace
+ * it — which is what taking a name out of a sentence needs, because the
+ * punctuation and the capital live outside the tag's own span.
+ */
+function rewriteTagsByLine(
+  markdown: string,
+  replace: (tag: SpeakerTagMatch) => TagRewrite,
+  opts: { skip?: (line: string) => boolean } = {},
+): { markdown: string; changed: number } {
+  let changed = 0;
+  const lines = markdown.split('\n').map((line) => {
+    if (opts.skip?.(line)) return line;
+    const next = rewriteLineTags(line, replace);
+    changed += next.changed;
+    return next.line;
+  });
+  return { markdown: lines.join('\n'), changed };
+}
+
+/** The list marker and indentation a line opens with — everything before the
+ *  first character of what the line SAYS. */
+const LINE_LEAD = /^(\s*(?:[-*+]|\d+[.)])?\s*)/;
+
+/** Punctuation that must not be left floating after the word before it. */
+const CLINGING = /^[.,;:!?)\]]/;
+
+/** An attribution separator: punctuation whose only job was to introduce the
+ *  name that has just been taken out. */
+const NAME_SEPARATOR = /^[ \t]*(?::|—|–)[ \t]*/;
+
+function rewriteLineTags(
+  line: string,
+  replace: (tag: SpeakerTagMatch) => TagRewrite,
+): { line: string; changed: number } {
+  const tags = findSpeakerTags(line);
+  if (tags.length === 0) return { line, changed: 0 };
+  const lead = LINE_LEAD.exec(line)?.[1]?.length ?? 0;
+  let out = '';
+  let at = 0;
+  let changed = 0;
+  let openedTheLine = false;
+  for (const tag of tags) {
+    const next = replace(tag);
+    if (next === null) continue;
+    out += line.slice(at, tag.start);
+    at = tag.end;
+    changed++;
+    if (next !== DROP_TAG) {
+      out += next;
+      continue;
+    }
+    // A tag that was the first thing the line SAID was opening a sentence,
+    // so the word now in its place has to start one.
+    if (tag.start === lead) openedTheLine = true;
+    const rest = line.slice(at);
+    const separator = NAME_SEPARATOR.exec(rest);
+    if (separator) {
+      at += separator[0].length;
+    } else if (out.endsWith(' ') && rest.startsWith(' ')) {
+      // One space belonged to the word before the name and one to the word
+      // after it. Exactly one goes — never the line's indentation, which is
+      // what a nested bullet is made of.
+      at += 1;
+    } else if (out.endsWith(' ') && (rest === '' || CLINGING.test(rest))) {
+      out = out.replace(/[ \t]+$/, '');
+    }
+  }
+  const rebuilt = out + line.slice(at);
+  return { line: openedTheLine ? capitaliseOpeningWord(rebuilt) : rebuilt, changed };
+}
+
+/**
+ * Give a line's first word its capital back, once a dropped name is no
+ * longer supplying one.
+ *
+ * ONLY WHEN THE WORD IS ALL LOWERCASE. `iPhone`, `bunx` and `ffmpeg` are
+ * spelled the way they are spelled; a word carrying a capital anywhere is
+ * one somebody chose the case of, and this leaves it alone.
+ */
+function capitaliseOpeningWord(line: string): string {
+  const lead = LINE_LEAD.exec(line)?.[1] ?? '';
+  const rest = line.slice(lead.length);
+  const word = /^[A-Za-z]+/.exec(rest)?.[0];
+  if (word === undefined || word !== word.toLowerCase()) return line;
+  return `${lead}${rest[0]!.toUpperCase()}${rest.slice(1)}`;
+}
+
 export interface NormalizeSpeakerTagsOptions {
   /** Label → the name a person has given that voice. */
   names: Readonly<Record<string, string>>;
@@ -426,9 +538,11 @@ export interface NormalizeSpeakerTagsResult {
  * Two rules, both deterministic:
  *  1. A tag whose label the meeting carried is RE-RENDERED from the name map
  *     — the model's job is to say which voice, never to spell the name.
- *  2. A tag whose label it did not carry is UNWRAPPED to its own text, so
- *     the sentence still reads and no reader is told a voice said something
- *     that never spoke. The label is reported, never silently dropped.
+ *  2. A tag whose label it did not carry is DROPPED — the name goes out of
+ *     the sentence with the link, along with the punctuation that only
+ *     existed to introduce it, so no reader is told a voice said something
+ *     that never spoke. The words of the note itself stay. The label is
+ *     reported, never silently dropped.
  */
 export function normalizeSpeakerTags(
   markdown: string,
@@ -438,14 +552,15 @@ export function normalizeSpeakerTags(
   const unknown: string[] = [];
   let renamed = 0;
   let stamped = 0;
-  const lines = markdown.split('\n').map((line) => {
-    if (isProtected(line, protectedLines)) return line;
-    return rewriteTags(line, (tag) => {
+  const { markdown: next } = rewriteTagsByLine(
+    markdown,
+    (tag) => {
       if (!opts.known.has(tag.label)) {
         unknown.push(tag.label);
-        // The words stay; only the claim about who said them goes. A tag
-        // whose text is bare sigil leaves nothing worth keeping.
-        return unwrappedText(tag);
+        // The NOTE stays and the invented person does not. Keeping the
+        // tag's words here is what used to leave "Speaker B" standing in a
+        // sentence about a meeting that never heard a Speaker B.
+        return DROP_TAG;
       }
       // Provenance the tag already carries is its own and is kept; a tag the
       // composer has just written carries none, and gets this tick's. Asked
@@ -469,15 +584,10 @@ export function normalizeSpeakerTags(
       if (speakerTagText(tag.label, opts.names) !== tag.text) renamed++;
       else if (!tag.claimsTurns && turns.length > 0) stamped++;
       return want;
-    }).markdown;
-  });
-  return { markdown: lines.join('\n'), renamed, stamped, unknown };
-}
-
-/** A tag reduced to its own words, the claim about who said them gone. */
-function unwrappedText(tag: SpeakerTagMatch): string {
-  const text = tag.text.startsWith(SPEAKER_TAG_SIGIL) ? tag.text.slice(1) : tag.text;
-  return text.trim().length > 0 ? text : '';
+    },
+    { skip: (line) => isProtected(line, protectedLines) },
+  );
+  return { markdown: next, renamed, stamped, unknown };
 }
 
 /**
@@ -515,8 +625,8 @@ export interface ReattributeSpeakerTagsResult {
   markdown: string;
   /** Mentions moved to the voice the revision named. */
   moved: number;
-  /** Mentions whose claim came off, because every turn behind them is now
-   *  attributed to nobody. */
+  /** Mentions whose claim came off — name and all — because every turn
+   *  behind them is now attributed to nobody. */
   unwrapped: number;
   /** Mentions the revision reached but could not place, now marked unsure. */
   unsure: number;
@@ -535,10 +645,12 @@ export interface ReattributeSpeakerTagsResult {
  *  - **They all agree on a different voice** → the mention moves. Every turn
  *    that could have produced these words belongs to that voice now, so the
  *    attribution is not a guess.
- *  - **They all agree on nobody** → the claim comes off and the words stay,
- *    the same remedy `normalizeSpeakerTags` gives a voice the meeting never
- *    carried. Saying "Speaker B" of speech the engine has withdrawn from B
- *    is the one outcome worse than saying nothing.
+ *  - **They all agree on nobody** → the claim comes off, name included, and
+ *    the note's own words stay — the same remedy `normalizeSpeakerTags`
+ *    gives a voice the meeting never carried. Saying "Speaker B" of speech
+ *    the engine has withdrawn from B is the one outcome worse than saying
+ *    nothing, and leaving the words "Speaker B" behind after taking the tag
+ *    off says it just as loudly.
  *  - **They disagree** → the mention is marked unsure. Half its turns moved
  *    and half did not, so it belongs to one of two voices and the notes do
  *    not record which. A coin flip would put a name against words somebody
@@ -556,7 +668,7 @@ export function reattributeSpeakerTags(
   let moved = 0;
   let unwrapped = 0;
   let unsure = 0;
-  const { markdown: next } = rewriteTags(markdown, (tag) => {
+  const { markdown: next } = rewriteTagsByLine(markdown, (tag) => {
     if (tag.turns.length === 0) return null;
     let touched = false;
     const now = new Set<string | null>();
@@ -578,7 +690,10 @@ export function reattributeSpeakerTags(
       if (only === tag.label) return null;
       if (only === null) {
         unwrapped++;
-        return unwrappedText(tag);
+        // Same remedy the invented-voice gate gives, and the same reason:
+        // the words are what the meeting has, and the name is what it no
+        // longer stands behind.
+        return DROP_TAG;
       }
       moved++;
       return renderSpeakerTag(only, opts.names, { turns: tag.turns });

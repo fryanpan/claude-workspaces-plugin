@@ -35,7 +35,7 @@ import type { NotesComposeInput, NotesComposer, NotesTick, NotesTurn } from './m
 import { refusalMessage } from './model-quota.ts';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
-import { DEFAULT_NOTES_INSTRUCTIONS } from './notes-prompt-store.ts';
+import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { authHeader, resolveCredentialFrom } from './summarize.ts';
 
@@ -88,7 +88,14 @@ export function buildNotesPrompt(
   input: NotesComposeInput,
   instructions: string = DEFAULT_NOTES_INSTRUCTIONS,
 ): { system: string; user: string } {
-  const system = instructions;
+  // A SOLO MEETING IS SENT NO ATTRIBUTION RULES. Its transcript lines carry
+  // no name — the session strips them until a second voice is heard — so
+  // rules demanding a speaker tag on every note, and spelling "Speaker B" as
+  // what such a name looks like, are asking for something the model can only
+  // supply by inventing it. That is the phantom, named in the prompt before
+  // the composer ever wrote it.
+  const system =
+    input.multiSpeaker === false ? withoutSpeakerAttribution(instructions) : instructions;
 
   const parts: string[] = [];
   const ctx = input.context;
