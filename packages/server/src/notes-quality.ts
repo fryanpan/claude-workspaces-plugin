@@ -139,6 +139,57 @@ export function duplicateTopics(markdown: string): string[] {
   return [...seen.values()].filter((s) => s.count > 1).map((s) => s.heading);
 }
 
+/** One bullet as it sits on the page, with whatever is indented under it. */
+export interface NestedBullet {
+  text: string;
+  children: NestedBullet[];
+}
+
+/**
+ * The bullets with their nesting kept, which `parseNotesTopics` throws away.
+ *
+ * Every other check here is right to read the notes flat: the twenty-word bar
+ * applies to a sub-bullet exactly as it applies to a lead bullet, and a reader
+ * reads both. Attribution is the one question where the shape matters, because
+ * the nested writing rule deliberately splits a point from who made it — the
+ * lead bullet carries the point, and the sub-bullets under it carry the
+ * option, the number, the objection, and who said it.
+ *
+ * Indentation is read in columns with tabs expanded to two spaces, because a
+ * model that indents with a tab has still written a sub-bullet. A heading
+ * starts the tree again: nothing under one heading is a child of a bullet
+ * under the previous one.
+ */
+export function nestedBullets(markdown: string): NestedBullet[] {
+  const roots: NestedBullet[] = [];
+  const stack: Array<{ indent: number; node: NestedBullet }> = [];
+  let fenced = false;
+  for (const raw of markdown.split('\n')) {
+    const line = raw.replace(/\t/g, '  ');
+    const trimmed = line.trim();
+    if (/^(```|~~~)/.test(trimmed)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      stack.length = 0;
+      continue;
+    }
+    const bullet = trimmed.match(/^(?:[-*+]|\d+\.)\s+(.*)$/);
+    const text = bullet?.[1]?.trim();
+    if (!text) continue;
+    const indent = line.length - line.trimStart().length;
+    while (stack.length > 0 && stack[stack.length - 1]!.indent >= indent) stack.pop();
+    const node: NestedBullet = { text, children: [] };
+    const parent = stack[stack.length - 1];
+    if (parent) parent.node.children.push(node);
+    else roots.push(node);
+    stack.push({ indent, node });
+  }
+  return roots;
+}
+
 /** A speaker tag as the notes carry it: `[@Name](speaker:LABEL)`. */
 const SPEAKER_TAG = /\[@[^\]]+\]\(speaker:[^)]+\)/;
 
@@ -149,6 +200,17 @@ const SPEAKER_TAG = /\[@[^\]]+\]\(speaker:[^)]+\)/;
  * which is a heuristic and is allowed to be: a bullet this misses is one the
  * model judge still sees, and a bullet this catches wrongly is a bullet whose
  * speaker tag would have done no harm.
+ *
+ * A LEAD BULLET IS ATTRIBUTED BY ITS SUB-BULLETS. Read flat, this check
+ * cannot judge a nested note-taker at all: the two-layer rule puts the point
+ * in the lead bullet and the speaker one line below it, so every decision
+ * written the way the instructions ask reads as unattributed. Measured on
+ * 2026-09-10 — `method:ledger-haiku` on AMI ES2002a scored 8% here while
+ * `method:original`, whose flat format opens every bullet with a speaker tag,
+ * scored 100%, and the gap was format rather than attribution: twelve of that
+ * run's twenty-five lead bullets carried no tag and every one of them had a
+ * tagged sub-bullet underneath. A bar that only the flat method can pass
+ * cannot be the bar the two ledger methods ship against.
  */
 const DECISION_WORDS =
   /\b(decid|agreed|agree to|will |we'll|going to|chose|choosing|settled on|owner|action|next step|takes? this|picking up)/i;
@@ -156,8 +218,22 @@ const QUESTION_WORDS =
   /\?|\b(open question|unresolved|unclear whether|asked whether|wants to know)\b/i;
 
 export function decisionsWithoutSpeaker(markdown: string): string[] {
-  return allBullets(markdown).filter(
-    (b) => (DECISION_WORDS.test(b) || QUESTION_WORDS.test(b)) && !SPEAKER_TAG.test(b),
+  const out: string[] = [];
+  const walk = (bullets: NestedBullet[]): void => {
+    for (const bullet of bullets) {
+      const claims = DECISION_WORDS.test(bullet.text) || QUESTION_WORDS.test(bullet.text);
+      if (claims && !attributedSomewhere(bullet)) out.push(bullet.text);
+      walk(bullet.children);
+    }
+  };
+  walk(nestedBullets(markdown));
+  return out;
+}
+
+/** True when this bullet, or anything indented under it, names a speaker. */
+function attributedSomewhere(bullet: NestedBullet): boolean {
+  return (
+    SPEAKER_TAG.test(bullet.text) || bullet.children.some((child) => attributedSomewhere(child))
   );
 }
 

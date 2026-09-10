@@ -28,6 +28,7 @@ import {
   duplicateTopics,
   flatBulletRuns,
   longFlatRuns,
+  nestedBullets,
   overlongBullets,
   parseNotesTopics,
   unlinkedReferences,
@@ -182,5 +183,76 @@ describe('the programmatic judges', () => {
     const copied = '- so the sync wakes on a ninety second retry loop';
     expect(verbatimBullets(copied, transcript)).toHaveLength(1);
     expect(verbatimBullets('- The sync retries too eagerly.', transcript)).toEqual([]);
+  });
+});
+
+/* ===== Attribution across the two-layer writing rule ===== */
+
+/**
+ * The nested note-takers write a point and its speaker on DIFFERENT LINES,
+ * which is what the instructions ask of them. Read flat, every one of those
+ * decisions looks unattributed — the failure that put `method:ledger-haiku`
+ * at 8% on this bar against `method:original`'s 100% on the same meeting,
+ * with the whole gap coming from format rather than from a missing voice.
+ */
+describe('a decision attributed one line down', () => {
+  const nested = [
+    '### Remote control design',
+    '',
+    '- The team agreed to ship the locator beep on Thursday',
+    '  - [@Speaker D](speaker:D?t=4,6) proposed it and owns the prototype',
+    '  - Cost of the beeper is not known yet (unconfirmed)',
+  ].join('\n');
+
+  it('reads the sub-bullets as belonging to the bullet above them', () => {
+    const [lead] = nestedBullets(nested);
+    expect(lead?.text).toBe('The team agreed to ship the locator beep on Thursday');
+    expect(lead?.children.map((c) => c.text)).toEqual([
+      '[@Speaker D](speaker:D?t=4,6) proposed it and owns the prototype',
+      'Cost of the beeper is not known yet (unconfirmed)',
+    ]);
+  });
+
+  it('counts a lead bullet as attributed when a sub-bullet names the speaker', () => {
+    expect(decisionsWithoutSpeaker(nested)).toEqual([]);
+  });
+
+  it('still catches a decision no line under it attributes', () => {
+    const orphan = nested
+      .replace(
+        '[@Speaker D](speaker:D?t=4,6) proposed it and owns the prototype',
+        'Someone proposed it',
+      )
+      .replace('Cost of the beeper is not known yet (unconfirmed)', 'Cost is not known yet');
+    expect(decisionsWithoutSpeaker(orphan)).toEqual([
+      'The team agreed to ship the locator beep on Thursday',
+    ]);
+  });
+
+  it('does not let a speaker under one bullet attribute the next one', () => {
+    const two = [
+      '- [@Speaker B](speaker:B?t=1) will write the brief',
+      '- The team agreed to ship on Thursday',
+    ].join('\n');
+    expect(decisionsWithoutSpeaker(two)).toEqual(['The team agreed to ship on Thursday']);
+  });
+
+  it('starts the tree again at a heading, so a bullet cannot adopt one across it', () => {
+    const across = [
+      '- The team agreed to ship on Thursday',
+      '',
+      '### Next steps',
+      '',
+      '  - [@Speaker B](speaker:B?t=1) will write the brief',
+    ].join('\n');
+    expect(decisionsWithoutSpeaker(across)).toEqual(['The team agreed to ship on Thursday']);
+  });
+
+  it('reads a tab as an indent, because a model that tabs still wrote a sub-bullet', () => {
+    const tabbed = [
+      '- The team agreed to ship on Thursday',
+      '\t- [@Speaker D](speaker:D?t=4) owns it',
+    ].join('\n');
+    expect(decisionsWithoutSpeaker(tabbed)).toEqual([]);
   });
 });
