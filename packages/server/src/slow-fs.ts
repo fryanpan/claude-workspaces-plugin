@@ -39,6 +39,7 @@ import { readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, sep } from 'node:path';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
+import { stampOf } from './file-stamp.ts';
 
 /**
  * Home-relative folders whose full paths must not reach a log line. The files
@@ -225,8 +226,8 @@ class BoundFileReader {
     const blocked = this.gate(path);
     if (blocked) return blocked;
     const raced = await this.race('read', path, async () => {
-      const [text, st] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
-      return { text, mtimeMs: st.mtimeMs, size: st.size };
+      const [text, st] = await Promise.all([readFile(path, 'utf8'), stat(path, { bigint: true })]);
+      return { text, ...stampOf(st) };
     });
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
@@ -313,7 +314,7 @@ class BoundFileReader {
       const tmp = `${target}.cw-pool-write~`;
       await writeFile(tmp, text);
       await rename(tmp, target);
-      return stat(target);
+      return stat(target, { bigint: true });
     });
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
@@ -334,14 +335,14 @@ class BoundFileReader {
       this.noteUnusable(path, raced.err, 'written');
       return { status: 'unavailable', reason: 'error' };
     }
-    return { status: 'ok', exists: true, mtimeMs: raced.value.mtimeMs, size: raced.value.size };
+    return { status: 'ok', exists: true, ...stampOf(raced.value) };
   }
 
   /** The mtime half of `read`, for the poll's change detection. */
   async statMtime(path: string): Promise<BoundStatResult> {
     const blocked = this.gate(path);
     if (blocked) return blocked;
-    const raced = await this.race('stat', path, () => stat(path));
+    const raced = await this.race('stat', path, () => stat(path, { bigint: true }));
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
       if (isEnoent(raced.err)) return { status: 'ok', exists: false };
@@ -352,7 +353,7 @@ class BoundFileReader {
       this.markStalled(path, errnoOf(raced.err) ?? 'stat failed', raced.err);
       return { status: 'unavailable', reason: 'error' };
     }
-    return { status: 'ok', exists: true, mtimeMs: raced.value.mtimeMs, size: raced.value.size };
+    return { status: 'ok', exists: true, ...stampOf(raced.value) };
   }
 
   /** Counters for the periodic stats line, so a stall is visible in the log. */

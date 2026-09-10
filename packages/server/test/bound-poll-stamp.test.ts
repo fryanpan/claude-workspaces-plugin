@@ -8,15 +8,18 @@
  * found is the mtime it left, so no later tick ever sees a change either. The
  * doc silently stops tracking its file, and nothing is logged.
  *
- * That is not a hypothetical granule. `statSync().mtimeMs` on this machine
- * moves in whole-millisecond steps (5,000 back-to-back writes produced 175
- * distinct mtimes), so two writes less than a millisecond apart already
- * collide; a kernel stamping inodes from a coarse timer tick gives a wider
- * window still. It is what made `git-ops-vs-bound.test.ts` time out on CI at
- * ~5.02s while passing locally, and it is why `flat-sync.test.ts` carries a
- * `writeExternal` helper that pushes the mtime forward by hand.
+ * That is not a hypothetical granule. `statSync().mtimeMs` moves in whole
+ * milliseconds under Bun, so two writes less than a millisecond apart already
+ * collided; it is what made `git-ops-vs-bound.test.ts` time out on CI at
+ * ~5.02s while passing locally, and it is why four test files each carried a
+ * `writeExternal` helper that pushed every external write's mtime seconds
+ * into the future by hand. All four are gone: the poll can see the writes
+ * where they actually landed.
  *
- * The stamp is now (mtime, size). These tests pin both halves.
+ * The stamp is now (mtime, size), and the mtime is read from the file's
+ * NANOSECOND stamp — six distinct values where `mtimeMs` gave one. These
+ * tests pin all three: the size half, the nanosecond half, and the echo
+ * suppression both halves also serve.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
@@ -97,6 +100,44 @@ describe('the poll’s change detection', () => {
     expect(statSync(path).size).not.toBe(recorded.size);
 
     await untilLive('Working-tree scratch.');
+  });
+
+  it('sees a write that landed in the same millisecond and changed the length by nothing', async () => {
+    // The hole the size half left open, and the one this file's header used
+    // to call "far smaller". A same-length write inside the previous stamp's
+    // millisecond moves neither half of an (mtimeMs, size) stamp, so the poll
+    // returns early forever and the doc silently stops tracking its file.
+    //
+    // Built by hand rather than by racing two writes: `utimesSync` takes
+    // fractional seconds at nanosecond resolution, so the two states can be
+    // placed 500us apart INSIDE one millisecond every run, on any machine.
+    const sameMs = Math.floor(Date.now() / 1000) + 0.25;
+    const halfMsLater = sameMs + 0.0005;
+    const first = DOC.replace('Intro paragraph on main.', 'Same length, line A.');
+    const second = DOC.replace('Intro paragraph on main.', 'Same length, line B.');
+
+    writeFileSync(path, first);
+    utimesSync(path, sameMs, sameMs);
+    // Records this stamp as the poll's baseline, synchronously, so the case
+    // does not depend on which sweep tick got there first.
+    expect(docStore.reconcileNow('d1')).toBe('apply');
+    await untilLive('Same length, line A.');
+    const before = statSync(path, { bigint: true });
+
+    writeFileSync(path, second);
+    utimesSync(path, halfMsLater, halfMsLater);
+    const after = statSync(path, { bigint: true });
+
+    // The premise, asserted rather than assumed: a millisecond stamp cannot
+    // tell these two states apart, and neither can the length.
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(after.size).toBe(before.size);
+    // ...but the filesystem itself can, which is the only reason there is
+    // anything to read. A volume that coarsens the stamp fails here instead
+    // of passing the test below for the wrong reason.
+    expect(after.mtimeNs).not.toBe(before.mtimeNs);
+
+    await untilLive('Same length, line B.');
   });
 
   it('still suppresses the echo of its own write-back', async () => {

@@ -49,6 +49,7 @@ import {
 } from './doc-origin-repo.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import type { LiveDoc } from './doc-store.ts';
+import { statStampSync } from './file-stamp.ts';
 import { showFile } from './git-diff.ts';
 import { gitConflictHint } from './git-provenance.ts';
 import { isWithinRoot } from './safe-path.ts';
@@ -127,20 +128,21 @@ interface FileBinding {
    * The size that came back with `lastMtimeMs`, and the second half of the
    * poll's change test.
    *
-   * mtime ALONE is not enough. A filesystem stamps a file from a clock whose
-   * granularity is coarser than the gap between "the server stats a file it
-   * has just bound" and "somebody writes it" — one millisecond is already
-   * enough on macOS, and a kernel stamping from a coarse tick gives a wider
-   * window still. A write that lands inside that granule leaves the mtime it
-   * found, so `mtimeMs === lastMtimeMs` and the poll concludes nothing
-   * happened — permanently, because that mtime never moves again. The edit is
-   * invisible to every reader of the doc and nothing is logged.
+   * mtime ALONE is not enough. A write that lands inside the granule of the
+   * stamp we recorded leaves the mtime it found, so `mtimeMs ===
+   * lastMtimeMs` and the poll concludes nothing happened — permanently,
+   * because that mtime never moves again. The edit is invisible to every
+   * reader of the doc and nothing is logged.
    *
-   * Size closes the case that matters: almost every real edit changes the
-   * byte count. What remains uncovered is a same-granule change that is also
-   * exactly the same length, which is a far smaller hole than the one this
-   * replaced. Content-hashing every tick would close it completely and is
-   * exactly the per-tick read the mtime poll exists to avoid.
+   * Two things make that granule small. Size is one: almost every real edit
+   * changes the byte count. The mtime's own precision is the other, and it is
+   * read in NANOSECONDS (`file-stamp.ts`) rather than whole milliseconds,
+   * which is what shrank the window from a millisecond to the filesystem's
+   * own resolution. What is left uncovered is a same-length write that the
+   * filesystem could not separate either — a volume with a coarse timestamp,
+   * or a write that restores the previous mtime deliberately. Content-hashing
+   * every tick would close that and is exactly the per-tick read the mtime
+   * poll exists to avoid.
    */
   lastSize?: number;
   /** An mtime spotted by the stat whose reconcile read has not landed yet. */
@@ -1092,7 +1094,7 @@ export class FileBindings {
     if (boundFiles.quarantined(binding.path)) return;
     if (!existsSync(binding.path)) return;
     try {
-      const st = statSync(binding.path);
+      const st = statStampSync(binding.path);
       binding.lastMtimeMs = st.mtimeMs;
       binding.lastSize = st.size;
     } catch {}
@@ -1180,8 +1182,9 @@ export class FileBindings {
     // ended up with, and the next sweep then sees no change at all.
     if (binding.writeInFlight) return;
     if (this.bindings.get(docId) !== binding) return;
-    // BOTH halves, or an edit that lands in the same timestamp granule as the
-    // stamp we recorded is invisible for good — see `lastSize`.
+    // BOTH halves, and the mtime at nanosecond precision, or an edit that
+    // lands in the same granule as the stamp we recorded is invisible for
+    // good — see `lastSize`.
     if (mtimeMs === binding.lastMtimeMs && size === binding.lastSize) return;
     // A reconcile for this exact stamp is already on the debounce; re-arming
     // it on every tick would push the read further away the longer the file
@@ -1679,7 +1682,7 @@ export class FileBindings {
         existsSync(binding.path)
       ) {
         try {
-          const st = statSync(binding.path);
+          const st = statStampSync(binding.path);
           if (st.mtimeMs !== binding.lastMtimeMs || st.size !== binding.lastSize) {
             binding.lastMtimeMs = st.mtimeMs;
             binding.lastSize = st.size;
@@ -1803,7 +1806,7 @@ export class FileBindings {
       // Record our own write's mtime so the poll doesn't treat the
       // write-back as an external edit and schedule a redundant reconcile.
       try {
-        const st = statSync(binding.path);
+        const st = statStampSync(binding.path);
         binding.lastMtimeMs = st.mtimeMs;
         binding.lastSize = st.size;
       } catch {}
@@ -1923,6 +1926,18 @@ export class FileBindings {
   /**
    * Is the bound file at least as new as the persisted `.ydoc`?
    *
+   * The `.ydoc` half stays a whole-millisecond `mtimeMs` while the file's is
+   * read to the nanosecond, and the two are only ever compared with `>=`, so a
+   * tie still goes to disk exactly as it did before the file's stamp got
+   * finer. One window is not identical: a fractional-millisecond double
+   * resolves ~244ns at today's epoch, so a file mtime in the top ~122ns of a
+   * millisecond rounds UP to the next one while a plain `statSync().mtimeMs`
+   * truncates down. Inside that window a same-millisecond file now reads as
+   * newer where it used to read as older. It errs toward disk — the
+   * documented source of truth at rest, and the side a tie already went to —
+   * and `liveWins` is what a caller holding un-flushed content passes instead
+   * of arguing about clocks.
+   *
    * `knownMtimeMs` is the preread's, and passing it is what keeps this off
    * the main thread: the caller has already paid for that stat on the pool,
    * and re-taking it here used to put a blocking syscall back on the hostile
@@ -1936,7 +1951,7 @@ export class FileBindings {
       const stateMtime = statSync(ydocPath).mtimeMs;
       if (knownMtimeMs !== undefined) return knownMtimeMs >= stateMtime;
       if (boundFiles.quarantined(filePath)) return true;
-      return statSync(filePath).mtimeMs >= stateMtime;
+      return statStampSync(filePath).mtimeMs >= stateMtime;
     } catch {
       return true;
     }
@@ -1962,7 +1977,7 @@ export class FileBindings {
     // Advance the poll baseline the same way the poll itself would, so this
     // manual reconcile doesn't get replayed on the next tick.
     try {
-      const st = statSync(binding.path);
+      const st = statStampSync(binding.path);
       binding.lastMtimeMs = st.mtimeMs;
       binding.lastSize = st.size;
     } catch {}
