@@ -1598,8 +1598,15 @@ export function beginNotesSession(
           }
           if (landing !== undefined) {
             const held = heldMethodLines.splice(0);
+            // KEPT UNTIL THE DOC TAKES THEM. `onNotes` answers `false` or
+            // `'refused'` for a write the doc would not apply — a concurrent
+            // edit, or the edit guard — and treating that as done discarded
+            // the line for good while the preference behind it was already
+            // recorded. Put back, exactly as the compose path carries words
+            // a refused write never landed.
+            let took = false;
             try {
-              deps.onNotes({
+              const answer = deps.onNotes({
                 docId: ids.docId,
                 meetingId: ids.meetingId,
                 tick: { tick: 0, reason: 'end', turns: [] },
@@ -1609,9 +1616,11 @@ export function beginNotesSession(
                   markdown,
                 })),
               });
+              took = answer !== false && answer !== 'refused';
             } catch (err) {
               deps.onError?.(err instanceof Error ? err.message : 'notes method line not written');
             }
+            if (!took) heldMethodLines.unshift(...held);
           }
         }
         if (!written) {
@@ -1850,18 +1859,35 @@ export function beginNotesSession(
           heldMethodLines.push(markdown);
           return;
         }
+        // WITH WHATEVER IS STILL HELD, in the order the switches were made.
+        // A line held from before the section existed, or from a write the
+        // doc refused, is waiting for exactly this: a heading and a write
+        // that lands. Sending them together also keeps them in one edit
+        // batch, so the doc applies the switches in the order they happened.
+        const pending = [...heldMethodLines.splice(0), markdown];
+        let took = false;
         try {
-          deps.onNotes({
+          const answer = deps.onNotes({
             docId: ids.docId,
             meetingId: ids.meetingId,
             // Not a tick: no words were said, so a sink that counts what a
             // tick wrote must not charge the room for this line.
             tick: { tick: 0, reason: 'end', turns: [] },
-            edits: [{ op: 'insert_under_heading', headingId, markdown }],
+            edits: pending.map((line) => ({
+              op: 'insert_under_heading' as const,
+              headingId: headingId as string,
+              markdown: line,
+            })),
           });
+          took = answer !== false && answer !== 'refused';
         } catch (err) {
           deps.onError?.(err instanceof Error ? err.message : 'notes method line not written');
         }
+        // A doc that would not take it has not been told anything, and the
+        // preference behind the line is already recorded. Held for the next
+        // successful write rather than dropped, which is what the compose
+        // path does with words a refused write never landed.
+        if (!took) heldMethodLines.unshift(...pending);
       });
     },
     nameSpeaker(speaker, name) {

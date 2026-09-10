@@ -126,11 +126,26 @@ export function readNotesMethod(dataDir: string, docId: string): NotesMethod {
  * dropped, so opening the fold and picking the row that is already on does
  * not grow the record.
  */
+/**
+ * What a write did: the record as it now reads, plus whether THIS change was
+ * appended to the history.
+ *
+ * Answered by the store rather than derived by the caller, because the only
+ * signal a caller has is the length of `changes` — and that stops moving at
+ * `MAX_KEPT_CHANGES`, where every further append drops the oldest entry. A
+ * caller comparing lengths would read the 51st change on a doc as "not
+ * recorded" and, on the bot path, stop writing the trace line for good.
+ */
+export interface NotesMethodWrite extends NotesMethodRecord {
+  /** Whether `change` was appended, as opposed to dropped as a no-op repeat. */
+  recorded: boolean;
+}
+
 export function writeNotesMethod(
   dataDir: string,
   docId: string,
   change: NotesMethodChange,
-): NotesMethodRecord {
+): NotesMethodWrite {
   const held = readNotesMethodRecord(dataDir, docId);
   const previous = held?.method ?? DEFAULT_NOTES_METHOD;
   const repeat = previous === change.method && change.meetingId === undefined;
@@ -145,5 +160,5 @@ export function writeNotesMethod(
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
   renameSync(tmp, path);
-  return record;
+  return { ...record, recorded: !repeat };
 }

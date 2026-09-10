@@ -216,7 +216,6 @@ export async function handleMeetingCalendarRoutes(
     // dropping a re-affirmation of the current method as a no-op repeat,
     // which would leave a trace line in the notes with no record behind it.
     const meetingId = botLive ? live?.meetingId : undefined;
-    const beforeCount = readNotesMethodRecord(dataDir, docId)?.changes.length ?? 0;
     const record = writeNotesMethod(dataDir, docId, {
       method,
       at: Date.now(),
@@ -226,8 +225,11 @@ export async function handleMeetingCalendarRoutes(
     // ONLY ON A RECORDED CHANGE, the rule the socket path and the trace
     // writer both hold: the record is written first and the line is a report
     // of that write, never an announcement of one that did not happen.
-    const recorded = record.changes.length > beforeCount;
-    if (botLive && recorded) {
+    // The store says whether it appended. A caller cannot tell from the
+    // history's length: at `MAX_KEPT_CHANGES` an append drops the oldest and
+    // the length does not move, which would silence every trace line on a
+    // doc that has been switched fifty times.
+    if (botLive && record.recorded) {
       recallRelay.noteMethodChange(docId, notesMethodLabel(method), by || undefined);
     }
     return j(200, { docId, method: record.method, changes: record.changes });

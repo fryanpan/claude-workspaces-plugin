@@ -344,6 +344,21 @@ export class MeetingRelay {
       // survives a reload; the line in the doc is the visible half of the
       // same fact. Nothing already written is touched, and no answer goes
       // back — the fold that sent it already shows the row it picked.
+      // A DURABLE WRITE ON THE DOC, so it takes the same sign-in decision the
+      // `start` frame takes. Without this the frame was a way around the REST
+      // route's visitor check that needed no meeting at all: open the socket,
+      // send one frame, and the doc's preference is changed by somebody who
+      // may not write to it. The row is told it was refused, the same answer
+      // an unwritable record gets, so the fold rolls back rather than sitting
+      // on a switch that did not happen.
+      if (ws.data.readOnly) {
+        this.send(ws, { type: 'notes_method', method: msg.method, recorded: false });
+        this.send(ws, {
+          type: 'error',
+          message: 'Sign in to change the note-taker — it is saved on this doc.',
+        });
+        return;
+      }
       const meeting = conn.meeting;
       const recorded =
         this.deps.setNotesMethod?.({

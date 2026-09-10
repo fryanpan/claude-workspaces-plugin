@@ -34,6 +34,7 @@ import {
 import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import { MeetingStore } from '../src/meetings.ts';
 import {
+  MAX_KEPT_CHANGES,
   readNotesMethod,
   readNotesMethodRecord,
   writeNotesMethod,
@@ -130,6 +131,48 @@ describe('the frame that changes the note-taker mid-meeting', () => {
       },
     };
   }
+
+  /**
+   * A READ-ONLY SOCKET IS NOT A WRITER, AND THIS FRAME IS A DURABLE WRITE.
+   *
+   * `CW_REQUIRE_SIGNIN_TO_WRITE` marks the socket read-only at upgrade, and
+   * `start` already refuses on it. This frame writes the doc's note-taker
+   * preference without needing a meeting at all, so without the same check it
+   * was a way around the REST route's visitor refusal: open the socket, send
+   * one frame, change somebody's doc.
+   */
+  it('refuses a read-only socket, and the doc keeps the note-taker it had', () => {
+    const changes: Change[] = [];
+    const relay = new MeetingRelay({
+      store: new MeetingStore(dataDir),
+      engines: [silentEngine()],
+      notes: null,
+      broadcast: () => {},
+      // The real write, so "unchanged" is read off disk rather than off a spy.
+      setNotesMethod: (c) => {
+        changes.push(c);
+        writeNotesMethod(dataDir, c.docId, { method: c.method, at: 1 });
+        return true;
+      },
+    });
+    const sent: unknown[] = [];
+    const ws: MeetingClient = {
+      data: { docId: 'd-ro', readOnly: true },
+      send: (frame: string) => sent.push(JSON.parse(frame)),
+    };
+    relay.onOpen(ws);
+    relay.onText(ws, JSON.stringify({ type: 'set_notes_method', method: 'ledger-opus' }));
+    expect(changes).toEqual([]);
+    expect(readNotesMethod(dataDir, 'd-ro')).toBe(DEFAULT_NOTES_METHOD);
+    // Refused out loud, both ways: the row rolls back rather than sitting on
+    // a switch that did not happen, and the strip can say why.
+    expect(sent).toContainEqual({
+      type: 'notes_method',
+      method: 'ledger-opus',
+      recorded: false,
+    });
+    expect(sent.some((f) => (f as { type?: string }).type === 'error')).toBe(true);
+  });
 
   it('records the method, who asked, and the meeting it was asked during', async () => {
     const m = await live('d-frame');
@@ -454,6 +497,37 @@ describe('a live meeting keeps the at-rest route out', () => {
     expect(bot.said).toEqual([]);
   });
 
+  /**
+   * AT THE CAP, AN APPEND DOES NOT MAKE THE HISTORY LONGER.
+   *
+   * `MAX_KEPT_CHANGES` entries in, every further change drops the oldest, so
+   * a caller reading "did it record?" off the length of `changes` reads false
+   * for a change that was written — and from the fifty-first switch on, a
+   * live bot meeting would stop writing its trace line for good.
+   */
+  it('writes the line for a change made on a doc whose history is already full', async () => {
+    const store = new MeetingStore(dataDir);
+    for (let i = 0; i < MAX_KEPT_CHANGES; i++) {
+      writeNotesMethod(dataDir, 'd-full', {
+        method: i % 2 === 0 ? 'ledger-haiku' : 'original',
+        at: i + 1,
+        meetingId: `m-${i}`,
+      });
+    }
+    expect(readNotesMethodRecord(dataDir, 'd-full')?.changes).toHaveLength(MAX_KEPT_CHANGES);
+    expect(
+      store.start({ docId: 'd-full', engine: 'bot', sampleRate: 16_000, mode: 'conversation' }),
+    ).not.toBeNull();
+    const bot: BotStub = { live: true, said: [] };
+    expect((await put(store, 'd-full', bot))?.status).toBe(200);
+    // The change landed — the newest entry is this one — and the length is
+    // exactly where it was, which is the whole trap.
+    const held = readNotesMethodRecord(dataDir, 'd-full');
+    expect(held?.changes).toHaveLength(MAX_KEPT_CHANGES);
+    expect(held?.changes.at(-1)?.by).toBe('Maya');
+    expect(bot.said).toHaveLength(1);
+  });
+
   it('still refuses a live meeting the bot relay does not hold, and writes no line', async () => {
     const store = new MeetingStore(dataDir);
     expect(
@@ -615,6 +689,53 @@ describe('the line the live session writes', () => {
     expect(h.writes.flatMap((w) => w.edits)).toEqual([]);
     expect(h.errors.join(' ')).toContain('never opened a notes section');
   });
+
+  /**
+   * A DOC THAT WOULD NOT TAKE THE LINE HAS NOT BEEN TOLD ANYTHING.
+   *
+   * `onNotes` answers `false` or `'refused'` for a write the doc rejected —
+   * a concurrent edit, or the edit guard. The preference behind the line is
+   * already recorded by then, so discarding it leaves the doc missing the
+   * switch marker it promised with no way back. It is held instead, the way
+   * the compose path carries words a refused write never landed.
+   */
+  for (const answer of [false, 'refused'] as const) {
+    it(`keeps the line when the doc answers ${JSON.stringify(answer)}, and writes it on the next take`, async () => {
+      const writes: NotesUpdate[] = [];
+      let take = false;
+      const s = beginNotesSession(
+        {
+          composer: { name: 'never', compose: () => Promise.resolve([]) },
+          schedule: new ManualScheduler(),
+          now: () => new Date(2026, 8, 9, 10, 38).getTime(),
+          readOutline: () => [],
+          notesHeadingId: () => 'h-mine',
+          onNotes: (u) => {
+            if (!take) return answer;
+            writes.push(u);
+            return true;
+          },
+        },
+        ids,
+      );
+      s.noteMethodChange(notesMethodLabel('ledger-opus'), 'Maya');
+      // Nothing reached the doc, and nothing was thrown away either.
+      await settle();
+      expect(writes).toEqual([]);
+      take = true;
+      s.noteMethodChange(notesMethodLabel('original'), 'Maya');
+      await s.end();
+      const traces = writes
+        .flatMap((w) => w.edits)
+        .filter((e) => 'markdown' in e && e.markdown.includes('Note-taker'));
+      // Both lines: the one the doc refused, and the one it took.
+      expect(traces).toHaveLength(2);
+      expect(traces.map((e) => ('markdown' in e ? e.markdown : ''))).toEqual([
+        '- 10:38 Note-taker Ledger · Opus — Maya',
+        '- 10:38 Note-taker Original — Maya',
+      ]);
+    });
+  }
 
   it('MUTATION CONTROL: the same change with a section already there is written at once', async () => {
     const h = session('h-mine');
