@@ -373,6 +373,27 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(overlap(box(l.card), l.el.low), 'the panel grew over the element').toBe(0);
     });
 
+    it('offers Done on the panel, which steps away and keeps the draft for that element', () => {
+      // The prompt's Done and the FAB fold away while the panel is up, and
+      // Cancel throws the words out: there was no way to leave and keep them.
+      const l = look(430, 'onLow');
+      const done = box(l.done);
+      const post = box(l.post);
+      // A row above Post and a column off it — never beside it, where the two
+      // read as one button and Done would take the comment with it.
+      expect(done[3]).toBeLessThanOrEqual(post[1]);
+      expect(done[2]).toBeLessThanOrEqual(post[0]);
+      const away = look(430, 'phoneAway');
+      expect(away.mode).toBe(false);
+      expect(away.card).toBeNull();
+      expect(away.fab, 'the way back into the mode').toBe(true);
+      const typed = look(430, 'grown').draft ?? '';
+      expect(typed.length, 'CONTROL: there were words to keep').toBeGreaterThan(0);
+      const back = look(430, 'phoneBack');
+      expect(back.snippet, 'CONTROL: the panel opened on the same element').toBe('Parking');
+      expect(back.draft).toBe(typed);
+    });
+
     it('goes back to its prompt with a tick after a post, still in the mode', () => {
       const l = look(430, 'posted');
       expect(l.posts).toEqual(['ferry times are wrong']);
@@ -385,9 +406,8 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
 
   describe('Done leaves nothing of the mode on the page', () => {
     // At 1180 Done is pressed with a card and its line up, which is the case
-    // that used to leave an empty composer behind. At 430 Done is not on
-    // screen while a draft is open (the panel stands in for the prompt), so
-    // there it can only clear the prompt itself.
+    // that used to leave an empty composer behind. At 430 it is the prompt's
+    // Done, after Cancel; the panel's own Done has its case above.
     for (const width of [1180, 430]) {
       it(`at ${width}`, () => {
         const before = look(width, width > 1100 ? 'onWide' : 'cancelled');

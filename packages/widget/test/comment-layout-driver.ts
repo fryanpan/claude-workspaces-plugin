@@ -66,6 +66,9 @@ export interface Look {
   focus: string;
   /** The field's text. */
   draft: string | null;
+  /** The phone panel's Done, and its Post, when painted. */
+  done: Box | null;
+  post: Box | null;
   /** The id of the element wearing the picker's outline, if any. */
   outlined: string | null;
   scrollY: number;
@@ -186,6 +189,8 @@ const LOOK = `(() => {
     fab: !!box(sr.querySelector('.fab')),
     focus: document.activeElement === host ? (ae ? ae.tagName : 'host') : 'page',
     draft: sr.querySelector('.composer textarea')?.value ?? null,
+    done: box(sr.querySelector('.composer .done')),
+    post: box(sr.querySelector('.composer .submit')),
     outlined,
     scrollY: Math.round(scrollY),
     el,
@@ -335,8 +340,14 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     // Enough words that the field grows to its four lines.
     await type(LONG);
     await look('grown');
-    // While a draft is open the panel offers Cancel where Done was — the two
-    // never sit together — so leaving from here is Cancel, then Done.
+    // The panel's Done steps away from the draft and keeps it on the element.
+    await tap(`${SHADOW}.querySelector('.composer .done')`);
+    await look('phoneAway');
+    await tap(fab);
+    await tap(el('low'));
+    await look('phoneBack');
+    // Cancel throws it away and hands back the prompt, whose Done ends the
+    // mode below.
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await look('cancelled');
   }

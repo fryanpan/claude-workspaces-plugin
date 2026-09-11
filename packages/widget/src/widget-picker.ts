@@ -346,8 +346,8 @@ const SAVED_MS = 4000;
  * One composer, two faces. Where there is room it is a CARD in the right
  * margin at its element's height (`widget-card.ts` places it). At phone width
  * it is the compact panel along the bottom (`.quick`): one row saying what the
- * comment is on, with Cancel; one row to type in, with Post. The page behind
- * holds still, so the element stays on screen and outlined.
+ * comment is on, with Done and Cancel; one row to type in, with Post. The page
+ * behind holds still, so the element stays on screen and outlined.
  */
 function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement | null): void {
   const existing = el.shadow.querySelector('.composer') as HTMLElement | null;
@@ -379,6 +379,7 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
     `<div class="composer-snippet">${head}</div>` +
     `<textarea placeholder="Comment on this element…" rows="${quick ? 1 : 3}"></textarea>` +
     '<div class="composer-actions">' +
+    (quick ? '<button class="done">Done</button>' : '') +
     '<button class="cancel">Cancel</button>' +
     '<button class="primary submit">Post</button>' +
     '</div>';
@@ -411,6 +412,12 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   // stands over the page's top-right corner, where nav and account links
   // live, and a finger has no Esc to reach them with. Leaving the mode is the
   // banner's Done, and it never sits beside Post.
+  //
+  // At phone width the panel stands in for the banner while it is up, so it
+  // carries its own Done, a row above Post and a column off it. Done keeps a
+  // draft, as it does on the banner — the one way a finger can step away from
+  // the words without Cancel throwing them out.
+  composer.querySelector('.done')?.addEventListener('click', () => exitFeedbackMode(el));
   composer.querySelector('.cancel')?.addEventListener('click', () => {
     closeComposer(el, composer);
     if (el.feedbackMode && !quick && target) openDefaultComposer(el);

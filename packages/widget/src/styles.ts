@@ -175,7 +175,7 @@ export const widgetStyles = `
 .auth-signout:hover { color: #1b1f23; }
 .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
 /* Pill buttons share one block; only coloring differs below. */
-.primary, .cancel, .resolve, .reopen {
+.primary, .cancel, .resolve, .reopen, .done {
   background: #fff;
   border: 1px solid #d1d5da;
   border-radius: 6px;
@@ -429,22 +429,21 @@ export const widgetStyles = `
 .picker-banner.quick > :first-child { flex: 1; }
 .picker-banner.quick .picker-cancel { color: #1b1f23; border-color: #d1d5da; }
 .picker-banner:has(~ .quick), .fab:has(~ .quick), .fab-list:has(~ .quick) { display: none; }
-.composer.quick { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.composer.quick { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
 .quick .composer-snippet { margin: 0; }
 .quick .composer-actions { display: contents; }
 /* One line that grows to four as you type, where the engine can size a
    field to its content; one line, scrolling, where it cannot. 16px, or iOS
    zooms the page on focus. */
 .quick textarea {
-  grid-area: 2 / 1;
+  grid-area: 2 / 1 / 3 / 3;
   min-height: 44px;
   max-height: 96px;
   field-sizing: content;
   resize: none;
   font-size: 16px;
 }
-.quick .cancel { grid-area: 1 / 2; }
-.quick .submit { grid-area: 2 / 2; }
+.quick .submit { grid-area: 2 / 3; }
 .quick .composer-err { grid-column: 1 / -1; }
 
 
