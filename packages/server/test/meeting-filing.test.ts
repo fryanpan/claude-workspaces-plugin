@@ -55,6 +55,8 @@ function git(repo: string, ...args: string[]): string {
 interface LibraryRow {
   name: string;
   href?: string;
+  /** Set instead of `href` on a project file no doc holds yet. */
+  open?: string;
 }
 
 describe('a meeting filed into its project', () => {
@@ -247,6 +249,11 @@ describe('a meeting filed into its project', () => {
     expect(lib.meetings[0]?.href).toBe(`/workspaces/${WS}/docs/${plan.docId}`);
     // And it is a MEETING, not another project file in the other column.
     expect(lib.files.some((f) => f.name === 'Riverbend winter plan')).toBe(false);
+    // Nor is its raw file offered beside it. The meeting holds the project's
+    // address, so the file listing does not offer a second bind over the same
+    // bytes — which would be one conversation under two names with two comment
+    // sets. The positive control is the row above: the listing DID build.
+    expect(lib.files.some((f) => f.open?.startsWith('docs/meetings/'))).toBe(false);
   });
 
   it('mounts the folder it files into, so the Library can open what it lists', async () => {

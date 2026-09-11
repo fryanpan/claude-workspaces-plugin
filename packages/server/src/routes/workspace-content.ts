@@ -7,6 +7,7 @@ import { attachmentIdOf } from '@claude-workspaces/core';
  * Lifted verbatim out of `createServer`'s request closure; the handlers
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
+import { docKeyForPath } from '../doc-key.ts';
 import {
   huddleAlias,
   huddleFilePath,
@@ -378,6 +379,25 @@ export async function handleWorkspaceContent(
     }
     const attached = await docStore.attachFileAsync(docId, file);
     if (!attached.ok) return j(409, { error: 'attach_failed', attached });
+    /**
+     * A meeting inside a project holds that project's ADDRESS, like every
+     * other bound project file.
+     *
+     * Without the claim the file is a project markdown file no doc holds, so
+     * the Library lists the same meeting twice — once under meetings with its
+     * title, once under files with its raw filename — and opening the second
+     * row would mint a SECOND document over the same bytes, with its own
+     * comment set. It never came up while huddles wrote to the data dir,
+     * because nothing outside a checkout has a key at all.
+     */
+    if (home) {
+      try {
+        const key = docKeyForPath(file);
+        if (key) docStore.repos.claim(key.docKey, docId);
+      } catch (err) {
+        console.error(`[huddle] could not address ${docId} in its project:`, err);
+      }
+    }
     if (typeof huddleTaskId === 'string') {
       const linked = taskStore.linkRef(huddleTaskId, { kind: 'doc', docId });
       // Link changes emit no store event; refresh by hand, as the
