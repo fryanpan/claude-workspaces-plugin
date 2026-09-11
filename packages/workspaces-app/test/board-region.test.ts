@@ -101,7 +101,18 @@ describe('createBoardRegion', () => {
     // Whether or not the lead's session is currently attached: they own goal
     // changes here, so they are somebody.
     const r = region();
-    r.state.agents = [{ agentId: 'a-1', state: 'active', stateLabel: 'active', lastToolCallAt: 1 }];
+    r.state.agents = [
+      // Not listening on purpose: the picker's option list is who you may
+      // HAND work to, which is a different question from who is here — an
+      // away agent's queue drains when it comes back.
+      {
+        agentId: 'a-1',
+        state: 'active',
+        stateLabel: 'active',
+        lastToolCallAt: 1,
+        listening: false,
+      },
+    ];
     (r.state.info as { leadAgentId?: string }).leadAgentId = 'a-lead';
     expect(r.knownAgentIds()).toEqual(['a-1', 'a-lead']);
   });
