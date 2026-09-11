@@ -257,12 +257,17 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
         expect(bottomStill.paneOverflowAnchor).toBe('none');
         expect(bottomStill.scrollHeight1).toBeGreaterThan(bottomStill.scrollHeight0);
         expect(bottomStill.eyeContentY1).toBeGreaterThan(bottomStill.eyeContentY0 + 10);
-        // THE FAULT: the browser did it its own way — it holds whatever node
-        // it picked, which at the foot of a live meeting doc was not the
-        // reader's line, and the page moved under them (+44px at 1180x820,
-        // +26px at 430 on the tick). The page's own hold does it instead,
-        // and the browser's is switched off so the two cannot both correct
-        // the same insert.
+        // AND WHAT THIS ARM IS AND IS NOT. On the live board, parked at the
+        // foot, the browser's own anchoring moved the page by +44px at
+        // 1180x820 and +26px at 430 — it holds whatever node it picked, and
+        // at the foot of a meeting doc that was not the line being read. This
+        // fixture does not reproduce that: run with the hold removed, Chrome
+        // held this line to 0.25px at 1180 and 0.81px at 430, so the reading
+        // below is a no-regression one rather than a repaired fault. What it
+        // does pin is WHOSE hold it is — the pane opts out of the browser's
+        // above, so the page is holding the reader's own line here, and on a
+        // browser with no anchoring of its own (the next block) nothing else
+        // would be.
         expect(bottomStill.frames).toBeGreaterThan(3);
         expect(bottomStill.worstDrift).toBeLessThanOrEqual(2);
         expect(Math.abs(bottomStill.eyeTop1 - bottomStill.eyeTop0)).toBeLessThanOrEqual(2);
