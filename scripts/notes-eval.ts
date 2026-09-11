@@ -82,6 +82,7 @@ import {
   decisionsWithoutSpeaker,
   duplicateTopics,
   longFlatRuns,
+  openedEmptyHeadings,
   overlongBullets,
   parseNotesTopics,
   unconfirmedBullets,
@@ -325,7 +326,7 @@ export class Behaviour {
     // The meeting and the text, without the tick: the same bullet failing on
     // twelve ticks of one meeting is one thing, and the same wording in two
     // different meetings is two.
-    return new Set(this.failures.map((f) => f.replace(/ tick \d+:/, ':'))).size;
+    return new Set(this.failures.map((f) => f.replace(/ ticks? [\d\u2013-]+:/, ':'))).size;
   }
 }
 
@@ -486,7 +487,7 @@ interface JudgedField {
   why: string;
 }
 
-async function judge(
+export async function judge(
   key: SummaryCredential,
   before: string,
   after: string,
@@ -559,6 +560,201 @@ async function judge(
   }
   return out;
 }
+
+/* ===== Which ticks the judge is shown ===== */
+
+/**
+ * How many ticks one judged window may span before it is judged as it stands.
+ *
+ * A bound rather than a principle: the window closes on its own as soon as a
+ * tick leaves no heading at frame one, and almost every one does so on the
+ * second. What this stops is the pathological meeting where the note-taker
+ * opens a heading every tick and never fills one — which is a defect, and a
+ * defect must reach the judge rather than swallow it.
+ */
+export const MAX_JUDGED_WINDOW_TICKS = 3;
+
+/** The speech, and the notes either side of it, that one judge call reads. */
+export interface JudgedWindow {
+  before: string;
+  after: string;
+  transcript: string;
+  where: string;
+}
+
+/** One tick, offered to the window. */
+export interface OfferedTick extends JudgedWindow {
+  /** Was this tick drawn for the judge? A tick that was not can still CLOSE a
+   *  window a previous tick opened — the frame-two writing is the evidence,
+   *  whether or not the sampler picked its tick. */
+  wanted: boolean;
+}
+
+/**
+ * The judge reads a whole ACTION, not one frame of one.
+ *
+ * The note-taker's own instructions make opening a topic a two-tick job:
+ * "open a new '### ' heading as soon as the speech raises a subject the
+ * existing headings do not cover … then add its bullets under its own id on
+ * the next update." Judged a tick at a time, frame one is a heading with
+ * nothing under it — and an empty heading is not a near miss on one bar, it
+ * is a paraphrase that was never written, a point that was never covered and
+ * a topic opened for nothing, all at once. Measured on 2026-09-10 against the
+ * shipped judge: three trials of one scripted tick that opened a heading and
+ * stopped, exactly as instructed, failed `paraphrased` 3/3 and `covers` 3/3,
+ * the judge's own reason reading "Battery life heading added but no content
+ * written at all". It penalises whichever method opens the most headings,
+ * which is the opposite of what the column is for.
+ *
+ * So a tick that opened a heading it left empty is HELD, and judged together
+ * with the tick that fills it: one window, both ticks' speech, the notes as
+ * they stood before the first and after the last. Held again if that tick
+ * opens a heading of its own, up to {@link MAX_JUDGED_WINDOW_TICKS}.
+ *
+ * WHY NOT SIMPLY NOT SCORE AN EMPTY HEADING, which is the other way to stop
+ * the artefact: because it cannot see a heading NOBODY EVER FILLS. Same three
+ * trials, same judge, on a scripted meeting whose heading is opened and then
+ * stranded while the room moves on: judged as a window this fails `covers`
+ * 3/3 and names the stranded heading; with the opening tick simply dropped
+ * and the next tick judged on its own, every behaviour passes 3/3. Dropping
+ * the frame buys the same clean number by making the judge blind to the
+ * defect, and a judge that stops seeing the real failure is not a fix. The
+ * window keeps it: the heading is still empty when the window closes, and the
+ * judge says so.
+ */
+export class JudgeWindow {
+  private held: (JudgedWindow & { ticks: number }) | null = null;
+  /** How many windows have been handed out — one per judge call. */
+  judged = 0;
+  /** How many of those read more than one tick because the note-taker was
+   *  mid-heading. THIS IS THE ARTEFACT'S SIZE on a meeting: without the
+   *  window every one of them was a judge call about a heading with nothing
+   *  under it. Counted here rather than by the caller, because a caller that
+   *  forgets on one of the two paths reports `0 of 0` having judged one. */
+  waited = 0;
+
+  private emit(window: JudgedWindow, ticks: number): JudgedWindow {
+    this.judged++;
+    if (ticks > 1) this.waited++;
+    return window;
+  }
+
+  /**
+   * Offer a tick. Returns the window to judge NOW, or null while the action
+   * it belongs to is still unfinished — or because the tick was not drawn.
+   *
+   * EVERY tick is offered, drawn or not. A window opened by a drawn tick is
+   * closed by whatever tick actually writes the bullets.
+   */
+  offer(tick: OfferedTick): JudgedWindow | null {
+    const held = this.held;
+    if (held) {
+      held.ticks++;
+      held.after = tick.after;
+      held.transcript = `${held.transcript}\n${tick.transcript}`;
+      held.where = spanning(held.where, tick.where);
+      if (
+        held.ticks < MAX_JUDGED_WINDOW_TICKS &&
+        openedEmptyHeadings(tick.before, tick.after).length > 0
+      ) {
+        return null;
+      }
+      this.held = null;
+      const { ticks, ...window } = held;
+      return this.emit(window, ticks);
+    }
+    if (!tick.wanted) return null;
+    const { wanted: _wanted, ...window } = tick;
+    if (openedEmptyHeadings(tick.before, tick.after).length === 0) return this.emit(window, 1);
+    this.held = { ...window, ticks: 1 };
+    return null;
+  }
+
+  /**
+   * The meeting is over. A window still open is judged as it stands — its
+   * heading was never filled, because there is no tick left to fill it, and
+   * that is exactly the failure the judge should report.
+   */
+  flush(): JudgedWindow | null {
+    const held = this.held;
+    if (!held) return null;
+    this.held = null;
+    const { ticks, ...window } = held;
+    return this.emit(window, ticks);
+  }
+}
+
+/**
+ * When the judge is next due, and how many calls are still owed.
+ *
+ * A SLOT BUYS A JUDGE CALL, NOT A TICK. Spread the calls evenly and hold the
+ * list fixed, and a window that spans the tick the next slot named spends two
+ * slots on one call: `method:ledger-opus` on ES2002a, which opens a heading
+ * almost every tick, came back with three judged examples where six were
+ * asked for. So the schedule is re-laid after every call — the calls still
+ * owed, spread over the ticks still to come — which keeps both the count and
+ * the spread that taking them all from the front of the meeting would lose.
+ *
+ * The spread is the point and not a nicety: the first ticks of a meeting are
+ * its easiest, and a judge that only ever saw them would report on a meeting
+ * that had not started.
+ */
+export class JudgeBudget {
+  private owed: number;
+  private dueAt = 0;
+  constructor(
+    calls: number,
+    private readonly ticks: number,
+  ) {
+    this.owed = calls;
+  }
+  /** Is a judge call due at this tick? */
+  due(i: number): boolean {
+    return this.owed > 0 && i >= this.dueAt;
+  }
+  /** A call was made, and it read up to and including this tick. */
+  spent(i: number): void {
+    this.owed--;
+    this.dueAt =
+      this.owed > 0
+        ? i + Math.max(1, Math.floor((this.ticks - i - 1) / this.owed))
+        : Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * Two tick labels as one range: `ES2002a tick 4` and `ES2002a tick 6` become
+ * `ES2002a ticks 4-6`. The meeting has to survive into the label — the
+ * failure lists are read per meeting — and the tick numbers have to stay
+ * legible, because the next thing a reader does with one is open that tick.
+ */
+function spanning(first: string, last: string): string {
+  const from = first.match(/^(.*) ticks? ([\d-]+)$/);
+  const to = last.match(/ tick (\d+)$/);
+  if (!from || !to) return `${first}\u2013${last}`;
+  return `${from[1]} ticks ${from[2]!.split('-')[0]}-${to[1]}`;
+}
+
+/** The judge's five fields, and the behaviour each is filed under. */
+const JUDGED_COLUMNS = [
+  ['paraphrased', 'paraphrase'],
+  ['covers', 'covers'],
+  ['topics', 'topicChange'],
+  ['guesses', 'unconfirmed'],
+  ['together', 'together'],
+] as const;
+
+/**
+ * What `CW_NOTES_EVAL_UNPAIRED=1` adds to a run: the same five columns again,
+ * judged the pre-window way — one tick at a time, mid-action or not.
+ *
+ * A control that lives in the harness rather than in a branch somebody has to
+ * rebuild. The artefact it measures is a difference between two ways of
+ * ASKING about one set of notes, so measuring it as two runs would put the
+ * note-taker's own sampling between the numbers; the shadow columns ride the
+ * same composes and differ in nothing but the question.
+ */
+export const UNPAIRED_SUFFIX = 'Unpaired';
 
 /* ===== The run ===== */
 
@@ -639,11 +835,25 @@ async function runMeeting(
   // judge that only ever saw them would report on a meeting that had not
   // started.
   const step = Math.max(1, Math.floor(ticks.length / Math.max(1, opts.judgePerMeeting)));
+  /** The ticks the PRE-WINDOW rule judged, and so the ticks the
+   *  `CW_NOTES_EVAL_UNPAIRED` control must judge, unmoved. */
   const judged = new Set(
     Array.from({ length: opts.judgePerMeeting }, (_, i) => i * step).filter(
       (i) => i < ticks.length,
     ),
   );
+  /**
+   * When the judge is next due, and how many calls are still owed.
+   *
+   * A SLOT BUYS A JUDGE CALL, NOT A TICK. A window can span the tick the next
+   * slot named, and a fixed list of indices then spends two slots on one
+   * call: `method:ledger-opus` on ES2002a, which opens a heading almost every
+   * tick, came back with three judged examples where six were asked for. So
+   * the schedule is re-laid after every call — the calls still owed, spread
+   * over the ticks still to come — which keeps both the count and the spread
+   * that taking them from the front of the meeting would lose.
+   */
+  const budget = new JudgeBudget(opts.judgePerMeeting, ticks.length);
 
   const harness = createNotesTickHarness({
     // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
@@ -707,6 +917,22 @@ async function runMeeting(
   // as an EXAMPLE, which is why the count is printed next to the totals and
   // the reasons are printed under them.
   let uncomposed = 0;
+  const judgeWindow = new JudgeWindow();
+  /** Ask the judge about one window and file its five verdicts, under the
+   *  given suffix — `''` for the run's own columns, `UNPAIRED_SUFFIX` for the
+   *  control ones. */
+  const judgeInto = async (window: JudgedWindow, suffix = ''): Promise<void> => {
+    const verdict = await judge(opts.key, window.before, window.after, window.transcript);
+    if (!verdict) return;
+    for (const [key, id] of JUDGED_COLUMNS) {
+      // A field the judge did not answer is not an example of anything.
+      // Scoring it as a failure would grade the judge's JSON, not the
+      // note-taker.
+      const field = verdict[key];
+      if (!field) continue;
+      behaviours[`${id}${suffix}`]?.see({ ok: field.ok, detail: field.why }, window.where);
+    }
+  };
   for (let i = 0; i < ticks.length; i++) {
     const tick = ticks[i]!;
     const transcript = tick.turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
@@ -803,26 +1029,36 @@ async function runMeeting(
     );
 
     /* --- the model's half --- */
-    if (judged.has(i) && opts.judgePerMeeting > 0) {
-      const verdict = await judge(opts.key, before, notes, transcript);
-      if (verdict) {
-        for (const [key, id] of [
-          ['paraphrased', 'paraphrase'],
-          ['covers', 'covers'],
-          ['topics', 'topicChange'],
-          ['guesses', 'unconfirmed'],
-          ['together', 'together'],
-        ] as const) {
-          // A field the judge did not answer is not an example of anything.
-          // Scoring it as a failure would grade the judge's JSON, not the
-          // note-taker.
-          const field = verdict[key];
-          if (!field) continue;
-          behaviours[id]!.see({ ok: field.ok, detail: field.why }, where);
-        }
+    if (opts.judgePerMeeting > 0) {
+      // EVERY tick is offered, drawn or not: a window a drawn tick opened is
+      // closed by whichever tick actually writes the bullets.
+      const window = judgeWindow.offer({
+        wanted: budget.due(i),
+        before,
+        after: notes,
+        transcript,
+        where,
+      });
+      if (window) {
+        budget.spent(i);
+        await judgeInto(window);
+      }
+      // The control: the SAME notes, judged the way they were judged before
+      // the window existed — this tick alone, mid-action or not. It is what
+      // makes "the artefact moved these columns by N points" a paired
+      // measurement over one set of composes rather than two runs of a
+      // sampling model.
+      if (judged.has(i) && behaviours[`paraphrase${UNPAIRED_SUFFIX}`]) {
+        await judgeInto({ before, after: notes, transcript, where }, UNPAIRED_SUFFIX);
       }
     }
     before = notes;
+  }
+  // A window still open when the words run out is judged as it stands — its
+  // heading was never filled, and there is no tick left to fill it.
+  if (opts.judgePerMeeting > 0) {
+    const tail = judgeWindow.flush();
+    if (tail) await judgeInto(tail);
   }
   await harness.end();
 
@@ -913,6 +1149,10 @@ async function runMeeting(
       // counts the walls still standing when the meeting ended, and a zero
       // is worth printing because it is the number that should be there.
       `${longFlatRuns(harness.notes()).length} topics over ${MAX_FLAT_RUN_BULLETS} flat bullets` +
+      (opts.judgePerMeeting > 0
+        ? `, ${judgeWindow.waited} of ${judgeWindow.judged} judged windows waited for a ` +
+          "heading's bullets"
+        : '') +
       (uncomposed > 0 ? `, ${uncomposed} never composed` : ''),
   );
   // Distinct reasons, not one line per failure: twenty timeouts are one fact
@@ -1026,6 +1266,13 @@ async function main(argv: string[]): Promise<number> {
   const judgeIdeasOnly = judgeAt >= 0 && argv[judgeAt + 1] === 'ideas';
   const variantAt = argv.indexOf('--variant');
   const variant = resolveVariant(variantAt >= 0 ? (argv[variantAt + 1] ?? '') : 'baseline');
+  const perMeetingAt = argv.indexOf('--judge-per-meeting');
+  const judgePerMeeting =
+    perMeetingAt >= 0 ? Math.max(0, Math.floor(Number(argv[perMeetingAt + 1]))) || 0 : 6;
+  if (perMeetingAt >= 0 && judgePerMeeting === 0) {
+    console.error(`--judge-per-meeting wants a count, not "${argv[perMeetingAt + 1]}".`);
+    return 2;
+  }
   const jobsAt = argv.indexOf('--jobs');
   // Meetings are independent — separate harnesses, separate docs, separate
   // ledgers — so they run side by side. Serially a full run is the sum of
@@ -1087,6 +1334,14 @@ async function main(argv: string[]): Promise<number> {
     speakers: new Behaviour('1.4', 'Decisions and questions keep a speaker'),
     unconfirmed: new Behaviour('1.4', 'Uncertain points marked unconfirmed'),
   };
+  // The control columns, only when asked for. Absent, nothing calls the judge
+  // twice and the run costs what it always did.
+  if (process.env.CW_NOTES_EVAL_UNPAIRED === '1') {
+    for (const [, id] of JUDGED_COLUMNS) {
+      const of = behaviours[id]!;
+      behaviours[`${id}${UNPAIRED_SUFFIX}`] = new Behaviour(of.id, `${of.what} — unpaired`);
+    }
+  }
 
   const corpusAt = argv.indexOf('--corpus');
   const corpusDir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
@@ -1104,7 +1359,13 @@ async function main(argv: string[]): Promise<number> {
     meetings,
     // The smoke slice judges ONE tick: the CI job is there to prove the
     // harness still runs end to end, not to measure anything.
-    judgePerMeeting: judgeOff || judgeIdeasOnly ? 0 : smoke ? 1 : 6,
+    //
+    // SIX IS A SAMPLE, AND A SMALL ONE: one example either way is seventeen
+    // points, which is wider than most differences between two methods. The
+    // judge is the cheap half of a run — the composes are the bill — so
+    // `--judge-per-meeting N` buys a narrower band for very little, and is
+    // how a comparison that has to resolve a real difference is run.
+    judgePerMeeting: judgeOff || judgeIdeasOnly ? 0 : smoke ? 1 : judgePerMeeting,
     key,
     corpusDir,
     ideas,

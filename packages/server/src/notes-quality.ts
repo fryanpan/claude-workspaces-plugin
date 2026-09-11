@@ -128,15 +128,73 @@ export function duplicateTopics(markdown: string): string[] {
   const seen = new Map<string, { heading: string; count: number }>();
   for (const topic of parseNotesTopics(markdown)) {
     if (!topic.heading) continue;
-    const key = topic.heading
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim();
+    const key = topicKey(topic.heading);
     const hit = seen.get(key);
     if (hit) hit.count++;
     else seen.set(key, { heading: topic.heading, count: 1 });
   }
   return [...seen.values()].filter((s) => s.count > 1).map((s) => s.heading);
+}
+
+/**
+ * One heading reduced to the words a reader reads, for comparing two of them.
+ *
+ * "Export range" and "Export Range:" are one topic to a reader and two
+ * strings to a computer, and every question here that compares headings —
+ * were two opened for one topic, is the heading in these notes the one that
+ * was in those — is the reader's question.
+ *
+ * LETTERS AND DIGITS IN ANY SCRIPT, not `a-z0-9`. Stripping to ASCII takes a
+ * heading with no Latin characters in it down to the empty string, which
+ * makes every such heading equal to every other one — and equal to the
+ * heading-less run of bullets a note-taker writes before it opens its first
+ * topic. A meeting held in Chinese would have had its topics read as one.
+ */
+function topicKey(heading: string): string {
+  return heading
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * Headings with no bullets under them.
+ *
+ * A topic `parseNotesTopics` returns always has a heading OR bullets — it
+ * emits nothing for the empty space before the first of either — so an empty
+ * bullet list is the whole of the question, and a guard on the heading being
+ * non-empty would be a clause no input can reach.
+ */
+export function emptyHeadings(markdown: string): string[] {
+  return parseNotesTopics(markdown)
+    .filter((t) => t.bullets.length === 0)
+    .map((t) => t.heading);
+}
+
+/**
+ * Headings this update OPENED and left empty.
+ *
+ * Frame one of a two-frame action, and the reason this is a question worth
+ * asking. The instructions tell the note-taker to "open a new heading as soon
+ * as the speech raises a subject the existing headings do not cover … then
+ * add its bullets under its own id on the next update" — so a heading with
+ * nothing under it yet is the writer obeying, not the writer failing. A
+ * heading that was ALREADY there and is still empty is a different thing
+ * entirely: nobody ever came back for it. This separates the two, which is
+ * what lets a judge wait for frame two without going blind to a heading that
+ * never gets one.
+ */
+export function openedEmptyHeadings(before: string, after: string): string[] {
+  const had = new Set(parseNotesTopics(before).map((t) => topicKey(t.heading)));
+  return emptyHeadings(after).filter((h) => {
+    // A heading whose key comes out empty — a rule, a row of asterisks — is
+    // not a subject the room raised, so there are no bullets coming for it
+    // and nothing to wait a tick for. Asking `had` about it would compare it
+    // against the heading-less run of bullets a note-taker writes before its
+    // first topic, which is the same empty key.
+    const key = topicKey(h);
+    return key.length > 0 && !had.has(key);
+  });
 }
 
 /** One bullet as it sits on the page, with whatever is indented under it. */
