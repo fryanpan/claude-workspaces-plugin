@@ -70,7 +70,7 @@ async function syncAs(
   docId: string,
   headers: Record<string, string>,
 ): Promise<{ text: string; meta: Record<string, unknown>; close: () => void }> {
-  const c = connectDoc(`ws://localhost:${port}/workspaces/${workspaceId}/docs/${docId}/y`, headers);
+  const c = connectDoc(`ws://127.0.0.1:${port}/workspaces/${workspaceId}/docs/${docId}/y`, headers);
   const timedOut = await Promise.race([
     c.ready.then(() => false),
     new Promise<boolean>((r) => setTimeout(() => r(true), 5000)),
@@ -124,7 +124,7 @@ describe('the sync channel leaks no host metadata', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     // A BOARD is the unit of sharing, so `leaky` is filed on one and the
@@ -245,7 +245,7 @@ describe('legacy docs are migrated, not grandfathered', () => {
     expect(existsSync(join(dataDir, 'legacy.private.json'))).toBe(false);
 
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     // A hydrated .ydoc is filed nowhere, and a doc no board holds has no
     // address at all now — so a board claims it before it can be read.

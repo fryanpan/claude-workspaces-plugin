@@ -80,7 +80,7 @@ describe('per-doc sharing is removed', () => {
       // Link mode only — it needs no Cloudflare credentials at all.
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     // A loose doc, filed on nothing. This is exactly what `share_doc` used to

@@ -83,7 +83,7 @@ describe('task creation records a real owner', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-owner-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

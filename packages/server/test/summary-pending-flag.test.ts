@@ -114,7 +114,7 @@ describe('summaryPendingTs marker', () => {
         debounceMs: 10 * 60_000,
       });
       handle = createServer({ port: 0, dataDir, summarizer });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
     });
 
@@ -170,7 +170,7 @@ describe('summaryPendingTs marker', () => {
       // which RESOLVES on the machine this feature runs on).
       summarizer = new ThreadSummarizer({ apiKey: null, fetchImpl: stubFetch });
       handle = createServer({ port: 0, dataDir, summarizer });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
     });
 

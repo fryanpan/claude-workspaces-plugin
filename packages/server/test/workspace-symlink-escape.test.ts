@@ -112,7 +112,7 @@ describe('symlink escape from a shared workspace', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     // The bind is a GROUPING and is not shareable on its own; file it on a
     // board and share that. The escape this file guards is unchanged — a

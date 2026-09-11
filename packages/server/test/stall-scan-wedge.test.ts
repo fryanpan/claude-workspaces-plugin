@@ -61,7 +61,7 @@ describe('the stall scan over a board holding an unreadable doc', () => {
     writeFileSync(boundPath, '# Design\n\nA readable first version.\n');
 
     const first = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${first.port}`;
+    const base = `http://127.0.0.1:${first.port}`;
     WS = await seedBoard(base);
     const post = (path: string, body: unknown) =>
       fetch(`${base}${path}`, {

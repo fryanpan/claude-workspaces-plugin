@@ -203,7 +203,7 @@ describe('over the dispatch route', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'goal-triage-next-'));
     handle = createServer({ dataDir: dir, port: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

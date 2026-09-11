@@ -64,7 +64,7 @@ describe(`GET /workspaces/${WS}/docs honours its setId filter`, () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'list-docs-set-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     for (const [docId, setId] of [

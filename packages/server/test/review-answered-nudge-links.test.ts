@@ -107,7 +107,7 @@ describe('the review_answered wake only sends its reader to links that exist', (
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'review-answered-links-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const { workspace } = await jj<{ workspace: { id: string; leadAgentId?: string } }>(
       await post('/workspaces', { name: 'index-rebuild', leadAgentId: LEAD.id }),

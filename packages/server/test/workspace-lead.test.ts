@@ -448,7 +448,7 @@ describe('lead agent routes + projection', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'ws-lead-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -714,7 +714,7 @@ describe('a display-name change keeps the seat and renames every write', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'ws-lead-rename-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -853,7 +853,7 @@ describe('the shared "agent" identity can neither claim nor be handed the seat',
       dataDir: mkdtempSync(join(tmpdir(), 'ws-lead-shared-http-')),
     });
     try {
-      const base = `http://localhost:${handle.port}`;
+      const base = `http://127.0.0.1:${handle.port}`;
       const post = (path: string, body: unknown) =>
         fetch(`${base}${path}`, {
           method: 'POST',

@@ -58,7 +58,7 @@ describe('POST /workspaces/<ws>/links:titles', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'link-titles-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const ws = await post('/workspaces', { name: 'Link Titles Board', goal: 'Ship.' });
     wsId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
     // The unrelated board exists so a wrong-board address has somewhere to

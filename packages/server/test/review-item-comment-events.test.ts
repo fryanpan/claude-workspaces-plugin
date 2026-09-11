@@ -141,7 +141,7 @@ describe('the owner hears a comment on their review item', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'review-item-comment-events-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

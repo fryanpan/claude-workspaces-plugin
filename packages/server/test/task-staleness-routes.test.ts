@@ -107,7 +107,7 @@ describe('premise drift over the work-queue route', () => {
     // The rule's own threshold is asserted on both sides in the unit tests;
     // here the subject is the plumbing, and a real 24h gap is unwaitable.
     handle = createServer({ port: 0, dataDir, premiseStaleAfterMs: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const w = await post('/workspaces', { name: 'queue', goal: 'Ship it.' });
     workspaceId = ((await w.json()) as { workspace: { id: string } }).workspace.id;

@@ -51,7 +51,7 @@ describe('plugin drift over the attachment routes', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'plugin-drift-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -127,7 +127,7 @@ describe('plugin drift over the attachment routes', () => {
     });
     await handle.stop();
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const body = (await (await local(`/workspaces/${wsId}/agents`)).json()) as ListBody;
     expect(body.attachments.find((a) => a.agentId === 'agent-persisted')?.pluginVersion).toBe(
       '0.9.9',

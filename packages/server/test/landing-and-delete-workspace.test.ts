@@ -37,7 +37,7 @@ describe('landing + delete_workspace e2e (HTTP)', () => {
     standaloneDir = mkdtempSync(join(tmpdir(), 'land-alone-'));
     standalone = join(standaloneDir, 'STANDALONE.md');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     mkdirSync(join(folder, 'src'));

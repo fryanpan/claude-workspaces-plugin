@@ -109,7 +109,7 @@ afterAll(async () => {
 });
 
 const get = (h: ServerHandle, path: string, headers: Record<string, string>) =>
-  fetch(`http://localhost:${h.port}${path}`, { headers });
+  fetch(`http://127.0.0.1:${h.port}${path}`, { headers });
 
 /** The board this file's docs, tasks and reviews are filed under. */
 
@@ -152,7 +152,7 @@ describe('a proxied trusted host, with Access in front of it', () => {
     });
 
     it('may do operator work — create a workspace, read the share admin surface', async () => {
-      const created = await fetch(`http://localhost:${h.port}/workspaces`, {
+      const created = await fetch(`http://127.0.0.1:${h.port}/workspaces`, {
         method: 'POST',
         headers: {
           host: PROXIED_HOST,
@@ -213,14 +213,14 @@ describe('a proxied trusted host, with Access in front of it', () => {
       const list = await get(h, docsOf(h), asCollaborator);
       expect(list.status).toBe(403);
       expect(await list.json()).toEqual({ error: 'forbidden' });
-      const create = await fetch(`http://localhost:${h.port}/workspaces`, {
+      const create = await fetch(`http://127.0.0.1:${h.port}/workspaces`, {
         method: 'POST',
         headers: { ...asCollaborator, 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Should not exist' }),
       });
       expect(create.status).toBe(403);
       expect(await create.json()).toEqual({ error: 'forbidden' });
-      const deploy = await fetch(`http://localhost:${h.port}/api/deploy`, {
+      const deploy = await fetch(`http://127.0.0.1:${h.port}/api/deploy`, {
         method: 'POST',
         headers: asCollaborator,
       });
@@ -242,7 +242,7 @@ describe('a proxied trusted host, with Access in front of it', () => {
       // 501 is "no deployer on this server", which sits BEHIND the host gate
       // and the identity check: reaching it is the positive control for the
       // collaborator's 403 above.
-      const r = await fetch(`http://localhost:${h.port}/api/deploy`, {
+      const r = await fetch(`http://127.0.0.1:${h.port}/api/deploy`, {
         method: 'POST',
         headers: { host: PROXIED_HOST, ...CF_RAY, 'cf-access-jwt-assertion': jwt },
       });
@@ -294,7 +294,7 @@ describe('a proxied trusted host, with Access in front of it', () => {
       const list = await get(h, docsOf(h), collab);
       expect(list.status).toBe(403);
       expect(await list.json()).toEqual({ error: 'out_of_share_scope' });
-      const create = await fetch(`http://localhost:${h.port}/workspaces`, {
+      const create = await fetch(`http://127.0.0.1:${h.port}/workspaces`, {
         method: 'POST',
         headers: { ...collab, 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Should not exist' }),
@@ -355,7 +355,7 @@ describe('a proxied trusted host, with Access in front of it', () => {
     });
 
     it('refuses a cross-origin write from the visitor’s localhost — the CSRF half', async () => {
-      const r = await fetch(`http://localhost:${h.port}/workspaces`, {
+      const r = await fetch(`http://127.0.0.1:${h.port}/workspaces`, {
         method: 'POST',
         headers: { ...auth(), origin: 'http://localhost:3000', 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'CSRF' }),
@@ -363,7 +363,7 @@ describe('a proxied trusted host, with Access in front of it', () => {
       expect(r.status).toBe(403);
       expect(await r.json()).toEqual({ error: 'origin_not_allowed' });
       // POSITIVE CONTROL: the same write from the page's own origin lands.
-      const own = await fetch(`http://localhost:${h.port}/workspaces`, {
+      const own = await fetch(`http://127.0.0.1:${h.port}/workspaces`, {
         method: 'POST',
         headers: {
           ...auth(),
@@ -524,7 +524,7 @@ describe('E. sharing off closes the operator hostname too', () => {
   let jwt: string;
 
   const setSharing = (enabled: boolean) =>
-    fetch(`http://localhost:${h.port}/api/share/enabled`, {
+    fetch(`http://127.0.0.1:${h.port}/api/share/enabled`, {
       method: 'POST',
       headers: { host: `localhost:${h.port}`, 'content-type': 'application/json' },
       body: JSON.stringify({ enabled }),
@@ -571,7 +571,7 @@ describe('E. sharing off closes the operator hostname too', () => {
   it('leaves the LOCAL surface working, so the switch can be flipped back', async () => {
     // The way out is the way in: local, tailnet and LAN are untouched, which
     // is what stops this from being a lockout.
-    const local = await fetch(`http://localhost:${h.port}${docsOf(h)}`, {
+    const local = await fetch(`http://127.0.0.1:${h.port}${docsOf(h)}`, {
       headers: { host: `localhost:${h.port}` },
     });
     expect(local.status).toBe(200);

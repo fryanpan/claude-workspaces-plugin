@@ -104,8 +104,8 @@ describe('the served shells carry the Sentry DSN and page type only when configu
       markdownAppDistDir: appDistB,
       emailCodeSignIn: true,
     });
-    baseA = `http://localhost:${withDsn.port}`;
-    baseB = `http://localhost:${without.port}`;
+    baseA = `http://127.0.0.1:${withDsn.port}`;
+    baseB = `http://127.0.0.1:${without.port}`;
     wsA = await seed(baseA);
     wsB = await seed(baseB);
   });
@@ -189,7 +189,7 @@ describe('the served shells carry the Sentry DSN and page type only when configu
       sentryDsn: FAKE_DSN,
     });
     try {
-      const html = await (await fetch(`http://localhost:${h.port}/`)).text();
+      const html = await (await fetch(`http://127.0.0.1:${h.port}/`)).text();
       expect(html).toContain(`<meta name="sentry-dsn" content="${FAKE_DSN}" />`);
       expect(html).not.toContain('sentry-release');
     } finally {

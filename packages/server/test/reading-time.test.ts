@@ -142,7 +142,7 @@ describe('server wiring: a read_session on a task body doc updates Task.readingT
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'reading-time-wire-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

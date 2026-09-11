@@ -97,7 +97,7 @@ describe('the group-bind MCP tools file the review on a board, through the real 
         ...process.env,
         // The MCP prefers this over port discovery, so the child talks to THIS
         // server and never to whatever prod instance is running on the box.
-        FEEDBACK_BASE_URL: `http://localhost:${handle.port}`,
+        FEEDBACK_BASE_URL: `http://127.0.0.1:${handle.port}`,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });

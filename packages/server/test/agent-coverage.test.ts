@@ -95,7 +95,7 @@ describe('watch coverage — what an agent is missing, not what it holds', () =>
     dataDir = mkdtempSync(join(tmpdir(), 'agent-coverage-'));
     srcDir = mkdtempSync(join(tmpdir(), 'agent-coverage-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -379,7 +379,7 @@ describe('watch coverage — what an agent is missing, not what it holds', () =>
         heartbeatFreshMs: 250,
         observedWorkFreshMs: 40,
       });
-      tightBase = `http://localhost:${tight.port}`;
+      tightBase = `http://127.0.0.1:${tight.port}`;
       WS = await seedBoard(tightBase);
     });
     afterEach(async () => {
@@ -521,7 +521,7 @@ describe('watch coverage — what an agent is missing, not what it holds', () =>
         heartbeatFreshMs: 40,
         observedWorkFreshMs: 30_000,
       });
-      const sbase = `http://localhost:${split.port}`;
+      const sbase = `http://127.0.0.1:${split.port}`;
       WS = await seedBoard(sbase);
       const shost = { host: `localhost:${split.port}`, 'content-type': 'application/json' };
       try {

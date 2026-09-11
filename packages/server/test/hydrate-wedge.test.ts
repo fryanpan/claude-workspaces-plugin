@@ -48,8 +48,8 @@ describe('a bound file that never answers', () => {
     // The board is seeded on THIS server and outlives it: the rounds below
     // boot fresh servers on the same data dir, so re-seeding would give them
     // a second board that the doc under test is not filed on.
-    WS = await seedBoard(`http://localhost:${first.port}`);
-    const created = await fetch(`http://localhost:${first.port}/workspaces/${WS}/docs`, {
+    WS = await seedBoard(`http://127.0.0.1:${first.port}`);
+    const created = await fetch(`http://127.0.0.1:${first.port}/workspaces/${WS}/docs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ docId: DOC_ID, type: 'markdown', sourceUrl: boundPath }),
@@ -80,7 +80,7 @@ describe('a bound file that never answers', () => {
 
   it('parks its own doc and leaves every other route answering', async () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     // The request that wedged production: an SSE subscribe on a doc that is
     // not resident, so answering it means hydrating from disk.
@@ -126,7 +126,7 @@ describe('a bound file that never answers', () => {
     // only prewarms by prefix this request parks the whole server and the
     // unrelated one below never answers.
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     const viaApi = fetch(`${base}/workspaces/${WS}/docs/${DOC_ID}?format=json`);
     const unrelated = fetch(`${base}/workspaces/${WS}/docs`).then((r) => `answered:${r.status}`);
@@ -149,7 +149,7 @@ describe('a bound file that never answers', () => {
     writeFileSync(boundPath, '# Notes\n\nA readable first version.\n');
 
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     const res = await fetch(`${base}/workspaces/${WS}/docs/${DOC_ID}/events:stream`);
     expect(res.status).toBeLessThan(500);
     await res.body?.cancel();

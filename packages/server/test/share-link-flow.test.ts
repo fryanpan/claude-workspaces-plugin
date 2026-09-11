@@ -173,7 +173,7 @@ describe('share links over HTTP', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'share-link-flow-'));
     handle = createServer(serverOptions());
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     ({ boardId: board, mintedDocId: docId } = await boardWith('Shared board', 'design-doc'));
     ({ boardId: otherBoard, mintedDocId: otherDocId } = await boardWith(
       'Private board',
@@ -201,7 +201,7 @@ describe('share links over HTTP', () => {
           cfApi: mockCfApi(cfState as never),
         },
       });
-      const probeBase = `http://localhost:${probe.port}`;
+      const probeBase = `http://127.0.0.1:${probe.port}`;
       const made = await fetch(`${probeBase}/workspaces`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -351,7 +351,7 @@ describe('share links over HTTP', () => {
       record!.expiresAt = Date.now() - 1000;
       writeFileSync(path, JSON.stringify(state, null, 2));
       handle = createServer(serverOptions());
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
 
       const r = await onShareHost(`/s/${linkId}`, STRANGER);
       expect(r.status).toBe(404);
@@ -1264,7 +1264,7 @@ describe('share links over HTTP', () => {
 
     it('leaves the agents on this machine unauthenticated', async () => {
       const probe = withoutOldMode();
-      const r = await fetch(`http://localhost:${probe.port}/workspaces`, {
+      const r = await fetch(`http://127.0.0.1:${probe.port}/workspaces`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Board on a share-link-only server' }),
@@ -1281,7 +1281,7 @@ describe('share links over HTTP', () => {
       // restart, and that one is deliberately one-way, so the way back was a
       // restart too.
       const probe = withoutOldMode();
-      const probeBase = `http://localhost:${probe.port}`;
+      const probeBase = `http://127.0.0.1:${probe.port}`;
       const made = await fetch(`${probeBase}/workspaces`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1328,7 +1328,7 @@ describe('share links over HTTP', () => {
 
     it('still serves the share hostname, and still refuses a stranger there', async () => {
       const probe = withoutOldMode();
-      const probeBase = `http://localhost:${probe.port}`;
+      const probeBase = `http://127.0.0.1:${probe.port}`;
       const made = await fetch(`${probeBase}/workspaces`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1419,7 +1419,7 @@ describe('share links over HTTP', () => {
     const openSocket = async (docPath: string, email: string, ws_ = board) => {
       const jwt = await signJwt(SHARE_AUD, email);
       const ws = new WebSocket(
-        `ws://localhost:${handle.port}/workspaces/${ws_}/docs/${docPath}/y`,
+        `ws://127.0.0.1:${handle.port}/workspaces/${ws_}/docs/${docPath}/y`,
         {
           headers: { host: SHARE_HOST, ...CF_RAY, 'cf-access-jwt-assertion': jwt },
         } as unknown as string[],
@@ -1442,7 +1442,7 @@ describe('share links over HTTP', () => {
     const ownerSocket = async (docPath: string) => {
       const jwt = await signJwt(OWNER_AUD, OWNER_EMAIL);
       const ws = new WebSocket(
-        `ws://localhost:${handle.port}/workspaces/${board}/docs/${docPath}/y`,
+        `ws://127.0.0.1:${handle.port}/workspaces/${board}/docs/${docPath}/y`,
         {
           headers: { host: OWNER_HOST, ...CF_RAY, 'cf-access-jwt-assertion': jwt },
         } as unknown as string[],
@@ -1569,7 +1569,7 @@ describe('share links over HTTP', () => {
       // biome-ignore lint/performance/noDelete: the absence IS the fixture
       delete (oldOpts as { shareLinkHosts?: unknown }).shareLinkHosts;
       const before = createServer(oldOpts);
-      const beforeBase = `http://localhost:${before.port}`;
+      const beforeBase = `http://127.0.0.1:${before.port}`;
       const post = (path: string, body: unknown) =>
         fetch(`${beforeBase}${path}`, {
           method: 'POST',
@@ -1598,7 +1598,7 @@ describe('share links over HTTP', () => {
 
     it('mints nothing once the share hostname is configured', async () => {
       const after = migrated();
-      const r = await fetch(`http://localhost:${after.port}/api/share/link`, {
+      const r = await fetch(`http://127.0.0.1:${after.port}/api/share/link`, {
         method: 'POST',
         headers: { host: `localhost:${after.port}`, 'content-type': 'application/json' },
         body: JSON.stringify({ workspaceId: oldBoard, allowDomains: ['@partner.example'] }),
@@ -1608,7 +1608,7 @@ describe('share links over HTTP', () => {
       // …and nothing was written: the registry still holds the one record
       // phase one made. A 410 that minted on its way out would be worse than
       // a 200.
-      const listed = await fetch(`http://localhost:${after.port}/api/share`, {
+      const listed = await fetch(`http://127.0.0.1:${after.port}/api/share`, {
         headers: { host: `localhost:${after.port}` },
       });
       const { shares } = (await listed.json()) as { shares: unknown[] };
@@ -1622,7 +1622,7 @@ describe('share links over HTTP', () => {
       // served, and the mint being gone does not touch that.
       const after = migrated();
       const visitor = await fetch(
-        `http://localhost:${after.port}/workspaces/${encodeURIComponent(oldBoard)}?format=json`,
+        `http://127.0.0.1:${after.port}/workspaces/${encodeURIComponent(oldBoard)}?format=json`,
         {
           headers: {
             host: oldShare.hostname,
@@ -1644,14 +1644,14 @@ describe('share links over HTTP', () => {
       // One hostname redeems, and it is not this one.
       const after = migrated();
       const port = after.port;
-      const minted = await fetch(`http://localhost:${port}/api/share/workspace`, {
+      const minted = await fetch(`http://127.0.0.1:${port}/api/share/workspace`, {
         method: 'POST',
         headers: { host: `localhost:${port}`, 'content-type': 'application/json' },
         body: JSON.stringify({ workspaceId: oldBoard }),
       });
       expect(minted.status, await minted.clone().text()).toBe(200);
       const { link } = (await minted.json()) as { link: { linkId: string } };
-      const r = await fetch(`http://localhost:${port}/s/${link.linkId}`, {
+      const r = await fetch(`http://127.0.0.1:${port}/s/${link.linkId}`, {
         redirect: 'manual',
         headers: {
           host: oldShare.hostname,
@@ -1663,7 +1663,7 @@ describe('share links over HTTP', () => {
       expect(r.headers.get('location')).toBeNull();
       // POSITIVE CONTROL: the same id on the SHARE hostname does redeem, so
       // the refusal above is the hostname and not a dead link.
-      const good = await fetch(`http://localhost:${port}/s/${link.linkId}`, {
+      const good = await fetch(`http://127.0.0.1:${port}/s/${link.linkId}`, {
         redirect: 'manual',
         headers: {
           host: SHARE_HOST,

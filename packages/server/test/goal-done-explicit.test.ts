@@ -292,7 +292,7 @@ describe('over the route that already exists', () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'goal-done-http-'));
     handle = createServer({ dataDir: dir, port: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

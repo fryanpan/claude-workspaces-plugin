@@ -63,7 +63,7 @@ describe('GET /workspaces/:id/related-work', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'related-work-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const wsRes = await fetch(`${base}/workspaces`, {
       method: 'POST',

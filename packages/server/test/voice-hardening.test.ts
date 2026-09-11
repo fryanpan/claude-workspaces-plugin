@@ -448,7 +448,7 @@ describe('voice actions, hardened: end to end', () => {
         return completeImpl();
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', {
       name: 'search-revamp',

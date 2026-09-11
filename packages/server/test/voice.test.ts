@@ -103,7 +103,7 @@ describe('voice routing (§3.8)', () => {
         return completeImpl(args);
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', {
       name: 'search-revamp',

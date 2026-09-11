@@ -98,7 +98,7 @@ describe('a nameless actor over the real routes', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-nameless-actor-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     ws = await seedBoard(base);
   });
 

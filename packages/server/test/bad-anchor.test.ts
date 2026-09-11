@@ -142,7 +142,7 @@ describe('a malformed text-range anchor', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-bad-anchor-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     process.on('uncaughtException', onUncaught);
     process.on('unhandledRejection', onUncaught);
@@ -353,7 +353,7 @@ describe('a malformed text-range anchor', () => {
       handle.tasks.flush();
       const restarted = createServer({ port: 0, dataDir });
       try {
-        const restartedBase = `http://localhost:${restarted.port}`;
+        const restartedBase = `http://127.0.0.1:${restarted.port}`;
         // Deliberately NOT re-seeded: the board comes back with the data dir,
         // and a fresh one would be a board this doc was never filed on.
         const res = await fetch(`${restartedBase}/workspaces/${WS}/docs/${docId}?format=json`);

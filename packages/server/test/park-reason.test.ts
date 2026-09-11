@@ -50,7 +50,7 @@ describe('a doc parked because its file would not answer', () => {
     access = await accessHarness();
 
     const first = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${first.port}`;
+    const base = `http://127.0.0.1:${first.port}`;
     const post = (path: string, body: unknown) =>
       fetch(`${base}${path}`, {
         method: 'POST',
@@ -92,7 +92,7 @@ describe('a doc parked because its file would not answer', () => {
 
   it('reports the reason to its owner on doc_status, and clears it when the file comes back', async () => {
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     const res = await fetch(`${base}/workspaces/${WS}/docs/${DOC_ID}/status`);
     expect(res.status).toBe(200);
@@ -137,7 +137,7 @@ describe('a doc parked because its file would not answer', () => {
 
   it('does not hand the reason to a share visitor — it names a host path', async () => {
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     const share = await mintAccessShare(base, access, workspaceId);
 
     // The owner sees it...

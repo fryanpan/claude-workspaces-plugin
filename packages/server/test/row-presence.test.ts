@@ -86,7 +86,7 @@ describe('the queue says who is already on a row', () => {
       dataDir,
       ...(opts?.heartbeatFreshMs !== undefined ? { heartbeatFreshMs: opts.heartbeatFreshMs } : {}),
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const { workspace } = await jj<{ workspace: { id: string } }>(
       await post('/workspaces', { name: 'atlas', goal: 'Ship the atlas.' }),
     );

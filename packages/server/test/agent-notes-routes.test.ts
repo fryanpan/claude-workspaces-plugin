@@ -62,7 +62,7 @@ describe('agent notes routes', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'agent-notes-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -444,7 +444,7 @@ describe('agent notes routes', () => {
     await handle.stop();
 
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     expect(handle.tasks.getTask(taskId)?.notes?.map((n) => n.text)).toEqual(['Before the restart']);
     expect(projected(wsId, taskId).notes?.map((n) => n.text)).toEqual(['Before the restart']);

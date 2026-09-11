@@ -189,7 +189,7 @@ describe('the review-item quality gate', () => {
       heldReviewItemMs: 0,
       stallNudgeQuietMs: 60 * 60_000,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -507,7 +507,7 @@ describe('the review-item quality gate', () => {
       // agent that filed learns nothing, which is the case being set up.
       await handle.stop();
       handle = createServer({ port: 0, dataDir, heldReviewItemMs: 0 });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
       const { tasks } = await jj<{
         tasks: Array<{ id: string; reviews?: Array<{ id: string; judge?: { verdict: string } }> }>;
@@ -613,7 +613,7 @@ describe('the review-item quality gate', () => {
       // The same data, a server with no judge: the key was removed.
       await handle.stop();
       handle = createServer({ port: 0, dataDir, heldReviewItemMs: 0 });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
       const revised = await jj<{ held?: boolean; item: { judge?: { verdict: string } } }>(
         await post(

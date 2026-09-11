@@ -1220,7 +1220,7 @@ describe('notes through the audio socket', () => {
   });
 
   it('a real meeting pauses into a tick and flushes the tail at stop', async () => {
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const path = join(dataDir, 'planning.md');
     writeFileSync(path, '# planning\n');
@@ -1231,7 +1231,7 @@ describe('notes through the audio socket', () => {
     });
     expect(res.status).toBe(200);
 
-    const ws = new WebSocket(`ws://localhost:${handle.port}${meetingSocketPath(WS, 'planning')}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}${meetingSocketPath(WS, 'planning')}`);
     ws.binaryType = 'arraybuffer';
     const frames: { type: string; final?: boolean; text?: string }[] = [];
     ws.addEventListener('message', (ev) => {
@@ -1886,7 +1886,7 @@ describe('a tagged meeting through the audio socket', () => {
   });
 
   it('writes tags into the doc, and a rename moves one voice and not the other', async () => {
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const path = join(dataDir, 'huddle.md');
     writeFileSync(path, '# huddle\n');
@@ -1897,7 +1897,7 @@ describe('a tagged meeting through the audio socket', () => {
     });
     expect(res.status).toBe(200);
 
-    const ws = new WebSocket(`ws://localhost:${handle.port}${meetingSocketPath(WS, 'huddle')}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}${meetingSocketPath(WS, 'huddle')}`);
     ws.binaryType = 'arraybuffer';
     const frames: { type: string; final?: boolean; mode?: string }[] = [];
     ws.addEventListener('message', (ev) => {

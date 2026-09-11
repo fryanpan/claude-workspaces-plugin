@@ -52,7 +52,7 @@ class AudioClient {
   private constructor(readonly ws: WebSocket) {}
 
   static async open(port: number, ws: string, docId: string): Promise<AudioClient> {
-    const sock = new WebSocket(`ws://localhost:${port}${meetingSocketPath(ws, docId)}`);
+    const sock = new WebSocket(`ws://127.0.0.1:${port}${meetingSocketPath(ws, docId)}`);
     sock.binaryType = 'arraybuffer';
     const client = new AudioClient(sock);
     sock.addEventListener('message', (ev) => {
@@ -133,7 +133,7 @@ describe('resuming a meeting across a server restart', () => {
         : createMockTranscriptionEngine(),
     });
     running.push(handle);
-    return { handle, base: `http://localhost:${handle.port}`, port: handle.port };
+    return { handle, base: `http://127.0.0.1:${handle.port}`, port: handle.port };
   };
 
   afterEach(async () => {

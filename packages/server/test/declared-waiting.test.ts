@@ -136,7 +136,7 @@ describe('on a real board the verdict names the ask every waiting row is excused
     // A zero quiet window: every row is quiet the moment it is read, so the
     // only thing deciding a row's fate is what is filed on it.
     handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base, { name: 'search-revamp' });
   });
 

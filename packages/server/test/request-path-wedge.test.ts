@@ -55,7 +55,7 @@ describe('a doc whose file never answers, reached by every request address', () 
     writeFileSync(boundPath, '# Notes\n\nA readable first version.\n');
 
     const first = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${first.port}`;
+    const base = `http://127.0.0.1:${first.port}`;
     const post = (path: string, body: unknown) =>
       fetch(`${base}${path}`, {
         method: 'POST',
@@ -97,7 +97,7 @@ describe('a doc whose file never answers, reached by every request address', () 
 
   it('answers an unrelated route throughout, whichever address named the doc', async () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     // Every address the server accepts for this doc. The last one names it in
     // the BODY rather than the URL, which is the case the per-request prewarm
@@ -156,7 +156,7 @@ describe('a doc whose file never answers, reached by every request address', () 
     writeFileSync(boundPath, '# Notes\n\nA readable first version.\n');
 
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     const res = await fetch(`${base}/workspaces/${WS}/docs/${DOC_ID}?format=json`);
     expect(res.status).toBe(200);

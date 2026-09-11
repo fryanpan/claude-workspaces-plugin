@@ -107,7 +107,7 @@ describe('POST /recall/status replay', () => {
   };
 
   const deliver = (body: string, headers: Record<string, string>) =>
-    fetch(`http://localhost:${h.port}/recall/status`, {
+    fetch(`http://127.0.0.1:${h.port}/recall/status`, {
       method: 'POST',
       headers: { host: CALLBACK_HOST, ...CF_RAY, 'content-type': 'application/json', ...headers },
       body,

@@ -53,7 +53,7 @@ describe('share_link arguments are honoured or refused, never dropped', () => {
         config: { ...access.serverOptions.share.config, ...config },
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const board = await local('/workspaces', { name: 'Args board' });
     expect(board.status).toBe(200);
     boardId = ((await board.json()) as { workspace: { id: string } }).workspace.id;

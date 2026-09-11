@@ -148,7 +148,7 @@ describe('task tool routes (plan §3.12 commit 6)', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-tools-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

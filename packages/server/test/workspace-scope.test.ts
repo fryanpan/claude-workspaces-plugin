@@ -157,7 +157,7 @@ describe('the canonical routes, over HTTP', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'ws-scope-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const mk = async (name: string): Promise<string> => {
       const r = await post('/workspaces', { name, goal: 'Ship it.' });
       return ((await r.json()) as { workspace: { id: string } }).workspace.id;

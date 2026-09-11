@@ -48,7 +48,7 @@ beforeAll(async () => {
     dataDir,
     meetingNotes: { composer: createStubNotesComposer() },
   });
-  base = `http://localhost:${handle.port}`;
+  base = `http://127.0.0.1:${handle.port}`;
   WS = await seedBoard(base);
 
   const path = join(dataDir, 'riverbend.md');

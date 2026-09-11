@@ -98,7 +98,7 @@ describe('attach_agent over the real route', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-sentry-projects-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     ws = await seedBoard(base, { name: 'Sentry attach board' });
   });
 

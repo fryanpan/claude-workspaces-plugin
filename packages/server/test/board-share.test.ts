@@ -213,9 +213,9 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     SEED_WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
 
     // Two markdown docs: one attached to the board workspace, one private.
     for (const id of [ATTACHED, PRIVATE]) {

@@ -100,7 +100,7 @@ describe('a reload cannot return the old bundle', () => {
     // that every browser-facing hostname sits behind Cloudflare Access. These tests
     // are about that flow, so they ask for it explicitly.
     handle = createServer({ port: 0, dataDir, markdownAppDistDir: dist, emailCodeSignIn: true });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const ws = await local('/workspaces', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

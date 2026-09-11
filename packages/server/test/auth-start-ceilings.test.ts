@@ -67,7 +67,7 @@ describe('the global sends-per-hour ceiling', () => {
       emailCodeSignIn: true,
       authCeilings: { globalStartsPerHour: 2 },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -113,7 +113,7 @@ describe('the per-peer sends-per-hour ceiling', () => {
       emailCodeSignIn: true,
       authCeilings: { globalStartsPerHour: 1000, peerStartsPerHour: 2 },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

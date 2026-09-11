@@ -132,7 +132,7 @@ describe('the board tells its lead which rows have stopped', () => {
     // park, a dependency — are unaffected by the window's size. One test
     // below builds its own server to prove the window is real.
     handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -294,7 +294,7 @@ describe('the board tells its lead which rows have stopped', () => {
     // window above cannot make: that the threshold is consulted at all.
     const dir = mkdtempSync(join(tmpdir(), 'stall-window-'));
     const own = createServer({ port: 0, dataDir: dir, stallNudgeQuietMs: 60 * 60_000 });
-    const ownBase = `http://localhost:${own.port}`;
+    const ownBase = `http://127.0.0.1:${own.port}`;
     WS = await seedBoard(ownBase);
     try {
       const { workspace } = await jj<{ workspace: { id: string } }>(
@@ -712,7 +712,7 @@ describe('the board tells its lead which rows have stopped', () => {
       stallNudgeQuietMs: 0,
       stallNudgeRepeatMs: 1,
     });
-    const ownBase = `http://localhost:${own.port}`;
+    const ownBase = `http://127.0.0.1:${own.port}`;
     WS = await seedBoard(ownBase);
     try {
       const { workspace } = await jj<{ workspace: { id: string } }>(

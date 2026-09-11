@@ -56,9 +56,9 @@ async function boot(requireSignInToWrite: boolean): Promise<Booted> {
   const b: Booted = {
     handle,
     dataDir,
-    base: `http://localhost:${handle.port}`,
-    wsBase: `ws://localhost:${handle.port}`,
-    ws: await seedBoard(`http://localhost:${handle.port}`),
+    base: `http://127.0.0.1:${handle.port}`,
+    wsBase: `ws://127.0.0.1:${handle.port}`,
+    ws: await seedBoard(`http://127.0.0.1:${handle.port}`),
   };
   booted.push(b);
   return b;

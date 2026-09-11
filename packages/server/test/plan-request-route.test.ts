@@ -99,7 +99,7 @@ describe('POST /workspaces/<ws>/docs/:docId/plan-request', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     workspaceId = await newBoard('plan-request-board');
   });
 

@@ -81,7 +81,7 @@ describe('POST /workspaces/<id>/tasks/batch', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-batch-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

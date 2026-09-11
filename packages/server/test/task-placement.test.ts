@@ -146,7 +146,7 @@ describe('the create ROUTES carry placement to the caller', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-placement-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
   afterAll(async () => {
     await handle.stop();

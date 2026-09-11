@@ -151,7 +151,7 @@ afterAll(async () => {
 
 /** A request on a given hostname, through the edge, with no Access token. */
 const on = (h: ServerHandle, host: string, path: string, method = 'GET', body?: string) =>
-  fetch(`http://localhost:${h.port}${path}`, {
+  fetch(`http://127.0.0.1:${h.port}${path}`, {
     method,
     headers: {
       host,
@@ -243,7 +243,7 @@ describe('the callback hostname serves Recall, and only Recall', () => {
       event: 'bot.done',
       data: { bot: { id: 'bot_test_1' }, data: { code: 'done' } },
     });
-    const r = await fetch(`http://localhost:${h.port}/recall/status`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/recall/status`, {
       method: 'POST',
       headers: {
         host: CALLBACK_HOST,
@@ -265,7 +265,7 @@ describe('the callback hostname serves Recall, and only Recall', () => {
       event: 'bot.done',
       data: { bot: { id: 'bot_test_1' }, data: { code: 'done' } },
     });
-    const r = await fetch(`http://localhost:${h.port}/api/recall/status`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/api/recall/status`, {
       method: 'POST',
       headers: {
         host: CALLBACK_HOST,
@@ -303,7 +303,7 @@ describe('the callback hostname serves Recall, and only Recall', () => {
     // The token is not what this hostname refuses on. A person who really is
     // the operator still cannot reach the product here — the surface is a
     // property of the NAME, not of who is asking.
-    const r = await fetch(`http://localhost:${h.port}/workspaces/${WS}/docs`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/workspaces/${WS}/docs`, {
       headers: { host: CALLBACK_HOST, ...CF_RAY, 'cf-access-jwt-assertion': operatorJwt },
     });
     expect(r.status).toBe(404);
@@ -315,7 +315,7 @@ describe('the callback hostname serves Recall, and only Recall', () => {
     // request to have come through Cloudflare: Recall authenticates with the
     // credentials the routes check, and a `viaProxy` requirement would break
     // any deployment fronted by something that is not Cloudflare.
-    const r = await fetch(`http://localhost:${h.port}/recall/${TOKEN}`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/recall/${TOKEN}`, {
       headers: { host: CALLBACK_HOST },
     });
     expect(r.status).toBe(404);
@@ -407,7 +407,7 @@ describe('the operator hostname has NO exemptions left', () => {
   it('POSITIVE CONTROL: the operator with a token still reaches the product', async () => {
     // Without this, the assertions above are satisfied by a server that
     // refuses everything on this hostname for some unrelated reason.
-    const r = await fetch(`http://localhost:${h.port}/workspaces/${WS}/docs`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/workspaces/${WS}/docs`, {
       headers: { host: PROXIED_HOST, ...CF_RAY, 'cf-access-jwt-assertion': operatorJwt },
     });
     expect(r.status).toBe(200);
@@ -502,7 +502,7 @@ describe('a bot that could not call back is not offered at all', () => {
     // board holds, because the scope middleware answers membership before any
     // route runs, so the link is made and the doc itself left absent.
     h.tasks.attachDoc(WS, 'any-doc');
-    const r = await fetch(`http://localhost:${h.port}/workspaces/${WS}/docs/any-doc/meeting-bot`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/workspaces/${WS}/docs/any-doc/meeting-bot`, {
       headers: { host: PROXIED_HOST, ...CF_RAY, 'cf-access-jwt-assertion': operatorJwt },
     });
     expect(r.status).toBe(200);

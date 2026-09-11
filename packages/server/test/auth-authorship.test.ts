@@ -75,12 +75,12 @@ async function boot(options: { requireEmailAuth?: boolean; ownerEmail?: string }
   // that every browser-facing hostname sits behind Cloudflare Access. These tests
   // are about that flow, so they ask for it explicitly.
   const handle = createServer({ port: 0, dataDir, emailCodeSignIn: true, ...options });
-  WS = await seedBoard(`http://localhost:${handle.port}`);
+  WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
   cleanups.push(async () => {
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
   });
-  return { base: `http://localhost:${handle.port}`, dataDir, handle };
+  return { base: `http://127.0.0.1:${handle.port}`, dataDir, handle };
 }
 
 /** Sign in and return the cookie pair to send back. */

@@ -36,7 +36,7 @@ beforeAll(() => {
   // that every browser-facing hostname sits behind Cloudflare Access. These tests
   // are about that flow, so they ask for it explicitly.
   handle = createServer({ port: 0, dataDir, emailCodeSignIn: true });
-  base = `http://localhost:${handle.port}`;
+  base = `http://127.0.0.1:${handle.port}`;
 });
 
 afterAll(async () => {
@@ -209,7 +209,7 @@ describe('the session cookie', () => {
     store.archive(emailIdentityId(email), 'test');
     const fresh = createServer({ port: 0, dataDir, emailCodeSignIn: true });
     try {
-      const res = await fetch(`http://localhost:${fresh.port}/api/auth/session`, {
+      const res = await fetch(`http://127.0.0.1:${fresh.port}/api/auth/session`, {
         headers: { cookie },
       });
       expect(await res.json()).toMatchObject({ authenticated: false });
@@ -229,17 +229,17 @@ describe('the session cookie', () => {
     store.revokeSessions(emailIdentityId(email));
     const fresh = createServer({ port: 0, dataDir, emailCodeSignIn: true });
     try {
-      const res = await fetch(`http://localhost:${fresh.port}/api/auth/session`, {
+      const res = await fetch(`http://127.0.0.1:${fresh.port}/api/auth/session`, {
         headers: { cookie },
       });
       expect(await res.json()).toMatchObject({ authenticated: false });
       // Positive control: an un-revoked identity on the same server is fine.
-      await fetch(`http://localhost:${fresh.port}/api/auth/start`, {
+      await fetch(`http://127.0.0.1:${fresh.port}/api/auth/start`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: 'control@example.com' }),
       });
-      const ctl = await fetch(`http://localhost:${fresh.port}/api/auth/verify`, {
+      const ctl = await fetch(`http://127.0.0.1:${fresh.port}/api/auth/verify`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: 'control@example.com', code: logged[logged.length - 1] }),
@@ -305,7 +305,7 @@ describe('logout revokes the session server-side', () => {
   beforeAll(() => {
     dataDir2 = mkdtempSync(join(tmpdir(), 'auth-revoke-test-'));
     handle2 = createServer({ port: 0, dataDir: dataDir2, emailCodeSignIn: true });
-    base2 = `http://localhost:${handle2.port}`;
+    base2 = `http://127.0.0.1:${handle2.port}`;
   });
 
   afterAll(async () => {
@@ -362,7 +362,7 @@ describe('logout revokes the session server-side', () => {
     await fetch(`${base2}/api/auth/logout`, { method: 'POST', headers: { cookie } });
     const fresh = createServer({ port: 0, dataDir: dataDir2, emailCodeSignIn: true });
     try {
-      const at = `http://localhost:${fresh.port}`;
+      const at = `http://127.0.0.1:${fresh.port}`;
       expect(await authenticated(cookie, at)).toBe(false);
       // Positive control: the un-revoked session works on the fresh server.
       expect(await authenticated(survivor, at)).toBe(true);

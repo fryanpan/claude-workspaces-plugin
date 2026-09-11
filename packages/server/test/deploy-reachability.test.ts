@@ -147,7 +147,7 @@ describe('POST /api/deploy over a real socket', () => {
         now: () => 1,
       }),
     });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     return handle.port;
   };
 

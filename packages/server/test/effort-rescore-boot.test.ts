@@ -74,7 +74,7 @@ describe('a prompt bump re-scores the open rows on boot', () => {
     ids: { open: string; alsoOpen: string; closed: string; unscored: string };
   }> {
     handle = boot(NEW);
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     const { workspace } = await jj<{ workspace: { id: string } }>(
       await fetch(`${base}/workspaces`, {
         method: 'POST',

@@ -36,7 +36,7 @@ interface HomePayload {
 async function makeHarness(summarizer?: ThreadSummarizer) {
   const dataDir = mkdtempSync(join(tmpdir(), 'home-routes-'));
   const handle = createServer({ port: 0, dataDir, ...(summarizer ? { summarizer } : {}) });
-  const base = `http://localhost:${handle.port}`;
+  const base = `http://127.0.0.1:${handle.port}`;
   const local = (path: string, init: RequestInit = {}) =>
     fetch(`${base}${path}`, {
       ...init,

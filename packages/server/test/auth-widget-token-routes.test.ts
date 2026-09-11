@@ -85,7 +85,7 @@ function boot(options: { requireEmailAuth?: boolean; dataDir?: string } = {}): {
   // Minted through the store: this helper is synchronous, and half these
   // servers are booted with the write gate on, where an HTTP seed is a 401.
   const ws = handle.tasks.createWorkspace('Test board').id;
-  return { base: `http://localhost:${handle.port}`, dataDir, handle, ws };
+  return { base: `http://127.0.0.1:${handle.port}`, dataDir, handle, ws };
 }
 
 async function signIn(base: string, email: string): Promise<string> {
@@ -356,7 +356,7 @@ describe('revocation kills the token', () => {
     cleanups.push(async () => {
       await second.stop();
     });
-    const base = `http://localhost:${second.port}`;
+    const base = `http://127.0.0.1:${second.port}`;
     const res = await fetch(`${base}/api/auth/widget-session`, {
       headers: bearer(token),
     });
@@ -418,7 +418,7 @@ describe('an archived identity', () => {
     cleanups.push(async () => {
       await second.stop();
     });
-    const base = `http://localhost:${second.port}`;
+    const base = `http://127.0.0.1:${second.port}`;
     const res = await fetch(`${base}/api/auth/widget-session`, { headers: bearer(token) });
     expect(res.status).toBe(401);
   });

@@ -76,7 +76,7 @@ describe(`GET /workspaces/${WS}/docs/:docId/status`, () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     // A doc big enough that "status is small" is a real claim, not a claim

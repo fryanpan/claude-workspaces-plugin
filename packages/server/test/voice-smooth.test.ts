@@ -175,7 +175,7 @@ describe('voice, smoothly (route)', () => {
         return completeImpl();
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const ws = await post('/workspaces', { name: 'QB', goal: 'Ship onboarding.' });

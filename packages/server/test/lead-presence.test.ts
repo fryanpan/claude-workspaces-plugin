@@ -136,7 +136,7 @@ describe(`GET /workspaces/${WS}/docs/:docId/lead-presence and the lead.presence 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'lead-presence-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     workspaceId = (
       (await (await post('/workspaces', { name: 'presence-board' })).json()) as {

@@ -143,7 +143,7 @@ describe('the board roster, through the server', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'agent-listening-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const { workspace } = (await (await post('/workspaces', { name: 'presence' })).json()) as {
       workspace: { id: string };
     };

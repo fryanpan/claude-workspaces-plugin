@@ -89,7 +89,7 @@ describe('ADVERSARIAL: activity stream e2e (throwaway server)', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'adv-act-data-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
   afterAll(async () => {
@@ -253,7 +253,7 @@ describe('ADVERSARIAL: landing project->artifacts + delete_workspace guardrail',
     writeFileSync(join(folder, 'README.md'), '# Proj\n\nthe distinct readme line\n');
     writeFileSync(join(folder, 'src', 'index.ts'), 'export const x = 1;\n');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
   afterAll(async () => {

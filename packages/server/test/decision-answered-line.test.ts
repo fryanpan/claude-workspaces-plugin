@@ -91,7 +91,7 @@ describe('the decision.answered channel line only sends a reader to links that e
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'decision-answered-line-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const ws = await post('/workspaces', { name: 'index-rebuild' });
     wsId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;

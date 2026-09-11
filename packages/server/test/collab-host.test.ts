@@ -184,7 +184,7 @@ describe('the collaboration hostname over HTTP', () => {
       proxiedTrustedEmails: [OWNER_EMAIL],
       accessTunnelHosts: [TUNNEL_HOST],
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     jwt = await signJwt(COLLAB_AUD);
 
     boardWith = async (
@@ -733,7 +733,7 @@ describe('the opt-in fails closed', () => {
     const h = spinUp({ cfAccess: { teamDomain: TEAM_DOMAIN, audience: COLLAB_AUD, jwks } });
     const ws = seedBoardOnHandle(h);
     const jwt = await signJwt(COLLAB_AUD);
-    const r = await fetch(`http://localhost:${h.port}/workspaces/${ws}/docs`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/workspaces/${ws}/docs`, {
       headers: { host: TUNNEL_HOST, ...CF_RAY, 'cf-access-jwt-assertion': jwt },
     });
     expect(r.status).toBe(403);
@@ -746,14 +746,14 @@ describe('the opt-in fails closed', () => {
     // hostname — the exact hole the cf-ray veto was added to close.
     const h = spinUp({ accessTunnelHosts: [TUNNEL_HOST] });
     const ws = seedBoardOnHandle(h);
-    const r = await fetch(`http://localhost:${h.port}/workspaces/${ws}/docs`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/workspaces/${ws}/docs`, {
       headers: { host: TUNNEL_HOST, ...CF_RAY },
     });
     expect(r.status).toBe(403);
     expect(await r.json()).toEqual({ error: 'unknown_host' });
     // POSITIVE CONTROL: that server is alive and serving its local caller, so
     // the 403 is the gate rather than a server that answers nothing.
-    const local = await fetch(`http://localhost:${h.port}/workspaces/${ws}/docs`, {
+    const local = await fetch(`http://127.0.0.1:${h.port}/workspaces/${ws}/docs`, {
       headers: { host: `localhost:${h.port}` },
     });
     expect(local.status).toBe(200);
@@ -830,7 +830,7 @@ describe('the collaboration hostname, with email identity in effect', () => {
         .sign(privateKey);
 
     const local = (path: string, init: RequestInit = {}) =>
-      fetch(`http://localhost:${h.port}${path}`, {
+      fetch(`http://127.0.0.1:${h.port}${path}`, {
         ...init,
         headers: {
           host: `localhost:${h.port}`,
@@ -875,7 +875,7 @@ describe('the collaboration hostname, with email identity in effect', () => {
    *  author the server actually recorded. */
   async function authorOfWrite(s: Surface, jwt: string): Promise<{ id: string; name: string }> {
     const res = await fetch(
-      `http://localhost:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads/by_find`,
+      `http://127.0.0.1:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads/by_find`,
       {
         method: 'POST',
         headers: {
@@ -893,7 +893,7 @@ describe('the collaboration hostname, with email identity in effect', () => {
     );
     expect(res.status, await res.clone().text()).toBe(200);
     const listed = await fetch(
-      `http://localhost:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads`,
+      `http://127.0.0.1:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads`,
       {
         headers: { host: `localhost:${s.port}` },
       },
@@ -920,7 +920,7 @@ describe('the collaboration hostname, with email identity in effect', () => {
     // before attribution is ever reached.
     const s = await surface();
     const res = await fetch(
-      `http://localhost:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads/by_find`,
+      `http://127.0.0.1:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads/by_find`,
       {
         method: 'POST',
         headers: {
@@ -943,7 +943,7 @@ describe('the collaboration hostname, with email identity in effect', () => {
     expect(named.id).toBe(emailIdentityId('collaborator@example.com'));
     // …and the nameless one really did land nothing.
     const listed = await fetch(
-      `http://localhost:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads`,
+      `http://127.0.0.1:${s.port}/workspaces/${s.workspaceId}/docs/${s.docId}/threads`,
       {
         headers: { host: `localhost:${s.port}` },
       },

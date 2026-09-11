@@ -103,7 +103,7 @@ async function handshakeAndSync(
     const timer = setTimeout(() => reject(new Error('no upgrade response within 5s')), 5000);
     let settle: ReturnType<typeof setTimeout> | null = null;
     Bun.connect({
-      hostname: 'localhost',
+      hostname: '127.0.0.1',
       port: handle.port,
       socket: {
         open(sock) {
@@ -160,7 +160,7 @@ async function handshakeAndSync(
 
 describe('yjs websocket compression', () => {
   it('negotiates permessage-deflate and sends the sync frames compressed', async () => {
-    const created = await fetch(`http://localhost:${handle.port}/workspaces`, {
+    const created = await fetch(`http://127.0.0.1:${handle.port}/workspaces`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'deflate board', goal: 'Load Home fast.' }),
@@ -169,7 +169,7 @@ describe('yjs websocket compression', () => {
     const { workspace } = (await created.json()) as { workspace: { id: string } };
     // Enough board state that sync step 2 is a real frame, not a header.
     for (let i = 0; i < 20; i++) {
-      const r = await fetch(`http://localhost:${handle.port}/workspaces/${workspace.id}/tasks`, {
+      const r = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${workspace.id}/tasks`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

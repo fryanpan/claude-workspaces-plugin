@@ -258,8 +258,8 @@ describe(`/workspaces/${WS}/chat-audit routes`, () => {
   const start = async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'chat-audit-route-'));
     handle = createServer({ port: 0, dataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
-    return `http://localhost:${handle.port}`;
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
+    return `http://127.0.0.1:${handle.port}`;
   };
 
   afterEach(async () => {

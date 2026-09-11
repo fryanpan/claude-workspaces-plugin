@@ -77,7 +77,7 @@ describe('placing a row among tied orders', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'reorder-ties-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

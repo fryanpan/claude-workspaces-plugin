@@ -50,7 +50,7 @@ describe('archiving a review unlinks the rows that point into it', () => {
     writeFileSync(join(folder, 'README.md'), '# Project\n\nthe unique md line\n');
     writeFileSync(join(folder, 'src', 'index.ts'), 'export const answer = 42;\n');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

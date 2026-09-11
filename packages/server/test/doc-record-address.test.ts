@@ -60,7 +60,7 @@ describe('the address the doc floats read a record at', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-record-address-'));
     access = await accessHarness();
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     workspaceId = (
       await jj<{ workspace: { id: string } }>(await post('/workspaces', { name: 'flows-board' }))
     ).workspace.id;

@@ -138,7 +138,7 @@ describe('the idle timeout this server configures is the one Bun enforces', () =
   function rawStream(port: number, path: string) {
     const state = { bytes: 0, closed: false, status: '' };
     const socket = Bun.connect({
-      hostname: 'localhost',
+      hostname: '127.0.0.1',
       port,
       socket: {
         open(s) {
@@ -174,7 +174,7 @@ describe('the idle timeout this server configures is the one Bun enforces', () =
     // the case above — one stream that must stay open, one that must close.
     dataDir = mkdtempSync(join(tmpdir(), 'sse-idle-'));
     handle = createServer({ port: 0, dataDir, httpIdleTimeoutSec: 1 });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     const host = `localhost:${handle.port}`;
     const ws = await seedBoard(base, { host });
     const stream = rawStream(handle.port, `/workspaces/${ws}/events:stream`);

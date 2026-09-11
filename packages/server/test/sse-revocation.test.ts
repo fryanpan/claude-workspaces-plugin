@@ -75,7 +75,7 @@ describe('a revoked share loses its event stream', () => {
       ...access.serverOptions,
     });
     const port = handle.port;
-    const base = `http://localhost:${port}`;
+    const base = `http://127.0.0.1:${port}`;
     WS = await seedBoard(base);
     const local = (path: string, init: RequestInit = {}) =>
       fetch(`${base}${path}`, {

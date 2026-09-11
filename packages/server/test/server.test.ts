@@ -48,7 +48,7 @@ describe('server REST', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-test-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -583,7 +583,7 @@ describe('server REST', () => {
     });
     const hits: unknown[] = [];
     try {
-      const webhookUrl = `http://localhost:${sink.port}/hook`;
+      const webhookUrl = `http://127.0.0.1:${sink.port}/hook`;
       const file = join(dataDir, 'hooked.md');
       writeFileSync(file, '# hooked\n');
       const { docId: hookedId } = await j<{ docId: string }>(
@@ -689,7 +689,7 @@ describe('server REST', () => {
     const second = createServer({ port: 0, dataDir });
     try {
       const list = await j<{ docs: { docId: string }[] }>(
-        await fetch(`http://localhost:${second.port}/workspaces/${WS}/docs`),
+        await fetch(`http://127.0.0.1:${second.port}/workspaces/${WS}/docs`),
       );
       const ids = list.docs.map((d) => d.docId);
       expect(ids).toContain(hydrateId);
@@ -697,7 +697,7 @@ describe('server REST', () => {
       // resolves on a server that never saw the create call.
       const byName = await j<{ meta: { docId: string } }>(
         await fetch(
-          `http://localhost:${second.port}/workspaces/${WS}/docs/hydrate-test?format=json`,
+          `http://127.0.0.1:${second.port}/workspaces/${WS}/docs/hydrate-test?format=json`,
         ),
       );
       expect(byName.meta.docId).toBe(hydrateId);
@@ -743,7 +743,7 @@ describe('server REST', () => {
       // observeDeep listener wouldn't be wired, so this would land in
       // memory but never reach disk.
       const fr = await fetch(
-        `http://localhost:${second.port}/workspaces/${WS}/docs/rebind-test/find_and_replace`,
+        `http://127.0.0.1:${second.port}/workspaces/${WS}/docs/rebind-test/find_and_replace`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -818,7 +818,7 @@ describe('delete_doc', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-del-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
   afterAll(async () => {
@@ -912,7 +912,7 @@ describe('doc owner + lastActivityAt', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-owner-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
   afterAll(async () => {
@@ -976,7 +976,7 @@ describe('read-only code docs', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-code-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
   afterAll(async () => {

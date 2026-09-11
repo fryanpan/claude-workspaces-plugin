@@ -51,7 +51,7 @@ describe('static assets are compressed and revalidatable', () => {
     writeFileSync(join(distDir, 'board.js'), JS_BODY);
 
     handle = createServer({ port: 0, dataDir, markdownAppDistDir: distDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(() => {

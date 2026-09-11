@@ -95,7 +95,7 @@ describe(`POST /workspaces/${WS}/docs/:docId/review-request`, () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     workspaceId = (
       await jj<{ workspace: { id: string } }>(

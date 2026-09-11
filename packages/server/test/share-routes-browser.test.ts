@@ -96,7 +96,7 @@ describe('share mutation routes refuse browser callers', () => {
       // local origin. Off here, so what refuses is the operator gate alone.
       requireSignInToWrite: false,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     boardId = (
       (await post('/workspaces', { name: 'Share board' }).then((r) => r.json())) as {

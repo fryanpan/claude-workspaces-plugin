@@ -144,7 +144,7 @@ describe('ending share access closes an open meeting socket', () => {
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const created = await postLocal('/workspaces', { name: 'Meeting board' });
@@ -179,7 +179,7 @@ describe('ending share access closes an open meeting socket', () => {
     const stayingHeaders = await admit(staying);
 
     // The route the member's browser opens the microphone on.
-    const url = `ws://localhost:${handle.port}/workspaces/${WS}/docs/${encodeURIComponent(docId)}/audio`;
+    const url = `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/${encodeURIComponent(docId)}/audio`;
     const ejectedMic = open(url, ejectedHeaders);
     const stayingMic = open(url, stayingHeaders);
     // POSITIVE CONTROL: both sockets are genuinely up, so "it closed" cannot
@@ -212,7 +212,7 @@ describe('ending share access closes an open meeting socket', () => {
   it('hangs up every microphone when the sharing master switch goes off', async () => {
     const listener = 'switch-member@partner.example';
     const headers = await admit(listener);
-    const url = `ws://localhost:${handle.port}/workspaces/${WS}/docs/${encodeURIComponent(docId)}/audio`;
+    const url = `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/${encodeURIComponent(docId)}/audio`;
     const mic = open(url, headers);
     await mic.opened;
     expect(mic.closeCode).toBeNull();

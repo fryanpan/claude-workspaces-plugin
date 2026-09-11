@@ -34,7 +34,7 @@ beforeAll(() => {
     // gate is turned off rather than tested a second time.
     accessOnlyBrowserHosts: false,
   });
-  base = `http://localhost:${handle.port}`;
+  base = `http://127.0.0.1:${handle.port}`;
 });
 
 afterAll(async () => {

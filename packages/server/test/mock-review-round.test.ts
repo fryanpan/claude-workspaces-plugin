@@ -76,7 +76,7 @@ describe('a review item raised on a mockup', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'mock-review-round-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     ws = await seedBoard(base);
     const file = join(dataDir, 'lemonade.html');
     writeFileSync(file, MOCK_HTML);

@@ -112,7 +112,7 @@ describe('a group bind lands on a board, as one unit', () => {
     writeFileSync(join(repo, 'src', 'b.ts'), 'const b = 2;\n');
 
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

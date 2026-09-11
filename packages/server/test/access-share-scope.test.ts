@@ -114,7 +114,7 @@ describe('Access-mode shares over HTTP', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     // PRIVATE is deliberately NOT bound into either workspace: it lands on the
@@ -698,7 +698,7 @@ describe('Access-mode shares over HTTP', () => {
       const share = await mintAccessShare(base, access, soloBoardId);
 
       const ws = new WebSocket(
-        `ws://localhost:${handle.port}/workspaces/${soloBoardId}/docs/${soloPath}/y`,
+        `ws://127.0.0.1:${handle.port}/workspaces/${soloBoardId}/docs/${soloPath}/y`,
         {
           headers: share.headers,
         } as unknown as string[],
@@ -731,7 +731,7 @@ describe('Access-mode shares over HTTP', () => {
       const share = await mintAccessShare(base, access, soloBoardId);
 
       const ws = new WebSocket(
-        `ws://localhost:${handle.port}/workspaces/${soloBoardId}/docs/${soloPath}/y`,
+        `ws://127.0.0.1:${handle.port}/workspaces/${soloBoardId}/docs/${soloPath}/y`,
       );
       const opened = await new Promise<boolean>((resolve) => {
         ws.addEventListener('open', () => resolve(true));
