@@ -420,19 +420,15 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(l.card, 'CONTROL: the panel is up').not.toBeNull();
       expect(l.snippet, 'no "on <element>" line').toBeNull();
       expect(l.done, 'no Done beside Post').toBeNull();
-      // Narrower than the labelled pill the margin card shows, and no bigger
-      // than Post — while both keep the 44px tap floor.
-      const wide = box(look(1180, 'onNarrow').cancel);
-      expect(cancel[2] - cancel[0], 'Cancel is narrower than the margin card one').toBeLessThan(
-        wide[2] - wide[0],
+      // Narrower than the labelled pill the margin card shows and no wider
+      // than Post, while both keep the 44px tap floor. Widths, not areas: CI
+      // read a 44x46 Cancel beside a 44x44 Post and failed an area
+      // comparison that meant nothing.
+      const w = (b: Box): number => b[2] - b[0];
+      expect(w(cancel), 'narrower than the margin card one').toBeLessThan(
+        w(box(look(1180, 'onNarrow').cancel)),
       );
-      // Width, not area: both are icon-sized, and a couple of pixels of line
-      // box on one runner's fonts is not a design difference — CI read a
-      // 44x46 Cancel beside a 44x44 Post and failed an area comparison that
-      // meant nothing.
-      expect(cancel[2] - cancel[0], 'and no wider than Post').toBeLessThanOrEqual(
-        post[2] - post[0],
-      );
+      expect(w(cancel), 'and no wider than Post').toBeLessThanOrEqual(w(post));
       expect(cancel[3] - cancel[1], 'and still a 44px target').toBeGreaterThanOrEqual(44);
       expect(cancel[1]).toBeLessThan(post[3]);
       expect(post[1]).toBeLessThan(cancel[3]);
