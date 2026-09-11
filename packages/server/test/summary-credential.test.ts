@@ -10,12 +10,8 @@
  * "the eval is broken" rather than "the wrong header went out".
  */
 import { describe, expect, it } from 'bun:test';
-import {
-  ACCESS_TOKEN_ENV,
-  type SummaryCredential,
-  authHeader,
-  resolveCredentialFrom,
-} from '../src/summarize.ts';
+import { ACCESS_TOKEN_ENV } from '../src/claude-key-source.ts';
+import { type SummaryCredential, authHeader, resolveCredentialFrom } from '../src/summarize.ts';
 
 /** A keychain that holds this, or holds nothing when given null. */
 const keychain = (stored: string | null) => (): string | null => {

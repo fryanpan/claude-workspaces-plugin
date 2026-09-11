@@ -15,6 +15,7 @@
  * deployment can actually do.
  */
 import { resolvePostmarkCodeSender } from './auth/postmark-code-sender.ts';
+import { describeClaudeKey } from './claude-key-source.ts';
 import { createDeployer } from './deploy.ts';
 import { effortEstimateEnabled, haikuEffortEstimator } from './effort-estimator.ts';
 import {
@@ -34,7 +35,7 @@ import { createRecallClient, recallStatusWebhookUrl } from './recall.ts';
 import { haikuReviewJudge, reviewGateEnabled } from './review-judge.ts';
 import type { ServerConfig } from './server-config.ts';
 import { readKeychainPassword } from './share/keychain.ts';
-import { KEYCHAIN_SERVICE, ThreadSummarizer } from './summarize.ts';
+import { ThreadSummarizer } from './summarize.ts';
 import {
   KEYCHAIN_SERVICE as ASSEMBLYAI_KEYCHAIN_SERVICE,
   createAssemblyAiEngine,
@@ -67,6 +68,12 @@ export function createServerDeps(
           : {}),
       }
     : undefined;
+
+  // Which Claude key every adapter below spends, said ONCE: prod's under the
+  // launchd service, the eval key anywhere else, or none — in which case each
+  // of them is null and this line is the whole account of why
+  // (`claude-key-source.ts`).
+  console.log(stamped(describeClaudeKey(process.env, readKeychainPassword)));
 
   // The ONLY place a real summarizer is constructed. `createServer` has no
   // default, so nothing that merely spins a server up — every test in
@@ -105,13 +112,8 @@ export function createServerDeps(
   // the machine is the item's own text. Absent key or CW_REVIEW_GATE=0 → null
   // → every item passes unjudged, which is the documented "gate off" state.
   const reviewJudge = haikuReviewJudge();
-  if (!reviewJudge) {
-    console.log(
-      reviewGateEnabled()
-        ? '[review-gate] no summary API key; review items pass unjudged. ' +
-            `Add one with: security add-generic-password -a "$USER" -s ${KEYCHAIN_SERVICE} -w`
-        : '[review-gate] off (CW_REVIEW_GATE=0); review items pass unjudged.',
-    );
+  if (!reviewJudge && !reviewGateEnabled()) {
+    console.log('[review-gate] off (CW_REVIEW_GATE=0); review items pass unjudged.');
   }
 
   // The ONLY place the real effort-estimate scorer is constructed — same seam
@@ -120,13 +122,8 @@ export function createServerDeps(
   // Absent key or CW_EFFORT_ESTIMATE=0 → null → every ticket stays unscored,
   // which reads on the row exactly like a workspace that never wired this in.
   const effortEstimator = haikuEffortEstimator();
-  if (!effortEstimator) {
-    console.log(
-      effortEstimateEnabled()
-        ? '[effort-estimate] no summary API key; tickets stay unscored. ' +
-            `Add one with: security add-generic-password -a "$USER" -s ${KEYCHAIN_SERVICE} -w`
-        : '[effort-estimate] off (CW_EFFORT_ESTIMATE=0); tickets stay unscored.',
-    );
+  if (!effortEstimator && !effortEstimateEnabled()) {
+    console.log('[effort-estimate] off (CW_EFFORT_ESTIMATE=0); tickets stay unscored.');
   }
 
   // The ONLY place a real transcription engine is constructed — same seam rule,
@@ -310,12 +307,7 @@ export function createServerDeps(
     methodFor: (docId) => readNotesMethod(cfg.dataDir, docId),
     composerOpts: { instructions: () => promptStore.read('meeting-notes') },
   });
-  if (transcription && !notesComposer) {
-    console.log(
-      '[meeting-notes] no summary API key; meetings record transcripts, notes stay off. ' +
-        `Add one with: security add-generic-password -a "$USER" -s ${KEYCHAIN_SERVICE} -w`,
-    );
-  }
+  // No "no key" line here: the `[claude]` line at the top already said it.
 
   // The ONLY place the real task-capture extractor is constructed — the same
   // dedicated-key consent as the notes composer, because the same transcript

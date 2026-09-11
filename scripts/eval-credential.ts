@@ -24,20 +24,29 @@
  * Absent an eval credential the run FAILS naming the item to add — it does
  * not quietly borrow prod's, which is the whole bug.
  *
+ * That order is exactly what every non-prod SERVER resolves too, since the
+ * rule became "the eval key for all local development and CI" (2026-09-11).
+ * So this is not a second resolver: it is the server's own
+ * `resolveCredentialFrom` with the prod marker stripped from the environment,
+ * which makes the eval non-prod wherever it runs (`claude-key-source.ts`).
+ *
  * Nothing here logs, returns or formats a credential VALUE. It answers a
  * `SummaryCredential`, whose value reaches exactly one header.
  */
-import type { SummaryCredential } from '../packages/server/src/summarize.ts';
+import {
+  ACCESS_TOKEN_ENV,
+  EVAL_KEYCHAIN_SERVICE,
+  EVAL_KEY_ENV,
+  withoutProdMarker,
+} from '../packages/server/src/claude-key-source.ts';
+import { type SummaryCredential, resolveCredentialFrom } from '../packages/server/src/summarize.ts';
 
-/** The Keychain item the eval reads. Prod's is a different name on purpose. */
-export const EVAL_KEYCHAIN_SERVICE = 'claude-workspaces-eval-api-key';
+/** The Keychain item the eval reads, and its env override. Prod's is a
+ *  different name on purpose. */
+export { EVAL_KEYCHAIN_SERVICE, EVAL_KEY_ENV };
 
 /** Env var holding an already-exchanged access token — how CI runs. */
-export const EVAL_ACCESS_TOKEN_ENV = 'CW_SUMMARY_ACCESS_TOKEN';
-
-/** The env override `readKeychainPassword` honours for that item — its
- *  service name uppercased, dashes to underscores. */
-export const EVAL_KEY_ENV = 'CLAUDE_WORKSPACES_EVAL_API_KEY';
+export const EVAL_ACCESS_TOKEN_ENV = ACCESS_TOKEN_ENV;
 
 /**
  * What to tell somebody who has no eval credential.
@@ -79,16 +88,7 @@ export function resolveEvalCredentialFrom(
   read: (service: string) => string | null,
   env: Record<string, string | undefined>,
 ): SummaryCredential | null {
-  if (explicit !== undefined) return explicit ? { kind: 'key', value: explicit } : null;
-  const token = env[EVAL_ACCESS_TOKEN_ENV]?.trim();
-  if (token) return { kind: 'token', value: token };
-  try {
-    const key = read(EVAL_KEYCHAIN_SERVICE);
-    if (key) return { kind: 'key', value: key };
-  } catch {
-    // A missing item throws. That is the "not configured" answer, and the
-    // caller prints `EVAL_CREDENTIAL_HELP` for it — there is nowhere else to
-    // look, by design.
-  }
-  return null;
+  // Null means "not configured", and the caller prints `EVAL_CREDENTIAL_HELP`
+  // for it — there is nowhere else to look, by design.
+  return resolveCredentialFrom(explicit, read, withoutProdMarker(env));
 }

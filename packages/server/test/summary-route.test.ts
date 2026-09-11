@@ -29,6 +29,7 @@ import {
   summaryHash,
   threadLines,
 } from '@claude-workspaces/core';
+import { EVAL_KEYCHAIN_SERVICE, KEYCHAIN_SERVICE } from '../src/claude-key-source.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ThreadSummarizer } from '../src/summarize.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -232,10 +233,11 @@ describe(`POST /workspaces/${WS}/docs/:docId/threads/:threadId/summary`, () => {
     // "Helpful" means it names the switch AND how to add a key — a bare
     // "disabled" leaves the operator with nowhere to go.
     expect(body.detail).toContain('CW_SUMMARIES=1');
-    // The CURRENT service name: `resolveKey` still reads the pre-rename entry
-    // second, but an operator being told how to ADD a key should be told to
-    // add it where the next reader looks first.
-    expect(body.detail).toContain('claude-workspaces-summary-api-key');
+    // The item THIS process reads first. A test run is not the prod service,
+    // so that is the eval item — telling a staging or dev operator to add
+    // prod's key would point them at the one they must not spend.
+    expect(body.detail).toContain(EVAL_KEYCHAIN_SERVICE);
+    expect(body.detail).not.toContain(KEYCHAIN_SERVICE);
     // The disabled path must short-circuit BEFORE the call, not after it.
     expect(calls.length).toBe(0);
   });

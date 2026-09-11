@@ -80,6 +80,7 @@
  */
 import { execFile } from 'node:child_process';
 import { userInfo } from 'node:os';
+import { PROD_SERVICE_LABEL } from './claude-key-source.ts';
 import { clientReleaseStatus } from './client-release.ts';
 import { type InstallRunner, spawnBunInstall } from './dependency-install.ts';
 import {
@@ -104,7 +105,7 @@ import {
 /** The launchd job this machine supervises the server with. Restarting it is
  *  what re-runs `scripts/serve.ts --no-watch`, which rebuilds the browser
  *  bundles and publishes them as the client release the fleet loads. */
-export const LAUNCHD_LABEL = 'com.fryanpan.claude-workspaces';
+export const LAUNCHD_LABEL = PROD_SERVICE_LABEL;
 
 /** How long the restart waits after `deploy()` returns, so the HTTP response
  *  that says "restarting" reaches the caller before the process it came

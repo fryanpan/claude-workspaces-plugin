@@ -37,6 +37,7 @@
  * counts as consent for server→Anthropic traffic.
  */
 import { isReviewItemOpen } from '@claude-workspaces/core';
+import type { EnvLike } from '@claude-workspaces/core/env-names';
 import { readKeychainPassword } from './share/keychain.ts';
 import { resolveKeyFrom } from './summarize.ts';
 import { resolveAssignee } from './task-owner.ts';
@@ -1288,9 +1289,10 @@ export class VoiceRouter {
 /**
  * The real Haiku completer, or null when the operator hasn't opted in.
  *
- * Consent is the SAME dedicated keychain entry the summarizer uses
- * (`claude-workspaces-summary-api-key` / CW_SUMMARY_API_KEY): adding
- * it is the act of consenting to server→api.anthropic.com traffic, and voice
+ * Consent is the SAME dedicated keychain entry the summarizer uses (prod's
+ * item under the launchd service, the eval item anywhere else — see
+ * `claude-key-source.ts`): adding it is the act of consenting to
+ * server→api.anthropic.com traffic, and voice
  * transcripts are the speaker's own words sent by their own explicit action.
  * A generic ANTHROPIC_API_KEY in the environment is deliberately not
  * honoured (see summarize.ts for the incident that rule comes from).
@@ -1299,11 +1301,17 @@ export function haikuVoiceComplete(opts?: {
   apiKey?: string | null;
   fetchImpl?: typeof fetch;
   readKey?: (service: string) => string | null;
+  /** Injected in tests; decides which item is read (`claude-key-source.ts`). */
+  env?: EnvLike;
 }): VoiceComplete | null {
   // Same two-name resolution as the summarizer: a machine set up before the
   // rename holds only the legacy entry, and reading just the new name left
   // the fast path silently off while summaries kept working.
-  const key = resolveKeyFrom(opts?.apiKey, opts?.readKey ?? readKeychainPassword);
+  const key = resolveKeyFrom(
+    opts?.apiKey,
+    opts?.readKey ?? readKeychainPassword,
+    opts?.env ?? process.env,
+  );
   if (!key) return null;
   const fetchImpl = opts?.fetchImpl ?? globalThis.fetch;
   const resolvedKey = key;

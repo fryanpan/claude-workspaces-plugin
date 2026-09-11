@@ -20,6 +20,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ElementAnchor, User } from '@claude-workspaces/core';
+import { EVAL_KEY_ENV } from '../src/claude-key-source.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { DEBOUNCE_MS, ThreadSummarizer } from '../src/summarize.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -48,15 +49,17 @@ let WS = '';
 
 describe('createServer builds no summarizer of its own', () => {
   let dataDir: string;
-  const priorKey = process.env.LIVE_FEEDBACK_SUMMARY_API_KEY;
+  const priorKey = process.env[EVAL_KEY_ENV];
   const priorFlag = process.env.CW_SUMMARIES;
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'summary-no-default-'));
     // A key that resolves on ANY machine, so this test is not quietly vacuous
     // on a box (or a CI runner) that happens to have no Keychain entry — which
-    // is exactly the state that hid the original bug from CI.
-    process.env.LIVE_FEEDBACK_SUMMARY_API_KEY = 'test-key-never-sent-anywhere';
+    // is exactly the state that hid the original bug from CI. It is the EVAL
+    // item's override: a test run is not the prod service, so that is the
+    // only item it reads (`claude-key-source.ts`).
+    process.env[EVAL_KEY_ENV] = 'test-key-never-sent-anywhere';
     process.env.CW_SUMMARIES = '1';
     globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
       const url = String(typeof input === 'string' ? input : ((input as Request)?.url ?? input));
@@ -74,9 +77,8 @@ describe('createServer builds no summarizer of its own', () => {
   afterAll(() => {
     globalThis.fetch = realFetch;
     rmSync(dataDir, { recursive: true, force: true });
-    if (priorKey === undefined)
-      Reflect.deleteProperty(process.env, 'LIVE_FEEDBACK_SUMMARY_API_KEY');
-    else process.env.LIVE_FEEDBACK_SUMMARY_API_KEY = priorKey;
+    if (priorKey === undefined) Reflect.deleteProperty(process.env, EVAL_KEY_ENV);
+    else process.env[EVAL_KEY_ENV] = priorKey;
     if (priorFlag === undefined) Reflect.deleteProperty(process.env, 'CW_SUMMARIES');
     else process.env.CW_SUMMARIES = priorFlag;
   });
