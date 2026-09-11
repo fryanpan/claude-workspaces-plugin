@@ -702,6 +702,10 @@ export class FileBindings {
     if (unread) {
       const liveWins = opts.liveWins === true || !this.diskNewerThanState(docId, abs, pre?.mtimeMs);
       binding.unreadAtAttach = { liveWins };
+      // A caller that said a write is owed (the index row, at boot) is still
+      // owed one, so the row keeps saying so. The stamp's verdict alone is
+      // not: it calls every never-edited doc the newer side.
+      if (opts.liveWins === true) this.failedWrites.add(docId);
       // Said to the owner on `get_doc` as well, because a held write-back is
       // otherwise indistinguishable from one that landed.
       binding.lastSyncError = {
@@ -1344,7 +1348,12 @@ export class FileBindings {
       preread: pre,
       ...(liveWins ? { liveWins } : {}),
     });
-    if (res.ok) console.log(`[doc-store] ${doc.docId}: bound file is readable again; reconciled`);
+    if (!res.ok) return;
+    // The held write is the attach's now: it armed one if the file needs it,
+    // and a file that already matches the doc owes nothing.
+    this.failedWrites.delete(doc.docId);
+    if (!this.hasPendingWrite(doc.docId)) this.p.clearPendingFileWrite(doc.docId);
+    console.log(`[doc-store] ${doc.docId}: bound file is readable again; reconciled`);
   }
 
   /**
@@ -2137,7 +2146,7 @@ export class FileBindings {
   pendingFileWrites(root?: string): { docId: string; path: string }[] {
     const out: { docId: string; path: string }[] = [];
     for (const [docId, binding] of this.bindings) {
-      if (!binding.writeTimer && !binding.writeInFlight) continue;
+      if (!this.hasPendingWrite(docId)) continue;
       if (root !== undefined && !isWithinRoot(root, binding.path)) continue;
       out.push({ docId, path: binding.path });
     }
@@ -2197,10 +2206,15 @@ export class FileBindings {
    * started it) and it has not landed, so answering "no" here is how a doc
    * mid-write became invisible to the shutdown sweep, to the deploy's
    * refusal check, and to the eviction guard, all at once.
+   *
+   * So does a write held for a file not yet read (`unreadAtAttach`): it has
+   * neither, and it is still owed. Evicting that doc would drop the poll that
+   * is waiting to carry it out.
    */
   hasPendingWrite(docId: string): boolean {
     const binding = this.bindings.get(docId);
     if (!binding) return false;
+    if (binding.unreadAtAttach && this.failedWrites.has(docId)) return true;
     return binding.writeTimer != null || binding.writeInFlight === true;
   }
 
