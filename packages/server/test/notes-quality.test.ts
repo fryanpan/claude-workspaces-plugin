@@ -26,9 +26,11 @@ import {
   bulletWords,
   decisionsWithoutSpeaker,
   duplicateTopics,
+  emptyHeadings,
   flatBulletRuns,
   longFlatRuns,
   nestedBullets,
+  openedEmptyHeadings,
   overlongBullets,
   parseNotesTopics,
   unlinkedReferences,
@@ -254,5 +256,89 @@ describe('a decision attributed one line down', () => {
       '\t- [@Speaker D](speaker:D?t=4) owns it',
     ].join('\n');
     expect(decisionsWithoutSpeaker(tabbed)).toEqual([]);
+  });
+});
+
+describe('a heading with nothing under it', () => {
+  const OPENED = ['### Battery life', '', '- [@B](speaker:B?t=4) wants a year'].join('\n');
+
+  it('is reported, while a heading with bullets is not', () => {
+    const notes = [
+      '### Battery life',
+      '',
+      '- [@B](speaker:B?t=4) wants a year on a coin cell',
+      '',
+      '### Casing colour',
+    ].join('\n');
+    expect(emptyHeadings(notes)).toEqual(['Casing colour']);
+  });
+
+  it('CONTROL: notes with no heading at all report nothing', () => {
+    // The bullets a note-taker writes before it opens any topic sit in a
+    // heading-less pseudo-topic; reporting that as an empty heading would put
+    // every flat run in the list.
+    expect(emptyHeadings('- a bullet before any heading\n')).toEqual([]);
+    expect(emptyHeadings('')).toEqual([]);
+  });
+
+  it('is reported whatever level it was written at', () => {
+    expect(emptyHeadings('#### Battery life\n')).toEqual(['Battery life']);
+  });
+
+  it('is not reported for a heading whose only bullet is an indented one', () => {
+    // The nested method writes a lead bullet and its propositions one layer
+    // down; a tick that landed only the layer below still wrote under the
+    // heading, and reading it as empty would strand a heading that has words
+    // in it.
+    expect(emptyHeadings('### Battery life\n\n  - on a coin cell\n')).toEqual([]);
+  });
+
+  it('counts as OPENED when this update is the one that wrote it', () => {
+    expect(
+      openedEmptyHeadings(
+        '- a bullet before any heading\n',
+        '- a bullet before any heading\n\n### Battery life\n',
+      ),
+    ).toEqual(['Battery life']);
+  });
+
+  it('is NOT opened by this update when it was already there and already empty', () => {
+    // The distinction the whole fix turns on: frame one of a two-frame action
+    // is the writer obeying, and a heading nobody ever came back for is not.
+    expect(
+      openedEmptyHeadings('### Battery life\n', '### Battery life\n\n### Casing colour\n'),
+    ).toEqual(['Casing colour']);
+  });
+
+  it('is not opened by an update that filled the heading it found', () => {
+    expect(openedEmptyHeadings('### Battery life\n', OPENED)).toEqual([]);
+  });
+
+  it('tells two headings apart when neither is written in Latin letters', () => {
+    // Reduced to ASCII these two keys are both the empty string, and so is
+    // the heading-less run of bullets above them — which read a heading the
+    // notes had never carried as one they already had.
+    const before = '- \u4e00\u6761\u8bb0\u5f55\n';
+    expect(openedEmptyHeadings(before, `${before}\n### \u7535\u6c60\u5bff\u547d\n`)).toEqual([
+      '\u7535\u6c60\u5bff\u547d',
+    ]);
+    expect(
+      openedEmptyHeadings(
+        '### \u7535\u6c60\u5bff\u547d\n',
+        '### \u7535\u6c60\u5bff\u547d\n\n### \u5916\u58f3\u989c\u8272\n',
+      ),
+    ).toEqual(['\u5916\u58f3\u989c\u8272']);
+  });
+
+  it('a heading made only of punctuation is not a topic to wait for', () => {
+    // A rule or a divider is not a subject the room raised, so there are no
+    // bullets coming for it and nothing to wait a tick for.
+    expect(openedEmptyHeadings('### Battery life\n', '### Battery life\n\n### ***\n')).toEqual([]);
+  });
+
+  it('reads a heading re-punctuated between the two updates as the same heading', () => {
+    // "Export range" and "Export Range:" are one topic to a reader, and a
+    // heading that looks new only because a colon arrived is not a new topic.
+    expect(openedEmptyHeadings('### Battery Life:\n', '### Battery life\n')).toEqual([]);
   });
 });
