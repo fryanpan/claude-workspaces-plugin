@@ -131,9 +131,16 @@ const suggestionCount = () => document.getElementById('suggestions-count')?.text
 
 /** An editor transaction — the one signal the whole margin loop rides. What it
  *  starts is debounced, so the caller polls for the result rather than waiting
- *  a fixed span. */
-function transaction(editor: EditorHandle): void {
-  editor.editor.emit('transaction', { editor: editor.editor } as never);
+ *  a fixed span.
+ *
+ *  The payload carries `transaction`, as tiptap's own always does: the margin
+ *  reads `docChanged` off it to decide whether the thread anchors have to be
+ *  re-read, and a payload without one is a shape the editor never emits. */
+function transaction(editor: EditorHandle, docChanged = false): void {
+  editor.editor.emit('transaction', {
+    editor: editor.editor,
+    transaction: { docChanged },
+  } as never);
 }
 
 describe('the balloon margin', () => {
