@@ -24,6 +24,7 @@
  */
 
 import * as Y from 'yjs';
+import { isUnclaimedBlankParagraph } from './prose-fragment.ts';
 import { readBlockAuthor, readBlockId, setBlockAuthor } from './prose-identity.ts';
 import { findBlockById } from './prose-outline.ts';
 
@@ -36,7 +37,14 @@ export type NestBlocksError =
   | 'nothing-to-nest';
 
 export interface NestBlocksResult {
-  /** How many blocks ended up under the lead. Zero always carries an error. */
+  /**
+   * How many blocks ended up under the lead.
+   *
+   * Zero carries an error EXCEPT when every block named is already under the
+   * lead: the end state the caller asked for holds, nothing had to move, and
+   * calling that a failure is what made a note-taker re-issue the same
+   * regroup on ten consecutive ticks of a measured hour.
+   */
   moved: number;
   error?: NestBlocksError;
 }
@@ -76,6 +84,109 @@ function nestedListOf(lead: Y.XmlElement, author: string): Y.XmlElement {
 }
 
 /**
+ * Whether every list item anywhere inside `el` is this author's.
+ *
+ * ONE PREDICATE, BECAUSE THE SAME MISTAKE HAS THREE ROUTES. A regroup moves a
+ * block by cloning it and deleting the original, and a clone carries its whole
+ * subtree — so "is this ours to move" is never a question about one element,
+ * it is a question about everything under it. That was got wrong three
+ * separate times: widening `precedingBlock` would have merged a person's
+ * paragraph into our list, a sibling list was gathered from before it was
+ * judged, and the judgement itself read only a list's DIRECT children so a
+ * person's bullet nested one level down was carried along. Each was found on
+ * its own. This exists so a fourth route has nothing new to get wrong: both
+ * places that decide what may move ask this, and it descends.
+ *
+ * Only list ITEMS are judged. A list container carries `cwAuthor` just when
+ * this agent's own insert built it — one that came back off disk carries
+ * nothing, because markdown has nowhere to put the attribute — so a container
+ * is never the evidence.
+ */
+function everyListItemIsOurs(el: Y.XmlElement, author: string): boolean {
+  for (const kid of el.toArray() as unknown[]) {
+    if (!(kid instanceof Y.XmlElement)) continue;
+    if (kid.nodeName === 'listItem' && readBlockAuthor(kid) !== author) return false;
+    if (!everyListItemIsOurs(kid, author)) return false;
+  }
+  return true;
+}
+
+/**
+ * The lists a regroup may gather from: the lead's own, and the sibling lists
+ * a note the note-taker itself wrote has cut it off from.
+ *
+ * WHY THIS EXISTS. A topic's bullets are one `bulletList` only for as long as
+ * every note under that heading is a bullet. The moment the note-taker writes
+ * anything else there — a paragraph note, or a `1.` where the instructions
+ * ask for a `- ` — the next insert lands after it and opens a SECOND list.
+ * `readOutline` reports both sets identically (`bullet`, depth 0, the same
+ * `underHeadingId`), so nothing the model is shown says the split happened,
+ * and a `nest_blocks` naming a lead from one list and members from the other
+ * found no sibling to move and answered `nothing-to-nest` — every tick, for
+ * as long as the topic stayed over the flat-run bar. Measured on an hour of
+ * EN2001a: seventeen of the run's twenty-four failed edits, and ten of them
+ * the SAME regroup re-issued tick after tick.
+ *
+ * WHAT IT WILL NOT CROSS. A heading (the next topic is not this one's to
+ * regroup), a list of the other kind, and any block that is not the
+ * note-taker's own — a person's paragraph in the middle of the notes stops
+ * the reach, which leaves their writing where they put it and the topic a
+ * little flatter than asked. A blank unclaimed paragraph is the browser's
+ * trailing node and is stepped over, exactly as `precedingBlock` steps over
+ * it.
+ *
+ * Returned in document order, so the members gathered from them stay in the
+ * order the meeting said them.
+ */
+function reachableLists(list: Y.XmlElement, author: string): Y.XmlElement[] {
+  const parent = (list.parent as Y.XmlFragment | Y.XmlElement | null) ?? null;
+  if (parent === null) return [list];
+  const siblings = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
+  const at = siblings.indexOf(list);
+  if (at < 0) return [list];
+  const out = [list];
+  const crossable = (el: Y.XmlElement | Y.XmlText | undefined): boolean => {
+    if (isUnclaimedBlankParagraph(el)) return true;
+    if (!(el instanceof Y.XmlElement)) return false;
+    if (el.nodeName === 'heading') return false;
+    // A LIST IS JUDGED BY ITS ITEMS, AT EVERY DEPTH — see
+    // {@link everyListItemIsOurs}. An empty list is not evidence of anything
+    // and is not crossed.
+    if (isList(el)) {
+      const items = (el.toArray() as unknown[]).filter(
+        (kid): kid is Y.XmlElement => kid instanceof Y.XmlElement && kid.nodeName === 'listItem',
+      );
+      return items.length > 0 && everyListItemIsOurs(el, author);
+    }
+    return readBlockAuthor(el) === author;
+  };
+  for (const step of [-1, 1]) {
+    for (let i = at + step; i >= 0 && i < siblings.length; i += step) {
+      const el = siblings[i];
+      // CROSSABLE FIRST, THEN GATHERED. A list is judged whole: one bullet in
+      // it that a person owns stops the reach AT that list, so neither it nor
+      // anything past it is gathered from. Gathering before the check moved
+      // our own bullets out of a list a person is also writing in — the reach
+      // reaching into somebody else's paragraph by another route, which is
+      // the thing this whole function refuses to do.
+      if (!crossable(el)) break;
+      if (isList(el) && el.nodeName === list.nodeName) out.push(el);
+    }
+  }
+  return out.sort((a, b) => siblings.indexOf(a) - siblings.indexOf(b));
+}
+
+/** Whether `el` sits anywhere inside `ancestor`. */
+function isInside(el: Y.XmlElement, ancestor: Y.XmlElement): boolean {
+  let node = el.parent as Y.XmlElement | Y.XmlFragment | null;
+  while (node != null) {
+    if (node === ancestor) return true;
+    node = (node as { parent?: Y.XmlElement | Y.XmlFragment | null }).parent ?? null;
+  }
+  return false;
+}
+
+/**
  * Move `blockIds` under `leadBlockId` as sub-bullets, in place.
  *
  * Refuses outright — moving nothing — when the LEAD is unusable, because a
@@ -98,29 +209,62 @@ export function nestBlocksUnderLead(
 
   // Document order, not the order the ids were named: a model listing them
   // backwards must not silently reverse the meeting.
+  //
+  // ACROSS THE LEAD'S OWN LIST AND THE ONES A NOTE OF ITS OWN CUT IT OFF
+  // FROM — see {@link reachableLists}. A bullet the outline reports as this
+  // lead's sibling has to BE reachable, or the regroup the notes are asked
+  // for cannot be made from what the model is shown.
   const wanted = new Set(opts.blockIds);
-  const members = (list.toArray() as unknown[]).filter(
-    (el): el is Y.XmlElement =>
-      el instanceof Y.XmlElement &&
-      el !== lead &&
-      el.nodeName === 'listItem' &&
-      wanted.has(readBlockId(el) ?? ' ') &&
-      readBlockAuthor(el) === opts.author,
-  );
-  if (members.length === 0) return { moved: 0, error: 'nothing-to-nest' };
+  const members: Array<{ el: Y.XmlElement; from: Y.XmlElement }> = [];
+  for (const from of reachableLists(list, opts.author)) {
+    for (const el of from.toArray() as unknown[]) {
+      if (!(el instanceof Y.XmlElement)) continue;
+      if (el === lead || el.nodeName !== 'listItem') continue;
+      if (!wanted.has(readBlockId(el) ?? ' ')) continue;
+      // AND EVERYTHING UNDER IT, because the move is a clone of the whole
+      // subtree: a bullet of ours carrying a person's reply beneath it takes
+      // their words along with it. Same rule as the reach, same predicate.
+      if (readBlockAuthor(el) !== opts.author) continue;
+      if (!everyListItemIsOurs(el, opts.author)) continue;
+      members.push({ el, from });
+    }
+  }
+  if (members.length === 0) {
+    // ALREADY DONE IS NOT A FAILURE. A model that cannot see how deep a
+    // bullet already sits re-asks for a regroup it made ticks ago; answering
+    // `nothing-to-nest` turns that into a failed edit, and on a batch of
+    // nothing but regroups into a write that landed nothing at all.
+    //
+    // EVERY id has to RESOLVE as well as sit under the lead. Filtering the
+    // unresolved ones away first would let a regroup naming a block that is
+    // gone report itself applied, which is how the mode the model actually
+    // has — naming ids that no longer exist — would stop being counted.
+    const named = opts.blockIds.map((id) => findBlockById(fragment, id));
+    if (named.length > 0 && named.every((el) => el != null && isInside(el, lead))) {
+      return { moved: 0 };
+    }
+    return { moved: 0, error: 'nothing-to-nest' };
+  }
 
   const nested = nestedListOf(lead, opts.author);
   let moved = 0;
-  for (const el of members) {
-    const at = (list.toArray() as unknown[]).indexOf(el);
+  for (const { el, from } of members) {
+    const at = (from.toArray() as unknown[]).indexOf(el);
     if (at < 0) continue;
     // Clone BEFORE the delete: a deleted element's content is no longer
     // readable, so the order here is the difference between moving a bullet
     // and losing one.
     const copy = el.clone();
-    list.delete(at, 1);
+    from.delete(at, 1);
     nested.insert(nested.length, [copy]);
     moved++;
+    // A list the regroup emptied is furniture, and leaving it behind would
+    // put a blank list between two notes for the rest of the meeting.
+    if (from !== list && from.length === 0) {
+      const holder = (from.parent as Y.XmlFragment | Y.XmlElement | null) ?? null;
+      const idx = holder === null ? -1 : (holder.toArray() as unknown[]).indexOf(from);
+      if (holder !== null && idx >= 0) holder.delete(idx, 1);
+    }
   }
   return moved === 0 ? { moved: 0, error: 'nothing-to-nest' } : { moved };
 }
