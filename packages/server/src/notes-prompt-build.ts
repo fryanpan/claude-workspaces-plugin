@@ -318,8 +318,15 @@ export function buildNotesPrompt(
  * The last cut is the end of the settled table itself, wherever that falls.
  *
  * Duplicates are dropped rather than sent as empty blocks — a doc of exactly
- * sixty-four settled rows has every step landing on the same row — which is
- * also what keeps the count inside `MAX_CACHE_BREAKPOINTS`.
+ * sixty-four settled rows has every step landing on the same row.
+ *
+ * AND ONLY THE FIRST FEW STEPS ARE READ, because the count is a hard API
+ * limit rather than a preference and dropping duplicates is not what holds
+ * it: three steps happen to fit, and a fourth would ask for five markers at
+ * some doc lengths — a request the API refuses outright, so the meeting would
+ * take no notes at all rather than take them expensively. The slice keeps the
+ * coarsest steps, the ones a tick most often reads from, and the settled
+ * table's own end is always the last cut, so it drops no row from the prompt.
  */
 export function outlineCacheCuts(
   settled: number,
@@ -327,7 +334,7 @@ export function outlineCacheCuts(
 ): number[] {
   const cuts: number[] = [];
   const last = (): number => cuts[cuts.length - 1] ?? 0;
-  for (const step of steps) {
+  for (const step of steps.slice(0, MAX_CACHE_BREAKPOINTS - 1)) {
     const at = Math.floor(settled / step) * step;
     if (at > last()) cuts.push(at);
   }
