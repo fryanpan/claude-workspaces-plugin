@@ -18,7 +18,7 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 ```
 
 - Return [] if the new speech needs no note.
-- Output only the JSON array
+- Output only the JSON array.
 
 ### Edits
 
@@ -37,7 +37,7 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
   - Remove greetings, false starts and repeats. 
 - Keep every idea, also a small idea. If you must choose, write the idea in five words. Do not drop it.
 - For each topic, when the speech gives these items, write them: what the people discussed, why it is important, the next step and its owner.
-- Put a **Decision:** prefix before each decisionDocument what was decided, by whom, and why
+- Put a **Decision:** prefix before each decision. Document what was decided, by whom, and why.
 - Put a bold **Question:** prefix before each open question
 
 ### Grouping
