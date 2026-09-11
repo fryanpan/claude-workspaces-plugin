@@ -135,8 +135,17 @@ function sourcesFor(
     fileMtime: (docId) => {
       const path = boundPaths.get(docId);
       if (path === undefined || !path.startsWith('/')) return undefined;
-      const st = statSync(path, { throwIfNoEntry: false });
-      return st?.isFile() ? st.mtimeMs : undefined;
+      try {
+        // `throwIfNoEntry` covers only ENOENT. A path whose parent turned into
+        // a file (ENOTDIR), one a permission change put out of reach (EACCES),
+        // a symlink loop — each still throws, and an unreadable file is the
+        // ordinary reason a row has no time to show. Failing the whole page
+        // over one of them would blank the Library instead.
+        const st = statSync(path, { throwIfNoEntry: false });
+        return st?.isFile() ? st.mtimeMs : undefined;
+      } catch {
+        return undefined;
+      }
     },
     projectRoot: (repoKey) => (hidden(repoKey) ? null : mounts.rootFor(repoKey)),
     markdownFiles: ctx.markdownFiles,

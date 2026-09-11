@@ -405,7 +405,16 @@ export function createMarkdownLister(
     const files: ProjectFile[] = [];
     for (const relPath of scanFolderPaths(root)) {
       if (!isMarkdownPath(relPath)) continue;
-      const st = statSync(join(root, relPath), { throwIfNoEntry: false });
+      // `throwIfNoEntry` covers ENOENT alone. Between the walk and this stat a
+      // folder can become a file (ENOTDIR) or lose its permissions (EACCES),
+      // and the page owes the reader every other file regardless — so one
+      // unreadable path drops its own row rather than the whole listing.
+      let st: ReturnType<typeof statSync> | undefined;
+      try {
+        st = statSync(join(root, relPath), { throwIfNoEntry: false });
+      } catch {
+        continue;
+      }
       if (st?.isFile()) files.push({ relPath, mtimeMs: st.mtimeMs });
     }
     cache.set(root, { at: now(), files });

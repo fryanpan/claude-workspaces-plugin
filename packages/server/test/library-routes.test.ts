@@ -152,6 +152,35 @@ describe('library routes', () => {
     expect(second?.at).toBe(when.getTime());
   });
 
+  /**
+   * `throwIfNoEntry: false` suppresses only ENOENT. A bound path whose parent
+   * has become a file throws ENOTDIR, as an unreadable one throws EACCES — and
+   * the page owes the reader every OTHER row regardless, with this one's time
+   * simply unknown. Verified against the pre-catch code: it answered 500.
+   */
+  it('keeps listing when a bound path cannot be stat-ed at all', async () => {
+    const bound = await at(`/workspaces/${WS}/docs`, {
+      method: 'POST',
+      body: JSON.stringify({
+        docId: 'tide',
+        type: 'markdown',
+        sourceUrl: join(repo, 'docs', 'tide-gauge.md'),
+        title: 'Tide gauge notes',
+      }),
+    });
+    expect(bound.status).toBe(200);
+    // Its whole folder is now a file, so stat-ing through it throws.
+    rmSync(join(repo, 'docs'), { recursive: true, force: true });
+    writeFileSync(join(repo, 'docs'), 'not a folder any more\n');
+
+    const lib = await items();
+    const row = lib.files.find((f) => f.href?.includes('tide'));
+    expect(row?.at).toBeUndefined();
+    // The positive control: the OTHER bound row still carries its own time,
+    // so the page is whole rather than uniformly timeless.
+    expect(typeof lib.files.find((f) => f.name === 'handbook.md')?.at).toBe('number');
+  });
+
   it('lists a discussion huddle under meetings', async () => {
     const huddle = await at(`/workspaces/${WS}/huddles`, {
       method: 'POST',
