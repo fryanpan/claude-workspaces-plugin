@@ -106,7 +106,7 @@ describe('publicAttachment (the shape events and visitors get)', () => {
     };
     // Positive control: the source record really carries the endpoint…
     expect(att.endpoint).toBe(ENDPOINT);
-    const pub = publicAttachment(att, 6000) as Record<string, unknown>;
+    const pub = publicAttachment(att, 6000, false) as Record<string, unknown>;
     // …and the public shape really carries everything else.
     expect(pub.agentId).toBe('relay-agent');
     expect(pub.runtime).toBe('webhook');

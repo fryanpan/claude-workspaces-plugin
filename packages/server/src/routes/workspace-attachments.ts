@@ -52,6 +52,19 @@ export async function handleWorkspaceAttachments(
     // The board's existence is not asked here any more —
     // `middleware/workspace-scope.ts` asked it once, above every handler, and
     // refused with this same 404 when the answer was no.
+    // Attached is not present. The record outlives the session that wrote it,
+    // so the roster alone answers "did anybody ever sit here" — the open
+    // stream is what answers "is anybody there now" (agent-listening.ts).
+    //
+    // `listening` is derived INSIDE these two reads, not stamped on their
+    // result here, and that placement is load-bearing rather than tidy:
+    // `PublicAttachment` is an allowlist that was rewritten field by field
+    // after a leak, and it is only a gate if nothing is added downstream of
+    // it. A field added to a visitor's row at this line would reach share
+    // visitors without ever being named there — which is the exact hole the
+    // rewrite closed. Every row the roster returns is kept, listening or
+    // not: this list is also the lead picker's options and the plugin-drift
+    // check's domain, and both need the sessions that are NOT here.
     const attachments = visitor
       ? taskStore.listPublicAttachments(workspaceId)
       : taskStore.listAttachments(workspaceId);

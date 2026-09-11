@@ -39,6 +39,7 @@ import {
   pendingDeclaration,
   reviewAnswered,
 } from '@claude-workspaces/core';
+import { agentListeningFrame } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
@@ -325,8 +326,22 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   });
   // The lead's own stream opening is what makes it deliverable, and it
   // emits no store event — so the board says so directly.
-  sse.onAgentStreams = (channel) => {
-    if (channel.startsWith('ws~')) leadPresence.notify(channel.slice('ws~'.length));
+  //
+  // The board's presence strip has the same problem and the same cause: a
+  // session's stream closing writes nothing, so nothing would trigger the
+  // roster re-read and its circle would sit there until an unrelated change
+  // happened along. The transient below is what makes a departure land on an
+  // open board without a reload. Transient rather than buffered: who is here
+  // is a fact about now, and replaying it to a page that reconnects would
+  // hand it a reading from before it left.
+  sse.onAgentStreams = (channel, agentId) => {
+    if (!channel.startsWith('ws~')) return;
+    const workspaceId = channel.slice('ws~'.length);
+    leadPresence.notify(workspaceId);
+    sse.broadcastTransient(
+      channel,
+      agentListeningFrame(workspaceId, agentId, sse.agentsOn(channel).has(agentId)),
+    );
   };
 
   const readyNudger = new ReadyWorkNudger({
