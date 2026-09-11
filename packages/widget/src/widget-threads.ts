@@ -209,15 +209,14 @@ function renderThreadRow(
 
   const snippet = threadSnippet(t.anchor);
   const last = t.comments[t.comments.length - 1];
-  row.innerHTML = `
-    <div class="meta">
-      <span class="dot"></span>
-      <span class="author-name">${escape(t.createdBy.name)}</span>
-      <span class="time">${formatTime(last?.ts ?? 0)}</span>
-    </div>
-    <div class="snippet">${escape(snippet)}</div>
-    <div class="last">${escape(last?.text ?? '')}</div>
-  `;
+  row.innerHTML =
+    '<div class="meta">' +
+    '<span class="dot"></span>' +
+    `<span class="author-name">${escape(t.createdBy.name)}</span>` +
+    `<span class="time">${formatTime(last?.ts ?? 0)}</span>` +
+    '</div>' +
+    `<div class="snippet">${escape(snippet)}</div>` +
+    `<div class="last">${escape(last?.text ?? '')}</div>`;
   row.addEventListener('click', () => {
     const pos = el.threadPositions.get(t.id);
     if (pos?.el) pos.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -248,33 +247,29 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
   pop.style.top = `${Math.min(cy + 6, window.innerHeight - 240)}px`;
   const snippet = threadSnippet(t.anchor);
   const status = t.anchor.kind === 'orphan' ? 'orphan' : t.status;
-  pop.innerHTML = `
-    <header>
-      <span class="tag tag-${status}">${status}</span>
-      <button class="icon-btn close">×</button>
-    </header>
-    <div class="snippet">${escape(snippet)}</div>
-    <div class="comments"></div>
-    <div class="actions">
-      <textarea rows="2" placeholder="Reply as ${escape(el.user?.name ?? 'Anon')}…"></textarea>
-      <button class="primary submit">Reply</button>
-      ${
-        status === 'resolved'
-          ? `<button class="reopen">Reopen</button>`
-          : status === 'open'
-            ? `<button class="resolve">Resolve</button>`
-            : ''
-      }
-    </div>
-  `;
+  pop.innerHTML =
+    '<header>' +
+    `<span class="tag tag-${status}">${status}</span>` +
+    '<button class="icon-btn close">×</button>' +
+    '</header>' +
+    `<div class="snippet">${escape(snippet)}</div>` +
+    '<div class="comments"></div>' +
+    '<div class="actions">' +
+    `<textarea rows="2" placeholder="Reply as ${escape(el.user?.name ?? 'Anon')}…"></textarea>` +
+    '<button class="primary submit">Reply</button>' +
+    (status === 'resolved'
+      ? '<button class="reopen">Reopen</button>'
+      : status === 'open'
+        ? '<button class="resolve">Resolve</button>'
+        : '') +
+    '</div>';
   const cList = pop.querySelector('.comments') as HTMLElement;
   for (const c of t.comments) {
     const row = document.createElement('div');
     row.className = 'comment';
-    row.innerHTML = `
-      <div class="author"><span class="swatch" style="background:${cssColor(c.author.color)}"></span>${escape(c.author.name)} <span class="time">${formatTime(c.ts)}</span></div>
-      <div class="body">${escape(c.text)}</div>
-    `;
+    row.innerHTML =
+      `<div class="author"><span class="swatch" style="background:${cssColor(c.author.color)}"></span>${escape(c.author.name)} <span class="time">${formatTime(c.ts)}</span></div>` +
+      `<div class="body">${escape(c.text)}</div>`;
     cList.appendChild(row);
   }
   el.shadow.appendChild(pop);

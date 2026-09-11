@@ -96,11 +96,10 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   const phone = isPhoneFace();
   const banner = document.createElement('div');
   banner.className = phone ? 'picker-banner quick' : 'picker-banner';
-  banner.innerHTML = `
-      <span>${phone ? 'Tap' : 'Click'} anything to comment.</span>
-      <span class="tick" hidden>Saved</span>
-      <button class="picker-cancel">Done${phone ? '' : ' (Esc)'}</button>
-    `;
+  banner.innerHTML =
+    `<span>${phone ? 'Tap' : 'Click'} anything to comment.</span>` +
+    '<span class="tick" hidden>Saved</span>' +
+    `<button class="picker-cancel">Done${phone ? '' : ' (Esc)'}</button>`;
   el.shadow.appendChild(banner);
   // The faint line from a card to its element (see `widget-card.ts`).
   const lead = document.createElement('div');
@@ -386,14 +385,13 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   const head = target
     ? `<b>${escape((target.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) || (anchor as ElementAnchor).snippet.text)}</b>`
     : 'About this page';
-  composer.innerHTML = `
-      <div class="composer-snippet">${head}</div>
-      <textarea placeholder="Comment on this element…" rows="${quick ? 1 : 3}"></textarea>
-      <div class="composer-actions">
-        <button class="cancel">Cancel</button>
-        <button class="primary submit">Post</button>
-      </div>
-    `;
+  composer.innerHTML =
+    `<div class="composer-snippet">${head}</div>` +
+    `<textarea placeholder="Comment on this element…" rows="${quick ? 1 : 3}"></textarea>` +
+    '<div class="composer-actions">' +
+    '<button class="cancel">Cancel</button>' +
+    '<button class="primary submit">Post</button>' +
+    '</div>';
   el.shadow.appendChild(composer);
   // Placed before the first paint, so the card never flashes where it isn't.
   placeCards(el);

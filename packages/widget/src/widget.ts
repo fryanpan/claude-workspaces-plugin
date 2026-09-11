@@ -478,18 +478,17 @@ export class FeedbackWidgetEl extends HTMLElement {
 
     const panel = document.createElement('div');
     panel.className = 'panel';
-    panel.innerHTML = `
-      <header class="panel-header">
-        <div class="title">Feedback</div>
-        <span class="status status-connecting">connecting…</span>
-        <button class="icon-btn close-panel" title="Close">×</button>
-      </header>
-      <div class="panel-actions">
-        <button class="primary pick-btn">Comment on element…</button>
-        <div class="me"></div>
-      </div>
-      <div class="panel-threads"></div>
-    `;
+    panel.innerHTML =
+      '<header class="panel-header">' +
+      '<div class="title">Feedback</div>' +
+      '<span class="status status-connecting">connecting…</span>' +
+      '<button class="icon-btn close-panel" title="Close">×</button>' +
+      '</header>' +
+      '<div class="panel-actions">' +
+      '<button class="primary pick-btn">Comment on element…</button>' +
+      '<div class="me"></div>' +
+      '</div>' +
+      '<div class="panel-threads"></div>';
     this.shadow.appendChild(panel);
 
     this.statusEl = panel.querySelector('.status') as HTMLElement;
@@ -600,12 +599,13 @@ export class FeedbackWidgetEl extends HTMLElement {
     // tip). `!important` on every element so the host page's own cursor
     // styles — pointer on links, text on inputs — don't flicker it away.
     const bubbleCursor = `url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="${BUBBLE_PATH}" fill="%232e7dd7" stroke="white" stroke-width="1.5"/></svg>') 3 21`;
-    s.textContent = `
-      .cfw-pin:hover { transform: translate(-50%,-100%) scale(1.08); }
-      .cfw-pin[data-status="resolved"] { background: ${STATUS_COLORS.resolved} !important; }
-      .cfw-pin[data-status="orphan"] { background: ${STATUS_COLORS.orphan} !important; }
-      body.cfw-feedback-mode, body.cfw-feedback-mode * { cursor: ${bubbleCursor}, crosshair !important; }
-    `;
+    // Written minified, a rule a line: the build minifies only the `styles*.ts`
+    // sheets, and whitespace here would ship to every host page.
+    s.textContent =
+      '.cfw-pin:hover{transform:translate(-50%,-100%) scale(1.08)}' +
+      `.cfw-pin[data-status="resolved"]{background:${STATUS_COLORS.resolved}!important}` +
+      `.cfw-pin[data-status="orphan"]{background:${STATUS_COLORS.orphan}!important}` +
+      `body.cfw-feedback-mode,body.cfw-feedback-mode *{cursor:${bubbleCursor},crosshair!important}`;
     document.head.appendChild(s);
   }
 
