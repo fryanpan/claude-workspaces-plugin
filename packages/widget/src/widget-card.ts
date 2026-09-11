@@ -45,8 +45,11 @@ const REST_Y = 72;
 export function placeCards(w: FeedbackWidgetEl): void {
   const lead = w.shadow.querySelector('.leader') as HTMLElement | null;
   if (!lead) return;
-  let top = 8;
-  let bot = window.innerHeight - 8;
+  // The part of the page actually on screen: above an iPad's keyboard, and
+  // inside a pinch-zoom. innerHeight knows about neither.
+  const vv = window.visualViewport;
+  let top = (vv?.offsetTop ?? 0) + 8;
+  let bot = (vv ? vv.offsetTop + vv.height : window.innerHeight) - 8;
   const x = window.innerWidth - 16 - CARD_W;
   // The mode's own buttons in the card's column — Done, the FAB's X, the list
   // — stay uncovered: the card's room ends where they start.

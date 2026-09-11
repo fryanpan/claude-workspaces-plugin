@@ -52,6 +52,8 @@ export interface Look {
   savedText: [number, number, number] | null;
   /** The mode's own buttons that are painted: the FAB and the list. */
   controls: Box[];
+  /** The visual viewport: its offset from the top, and its height. */
+  vv: [number, number];
   /** Each leader line's two ends. */
   lines: Array<[number, number, number, number]>;
   /** The banner when it is painted, else null. */
@@ -169,6 +171,7 @@ const LOOK = `(() => {
       return [t.getBoundingClientRect().height, line, t.scrollHeight];
     })(),
     controls: [...sr.querySelectorAll('.fab, .fab-list')].map(box).filter(Boolean),
+    vv: [Math.round(visualViewport.offsetTop), Math.round(visualViewport.height)],
     lines,
     banner: box(b),
     tick: !!t && !t.hidden,
@@ -267,6 +270,23 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     // A finger on the saved card, while the resting card's field has focus.
     await tap(`${SHADOW}.querySelector('.saved')`);
     await look('savedTapped');
+    // Zoomed in and scrolled down inside the zoom: the visual viewport is
+    // half the height and starts partway down the layout viewport, as it does
+    // when an iPad's keyboard pushes the page up.
+    await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await settle();
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: 300,
+      y: 300,
+      deltaX: 0,
+      deltaY: 1000,
+    });
+    await settle();
+    await look('zoomed');
+    await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await cdp.evaluate('scrollTo(0, 0)');
+    await settle();
     // An iPad turned to portrait mid-comment, and back.
     await tap(el('wide'));
     await type('Riverbend stop');
