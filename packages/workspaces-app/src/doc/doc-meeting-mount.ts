@@ -145,9 +145,12 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
   const strip = mountMeetingStrip({
     docId,
     root: stripEl,
-    // The Record Audio button docks at the end of the top bar's toolbar;
-    // the strip fuses to it from the row below.
-    toolbar: document.querySelector<HTMLElement>('#topbar .toolbar'),
+    // The Record Audio button docks at the end of the top BAR — beside the
+    // toolbar, not inside it. The toolbar scrolls sideways on a phone, and a
+    // control in a scroll container is a control that can be scrolled out of
+    // reach; see `MeetingStripOpts.dock`. The strip fuses to it from the row
+    // below.
+    dock: document.querySelector<HTMLElement>('#topbar'),
     bot: botClient,
     // "<name>'s Claude Code Agent" — the bot walks into the call wearing
     // the name of the person who sent it, editable in the chooser.

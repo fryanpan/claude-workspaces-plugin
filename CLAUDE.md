@@ -73,6 +73,13 @@ that way and add new subsystem docs to the list here.
   commits, not a fragment per file.
 - **Mockups and sketches never enter the repo** — write the HTML outside the
   working tree and serve it with `attach_mockup(docId, sourceHtmlPath)`.
+- **A mock of a change to an existing surface starts from that surface.** Take
+  the real markup and stylesheets off a `bun run staging` run, add the change
+  in place, and keep the flow the reader already uses. A fresh design is only
+  for a surface that does not exist yet.
+- **Mocks are interactive.** The reader reaches every state by acting on the
+  page — tapping, typing, moving — never by reading a strip of captioned
+  scenes.
 
 ## The gates — `bun run verify` before you push
 

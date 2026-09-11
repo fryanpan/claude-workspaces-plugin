@@ -19,6 +19,7 @@ import { balloonMarginVisible } from '../card-placement.ts';
 import { type CommentHintsHandle, mountCommentHints } from '../comment-hints.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
+import { mountReadingHold } from '../reading-hold.ts';
 import { type RecentNoteCardsHandle, mountRecentNoteCards } from '../recent-note-cards.ts';
 import { type MarkupMarginHandle, mountMarkupMargin } from '../redline/markup-margin.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
@@ -45,6 +46,13 @@ export interface DocMarginHandle {
 
 export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   const { docId, ydoc, scope, editor, editorMount, chrome } = opts;
+
+  // The page holds the reader's own line still while the meeting writes into
+  // the doc (`reading-hold.ts`) — the same loop as everything else here: a
+  // note landing above the fold moves the text the cards are drawn against,
+  // and moving the pane by the same amount is what leaves the reader where
+  // they were.
+  mountReadingHold({ scroller: editorMount, scope });
 
   // The balloon margin: plain markdown docs get comment balloons only (no
   // git base, so no deletions) — reuses the same mount as the redline
@@ -155,7 +163,22 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   });
   const hintsHandle = hints;
   const footnotesHandle = footnotes;
-  const onMarginTransaction = (): void => {
+  const onMarginTransaction = (props: { transaction: { docChanged: boolean } }): void => {
+    // A CHANGED DOC RE-READS THE ANCHORS. The highlight positions the
+    // decoration plugin holds are a cache: absolute positions it maps through
+    // every transaction, while the Yjs relative anchors are the truth. A
+    // structural edit — a tick grouping a topic, a block replaced, anything
+    // arriving as a remote update — can map a range onto itself, and a
+    // zero-width range draws no highlight. The card goes with it: the balloon
+    // column picks the threads it draws by looking for that highlight, and
+    // the in-flow card is a widget decoration built beside it. Measured at
+    // 430 on the live board, every inline card left the document on a tick
+    // and 276px of flow went with them, while every anchor still resolved.
+    // Recomputing from the anchors is what puts them back — in the same
+    // transaction, so nothing paints without them.
+    if (props.transaction.docChanged) {
+      chrome.refreshThreadDecorations(chrome.threadsPanel.getActive());
+    }
     // A note landing, stepping down or ageing out arrives as a transaction:
     // re-read the tinted set before the column lays out against it.
     cards.tick();

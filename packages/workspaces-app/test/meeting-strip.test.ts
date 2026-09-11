@@ -316,7 +316,7 @@ function mount(
     bot?: MeetingBotClient;
     botNamePrefill?: string;
     offeredNotesMethods?: readonly NotesMethod[];
-    toolbar?: HTMLElement | null;
+    dock?: HTMLElement | null;
     systemAudioOffered?: () => boolean;
   } = {},
 ): Harness {
@@ -441,21 +441,25 @@ describe('the chrome at rest', () => {
     expect(h.record().querySelector<HTMLElement>('.meeting-record-dot')?.hidden).toBe(true);
   });
 
-  it('docks the button in the toolbar it was given, and takes it along on destroy', () => {
-    const toolbar = document.createElement('div');
-    document.body.append(toolbar);
-    const h = mount(undefined, { toolbar });
-    const btn = toolbar.querySelector('.meeting-record');
+  it('docks the button in the bar it was given, and takes it along on destroy', () => {
+    const bar = document.createElement('div');
+    document.body.append(bar);
+    const h = mount(undefined, { dock: bar });
+    const btn = bar.querySelector('.meeting-record');
     expect(btn).not.toBeNull();
     expect(h.root.querySelector('.meeting-record')).toBeNull();
-    expect(toolbar.querySelector('.meeting-record-options')).not.toBeNull();
+    expect(bar.querySelector('.meeting-record-options')).not.toBeNull();
+    // Record and its chevron are one box, so the bar sizes them together.
+    expect(btn?.parentElement?.className).toBe('meeting-record-dock');
+    expect(bar.querySelector('.meeting-record-options')?.parentElement).toBe(btn?.parentElement);
     h.strip.destroy();
-    expect(toolbar.querySelector('.meeting-record')).toBeNull();
-    expect(toolbar.querySelector('.meeting-record-options')).toBeNull();
+    expect(bar.querySelector('.meeting-record')).toBeNull();
+    expect(bar.querySelector('.meeting-record-options')).toBeNull();
+    expect(bar.querySelector('.meeting-record-dock')).toBeNull();
   });
 
   it('destroy takes the scrim and popover with it, not just the button', () => {
-    // The scrim and both popovers dock beside the button in the TOOLBAR, not
+    // The scrim and both popovers dock beside the button in the TOP BAR, not
     // in `root` (root is `hidden` while idle — see the chooser-was-
     // unreachable-while-idle fix). A destroy that only removed the button
     // left them behind: a SPA navigation to the next doc re-mounts a fresh
@@ -463,15 +467,15 @@ describe('the chrome at rest', () => {
     // new Record button, and the orphaned popover's own Escape listener is
     // gone (it was removed from `document`, not from the element), so nothing
     // closes it.
-    const toolbar = document.createElement('div');
-    document.body.append(toolbar);
-    const h = mount(undefined, { toolbar });
-    toolbar.querySelector<HTMLButtonElement>('.meeting-record')?.click();
-    expect(toolbar.querySelector<HTMLElement>('.meeting-pop')?.hidden).toBe(false);
+    const bar = document.createElement('div');
+    document.body.append(bar);
+    const h = mount(undefined, { dock: bar });
+    bar.querySelector<HTMLButtonElement>('.meeting-record')?.click();
+    expect(bar.querySelector<HTMLElement>('.meeting-pop')?.hidden).toBe(false);
     h.strip.destroy();
-    expect(toolbar.querySelector('.meeting-record')).toBeNull();
-    expect(toolbar.querySelector('.meeting-scrim')).toBeNull();
-    expect(toolbar.querySelector('.meeting-pop')).toBeNull();
+    expect(bar.querySelector('.meeting-record')).toBeNull();
+    expect(bar.querySelector('.meeting-scrim')).toBeNull();
+    expect(bar.querySelector('.meeting-pop')).toBeNull();
   });
 
   it('a press opens the start chooser; the scrim and Escape both close it', () => {
@@ -1943,6 +1947,60 @@ describe('one tap when alone', () => {
     expect(h.pop().querySelector('.meeting-stop-cta')).not.toBeNull();
     h.pressStop();
     expect(h.options().hidden).toBe(false);
+  });
+
+  it('the popover’s verb follows the recording state — Start while idle, Stop while live', async () => {
+    // The phone report said the options menu offered Start Recording while a
+    // recording was running. It does not, and this is the case that says so
+    // in behaviour rather than in a code comment: the chevron is the door to
+    // a START and is gone the moment there is nothing to start, and the
+    // panel Record opens while live carries one verb, which ENDS the capture
+    // rather than merely being spelled differently.
+    const stopped = vi.fn();
+    const h = mount(() => Promise.resolve({ ok: true as const, capture: fakeCapture(stopped) }), {
+      alone: () => true,
+    });
+    h.options().click();
+    expect(h.startCta().textContent).toContain('Start Recording');
+    expect(h.pop().querySelector('.meeting-stop-cta')).toBeNull();
+    h.startCta().click();
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm1',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'solo',
+    });
+    expect(h.strip.state().kind).toBe('recording');
+
+    // Live: no door to a second start, and the one verb is Stop.
+    expect(h.options().hidden).toBe(true);
+    h.record().click();
+    expect(h.pop().querySelector('.meeting-start-cta')).toBeNull();
+    expect(h.stopCta().textContent).toBe('■ Stop Recording');
+
+    // And a tap that reaches the chevron anyway — a keyboard, a screen
+    // reader, a stylesheet that stops hiding it — lands on the same menu.
+    // It used to open the chooser unconditionally, which put a second
+    // "Start Recording" in front of somebody already recording.
+    h.scrim().click();
+    expect(h.pop().hidden).toBe(true);
+    h.options().click();
+    expect(h.pop().hidden).toBe(false);
+    expect(h.pop().querySelector('.meeting-start-cta')).toBeNull();
+    expect(h.stopCta().textContent).toBe('■ Stop Recording');
+
+    // The action, not just the label: pressing it ends the capture.
+    h.stopCta().click();
+    expect(h.strip.state().kind).toBe('idle');
+    expect(stopped).toHaveBeenCalled();
+
+    // …and the start door is back, offering Start again.
+    expect(h.options().hidden).toBe(false);
+    h.record().click();
+    expect(h.startCta().textContent).toContain('Start Recording');
   });
 
   it('a live bot outranks the tap — Record opens the bot’s menu, not a microphone', async () => {

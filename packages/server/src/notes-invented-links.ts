@@ -40,6 +40,17 @@
  */
 
 import { SUGGEST_PARAM, type prose } from '@claude-workspaces/core';
+import type { NoteLinkTarget } from './notes-scheme-links.ts';
+
+/** One entry of a compose input's link lists, as this module reads it. The
+ *  title and the id are optional because the check itself needs neither —
+ *  they are collected for `named`, which the scheme resolver reads. */
+export interface NoteLinkSource {
+  url: string;
+  title?: string;
+  id?: string;
+  kind?: 'task' | 'doc';
+}
 
 /** What the tick was given, as the check needs to see it. */
 export interface NotesLinkSources {
@@ -48,16 +59,26 @@ export interface NotesLinkSources {
   /** Text the tick could have read a URL out of — its speech, and the doc as
    *  it stood. Searched for the composed URL verbatim, nothing cleverer. */
   text: readonly string[];
+  /**
+   * The same things, under the TITLES they were handed to the tick by — what
+   * `notes-scheme-links.ts` resolves a `task:<title>` citation against.
+   *
+   * Optional, and absent means "this caller cannot say what the tick was
+   * given", exactly as an absent `linkSources` does on the applier: no title
+   * resolves, so a scheme citation comes out as words rather than as a link
+   * to a row nobody can show was named.
+   */
+  named?: readonly NoteLinkTarget[];
 }
 
 /** The shape of a compose input this module reads. Structural on purpose:
  *  `NotesComposeInput` satisfies it without this module importing the notes
  *  pipeline, and the eval harness can hand it the same fields. */
 export interface NotesLinkInputs {
-  references?: readonly { url: string }[] | undefined;
-  taskLinks?: readonly { url: string }[] | undefined;
-  docLinks?: readonly { url: string }[] | undefined;
-  suggestions?: readonly { url: string }[] | undefined;
+  references?: readonly NoteLinkSource[] | undefined;
+  taskLinks?: readonly NoteLinkSource[] | undefined;
+  docLinks?: readonly NoteLinkSource[] | undefined;
+  suggestions?: readonly NoteLinkSource[] | undefined;
   outline?: readonly { text: string }[] | undefined;
   /** This tick's settled turns. */
   turns?: readonly { text: string }[] | undefined;
@@ -66,13 +87,37 @@ export interface NotesLinkInputs {
 /** Everything a tick was given, collected once, at the seam that has it all. */
 export function notesLinkSources(input: NotesLinkInputs): NotesLinkSources {
   const urls: string[] = [];
-  for (const list of [input.references, input.taskLinks, input.docLinks, input.suggestions]) {
-    for (const item of list ?? []) urls.push(item.url);
+  const named: NoteLinkTarget[] = [];
+  // The kind is positional where the list itself says it: a captured task
+  // link is a row and a resolved lookup is a doc, whatever either one
+  // carries. A reference and a suggestion say so themselves.
+  const lists: Array<[readonly NoteLinkSource[] | undefined, 'task' | 'doc' | undefined]> = [
+    [input.references, undefined],
+    [input.taskLinks, 'task'],
+    [input.docLinks, 'doc'],
+    [input.suggestions, undefined],
+  ];
+  for (const [list, kindOfList] of lists) {
+    for (const item of list ?? []) {
+      urls.push(item.url);
+      // A source with no title cannot answer "which row is this" and is not
+      // offered as an answer — the older callers that hand URLs alone stay
+      // exactly as strict as they were.
+      if (item.title !== undefined && item.title.trim().length > 0) {
+        const kind = kindOfList ?? item.kind;
+        named.push({
+          title: item.title,
+          url: item.url,
+          ...(kind !== undefined ? { kind } : {}),
+          ...(item.id !== undefined ? { id: item.id } : {}),
+        });
+      }
+    }
   }
   const text: string[] = [];
   for (const entry of input.outline ?? []) text.push(entry.text);
   for (const turn of input.turns ?? []) text.push(turn.text);
-  return { urls, text };
+  return { urls, text, named };
 }
 
 /**

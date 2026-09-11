@@ -36,7 +36,7 @@
  * column's 100ms debounce, beside the wrong lines or on screen for text that
  * had left it. `clamped` and `landed` are those two.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -120,27 +120,61 @@ function buildPage(): string {
   return html;
 }
 
-/** Drive one meeting at one of the two verified widths. */
-function measure(html: string, preset: 'ipad' | 'phone'): Probe {
+/**
+ * Drive one meeting at one of the two verified widths.
+ *
+ * AWAITED, NOT WAITED FOR. A launch is half a minute of another process, and a
+ * worker that BLOCKS on it stops answering vitest's own RPC: two launches in
+ * one file is past the minute birpc allows, and the run dies with
+ * `Timeout calling "onTaskUpdate"` while every case in it passes — a red gate
+ * with nothing failing in it. So the child is spawned and awaited, which
+ * leaves the worker's loop free to answer while the browser works.
+ */
+async function measure(html: string, preset: 'ipad' | 'phone'): Promise<Probe> {
   const dir = mkdtempSync(join(tmpdir(), 'cw-comments-in-view-probe-'));
   dirs.push(dir);
   const file = join(dir, 'probe.js');
   writeFileSync(file, '(async () => await window.commentsInViewProbe())()');
   const runId = `civ${process.pid}${owned.length}`;
   owned.push(runId);
-  const r = spawnSync(
-    'bun',
-    [SHOT, '--url', `file://${html}`, '--preset', preset, '--settle', '400', '--eval-file', file],
-    { encoding: 'utf8', timeout: SPAWN_MS, env: { ...process.env, [RUN_ID_ENV]: runId } },
+  const r = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+    (resolve, reject) => {
+      const child = spawn(
+        'bun',
+        [
+          SHOT,
+          '--url',
+          `file://${html}`,
+          '--preset',
+          preset,
+          '--settle',
+          '400',
+          '--eval-file',
+          file,
+        ],
+        { timeout: SPAWN_MS, env: { ...process.env, [RUN_ID_ENV]: runId } },
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', (d: string) => {
+        stdout += d;
+      });
+      child.stderr.setEncoding('utf8').on('data', (d: string) => {
+        stderr += d;
+      });
+      child.on('error', reject);
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+    },
   );
-  expect(r.status, r.stderr).toBe(0);
+  expect(r.code, r.stderr).toBe(0);
   return JSON.parse((JSON.parse(r.stdout) as { result: string }).result) as Probe;
 }
 
 /** One launch per width, shared by every case below: the probe runs all its
- *  arms in one page, and a second launch would pay for all of them again. */
-const probes = new Map<'ipad' | 'phone', Probe>();
-function probeFor(preset: 'ipad' | 'phone'): Probe {
+ *  arms in one page, and a second launch would pay for all of them again. The
+ *  PROMISE is what is kept, so two cases asking at once still launch once. */
+const probes = new Map<'ipad' | 'phone', Promise<Probe>>();
+function probeFor(preset: 'ipad' | 'phone'): Promise<Probe> {
   const hit = probes.get(preset);
   if (hit) return hit;
   const got = measure(buildPage(), preset);
@@ -164,8 +198,8 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
     const width = preset === 'ipad' ? '1180x820' : '430';
     it(
       `keeps every card with its own sentence through a meeting at ${width}`,
-      () => {
-        const { watching, afterScrollBack, held, jumped, untouched } = probeFor(preset);
+      async () => {
+        const { watching, afterScrollBack, held, jumped, untouched } = await probeFor(preset);
 
         // THE CONTROLS. The reader really was down at the transcript, the
         // column really had cards to draw, and not one comment's sentence was
@@ -235,11 +269,150 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
   }
 });
 
+describe.skipIf(CHROME === null)('the page holds still while the meeting writes', () => {
+  for (const preset of ['ipad', 'phone'] as const) {
+    const width = preset === 'ipad' ? '1180x820' : '430';
+    it(
+      `keeps the reader's line on its pixel through a tick at ${width}`,
+      async () => {
+        const { bottomStill, aboveStill, grownStill, rewrapStill, replaceStill } =
+          await probeFor(preset);
+
+        // PARKED AT THE VERY FOOT, with the browser's own scroll anchoring
+        // left switched on. The controls: a real paragraph was on screen, the
+        // pane was at the end of its travel, the document grew, and the notes
+        // landed ABOVE the reader's line — so the layout moved that line and
+        // something had to move the pane by the same amount.
+        expect(bottomStill.eyeOnScreen).toBe(true);
+        expect(bottomStill.atBottom0).toBe(true);
+        expect(bottomStill.anchoringSuppressed).toBe(false);
+        // …and the browser's own hold is off on this pane, which is what
+        // keeps its pick out of the decision (this Chrome supports it).
+        expect(bottomStill.supportsAnchoring).toBe(true);
+        expect(bottomStill.paneOverflowAnchor).toBe('none');
+        expect(bottomStill.scrollHeight1).toBeGreaterThan(bottomStill.scrollHeight0);
+        expect(bottomStill.eyeContentY1).toBeGreaterThan(bottomStill.eyeContentY0 + 10);
+        // AND WHAT THIS ARM IS AND IS NOT. On the live board, parked at the
+        // foot, the browser's own anchoring moved the page by +44px at
+        // 1180x820 and +26px at 430 — it holds whatever node it picked, and
+        // at the foot of a meeting doc that was not the line being read. This
+        // fixture does not reproduce that: run with the hold removed, Chrome
+        // held this line to 0.25px at 1180 and 0.81px at 430, so the reading
+        // below is a no-regression one rather than a repaired fault. What it
+        // does pin is WHOSE hold it is — the pane opts out of the browser's
+        // above, so the page is holding the reader's own line here, and on a
+        // browser with no anchoring of its own (the next block) nothing else
+        // would be.
+        expect(bottomStill.frames).toBeGreaterThan(3);
+        expect(bottomStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(bottomStill.eyeTop1 - bottomStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(bottomStill.scrollTop1).toBeGreaterThan(bottomStill.scrollTop0);
+
+        // AND ON A BROWSER WITH NO ANCHORING OF ITS OWN — Safari before 27,
+        // which is every iPad this product is read on today. The controls: the
+        // suppressing sheet really was in force, and the line really did move
+        // down the document, so nothing but the page could hold it.
+        expect(aboveStill.anchoringSuppressed).toBe(true);
+        expect(aboveStill.eyeOnScreen).toBe(true);
+        expect(aboveStill.eyeContentY1).toBeGreaterThan(aboveStill.eyeContentY0 + 10);
+        // THE FAULT: 67px at 1180 and 105px at 430 of the reader's own text
+        // pushed down the screen (154.75 and 131.19 in this fixture). The
+        // page moves the pane by what the layout moved the line, in the same
+        // frame, so the line itself does not move.
+        expect(aboveStill.frames).toBeGreaterThan(3);
+        expect(aboveStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(aboveStill.eyeTop1 - aboveStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(aboveStill.scrollTop1).toBeGreaterThan(aboveStill.scrollTop0);
+
+        // AND WHEN NOTHING MUTATES AT ALL: a block above the reader grows the
+        // way an image, an embed or a swapped font grows it, with no node
+        // added, removed or retyped. The controls are the same two — the sheet
+        // was in force, and the line really moved down the document — and the
+        // change was invisible to the mutation half of the hold, so only the
+        // resize half can have corrected it.
+        expect(grownStill.change).toBe('grow');
+        expect(grownStill.anchoringSuppressed).toBe(true);
+        expect(grownStill.eyeOnScreen).toBe(true);
+        expect(grownStill.eyeContentY1).toBeGreaterThan(grownStill.eyeContentY0 + 10);
+        expect(grownStill.frames).toBeGreaterThan(3);
+        expect(grownStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(grownStill.eyeTop1 - grownStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(grownStill.scrollTop1).toBeGreaterThan(grownStill.scrollTop0);
+
+        // AND WHEN THE CHANGE IS INSIDE THE BLOCK THE PANE'S TOP CUTS THROUGH:
+        // a long paragraph running up past the fold rewraps above it, so the
+        // element grows downward while its own top stays put. The controls:
+        // such a block really was there, and the reader's line really moved
+        // down the document.
+        expect(rewrapStill.straddledTop).toBe(true);
+        expect(rewrapStill.eyeOnScreen).toBe(true);
+        expect(rewrapStill.eyeContentY1).toBeGreaterThan(rewrapStill.eyeContentY0 + 10);
+        expect(rewrapStill.frames).toBeGreaterThan(3);
+        expect(rewrapStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(rewrapStill.eyeTop1 - rewrapStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(rewrapStill.scrollTop1).toBeGreaterThan(rewrapStill.scrollTop0);
+
+        // AND WHEN THE TICK REBUILDS THE BLOCK THE READER IS ON. Grouping a
+        // topic in place rewrites the blocks it groups, so the element the
+        // reading started on leaves the document in the same tick that lands
+        // notes above it. The controls: it really did leave, and the reader's
+        // line really moved down the document — so a hold that knew only that
+        // one element would have had nothing left to measure against and
+        // would have taken the whole growth.
+        expect(replaceStill.replaced).toBe(true);
+        expect(replaceStill.eyeOnScreen).toBe(true);
+        expect(replaceStill.eyeContentY1).toBeGreaterThan(replaceStill.eyeContentY0 + 10);
+        expect(replaceStill.frames).toBeGreaterThan(3);
+        expect(replaceStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(replaceStill.eyeTop1 - replaceStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(replaceStill.scrollTop1).toBeGreaterThan(replaceStill.scrollTop0);
+      },
+      BROWSER_CASE_MS,
+    );
+  }
+});
+
+describe.skipIf(CHROME === null)('a rewriting tick keeps the cards it does not touch', () => {
+  for (const preset of ['ipad', 'phone'] as const) {
+    const width = preset === 'ipad' ? '1180x820' : '430';
+    it(
+      `keeps every card in the document through a grouping tick at ${width}`,
+      async () => {
+        const { cardsKept } = await probeFor(preset);
+        // THE CONTROLS: the tick really rewrote blocks, and there really were
+        // cards to lose.
+        expect(cardsKept.editsApplied).toBe(2);
+        expect(cardsKept.editsFailed).toBe(0);
+        expect(cardsKept.threads).toBeGreaterThan(0);
+        expect(cardsKept.frames).toBeGreaterThan(10);
+        // …and the control that says what this is NOT about: every comment's
+        // anchor still resolved through the whole tick, before and after, so
+        // not one of them was orphaned. The cards left anyway.
+        expect(cardsKept.resolvedBefore.every(Boolean)).toBe(true);
+        expect(cardsKept.resolvedAfter.every(Boolean)).toBe(true);
+        expect(cardsKept.resolvedEnd.every(Boolean)).toBe(true);
+        // THE FAULT: every card gone — measured on the live board at 430 for
+        // 2.2s, with 276px of flow, because the mapped highlight positions
+        // the decoration plugin had cached went to zero width and nothing
+        // re-read the anchors. Here they never came back at all: no card in
+        // the document in any frame after the tick, and the flow 234px
+        // shorter for good.
+        expect(cardsKept.minCards).toBe(cardsKept.threads);
+        expect(cardsKept.framesMissing).toBe(0);
+        expect(cardsKept.rangeSpans).toBeGreaterThanOrEqual(cardsKept.threads);
+        // The flow never lost height under the reader either.
+        expect(cardsKept.minScrollHeight).toBeGreaterThanOrEqual(cardsKept.scrollHeight0);
+      },
+      BROWSER_CASE_MS,
+    );
+  }
+});
+
 describe.skipIf(CHROME === null)('a margin comment shows only beside text on screen', () => {
   it(
     'at 1180x820 an open card whose text is just off the top paints nothing',
-    () => {
-      const { clamped } = probeFor('ipad');
+    async () => {
+      const { clamped } = await probeFor('ipad');
       // THE CONTROLS. The margin is the surface here, the card's text really
       // is off screen, and the card is taller than the scroll offset — so
       // there is no room for it between the document's top and the fold,
@@ -264,8 +437,8 @@ describe.skipIf(CHROME === null)('a margin comment shows only beside text on scr
 
   it(
     'at 1180x820 notes landing above the comments take the cards with the text on the next frame',
-    () => {
-      const { landed } = probeFor('ipad');
+    async () => {
+      const { landed } = await probeFor('ipad');
       // THE CONTROLS. Every comment's text and card began on screen; after
       // six notes the text had moved but was still on screen; after sixteen
       // more only the title's comment was — and every card still existed.
@@ -287,10 +460,10 @@ describe.skipIf(CHROME === null)('a margin comment shows only beside text on scr
 
   it(
     'at 430 there is no margin, so neither arm paints a balloon',
-    () => {
+    async () => {
       // The cards sit in the flow under their text at this width; the margin
       // rule has nothing to apply to, and the reading says so.
-      const { clamped, landed } = probeFor('phone');
+      const { clamped, landed } = await probeFor('phone');
       expect(clamped.placement).toBe('inline');
       expect(clamped.balloonsPainted).toBe(0);
       expect(landed.placement).toBe('inline');

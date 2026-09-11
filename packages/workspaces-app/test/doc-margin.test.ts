@@ -131,9 +131,16 @@ const suggestionCount = () => document.getElementById('suggestions-count')?.text
 
 /** An editor transaction — the one signal the whole margin loop rides. What it
  *  starts is debounced, so the caller polls for the result rather than waiting
- *  a fixed span. */
-function transaction(editor: EditorHandle): void {
-  editor.editor.emit('transaction', { editor: editor.editor } as never);
+ *  a fixed span.
+ *
+ *  The payload carries `transaction`, as tiptap's own always does: the margin
+ *  reads `docChanged` off it to decide whether the thread anchors have to be
+ *  re-read, and a payload without one is a shape the editor never emits. */
+function transaction(editor: EditorHandle, docChanged = false): void {
+  editor.editor.emit('transaction', {
+    editor: editor.editor,
+    transaction: { docChanged },
+  } as never);
 }
 
 describe('the balloon margin', () => {
@@ -229,5 +236,56 @@ describe('footnote notes in the same column', () => {
       .map((el) => el.style.top);
     expect(tops.length).toBeGreaterThanOrEqual(3);
     expect(new Set(tops).size).toBe(tops.length);
+  });
+});
+
+describe('a remote tick that rewrites the prose', () => {
+  /** Where a word sits in the editor's own coordinates, so the thread can be
+   *  anchored to real text without counting node boundaries by hand. */
+  function rangeOf(editor: EditorHandle, word: string): { from: number; to: number } {
+    let found: { from: number; to: number } | null = null;
+    editor.editor.state.doc.descendants((node, pos) => {
+      if (found || !node.isText) return;
+      const i = (node.text ?? '').indexOf(word);
+      if (i >= 0) found = { from: pos + i, to: pos + i + word.length };
+    });
+    if (!found) throw new Error(`"${word}" is not in the document`);
+    return found;
+  }
+
+  const highlights = () => [...document.querySelectorAll('#editor .thread-range')];
+
+  it('leaves the comment highlight on the words it was left on', async () => {
+    const { ydoc, editor } = mount('# Topic\n\nAlpha bravo gamma. Delta epsilon.\n');
+    openThreadAt(ydoc, editor, rangeOf(editor, 'bravo'), 't-1');
+    transaction(editor, true);
+    await vi.waitFor(() => expect(highlights()).toHaveLength(1));
+
+    // THE TICK, the way a second viewer gets one: applied to another copy of
+    // the doc and synced in as a remote update. The positions the decoration
+    // plugin holds are a cache it maps through every transaction, and a
+    // structural edit can map a range onto itself — a zero-width range draws
+    // no highlight, and the in-flow card is a widget built beside it, so the
+    // card goes too.
+    const remote = new Y.Doc();
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(ydoc));
+    prose.ensureBlockIds(remote);
+    const ids = prose
+      .addressableBlocks(prose.getProseFragment(remote))
+      .map((el) => prose.readBlockId(el))
+      .filter((id): id is string => id != null);
+    const result = prose.applyBlockEdits(
+      remote,
+      [{ op: 'insert_under_heading', headingId: ids[0] as string, markdown: '- Note: a decision' }],
+      { author: 'meeting-notes', suggestionAuthor: suggester },
+    );
+    // The control: the tick really rewrote the prose.
+    expect(result.applied).toBe(1);
+    Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(remote, Y.encodeStateVector(ydoc)));
+
+    // The anchors are the truth and they still resolve — the control that
+    // says this is not an orphaned comment.
+    await vi.waitFor(() => expect(highlights()).toHaveLength(1));
+    expect(highlights()[0]?.textContent).toBe('bravo');
   });
 });
