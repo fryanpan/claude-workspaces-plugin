@@ -699,6 +699,8 @@ export class DocStore {
     this.docs.delete(docId);
     this.lastTouchedAt.delete(docId);
     this.hydratedAt.delete(docId);
+    // A park describes THIS live doc; the next hydrate decides afresh.
+    this.parkedSources.delete(docId);
     // The row written above carries the marker now, so the in-memory copy has
     // done its job; a doc that comes back re-derives it from its own binding.
     this.bindings.forgetFailedWrite(docId);
@@ -801,6 +803,7 @@ export class DocStore {
     this.memoryTicker = null;
     if (this.evictTicker) clearInterval(this.evictTicker);
     this.evictTicker = null;
+    this.disarmParkRetry();
     this.bindings.stopPolling();
     this.fanout.stop();
   }
@@ -1281,6 +1284,7 @@ export class DocStore {
     this.activityMtime.delete(docId);
     this.lastTouchedAt.delete(docId);
     this.hydratedAt.delete(docId);
+    this.parkedSources.delete(docId);
     this.fanout.forgetDoc(doc);
     doc.disposeAuthorship?.();
     doc.disposeAuthorship = null;
@@ -1403,13 +1407,121 @@ export class DocStore {
    * doc's owner has.
    *
    * Recorded wherever a hydrate decides not to touch the file, cleared the
-   * moment a binding exists, and reported by `getDocStatus` / `getDoc`.
+   * moment a binding exists, and reported by `getDocStatus` / `getDoc` — the
+   * `reason` and `at` only (`reportedPark`), because `retryPath` is a host
+   * path and `editedBefore` is bookkeeping.
+   *
+   * `note` is the same account with no path in it, for `getSyncError`: an
+   * edit to a parked doc lands in the `.ydoc` and nowhere else, and the edit
+   * response is where whoever made it is looking (`withSyncError`).
+   *
+   * `retryPath` marks a park that is waiting on the FILE rather than on a
+   * person — see `retryParkedSources`. `editedBefore` is the doc's
+   * `lastContentChangeAt` when it FIRST parked, carried across re-parks, so
+   * the bind that finally lands knows whether anybody wrote in the meantime.
    */
-  private readonly parkedSources = new Map<string, { reason: string; at: number }>();
+  private readonly parkedSources = new Map<
+    string,
+    { reason: string; at: number; note: string; retryPath?: string; editedBefore?: number }
+  >();
 
   /** Note why `docId` is parked, replacing any older reason. */
-  private parkSource(docId: string, reason: string): void {
-    this.parkedSources.set(docId, { reason, at: this.now() });
+  private parkSource(
+    docId: string,
+    reason: string,
+    opts: { note: string; retryPath?: string },
+  ): void {
+    const earlier = this.parkedSources.get(docId);
+    this.parkedSources.set(docId, {
+      reason,
+      at: this.now(),
+      note: opts.note,
+      ...(opts.retryPath ? { retryPath: opts.retryPath } : {}),
+      editedBefore: earlier ? earlier.editedBefore : this.docs.get(docId)?.lastContentChangeAt,
+    });
+    if (opts.retryPath) this.armParkRetry();
+  }
+
+  /** The park as its owner sees it — never the path it will retry. */
+  private reportedPark(docId: string): { reason: string; at: number } | undefined {
+    if (this.bindings.has(docId)) return undefined;
+    const park = this.parkedSources.get(docId);
+    return park ? { reason: park.reason, at: park.at } : undefined;
+  }
+
+  private parkTicker: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Try again, on the poll's cadence, for every parked doc whose file may
+   * answer now.
+   *
+   * A park used to be permanent for a resident doc. `resolveDoc` finds it in
+   * memory and returns it, the deferred bind that parked it has had its one
+   * retry, and nothing else hydrates a doc that is already loaded — so a doc
+   * whose folder hiccupped once stayed unbound, and every edit to it stayed
+   * out of its file, until eviction or a restart. The quarantine's own
+   * backoff was the only thing that ever expired.
+   *
+   * So this waits for exactly that. A park whose path is still quarantined,
+   * or which is waiting on a pool that is still busy, is left alone — the
+   * check is two map lookups and starts no I/O — and the first tick after
+   * the backoff runs the ordinary non-blocking hydrate: the read goes to the
+   * pool, and either binds a moment later or quarantines the path for
+   * another backoff. The exposure is what `slow-fs.ts` already allows: one
+   * call per path per backoff, none of it on the main thread.
+   *
+   * A park with a deferred read in flight belongs to that read. One that is
+   * not resident is dropped: re-hydrating an evicted doc to bind it would pull
+   * it back into memory for nobody.
+   */
+  private retryParkedSources(): void {
+    if (this.stopped) return;
+    for (const [docId, park] of this.parkedSources) {
+      if (!this.docs.has(docId) || this.bindings.has(docId)) {
+        this.parkedSources.delete(docId);
+        continue;
+      }
+      const path = park.retryPath;
+      if (!path || this.deferredBinds.has(docId)) continue;
+      if (boundFiles.quarantined(path) || boundFiles.busy()) continue;
+      this.rehydrateUntouched(docId);
+    }
+    if (![...this.parkedSources.values()].some((p) => p.retryPath)) this.disarmParkRetry();
+  }
+
+  /**
+   * `hydrateDoc` on the store's own behalf — a parked doc's retry, or its
+   * deferred read landing — which is nobody reaching for the doc. The hydrate
+   * goes through `getOrCreate`, which stamps `lastTouchedAt`, so a doc whose
+   * file never comes back would be re-stamped on every retry and never go
+   * idle, although a park is deliberately no eviction hold.
+   */
+  private rehydrateUntouched(docId: string, opts: { liveWins?: boolean } = {}): boolean {
+    const touched = this.lastTouchedAt.get(docId);
+    try {
+      return this.hydrateDoc(docId, opts);
+    } finally {
+      if (touched === undefined) this.lastTouchedAt.delete(docId);
+      else this.lastTouchedAt.set(docId, touched);
+    }
+  }
+
+  private armParkRetry(): void {
+    if (this.parkTicker || this.stopped) return;
+    const timer = setInterval(() => {
+      try {
+        this.retryParkedSources();
+      } catch (err) {
+        console.error('[doc-store] parked-doc retry failed:', err);
+      }
+    }, DOC_STORE_TIMINGS.filePollMs);
+    timer.unref?.();
+    this.parkTicker = timer;
+  }
+
+  private disarmParkRetry(): void {
+    if (this.parkTicker) clearInterval(this.parkTicker);
+    this.parkTicker = null;
   }
 
   /**
@@ -1495,11 +1607,12 @@ export class DocStore {
         console.warn(
           `[doc-store] ${docId}: doc origin repo unplaced at hydrate (${placement.reason}); writes parked`,
         );
-        this.parkSource(
-          docId,
+        // No `retryPath`: this park waits on a checkout, not a file, and
+        // `maybeRebindHome` already re-tries it on the doc's next edit.
+        const reason =
           `the repo this doc is pinned to is not on this machine (${placement.reason}); ` +
-            'content is served from the .ydoc and writes are parked until it is placed',
-        );
+          'content is served from the .ydoc and writes are parked until it is placed';
+        this.parkSource(docId, reason, { note: reason });
         return false;
       }
       const homePre = this.prereadFor(docId, placement.absPath, blocking);
@@ -1510,14 +1623,25 @@ export class DocStore {
       });
       return this.bindings.has(docId);
     }
-    if (!src) return false;
+    if (!src) {
+      // Nothing to bind, so nothing parked — and nothing for a retry to read.
+      this.parkedSources.delete(docId);
+      return false;
+    }
     const preread = this.prereadFor(docId, src, blocking);
     if (preread === 'unavailable') return false;
     // With bytes in hand, existence is something we KNOW rather than something
     // to ask the filesystem — `existsSync` on a path whose provider has
     // stopped answering parks the loop exactly as a read does. The `existsSync`
     // survives only on the boot branch, where `preread` is undefined.
-    if (preread ? !preread.exists : !existsSync(src)) return false;
+    if (preread ? !preread.exists : !existsSync(src)) {
+      // Not a park: the file answered, and it is not there. A doc bound to a
+      // missing file comes back unbound at boot with no reason recorded, and
+      // one reached through a deferred read must end the same way — or the
+      // retry would keep reading a file that answered "gone".
+      this.parkedSources.delete(docId);
+      return false;
+    }
     const attachOpts: AttachOpts = { liveWins, ...(preread ? { preread } : {}) };
     if (contentKind(doc.meta.type) === 'prose') {
       return this.attachFile(docId, src, attachOpts).ok;
@@ -1539,7 +1663,8 @@ export class DocStore {
       // A mockup's binding is watch-only, so hydration re-arms it exactly as
       // it re-arms a code doc's: a mock whose source is still being edited
       // must keep updating the pages people have open across a restart.
-      return this.attachMockupFile(docId, src).ok;
+      // With the pool's stat, so arming the poll takes none of its own here.
+      return this.bindings.attachMockupFile(docId, src, preread ? { preread } : {}).ok;
     }
     return false;
   }
@@ -1584,6 +1709,12 @@ export class DocStore {
         docId,
         `the bound file stopped answering and is quarantined (${redactBoundPath(path)}); ` +
           'content is served from the .ydoc and writes are parked until it answers again',
+        {
+          note:
+            'the bound file stopped answering, so this doc is parked: edits are kept in the ' +
+            '.ydoc and not written to the file. It re-binds on its own once the file answers.',
+          retryPath: path,
+        },
       );
       return 'unavailable';
     }
@@ -1595,6 +1726,13 @@ export class DocStore {
         docId,
         `bound-file reads are backed up behind another unresponsive path (${redactBoundPath(path)}); ` +
           'content is served from the .ydoc and writes are parked until they drain',
+        {
+          note:
+            'bound-file reads are backed up behind another unresponsive file, so this doc is ' +
+            'parked: edits are kept in the .ydoc and not written to the file. It re-binds on ' +
+            'its own once the reads drain.',
+          retryPath: path,
+        },
       );
       return 'unavailable';
     }
@@ -1627,10 +1765,22 @@ export class DocStore {
     // anyway, because from the outside this is indistinguishable from the
     // quarantine above until it resolves, and a status call that arrived in
     // the gap should say "reading" rather than imply the doc is unbacked.
+    //
+    // It carries `retryPath` too, for the read that comes back with neither
+    // bytes nor a quarantine — an un-downloaded cloud file fails at once with
+    // EDEADLK and earns no backoff (`isDataless`). Its re-hydrate lands while
+    // this read still holds `deferredBinds`, so without a retry the doc would
+    // sit on "being read" for good.
     this.parkSource(
       docId,
       `the bound file is being read off the main thread (${redactBoundPath(path)}); ` +
         'content is served from the .ydoc and writes are parked until the read lands',
+      {
+        note:
+          'the bound file is still being read, so edits are kept in the .ydoc for now and ' +
+          'written to the file once the read lands.',
+        retryPath: path,
+      },
     );
     this.bindAfterRead(docId, path);
     return 'unavailable';
@@ -1680,7 +1830,12 @@ export class DocStore {
     // a `file-watch` apply or a meta write must NOT count, or a restart that
     // picks up an edit made while the server was down would reassert the
     // stale doc over it.
-    const editedBefore = this.docs.get(docId)?.lastContentChangeAt;
+    //
+    // The gap starts when the doc first PARKED, not when this read started: a
+    // doc re-tried after a quarantine was just as editable for the whole
+    // backoff, and an edit made then is exactly as unknown to the file.
+    const park = this.parkedSources.get(docId);
+    const editedBefore = park ? park.editedBefore : this.docs.get(docId)?.lastContentChangeAt;
     void boundFiles
       .read(path)
       .then(() => {
@@ -1693,7 +1848,7 @@ export class DocStore {
         if (!this.docs.has(docId) || this.bindings.has(docId)) return;
         const editedAfter = this.docs.get(docId)?.lastContentChangeAt;
         const editedInGap = editedAfter !== undefined && editedAfter !== editedBefore;
-        this.hydrateDoc(docId, editedInGap ? { liveWins: true } : {});
+        this.rehydrateUntouched(docId, editedInGap ? { liveWins: true } : {});
       })
       .catch((err) => {
         console.error(`[doc-store] ${docId}: deferred bind failed:`, err);
@@ -2517,7 +2672,7 @@ export class DocStore {
     if (contentKind(doc.meta.type) === 'flat') {
       const text = doc.ydoc.getText('content').toString();
       const syncError = this.bindings.getSyncError(doc.docId);
-      const parked = this.bindings.has(doc.docId) ? undefined : this.parkedSources.get(doc.docId);
+      const parked = this.reportedPark(doc.docId);
       return {
         plainText: text,
         blocks: [{ type: 'code', text, startOffset: 0, endOffset: text.length }],
@@ -2583,9 +2738,7 @@ export class DocStore {
     });
 
     const syncError = this.bindings.getSyncError(docId);
-    const sourceParked = this.bindings.has(doc.docId)
-      ? undefined
-      : this.parkedSources.get(doc.docId);
+    const sourceParked = this.reportedPark(doc.docId);
     return {
       plainText: walk.plainText,
       blocks,
@@ -2626,6 +2779,7 @@ export class DocStore {
     const doc = this.resolveDoc(docId);
     if (!doc) return null;
     const binding = this.bindings.describe(doc.docId);
+    const parked = binding ? undefined : this.reportedPark(doc.docId);
     const meta = this.withActivity(doc.meta);
 
     let textLength: number;
@@ -2664,9 +2818,7 @@ export class DocStore {
       // Only while genuinely unbound. A doc that parked and then bound on the
       // deferred read clears its reason in `hydrateDoc`, but a doc bound by
       // some other route would otherwise carry a stale one to its owner.
-      ...(!binding && this.parkedSources.has(doc.docId)
-        ? { sourceParked: this.parkedSources.get(doc.docId) }
-        : {}),
+      ...(parked ? { sourceParked: parked } : {}),
       ...(meta.lastActivityAt !== undefined ? { lastActivityAt: meta.lastActivityAt } : {}),
       textLength,
       blockCount,
@@ -3037,9 +3189,26 @@ export class DocStore {
     return this.bindings.reconcileNow(docId);
   }
 
-  /** The doc's pending sync trouble, if any — conflicts, parse failures. */
+  /**
+   * The doc's pending sync trouble, if any — conflicts, parse failures, and a
+   * park.
+   *
+   * A parked doc has no binding to carry a `syncError`, which made an edit to
+   * one indistinguishable from an edit that reached its file: the response
+   * said ok, and the only account anywhere was the hydrate's console line. So
+   * the park answers here with its `note`, which names no path — this is what
+   * the edit routes hand back to whoever made the edit (`withSyncError`).
+   * `getDocStatus` / `getDoc` keep reporting it as `sourceParked`, and
+   * eviction still reads the binding's alone: a park is not a reason to hold
+   * a doc in memory.
+   */
   getSyncError(docId: string): { message: string; at: number } | undefined {
-    return this.bindings.getSyncError(docId);
+    const target = this.aliases.get(docId) ?? docId;
+    const bound = this.bindings.getSyncError(target);
+    if (bound) return bound;
+    if (this.bindings.has(target)) return undefined;
+    const park = this.parkedSources.get(target);
+    return park ? { message: park.note, at: park.at } : undefined;
   }
 
   /**

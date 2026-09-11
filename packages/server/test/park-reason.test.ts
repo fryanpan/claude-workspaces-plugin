@@ -111,12 +111,10 @@ describe('a doc parked because its file would not answer', () => {
     // stale one is worse than none, because it says a healthy doc is not
     // being written.
     //
-    // A resident-but-unbound doc does not re-hydrate on its own: `resolveRoom`
-    // finds it in memory and returns it, and the deferred bind that parked it
-    // has already had its one retry. The recovery is an explicit re-bind,
-    // which is what an owner does (`attach_markdown` on the same path), so
-    // that is what this drives. `boundFiles.reset()` stands in for the
-    // quarantine backoff expiring.
+    // A parked doc re-binds on its own once the quarantine expires
+    // (`park-retry.test.ts`). This drives the other recovery, an explicit
+    // re-bind — what an owner does with `attach_markdown` on the same path —
+    // with `boundFiles.reset()` standing in for the backoff expiring.
     unlinkSync(boundPath);
     writeFileSync(boundPath, '# Design\n\nBack from the dead.\n');
     boundFiles.reset();

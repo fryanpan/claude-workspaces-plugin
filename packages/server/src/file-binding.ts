@@ -855,6 +855,7 @@ export class FileBindings {
   attachMockupFile(
     docId: string,
     filePath: string,
+    opts: { preread?: PrereadFile } = {},
   ): { ok: boolean; error?: 'not-found' | 'path-empty'; resolvedPath?: string } {
     if (!filePath || filePath.trim() === '') return { ok: false, error: 'path-empty' };
     const doc = this.p.doc(docId);
@@ -872,10 +873,11 @@ export class FileBindings {
     if (existing) existing.pollArmed = false;
     const binding: FileBinding = { path: abs, mockup: true };
     this.bindings.set(docId, binding);
-    // No preread: this door is reached from a serve and from a bind, both of
-    // which have just read the file successfully, so the one stat that arming
-    // costs is on a path already proved to answer.
-    this.armFileWatcher(doc, binding);
+    // A serve and a bind reach this door with no preread, having just read
+    // the file successfully, so the one stat that arming costs is on a path
+    // already proved to answer. A HYDRATE has proved nothing on this thread:
+    // it brings the pool's stat, and arming must not take a second one here.
+    this.armFileWatcher(doc, binding, opts.preread);
     return { ok: true, resolvedPath: abs };
   }
 
