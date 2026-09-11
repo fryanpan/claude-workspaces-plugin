@@ -12,6 +12,7 @@ import {
   serverSentryTelemetry,
   withRouteSpan,
 } from '../src/sentry.ts';
+import { SUPERVISOR_PROBE_HEADER, SUPERVISOR_PROBE_PATH } from '../src/supervisor-health.ts';
 
 /**
  * Server-side Sentry: today's ask is "observe it, don't trust the `if`
@@ -458,6 +459,34 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
     expect(joined).toContain(release);
     expect(joined).toContain('/workspaces/:id/tasks/:id/transition');
     expect(joined).not.toContain(taskId);
+  });
+
+  it("the supervisor's health probe opens no transaction; the same request without its marker does", async () => {
+    // Every 30s at full sample rate is 2,880 transactions a day of one route
+    // answering. The unmarked request is the control: without it, zero could
+    // mean the capture server stopped hearing anything.
+    const transactions = () =>
+      (
+        capture
+          .hits()
+          .map((h) => h.text)
+          .join('\n')
+          .match(/\{"type":"transaction"\}/g) ?? []
+      ).length;
+    const probe = (marked: boolean) => {
+      const headers = marked ? { [SUPERVISOR_PROBE_HEADER]: '1' } : undefined;
+      const req = new Request(`http://127.0.0.1${SUPERVISOR_PROBE_PATH}`, { headers });
+      return withRouteSpan(req, SUPERVISOR_PROBE_PATH, async () => new Response('{}'));
+    };
+
+    capture.hits().length = 0;
+    expect((await probe(true)).status).toBe(200);
+    await flushServerSentry(5000);
+    expect(transactions()).toBe(0);
+
+    expect((await probe(false)).status).toBe(200);
+    await flushServerSentry(5000);
+    expect(transactions()).toBe(1);
   });
 
   it("the SDK's own BunServer auto-instrumentation is disabled — a real Bun.serve request produces no second, unredacted transaction", async () => {
