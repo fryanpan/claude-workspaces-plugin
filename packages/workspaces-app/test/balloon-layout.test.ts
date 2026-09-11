@@ -288,6 +288,23 @@ describe('placeCards', () => {
     expect(placeCards([at(120), at(300)], 8, { floorY, minY: 0, viewport })).toEqual([4060, 4168]);
   });
 
+  it('near the top of the document, a card just scrolled off stays beside its own text', () => {
+    // The caller clamps every position to >= 0, so a card asking to sit above
+    // the document top renders AT the top. That is the rule still holding
+    // rather than escaping: this branch can only move a card up, towards its
+    // own anchor, never down into the band. What the reader glimpses near the
+    // top of a document is the card whose sentence is a few pixels off screen
+    // — never one from a thousand lines away, which is the whole bug.
+    const shallow = { top: 50, bottom: 850 };
+    const [y] = placeCards([{ anchorY: 0, anchorBottom: 20, height: 100 }], 8, {
+      floorY: 50,
+      minY: 0,
+      visible: shallow,
+    });
+    expect(y).toBeLessThanOrEqual(0);
+    expect(Math.max(0, y as number)).toBeLessThanOrEqual(20);
+  });
+
   it('keeps the returned array index-aligned with the input', () => {
     // Mixed on- and off-screen, given out of anchor order.
     const ys = place([at(4300), at(120), at(4100)]);
