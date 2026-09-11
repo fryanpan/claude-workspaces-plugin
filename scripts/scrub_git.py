@@ -168,6 +168,41 @@ def published_author_names(remote_glob: Optional[str] = None) -> set:
     }
 
 
+def remote_owner(url: str) -> str:
+    """The account segment of a hosted remote URL, or "" when it has none.
+
+    `git@host:owner/repo.git` and `https://host/owner/repo` both give
+    `owner`. A local path or a `file://` URL names a directory, not an
+    account, so it gives nothing rather than exempting a folder name.
+    """
+    url = url.strip()
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        if scheme.lower() == "file" or "/" not in rest:
+            return ""
+        path = rest.split("/", 1)[1]
+    elif re.match(r"^[^/:]+:", url) and not re.match(r"^[A-Za-z]:", url):
+        # git's scp-like form, `[user@]host:path` — a colon before any slash.
+        # A one-letter "host" is a Windows drive, which git reads as a path.
+        path = url.split(":", 1)[1]
+    else:
+        return ""
+    parts = [p for p in path.split("/") if p]
+    return parts[-2] if len(parts) >= 2 else ""
+
+
+def email_account(identity: str) -> str:
+    """The account an identity's email names, casefolded.
+
+    `Ada <ada@example.invalid>` gives `ada`, and GitHub's noreply form
+    `Ada <12345+ada@users.noreply.github.com>` gives `ada` too.
+    """
+    if "<" not in identity:
+        return ""
+    local = identity.split("<", 1)[1].split("@", 1)[0].strip()
+    return re.sub(r"^\d+\+", "", local).casefold()
+
+
 def maintainer_names(remote_glob: Optional[str] = None) -> set:
     """Names the Haiku layer must not read as a leak in THIS repository.
 
@@ -189,13 +224,36 @@ def maintainer_names(remote_glob: Optional[str] = None) -> set:
       `user.name` to a colleague's name buys no exemption — they would have
       to be a published author here already.
 
+    Once the full name qualifies, the exemption covers the person pushing in
+    the forms they are actually written: the full name, its first word, and
+    their account handle. A decision record quotes a maintainer by first name
+    far more often than by full name, and the full name alone left the
+    scanner blocking those: a window audit counted 21 flagged commits whose
+    only names were the maintainer's. Neither short form is checked on its
+    own — both hang off the same qualifying full name, so a checkout that
+    earns nothing still earns nothing.
+
+    The handle is the account that owns `origin`, and only when a commit
+    already published under the qualifying name carries an email naming that
+    same account. The owner of `origin` is often an organisation or somebody
+    else's repository, and a remote URL alone says nothing about who is
+    pushing to it; the published email is what ties the account to the
+    person.
+
     Empty set means no exemption and the scanner behaves exactly as before,
     which is what CI and any fresh clone get.
     """
     local = _git(["git", "config", "user.name"]).strip()
     if not local:
         return set()
-    return {local} & published_author_names(remote_glob)
+    theirs = [i for i in public_commit_identities(remote_glob) if _identity_name(i) == local]
+    if not theirs:
+        return set()
+    names = {local, local.split()[0]}
+    handle = remote_owner(_git(["git", "remote", "get-url", "origin"]))
+    if handle and any(email_account(i) == handle.casefold() for i in theirs):
+        names.add(handle)
+    return names
 
 
 def redact_public_identities(patch: str, identities: Iterable[str]) -> str:
