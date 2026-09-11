@@ -28,6 +28,7 @@
     "check:widget-size": "bun run scripts/check-widget-size.ts",
     "check:plugin-version": "bun run scripts/check-plugin-version.ts",
     "check:scrub-gate": "python3 scripts/scrub-selftest.py",
+    "scrub:recall": "python3 scripts/scrub-recall.py",
     "check:hooks": "bash scripts/check-hooks.sh",
     "check:architecture": "bun run scripts/architecture-freshness.ts",
     "check:imports": "bun run scripts/import-direction.ts",

@@ -780,6 +780,41 @@ def check_haiku_unavailable() -> None:
         expect(f"haiku classify: {label}", 0 if got == want else 1, 0,
                f"HTTP {status} sorted as {got!r}, wanted {want!r}")
 
+    # One added line longer than a piece — minified JSON, a data URL — is cut
+    # into slices rather than sent whole, and a token straddling a cut is
+    # still read whole by one slice.
+    head = "diff --git a/x.json b/x.json\n--- a/x.json\n+++ b/x.json\n@@ -0,0 +1 @@\n"
+    for at, label in ((100_000, "late in the line"), (14_995, "across a cut")):
+        body = "a" * at + "NEEDLE_7Q" + "b" * (120_000 - at)
+        pieces = haiku.split_patch(head + "+" + body, 30_000)
+        worst = max(len(p) for p in pieces)
+        expect(f"haiku pieces: a line longer than a piece stays under the cap ({label})",
+               0 if worst <= 30_000 and len(pieces) > 1 else 1, 0,
+               f"{len(pieces)} piece(s), largest {worst}")
+        expect(f"haiku pieces: ...and the token is whole in one of them ({label})",
+               0 if any("NEEDLE_7Q" in p for p in pieces) else 1, 0)
+
+    # Pieces are combined leak-first. "Unavailable" goes to a policy that may
+    # be set to warn, so a leak one piece FOUND must not be turned into a
+    # banner because a different piece of the same push timed out.
+    real_split, real_scan = haiku.split_patch, haiku._scan_piece
+    down = haiku.Unavailable("unreachable", "stub: this piece timed out")
+    try:
+        haiku.split_patch = lambda patch, limit=None: ["found", "down"]
+        haiku._scan_piece = lambda piece: 1 if piece == "found" else down
+        expect("haiku pieces: a leak one piece found outranks a piece that could not run",
+               haiku.call_haiku("x"), 1)
+        haiku.split_patch = lambda patch, limit=None: ["down", "found"]
+        expect("haiku pieces: ...in either order",
+               haiku.call_haiku("x"), 1)
+        haiku.split_patch = lambda patch, limit=None: ["clean", "down"]
+        haiku._scan_piece = lambda piece: 0 if piece == "clean" else down
+        got = haiku.call_haiku("x")
+        expect("haiku pieces: a clean piece beside one that could not run is unavailable, not clean",
+               0 if isinstance(got, haiku.Unavailable) else 1, 0, f"got {got!r}")
+    finally:
+        haiku.split_patch, haiku._scan_piece = real_split, real_scan
+
     # The dated reset is the one thing a person can act on in the cap case, so
     # it has to survive into what they are shown.
     detail = haiku.classify_http_error(400, HAIKU_EXHAUSTED_BODY).detail
