@@ -88,6 +88,14 @@ export interface BoardBootEnv {
   localStorage: BootStorage;
   window: BootWindow;
   connect: (url: string) => FeedbackClient;
+  /**
+   * Loads the comment widget into THIS bundle, for a shell that rendered a
+   * `<claude-feedback-widget>`. It used to arrive as its own `/widget.esm.js`,
+   * which carries a second copy of Yjs, so every board load warned "Yjs was
+   * already imported". Loaded here instead it shares the board's chunk of Yjs.
+   * A test that renders no widget leaves it out.
+   */
+  loadWidget?: () => Promise<unknown>;
 }
 
 // The deadline every boot claim is decided by now lives with the claims
@@ -108,6 +116,10 @@ export { WALK_HANDOFF_DEADLINE_MS } from './board-deep-links.ts';
  */
 export async function bootBoard(env: BoardBootEnv): Promise<void> {
   const { document, location, history, localStorage, window, connect } = env;
+  // First, before any await: the widget arrived independently of the board
+  // when it was a script tag, so a board boot that fails later must not take
+  // the feedback launcher with it.
+  if (document.querySelector('claude-feedback-widget')) void env.loadWidget?.();
 
   function workspaceIdFromPath(): string {
     const m = location.pathname.match(/\/workspaces\/([^/?#]+)/);

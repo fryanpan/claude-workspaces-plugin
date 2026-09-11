@@ -223,9 +223,14 @@ to an HTML file. Once bound, the file is served here without any symlink dance.<
  * Observed in a browser on 2026-08-17.
  *
  * Declarative `<claude-feedback-widget>` rather than `FeedbackWidget.init` on
- * purpose: a module script is deferred, so a plain inline script calling
- * `init` would run before the module that defines it. The element upgrades on
- * parse and reads its own attributes.
+ * purpose: the element upgrades whenever its definition arrives and reads its
+ * own attributes.
+ *
+ * No `<script src="/widget.esm.js">` beside it. That bundle is for OTHER
+ * people's pages and carries its own copy of Yjs; loaded next to `board.js`
+ * it made two copies on one page, and every board load logged "Yjs was
+ * already imported". `bootBoard` sees this element and imports the widget
+ * into the board's own bundle, so both share one Yjs.
  *
  * `workspace-id` is THIS board, not a home for the feedback doc: the doc
  * belongs to every board (see `workspacesOfMember`), so the address it is
@@ -279,7 +284,6 @@ export function renderBoardShell(
   // CRDT they sync. Keeping the widget off their page keeps them off the doc.
   const widget = opts.feedback
     ? `
-    <script type="module" src="/widget.esm.js"></script>
     <claude-feedback-widget workspace-id="${safeId}" doc-id="${escape(BOARD_FEEDBACK_DOC_ID)}" view="${safeName}" identity-scope="host"></claude-feedback-widget>`
     : '';
   return `<!doctype html>
