@@ -51,7 +51,8 @@ describe('injectWidget', () => {
     // An attribute on an unrelated script names the widget and mounts nothing.
     const scriptAttr =
       '<html><body><script data-component="claude-feedback-widget">window.x = 1;</script></body></html>';
-    for (const page of [copiedChrome, commented, prose, scriptAttr]) {
+    const lazySrc = '<html><body><script data-src="/widget.iife.js"></script></body></html>';
+    for (const page of [copiedChrome, commented, prose, scriptAttr, lazySrc]) {
       expect(embeds(injectWidget(page, 'doc-1', 'w-1'))).toBe(1);
     }
   });
@@ -63,6 +64,44 @@ describe('injectWidget', () => {
     const byInit = `<html><head>${style}</head><body><script>FeedbackWidget.init({ docId: "mine" })</script></body></html>`;
     const byCreate = `<html><body>${style}<script>document.body.append(document.createElement("claude-feedback-widget"))</script></body></html>`;
     for (const page of [byElement, byScriptTag, byInit, byCreate]) {
+      expect(injectWidget(page, 'doc-1', 'w-1')).toBe(page);
+    }
+  });
+
+  it('adds the widget to a mock whose only mention is in a script block the browser never runs', () => {
+    // Measured on a served mock: board.css carried as JSON named the widget,
+    // and the page went out with none.
+    const json =
+      '<html><head><script type="application/json" id="chrome">{"css":"body:has(claude-feedback-widget) .dock{bottom:64px}"}</script></head><body><h1>Riverbend</h1></body></html>';
+    const template =
+      '<html><body><script type="text/x-template" id="launcher"><div>FeedbackWidget.init({ docId: "t" })</div></script><h1>Harborlight</h1></body></html>';
+    // A data block's `src` is never fetched, and the type is read without case or parameters.
+    const importMap =
+      '<html><head><script type="importmap">{"imports":{"widget":"/widget.iife.js"}}</script></head><body></body></html>';
+    const dataSrc =
+      '<html><body><script type="Application/JSON; charset=utf-8" src="/widget.iife.js"></script></body></html>';
+    for (const page of [json, template, importMap, dataSrc]) {
+      expect(embeds(injectWidget(page, 'doc-1', 'w-1'))).toBe(1);
+    }
+  });
+
+  it('still leaves alone a page that mounts the widget from a script the browser runs', () => {
+    const init = 'FeedbackWidget.init({ docId: "mine" })';
+    const pages = [
+      `<script type="">${init}</script>`,
+      `<script type="text/javascript">${init}</script>`,
+      `<script type='TEXT/JavaScript; charset=utf-8'>${init}</script>`,
+      `<script type="application/ecmascript">${init}</script>`,
+      `<script type=module>${init}</script>`,
+      '<script type="module" src="/widget.iife.js"></script>',
+      // The browser decodes the reference and runs it; undecoded, it must not read as data.
+      `<script type="text&#x2f;javascript">${init}</script>`,
+      // A data-* attribute that looks like a type does not make the script data.
+      `<script data-type="application/json">${init}</script>`,
+      // A data block beside a real embed does not hide the real one.
+      `<script type="application/json">{"w":"claude-feedback-widget"}</script><script>${init}</script>`,
+    ].map((scripts) => `<html><body>${scripts}</body></html>`);
+    for (const page of pages) {
       expect(injectWidget(page, 'doc-1', 'w-1')).toBe(page);
     }
   });
