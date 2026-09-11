@@ -10,7 +10,7 @@ import type { NoteCard } from '../recent-note-cards.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
 import { MORPH_MS, isFoldingTap, sizeThreadSlots } from '../thread-morph.ts';
 import { createBalloonCards } from './balloon-cards.ts';
-import { foldWithStrips, layoutBalloons } from './balloon-layout.ts';
+import { foldWithStrips, placeCards } from './balloon-layout.ts';
 import {
   type DeletionGroup,
   type RedlineDeletion,
@@ -501,25 +501,38 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     const marginOffsetY = contentY(marginRect.top, editorRect);
     const doc = view.state.doc;
 
+    // BOTH edges of the marked text, not just its top: whether a card belongs
+    // in the visible column is a question about the whole of its sentence, and
+    // a highlight straddling the top edge is still on screen.
     const items = rendered.map((b) => {
       let anchorY = 0;
+      let anchorBottom = 0;
+      const from = (r: { top: number; bottom: number }): void => {
+        anchorY = contentY(r.top, editorRect);
+        anchorBottom = contentY(r.bottom, editorRect);
+      };
       try {
         if (b.kind === 'del') {
           const pos = Math.max(0, Math.min(b.group.pos, doc.content.size));
-          anchorY = contentY(view.coordsAtPos(pos).top, editorRect);
+          from(view.coordsAtPos(pos));
         } else if (b.kind === 'comment') {
           const span = threadSpan(b.thread.id);
-          if (span) anchorY = contentY(span.getBoundingClientRect().top, editorRect);
+          if (span) from(span.getBoundingClientRect());
         } else if (b.kind === 'note') {
-          anchorY = contentY(b.anchor.getBoundingClientRect().top, editorRect);
+          from(b.anchor.getBoundingClientRect());
         } else {
           const span = suggestionSpan(b.summary.sid);
-          if (span) anchorY = contentY(span.getBoundingClientRect().top, editorRect);
+          if (span) from(span.getBoundingClientRect());
         }
       } catch {
         // happy-dom / positions without layout info — stack from the top.
       }
-      return { anchorY: Math.max(0, anchorY), height: b.el.offsetHeight };
+      const top = Math.max(0, anchorY);
+      return {
+        anchorY: top,
+        anchorBottom: Math.max(top, anchorBottom),
+        height: b.el.offsetHeight,
+      };
     });
     // Floor stacking positions below the floating toggle, but keep the TRUE
     // anchor for the leader lines — the line should still point at the
@@ -549,11 +562,22 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
           })
         : null;
     const floorY = reserved?.floorY ?? minY;
-    const ys = layoutBalloons(
-      items.map((it) => ({ anchorY: Math.max(floorY, it.anchorY), height: it.height })),
-      GAP,
-      reserved?.viewport,
-    );
+    // The fold is about the cards the reader can SEE. A card whose sentence is
+    // off screen keeps its own anchor and takes no part in the visible stack —
+    // see `placeCards`, which is where that rule and its measurement live.
+    const ys = placeCards(items, GAP, {
+      floorY,
+      minY,
+      ...(reserved ? { viewport: reserved.viewport } : {}),
+      ...(editorEl.clientHeight > 0
+        ? {
+            visible: {
+              top: editorEl.scrollTop,
+              bottom: editorEl.scrollTop + editorEl.clientHeight,
+            },
+          }
+        : {}),
+    });
 
     // Size the overlay to the scrolled content so lines aren't clipped.
     overlay.setAttribute('width', String(Math.max(0, editorEl.scrollWidth)));
