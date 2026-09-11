@@ -326,6 +326,14 @@ def report(cases: List[Case], results: List[Run], runs: int) -> int:
         rs = answered(rs)
         return sum(1 for r in rs if r.verdict == "blocked") / len(rs)
 
+    # A case none of whose runs was answered was not measured, and leaving it
+    # out of the rates must not leave it out of the verdict: an expired key
+    # would otherwise make every case vanish and the sweep exit 0.
+    unmeasured = sorted(c for c, rs in by_case.items() if not answered(rs))
+    if unmeasured:
+        print(f"\nNOT MEASURED — no run answered: {', '.join(unmeasured)}")
+        return 2
+
     worst_pos = min((rate(rs) for rs in by_case.values()
                      if answered(rs) and rs[0].label == "positive"), default=1.0)
     worst_neg = max((rate(rs) for rs in by_case.values()
