@@ -51,7 +51,8 @@ describe('buildLibrary', () => {
           meta('d-plan', { title: 'Saltmarsh plan', huddle: true, huddleKind: 'plan' }),
           meta('d-note', { title: 'Volunteer handbook', lastActivityAt: 5_000 }),
         ],
-        lastMeeting: (id) => (id === 'd-sync' ? { startedAt: 9_000, endedAt: null } : undefined),
+        lastMeeting: (id) =>
+          id === 'd-sync' ? { startedAt: 9_000, endedAt: 9_000 + 47 * 60_000 } : undefined,
         fileMtime: (id) => (id === 'd-note' ? 5_000 : 2_000),
       }),
     );
@@ -61,6 +62,28 @@ describe('buildLibrary', () => {
     ]);
     expect(lib.files.map((r) => r.name)).toEqual(['Volunteer handbook', 'Saltmarsh plan']);
     expect(lib.meetings[0]?.href).toBe('/workspaces/w-test/docs/d-sync');
+  });
+
+  /**
+   * Finding 3 of the Library fresh-eyes pass. Every meeting is titled from
+   * the clock at the minute it opened, so two in one minute read the same
+   * — the row has to carry what separates them.
+   */
+  it('gives a meeting row its length, so two of one title are told apart', () => {
+    const both = [
+      meta('d-am', { title: 'Meeting notes 2026-09-11 16:11' }),
+      meta('d-pm', { title: 'Meeting notes 2026-09-11 16:11' }),
+    ];
+    const held: Record<string, { startedAt: number; endedAt: number | null }> = {
+      'd-am': { startedAt: 9_000, endedAt: 9_000 + 47 * 60_000 },
+      // Still running: no end, so no length to claim.
+      'd-pm': { startedAt: 90_000, endedAt: null },
+    };
+    const lib = buildLibrary(sources({ docs: both, lastMeeting: (id) => held[id] }));
+    expect(lib.meetings.map((r) => [r.at, r.durationMs])).toEqual([
+      [90_000, undefined],
+      [9_000, 47 * 60_000],
+    ]);
   });
 
   /**

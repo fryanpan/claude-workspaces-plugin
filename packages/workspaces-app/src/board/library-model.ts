@@ -16,6 +16,8 @@ export interface LibraryRow {
    * different clock for that one row.
    */
   at?: number;
+  /** How long the meeting ran, for one that has ended. Meetings only. */
+  durationMs?: number;
   /** Opens as a plain link. */
   href?: string;
   /** A project file with no doc yet — opened by `POST …/library/open`. */
@@ -64,6 +66,53 @@ export const LIBRARY_NO_TIME = '—';
 /** The row's age, or the em dash when there is no clock reading for it. */
 export function libraryWhenColumn(row: LibraryRow, now: number): string {
   return row.at === undefined ? LIBRARY_NO_TIME : libraryAgo(row.at, now);
+}
+
+/** How the reader's own locale writes a moment. Overridable for tests. */
+export interface LibraryFormat {
+  locale?: string;
+  timeZone?: string;
+}
+
+/**
+ * "Sep 11, 22:43" — the calendar moment, not how long ago.
+ *
+ * The reader's own locale and zone by default; a test passes both so the
+ * string does not depend on where the runner sits.
+ */
+export function libraryMoment(at: number, fmt: LibraryFormat = {}): string {
+  return new Intl.DateTimeFormat(fmt.locale, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    ...(fmt.timeZone === undefined ? {} : { timeZone: fmt.timeZone }),
+  }).format(new Date(at));
+}
+
+/** "5 min", "47 min", "1 hr 12 min" — how long a recording ran. */
+export function libraryLength(durationMs: number): string {
+  const min = Math.max(1, Math.round(durationMs / 60_000));
+  if (min < 60) return `${min} min`;
+  const hr = Math.floor(min / 60);
+  const rest = min % 60;
+  return rest === 0 ? `${hr} hr` : `${hr} hr ${rest} min`;
+}
+
+/**
+ * A meeting row's secondary text: "Sep 11, 22:43 · 5 min".
+ *
+ * Every meeting on a board is titled from the clock at the minute it opened,
+ * so two held in the same minute — or two whose titles nobody changed — read
+ * identically in a list. What actually separates them is when they ran and
+ * for how long, which is what this says. Empty for a row with no start at
+ * all, so nothing renders a bare separator.
+ */
+export function meetingSubtitle(row: LibraryRow, fmt: LibraryFormat = {}): string {
+  if (row.at === undefined) return '';
+  const when = libraryMoment(row.at, fmt);
+  return row.durationMs === undefined ? when : `${when} · ${libraryLength(row.durationMs)}`;
 }
 
 /** One search hit, and which list it came from. */

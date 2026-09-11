@@ -3522,12 +3522,30 @@ body.board-body {
 .library-row:active {
   background: var(--bg-hover);
 }
+/* Name and whatever identifies it further share the first column and stay on
+   one line together: the name gives way to an ellipsis, the label beside it
+   does not, because a secondary line that vanishes at 430px is exactly where
+   two identically-titled meetings needed telling apart. */
+.library-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
 .library-name {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.library-sub {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .library-when {
   flex: 0 0 auto;

@@ -55,6 +55,8 @@ export interface LibraryRow {
    * rather than substituting a clock it does have.
    */
   at?: number;
+  /** How long the meeting ran, for one that has ended. Meetings only. */
+  durationMs?: number;
   /** Where the row opens: a doc's page on this board, or a mounted file. */
   href?: string;
   /** A project markdown file with no doc on this board yet: its path from the
@@ -313,7 +315,14 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     if (held !== undefined || discussion) {
       // A meeting keeps its TITLE: its file is a huddle note in the data dir,
       // named after nothing a person chose.
-      meetings.push({ name: title, at: held?.startedAt ?? meta.createdAt, href });
+      const startedAt = held?.startedAt ?? meta.createdAt;
+      const ended = held?.endedAt ?? null;
+      meetings.push({
+        name: title,
+        at: startedAt,
+        href,
+        durationMs: ended !== null && ended > startedAt ? ended - startedAt : undefined,
+      });
       continue;
     }
     // The Files list's one clock, for a bound doc exactly as for a loose
