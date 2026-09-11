@@ -483,7 +483,7 @@ owns. It is named here only because it is the answer to a question the picture
 did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-quota-notice.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-quota-notice.ts`, `agent-listening.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
@@ -494,6 +494,15 @@ body, and re-emits nothing from either. The second turns that verdict into the
 block edits that put one sentence in the meeting doc and later take it away.
 Both are functions over values, which is the point: what a person in the room
 is told when the note-taker stops is now testable without an API or a Yjs doc.
+
+`agent-listening.ts` joins it too, and draws no new boundary — it is the one
+question the presence strip was missing. The roster has always answered *did a
+session sit down here*, which is durable and outlives the session; whether
+anybody is there is answered by the stream that session's MCP child holds, and
+the SSE bus already knew (`agentsOn`). The module takes that set as data and
+stamps the roster with it, so `/workspaces/<id>/agents` can say `listening`
+per row and the board can draw a circle only for somebody present. It reaches
+for no bus of its own, which is why it sits here and not beside `sse.ts`.
 
 `path-params.ts` joins that row for the same reason and from the same problem:
 it decodes one path segment, answering rather than throwing on a stray `%`, and

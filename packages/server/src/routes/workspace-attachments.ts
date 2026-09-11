@@ -21,6 +21,7 @@
  * Same posture as `middleware/host-guard.ts` and `workspace-path.ts` on the
  * same problem.
  */
+import { stampListening } from '../agent-listening.ts';
 import { attachNotes } from '../attach-notes.ts';
 import { clientReleaseStatus } from '../client-release.ts';
 import {
@@ -52,9 +53,19 @@ export async function handleWorkspaceAttachments(
     // The board's existence is not asked here any more —
     // `middleware/workspace-scope.ts` asked it once, above every handler, and
     // refused with this same 404 when the answer was no.
-    const attachments = visitor
-      ? taskStore.listPublicAttachments(workspaceId)
-      : taskStore.listAttachments(workspaceId);
+    // Attached is not present. The record outlives the session that wrote it,
+    // so the roster alone answers "did anybody ever sit here" — the open
+    // stream is what answers "is anybody there now" (agent-listening.ts).
+    // Stamped on every row rather than filtered here: the roster is also the
+    // lead picker's option list and the drift check's domain, both of which
+    // need the sessions that are NOT listening.
+    const listening = sse.agentsOn(`ws~${workspaceId}`);
+    const attachments = stampListening(
+      visitor
+        ? taskStore.listPublicAttachments(workspaceId)
+        : taskStore.listAttachments(workspaceId),
+      listening,
+    );
     // Drift rides the same read the board already makes, so nobody has
     // to run a command to discover that a merge never reached them.
     // A plugin version is workspace-visible, not host-describing —

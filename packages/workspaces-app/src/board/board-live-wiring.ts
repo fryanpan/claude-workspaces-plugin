@@ -181,7 +181,11 @@ export function wireBoardLive(deps: BoardLiveDeps): void {
   // SSE: agent presence + activity refresh. Board changes arrive via the
   // ydoc; SSE only nudges the REST-backed regions.
   const es = new EventSource(`/workspaces/${encodeURIComponent(workspaceId)}/events:stream`);
-  for (const name of ['agent.attached', 'agent.detached', 'agent.heartbeat']) {
+  // `agent.listening` is the one of these four that no store write produces:
+  // an agent's stream opening or closing changes who is present and records
+  // nothing, so without it a departed session's circle would sit on an open
+  // board until some unrelated change happened to trigger a roster read.
+  for (const name of ['agent.attached', 'agent.detached', 'agent.heartbeat', 'agent.listening']) {
     es.addEventListener(name, () => void loadAgents());
   }
   // The list lives beside `describeEvent` in board-presence-model, because the two must

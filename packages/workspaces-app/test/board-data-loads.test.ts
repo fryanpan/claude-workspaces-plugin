@@ -50,6 +50,28 @@ afterEach(() => {
 });
 
 describe('createBoardLoads', () => {
+  it('reads an unstamped roster row as NOT listening', async () => {
+    // A server too old to stamp the field cannot say whether anybody is on
+    // the wire, and "cannot say" must not become a presence circle — the
+    // strip's whole claim is that a circle means somebody is there. This is
+    // the one place that can still tell silence from an answer.
+    const l = loads();
+    serve({ attachments: [{ agentId: 'agent-riverbend', lastToolCallAt: 5 }] });
+    await l.loadAgents();
+    expect(l.state.agents[0]?.listening).toBe(false);
+  });
+
+  it('carries a stamped roster row’s answer through unchanged', async () => {
+    // The positive control for the case above: the mapping does pass a `true`
+    // along, so the `false` there is the server's silence and not a constant.
+    const l = loads();
+    serve({
+      attachments: [{ agentId: 'agent-riverbend', lastToolCallAt: 5, listening: true }],
+    });
+    await l.loadAgents();
+    expect(l.state.agents[0]?.listening).toBe(true);
+  });
+
   it('keeps the last good agent list when the server is unreachable', async () => {
     const l = loads();
     serve({ attachments: [{ agentId: 'a-1', lastToolCallAt: 5 }] });

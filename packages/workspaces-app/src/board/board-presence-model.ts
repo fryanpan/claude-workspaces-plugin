@@ -442,6 +442,17 @@ export interface PresenceAgent {
   state: 'active' | 'unresponsive' | 'away';
   stateLabel: string;
   lastToolCallAt: number;
+  /** The agent's own event stream is open on this board right now — the
+   *  server's `agent-listening.ts`, stamped on every roster row.
+   *
+   *  The strip draws a circle for a listening agent and nothing at all for
+   *  the rest, which is the whole of "present means connected AND listening"
+   *  (Bryan, 2026-09-10). It is not optional and not defaulted to true:
+   *  an attachment record outlives the session that wrote it, so treating a
+   *  missing answer as a yes is exactly the reading that draws a circle for
+   *  somebody who left. Callers turn an older server's silence into `false`
+   *  at the wire, where they can see that it WAS silence. */
+  listening: boolean;
 }
 
 export interface PresenceChip {
@@ -732,9 +743,33 @@ function foldTabs(people: PresencePerson[]): PresencePerson[] {
   return [...byIdentity.values()];
 }
 
-/** One chip per person and agent (§2.7), people first. Person chips carry the
- *  surface they're on; agent chips carry the derived liveness state — real
- *  signals (heartbeat, last tool call), never guesses.
+/**
+ * What to call a present agent's liveness in its own tooltip.
+ *
+ * `away` is derived from the heartbeat clock alone, and on this strip the
+ * clock has already lost to the socket: a chip exists only because the
+ * agent's stream is open, and `isDeliverable` (task-agents.ts) hands work to
+ * a stream-holding agent however long ago it last announced itself. So
+ * "away — requests queue" would be a plain falsehood printed on a session
+ * that is listening, which is the same defect as a faded circle with the
+ * words spelled out. The clock's reading still matters — it is why this agent
+ * is here and quiet — so it is reported as quiet rather than as gone. The
+ * other two labels are already true of a listening agent and pass through.
+ */
+function listeningStateLabel(a: PresenceAgent): string {
+  return a.state === 'away' ? 'listening, quiet since its last heartbeat' : a.stateLabel;
+}
+
+/** One chip per PRESENT person and agent (§2.7), people first. Person chips
+ *  carry the surface they're on; agent chips carry the derived liveness
+ *  state — real signals (heartbeat, last tool call, an open stream), never
+ *  guesses.
+ *
+ *  People arrive from Yjs awareness, which is per-connection: an entry exists
+ *  only while that tab's socket does, so a person in the list is by
+ *  construction here. Agents do not work that way — their roster row is
+ *  durable and outlives the session — so the listening gate below is what
+ *  makes the two halves of the strip mean the same thing.
  *
  *  `key` is the participant, not the connection: `p-<identity>` for a person
  *  (see `presenceIdentity`), `a-<agentId>` for an agent. It is what the
@@ -760,14 +795,23 @@ export function presenceChips(
       clientId: p.clientId,
     });
   }
-  const sortedAgents = [...agents].sort((a, b) => a.agentId.localeCompare(b.agentId));
+  // Attached is not present. A session that exited keeps its roster row —
+  // and its heartbeat and last tool call with it — so the record alone cannot
+  // tell a working agent from one that left hours ago. An agent earns a
+  // circle by holding its event stream, and one that is not holding it gets
+  // no circle, no placeholder and no faded stand-in: the board answers "is
+  // anybody there" by what it draws, so a mark for somebody absent is not a
+  // softer answer, it is the wrong one.
+  const sortedAgents = agents
+    .filter((a) => a.listening)
+    .sort((a, b) => a.agentId.localeCompare(b.agentId));
   for (const a of sortedAgents) {
     chips.push({
       key: `a-${a.agentId}`,
       label: a.agentId,
       kind: 'agent',
       where: a.state,
-      title: `${a.agentId} · ${a.stateLabel} · last tool call ${timeAgo(a.lastToolCallAt, now)}`,
+      title: `${a.agentId} · ${listeningStateLabel(a)} · last tool call ${timeAgo(a.lastToolCallAt, now)}`,
       state: a.state,
     });
   }

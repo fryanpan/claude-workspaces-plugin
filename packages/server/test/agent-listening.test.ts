@@ -1,0 +1,262 @@
+/**
+ * Who the board says is PRESENT — the roster's `listening` flag and the push
+ * that makes it change without a reload.
+ *
+ * Two halves, and the second is the one worth the runtime. The first pins the
+ * pure module: a stamped row, an id that is not on the wire, and the frame
+ * shape. The second drives the real thing — an agent attaches, opens the
+ * stream its MCP child opens, and the roster says it is listening; the stream
+ * closes and the roster says it is not, with a frame arriving on a browser's
+ * own stream to say so. That pair is what "connected AND listening" means in
+ * code, and the close half is the falsifiable one: nothing is written when a
+ * stream dies, so without the push the board would keep drawing a session
+ * that has gone.
+ *
+ * All fixtures are invented — the repo is public.
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  AGENT_LISTENING_EVENT,
+  agentListeningFrame,
+  stampListening,
+} from '../src/agent-listening.ts';
+import { type ServerHandle, createServer } from '../src/server.ts';
+import { waitFor } from './wait-for.ts';
+
+const RIVERBEND = 'agent-riverbend';
+const HARBORLIGHT = 'agent-harborlight';
+
+describe('stampListening', () => {
+  it('answers per row, and never drops one', () => {
+    const rows = [
+      { agentId: RIVERBEND, state: 'active' },
+      { agentId: HARBORLIGHT, state: 'away' },
+    ];
+    const out = stampListening(rows, new Set([RIVERBEND]));
+    // The roster stays whole: it is also the lead picker's options and the
+    // plugin-drift check's domain, both of which need the absent sessions.
+    expect(out.map((r) => r.agentId)).toEqual([RIVERBEND, HARBORLIGHT]);
+    expect(out.map((r) => r.listening)).toEqual([true, false]);
+    // Every other field rides through untouched.
+    expect(out[0]?.state).toBe('active');
+  });
+
+  it('says false rather than saying nothing', () => {
+    // The absent case has to be an explicit `false` on the wire. A reader
+    // that cannot tell "no" from "this server never answers the question"
+    // would draw a circle for somebody who left, which is the whole defect.
+    const [row] = stampListening([{ agentId: RIVERBEND }], new Set());
+    expect(row && 'listening' in row).toBe(true);
+    expect(row?.listening).toBe(false);
+  });
+});
+
+describe('agentListeningFrame', () => {
+  it('carries the answer, not only the news', () => {
+    expect(agentListeningFrame('w-1', RIVERBEND, false)).toEqual({
+      event: AGENT_LISTENING_EVENT,
+      workspaceId: 'w-1',
+      agentId: RIVERBEND,
+      listening: false,
+    });
+  });
+});
+
+type Frame = { event: string; data?: Record<string, unknown> };
+
+/** Read an SSE response into a growing list of frames.
+ *
+ *  `stop` takes the AbortController rather than cancelling the reader: a
+ *  cancelled reader leaves Bun's connection open, so the server's
+ *  `ReadableStream.cancel` — the hook that unregisters the sink — never runs
+ *  and the roster keeps reporting a stream nobody is holding. Aborting the
+ *  fetch drops the socket, which is what a session exiting actually does. */
+function listenFrames(
+  res: Response,
+  abort: AbortController,
+): { frames: Frame[]; stop: () => Promise<void> } {
+  const frames: Frame[] = [];
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const decoder = new TextDecoder();
+  let stopped = false;
+  let buf = '';
+  const pump = (async () => {
+    try {
+      while (!stopped) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buf += decoder.decode(value, { stream: true });
+        let sep = buf.indexOf('\n\n');
+        while (sep >= 0) {
+          const raw = buf.slice(0, sep);
+          buf = buf.slice(sep + 2);
+          sep = buf.indexOf('\n\n');
+          const frame: Frame = { event: 'message' };
+          for (const line of raw.split('\n')) {
+            if (line.startsWith('event:')) frame.event = line.slice(6).trim();
+            else if (line.startsWith('data:')) {
+              try {
+                frame.data = JSON.parse(line.slice(5).trimStart()) as Record<string, unknown>;
+              } catch {}
+            }
+          }
+          if (frame.event !== 'message') frames.push(frame);
+        }
+      }
+    } catch {}
+  })();
+  return {
+    frames,
+    stop: async () => {
+      stopped = true;
+      abort.abort();
+      await reader.cancel().catch(() => {});
+      await pump;
+    },
+  };
+}
+
+describe('the board roster, through the server', () => {
+  let handle: ServerHandle;
+  let dataDir: string;
+  let base: string;
+  let workspaceId: string;
+
+  const post = (path: string, body: unknown) =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  /** The roster as the board reads it. */
+  const roster = async (): Promise<Array<{ agentId: string; listening?: boolean }>> => {
+    const res = await fetch(`${base}/workspaces/${workspaceId}/agents`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      attachments: Array<{ agentId: string; listening?: boolean }>;
+    };
+    return body.attachments;
+  };
+
+  const listeningOf = async (agentId: string): Promise<boolean | undefined> =>
+    (await roster()).find((a) => a.agentId === agentId)?.listening;
+
+  /** The stream an agent's MCP child holds for the life of its session. */
+  const openAgentStream = async (agentId: string) => {
+    const abort = new AbortController();
+    const res = await fetch(
+      `${base}/workspaces/${workspaceId}/events:stream?agentId=${encodeURIComponent(agentId)}`,
+      { headers: { accept: 'text/event-stream' }, signal: abort.signal },
+    );
+    expect(res.status).toBe(200);
+    return listenFrames(res, abort);
+  };
+
+  /** A browser tab watching the same board: a stream with no agentId on it. */
+  const openTabStream = async () => {
+    const abort = new AbortController();
+    const res = await fetch(`${base}/workspaces/${workspaceId}/events:stream`, {
+      headers: { accept: 'text/event-stream' },
+      signal: abort.signal,
+    });
+    expect(res.status).toBe(200);
+    return listenFrames(res, abort);
+  };
+
+  beforeEach(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'agent-listening-'));
+    handle = createServer({ port: 0, dataDir });
+    base = `http://localhost:${handle.port}`;
+    const { workspace } = (await (await post('/workspaces', { name: 'presence' })).json()) as {
+      workspace: { id: string };
+    };
+    workspaceId = workspace.id;
+  });
+
+  afterEach(async () => {
+    await handle.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('an attached agent that never opened a stream is not listening', async () => {
+    // The record alone. This is exactly the session that exited: the row, the
+    // heartbeat and the last tool call all survive it, and none of them can
+    // say whether anybody is there.
+    await post(`/workspaces/${workspaceId}/agents`, {
+      agentId: RIVERBEND,
+      runtime: 'claude-code-local',
+    });
+    expect(await listeningOf(RIVERBEND)).toBe(false);
+  });
+
+  it('opening the agent stream makes it listening, and closing it stops', async () => {
+    await post(`/workspaces/${workspaceId}/agents`, {
+      agentId: RIVERBEND,
+      runtime: 'claude-code-local',
+    });
+    const stream = await openAgentStream(RIVERBEND);
+    await waitFor(async () => (await listeningOf(RIVERBEND)) === true, {
+      describe: 'the roster to report the open stream',
+    });
+
+    // Take the subscription away — the session's stream is the whole of its
+    // listening, and nothing else about the attachment changes.
+    await stream.stop();
+    await waitFor(async () => (await listeningOf(RIVERBEND)) === false, {
+      describe: 'the roster to report the closed stream',
+    });
+    // …and the row is still there. Not listening is not detached: the
+    // roster keeps the session, the strip simply stops drawing it.
+    expect((await roster()).map((a) => a.agentId)).toContain(RIVERBEND);
+  });
+
+  it('a browser tab never makes an absent agent look present', async () => {
+    // A tab's stream carries no agentId, so it can raise the subscriber count
+    // without raising anybody's presence. The positive control is the agent
+    // stream in the case above: the same roster read says true there.
+    await post(`/workspaces/${workspaceId}/agents`, {
+      agentId: RIVERBEND,
+      runtime: 'claude-code-local',
+    });
+    const watching = await openTabStream();
+    expect(await listeningOf(RIVERBEND)).toBe(false);
+    await watching.stop();
+  });
+
+  it('tells the open board when a stream closes, so a circle can go without a reload', async () => {
+    await post(`/workspaces/${workspaceId}/agents`, {
+      agentId: RIVERBEND,
+      runtime: 'claude-code-local',
+    });
+    // The browser, watching the board it has open.
+    const board = await openTabStream();
+
+    const stream = await openAgentStream(RIVERBEND);
+    const opened = await waitFor(
+      () =>
+        board.frames.find(
+          (f) => f.event === AGENT_LISTENING_EVENT && f.data?.agentId === RIVERBEND,
+        ),
+      { describe: 'an agent.listening frame for the opened stream' },
+    );
+    expect(opened.data?.listening).toBe(true);
+
+    await stream.stop();
+    const closed = await waitFor(
+      () =>
+        board.frames.find(
+          (f) =>
+            f.event === AGENT_LISTENING_EVENT &&
+            f.data?.agentId === RIVERBEND &&
+            f.data?.listening === false,
+        ),
+      { describe: 'an agent.listening frame for the closed stream' },
+    );
+    expect(closed.data?.workspaceId).toBe(workspaceId);
+    await board.stop();
+  });
+});
