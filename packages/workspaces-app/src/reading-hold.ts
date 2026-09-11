@@ -190,6 +190,10 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
       sizes.observe(block, { box: 'border-box' });
     }
   }
+  function forget(block: Element): void {
+    sizes.unobserve(block);
+    watched.delete(block);
+  }
   scope.onCleanup(() => sizes.disconnect());
 
   const observer = new MutationObserver((records) => {
@@ -199,8 +203,16 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
       if (rec.addedNodes.length > 0) structural = true;
       // A `ResizeObserver` holds its targets, so a block the tick replaced
       // would be kept alive by this one for as long as the doc is open.
+      // Forgetting it is the other half: the editor re-inserts an element it
+      // took out — a paragraph lifted into a list and put back — and a block
+      // still remembered as watched while no longer observed is one the
+      // resize half would never cover again.
       for (const gone of Array.from(rec.removedNodes)) {
-        if (gone instanceof Element) sizes.unobserve(gone);
+        if (!(gone instanceof Element)) continue;
+        forget(gone);
+        // A removed subtree reports only its root, and the blocks are its
+        // children: those went with it and are neither reported nor walked.
+        for (const kid of Array.from(gone.children)) forget(kid);
       }
     }
     // Blocks the tick just wrote are new elements; they have to be watched for
