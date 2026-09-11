@@ -96,9 +96,9 @@ describe('resolveBaseUrl', () => {
       existsSync: () => true,
       readFileSync: () => JSON.stringify({ port }),
     });
-    expect(resolveBaseUrl(deps)).toBe('http://localhost:8787');
+    expect(resolveBaseUrl(deps)).toBe('http://127.0.0.1:8787');
     port = 8790;
-    expect(resolveBaseUrl(deps)).toBe('http://localhost:8790');
+    expect(resolveBaseUrl(deps)).toBe('http://127.0.0.1:8790');
   });
 });
 

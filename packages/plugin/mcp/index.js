@@ -14637,7 +14637,7 @@ function resolveBaseUrl(deps) {
     try {
       const j = JSON.parse(deps.readFileSync(discovery, "utf8"));
       if (j.port)
-        return `http://localhost:${j.port}`;
+        return `http://127.0.0.1:${j.port}`;
     } catch {}
   }
   throw new Error("claude-workspaces server not found — start it with `bun run dev` (or set CW_BASE_URL). " + `Looked for a discovery file at ${discoveryCandidates(deps.homedir()).join(" and ")}.`);
@@ -19425,7 +19425,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.204";
+var PLUGIN_VERSION = "0.1.205";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
