@@ -166,10 +166,6 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     ev.stopPropagation();
     exitFeedbackMode(el);
   });
-  window.addEventListener('pointermove', onMove, true);
-  window.addEventListener('pointerdown', onDown, true);
-  window.addEventListener('pointerup', onTap, true);
-  window.addEventListener('keydown', onKey, true);
   // The face is chosen for the width the mode opened at. Turning an iPad to
   // portrait crosses that line, so the mode is opened again on the other
   // face, carrying the draft and the element it is about.
@@ -185,7 +181,14 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
       openComposerForElement(el, t);
     } else if (drafts.has(el)) openDefaultComposer(el);
   };
-  window.addEventListener('resize', onResize);
+  const on = [
+    ['pointermove', onMove],
+    ['pointerdown', onDown],
+    ['pointerup', onTap],
+    ['keydown', onKey],
+    ['resize', onResize],
+  ] as [string, EventListener][];
+  for (const [t, f] of on) window.addEventListener(t, f, true);
 
   el.modeCleanup = () => {
     document.body.classList.remove('cfw-feedback-mode');
@@ -197,15 +200,12 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     // the mode's to discard, though: they wait for that element to be opened
     // again (Cancel is the one way to drop them).
     keepDraft(el);
-    for (const n of el.shadow.querySelectorAll('.composer, .saved, .leader')) n.remove();
-    banner.remove();
+    for (const n of el.shadow.querySelectorAll('.composer, .saved, .leader, .picker-banner')) {
+      n.remove();
+    }
     fab?.setAttribute('aria-pressed', 'false');
     fab?.classList.remove('open');
-    window.removeEventListener('pointermove', onMove, true);
-    window.removeEventListener('pointerdown', onDown, true);
-    window.removeEventListener('pointerup', onTap, true);
-    window.removeEventListener('keydown', onKey, true);
-    window.removeEventListener('resize', onResize);
+    for (const [t, f] of on) window.removeEventListener(t, f, true);
   };
 }
 
@@ -261,7 +261,7 @@ function hitTest(ev: MouseEvent): HTMLElement | null {
   const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
   if (!el) return null;
   // skip widget chrome
-  if (el.closest(`[${IGNORE_ATTR}]`) || el.tagName === TAG.toUpperCase()) return null;
+  if (el.closest(`[${IGNORE_ATTR}],${TAG}`)) return null;
   return el;
 }
 
@@ -269,19 +269,8 @@ function hitTest(ev: MouseEvent): HTMLElement | null {
  *  than a pointer: writes the widget made itself must not re-enter the
  *  render loop. */
 export function isInOwnChrome(node: Node): boolean {
-  let el: Node | null = node;
-  while (el) {
-    if (el.nodeType === 1) {
-      const e = el as Element;
-      if (
-        e.hasAttribute?.(IGNORE_ATTR) ||
-        e.tagName === TAG.toUpperCase() ||
-        e.id === 'cfw-light-styles'
-      ) {
-        return true;
-      }
-    }
-    el = el.parentNode;
+  for (let n: Node | null = node; n; n = n.parentNode) {
+    if (isOwnChromeNode(n) || (n as Element).id === 'cfw-light-styles') return true;
   }
   return false;
 }
