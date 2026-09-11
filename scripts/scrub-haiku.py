@@ -20,10 +20,16 @@ moment the branch merges `main` — which the conventions require before the
 final push. See scrub_git.py for the measurement and why `--cc` is load-bearing.
 
 Exit codes:
-  0  clean (or Haiku unavailable — defensive non-block)
-  1  leaks found — push blocked
-  2  setup error (treated as 0 by the hook so missing key / network blip
-     doesn't break pushes; the regex check still ran)
+  0  clean — or this layer could not run and UNAVAILABLE_POLICY says warn
+  1  blocked — leaks found, or this layer could not run and the policy says
+     block. Either way the hook fails the push.
+
+There is no quiet third code any more. "Could not run" used to return 2, and
+main() turned every 2 into 0 behind one line of stderr, so a gate that could
+not look answered a push exactly as it answers one it looked at and found
+clean. A real name reached this public repo's main branch that way. Now the
+three ways it can fail to run are told apart, said out loud in a banner, and
+each has a recorded answer below.
 
 Bypass entirely with SCRUB_SKIP=1. Skip just Haiku with SCRUB_SKIP_HAIKU=1.
 """
@@ -36,12 +42,16 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scrub_git  # noqa: E402
 
 MODEL = "claude-haiku-4-5-20251001"
-API_URL = "https://api.anthropic.com/v1/messages"
+# Overridable so the self-test can drive every failure case against a stub on
+# loopback without spending a key or reaching the network, and so a deployment
+# behind a gateway can point this at the gateway. Unset, it is the real API.
+API_URL = os.environ.get("SCRUB_HAIKU_API_URL") or "https://api.anthropic.com/v1/messages"
 API_TIMEOUT_SEC = 30
 # Approx chars-to-tokens (Anthropic English ~3.5 chars/token; be conservative at 4).
 # 80K tokens of diff caps out a Haiku call comfortably.
@@ -142,7 +152,174 @@ def system_prompt(maintainers: "set[str] | None" = None) -> str:
     return f"{SYSTEM_PROMPT}\n\n**This repository's maintainers:**\n{listed}"
 
 
-KEYCHAIN_SERVICE = "scrub-haiku-api-key"
+# Overridable for the same reason as API_URL: the self-test points it at a
+# service name that does not exist, so the "no key at all" case is reachable
+# without touching — or reading — the real entry.
+KEYCHAIN_SERVICE = os.environ.get("SCRUB_HAIKU_KEYCHAIN_SERVICE") or "scrub-haiku-api-key"
+
+# ---------------------------------------------------------------------------
+# What this gate does when it CANNOT RUN
+# ---------------------------------------------------------------------------
+#
+# Three different things go wrong here, and they are not the same condition:
+#
+#   exhausted    the key is valid and over its usage cap. The API answers HTTP
+#                400 naming the date access returns. Nobody here can shorten
+#                that wait.
+#   absent       no key resolves, or the one that does is rejected. Somebody's
+#                install is broken, and it is fixable in a minute.
+#   unreachable  network failure, timeout, or a reply this tool cannot read.
+#                Transient — the next push may well work.
+#
+# All three used to collapse into one `return 2`.
+#
+# WHICH OF THEM BLOCKS A PUSH IS A PROJECT DECISION, and it is recorded here so
+# that the answer is a line in the gate rather than something you learn by
+# reading a hook. The three settings, exhaustively:
+#
+#   "warn-all"               never block; print the banner, let the push go.
+#   "block-all"              block on any of the three.
+#   "block-except-exhausted" block on absent and unreachable — each is
+#                            somebody's to fix today — and warn on exhausted,
+#                            which nobody can fix before the reset date.
+#
+# ANSWERED by the repo owner on 2026-09-10: "Always block". A push that the
+# name-aware layer never saw is a push nobody checked for an unfamiliar real
+# name, and the regex layer passing says nothing about that — so the gate
+# refuses rather than waving it through with a banner. Exhausted is included
+# deliberately: nobody can fix a spend cap before its reset date, and a window
+# where the weaker check is the only one running is exactly the window this
+# decision exists to close. SCRUB_HAIKU_UNAVAILABLE overrides it for a push
+# that genuinely cannot wait, and says so in the banner when it does.
+UNAVAILABLE_POLICY = "block-all"
+
+EXHAUSTED = "exhausted"
+ABSENT = "absent"
+UNREACHABLE = "unreachable"
+
+POLICIES = {
+    "warn-all": {EXHAUSTED: "warn", ABSENT: "warn", UNREACHABLE: "warn"},
+    "block-all": {EXHAUSTED: "block", ABSENT: "block", UNREACHABLE: "block"},
+    "block-except-exhausted": {
+        EXHAUSTED: "warn", ABSENT: "block", UNREACHABLE: "block",
+    },
+}
+
+POLICY_ENV = "SCRUB_HAIKU_UNAVAILABLE"
+
+
+class Policy(NamedTuple):
+    """Which policy is being applied, and what was asked for."""
+
+    name: str   # a key of POLICIES — the one actually applied
+    asked: str  # what the env var or the constant said, verbatim
+    known: bool  # False when `asked` names no policy, and `name` is the fallback
+
+
+def resolve_policy() -> Policy:
+    """The recorded policy, env override first.
+
+    An unrecognised name falls back to `block-all` rather than to the recorded
+    value: a leak gate whose setting is a typo is a leak gate nobody has read,
+    and the safe reading of "I don't know what I was told to do" is to stop.
+    """
+    asked = os.environ.get(POLICY_ENV) or UNAVAILABLE_POLICY
+    if asked in POLICIES:
+        return Policy(asked, asked, True)
+    return Policy("block-all", asked, False)
+
+
+class Unavailable(NamedTuple):
+    """This layer could not run, and why — in words, never carrying a key."""
+
+    case: str    # EXHAUSTED | ABSENT | UNREACHABLE
+    detail: str  # one line a person can act on
+    hint: str = ""  # what would fix it, or "" when nothing here can
+
+
+KEY_HINT = (
+    "Store one with:  security add-generic-password -a \"$USER\" "
+    f"-s {KEYCHAIN_SERVICE} -w   (omit the value after -w; it prompts, so the "
+    "key stays out of shell history) — or set SCRUB_HAIKU_API_KEY."
+)
+
+# Substrings that mark an HTTP error as "this key is over its cap" rather than
+# as a transient fault. Matched against the API's own error message, which is
+# where the dated reset lives too, so the banner can quote it.
+CAP_MARKERS = ("usage limit", "credit balance", "spend limit", "spending limit", "quota")
+
+
+def api_error_message(body: str) -> str:
+    """The API's `error.message`, else a trimmed body. Never a key — an error
+    body from the API echoes the request's headers nowhere."""
+    try:
+        parsed = json.loads(body)
+        message = parsed["error"]["message"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        message = None
+    if isinstance(message, str) and message.strip():
+        return message.strip()[:300]
+    return body.strip()[:200] or "(no response body)"
+
+
+def classify_http_error(status: int, body: str) -> Unavailable:
+    """Sort an HTTP failure into one of the three cases.
+
+    The cap case is recognised by the message, not the status: the observed
+    answer for an over-cap key is a 400 `invalid_request_error`, the same
+    status a malformed request would draw, so the status alone cannot tell
+    "you have spent your budget" from "your JSON is wrong".
+    """
+    message = api_error_message(body)
+    lowered = message.lower()
+    if any(marker in lowered for marker in CAP_MARKERS):
+        return Unavailable(EXHAUSTED, f"HTTP {status}: {message}")
+    if status in (401, 403):
+        return Unavailable(
+            ABSENT,
+            f"HTTP {status}: the API rejected the key it was given — {message}",
+            KEY_HINT,
+        )
+    return Unavailable(UNREACHABLE, f"HTTP {status} from the API: {message}")
+
+
+BANNER_RULE = "=" * 74
+
+
+def print_banner(unavailable: Unavailable, policy: Policy, action: str) -> None:
+    """Say, unmissably, that only half the gate ran.
+
+    One line of stderr among a push's other output is what this had before,
+    and it is what let a real name through: the line was printed, and nobody
+    saw it. The frame is the point.
+    """
+    lines = [
+        "",
+        BANNER_RULE,
+        "  LEAK GATE: ONLY HALF OF IT RAN",
+        BANNER_RULE,
+        f"  The name-aware scanner could not run — {unavailable.case}.",
+        f"  {unavailable.detail}",
+    ]
+    if unavailable.hint:
+        lines.append(f"  {unavailable.hint}")
+    lines += [
+        "",
+        "  The regex scanner ran and passed. It matches names and patterns it",
+        "  has been given. It does not recognise an unfamiliar real name, and",
+        "  recognising those is the whole job of the layer that did not run.",
+        "",
+    ]
+    if action == "block":
+        lines.append(f"  PUSH BLOCKED.  [policy: {policy.name}]")
+    else:
+        lines += [
+            f"  PUSH ALLOWED on the regex layer alone.  [policy: {policy.name}]",
+            "  Read what this push publishes before it lands.",
+        ]
+    lines += [BANNER_RULE, ""]
+    for line in lines:
+        print(line, file=sys.stderr)
 
 
 def read_keychain(service: str) -> str | None:
@@ -173,7 +350,8 @@ def read_keychain(service: str) -> str | None:
     return proc.stdout.strip() or None
 
 
-def call_haiku(diff_content: str) -> int:
+def call_haiku(diff_content: str) -> "int | Unavailable":
+    """0 clean, 1 leaks found, or an `Unavailable` saying which way it failed."""
     # Keychain first, then the env vars. SCRUB_HAIKU_API_KEY is preferred over
     # ANTHROPIC_API_KEY so this layer can use a key separate from
     # general-purpose Anthropic usage (better audit + isolated billing); the
@@ -184,14 +362,11 @@ def call_haiku(diff_content: str) -> int:
         or os.environ.get("ANTHROPIC_API_KEY")
     )
     if not api_key:
-        print(
-            "[scrub-haiku] no API key — skipping Haiku check. Store one with:\n"
-            f'  security add-generic-password -a "$USER" -s {KEYCHAIN_SERVICE} -w\n'
-            "  (omit the value after -w; it prompts, so the key stays out of shell history)\n"
-            "  ...or set SCRUB_HAIKU_API_KEY / ANTHROPIC_API_KEY.",
-            file=sys.stderr,
+        return Unavailable(
+            ABSENT,
+            "No API key resolved — not from the Keychain, not from the environment.",
+            KEY_HINT,
         )
-        return 2
 
     body = json.dumps({
         "model": MODEL,
@@ -216,20 +391,30 @@ def call_haiku(diff_content: str) -> int:
     try:
         with urllib.request.urlopen(req, timeout=API_TIMEOUT_SEC) as resp:
             data = json.loads(resp.read())
+    # HTTPError first — it is a subclass of URLError, so the order is what
+    # keeps a 400 from being read as a network fault.
     except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        print(f"[scrub-haiku] HTTP {e.code} from Anthropic API: {body[:200]}", file=sys.stderr)
-        return 2
+        return classify_http_error(e.code, e.read().decode("utf-8", errors="replace"))
     except (urllib.error.URLError, json.JSONDecodeError, OSError) as e:
-        print(f"[scrub-haiku] API call failed: {e}", file=sys.stderr)
-        return 2
+        return Unavailable(
+            UNREACHABLE,
+            f"The API call failed: {e}",
+            "Transient. Try the push again.",
+        )
 
-    content = data.get("content", [])
-    if not content:
-        print("[scrub-haiku] empty response from Haiku.", file=sys.stderr)
-        return 2
+    # Every step of the shape is checked before it is indexed. Valid JSON in
+    # the wrong shape — `{"content": "..."}` from a gateway, `{"content":
+    # [null]}` — would otherwise raise out of here as a traceback, which is
+    # neither of the two answers this tool is allowed to give and says nothing
+    # a person can act on.
+    content = data.get("content") if isinstance(data, dict) else None
+    if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+        return Unavailable(
+            UNREACHABLE,
+            "The API's reply was not in a shape this tool can read.",
+        )
 
-    text = content[0].get("text", "").strip()
+    text = str(content[0].get("text", "")).strip()
 
     if "VERDICT: CLEAN" in text:
         return 0
@@ -239,9 +424,10 @@ def call_haiku(diff_content: str) -> int:
             print(f"  {line}", file=sys.stderr)
         return 1
 
-    print("[scrub-haiku] unexpected response shape from Haiku:", file=sys.stderr)
-    print(text, file=sys.stderr)
-    return 2
+    return Unavailable(
+        UNREACHABLE,
+        f"The scanner's reply carried no verdict line: {text[:200]!r}",
+    )
 
 
 def get_diff(range_spec: str) -> str:
@@ -294,15 +480,22 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    rc = call_haiku(diff)
-    if rc == 2:
-        # Setup / API error — don't block the push. Regex check already passed.
+    result = call_haiku(diff)
+    if not isinstance(result, Unavailable):
+        return result
+
+    policy = resolve_policy()
+    if not policy.known:
         print(
-            "[scrub-haiku] Haiku check unavailable; relying on regex check only.",
+            f"[scrub-haiku] {POLICY_ENV}/UNAVAILABLE_POLICY is set to "
+            f"{policy.asked!r}, which names no policy. Applying "
+            f"{policy.name!r} — a gate told something it cannot read stops. "
+            f"Valid settings: {', '.join(sorted(POLICIES))}.",
             file=sys.stderr,
         )
-        return 0
-    return rc
+    action = POLICIES[policy.name][result.case]
+    print_banner(result, policy, action)
+    return 1 if action == "block" else 0
 
 
 if __name__ == "__main__":
