@@ -358,13 +358,14 @@ export interface NotesComposeInput {
    * Blocks the CALLER has decided are the agent's to edit, whatever the doc's
    * marks say. `renderOutline` prints one as `yours` rather than `theirs`.
    *
-   * It exists because the outline's `theirs` is read straight off `cwAuthor`,
-   * and on a doc whose marks are gone — a reparse from disk, or the next
-   * recording's release — that prints EVERY line as a person's. The cleanup
-   * pass's gate treats an unmarked block on such a doc as unknown rather than
-   * as somebody's (`notes-cleanup-pass.ts`), and a gate that admits a block
-   * the prompt has just called a person's writing changes nothing: the model
-   * does as it is told. So the two are said in one place and agree.
+   * It exists so the prompt and the caller's own gate say ONE thing. The
+   * outline's `theirs` is read straight off `cwAuthor`, which answers "did
+   * this agent write it" and not "may this caller rewrite it" — and a gate
+   * that admits a block the prompt has just called somebody else's writing
+   * changes nothing, because the model does as it is told. The cleanup pass
+   * sets it to its own work inside the meeting's section
+   * (`notes-cleanup-pass.ts`); on a doc that records no authors at all that
+   * set is empty, and every line there is correctly named as somebody's.
    *
    * Absent leaves every existing caller's prompt byte-identical.
    */
