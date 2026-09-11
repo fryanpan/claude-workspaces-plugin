@@ -33,6 +33,14 @@
  * working two boards was paying a wake per board per blip for a roster that
  * never changed. `ListeningAnnouncer` below is what makes a non-event quiet.
  *
+ * WHO THE ANSWER IS ANNOUNCED TO is the board's pages, and never an agent.
+ * Quieting the non-events still left every real arrival and departure — and
+ * a whole fleet reconnecting after a deploy — waking every other session on
+ * the board for a circle it cannot act on. So the frame goes out with
+ * `skipAgentStreams` (`SseBus.broadcastTransient`), which the `agentId` on
+ * an agent's stream makes exact on both the per-key and the multiplexed
+ * route (`sse-mux.ts` registers it on board channels).
+ *
  * WHERE THE ANSWER IS PUT ON A ROW is not here. The roster derives it inside
  * `listAttachments` / `listPublicAttachments` (`task-agents.ts`), so a share
  * visitor's copy still passes through the `PublicAttachment` allowlist, which

@@ -311,12 +311,22 @@ export class SseBus {
    *
    * Returns how many sinks it reached. Zero is a real answer (nobody has the
    * doc open) and costs nothing — there is no buffer to park it in.
+   *
+   * `skipAgentStreams` keeps the frame off every stream an agent opened for
+   * itself (the ones `add` registered with an `agentId`). For a frame only a
+   * page can use: an agent's MCP child forwards whatever reaches its stream
+   * as a channel notification, and each one costs that session a full turn.
    */
-  broadcastTransient(docId: string, payload: SsePayload): number {
+  broadcastTransient(
+    docId: string,
+    payload: SsePayload,
+    opts: { skipAgentStreams?: boolean } = {},
+  ): number {
     const set = this.byDoc.get(docId);
     if (!set) return 0;
     let sent = 0;
-    for (const sink of set.keys()) {
+    for (const [sink, who] of set) {
+      if (opts.skipAgentStreams && who.agentId !== undefined) continue;
       try {
         sink.write(payload.event, payload);
         sent += 1;

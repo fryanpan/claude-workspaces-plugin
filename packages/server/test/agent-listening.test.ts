@@ -20,10 +20,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AGENT_LISTENING_EVENT, agentListeningFrame } from '../src/agent-listening.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { SseBus } from '../src/sse.ts';
 import { waitFor } from './wait-for.ts';
 
 const RIVERBEND = 'agent-riverbend';
 const HARBORLIGHT = 'agent-harborlight';
+const SALTMARSH = 'agent-saltmarsh';
 
 describe('agentListeningFrame', () => {
   it('carries the answer, not only the news', () => {
@@ -248,5 +250,90 @@ describe('the board roster, through the server', () => {
     );
     expect(closed.data?.workspaceId).toBe(workspaceId);
     await board.stop();
+  });
+
+  it("keeps the frame off every agent's own stream, per-key and multiplexed", async () => {
+    // What was waking the fleet: each arrival and departure reached every
+    // attached agent's stream, and its MCP child forwarded it as a channel
+    // wake about somebody else's circle. Two bystanders, one on each stream
+    // shape an MCP child opens, and a tab as the positive control.
+    for (const agentId of [RIVERBEND, HARBORLIGHT, SALTMARSH]) {
+      await post(`/workspaces/${workspaceId}/agents`, { agentId, runtime: 'claude-code-local' });
+    }
+    await post(`/api/agents/${SALTMARSH}/watches`, { add: [`ws:${workspaceId}`], name: 'Salt' });
+    const board = await openTabStream();
+    const perKey = await openAgentStream(HARBORLIGHT);
+    const muxAbort = new AbortController();
+    const muxRes = await fetch(`${base}/events/agent/${SALTMARSH}`, {
+      headers: { accept: 'text/event-stream' },
+      signal: muxAbort.signal,
+    });
+    expect(muxRes.status).toBe(200);
+    const mux = listenFrames(muxRes, muxAbort);
+    // Both bystanders are registered as agents — the property the cut
+    // relies on — or the roster would not call them listening.
+    await waitFor(async () => (await listeningOf(HARBORLIGHT)) && (await listeningOf(SALTMARSH)), {
+      describe: 'both bystander streams to register as agent streams',
+    });
+
+    const arriving = await openAgentStream(RIVERBEND);
+    await arriving.stop();
+    const isRiverbend = (listening: boolean) => (f: Frame) =>
+      f.event === AGENT_LISTENING_EVENT &&
+      f.data?.agentId === RIVERBEND &&
+      f.data?.listening === listening;
+    await waitFor(() => board.frames.find(isRiverbend(true)), {
+      describe: 'the tab to hear the arrival',
+    });
+    await waitFor(() => board.frames.find(isRiverbend(false)), {
+      describe: 'the tab to hear the departure',
+    });
+
+    // A board event after the departure. Every stream on the channel is
+    // written in order, so once a bystander holds this frame it would already
+    // hold any presence frame sent before it — which makes the absence below
+    // an observation rather than a race. It is also the half that must NOT
+    // go quiet: ordinary board broadcasts still reach agents on both shapes.
+    await post(`/workspaces/${workspaceId}/tasks`, {
+      title: 'Chart the tide pools',
+      body: 'Agent can chart the tide pools so that the survey has a baseline.',
+      assignee: 'Riverbend',
+      assigneeKind: 'agent',
+      author: { id: RIVERBEND, name: 'Riverbend', kind: 'agent' },
+    });
+    for (const stream of [perKey, mux]) {
+      await waitFor(() => stream.frames.find((f) => f.event === 'task.created'), {
+        describe: 'the board event to reach a bystander agent',
+      });
+    }
+    const presenceOn = (stream: { frames: Frame[] }) =>
+      stream.frames.filter((f) => f.event === AGENT_LISTENING_EVENT).map((f) => f.data?.agentId);
+    expect({ perKey: presenceOn(perKey), mux: presenceOn(mux) }).toEqual({ perKey: [], mux: [] });
+
+    for (const stream of [board, perKey, mux]) await stream.stop();
+  });
+});
+
+describe('SseBus.broadcastTransient skipAgentStreams', () => {
+  const sinkOf = (log: string[]) => ({
+    write: (event: string) => {
+      log.push(event);
+    },
+    close: () => {},
+  });
+
+  it('reaches tabs and skips agents only when asked', () => {
+    const bus = new SseBus();
+    const tab: string[] = [];
+    const agent: string[] = [];
+    bus.add('ws~w-1', sinkOf(tab));
+    bus.add('ws~w-1', sinkOf(agent), undefined, RIVERBEND);
+    const frame = agentListeningFrame('w-1', HARBORLIGHT, true);
+    expect(bus.broadcastTransient('ws~w-1', frame, { skipAgentStreams: true })).toBe(1);
+    expect(tab).toEqual([AGENT_LISTENING_EVENT]);
+    expect(agent).toEqual([]);
+    // The default is unchanged — a meeting transcript still reaches everyone.
+    expect(bus.broadcastTransient('ws~w-1', frame)).toBe(2);
+    expect(agent).toEqual([AGENT_LISTENING_EVENT]);
   });
 });
