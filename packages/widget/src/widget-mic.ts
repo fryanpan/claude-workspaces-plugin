@@ -53,6 +53,19 @@ const MIC_CSS = [
   // appear. Beside the button, toward the page.
   '[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:56px;top:50%;transform:translateY(-50%);white-space:nowrap;background:#1b1f23;color:#fff;font-size:12px;line-height:1.3;padding:6px 10px;border-radius:6px;pointer-events:none}',
   '.readout{position:fixed;right:78px;bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px,calc(env(safe-area-inset-bottom) + 74px)));max-width:min(320px,calc(100vw - 110px));background:#1b1f23;color:#fff;border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.4;z-index:2147483647}',
+  // The capture's own states. `createVoiceCapture` puts a spinner in the
+  // readout while a post is in flight and takes the long form for a
+  // paragraph-length answer; the app's rules for both are in
+  // `workspaces-app/src/styles.css` and no sheet out there crosses a shadow
+  // boundary, so the same two states are spelled again here. Values, not the
+  // app's custom properties, for the same reason.
+  '.readout.voice-indicator--busy{display:flex;align-items:center;gap:8px}',
+  '.readout.voice-indicator--long{white-space:normal;max-height:min(40vh,320px);overflow-y:auto;-webkit-overflow-scrolling:touch}',
+  '.voice-spinner{flex:none;width:14px;height:14px;border:2px solid #d0d7de;border-top-color:#2e7dd7;border-radius:50%;animation:cw-voice-spin .8s linear infinite}',
+  '@keyframes cw-voice-spin{to{transform:rotate(360deg)}}',
+  // Asking for less motion keeps the mark and drops the rotation.
+  '@media (prefers-reduced-motion:reduce){.voice-spinner{animation:none;opacity:.8}}',
+  // Last, so a hidden readout stays hidden however the capture has classed it.
   '.readout.hidden{display:none}',
 ].join('');
 

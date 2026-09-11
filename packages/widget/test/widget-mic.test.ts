@@ -78,6 +78,27 @@ describe('the mic a host adds to the widget', () => {
     expect(list.classList.contains('side')).toBe(true);
   });
 
+  it('styles the states the capture puts on the readout', () => {
+    // `createVoiceCapture` classes the readout busy while a post is in flight
+    // and long for a paragraph-length answer, and puts a spinner inside it.
+    // The app's rules for all three live in a document stylesheet, which
+    // cannot cross into this shadow root — so the sheet the mic injects has
+    // to carry them, or the wait shows nothing and a long answer runs off.
+    const el = fakeWidget();
+    const { readout } = addMic(el, LABELS);
+    readout.classList.remove('hidden');
+    const spinner = document.createElement('span');
+    spinner.className = 'voice-spinner';
+    readout.append(spinner);
+    readout.classList.add('voice-indicator--busy', 'voice-indicator--long');
+    expect(getComputedStyle(readout).display, 'the spinner sits beside the words').toBe('flex');
+    expect(getComputedStyle(readout).overflowY, 'a long answer scrolls').toBe('auto');
+    expect(getComputedStyle(spinner).width, 'and the spinner has a size').toBe('14px');
+    // And hidden still wins: a readout the capture has cleared stays gone.
+    readout.classList.add('hidden');
+    expect(getComputedStyle(readout).display).toBe('none');
+  });
+
   it('is idempotent — a second call hands back the first mic', () => {
     // A capture is wired to exactly one button; a second button would be a
     // mic nothing listens to.
