@@ -36,6 +36,14 @@
  * counts on any mention, since code that names the widget is how a page mounts
  * it programmatically.
  *
+ * But only a script the browser would RUN. A `type` that is not JavaScript or
+ * `module` makes the element a data block — JSON, an import map, a template —
+ * whose `src` is never fetched and whose body is never executed, so it can
+ * mount nothing whatever it names. A mock carrying board.css as JSON was
+ * served without a widget for exactly that selector. Parameters are ignored
+ * where the spec would refuse them (`text/javascript; charset=…`): that errs
+ * toward "already embedded", the same side as below.
+ *
  * One left-to-right alternation rather than stripping each kind in turn, so
  * whichever span OPENS first owns the text up to its close — a `<!--` inside a
  * script string cannot swallow the embed after it, which it would if comments
@@ -46,13 +54,59 @@ const OPAQUE =
   /<!--[\s\S]*?-->|<style(?=[\s/>])[^>]*>[\s\S]*?<\/style\s*>|<script(?=[\s/>])([^>]*)>([\s\S]*?)<\/script\s*>/gi;
 const EMBED_IN_MARKUP = /<claude-feedback-widget\b|<script\b[^>]*widget\.iife\.js/i;
 const EMBED_IN_SCRIPT = /claude-feedback-widget|widget\.iife\.js|FeedbackWidget\s*\.\s*init/i;
-/** A script tag's attributes embed only through `src`; a `data-*` naming the widget mounts nothing. */
-const BUNDLE_SRC = /\bsrc\s*=\s*["']?[^"'\s>]*widget\.iife\.js/i;
+const BUNDLE = /widget\.iife\.js/i;
+
+/** One attribute, name then an optional double-, single- or un-quoted value. */
+const ATTR = /([^\s"'>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+
+/** The value of the first attribute called `name` — the one a browser keeps. */
+function attr(attrs: string, name: string): string | undefined {
+  for (const [, key, dq, sq, bare] of attrs.matchAll(ATTR)) {
+    if (key?.toLowerCase() === name) return dq ?? sq ?? bare ?? '';
+  }
+  return undefined;
+}
+
+/** The HTML spec's JavaScript MIME type essences, plus `module`. */
+const RUNNABLE = new Set([
+  'module',
+  'application/ecmascript',
+  'application/javascript',
+  'application/x-ecmascript',
+  'application/x-javascript',
+  'text/ecmascript',
+  'text/javascript',
+  'text/javascript1.0',
+  'text/javascript1.1',
+  'text/javascript1.2',
+  'text/javascript1.3',
+  'text/javascript1.4',
+  'text/javascript1.5',
+  'text/jscript',
+  'text/livescript',
+  'text/x-ecmascript',
+  'text/x-javascript',
+]);
+
+/**
+ * Whether a browser would execute a `<script>` with these attributes. A type
+ * holding a character reference (`text&#x2f;javascript`) is not decoded here,
+ * so it counts as runnable — the "already embedded" side again.
+ */
+function runs(attrs: string): boolean {
+  const type = attr(attrs, 'type')?.split(';')[0]?.trim().toLowerCase();
+  return !type || type.includes('&') || RUNNABLE.has(type);
+}
 
 function alreadyEmbedded(html: string): boolean {
   let byScript = false;
   const markup = html.replace(OPAQUE, (_span, attrs?: string, body?: string) => {
-    if (attrs !== undefined && (BUNDLE_SRC.test(attrs) || EMBED_IN_SCRIPT.test(body ?? '')))
+    // A script's attributes embed only through `src`; a `data-*` naming the widget mounts nothing.
+    if (
+      attrs !== undefined &&
+      runs(attrs) &&
+      (BUNDLE.test(attr(attrs, 'src') ?? '') || EMBED_IN_SCRIPT.test(body ?? ''))
+    )
       byScript = true;
     return ' ';
   });
