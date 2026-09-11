@@ -451,6 +451,7 @@ def check_remote_owner() -> None:
          "ssh URL with a port and a trailing slash"),
         ("/srv/harborlight/riverbend.git", "", "a local path names a folder, not an account"),
         ("file:///srv/harborlight/riverbend.git", "", "so does a file:// URL"),
+        ("C:/srv/harborlight/riverbend.git", "", "so does a Windows drive path"),
         ("https://example.invalid/riverbend.git", "", "a URL with no owner segment"),
         ("", "", "no origin at all"),
     ]

@@ -181,8 +181,9 @@ def remote_owner(url: str) -> str:
         if scheme.lower() == "file" or "/" not in rest:
             return ""
         path = rest.split("/", 1)[1]
-    elif re.match(r"^[^/:]+:", url):
+    elif re.match(r"^[^/:]+:", url) and not re.match(r"^[A-Za-z]:", url):
         # git's scp-like form, `[user@]host:path` — a colon before any slash.
+        # A one-letter "host" is a Windows drive, which git reads as a path.
         path = url.split(":", 1)[1]
     else:
         return ""
