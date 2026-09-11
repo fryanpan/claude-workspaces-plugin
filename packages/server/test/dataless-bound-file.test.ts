@@ -66,7 +66,7 @@ describe('a bound file that is not downloaded', () => {
   let dataless: boolean;
   /** Pool reads of the bound file, refused or not — the poll's retries. */
   let poolReads: number;
-  /** Every console line, rendered, and whether any argument was an Error. */
+  /** Every console line, rendered, and how many of ours carried an Error. */
   let lines: string[];
   let stackTraces: number;
   let restores: Array<() => void>;
@@ -104,11 +104,16 @@ describe('a bound file that is not downloaded', () => {
       }
       return (realReadFile as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
     }) as typeof fsp.readFile);
+    // Only lines about this file count as stack traces: the server suite
+    // shares a process, and another file's leftover timers log their own.
+    const ours = (line: string) =>
+      line.includes('EDEADLK') || line.includes(DOC_ID) || line.includes(scratch);
     const capture = (...args: unknown[]) => {
-      if (args.some((a) => a instanceof Error)) stackTraces++;
-      lines.push(
-        args.map((a) => (a instanceof Error ? (a.stack ?? a.message) : String(a))).join(' '),
-      );
+      const line = args
+        .map((a) => (a instanceof Error ? (a.stack ?? a.message) : String(a)))
+        .join(' ');
+      if (args.some((a) => a instanceof Error) && ours(line)) stackTraces++;
+      lines.push(line);
     };
     const consoles = (['error', 'warn', 'log'] as const).map((level) =>
       spyOn(console, level).mockImplementation(capture),
