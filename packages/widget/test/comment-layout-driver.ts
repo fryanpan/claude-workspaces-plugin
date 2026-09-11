@@ -52,8 +52,8 @@ export interface Look {
   savedText: [number, number, number] | null;
   /** The mode's own buttons that are painted: the FAB and the list. */
   controls: Box[];
-  /** The visual viewport: its offset from the top, and its height. */
-  vv: [number, number];
+  /** The visual viewport: its top offset and height, then its left offset and width. */
+  vv: [number, number, number, number];
   /** Each leader line's two ends. */
   lines: Array<[number, number, number, number]>;
   /** The banner when it is painted, else null. */
@@ -171,7 +171,7 @@ const LOOK = `(() => {
       return [t.getBoundingClientRect().height, line, t.scrollHeight];
     })(),
     controls: [...sr.querySelectorAll('.fab, .fab-list')].map(box).filter(Boolean),
-    vv: [Math.round(visualViewport.offsetTop), Math.round(visualViewport.height)],
+    vv: [visualViewport.offsetTop, visualViewport.height, visualViewport.offsetLeft, visualViewport.width].map(Math.round),
     lines,
     banner: box(b),
     tick: !!t && !t.hidden,

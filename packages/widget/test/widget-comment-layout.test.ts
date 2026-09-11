@@ -172,12 +172,18 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
 
     it('keeps the card inside the visual viewport, not the layout viewport', () => {
       const l = look(1180, 'zoomed');
-      const [top, height] = l.vv;
+      const [top, height, left, width] = l.vv;
       expect(top, 'CONTROL: the visible part starts below the layout top').toBeGreaterThan(100);
       expect(height, 'CONTROL: and is shorter than the window').toBeLessThan(820);
       const card = box(l.card);
       expect(card[1]).toBeGreaterThanOrEqual(top);
       expect(card[3]).toBeLessThanOrEqual(top + height);
+      // Sideways too: zoomed in, the window's right edge is off screen.
+      expect(left + width, 'CONTROL: the right edge of the window is off screen').toBeLessThan(
+        1164,
+      );
+      expect(card[0]).toBeGreaterThanOrEqual(left);
+      expect(card[2]).toBeLessThanOrEqual(left + width);
     });
 
     it('stays clear of the FAB and the list button for an element low on the screen', () => {
