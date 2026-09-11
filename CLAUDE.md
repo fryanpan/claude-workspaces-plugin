@@ -81,13 +81,13 @@ bun run verify --bail                 # stop at the first failure
 ```
 
 **One command, not a list you pick from.** This section used to name four
-gates. CI runs fifteen you can run locally, and a builder who ran the four and
-pushed went red on `loc:audit` — a doc comment had taken a file from 496 to
-504 lines. A list drifts the moment somebody adds a CI step; `bun run verify`
-is the set, `scripts/verify.ts` is where it is written down, and
-`bun run verify:parity` — a member of the run AND a step of CI's `gates` job —
-fails if ci.yml gains a gate that is not a member, in ANY of its jobs. That is
-what keeps this paragraph true.
+gates. CI runs every gate `bun run verify --list` names, and a builder who
+ran the four and pushed went red on `loc:audit` — a doc comment had taken a
+file from 496 to 504 lines. A list drifts the moment somebody adds a CI step;
+`bun run verify` is the set, `scripts/verify.ts` is where it is written down,
+and `bun run verify:parity` — a member of the run AND a step of CI's `gates`
+job — fails if ci.yml gains a gate that is not a member, in ANY of its jobs.
+That is what keeps this paragraph true.
 
 CI is four jobs (`gates`, `client`, `server`, `coverage`) so that a verdict
 takes about ninety seconds rather than eleven minutes; `bun run verify` is
