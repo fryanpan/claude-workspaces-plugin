@@ -4,12 +4,17 @@ import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-
 /**
  * The tidy-up offer's stylesheet contract (meeting-cleanup-offer.ts).
  *
- * The offer is the one control a finished meeting leaves on the page, and the
- * device it is pressed on is an iPad held at arm's length. So what is read
- * here is what a finger needs: that the button is a target rather than a link
- * of text, that it reads as a control at rest (hover is not an answer on a
- * touch screen), and that a refusal message goes UNDER the controls at phone
- * width instead of squeezing them.
+ * THE CASE THIS FILE EXISTS FOR IS THE FIRST ONE. The offer shipped as a row
+ * at the end of the prose whose `display: flex` outranked the UA's `[hidden]`
+ * rule, so it stood open at the end of EVERY doc — including docs that had
+ * never held a recording — overlapping the notes and doing nothing when it
+ * was pressed. Every logic test passed throughout: they read the `hidden`
+ * PROPERTY, which was set correctly the whole time. Only the cascade knew.
+ *
+ * The rest is what a finger needs, because the device it is pressed on is an
+ * iPad held at arm's length: that the answers are targets rather than lines
+ * of text, and that they read as controls at rest — hover is not an answer on
+ * a touch screen.
  *
  * Read off the cascade rather than the file's text: a rule that exists and
  * never reaches the element is what a regex cannot tell from one that works.
@@ -25,57 +30,71 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-const offerRow = (): HTMLElement => attach('cleanup-offer');
-const goIn = (row: HTMLElement): HTMLElement =>
-  attach('cleanup-offer-go', { tag: 'button', parent: row });
+const scrim = (attrs?: Record<string, string>): HTMLElement =>
+  attach('cleanup-offer', attrs ? { attrs } : {});
+const goIn = (root: HTMLElement): HTMLElement =>
+  attach('cleanup-offer-go', { tag: 'button', parent: root });
 
 describe('the offer at the end of a finished meeting', () => {
-  it('is a target for a finger, not a line of text', () => {
-    const go = styleOf(goIn(offerRow()));
+  it('paints nothing at all until a recording has ended', () => {
+    // Positive control: a sibling overlay whose `[hidden]` pair is correct
+    // reads `none` through the same harness, so a `none` here is the rule
+    // working rather than the cascade never arriving.
+    expect(styleOf(attach('meeting-strip', { attrs: { hidden: '' } })).display).toBe('none');
+    expect(styleOf(scrim({ hidden: '' })).display).toBe('none');
+    // …and it is a real rule being overridden, not an element nothing reaches:
+    // shown, the same selector lays out the dialog.
+    expect(styleOf(scrim()).display).toBe('flex');
+  });
+
+  it('is a modal over the notes, not a row in the prose', () => {
+    const root = styleOf(scrim());
+    expect(root.position).toBe('fixed');
+    expect(root.alignItems).toBe('center');
+    expect(root.justifyContent).toBe('center');
+    // A scrim: the notes are visible behind the question they are about.
+    expect(root.background).toContain('rgba(27, 31, 35, 0.45)');
+  });
+
+  it('sits above every layer that could be open when a recording ends', () => {
+    // A recording ends on its own clock, so it can land while a thread modal
+    // or the thread view is open. Under them this would be an invisible
+    // dialog holding the focus, whose Escape closed the layer the person can
+    // actually see.
+    const zOf = (el: HTMLElement): number => Number(styleOf(el).zIndex);
+    const ours = zOf(scrim());
+    for (const under of ['thread-modal', 'thread-modal-scrim', 'thread-view']) {
+      expect(ours).toBeGreaterThan(zOf(attach(under)));
+    }
+    // Positive control: those layers do carry a z-index of their own, so the
+    // comparison is against a number rather than against `auto` read as NaN.
+    expect(zOf(attach('thread-modal'))).toBeGreaterThan(0);
+  });
+
+  it('gives each answer a target for a finger, not a line of text', () => {
+    const go = styleOf(goIn(scrim()));
     // Padding rather than a fixed height, so a label that wraps on the phone
     // grows the target instead of centring a box inside it.
-    expect(go.paddingTop).toBe('9px');
-    expect(go.paddingBottom).toBe('9px');
-    expect(go.paddingLeft).toBe('14px');
+    // 12px each side over the 20px line box clears the 44px floor a finger
+    // needs; the 9px this shipped with measured 40px on the iPad.
+    expect(go.paddingTop).toBe('12px');
+    expect(go.paddingBottom).toBe('12px');
+    expect(go.paddingLeft).toBe('16px');
     expect(go.cursor).toBe('pointer');
   });
 
   it('reads as a control at rest — a border, not a hover', () => {
-    const go = styleOf(goIn(offerRow()));
+    const go = styleOf(goIn(scrim()));
     expect(go.borderStyle).toBe('solid');
     expect(go.borderTopWidth).toBe('1px');
     // Positive control: a bare button the cascade never reaches reads none.
     expect(styleOf(attach('', { tag: 'button' })).borderStyle).not.toBe('solid');
   });
 
-  it('lays the controls in a row, and the row sits under the notes', () => {
-    const row = styleOf(offerRow());
-    expect(row.display).toBe('flex');
-    expect(row.alignItems).toBe('center');
-    // A gap from the last note, not against it.
-    expect(row.marginTop).toBe('14px');
-  });
-
-  it('hugs the last note instead of sitting below the click-to-type runway', () => {
-    // The first headless render at 430 put the offer a full screen below the
-    // notes: `#editor > .ProseMirror` carries a 60vh floor so an empty doc is
-    // clickable, and the offer is appended after it.
-    const editor = attach('', { attrs: { id: 'editor' } });
-    const prose = attach('ProseMirror', { parent: editor });
-    // Control: with no offer showing, the runway is still there.
-    expect(styleOf(prose).minHeight).not.toBe('auto');
-    attach('cleanup-offer', { parent: editor });
-    expect(styleOf(prose).minHeight).toBe('auto');
-  });
-
-  it('lets a refusal message drop below the controls at phone width', () => {
+  it('lets the two answers wrap rather than shrink at phone width', () => {
     setViewport(PHONE);
-    const row = offerRow();
-    const note = attach('cleanup-offer-note', { parent: row });
-    expect(styleOf(row).flexWrap).toBe('wrap');
-    expect(styleOf(note).flexBasis).toBe('100%');
-    // …and not on the tablet, where they fit on one line.
-    setViewport(IPAD);
-    expect(styleOf(offerRow()).flexWrap).toBe('nowrap');
+    const actions = attach('cleanup-offer-actions', { parent: scrim() });
+    expect(styleOf(actions).flexWrap).toBe('wrap');
+    expect(styleOf(actions).justifyContent).toBe('flex-end');
   });
 });
