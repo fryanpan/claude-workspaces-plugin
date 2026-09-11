@@ -24,6 +24,12 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { type CaptureMode, normalizeSpeakerName, parseCaptureMode } from '@claude-workspaces/core';
 import {
+  DEFAULT_MEETING_RETENTION,
+  type MeetingRetention,
+  meetingRetentionKeeps,
+  parseMeetingRetention,
+} from './meeting-home.ts';
+import {
   AudioSink,
   type DocInfoResolver,
   type MeetingJsonAudio,
@@ -100,6 +106,18 @@ export interface MeetingRecord {
    * companion.
    */
   gaps?: MeetingGap[];
+  /**
+   * How much of this meeting its project chose to keep, as it stood when the
+   * meeting started.
+   *
+   * On the record because it is the only thing that explains an empty
+   * transcript. A meeting whose project keeps nothing reads, on disk and in
+   * every list, exactly like one where the engine failed and nobody noticed
+   * — and those two want opposite responses from whoever finds them. Absent
+   * reads as `transcripts-and-audio`, which is what every meeting recorded
+   * before this field existed actually kept.
+   */
+  retention?: MeetingRetention;
 }
 
 /** One stretch of a meeting during which one capture delivered nothing. */
@@ -214,6 +232,9 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
           ? { source: parseMeetingSource(row.source) as MeetingSource }
           : {}),
         ...(typeof row.participant === 'string' ? { participant: row.participant } : {}),
+        ...(parseMeetingRetention(row.retention) !== null
+          ? { retention: parseMeetingRetention(row.retention) as MeetingRetention }
+          : {}),
       });
       continue;
     }
@@ -368,18 +389,41 @@ export interface ActiveMeeting {
 export class MeetingStore {
   private readonly live = new Map<string, ActiveMeeting>();
   private readonly docInfo: DocInfoResolver;
+  private readonly retentionOf: (docId: string) => MeetingRetention;
 
   /**
    * `docInfo` is how the raw companion learns the doc's bound path and
    * title — resolved at meeting start and stop, never cached, so a doc that
    * moved between two meetings is tied to where it is now. Absent (a test,
    * a bare store) the companion is named after the doc id.
+   *
+   * `retention` is the PROJECT's choice, asked once per meeting at start, and
+   * it decides what this store writes rather than what it later removes.
+   * Absent, every meeting keeps everything, which is what this store did
+   * before a project could say otherwise.
    */
   constructor(
     private readonly dataDir: string,
-    opts: { docInfo?: DocInfoResolver } = {},
+    opts: { docInfo?: DocInfoResolver; retention?: (docId: string) => MeetingRetention } = {},
   ) {
     this.docInfo = opts.docInfo ?? (() => undefined);
+    this.retentionOf = opts.retention ?? (() => DEFAULT_MEETING_RETENTION);
+  }
+
+  /**
+   * What this doc's project keeps, never throwing.
+   *
+   * A resolver that fails must not stop a meeting from starting, and the
+   * fallback is the permissive default for the reason the default gives: a
+   * lookup failure is not a project asking to lose its transcript.
+   */
+  private retentionFor(docId: string): MeetingRetention {
+    try {
+      return this.retentionOf(docId);
+    } catch (err) {
+      console.error(`[meeting] retention for ${docId} failed; keeping everything:`, err);
+      return DEFAULT_MEETING_RETENTION;
+    }
   }
 
   /** The doc's path and title as best the server knows, never throwing. */
@@ -434,6 +478,7 @@ export class MeetingStore {
       meetingId = `${meetingIdFor(docId, startedAt)}-${n}`;
       transcriptPath = meetingTranscriptPath(dataDir, docId, meetingId);
     }
+    const retention = this.retentionFor(docId);
     appendLine(meetingIndexPath(dataDir, docId), {
       meetingId,
       docId,
@@ -444,11 +489,16 @@ export class MeetingStore {
       segment,
       source,
       ...(args.participant !== undefined ? { participant: args.participant } : {}),
+      retention,
     });
     // Create the file at start so a meeting nobody spoke in still reads back
-    // as an empty transcript rather than a missing one.
-    mkdirSync(dirname(transcriptPath), { recursive: true });
-    appendFileSync(transcriptPath, '');
+    // as an empty transcript rather than a missing one — unless the project
+    // keeps no transcript, in which case an empty file would be this server
+    // creating the very artifact it was told not to.
+    if (meetingRetentionKeeps(retention, 'transcript')) {
+      mkdirSync(dirname(transcriptPath), { recursive: true });
+      appendFileSync(transcriptPath, '');
+    }
     return this.open({
       docId,
       meetingId,
@@ -460,6 +510,7 @@ export class MeetingStore {
       source,
       ...(args.participant !== undefined ? { participant: args.participant } : {}),
       seed: [],
+      retention,
     });
   }
 
@@ -523,6 +574,10 @@ export class MeetingStore {
       // and the dedupe map that keeps a re-settled turn from doubling.
       seed: readTranscript(dataDir, docId, meetingId),
       resumedAt,
+      // The choice the meeting STARTED under, not the one the project holds
+      // now: half a conversation kept and half not is a record nobody can
+      // read, and a resume is the same recording.
+      retention: record.retention ?? DEFAULT_MEETING_RETENTION,
     });
   }
 
@@ -545,18 +600,25 @@ export class MeetingStore {
     seed: readonly TranscriptTurn[];
     /** When this leg picked the meeting up; absent on a fresh meeting. */
     resumedAt?: number;
+    /** What this meeting's project keeps — decided at start, fixed for its life. */
+    retention: MeetingRetention;
   }): ActiveMeeting {
     const { docId, meetingId, startedAt, segment, engine, sampleRate, mode, source } = args;
+    const retention = args.retention;
+    const keepTranscript = meetingRetentionKeeps(retention, 'transcript');
+    const keepAudio = meetingRetentionKeeps(retention, 'audio');
     const participant = args.participant;
     const dataDir = this.dataDir;
     const transcriptPath = meetingTranscriptPath(dataDir, docId, meetingId);
     // The tie back to the doc, written before a word arrives: a folder whose
     // meeting never reaches stop still says which doc it belongs to.
     const info = this.infoFor(docId);
-    try {
-      ensureMeetingJson(dataDir, docId, info);
-    } catch (err) {
-      console.error(`[meeting] meeting.json for ${docId} not written:`, err);
+    if (keepTranscript) {
+      try {
+        ensureMeetingJson(dataDir, docId, info);
+      } catch (err) {
+        console.error(`[meeting] meeting.json for ${docId} not written:`, err);
+      }
     }
     /** One open audio file per stream, opened on the first frame of each. */
     const sinks = new Map<string, AudioSink>();
@@ -592,6 +654,14 @@ export class MeetingStore {
       turnBase,
       recordTurn(turn: number, text: string, speaker?: string): void {
         if (stopped) return;
+        // Counted either way — `turns` is how long the meeting was, which the
+        // project did not ask to forget — but written only when the project
+        // keeps the words. The composer still sees every turn: it is handed
+        // them by the relay, not read back off this file.
+        if (!keepTranscript) {
+          written.set(turn, { text, speaker });
+          return;
+        }
         const prior = written.get(turn);
         // An engine that settles the same turn twice with the same words and
         // the same label would otherwise double it in the record, and
@@ -650,7 +720,7 @@ export class MeetingStore {
         appendLine(meetingIndexPath(dataDir, docId), { meetingId, gapStream: stream, gapTo: ts });
       },
       recordAudio(chunk: Uint8Array, stream = 'mic'): void {
-        if (stopped || chunk.byteLength === 0) return;
+        if (stopped || chunk.byteLength === 0 || !keepAudio) return;
         let sink = sinks.get(stream);
         if (!sink) {
           sink = new AudioSink(
@@ -675,6 +745,7 @@ export class MeetingStore {
           ...(Object.keys(speakers).length > 0 ? { speakers: { ...speakers } } : {}),
           segment,
           source,
+          retention,
           ...(participant !== undefined ? { participant } : {}),
           // Read back off the index rather than kept in a second place: the
           // lines this leg appended and the ones an earlier leg appended are
@@ -702,25 +773,29 @@ export class MeetingStore {
           if (entry) audio.push(entry);
         }
         sinks.clear();
+        // The companion is the transcript a person reads, so it follows the
+        // transcript's own rule: a project keeping no words gets no file of
+        // them in either shape.
         try {
-          flushRawSegments({
-            dataDir,
-            docId,
-            info: store.infoFor(docId),
-            liveMeetingIds: new Set([...live.values()].map((m) => m.meetingId)),
-            ended: {
-              meetingId,
-              audio,
-              // A resumed leg's words would otherwise never reach the raw
-              // companion: the segment for this meeting id may already be in
-              // `meeting.json` from the leg that ran before the restart, and
-              // a written segment is skipped. Told where this leg started,
-              // the flush appends the continuation instead of nothing.
-              ...(args.resumedAt !== undefined
-                ? { resumedFrom: turnBase, resumedAt: args.resumedAt }
-                : {}),
-            },
-          });
+          if (keepTranscript)
+            flushRawSegments({
+              dataDir,
+              docId,
+              info: store.infoFor(docId),
+              liveMeetingIds: new Set([...live.values()].map((m) => m.meetingId)),
+              ended: {
+                meetingId,
+                audio,
+                // A resumed leg's words would otherwise never reach the raw
+                // companion: the segment for this meeting id may already be in
+                // `meeting.json` from the leg that ran before the restart, and
+                // a written segment is skipped. Told where this leg started,
+                // the flush appends the continuation instead of nothing.
+                ...(args.resumedAt !== undefined
+                  ? { resumedFrom: turnBase, resumedAt: args.resumedAt }
+                  : {}),
+              },
+            });
         } catch (err) {
           console.error(`[meeting] raw transcript for ${docId} not written:`, err);
         }

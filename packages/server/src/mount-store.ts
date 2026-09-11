@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { repoIdentityAt } from './doc-key.ts';
 import { findWorktreeRoot } from './doc-origin-repo.ts';
+import type { MeetingHomeChoice, MeetingRetention } from './meeting-home.ts';
 import { type MountedDir, reconcileProject } from './mount-reconcile.ts';
 import {
   type FileEntry,
@@ -404,6 +405,43 @@ export class MountStore {
 
   setConventionsPath(repoKey: string, relPath: string): ProjectRecord {
     return this.registry.setConventionsPath(repoKey, relPath);
+  }
+
+  // ---- Where meetings file ------------------------------------------------
+
+  /** The project's meetings choice, or undefined when it has made none. */
+  meetingsOf(repoKey: string): MeetingHomeChoice | undefined {
+    return this.registry.meetingsOf(repoKey);
+  }
+
+  setMeetings(repoKey: string, choice: MeetingHomeChoice): ProjectRecord {
+    return this.registry.setMeetings(repoKey, choice);
+  }
+
+  /**
+   * Where this project's meetings land on disk, or null when it has not said.
+   *
+   * Null covers three different "no": no choice, no checkout to join the
+   * relative path to, and a relative path that escapes the root. All three
+   * mean the same thing to the caller — keep filing where meetings have
+   * always filed — and distinguishing them would only invite a caller to
+   * write into a path this store just refused.
+   */
+  meetingHome(
+    repoKey: string,
+  ): { relPath: string; abs: string; retention: MeetingRetention; gitignore: boolean } | null {
+    const choice = this.registry.meetingsOf(repoKey);
+    if (!choice) return null;
+    const root = this.rootFor(repoKey);
+    if (!root) return null;
+    const abs = join(root, choice.relPath);
+    if (!isWithinRoot(root, abs)) return null;
+    return {
+      relPath: choice.relPath,
+      abs,
+      retention: choice.retention,
+      gitignore: choice.gitignore,
+    };
   }
 }
 

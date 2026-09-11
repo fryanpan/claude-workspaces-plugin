@@ -1,4 +1,9 @@
-import { basename, extname } from 'node:path';
+import { basename, extname, join } from 'node:path';
+import {
+  MEETING_RETENTIONS,
+  applyMeetingGitignore,
+  parseMeetingRetention,
+} from '../meeting-home.ts';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import { isMountableRelPath } from '../mount-scan.ts';
@@ -272,6 +277,63 @@ export async function handleMountRoutes(
         conventionsPath: project.conventionsPath,
       });
     }
+  }
+
+  // --- Where this project's meetings file, and what it keeps ---
+  //
+  // One PUT for all three, because they are one decision: a project saying
+  // "meetings go in docs/meetings, keep the words, keep them out of git" is
+  // answering a single question, and three routes would let a caller land
+  // half of it. `retention` and `gitignore` are optional only so a caller
+  // moving the folder need not restate a choice it already made.
+  if (pathname === '/api/mounts/meetings' && req.method === 'PUT') {
+    const body = await safeJson(req);
+    const path = readPath(body);
+    const relPath = typeof body?.meetingsPath === 'string' ? body.meetingsPath.trim() : '';
+    if (!path) return j(400, { error: 'path must be an absolute filesystem path' });
+    // The shape a mount takes, and for the same reason: this becomes a
+    // directory this server WRITES into, so a `..` here is an arbitrary
+    // write wearing a settings write's clothes.
+    if (!isMountableRelPath(relPath) || relPath.endsWith('/')) {
+      return j(400, {
+        error: 'meetingsPath must be a repo-relative folder with no .. and no dot-directory',
+      });
+    }
+    const at = mounts.locate(path);
+    if (!at) return j(400, { error: 'not-a-repo', path });
+    const current = mounts.meetingsOf(at.repoKey);
+    const retention =
+      body?.retention === undefined
+        ? (current?.retention ?? 'transcripts-and-audio')
+        : parseMeetingRetention(body.retention);
+    if (retention === null) {
+      return j(400, { error: `retention must be one of ${MEETING_RETENTIONS.join(', ')}` });
+    }
+    const gitignore =
+      body?.gitignore === undefined ? (current?.gitignore ?? false) : body.gitignore === true;
+    const project = mounts.setMeetings(at.repoKey, { relPath, retention, gitignore });
+    // Mounted as well as recorded: rule 5 says a meeting lands in a MOUNTED
+    // folder, and a folder nobody mounted gives its files no address, so the
+    // Library would list a meeting it could not open.
+    const folderAbs = join(at.checkoutRoot, relPath);
+    const mounted = mounts.mount(folderAbs);
+    const gitignoreResult = applyMeetingGitignore(folderAbs, gitignore);
+    return j(200, {
+      ok: true,
+      repoKey: project.repoKey,
+      meetings: project.meetings,
+      mountId: mounted.ok ? mounted.mount.mountId : null,
+      ...(mounted.ok ? {} : { mountError: mounted.error }),
+      gitignoreResult,
+    });
+  }
+
+  if (pathname === '/api/mounts/meetings' && req.method === 'GET') {
+    const path = url.searchParams.get('path');
+    if (!path) return j(400, { error: 'path is required' });
+    const at = mounts.locate(path);
+    if (!at) return j(400, { error: 'not-a-repo', path });
+    return j(200, { repoKey: at.repoKey, meetings: mounts.meetingsOf(at.repoKey) ?? null });
   }
 
   return j(405, { error: 'method not allowed' });

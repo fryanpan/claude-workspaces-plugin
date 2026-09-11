@@ -52,7 +52,7 @@ function sources(over: Partial<LibrarySources> = {}): LibrarySources {
 }
 
 describe('buildLibrary', () => {
-  it('puts a doc that held a meeting, or a discussion huddle, under meetings — and a plan under files', () => {
+  it('puts a doc that held a meeting, and BOTH huddle kinds, under meetings', () => {
     const lib = buildLibrary(
       sources({
         docs: [
@@ -64,11 +64,15 @@ describe('buildLibrary', () => {
         lastMeetingAt: (id) => (id === 'd-sync' ? 9_000 : undefined),
       }),
     );
+    // A plan huddle is a meeting too: "Make a plan" and "have a meeting" are
+    // two ways into one conversation, and a person hunting for it presses
+    // neither button again — they open the meetings list.
     expect(lib.meetings.map((r) => [r.name, r.at])).toEqual([
       ['Harborlight weekly sync', 9_000],
+      ['Saltmarsh plan', 1_000],
       ['Trail map review', 1_000],
     ]);
-    expect(lib.files.map((r) => r.name)).toEqual(['Volunteer handbook', 'Saltmarsh plan']);
+    expect(lib.files.map((r) => r.name)).toEqual(['Volunteer handbook']);
     expect(lib.meetings[0]?.href).toBe('/workspaces/w-test/docs/d-sync');
   });
 

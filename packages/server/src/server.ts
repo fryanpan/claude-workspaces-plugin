@@ -34,7 +34,7 @@ import { createHomePane } from './home-pane.ts';
 import { spokenReviewComment } from './huddle.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
-import { createMarkdownLister } from './library.ts';
+import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
@@ -117,6 +117,7 @@ import {
 import { createUpgradeStream } from './routes/upgrade-stream.ts';
 import { type LibraryRoutesContext, handleLibraryRoutes } from './routes/workspace-library.ts';
 import {
+  type MeetingHomeResolution,
   type WorkspaceRoutesContext,
   handleWorkspaceAttachmentRoutes,
   handleWorkspaceDeleteRoute,
@@ -1823,6 +1824,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
   };
 
+  /**
+   * Where a board's meetings file: its project, and what that project chose.
+   *
+   * The project is read the same way the Library reads it — the repo holding
+   * most of this board's own docs — rather than stored beside the board,
+   * because a board has no repo field and a second answer to "which project
+   * is this" is a second answer that can drift from the first.
+   */
+  const meetingHomeFor = (workspaceId: string): MeetingHomeResolution | null => {
+    const board = taskStore.getWorkspace(workspaceId);
+    if (!board) return null;
+    const ids = new Set(board.docIds);
+    const repoKey = projectRepoKey(
+      docStore.list().filter((m) => ids.has(m.docId)),
+      (docId) => docStore.repos.primaryKeyFor(docId),
+    );
+    if (!repoKey) return null;
+    const home = mountStore.meetingHome(repoKey);
+    return home ? { repoKey, ...home } : null;
+  };
+
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
   const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
 
@@ -2036,6 +2058,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspacesOfDoc: shareWorkspacesOf,
     watchKeyExists,
     keepMovingVerdicts: stallWiring.keepMoving,
+    meetingHomeFor,
   };
 
   /**

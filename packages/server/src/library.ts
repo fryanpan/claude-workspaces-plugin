@@ -255,10 +255,20 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
     const key = src.docKeyOf(meta.docId);
     const heldAt = src.lastMeetingAt(meta.docId);
-    const discussion = meta.huddle === true && meta.huddleKind !== 'plan';
+    /**
+     * Every huddle is a meeting, whichever button opened it.
+     *
+     * "Make a plan" and "have a meeting" are two ways into the same thing: a
+     * live conversation over a doc with no ticket behind it. A plan used to
+     * land under Files, which meant the one surface a person goes to for
+     * "where did that conversation go?" answered only half the time — and it
+     * was the half they had not pressed. Rule 5 of the docs decision counts
+     * both.
+     */
+    const isHuddle = meta.huddle === true;
     const keyRel = key ? parseDocKey(key)?.relPath : undefined;
     const name = meta.title?.trim() || (keyRel ? posix.basename(keyRel) : meta.docId);
-    if (heldAt !== undefined || discussion) {
+    if (heldAt !== undefined || isHuddle) {
       const href = docHref(src.workspaceId, meta);
       if (href) meetings.push({ name, at: heldAt ?? meta.createdAt, href });
       continue;
