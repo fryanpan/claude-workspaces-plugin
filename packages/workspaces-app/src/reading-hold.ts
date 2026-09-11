@@ -175,19 +175,38 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
    * correction from here still lands in the frame that resized.
    */
   const sizes = new ResizeObserver(hold);
+  /** Observed already — a live transcript retypes its last turn dozens of
+   *  times a minute, and re-walking the whole doc on each of those would make
+   *  the hold cost grow with the length of the meeting. */
+  const watched = new WeakSet<Element>();
   function watchBlocks(): void {
-    // `border-box`: what displaces the flow is the block's outer height, and
-    // the content box misses a change that is all padding — the shape a line
-    // added above the fold leaves when the browser lays it out as box spacing.
-    for (const block of blocks()) sizes.observe(block, { box: 'border-box' });
+    for (const block of blocks()) {
+      if (watched.has(block)) continue;
+      watched.add(block);
+      // `border-box`: what displaces the flow is the block's outer height, and
+      // the content box misses a change that is all padding — the shape a line
+      // added above the fold leaves when the browser lays it out as box
+      // spacing.
+      sizes.observe(block, { box: 'border-box' });
+    }
   }
   scope.onCleanup(() => sizes.disconnect());
 
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver((records) => {
     hold();
-    // Blocks the tick just wrote are new elements; they have to be watched
-    // for the image that has not loaded yet.
-    watchBlocks();
+    let structural = false;
+    for (const rec of records) {
+      if (rec.addedNodes.length > 0) structural = true;
+      // A `ResizeObserver` holds its targets, so a block the tick replaced
+      // would be kept alive by this one for as long as the doc is open.
+      for (const gone of Array.from(rec.removedNodes)) {
+        if (gone instanceof Element) sizes.unobserve(gone);
+      }
+    }
+    // Blocks the tick just wrote are new elements; they have to be watched for
+    // the image that has not loaded yet. Retyped text is not — the walk only
+    // happens where something was added.
+    if (structural) watchBlocks();
   });
   observer.observe(scroller, { childList: true, subtree: true, characterData: true });
   scope.onCleanup(() => observer.disconnect());
