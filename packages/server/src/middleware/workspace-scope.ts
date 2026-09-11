@@ -156,8 +156,23 @@ export interface WorkspaceScopeDeps<TBoard = unknown> {
    * tab. Optional: a caller with no page surface (the unit tests, and any
    * future embedder) falls back to `j`, which is the right answer when there
    * is no page to render.
+   *
+   * It is handed the ADDRESS rather than nothing, so the page it renders can
+   * link back to the board the reader was already on. A not-found page whose
+   * only way out is the server root sends them through a list to find a board
+   * they had in the URL bar.
+   *
+   * And it is told WHICH of the two refusals this is, because the board link
+   * is only an escape route when the board is there. `boardExists: false`
+   * means the id in the path names no board at all, and a page inviting the
+   * reader to open it hands them a second dead end; the caller renders the
+   * board's own not-found page for that case instead.
    */
-  notFoundPage?: () => Response;
+  notFoundPage?: (address: {
+    workspaceId: string;
+    rest: string;
+    boardExists: boolean;
+  }) => Response;
 }
 
 /**
@@ -232,14 +247,21 @@ export function resolveWorkspaceScope<TBoard>(
    * member both confirmed, and a refusal renders as a page rather than JSON.
    */
   const page = isBoardPageRequest(method, rest, url);
-  const refuse = (status: number, body: unknown): WorkspaceScopeResult<TBoard> => ({
+  const refuse = (
+    status: number,
+    body: unknown,
+    boardExists: boolean,
+  ): WorkspaceScopeResult<TBoard> => ({
     kind: 'refused',
-    response: page && deps.notFoundPage ? deps.notFoundPage() : deps.j(status, body),
+    response:
+      page && deps.notFoundPage
+        ? deps.notFoundPage({ workspaceId, rest, boardExists })
+        : deps.j(status, body),
   });
 
   const board = deps.workspaceRecord(workspaceId);
   if (board === undefined) {
-    return refuse(404, { error: 'workspace not found' });
+    return refuse(404, { error: 'workspace not found' }, false);
   }
 
   // The member half. `<collection>/<memberId>[/<verb>…]` must name something
@@ -258,7 +280,7 @@ export function resolveWorkspaceScope<TBoard>(
     // answers `.includes`, and would then grant on any SUBSTRING match.
     // Refusing a non-array can only close, never open.
     if (!Array.isArray(owners) || !owners.includes(workspaceId)) {
-      return refuse(404, { error: 'not-found' });
+      return refuse(404, { error: 'not-found' }, true);
     }
   }
 
