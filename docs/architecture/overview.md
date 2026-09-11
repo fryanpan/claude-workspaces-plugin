@@ -793,6 +793,22 @@ exactly once, and nothing word-rate enters the SSE buffer.
 - [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.
 
+`meeting-home.ts` is the one new top-level module in the Meetings box, and it
+holds the two facts a meeting needs before anybody speaks: which folder of its
+project it files into, and how much of it that project chose to keep. The
+choice sits on the `ProjectRecord` the mount registry already keeps per
+project, beside privacy and the conventions path, because it is the same kind
+of thing — something the project decided and this server applies. The filing
+record beside it is one append-only line per meeting saying which board,
+project and lead seat the conversation belonged to, folded on read like
+`meetings.jsonl` next door. Retention is expressed as what is never WRITTEN,
+so nothing here deletes; `meetings.ts` asks it once at start and carries the
+answer on the meeting. `routes/mounts.ts` is the lead's door to the choice and
+`routes/doc-title.ts` is the fourth member of the docs chain, which is where a
+person renames the meeting the clock named. On the client `doc/doc-rename.ts`
+joins the existing `doc/` family in the view tier and adds no box: it makes
+the topbar title its own editor.
+
 ## Adding a file
 
 1. Name its layer first. If you cannot, it is doing two jobs.
