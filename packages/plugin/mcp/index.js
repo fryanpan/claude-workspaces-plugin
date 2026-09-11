@@ -15780,7 +15780,7 @@ var TOOL_LIST = {
     },
     {
       name: "find_and_replace",
-      description: "Replace plain text in a doc with other plain text. find matches the doc's plain text, not markdown, and marks are preserved. A find written as pipe-table row syntax matches table rows structurally. Disambiguate repeats with contextBefore, contextAfter or occurrence, or pass replaceAll. A no-match returns a hint quoting the doc's actual characters. replace stays inside one block, so block-level markdown in it is refused with block-markdown-in-replacement.",
+      description: "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15798,10 +15798,13 @@ var TOOL_LIST = {
             type: "boolean",
             description: "Replace every occurrence in one call, with marks carried per site. Mutually exclusive with `occurrence` and with `suggest`."
           },
-          parseInlineMarks: { type: "boolean" },
+          parseInlineMarks: {
+            type: "boolean",
+            description: "Read inline markdown in replace as marks: links, speaker tags, bold, italic, code and strikethrough. A direct edit defaults to false. A suggestion defaults to true, so pass false to offer literal characters."
+          },
           suggest: {
             type: "boolean",
-            description: "Propose the change instead of applying it. Returns { suggestionId } instead of ok:true."
+            description: "Propose the change instead of applying it. Returns { suggestionId } instead of ok:true. The offered text parses inline markdown unless parseInlineMarks is false."
           }
         },
         required: ["workspaceId", "docId", "find", "replace"]
@@ -15809,7 +15812,7 @@ var TOOL_LIST = {
     },
     {
       name: "rewrite_thread_region",
-      description: "Rewrite the text a thread is anchored to. Use it for comment-driven edits, where a person commented and you fix the range they commented on. The anchor resolves at apply time, so a concurrent edit does not break it. It returns anchor-orphaned when the text is gone, and find_and_replace is then the fallback.",
+      description: "Rewrite the text a thread is anchored to. Use it for comment-driven edits. The anchor resolves at apply time, so a concurrent edit does not break it. It returns anchor-orphaned when the text is gone; find_and_replace is the fallback. With suggest, replacement parses inline markdown unless parseInlineMarks is false.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15820,10 +15823,13 @@ var TOOL_LIST = {
           docId: { type: "string" },
           threadId: { type: "string" },
           replacement: { type: "string" },
-          parseInlineMarks: { type: "boolean" },
+          parseInlineMarks: {
+            type: "boolean",
+            description: "Read inline markdown in replacement as marks: links, speaker tags, bold, italic, code and strikethrough. A direct edit defaults to false. A suggestion defaults to true, so pass false to offer literal characters."
+          },
           suggest: {
             type: "boolean",
-            description: "Propose the rewrite instead of applying it. Returns { suggestionId } instead of ok:true."
+            description: "Propose the rewrite instead of applying it. Returns { suggestionId } instead of ok:true. The offered text parses inline markdown unless parseInlineMarks is false."
           }
         },
         required: ["workspaceId", "docId", "threadId", "replacement"]
@@ -16001,7 +16007,7 @@ var TOOL_LIST = {
     },
     {
       name: "apply_block_edits",
-      description: "Apply several block-addressed edits as ONE transaction. Use it whenever you make more than one change, because separate calls arrive in pieces and a failure halfway leaves half of it applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block that is no longer marked yours returns it as a suggestion for the person to accept.",
+      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion. Markdown in each edit is parsed either way.",
       inputSchema: {
         type: "object",
         properties: {
