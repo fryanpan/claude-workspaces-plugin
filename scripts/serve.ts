@@ -17,7 +17,8 @@
  * Modes:
  *   default     — DEV: server runs under `bun --watch` (hot-reload on any
  *                 imported change) + a workspaces-app bundler in --watch mode.
- *   --no-watch  — PROD: rebuilds the browser bundles once, publishes them as
+ *   --no-watch  — PROD: installs dependencies from bun.lock, rebuilds the
+ *                 browser bundles once, publishes them as
  *                 an immutable client release outside this checkout, and runs
  *                 the server as a plain long-lived process against it. No
  *                 bundler, no hot-reload: deploys are deliberate (git pull +
@@ -27,32 +28,23 @@
  *
  * Stops cleanly on Ctrl+C.
  */
+// Static imports are resolved before a line of this file runs, so the ones
+// here must never reach node_modules: they are what runs BEFORE the install,
+// and a package a pull just added cannot be imported until it has run. The
+// rest are loaded with `await import` once `installBeforeBoot` returns.
+// supervisor-install.test.ts boots this from a copy with no node_modules.
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { publishDiscovery, releaseDiscovery } from '../packages/core/src/discovery-file.ts';
-import { readRenamedEnv } from '../packages/core/src/env-names.ts';
-import {
-  type PreparedClient,
-  clientReleaseRoot,
-  prepareClientRelease,
-} from '../packages/server/src/client-release.ts';
+import type { PreparedClient } from '../packages/server/src/client-release.ts';
 import { resolveDataDir } from '../packages/server/src/data-dir.ts';
-import { readDeploySource } from '../packages/server/src/deploy-source.ts';
+import {
+  installBeforeBoot,
+  supervisorInstallGate,
+} from '../packages/server/src/dependency-install.ts';
 import { stamped } from '../packages/server/src/log-stamp.ts';
-import {
-  type BindErrorKind,
-  acquirePort,
-  probeLocalPort,
-  shouldWalkPorts,
-} from '../packages/server/src/port-bind.ts';
-import {
-  createHealthWatchdog,
-  fileRestartLedger,
-  probeHealth,
-  restartLedgerPath,
-} from '../packages/server/src/supervisor-health.ts';
+import type { BindErrorKind } from '../packages/server/src/port-bind.ts';
 
 /**
  * A supervisor diagnostic, with the clock the log file does not provide.
@@ -92,6 +84,30 @@ const requestedPort = Number(arg('port') ?? process.env.PORT ?? '8787');
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 const dataDir = resolveDataDir(process.env, repoRoot);
+
+// PROD: dependencies first — the builds, the server and the rest of this
+// supervisor import them. A failed install is the one deploy step that does
+// NOT fall back: this waits, on a backoff, until one succeeds; see
+// `installBeforeBoot` for why it neither boots over the failure nor exits
+// into a launchd respawn loop. The health watchdog below is armed only after
+// this returns; before it, it would find nothing listening and exit into
+// that same loop.
+if (noWatch) await installBeforeBoot(supervisorInstallGate(repoRoot, dataDir, note));
+
+const { publishDiscovery, releaseDiscovery } = await import(
+  '../packages/core/src/discovery-file.ts'
+);
+const { readRenamedEnv } = await import('../packages/core/src/env-names.ts');
+const { clientReleaseRoot, prepareClientRelease } = await import(
+  '../packages/server/src/client-release.ts'
+);
+const { readDeploySource } = await import('../packages/server/src/deploy-source.ts');
+const { acquirePort, probeLocalPort, shouldWalkPorts } = await import(
+  '../packages/server/src/port-bind.ts'
+);
+const { createHealthWatchdog, fileRestartLedger, probeHealth, restartLedgerPath } = await import(
+  '../packages/server/src/supervisor-health.ts'
+);
 
 /**
  * DEV only. Walk to the next port when this one is occupied, so two agents on
@@ -170,6 +186,7 @@ const port = await resolvePort();
 //      being served.
 //
 // A failed build keeps the previous release live (stale beats down), loudly.
+// Dependencies were installed above, before this file's imports.
 const clientArgs: string[] = [];
 if (noWatch) {
   const failures: string[] = [];

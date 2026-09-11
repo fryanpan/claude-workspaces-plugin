@@ -64,7 +64,9 @@
  *   Frozen, because a deploy installs exactly what was merged — an install
  *   that would rewrite `bun.lock` in the deploy source is a broken merge, not
  *   something to paper over. A failed install refuses the restart outright:
- *   `install-failed`, and the server keeps running on the code it has.
+ *   `install-failed`, and the server keeps running on the code it has. The
+ *   runner lives in `dependency-install.ts`, which the supervisor also runs
+ *   before it boots — the manual fallback never reaches this module.
  *
  * - A restart is recorded as an INTENT, not a success. The result carries
  *   `verification: pending` with a deadline; the restarted server confirms
@@ -76,9 +78,10 @@
  *   verdict; a pending record past its deadline reads as failed even if the
  *   watchdog never got to write.
  */
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { userInfo } from 'node:os';
 import { clientReleaseStatus } from './client-release.ts';
+import { type InstallRunner, spawnBunInstall } from './dependency-install.ts';
 import {
   type BusyDoc,
   type DeployResult,
@@ -111,12 +114,6 @@ export const RESTART_DELAY_MS = 1500;
 /** Ceiling on any single git invocation. A hung fetch must not hold the
  *  single-flight slot open forever. */
 const GIT_TIMEOUT_MS = 120_000;
-
-/** Ceiling on `bun install`. A cold cache pulling a new package over a slow
- *  link is minutes, not seconds; a hang past this is a failed install, and a
- *  failed install is a refused restart — never a restart into missing
- *  imports. */
-export const INSTALL_TIMEOUT_MS = 300_000;
 
 /** How long a busy bound document is given to finish before the deploy
  *  refuses over it. The write-back debounce is ~800ms (`doc-store.ts`), so this
@@ -309,7 +306,7 @@ export interface DeployDeps {
    * as `wait`: a wiring that forgets it is a compile error, not a deploy
    * that restarts into missing imports.
    */
-  install: () => { ok: boolean; detail?: string };
+  install: InstallRunner;
   /**
    * Sleep. REQUIRED rather than defaulted, so a caller that forgets it is a
    * compile error instead of a test suite that sleeps for real.
@@ -684,32 +681,6 @@ function spawnGit(cwd: string): GitRunner {
       return { ok: r.exitCode === 0, stdout: r.stdout.toString() };
     } catch {
       return { ok: false, stdout: '' };
-    }
-  };
-}
-
-/**
- * `bun install --frozen-lockfile` in the deploy source. Frozen because a
- * deploy installs exactly what the merge delivered — an install that wants to
- * rewrite `bun.lock` is a broken merge to refuse loudly, and a write to the
- * lockfile would also dirty the deploy source, which the NEXT deploy then
- * refuses over. Only `node_modules` moves.
- */
-function spawnBunInstall(cwd: string): () => { ok: boolean; detail?: string } {
-  return () => {
-    try {
-      const r = spawnSync('bun', ['install', '--frozen-lockfile'], {
-        cwd,
-        encoding: 'utf8',
-        timeout: INSTALL_TIMEOUT_MS,
-      });
-      if (r.status === 0) return { ok: true };
-      // The tail, not the head: bun prints its resolution log first and the
-      // reason it stopped last.
-      const tail = `${r.stderr ?? ''}\n${r.stdout ?? ''}`.trim().slice(-500);
-      return { ok: false, detail: tail || `bun install exited with ${r.status ?? 'a signal'}` };
-    } catch (err) {
-      return { ok: false, detail: err instanceof Error ? err.message : String(err) };
     }
   };
 }

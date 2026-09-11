@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts · server-starts.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -492,6 +492,20 @@ check `scripts/serve.ts` runs against the server it supervises — one HTTP
 request to a route that already exists, a verdict, and a restart ledger that
 outlives the supervisor — so the server imports only its probe-marker
 constant, and only so `sentry.ts` can leave the probe out of tracing.
+
+`server-starts.ts` joins Ops and moves no boundary. `bin.ts` records every
+start of the process in `server-starts.json` beside the deploy log: once at
+start, and again once serving, with the deploy it confirmed. It reads the
+watchdog's restart ledger at that moment, because the ledger keeps only an
+hour. `scripts/server-starts.ts` (`bun run starts:report`) reads a day of
+those records back for the health check, and the planned uptime report will
+use the same record to label outages as deploys.
+
+`dependency-install.ts` joins Ops beside it and moves no boundary. It is the
+`bun install --frozen-lockfile` runner, taken out of `deploy.ts` so the deploy
+verb and `scripts/serve.ts` run one copy: the verb installs before the restart
+it schedules, and the supervisor installs before it builds or boots, which
+covers the manual pull-and-kickstart fallback the verb never sees.
 
 `model-quota.ts` and `notes-quota-notice.ts` join the DOMAIN row and move no
 boundary. The first answers one question about a refused model call — is the

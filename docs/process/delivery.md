@@ -153,6 +153,15 @@ both browser bundles at startup, before the server process spawns. **Restarting
 prod is the deploy.** A build that fails logs loudly and leaves the previous
 client serving — stale beats down.
 
+Before either build it runs `bun install --frozen-lockfile`, so a pull that
+added a package cannot restart into a missing import. That step does not fall
+back: a failed install boots nothing and writes its reason to the err log. It
+does not exit either, because launchd would relaunch it every 10 seconds. It
+waits and retries after 1 minute, doubling to at most 30, or at once when
+`bun.lock` or a `package.json` changes. The failure is recorded in the data dir
+(`supervisor-install-failure.json`), so a relaunch against the same lock waits
+too; delete that file to force an attempt.
+
 ### Running it
 
 ```bash
