@@ -7,14 +7,12 @@
  * twice must not — the whole feature is a rewrite of notes people have been
  * reading, so the button is the only thing that may start one.
  *
- * AND THE FIRST CASE IS NOT THE WHOLE OF ITS OWN QUESTION. The offer shipped
- * standing at the end of every doc, over the prose, with no meeting to tidy —
- * and every case here passed, because they read `hidden` as a PROPERTY and it
- * was set correctly the whole time. What was wrong was the cascade:
- * `.cleanup-offer { display: flex }` outranks the UA's `[hidden]` rule and
- * `doc.css` carried no pair for it. So the computed value is read in
- * `cleanup-offer-css.test.ts`, and these cases read the property knowing that
- * is only half of "shows nothing".
+ * And the question the first case asks is whether anything is on screen
+ * without a recording having ended, because that is how this shipped: the
+ * dialog stood open on every doc, over the prose, with no meeting to tidy, so
+ * pressing it did nothing. Its visibility is CSS, not this module's logic, so
+ * the computed value is read in `cleanup-offer-css.test.ts`; what is read
+ * here is that the dialog is never RAISED except by `offer()`.
  *
  * Fictional names throughout; the repo is public.
  */
@@ -23,6 +21,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLEANUP_WASH_HOLD_MS, mountMeetingCleanupOffer } from '../src/meeting-cleanup-offer.ts';
 
 let parent: HTMLElement;
+/**
+ * Every mount this file makes, destroyed when the case ends.
+ *
+ * Not hygiene for its own sake: the dialog's Tab trap and its Escape handler
+ * are bound to `document`, so a mount left alive keeps judging keystrokes in
+ * every case that follows — emptying the body detaches its element and leaves
+ * its listeners. A leaked mount made three later cases read the previous
+ * case's dialog.
+ */
+const mounted: { destroy: () => void }[] = [];
 
 beforeEach(() => {
   document.body.innerHTML = '';
@@ -31,6 +39,7 @@ beforeEach(() => {
   history.replaceState(null, '', '/workspaces/w-riverbend/docs/d-ferry');
 });
 afterEach(() => {
+  for (const m of mounted.splice(0)) m.destroy();
   vi.restoreAllMocks();
 });
 
@@ -53,6 +62,23 @@ const noteEl = (): HTMLElement => {
   const el = offerEl().querySelector<HTMLElement>('.cleanup-offer-note');
   if (!el) throw new Error('no note');
   return el;
+};
+const tab = (shiftKey = false): KeyboardEvent => {
+  const ev = new KeyboardEvent('keydown', {
+    key: 'Tab',
+    shiftKey,
+    bubbles: true,
+    cancelable: true,
+  });
+  document.dispatchEvent(ev);
+  return ev;
+};
+const shiftTab = (): KeyboardEvent => tab(true);
+/** Escape, dispatched where a real one lands: the focused control. */
+const escape = (): void => {
+  (document.activeElement ?? document).dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+  );
 };
 
 /** A fetch that records its calls and answers with `reply`. */
@@ -122,14 +148,17 @@ function deferredFetch(): {
   };
 }
 
-const mount = (fetchImpl: typeof fetch, liveZone?: { holdWash: (ms: number) => void }) =>
-  mountMeetingCleanupOffer({
+const mount = (fetchImpl: typeof fetch, liveZone?: { holdWash: (ms: number) => void }) => {
+  const offer = mountMeetingCleanupOffer({
     docId: 'd-ferry',
     parent,
     fetchImpl,
     // The zone's other members are never reached from here.
     ...(liveZone ? { liveZone: liveZone as never } : {}),
   });
+  mounted.push(offer);
+  return offer;
+};
 
 describe('the tidy-up offer', () => {
   it('shows nothing until a recording has ended', () => {
@@ -144,8 +173,136 @@ describe('the tidy-up offer', () => {
     const offer = mount(f);
     offer.offer('m-1');
     expect(offerEl().hidden).toBe(false);
-    expect(goEl().textContent).toBe('Tidy up these notes');
+    // A question with two answers, and nothing said until one is pressed.
+    expect(goEl().textContent).toBe('Tidy up');
+    expect(dismissEl().textContent).toBe('Not now');
+    expect(noteEl().hidden).toBe(true);
     // The whole point: an offer on screen has asked the server for nothing.
+    expect(f.calls).toEqual([]);
+  });
+
+  it('is a dialog, addressed to the question it asks', () => {
+    const f = stubFetch();
+    mount(f).offer('m-1');
+    const card = offerEl().querySelector('.cleanup-offer-card');
+    expect(card?.getAttribute('role')).toBe('dialog');
+    expect(card?.getAttribute('aria-modal')).toBe('true');
+    const labelledBy = card?.getAttribute('aria-labelledby') ?? '';
+    expect(offerEl().querySelector(`#${labelledBy}`)?.textContent).toBe('Tidy up these notes?');
+  });
+
+  it('says it is working while the pass is on the wire, and refuses both answers', async () => {
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
+    // The dialog stays up and reports, rather than vanishing on the press.
+    expect(offerEl().hidden).toBe(false);
+    expect(noteEl().hidden).toBe(false);
+    expect(noteEl().textContent).toBe('Tidying up these notes…');
+    expect(goEl().disabled).toBe(true);
+    expect(dismissEl().disabled).toBe(true);
+    // …and nothing closes over writes that are already coming: not the
+    // disabled answers, not Escape, not the scrim.
+    dismissEl().click();
+    escape();
+    offerEl().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(offerEl().hidden).toBe(false);
+    // Then it comes back: the notes behind it are the receipt.
+    f.settle(0, { ok: true, touched: 2 });
+    await vi.waitFor(() => expect(offerEl().hidden).toBe(true));
+  });
+
+  it('keeps Tab inside the dialog, including while both answers are refused', async () => {
+    // `aria-modal` moves no focus on its own. Without the trap, Tab lands on
+    // the prose under the scrim — and while the pass runs there is nothing in
+    // the card to hold it at all, because both answers are disabled.
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    expect(document.activeElement).toBe(goEl());
+    // At the last stop, Tab wraps to the first rather than leaving.
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(dismissEl());
+    expect(shiftTab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(goEl());
+    // Focus already outside is pulled back — the branch a card-scoped
+    // listener could never see.
+    outside.focus();
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(dismissEl());
+    // And with the request on the wire, nothing in the card can take it.
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
+    outside.focus();
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(outside);
+    // An Escape refused because the pass is running is still consumed: it
+    // must not reach a layer underneath and close that instead.
+    const underneath = vi.fn();
+    document.addEventListener('keydown', underneath);
+    try {
+      escape();
+      expect(offerEl().hidden).toBe(false);
+      expect(underneath).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', underneath);
+    }
+  });
+
+  it('leaves Tab alone once the dialog is closed', () => {
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    mount(stubFetch());
+    outside.focus();
+    expect(tab().defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it('takes the Escape the layers under it would otherwise have taken', () => {
+    // A recording can end while a thread modal is open, and this dialog is
+    // the layer on top when it does. Those layers keep their own Escape
+    // handlers on `document`, in the bubble phase; between two listeners on
+    // one node the winner is whichever was added first, which nothing here
+    // controls — so this one runs in the capture phase instead.
+    const underneath = vi.fn();
+    document.addEventListener('keydown', underneath);
+    try {
+      const offer = mount(stubFetch());
+      // Closed, it takes nothing: the layer under it still gets its press.
+      escape();
+      expect(underneath).toHaveBeenCalledTimes(1);
+      offer.offer('m-1');
+      escape();
+      expect(offerEl().hidden).toBe(true);
+      expect(underneath).toHaveBeenCalledTimes(1);
+      // A Tab it has placed is its own too: left to bubble, the layer's own
+      // trap would move the focus on again, back under the scrim.
+      offer.offer('m-2');
+      tab();
+      expect(underneath).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', underneath);
+    }
+  });
+
+  it('closes on Escape and on the scrim, without running anything', () => {
+    const f = stubFetch();
+    const offer = mount(f);
+    offer.offer('m-1');
+    escape();
+    expect(offerEl().hidden).toBe(true);
+    offer.offer('m-2');
+    // A press on the scrim itself, not one inside the card.
+    offerEl()
+      .querySelector('.cleanup-offer-card')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(offerEl().hidden).toBe(false);
+    offerEl().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(offerEl().hidden).toBe(true);
     expect(f.calls).toEqual([]);
   });
 
@@ -167,32 +324,13 @@ describe('the tidy-up offer', () => {
     await vi.waitFor(() => expect(offerEl().hidden).toBe(true));
   });
 
-  it('says it is working while the pass is on the wire, and refuses both controls', async () => {
-    const f = deferredFetch();
-    const offer = mount(f.impl);
-    offer.offer('m-1');
-    goEl().click();
-    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
-    // The row stays and reports. A button that only greyed out would leave
-    // nothing on screen saying anything was happening.
-    expect(offerEl().hidden).toBe(false);
-    expect(noteEl().hidden).toBe(false);
-    expect(noteEl().textContent).toBe('Tidying up these notes…');
-    expect(goEl().disabled).toBe(true);
-    // Dismissing now would retire a question whose answer is already coming.
-    expect(dismissEl().disabled).toBe(true);
-    // Then it goes: the notes above it are the receipt.
-    f.settle(0, { ok: true, touched: 2 });
-    await vi.waitFor(() => expect(offerEl().hidden).toBe(true));
-  });
-
   it('keeps the offer up and says so when the pass refuses', async () => {
     const f = stubFetch({ status: 409, body: { ok: false, error: 'no transcript' } });
     const offer = mount(f);
     offer.offer('m-1');
     goEl().click();
     await vi.waitFor(() => expect(noteEl().textContent).toBe('no transcript'));
-    // Still pressable, and still dismissable: a refusal is not a dead end.
+    // Still pressable, and still refusable: a refusal is not a dead end.
     expect(offerEl().hidden).toBe(false);
     expect(goEl().disabled).toBe(false);
     expect(dismissEl().disabled).toBe(false);
