@@ -39,6 +39,7 @@ export const NAV_ICONS = {
   tasks: `<svg ${SVG} ${SVG_ENDS}><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg>`,
   mine: `<svg ${SVG} ${SVG_ENDS}><circle cx="12" cy="8" r="3.4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>`,
   activity: `<svg ${SVG} ${SVG_ENDS}><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>`,
+  library: `<svg ${SVG} ${SVG_ENDS}><path d="M5 4.5h9l5 5V19.5H5z"/><path d="M14 4.5v5h5"/><path d="M8.5 13h7M8.5 16.5h7"/></svg>`,
   collapse: `<svg ${SVG} ${SVG_ENDS}><polyline points="14 6 8 12 14 18"/></svg>`,
   expand: `<svg ${SVG} ${SVG_ENDS}><polyline points="10 6 16 12 10 18"/></svg>`,
   share: `<svg ${SVG} ${SVG_ENDS}><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.3 10.8 7.4-4.3M8.3 13.2l7.4 4.3"/></svg>`,
@@ -53,6 +54,7 @@ const NAV_ITEMS: ReadonlyArray<{ nav: BoardNav; label: string; icon: string }> =
   { nav: 'home', label: 'Home', icon: NAV_ICONS.home },
   { nav: 'tasks', label: 'Tasks', icon: NAV_ICONS.tasks },
   { nav: 'mine', label: 'My Tasks', icon: NAV_ICONS.mine },
+  { nav: 'library', label: 'Library', icon: NAV_ICONS.library },
   { nav: 'activity', label: 'Activity', icon: NAV_ICONS.activity },
 ];
 
@@ -189,6 +191,7 @@ export function buildShell(
         <div id="board" class="board"></div>
         <div id="board-archived" class="board hidden"></div>
         <div id="board-activity" class="board-activity hidden"></div>
+        <div id="board-library" class="board-library hidden"></div>
       </section>
     </div>
     <div id="board-detail" class="board-detail hidden"></div>

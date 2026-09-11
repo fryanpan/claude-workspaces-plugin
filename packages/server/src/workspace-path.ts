@@ -92,10 +92,10 @@ export function safeDecodeSegment(segment: string): string {
  * make every collection added later a page too, so adding one would be an
  * accident rather than a decision.
  */
-const BOARD_PAGE_TABS: readonly string[] = ['', 'home', 'tasks', 'mine', 'activity'];
+const BOARD_PAGE_TABS: readonly string[] = ['', 'home', 'tasks', 'mine', 'activity', 'library'];
 
 /**
- * `/workspaces/<id>` and its four named tabs, as the matcher that SERVES
+ * `/workspaces/<id>` and its named tabs, as the matcher that SERVES
  * them — built from the list above rather than written out beside it.
  *
  * The empty entry is the bare board path, which is why the suffix group is

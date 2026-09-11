@@ -907,7 +907,7 @@ export function panePath(workspaceId: string, pane: BoardPane): string {
  * is the single thing the URL and the nav agree on, and both of those are
  * derived from it. One source, so a deep link and a click cannot disagree.
  */
-export type BoardNav = 'home' | 'tasks' | 'mine' | 'activity';
+export type BoardNav = 'home' | 'tasks' | 'mine' | 'library' | 'activity';
 
 /** `/workspaces/<id>` stays Tasks, for the reason `paneFromPath` gives: every
  *  link already in the field points there. The other three are suffixes. */
@@ -917,6 +917,7 @@ export function navFromPath(pathname: string): BoardNav {
   if (suffix === 'home') return 'home';
   if (suffix === 'mine') return 'mine';
   if (suffix === 'activity') return 'activity';
+  if (suffix === 'library') return 'library';
   return 'tasks';
 }
 
@@ -942,6 +943,7 @@ const NAV_TAB_LABEL: Record<BoardNav, string> = {
   home: 'Home',
   tasks: '',
   mine: 'My Tasks',
+  library: 'Library',
   activity: 'Activity',
 };
 
