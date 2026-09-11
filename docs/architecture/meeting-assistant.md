@@ -2094,6 +2094,15 @@ start that never became a meeting raises nothing, because it named none. `POST
 share visitor, refuses a meeting that is still recording, and 404s a meeting
 the doc never held.
 
+**The offer belongs to the meeting that ended**, and a new recording takes it
+off the screen at once — even with the last one's request still on the wire.
+The in-flight guard is keyed on the MEETING rather than a bare flag, so the
+next meeting's offer is pressable immediately rather than live-looking and
+inert, and a superseded request says nothing when it finally answers: hiding
+on success would take the new offer down with it, and failing would put an
+error about the old meeting on it. A button left up would be worse than
+either — pressed, it tidies the PREVIOUS meeting in the middle of this one.
+
 **It is the composer again, not a new subsystem.** Same `NotesComposer`, same
 prompt store, same `applyBlockEdits`, same authorship rules. What differs is
 what it is handed: the entire transcript instead of a tick's turns, a

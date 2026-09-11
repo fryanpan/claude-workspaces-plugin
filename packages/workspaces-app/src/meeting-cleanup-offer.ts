@@ -90,7 +90,12 @@ export function mountMeetingCleanupOffer(opts: {
   opts.parent.append(root);
 
   let meetingId: string | null = null;
-  let running = false;
+  // Keyed on the MEETING rather than a bare flag. It is what stops a second
+  // press re-sending the same pass — and, because the offer can move to the
+  // next meeting while the last one's POST is still on the wire, a bare flag
+  // would leave the new offer's button live-looking and inert until the old
+  // request finally answered.
+  const inFlight = new Set<string>();
 
   const show = (visible: boolean): void => {
     root.hidden = !visible;
@@ -104,8 +109,16 @@ export function mountMeetingCleanupOffer(opts: {
   };
 
   async function run(): Promise<void> {
-    if (running || meetingId === null) return;
-    running = true;
+    const id = meetingId;
+    if (id === null || inFlight.has(id)) return;
+    // SUPERSEDED WHILE THE REQUEST WAS ON THE WIRE. A new recording starting
+    // withdraws this offer, and Dismiss retires it, and either can happen
+    // while the POST is still in flight. This offer is about the meeting it
+    // was pressed for: answering for it afterwards would put a button back on
+    // screen that, pressed, tidies the PREVIOUS meeting in the middle of the
+    // one now recording.
+    const superseded = (): boolean => meetingId !== id;
+    inFlight.add(id);
     note.hidden = true;
     button.disabled = true;
     button.textContent = 'Tidying up…';
@@ -115,11 +128,12 @@ export function mountMeetingCleanupOffer(opts: {
     try {
       const res = await doFetch(
         api(
-          `docs/${encodeURIComponent(opts.docId)}/meetings/${encodeURIComponent(meetingId)}/notes-cleanup`,
+          `docs/${encodeURIComponent(opts.docId)}/meetings/${encodeURIComponent(id)}/notes-cleanup`,
         ),
         { method: 'POST' },
       );
       const body = (await res.json().catch(() => ({}))) as CleanupReply;
+      if (superseded()) return;
       if (!res.ok || body.ok !== true) {
         fail(body.error ?? 'The tidy-up could not run. The notes are unchanged.');
         return;
@@ -128,9 +142,9 @@ export function mountMeetingCleanupOffer(opts: {
       meetingId = null;
       show(false);
     } catch {
-      fail('The tidy-up could not run. The notes are unchanged.');
+      if (!superseded()) fail('The tidy-up could not run. The notes are unchanged.');
     } finally {
-      running = false;
+      inFlight.delete(id);
     }
   }
 
@@ -142,7 +156,6 @@ export function mountMeetingCleanupOffer(opts: {
 
   return {
     offer(id) {
-      if (running) return;
       meetingId = id;
       note.hidden = true;
       button.disabled = false;
@@ -150,7 +163,10 @@ export function mountMeetingCleanupOffer(opts: {
       show(true);
     },
     withdraw() {
-      if (running) return;
+      // Taken even while a request is in flight. The offer belongs to the
+      // meeting that ended; once the next one starts it is gone from the
+      // screen at once, and `run` sees itself superseded rather than putting
+      // it back.
       meetingId = null;
       show(false);
     },

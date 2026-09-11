@@ -54,6 +54,55 @@ function stubFetch(reply: { status?: number; body?: unknown } = {}): typeof fetc
   return impl;
 }
 
+/**
+ * A fetch whose every call is answered when the case says so.
+ *
+ * `read(i)` is how a case waits for the CALLER to have finished with a reply
+ * rather than for the reply to have been sent: it flips once the body has
+ * been read, and `vi.waitFor` polls on a timer, so everything queued behind
+ * that read has run by the time it is seen. Asserting straight after
+ * `settle` would be asking the question before the answer arrived.
+ */
+function deferredFetch(): {
+  impl: typeof fetch;
+  calls: { url: string }[];
+  settle: (i: number, body: unknown, status?: number) => void;
+  reject: (i: number) => void;
+  read: (i: number) => boolean;
+} {
+  const calls: { url: string }[] = [];
+  const consumed: boolean[] = [];
+  const pending: { resolve: (r: Response) => void; reject: (e: Error) => void }[] = [];
+  const impl = ((url: string) => {
+    calls.push({ url: String(url) });
+    return new Promise<Response>((resolve, reject) => {
+      pending.push({ resolve, reject });
+    });
+  }) as typeof fetch;
+  return {
+    impl,
+    calls,
+    settle: (i, body, status = 200) => {
+      const res = new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+      const asJson = res.json.bind(res);
+      res.json = async () => {
+        const value: unknown = await asJson();
+        consumed[i] = true;
+        return value;
+      };
+      pending[i]?.resolve(res);
+    },
+    reject: (i) => {
+      consumed[i] = true;
+      pending[i]?.reject(new Error('offline'));
+    },
+    read: (i) => consumed[i] === true,
+  };
+}
+
 const mount = (fetchImpl: typeof fetch, liveZone?: { holdWash: (ms: number) => void }) =>
   mountMeetingCleanupOffer({
     docId: 'd-ferry',
@@ -122,6 +171,61 @@ describe('the tidy-up offer', () => {
     offerEl().querySelector<HTMLButtonElement>('.cleanup-offer-dismiss')?.click();
     expect(offerEl().hidden).toBe(true);
     expect(f.calls).toEqual([]);
+  });
+
+  it('stays gone when the next recording starts mid-request', async () => {
+    // The offer is about the meeting that ended. Withdrawing it has to take
+    // effect at once: left on screen, the button would tidy the PREVIOUS
+    // meeting in the middle of the one now recording.
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
+    offer.withdraw();
+    expect(offerEl().hidden).toBe(true);
+    f.settle(0, { ok: false, error: 'no transcript' }, 500);
+    await vi.waitFor(() => expect(f.read(0)).toBe(true));
+    expect(offerEl().hidden).toBe(true);
+    expect(goEl().disabled).toBe(true);
+  });
+
+  it('says nothing at all once the offer has moved to the next meeting', async () => {
+    // Two things, and both are about the LAST meeting's request still being
+    // on the wire: the new offer's button has to work right now rather than
+    // look live and do nothing, and the old request finishing must not take
+    // the new offer off the screen with it.
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
+    offer.withdraw();
+    offer.offer('m-2');
+    expect(offerEl().hidden).toBe(false);
+    // Pressed while m-1's POST has still not answered: a different meeting,
+    // so it goes.
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(2));
+    expect(f.calls[1]?.url).toContain('m-2');
+    // And m-1 succeeding now says nothing about m-2's offer.
+    f.settle(0, { ok: true, touched: 2 });
+    await vi.waitFor(() => expect(f.read(0)).toBe(true));
+    expect(offerEl().hidden).toBe(false);
+  });
+
+  it("puts no error from the old meeting on the new meeting's offer", async () => {
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
+    offer.withdraw();
+    offer.offer('m-2');
+    f.reject(0);
+    await vi.waitFor(() => expect(f.read(0)).toBe(true));
+    expect(offerEl().hidden).toBe(false);
+    expect(offerEl().querySelector<HTMLElement>('.cleanup-offer-note')?.hidden).toBe(true);
   });
 
   it('does not run twice on a double press', async () => {
