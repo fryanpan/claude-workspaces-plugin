@@ -111,6 +111,31 @@ export function drainFifo(path: string): boolean {
   }
 }
 
+/**
+ * The other end of this pipe, arriving late from ANOTHER process.
+ *
+ * Every test here asserts that the main thread never opens a pipe, so on a
+ * regression the main thread is the one parked in `open` — and nothing in the
+ * test process can release it, because nothing in the test process runs. A
+ * child can. After `afterMs` it opens whichever end `end` names: `'write'`
+ * hands a parked reader end-of-file, `'read'` takes a parked writer's bytes.
+ * That turns the regression from a runner that hangs into a test that fails
+ * by its own assertion, a moment late.
+ *
+ * On a passing run nothing is parked in `open` on the main thread, and the
+ * test calls the returned function to kill the child before it fires.
+ * `afterMs` must sit well past `boundReadDeadlineMs`, so that a pool call the
+ * code under test walked away from has already been written off by then.
+ */
+export function armFifoValve(path: string, afterMs: number, end: 'read' | 'write'): () => void {
+  const open = end === 'write' ? ': > "$0"' : 'cat "$0" > /dev/null';
+  const child = Bun.spawn(['sh', '-c', `sleep ${afterMs / 1000}; ${open}`, path], {
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  return () => child.kill();
+}
+
 /** How long to keep handing EOF to the pipes in a directory before giving up. */
 const RELEASE_BUDGET_MS = 5_000;
 
