@@ -21,9 +21,9 @@ import type { NotesTurn } from '../packages/server/src/meeting-notes.ts';
 import {
   OVERLAP_MAX_CHARS,
   OVERLAP_MAX_TURNS,
-  OVERLAP_PROMPT_RULE,
   buildTaskCapturePrompt,
 } from '../packages/server/src/meeting-task-capture.ts';
+import { withoutSection } from '../packages/server/src/prompt-sections.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
 
@@ -111,9 +111,8 @@ async function main(): Promise<void> {
   // The baseline is the prompt as it was BEFORE the boundary window: no
   // earlier lines, and no standing rule about them either. Both halves are
   // paid on every tick, so both belong in the delta.
-  const rule = `\n${OVERLAP_PROMPT_RULE.join('\n')}\n`;
   const built = buildTaskCapturePrompt({ turns: tick, candidates });
-  const without = { system: built.system.replace(rule, '\n'), user: built.user };
+  const without = { system: withoutSection(built.system, 'Earlier speech'), user: built.user };
   const with_ = buildTaskCapturePrompt({ turns: tick, priorTurns: prior, candidates });
   if (without.system === built.system) throw new Error('baseline strip found no rule to remove');
   const chars = (p: { system: string; user: string }): number => p.system.length + p.user.length;

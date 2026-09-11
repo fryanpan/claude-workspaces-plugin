@@ -50,7 +50,7 @@ describe('buildEffortEstimatePrompt', () => {
     expect(p).toContain('hours to a few days');
     // And says out loud that the human-effort reading is the wrong one,
     // rather than only implying it by giving ranges.
-    expect(p).toContain('do not estimate how long a human engineer would take');
+    expect(p).toContain('do not estimate for a human engineer');
   });
 
   it('tells the scorer the ceiling it will be judged against', () => {

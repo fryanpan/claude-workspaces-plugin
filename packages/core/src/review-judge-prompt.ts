@@ -29,12 +29,15 @@ export const REVIEW_JUDGE_PROMPT_VERSION = 6;
  * options with no costs, bare ids the reader had to go and look up.
  */
 export const DEFAULT_REVIEW_ITEM_CRITERIA = [
-  'A good review item can be answered from the card alone, on a phone, without opening anything else.',
-  '- The headline names the decision or the thing to look at, in the reader’s own words — not the agent’s internal name for it.',
-  '- The detail gives the stakes (what waits on this, what it changes) and says exactly what to look at.',
-  '- On a decision, each option says what choosing it costs — time, risk, or what it rules out.',
-  '- Links are inline on the words they explain, never bare URLs or “see below”.',
-  '- No raw ids and no acronyms without expansion: a ticket id, a doc id, a commit hash or a team-only abbreviation is something the reader would have to look up.',
+  'A good review item can be answered from the card alone, on a phone.',
+  '',
+  '### Criteria',
+  '',
+  '- The headline names the decision or the thing to look at, in the reader’s words, not the agent’s.',
+  '- The detail gives the stakes (what waits on this, what it changes) and says what to look at.',
+  '- On a decision, each option says its cost: time, risk, or what it rules out.',
+  '- Links are inline on the words they explain. No bare URLs. No “see below”.',
+  '- No raw ids and no unexpanded acronyms. The reader must not have to look anything up.',
 ].join('\n');
 
 /**

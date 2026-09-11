@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { NOTES_METHODS, type NotesMethod } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { LEDGER_FLAT_RUN_ANCHOR } from '../src/notes-ledger.ts';
+import { LEDGER_SPEAKER_RULES } from '../src/notes-ledger.ts';
 import { createNotesMethodComposer } from '../src/notes-method-composer.ts';
 
 /** What one call to the model was: which model, and the prompt it carried. */
@@ -347,10 +347,13 @@ describe('a ledger method writes in two layers, and the original does not', () =
   // a composer and `ledger-haiku` would silently run as the original — this
   // is the assertion that says they do not.
 
+  // Cut by HEADING, so the section bodies here are anybody's words: a person
+  // who rewords either one on the settings page still gets two layers.
+  const FLAT_RULE = '- Group a long topic under a subtopic.';
   const SHIPPED = [
     'Write the meeting notes.',
-    LEDGER_FLAT_RUN_ANCHOR,
-    'Keep the speaker on decisions and questions.',
+    `### Grouping\n\n${FLAT_RULE}`,
+    '### Speakers and links\n\n- Keep the speaker on decisions and questions.',
   ].join('\n\n');
 
   async function composeWith(
@@ -374,17 +377,21 @@ describe('a ledger method writes in two layers, and the original does not', () =
   test('the ledger methods compose against the nested rule', async () => {
     for (const method of ['ledger-haiku', 'ledger-opus'] as const) {
       const system = await composeWith(method, SHIPPED);
-      expect(system).toContain('TWO LAYERS, ALWAYS');
-      expect(system).not.toContain(LEDGER_FLAT_RUN_ANCHOR);
-      // Everything else the person wrote is still theirs.
-      expect(system).toContain('Keep the speaker on decisions and questions.');
+      expect(system).toContain('### Two layers');
+      expect(system).not.toContain(FLAT_RULE);
+      // Everything else the person wrote is still theirs, and the ledger's
+      // own speaker rules ride at the end of their speakers section.
+      expect(system).toContain(
+        `- Keep the speaker on decisions and questions.\n${LEDGER_SPEAKER_RULES}`,
+      );
     }
   });
 
   test('MUTATION CONTROL: the original composes against the shipped rule', async () => {
     const system = await composeWith('original', SHIPPED);
-    expect(system).toContain(LEDGER_FLAT_RUN_ANCHOR);
-    expect(system).not.toContain('TWO LAYERS, ALWAYS');
+    expect(system).toContain(FLAT_RULE);
+    expect(system).not.toContain('### Two layers');
+    expect(system).not.toContain(LEDGER_SPEAKER_RULES);
   });
 
   test('instructions the rule has been edited out of still compose, and say so', async () => {
@@ -413,7 +420,7 @@ describe('a ledger method writes in two layers, and the original does not', () =
  * where a rule can be eaten without anything failing.
  */
 describe('every shipped method is told not to write a point stronger than the speech', () => {
-  const STRENGTH_RULE = 'NEVER WRITE A POINT STRONGER THAN THE SPEECH MADE IT';
+  const STRENGTH_RULE = 'Keep the strength that the speaker gave.';
 
   test('it reaches the compose on all three methods, the block-swapping ones included', async () => {
     for (const method of NOTES_METHODS) {
@@ -423,8 +430,9 @@ describe('every shipped method is told not to write a point stronger than the sp
       const system = composes(h.seen)[0]?.system ?? '';
       expect(system).toContain(STRENGTH_RULE);
       // The three upgrades it names, each one a move measured in the corpus.
-      expect(system).toContain('a remark about THE ROOM');
-      expect(system).toContain('is not a commitment');
+      expect(system).toContain('An aside is not a proposal.');
+      expect(system).toContain('A fragment is not a commitment.');
+      expect(system).toContain('"Right, okay" is not a decision.');
     }
   });
 

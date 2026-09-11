@@ -43,6 +43,9 @@
 
 import type { NotesTurn } from './meeting-notes.ts';
 import { contentWords, ideaCarried } from './notes-idea-coverage.ts';
+import { NOTES_SPEAKERS_HEADING } from './notes-prompt-store.ts';
+import { MAX_BULLET_WORDS } from './notes-quality.ts';
+import { appendToSection, replaceSection } from './prompt-sections.ts';
 import { type SummaryCredential, authHeader } from './summarize.ts';
 
 /** The cheap model the extract runs on, whatever composes the notes. */
@@ -281,19 +284,11 @@ export function createNotesLedger(deps: NotesLedgerDeps): NotesLedger {
 }
 
 /**
- * The paragraph of the shipped instructions the nested rule replaces.
- *
- * Asserted rather than assumed: a silent `.replace()` that matched nothing
- * would run a ledger method on the ORIGINAL prompt and report it as a
- * different note-taker, which is the failure that makes a whole comparison
- * table meaningless.
+ * The section of the notes instructions the two-layer rule replaces, by its
+ * heading. Only the heading is matched, so a person may reword the section on
+ * the settings page and a ledger method still writes in two layers.
  */
-export const LEDGER_FLAT_RUN_ANCHOR = [
-  '- ONE POINT PER BULLET, AT MOST 20 WORDS — count them. A longer thought',
-  '  is two bullets, and a bullet that needs a dash, a semicolon or the word',
-  '  "and" to hold two ideas is already those two bullets. The speaker tag',
-  '  does not count towards the twenty.',
-].join('\n');
+export const LEDGER_REPLACES_HEADING = 'Grouping';
 
 /**
  * WHY A LEDGER METHOD WRITES IN TWO LAYERS.
@@ -305,66 +300,80 @@ export const LEDGER_FLAT_RUN_ANCHOR = [
  * pairing (`nested-ledger`) as the lowest lost-idea rate of the sweep. The
  * twenty-word cap is unchanged and still counted per bullet.
  *
- * THE LEAD BULLETS CARRY NO WORD CEILING OF THEIR OWN, and that is a measured
+ * THE LEAD NOTES CARRY NO WORD CEILING OF THEIR OWN, and that is a measured
  * decision rather than a looser rule. With one, the writer met it by cutting
  * the speaker tag off the front of a lead bullet, and a single untagged
  * bullet survives every later tick — so one dropped tag cost the whole
  * "decisions and questions keep a speaker" column, which the original holds
  * at 100%.
+ *
+ * Its example carries no speaker tag, on purpose: the rules about tags are
+ * `LEDGER_SPEAKER_RULES`, which ride in the speakers section so a solo
+ * meeting drops them with the rest of it.
  */
-export const LEDGER_NESTED_RULE = [
-  '- TWO LAYERS, ALWAYS. The top layer is what a person reads at a glance:',
-  '  short LEAD bullets, one per point the room worked on, each as short as',
-  '  the point can be said in. Under each lead bullet sit its SUB-BULLETS, indented two',
-  '  spaces, one per proposition the speech carried about that point — an',
-  '  option, a number, an objection, a reason, a decision, who said it.',
-  '  Like this:',
-  '      - Remote has to survive the couch',
-  '        - [@Dana](speaker:B) says people lose it between the cushions weekly',
-  '        - [@Rowan](speaker:C) offers a locator beep triggered by a whistle',
-  '        - Cost of the beeper is not known yet (unconfirmed)',
-  '- THE SPEAKER TAG RIDES WHICHEVER LAYER THE POINT IS ON, in the same',
-  '  `[@Name](speaker:LABEL)` form as everywhere else. A decision, an open',
-  '  question, a doubt and a claim all keep their tag whether they are a lead',
-  '  bullet or a sub-bullet — who decided, who is asking and who is unsure is',
-  '  part of what those notes say, and being the short glance layer buys a',
-  '  lead bullet no exemption from it. Only a note that is the ROOM rather',
-  '  than anybody in it goes untagged, like the last line above.',
-  "- A BULLET THAT FUSES TWO PEOPLE'S POINTS IS TWO BULLETS, each with its",
-  '  own tag. Fusing is how a note ends up belonging to nobody: "assumption',
-  '  that people will buy it, but practicality is uncertain" is one person\'s',
-  "  claim and another's doubt, and written as one bullet it loses both",
-  '  names. Before you write a bullet with no tag on it, name the voice it',
-  '  came from; if you can name one, the tag goes on.',
-  '- SO NOTHING IS EVER DROPPED FOR LENGTH. The glance layer stays short',
-  '  because the detail is one layer DOWN, not because it was cut. If a',
-  '  proposition does not fit in the lead bullet, it becomes a sub-bullet;',
-  '  it never becomes nothing.',
-  '- ONE POINT PER BULLET, AT MOST 20 WORDS — count them, lead bullets and',
-  '  sub-bullets alike. A longer thought is two bullets. The speaker tag',
-  '  does not count towards the twenty, and no lead bullet is ever shortened',
-  '  by dropping one: the tag is not packaging, it is who said the thing.',
+export const LEDGER_TWO_LAYERS_SECTION = [
+  '### Two layers',
+  '',
+  '- Always write in two layers.',
+  '- The top layer is for a quick read. Write short LEAD notes, one for each point that the people discussed. Make each lead note as short as the point allows.',
+  '- Under each lead note, put its SUB-NOTES, indented two spaces. Write one sub-note for each fact that the speech gave about the point: an option, a number, an objection, a reason, a decision.',
+  '',
+  '```',
+  '- Remote has to survive the couch',
+  '  - People lose it between the cushions each week',
+  '  - Option: a locator beep that a whistle starts',
+  '  - Cost of the beeper is not known yet (unconfirmed)',
+  '```',
+  '',
+  '- Do not drop a point for length. The top layer stays short because the detail is one layer down. If a fact does not fit in the lead note, make it a sub-note.',
+  `- Write one point in each note, lead notes and sub-notes alike. Use a maximum of ${MAX_BULLET_WORDS} words.`,
+  '- Group with `nest_blocks`. Do not group with `replace_block` and `delete_block`.',
 ].join('\n');
 
 /**
- * The shipped instructions with the nested writing rule in place of the flat
- * one — what a LEDGER method composes against.
+ * What the two-layer rule asks about WHO SAID IT, added at the end of the
+ * speakers section — so a solo meeting, which is not sent that section, is
+ * not sent these either.
  *
- * Returns the source unchanged, and says so once, when the anchor is no
- * longer there: a person editing the prompt on the settings page must not be
- * able to turn a ledger method into a failed tick. The note-taker then writes
- * flat, which is the original's behaviour and never nothing.
+ * Each line is a measured regression: nested notes scored 73% on "decisions
+ * and questions keep a speaker" against the original's 100%, because the
+ * rule's worked example wrote a bare "B:" and a writer fused two people's
+ * points into one bullet that belonged to nobody.
+ */
+export const LEDGER_SPEAKER_RULES = [
+  '- Tag the voice on the layer where the point is, lead note or sub-note. Decisions, open questions, doubts and claims always keep their tag. Only a note about the group has no tag.',
+  '- Do not join the points of two people in one note. Write two notes, each with its own tag: "[@Speaker B](speaker:B) says people will buy it" and "[@Speaker C](speaker:C) doubts it is practical".',
+  '- Before you write a note with no tag, find the voice that said it. If you can name one, add the tag.',
+  '- Do not remove a tag to make a lead note shorter. The tag is not packaging. It shows who said the point.',
+].join('\n');
+
+/**
+ * The instructions with the two-layer rule in place of `### Grouping` — what
+ * a LEDGER method composes against — and its speaker rules at the end of the
+ * speakers section, or in a section of their own when the instructions have
+ * none (a solo meeting drops that one too: `withoutSpeakerAttribution`
+ * removes every section under the heading).
+ *
+ * Returns the source unchanged, and says so once, when there is no
+ * `### Grouping` section: a person editing the prompt on the settings page
+ * must not be able to turn a ledger method into a failed tick. The
+ * note-taker then writes flat, which is the original's behaviour and never
+ * nothing.
  */
 export function nestedNotesInstructions(
   source: string,
   onError?: (message: string) => void,
 ): string {
-  if (!source.includes(LEDGER_FLAT_RUN_ANCHOR)) {
+  const layered = replaceSection(source, LEDGER_REPLACES_HEADING, LEDGER_TWO_LAYERS_SECTION);
+  if (layered === null) {
     onError?.(
-      'notes ledger: the one-point-per-bullet rule is no longer in the instructions, ' +
+      `notes ledger: the instructions have no "### ${LEDGER_REPLACES_HEADING}" section, ` +
         'so the nested writing rule was not applied',
     );
     return source;
   }
-  return source.replace(LEDGER_FLAT_RUN_ANCHOR, LEDGER_NESTED_RULE);
+  return (
+    appendToSection(layered, NOTES_SPEAKERS_HEADING, LEDGER_SPEAKER_RULES) ??
+    `${layered}\n\n### ${NOTES_SPEAKERS_HEADING}\n\n${LEDGER_SPEAKER_RULES}`
+  );
 }

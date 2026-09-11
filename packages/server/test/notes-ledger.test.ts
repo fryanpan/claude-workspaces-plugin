@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { NotesTurn } from '../src/meeting-notes.ts';
 import {
+  LEDGER_SPEAKER_RULES,
   MAX_CARRIED,
   MAX_CARRY_AGE,
   createNotesLedger,
@@ -8,7 +9,9 @@ import {
   ledgerTranscript,
   nestedNotesInstructions,
 } from '../src/notes-ledger.ts';
+import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from '../src/notes-prompt-store.ts';
+import { input } from './notes-compose-input.ts';
 
 /** A fetch that answers one tool call with `points`, and records what it was
  *  asked. Nothing here reaches the network. */
@@ -287,13 +290,67 @@ describe('the nested rule keeps the speaker where the flat one had it', () => {
   });
 
   test('no lead bullet may be shortened by dropping a tag', () => {
-    expect(nested).toContain('no lead bullet is ever shortened');
+    expect(nested).toContain('Do not remove a tag to make a lead note shorter.');
+  });
+
+  test('the two layers take the place of the grouping section, by its heading', () => {
+    expect(nested).toContain('### Two layers');
+    expect(nested).not.toContain('### Grouping');
+    expect(nested).not.toContain('organize notes into subtopics');
   });
 
   test('MUTATION CONTROL: the instructions it replaced said neither', () => {
     // Same source, no swap. If these passed either way the two above would
     // be reading the shipped prompt rather than the rule this module adds.
     expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain('](speaker:B)');
-    expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain('no lead bullet is ever shortened');
+    expect(DEFAULT_NOTES_INSTRUCTIONS).not.toContain('Do not remove a tag');
+  });
+});
+
+/**
+ * A solo meeting drops the whole `### Speakers and links` section by its
+ * heading (`notes-prompt-build.ts`), and the ledger's own speaker rules ride
+ * in that section — so they go with it. Before, they sat inside the swapped
+ * block, and a solo ledger meeting was still told to tag every note.
+ */
+describe('a solo ledger meeting drops the speaker rules with the section', () => {
+  const solo = { ...input, multiSpeaker: false };
+  const multi = { ...input, multiSpeaker: true };
+  const ruleLines = LEDGER_SPEAKER_RULES.split('\n');
+
+  test('the shipped prompt, nested, keeps no speaker rule in a solo meeting', () => {
+    const { system } = buildNotesPrompt(solo, nestedNotesInstructions(DEFAULT_NOTES_INSTRUCTIONS));
+    expect(system).toContain('### Two layers');
+    expect(system).not.toContain('### Speakers and links');
+    for (const line of ruleLines) expect(system).not.toContain(line);
+  });
+
+  test('so does a prompt whose speakers section a person reworded', () => {
+    const reworded = DEFAULT_NOTES_INSTRUCTIONS.replace(
+      /### Speakers and links[\s\S]*$/,
+      '### Speakers AND Links\n\n- Say who made each point.\n\n### Closing\n\n- End with owners.',
+    );
+    const { system } = buildNotesPrompt(solo, nestedNotesInstructions(reworded));
+    expect(system).not.toContain('Say who made each point.');
+    for (const line of ruleLines) expect(system).not.toContain(line);
+    expect(system).toContain('### Closing\n\n- End with owners.');
+  });
+
+  test('and a prompt with no speakers section at all', () => {
+    const none = DEFAULT_NOTES_INSTRUCTIONS.replace(/\n+### Speakers and links[\s\S]*$/, '');
+    const nested = nestedNotesInstructions(none);
+    // The rules get a section of their own, under the one heading the cut
+    // knows, so a multi-speaker meeting is still sent them...
+    expect(buildNotesPrompt(multi, nested).system).toContain(LEDGER_SPEAKER_RULES);
+    // ...and a solo one is not.
+    for (const line of ruleLines) {
+      expect(buildNotesPrompt(solo, nested).system).not.toContain(line);
+    }
+  });
+
+  test('a multi-speaker ledger meeting keeps them, at the end of the section', () => {
+    const { system } = buildNotesPrompt(multi, nestedNotesInstructions(DEFAULT_NOTES_INSTRUCTIONS));
+    expect(system).toContain('### Speakers and links');
+    expect(system).toContain(`keep its links.\n${LEDGER_SPEAKER_RULES}`);
   });
 });

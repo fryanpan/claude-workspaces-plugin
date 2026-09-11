@@ -339,14 +339,14 @@ describe('the capture prompt states the convention it is guarded by', () => {
     const said = system.replace(/\s+/g, ' ');
     for (const phrase of NOW_CUE_EXAMPLES) expect(said).toContain(phrase);
     for (const phrase of LATER_CUE_EXAMPLES) expect(said).toContain(phrase);
-    expect(said).toContain('the speaker says "Claude"');
-    expect(said).toContain('A bare "can you" to another person in the room is NOT it');
-    expect(said).toContain('Speech with NEITHER cue asks for nothing');
-    expect(said).toContain('carrying both ("Claude, can you create a task") is LATER');
-    expect(said).toContain('One cued line asks for as many things as it NAMES');
+    expect(said).toContain('NOW cue: "Claude" (any transcribed spelling), then');
+    expect(said).toContain('A "can you" to another person is not it.');
+    expect(said).toContain('Speech with no cue asks for nothing');
+    expect(said).toContain('An ask with both cues ("Claude, can you create a task") is LATER.');
+    expect(said).toContain('One cued line asks for each thing it names');
     // The plural cue's own half of the convention, so the model is not
     // asked for tasks the guard will then throw away.
-    expect(said).toContain('asks for a task per thing they THEN NAME');
+    expect(said).toContain('is one task for each thing then named.');
   });
 });
 

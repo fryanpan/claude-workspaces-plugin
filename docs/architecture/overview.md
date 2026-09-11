@@ -57,7 +57,7 @@ flowchart TB
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-method-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
-    prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
+    prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts · server-starts.ts"]
   end
   core["core — pure shared library"]
@@ -105,6 +105,17 @@ on, and `meeting-notes-composer.ts` is left with the HTTP seam. Two of the six a
 fields on a **board** rather than on the server and keep being written
 through `PUT /api/workspaces/<id>/settings` — `routes/prompts.ts` says so
 with `scope` rather than serving them twice, and the client hides the split.
+
+Every default is **markdown with `###` sections** (2026-09-11), and a caller
+that changes a prompt before it goes out does it by heading, never by an
+exact sentence: `prompt-sections.ts` cuts, replaces and appends whole
+sections, so a solo meeting drops `### Speakers and links` and a ledger
+method swaps `### Grouping` however the owner has reworded their bodies.
+`prompt-markdown-migration.ts` is the one-shot move of stored overrides onto
+those defaults — an override that is an old default word for word is
+soft-cleared, any other is kept and marked "written before markdown" — run
+by `prompt-store.ts` on a version-1 `prompts.json` and by the board hydrate
+on the two board fields.
 
 **Where a route lives.** Everything that decides which URL paths it answers is
 under `routes/`, `server.ts` composes and delegates to it and matches nothing
