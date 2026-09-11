@@ -81,9 +81,10 @@ export interface Reading {
 }
 
 /** Elements a comment goes on: one that stops short of the right margin, one
- *  that reaches into it, and one low enough that the phone's panel would sit
- *  on it. `#title` is the page heading the phone banner used to cover, and
- *  `#acct` a link in the top-right corner, where the resting card stands. */
+ *  that reaches into it, one low enough that the phone's panel would sit on
+ *  it, and one taller than the screen. `#title` is the page heading the phone
+ *  banner used to cover, and `#acct` a link in the top-right corner, where the
+ *  resting card stands. */
 function pageHtml(bundle: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -97,6 +98,7 @@ function pageHtml(bundle: string): string {
  #wide{height:70px;margin-top:40px;background:#eef5ea}
  #spacer{height:560px}
  #low{height:60px;background:#eef5ea}
+ #tall{height:1200px;margin-top:40px;background:#eef5ea}
  #tail{height:900px}
  #acct{position:absolute;right:48px;top:110px}
 </style></head>
@@ -108,6 +110,7 @@ function pageHtml(bundle: string): string {
  <div id="wide">The full timetable, across the page</div>
  <div id="spacer"></div>
  <div id="low">Parking</div>
+ <div id="tall">The route map</div>
  <div id="tail"></div>
 </main>
 <${TAG} doc-id="comment-layout" workspace-id="w-demo" user="Test Reviewer" server-url="ws://127.0.0.1:1"></${TAG}>
@@ -154,7 +157,7 @@ const LOOK = `(() => {
     p.getAttribute('points').split(/[ ,]/).map((n) => Math.round(Number(n))));
   const ae = sr.activeElement;
   const el = {};
-  for (const id of ['title', 'narrow', 'wide', 'low', 'acct']) el[id] = box(document.getElementById(id));
+  for (const id of ['title', 'narrow', 'wide', 'low', 'acct', 'tall']) el[id] = box(document.getElementById(id));
   const outlined = ['narrow', 'wide', 'low'].find((id) =>
     /solid/.test(document.getElementById(id).style.outline)) ?? null;
   return {
@@ -408,6 +411,11 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await look('lowOpen');
     await enter();
     await look('lowTwice');
+    // An element taller than the screen, whose card has nowhere clear to go.
+    await cdp.evaluate(`scrollTo(0, document.getElementById('tall').offsetTop - 100)`);
+    await settle();
+    await tap(el('tall'));
+    await look('onTall');
     await tap(done);
   }
   return { width, height, looks };

@@ -109,9 +109,15 @@ export function placeCards(w: FeedbackWidgetEl): void {
     c.style.top = `${y}px`;
     if (!r) continue;
     // The line leaves the element's own edge — a dot on it, so it lands ON
-    // the thing — and meets the card on the side that faces it.
+    // the thing — and meets the card on the side that faces it. That edge is
+    // held to the card's room on screen: an element taller than the screen,
+    // or scrolled partly off it, sent the line out past the screen's edge,
+    // through whatever bar the page keeps there.
     const ex = beside ? r.right + 4 : Math.min(Math.max(x + 24, r.left), r.right);
-    const ey = beside ? r.top + 10 : y > r.top ? r.bottom + 2 : r.top - 2;
+    const ey = Math.max(
+      top,
+      Math.min(beside ? r.top + 10 : y > r.top ? r.bottom + 2 : r.top - 2, bot),
+    );
     const cx = beside ? x : Math.max(ex, x + 12);
     const cy = beside ? y + 12 : y > r.top ? y : y + h;
     lines += `<polyline points="${ex},${ey} ${cx},${cy}"/><circle cx="${ex}" cy="${ey}" r="2.5"/>`;

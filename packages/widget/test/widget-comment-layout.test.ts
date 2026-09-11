@@ -213,6 +213,24 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(overlap(card, l.el.low)).toBe(0);
     });
 
+    it('keeps every line on screen for an element taller than the screen', () => {
+      // The line ran from the card to the element's far edge, off the bottom
+      // of the screen and through whatever bar the page keeps there.
+      const l = look(1180, 'onTall');
+      expect(box(l.el.tall)[3], 'CONTROL: the element runs past the bottom').toBeGreaterThan(820);
+      expect(l.snippet, 'CONTROL: its card is open').toBe('The route map');
+      expect(l.lines.length, 'CONTROL: and has a line').toBeGreaterThan(0);
+      const floor = Math.min(...l.controls.map((c) => c[1]));
+      for (const [, y1, , y2] of l.lines) {
+        for (const y of [y1, y2]) {
+          expect(y).toBeGreaterThanOrEqual(0);
+          expect(y, 'a line runs down into the buttons or off the screen').toBeLessThanOrEqual(
+            floor,
+          );
+        }
+      }
+    });
+
     it('stacks two quick posts on an element low on the screen rather than piling them up', () => {
       // A saved card stepped down past the one above it, off the bottom of the
       // screen, and was clamped back on top of it.
