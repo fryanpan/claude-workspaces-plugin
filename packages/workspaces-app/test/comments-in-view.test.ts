@@ -2,9 +2,9 @@
  * A comment sits in the margin beside the text it marks, and nowhere else —
  * measured with a meeting running under it.
  *
- * THE FAULT. A live transcript grows at the foot of the doc and follow mode
- * holds the pane there, so every comment's sentence is a screenful or more
- * above the fold. The column then drew all of them anyway: `foldWithStrips`
+ * THE FAULT. A live transcript grows at the foot of the doc and a reader
+ * watching it has scrolled the pane there, so every comment's sentence is a
+ * screenful or more above the fold. The column then drew all of them anyway: `foldWithStrips`
  * floors every anchor at `scrollTop + band.top` so that no card comes to rest
  * under the new-content strip, and that floor does not ask whether the card's
  * own text is on screen. Measured at 1180x820 before the fix: four cards
@@ -19,9 +19,15 @@
  *
  * THE CONTROLS. `cards` and `beside` are why a reading of zero detached cards
  * means something: a column that rendered nothing, or a meeting that never
- * scrolled the pane, would report zero and prove nothing. `zoneOnScreen` and
- * `bandTop` say the meeting really pinned the pane and the strip really
+ * reached the foot, would report zero and prove nothing. `zoneOnScreen` and
+ * `bandTop` say the pane really was at the transcript and the strip really
  * covered the column — the two conditions the fault needs.
+ *
+ * AND THE PAGE NEVER FOLLOWS (owner, 2026-09-11: "Never follow"). A reader
+ * at the top, beside the comments, stays there while the transcript grows
+ * past the fold, and reaches the words by scrolling down for them. The pane
+ * used to pull itself down to the transcript, which is what took the
+ * comments out of reach in the first place.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -141,23 +147,23 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
     it(
       `keeps every card with its own sentence through a meeting at ${width}`,
       () => {
-        const { following, afterScrollBack, held, jumped } = measure(buildPage(), preset);
+        const { watching, afterScrollBack, held, jumped, untouched } = measure(buildPage(), preset);
 
-        // THE CONTROLS. The meeting really ran the pane down to the foot, the
+        // THE CONTROLS. The reader really was down at the transcript, the
         // column really had cards to draw, and not one comment's sentence was
         // on screen — the three conditions the fault needs. Without them a
         // reading of zero below would mean only that nothing was measured.
-        expect(following.threads).toBeGreaterThan(0);
-        expect(following.cards).toBe(following.threads);
-        expect(following.zoneOnScreen).toBe(true);
-        expect(following.per.every((p) => !p.anchorOnScreen)).toBe(true);
+        expect(watching.threads).toBeGreaterThan(0);
+        expect(watching.cards).toBe(watching.threads);
+        expect(watching.zoneOnScreen).toBe(true);
+        expect(watching.per.every((p) => !p.anchorOnScreen)).toBe(true);
 
         // THE FAULT: a card painted in the visible column with its sentence
         // nowhere near it. Four of these at 1180x820 before the fix, the worst
         // 4226px from its own text; at 430 the cards sit in the flow, so the
         // reading there is the no-regression half.
-        expect(following.detached).toBe(0);
-        expect(following.worstDetachment).toBe(0);
+        expect(watching.detached).toBe(0);
+        expect(watching.worstDetachment).toBe(0);
 
         // The positive half of the same rule, and the control for the zero
         // above: a surface that simply stopped drawing would pass it.
@@ -183,11 +189,28 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
         // is the strip. The first two readings are the control: the pane was
         // at the foot and no comment's sentence was on screen, so the jump had
         // somewhere to travel from.
-        expect(jumped.followingBefore).toBe(true);
+        expect(jumped.watchingBefore).toBe(true);
         expect(jumped.anchorsOnScreenBefore).toBe(0);
         expect(jumped.anchorOnScreen).toBe(true);
         expect(jumped.cardOnScreen).toBe(true);
         expect(Math.abs(jumped.offsetFromAnchor)).toBeLessThan(400);
+
+        // THE PAGE NEVER FOLLOWS. The controls first: the transcript started
+        // on screen, grew until its foot was past the bottom edge, and the
+        // document really got taller — so a page that followed had to move.
+        expect(untouched.zoneOnScreen0).toBe(true);
+        expect(untouched.zoneBottomBelowFold1).toBe(true);
+        expect(untouched.scrollHeight1).toBeGreaterThan(untouched.scrollHeight0);
+        expect(untouched.anchorsOnScreen0).toBeGreaterThan(0);
+        // It did not: the reader is where they were, beside the same comments.
+        expect(untouched.scrollTop0).toBe(0);
+        expect(untouched.scrollTop1).toBe(untouched.scrollTop0);
+        expect(untouched.anchorsOnScreen1).toBe(untouched.anchorsOnScreen0);
+        // And the words are a scroll away: down at the foot the newest one is
+        // on screen, and more words arriving there do not move the page either.
+        expect(untouched.handScrollTop).toBeGreaterThan(0);
+        expect(untouched.newestOnScreen).toBe(true);
+        expect(untouched.handScrollTop1).toBe(untouched.handScrollTop);
       },
       BROWSER_CASE_MS,
     );

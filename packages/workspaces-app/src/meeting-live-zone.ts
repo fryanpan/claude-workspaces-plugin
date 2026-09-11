@@ -42,6 +42,12 @@
  * 2026-08-31). The pill is `meeting-speaker-pill.ts`'s, and it is WHERE A
  * VOICE IS NAMED: the strip's tappable one is never on screen while this zone
  * exists, so these were the only pills the iPad showed and they were inert.
+ *
+ * THE PAGE NEVER FOLLOWS IT (owner, 2026-09-11: "Never follow" — "The page
+ * never moves on its own. New text arrives below the fold and you scroll down
+ * when you want it"). Nothing here writes the pane's scroll offset. The zone
+ * used to keep itself in view as it grew, and that pull is what dragged the
+ * reader away from the comments beside the text above.
  */
 
 import { createStreamHold } from './meeting-live-hold.ts';
@@ -147,13 +153,6 @@ interface ZoneTurn {
   fading?: boolean;
 }
 
-/** How far below the pane's visible edge the zone's bottom may sit and
- *  still count as "in view" — a scroll that leaves it within this is not a
- *  scroll away from it. */
-export const FOLLOW_SLACK_PX = 48;
-/** Breathing room kept under the zone when it is scrolled into view. */
-const FOLLOW_PAD_PX = 12;
-
 export function createMeetingLiveZone(opts: {
   /** Rendered as `parent`'s last child — after the editor's content. */
   parent: HTMLElement;
@@ -163,8 +162,6 @@ export function createMeetingLiveZone(opts: {
    * margins in a grid cell), a width no stylesheet rule can coincide with.
    */
   prose?: HTMLElement;
-  /** The scroll pane the zone is kept in view within. Defaults to `parent`. */
-  scroller?: HTMLElement;
   now?: () => number;
   /**
    * Whether the viewer asked for reduced motion. Reads the media query by
@@ -175,7 +172,6 @@ export function createMeetingLiveZone(opts: {
   nameSpeaker?: (label: string) => void;
 }): MeetingLiveZone {
   const now = opts.now ?? (() => Date.now());
-  const scroller = opts.scroller ?? opts.parent;
   const reducedMotion =
     opts.reducedMotion ??
     (() =>
@@ -222,57 +218,24 @@ export function createMeetingLiveZone(opts: {
   const ordered = (): ZoneTurn[] => [...turns.values()].sort((a, b) => a.turn - b.turn);
 
   /**
-   * Follow mode: the zone is kept in view as it grows — the transcript is
-   * what the person is watching. Off the moment they scroll it out of view
-   * (a deliberate scroll up to read or edit is never fought), on again once
-   * they scroll back to it. Decided from where the zone IS after each
-   * scroll, so the zone's own scrolling always lands in "following".
+   * A reader who has scrolled down to the foot of the pane to watch the
+   * words is held still through a collapse by the browser, not by this
+   * module: a pane at its foot cannot keep its offset when its content
+   * shrinks, so scrollTop is clamped by exactly the loss. Nothing here
+   * scrolls, up or down. meeting-live-hold.ts THE RESERVE is the other half:
+   * a shrink BELOW the reader's line turns the same clamp into a step.
    */
-  let follow = true;
-
-  /** Pixels the zone's bottom (plus padding) sits below the pane's visible
-   *  edge; ≤ 0 means in view. Null while the zone is hidden. */
-  function overflowBelow(): number | null {
-    if (root.hidden) return null;
-    const visibleBottom = scroller.getBoundingClientRect().top + scroller.clientHeight;
-    return root.getBoundingClientRect().bottom + FOLLOW_PAD_PX - visibleBottom;
-  }
-  const onScroll = (): void => {
-    const over = overflowBelow();
-    if (over !== null) follow = over <= FOLLOW_SLACK_PX;
-  };
-  scroller.addEventListener('scroll', onScroll, { passive: true });
-
-  /**
-   * LOAD-BEARING, and not designed: while following, the pane sits at its
-   * foot, and a pane at its foot cannot keep its offset when its content
-   * shrinks — the browser clamps scrollTop by exactly the loss. That clamp is
-   * what holds the reader's line still through the collapse; nothing here
-   * scrolls up on purpose. Anything that keeps the pane off its foot (a
-   * bottom spacer, following that stops short of the end) loses the guarantee
-   * with no test going red. meeting-live-hold.ts THE RESERVE is the other
-   * half: a shrink BELOW the reader's line turns the same clamp into a step.
-   */
-  function keepInView(): void {
-    if (!follow) return;
-    const over = overflowBelow();
-    if (over !== null && over > 0) scroller.scrollTop += over;
-  }
-
   function matchProseWidth(): void {
     if (!opts.prose || root.hidden) return;
     const width = opts.prose.getBoundingClientRect().width;
     root.style.width = width > 0 ? `${width}px` : '';
   }
-  // The prose changes size as notes land (taller, and wider when a new line
-  // is the longest): re-match the width, and follow the zone down.
+  // The prose changes width as notes land (wider when a new line is the
+  // longest): re-match it.
   const resize =
     typeof ResizeObserver === 'undefined' || !opts.prose
       ? null
-      : new ResizeObserver(() => {
-          matchProseWidth();
-          keepInView();
-        });
+      : new ResizeObserver(() => matchProseWidth());
   if (opts.prose) resize?.observe(opts.prose);
 
   /**
@@ -514,11 +477,7 @@ export function createMeetingLiveZone(opts: {
     lines.replaceChildren(...runOf(streamTurns()));
     streamHold.trim();
     matchProseWidth();
-    // Before keepInView, not after: following mode scrolls to whatever the
-    // zone's height is when it is asked, and the hold is about to take a
-    // line of that height back.
     if (splitAnchor) streamHold.hold(splitAnchor);
-    keepInView();
   }
 
   /**
@@ -641,7 +600,6 @@ export function createMeetingLiveZone(opts: {
   return {
     begin() {
       live = true;
-      follow = true;
       sawProgress = false;
       clearChunks();
       turns.clear();
@@ -729,7 +687,6 @@ export function createMeetingLiveZone(opts: {
       live = false;
       clearChunks();
       resize?.disconnect();
-      scroller.removeEventListener('scroll', onScroll);
       root.remove();
     },
   };

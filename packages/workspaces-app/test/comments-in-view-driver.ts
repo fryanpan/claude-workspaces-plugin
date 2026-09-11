@@ -65,7 +65,7 @@ export interface Reading {
   /** The top strip's reserved band — the thing that used to drag the stack. */
   bandTop: number;
   bandBottom: number;
-  /** Is the live transcript's last line on screen (follow mode holding)? */
+  /** Is any of the live transcript on screen? */
   zoneOnScreen: boolean;
   zoneHeight: number;
   /** Cards painted on screen whose own text is NOT — the fault, counted. */
@@ -80,9 +80,9 @@ export interface Reading {
 }
 
 export interface Probe {
-  /** The state a meeting reaches on its own: transcript at the foot, the
-   *  reader following it, every comment far above. */
-  following: Reading;
+  /** The reader has scrolled down to watch the transcript at the foot, every
+   *  comment far above. */
+  watching: Reading;
   /** The reader scrolls up to one comment's own text, then the transcript
    *  keeps growing. Does the comment stay beside its text? */
   afterScrollBack: Reading;
@@ -92,12 +92,14 @@ export interface Probe {
   jumped: JumpReading;
   /** The reader parked on a comment MID-doc while the meeting runs on. */
   held: HeldReading;
+  /** The reader at the top while the transcript grows past the fold. */
+  untouched: UntouchedReading;
 }
 
 /** Reaching a comment from the strip, with the transcript still growing. */
 export interface JumpReading {
-  /** The pane was at the foot, following the transcript, before the jump. */
-  followingBefore: boolean;
+  /** The reader was at the foot, watching the transcript, before the jump. */
+  watchingBefore: boolean;
   /** …and not one comment's text was on screen then. */
   anchorsOnScreenBefore: number;
   /** `revealThreadBalloon` found a card to reveal. */
@@ -127,6 +129,33 @@ export interface HeldReading {
   /** Was the card beside its text at each moment? */
   beside0: boolean;
   beside1: boolean;
+}
+
+/**
+ * The page never follows the transcript (owner, 2026-09-11: "Never follow").
+ * The reader sits at the top, beside the comments, while the words grow
+ * past the bottom edge — and then scrolls down by hand to reach them.
+ */
+export interface UntouchedReading {
+  /** The pane's offset before the words arrived, and after. */
+  scrollTop0: number;
+  scrollTop1: number;
+  /** The control: the document really grew under the reader. */
+  scrollHeight0: number;
+  scrollHeight1: number;
+  /** The control: the transcript began on screen and its foot ended past the
+   *  bottom edge — so a page that followed would have had to move. */
+  zoneOnScreen0: boolean;
+  zoneBottomBelowFold1: boolean;
+  /** Comments whose text was on screen, before and after. */
+  anchorsOnScreen0: number;
+  anchorsOnScreen1: number;
+  /** The reader scrolls to the foot: where the pane went, and whether the
+   *  newest words are on screen there. */
+  handScrollTop: number;
+  newestOnScreen: boolean;
+  /** More words arrive with the reader at the foot: the offset after. */
+  handScrollTop1: number;
 }
 
 const WORDS = (
@@ -379,14 +408,15 @@ async function probe(): Promise<string> {
   const m = mount();
   await frame();
 
-  // A meeting runs: the transcript grows at the foot and follow mode holds it
-  // in view, which is what takes every comment off the top of the screen.
+  // A meeting runs and the reader scrolls down to watch the transcript at
+  // the foot, which takes every comment off the top of the screen.
   for (let i = 0; i < 14; i++) {
     utter(m, 9);
     await sleep(20);
   }
+  toFoot(m);
   await settle(m);
-  const following = read(m);
+  const watching = read(m);
 
   // The reader goes back to one comment's own text.
   const target = m.threadIds[1] as string;
@@ -411,8 +441,14 @@ async function probe(): Promise<string> {
 
   const held = await heldArm();
   const jumped = await jumpArm();
-  const out: Probe = { following, afterScrollBack, target, held, jumped };
+  const untouched = await untouchedArm();
+  const out: Probe = { watching, afterScrollBack, target, held, jumped, untouched };
   return JSON.stringify(out);
+}
+
+/** The reader scrolls the pane down to its foot, by hand. */
+function toFoot(m: Mounted): void {
+  m.editorEl.scrollTop = m.editorEl.scrollHeight - m.editorEl.clientHeight;
 }
 
 /** Take the whole surface back out — the next arm mounts into a clean pane. */
@@ -521,6 +557,7 @@ async function jumpArm(): Promise<JumpReading> {
     utter(m, 9);
     await sleep(20);
   }
+  toFoot(m);
   await settle(m);
   const before = read(m);
 
@@ -531,12 +568,78 @@ async function jumpArm(): Promise<JumpReading> {
   const p = after.per.find((x) => x.id === id);
 
   const out: JumpReading = {
-    followingBefore: before.zoneOnScreen,
+    watchingBefore: before.zoneOnScreen,
     anchorsOnScreenBefore: before.per.filter((x) => x.anchorOnScreen).length,
     revealed,
     anchorOnScreen: p?.anchorOnScreen ?? false,
     cardOnScreen: p?.cardOnScreen ?? false,
     offsetFromAnchor: p?.offsetFromAnchor ?? Number.NaN,
+  };
+  teardown(m);
+  return out;
+}
+
+/**
+ * The reader stays at the top, beside the comments, while the meeting talks:
+ * a short doc, so the transcript starts on screen under the prose and grows
+ * past the bottom edge. The page must not move — and the words must still be
+ * there when the reader scrolls down for them.
+ */
+async function untouchedArm(): Promise<UntouchedReading> {
+  const m = mount({ paragraphs: 4, threads: 2 });
+  m.editorEl.scrollTop = 0;
+  utter(m, 9);
+  await settle(m);
+  const before = read(m);
+  const scrollTop0 = m.editorEl.scrollTop;
+  const scrollHeight0 = m.editorEl.scrollHeight;
+
+  for (let i = 0; i < 60; i++) {
+    utter(m, 9);
+    await sleep(10);
+  }
+  await settle(m);
+  const after = read(m);
+  const zoneEl = document.querySelector('.live-zone') as HTMLElement;
+  const newest = (): DOMRect | undefined => {
+    const turns = zoneEl.querySelectorAll('.lz-turn');
+    return turns[turns.length - 1]?.getBoundingClientRect();
+  };
+  const scrollTop1 = m.editorEl.scrollTop;
+  const scrollHeight1 = m.editorEl.scrollHeight;
+  const zoneBottomBelowFold1 = zoneEl.getBoundingClientRect().bottom > after.paneBottom;
+
+  // Down to the foot by hand. The "N above" strip arrives once the comments
+  // leave the screen and takes its band out of the pane, so the first scroll
+  // can stop short of the end — the reader scrolls again, as they would.
+  toFoot(m);
+  await settle(m);
+  toFoot(m);
+  await settle(m);
+  const handScrollTop = m.editorEl.scrollTop;
+  const foot = read(m);
+  const last = newest();
+  const newestOnScreen =
+    last !== undefined &&
+    last.height > 0 &&
+    last.bottom <= foot.paneBottom &&
+    last.top >= foot.paneTop;
+  utter(m, 9);
+  utter(m, 9);
+  await settle(m);
+
+  const out: UntouchedReading = {
+    scrollTop0,
+    scrollTop1,
+    scrollHeight0,
+    scrollHeight1,
+    zoneOnScreen0: before.zoneOnScreen,
+    zoneBottomBelowFold1,
+    anchorsOnScreen0: before.per.filter((x) => x.anchorOnScreen).length,
+    anchorsOnScreen1: after.per.filter((x) => x.anchorOnScreen).length,
+    handScrollTop,
+    newestOnScreen,
+    handScrollTop1: m.editorEl.scrollTop,
   };
   teardown(m);
   return out;

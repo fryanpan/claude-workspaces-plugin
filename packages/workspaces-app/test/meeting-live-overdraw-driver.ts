@@ -132,10 +132,17 @@ interface Box {
  * an ancestor is 3px tall with `overflow: hidden` — which is exactly what a
  * collapsing slot is for most of its life. Measured without this, the collapse
  * reads as a 605px² smear that no pixel on screen ever showed.
+ *
+ * It stops at the zone. The page never scrolls itself to the transcript
+ * (owner, 2026-09-11: "Never follow"), so the zone spends most of a long
+ * meeting below the fold, and the scroll pane's clip would hide every run
+ * there — a clean zero measured over nothing. Two runs drawn over each other
+ * are a smear wherever the reader has scrolled to.
  */
 function clipOf(el: Element | null): Box | null {
   let box: Box | null = null;
-  for (let n = el; n && n !== document.body; n = n.parentElement) {
+  const stop = el?.closest('.live-zone')?.parentElement ?? document.body;
+  for (let n = el; n && n !== stop; n = n.parentElement) {
     const s = getComputedStyle(n);
     if (s.overflowX === 'visible' && s.overflowY === 'visible') continue;
     const b = n.getBoundingClientRect();

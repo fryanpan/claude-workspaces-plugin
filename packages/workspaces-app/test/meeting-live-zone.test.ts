@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COLLAPSE_MS,
   FADE_MS,
-  FOLLOW_SLACK_PX,
   NOTE_LAND_MS,
   WASH_GRACE_MS,
   createMeetingLiveZone,
@@ -463,10 +462,14 @@ describe('a settled chunk fades where it sits, then collapses', () => {
  */
 function fakeLayout(opts: { viewport: number; zoneBottom: () => number; proseWidth?: number }) {
   let scrollTop = 0;
+  /** Every write to the pane's offset that did not come from `scroll` — the
+   *  page moving on its own. */
+  let writes = 0;
   Object.defineProperty(parent, 'clientHeight', { value: opts.viewport, configurable: true });
   Object.defineProperty(parent, 'scrollTop', {
     get: () => scrollTop,
     set: (v: number) => {
+      writes++;
       scrollTop = v;
     },
     configurable: true,
@@ -478,46 +481,57 @@ function fakeLayout(opts: { viewport: number; zoneBottom: () => number; proseWid
   prose.getBoundingClientRect = () => ({ width: opts.proseWidth ?? 0 }) as DOMRect;
   return {
     prose,
+    /** The reader scrolls — the one thing allowed to move the pane. */
     scroll: (to: number) => {
       scrollTop = to;
       parent.dispatchEvent(new Event('scroll'));
     },
     top: () => scrollTop,
+    writes: () => writes,
   };
 }
 
-describe('the live zone stays in view', () => {
-  it('scrolls the pane so a zone that grew past the bottom edge is visible again', () => {
+/**
+ * Owner's call, 2026-09-11 — "Never follow": the page never moves on its own;
+ * new text arrives below the fold and the reader scrolls down when they want
+ * it. The pull toward the transcript is what took the comments beside the
+ * text above out of reach.
+ */
+describe('the live zone never moves the page', () => {
+  it('leaves the pane where it is when the transcript grows past the bottom edge', () => {
     const zone = createMeetingLiveZone({ parent, now });
     let bottom = 300;
     const lay = fakeLayout({ viewport: 500, zoneBottom: () => bottom });
     zone.begin(now());
     zone.onTurn({ turn: 0, text: 'fits', final: false });
-    expect(lay.top()).toBe(0); // in view: nothing to do
+    // From here the zone's bottom is 400px past the pane's bottom edge.
     bottom = 900;
-    zone.onTurn({ turn: 0, text: 'fits and then some more words', final: false });
-    // Bottom edge plus the 12px breathing room lands at the pane's edge.
-    expect(lay.top()).toBe(900 + 12 - 500);
+    zone.onTurn({ turn: 0, text: 'fits and then some more words', final: true });
+    zone.onTurn({ turn: 1, text: 'and another turn after it', final: false });
+    expect(lay.top()).toBe(0);
+    expect(lay.writes()).toBe(0);
   });
 
-  it('does not fight a deliberate scroll up, and follows again once scrolled back', () => {
-    const zone = createMeetingLiveZone({ parent, now });
-    let bottom = 900;
-    const lay = fakeLayout({ viewport: 500, zoneBottom: () => bottom });
-    zone.begin(now());
-    zone.onTurn({ turn: 0, text: 'a line', final: false });
-    expect(lay.top()).toBe(412);
-    // The person scrolls to the top to read the agenda.
-    lay.scroll(0);
-    bottom = 960;
-    zone.onTurn({ turn: 0, text: 'a line, longer now', final: false });
-    expect(lay.top()).toBe(0);
-    // They scroll back until the zone's bottom is within the slack…
-    lay.scroll(960 + 12 - 500 - FOLLOW_SLACK_PX);
-    bottom = 1020;
-    zone.onTurn({ turn: 0, text: 'a line, longer still', final: false });
-    // …and the zone is followed again.
-    expect(lay.top()).toBe(1020 + 12 - 500);
+  it('leaves a reader parked at the foot where they are, through a whole settle', () => {
+    vi.useFakeTimers();
+    try {
+      const zone = createMeetingLiveZone({ parent, now, reducedMotion: () => false });
+      let bottom = 900;
+      const lay = fakeLayout({ viewport: 500, zoneBottom: () => bottom });
+      zone.begin(now());
+      zone.onTurn({ turn: 0, text: 'a line', final: true });
+      // The reader scrolls down to watch the words, by hand.
+      lay.scroll(412);
+      bottom = 1020;
+      zone.onTurn({ turn: 1, text: 'a line, and more said after it', final: false });
+      zone.onProgress({ tick: 0, phase: 'composing', turns: [0] });
+      zone.onProgress({ tick: 0, phase: 'written', turns: [0] });
+      vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS + COLLAPSE_MS);
+      expect(lay.top()).toBe(412);
+      expect(lay.writes()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("copies the prose column's width so the two coincide exactly", () => {
