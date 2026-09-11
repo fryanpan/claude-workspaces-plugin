@@ -240,6 +240,22 @@ export class AgentNoteRing {
     return this.rings.size;
   }
 
+  /**
+   * When this agent's PREVIOUS turn note landed — the boundary the unfiled-ask
+   * check measures "filed nothing this turn" from. `undefined` when the ring
+   * has none, which is what a restarted server sees; the caller falls back to
+   * a bounded window rather than treating it as "filed nothing ever".
+   */
+  lastTurnAt(agent: string): number | undefined {
+    const ring = this.rings.get(normalizeAgent(agent));
+    if (!ring) return undefined;
+    for (let i = ring.length - 1; i >= 0; i--) {
+      const note = ring[i];
+      if (note && note.kind === 'turn') return note.at;
+    }
+    return undefined;
+  }
+
   /** Newest first. Unknown agent → empty, not an error. */
   list(agent: string): AgentRingNote[] {
     return [...(this.rings.get(normalizeAgent(agent)) ?? [])].reverse();

@@ -1,11 +1,12 @@
 /**
  * Chat-audit counters — the store, and the routes in front of it.
  *
- * The number an agent reads here is NOT a live measurement: the server cannot
- * see chat (it lives in each session's terminal), so the daily chat audit —
- * an agent that mines transcripts — publishes per-agent counts and the server
- * stores and serves them. One number, one implementation: what the audit
- * publishes is exactly what a session reads back about itself.
+ * Two writers, one log. The daily chat audit — an agent that mines whole
+ * transcripts — publishes per-agent counts. The Stop hook route ALSO writes
+ * here, one row per detected ask, because the server does see one line of
+ * chat: the closing message every turn posts to its Activity tab. The live
+ * writer is a floor (a regex over one line); the daily one sees more and its
+ * row for a day supersedes. A session reads back whichever row is latest.
  *
  * Store tests cover parsing/latest-wins/persistence; route tests cover the
  * layer a unit test misses. Absence assertions sit next to their positive
@@ -15,12 +16,132 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChatAudit, chatAuditLogPath, normalizeAgent } from '../src/chat-audit.ts';
+import { ChatAudit, chatAuditLogPath, dayBefore, normalizeAgent } from '../src/chat-audit.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
+
+describe('the live writer — one row per ask the Stop hook route saw', () => {
+  let dir: string;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A store whose clock the test owns, so "the same day" is a fact and not
+   *  a race against midnight. */
+  function storeAt(iso: string): { store: ChatAudit; set: (iso: string) => void } {
+    dir = mkdtempSync(join(tmpdir(), 'chat-audit-live-'));
+    let t = Date.parse(iso);
+    return {
+      store: new ChatAudit({ dataDir: dir, now: () => t }),
+      set: (v) => {
+        t = Date.parse(v);
+      },
+    };
+  }
+
+  it("carries the day's running totals forward, so each row is the total so far", () => {
+    const { store, set } = storeAt('2026-09-10T09:00:00.000Z');
+    expect(store.recordLive({ agent: 'Riverbend', unfiled: true })).toMatchObject({
+      unfiledAsks: 1,
+      totalAsks: 1,
+    });
+    set('2026-09-10T11:00:00.000Z');
+    expect(store.recordLive({ agent: 'Riverbend', unfiled: false })).toMatchObject({
+      unfiledAsks: 1,
+      totalAsks: 2,
+    });
+    set('2026-09-10T13:00:00.000Z');
+    const third = store.recordLive({ agent: 'Riverbend', unfiled: true });
+    expect(third).toMatchObject({ unfiledAsks: 2, totalAsks: 3, auditor: 'stop-hook' });
+    // A different agent on the same day counts separately — the forward-carry
+    // is per agent, and a shared counter would blame whoever posted last.
+    expect(store.recordLive({ agent: 'Harborlight', unfiled: true })).toMatchObject({
+      unfiledAsks: 1,
+      totalAsks: 1,
+    });
+  });
+
+  it('starts each day from zero rather than from yesterday', () => {
+    const { store, set } = storeAt('2026-09-09T09:00:00.000Z');
+    store.recordLive({ agent: 'Riverbend', unfiled: true });
+    store.recordLive({ agent: 'Riverbend', unfiled: true });
+    set('2026-09-10T09:00:00.000Z');
+    expect(store.recordLive({ agent: 'Riverbend', unfiled: true })).toMatchObject({
+      unfiledAsks: 1,
+      totalAsks: 1,
+    });
+  });
+
+  it('refuses a row for the bare shared name, which belongs to nobody', () => {
+    const { store } = storeAt('2026-09-10T09:00:00.000Z');
+    expect(store.recordLive({ agent: 'agent', unfiled: true })).toBeNull();
+    expect(store.recordLive({ agent: '  ', unfiled: true })).toBeNull();
+  });
+});
+
+describe('the window a board surface reads', () => {
+  let dir: string;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function seeded(): ChatAudit {
+    dir = mkdtempSync(join(tmpdir(), 'chat-audit-window-'));
+    const store = new ChatAudit({
+      dataDir: dir,
+      now: () => Date.parse('2026-09-10T09:00:00.000Z'),
+    });
+    store.publish({
+      day: '2026-09-10',
+      auditor: 'Team Lead',
+      entries: [{ agent: 'Riverbend', unfiledAsks: 4, totalAsks: 9 }],
+    });
+    store.publish({
+      day: '2026-09-08',
+      auditor: 'Team Lead',
+      entries: [
+        { agent: 'Riverbend', unfiledAsks: 1, totalAsks: 2 },
+        { agent: 'Harborlight', unfiledAsks: 7, totalAsks: 7 },
+      ],
+    });
+    store.publish({
+      day: '2026-09-02',
+      auditor: 'Team Lead',
+      entries: [{ agent: 'Riverbend', unfiledAsks: 99, totalAsks: 99 }],
+    });
+    return store;
+  }
+
+  it('sums each agent over the window, worst first, and leaves older days out', () => {
+    const view = seeded().window(7, '2026-09-10');
+    expect(view).toMatchObject({ days: 7, from: '2026-09-04' });
+    expect(view.agents).toEqual([
+      { agent: 'Harborlight', unfiledAsks: 7, totalAsks: 7, days: 1 },
+      { agent: 'Riverbend', unfiledAsks: 5, totalAsks: 11, days: 2 },
+    ]);
+  });
+
+  it('counts a corrected day once, taking the later row', () => {
+    const store = seeded();
+    store.publish({
+      day: '2026-09-10',
+      auditor: 'Team Lead',
+      entries: [{ agent: 'Riverbend', unfiledAsks: 0, totalAsks: 9 }],
+    });
+    const riverbend = store.window(7, '2026-09-10').agents.find((a) => a.agent === 'Riverbend');
+    expect(riverbend).toEqual({ agent: 'Riverbend', unfiledAsks: 1, totalAsks: 11, days: 2 });
+  });
+
+  it('walks back over a month boundary', () => {
+    expect(dayBefore('2026-09-10', 6)).toBe('2026-09-04');
+    expect(dayBefore('2026-09-01', 1)).toBe('2026-08-31');
+    expect(dayBefore('2026-01-01', 1)).toBe('2025-12-31');
+    expect(dayBefore('2026-03-01', 1)).toBe('2026-02-28');
+  });
+});
 
 describe('ChatAudit store', () => {
   let dir: string;
