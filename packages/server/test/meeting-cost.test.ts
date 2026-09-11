@@ -373,3 +373,58 @@ describe('the read the chooser makes', () => {
     expect(await r?.json()).toEqual({ error: 'not available to share visitors' });
   });
 });
+
+describe('a model the price table has never heard of', () => {
+  /** The same tick pipeline, composing on a model with no price. */
+  const onUnknownModel = (dir: string) =>
+    createNotesTickHarness({
+      workspaceId: 'w-test',
+      captureBoard: emptyBoard,
+      dataDir: dir,
+      taskExtractor: fakeCaptureExtractor(CAPTURE_USAGE),
+      compose: (input, n) => {
+        input.measure?.({ model: 'claude-imaginary-9' });
+        input.measure?.({
+          usage: {
+            inputTokens: 10_000,
+            outputTokens: 200,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        });
+        return addNotes(input, `- point ${n}`);
+      },
+    });
+
+  it('is named on the meeting rather than counted as free', async () => {
+    const h = onUnknownModel(dataDir());
+    await h.speak('One.');
+    await h.end();
+    expect(h.summary()?.spend?.unpricedModels).toEqual(['claude-imaginary-9']);
+  });
+
+  it('keeps that meeting out of the rolling figure entirely', async () => {
+    // Its dollars are short by whatever the unpriced calls cost while its
+    // full length still counts in the denominator, so filing it would pull
+    // the chooser's figure down by an amount nothing names. A frozen figure
+    // is a stale number a person can reason about; this would be a confident
+    // wrong one.
+    const dir = dataDir();
+    recordMeetingCost(dir, 'original', { at: 1, ms: 3_600_000, usd: 2, calls: 10 });
+    const before = readPerHourByMethod(dir).original;
+    const h = onUnknownModel(dir);
+    await h.speak('One.');
+    await h.end();
+    expect(readPerHourByMethod(dir).original).toBe(before as number);
+  });
+
+  it('MUTATION CONTROL: the same meeting on a priced model IS recorded', async () => {
+    const dir = dataDir();
+    recordMeetingCost(dir, 'original', { at: 1, ms: 3_600_000, usd: 2, calls: 10 });
+    const before = readPerHourByMethod(dir).original ?? 0;
+    const h = meetingWith({ dataDir: dir });
+    await h.speak('One.');
+    await h.end();
+    expect(readPerHourByMethod(dir).original).not.toBe(before);
+  });
+});

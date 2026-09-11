@@ -1062,7 +1062,21 @@ export function withServerNotesSinks(
       // the stop: a switch mid-meeting composes the rest of the meeting on
       // the new method and writes its own trace line, so the method it ended
       // on is the one whose cost this meeting is mostly evidence about.
-      if (deps.dataDir !== undefined && summary.spend && summary.spend.calls > 0) {
+      //
+      // A MEETING THAT CALLED A MODEL THE TABLE CANNOT PRICE IS NOT RECORDED.
+      // Its unpriced calls contribute no dollars while its full length still
+      // counts in the denominator, so filing it would drag every later figure
+      // down by an amount nothing names — the same silent understatement this
+      // whole change exists to end. A model rollout therefore freezes the
+      // figure at its last honest value until the table learns the new price,
+      // which is a stale number a person can reason about rather than a
+      // confident wrong one.
+      if (
+        deps.dataDir !== undefined &&
+        summary.spend &&
+        summary.spend.calls > 0 &&
+        summary.spend.unpricedModels.length === 0
+      ) {
         recordMeetingCost(
           deps.dataDir,
           readNotesMethod(deps.dataDir, summary.docId),
