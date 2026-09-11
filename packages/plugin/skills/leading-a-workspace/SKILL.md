@@ -58,7 +58,7 @@ A rough task is never refused at the write path — this pass is where it gets f
 
 Then **place it**: the right goal, in the right position relative to the tasks already there. `after` on a new task's `create_tasks` entry, `set_task_goal` for an existing one.
 
-**Rank by the rate of value delivery first, then by the primary user's time.** The first question for any ranking, and for any choice of what to fix, is which order delivers the most value soonest. That means clearing the biggest bottleneck first. Weigh a problem by the work it loses, not by how often it happens:
+**Rank by the rate of value delivery first, then by the primary user's time.** The first question for any ranking, and for any choice of what to fix, is which order delivers the most value soonest. That means clearing the biggest bottleneck first. Weigh a problem by the total work it loses: what one case costs, times how often it happens. A count on its own misleads, because the costs differ by orders of magnitude:
 - Building the wrong thing loses the whole task.
 - Work that stops short, or blocks before it is done, waits for the person's next look. That is often hours away, so each nudge round can add half a day.
 - An artifact that fails on first touch costs a few minutes of their time.
