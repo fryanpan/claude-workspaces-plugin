@@ -75,9 +75,11 @@ describe('the offer at the end of a finished meeting', () => {
     const go = styleOf(goIn(scrim()));
     // Padding rather than a fixed height, so a label that wraps on the phone
     // grows the target instead of centring a box inside it.
-    expect(go.paddingTop).toBe('9px');
-    expect(go.paddingBottom).toBe('9px');
-    expect(go.paddingLeft).toBe('14px');
+    // 12px each side over the 20px line box clears the 44px floor a finger
+    // needs; the 9px this shipped with measured 40px on the iPad.
+    expect(go.paddingTop).toBe('12px');
+    expect(go.paddingBottom).toBe('12px');
+    expect(go.paddingLeft).toBe('16px');
     expect(go.cursor).toBe('pointer');
   });
 
