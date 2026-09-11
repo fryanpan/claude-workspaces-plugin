@@ -808,7 +808,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'find_and_replace',
       description:
-        "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
+        "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block; block-level markdown is refused with block-markdown-in-replacement. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
       inputSchema: {
         type: 'object',
         properties: {
