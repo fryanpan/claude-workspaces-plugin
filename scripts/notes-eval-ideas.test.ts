@@ -136,8 +136,10 @@ describe('the lost-idea rate', () => {
   });
 
   it('gates on the bar the shipped baseline holds', () => {
+    // Zero is a bar this ratchet can now reach and ship, so the floor here is
+    // zero too — a test that forbade it would go red on the first perfect run.
     const bar = readLostIdeaBar();
-    expect(bar).toBeGreaterThan(0);
+    expect(bar).toBeGreaterThanOrEqual(0);
     expect(bar).toBeLessThanOrEqual(0.41);
   });
 });
