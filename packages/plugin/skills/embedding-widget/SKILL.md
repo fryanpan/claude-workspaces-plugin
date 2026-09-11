@@ -226,8 +226,7 @@ enter the repo, so this needs no widget markup at all — and the bind captures
 the content, so cleaning up your scratch directory does not take the mock
 down with it.
 
-Two rules about what you write there, both learned the same day a reviewer
-sent a strip of seven captioned scenes straight back (2026-09-11):
+Two rules about what you write there:
 
 - **A change to a surface that already exists is mocked ON that surface.**
   Run the app, copy the rendered markup and the stylesheets it loads into your

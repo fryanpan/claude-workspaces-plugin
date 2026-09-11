@@ -79,7 +79,7 @@ that way and add new subsystem docs to the list here.
   for a surface that does not exist yet.
 - **Mocks are interactive.** The reader reaches every state by acting on the
   page — tapping, typing, moving — never by reading a strip of captioned
-  scenes. 2026-09-11: Bryan sent a seven-scene static mock back for both.
+  scenes.
 
 ## The gates — `bun run verify` before you push
 
