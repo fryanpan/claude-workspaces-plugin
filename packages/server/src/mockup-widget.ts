@@ -26,8 +26,35 @@
  * in explicitly keeps its own embed: it may be passing `view`, a `server-url`,
  * or calling `FeedbackWidget.init` with derived options, and a second copy
  * bolted on underneath would fight it for the same `docId`.
+ *
+ * A MENTION is not an embed. This used to match the name anywhere in the
+ * page, and the board's own stylesheet carries `body:has(claude-feedback-widget)`
+ * — so every mock that copied the real chrome was served without a widget, and
+ * its reviewer could not comment. So the page is read the way a browser reads
+ * it: comments and `<style>` bodies say nothing, markup embeds only by the
+ * element's own tag or a `<script src>` naming the bundle, and a script body
+ * counts on any mention, since code that names the widget is how a page mounts
+ * it programmatically.
+ *
+ * One left-to-right alternation rather than stripping each kind in turn, so
+ * whichever span OPENS first owns the text up to its close — a `<!--` inside a
+ * script string cannot swallow the embed after it, which it would if comments
+ * were stripped first. An unclosed span matches nothing and stays markup, so
+ * a malformed page errs toward "already embedded", never toward a second copy.
  */
-const ALREADY_EMBEDDED = /claude-feedback-widget|widget\.iife\.js|FeedbackWidget\s*\.\s*init/i;
+const OPAQUE =
+  /<!--[\s\S]*?-->|<style(?=[\s/>])[^>]*>[\s\S]*?<\/style\s*>|<script(?=[\s/>])([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+const EMBED_IN_MARKUP = /<claude-feedback-widget\b|<script\b[^>]*widget\.iife\.js/i;
+const EMBED_IN_SCRIPT = /claude-feedback-widget|widget\.iife\.js|FeedbackWidget\s*\.\s*init/i;
+
+function alreadyEmbedded(html: string): boolean {
+  let byScript = false;
+  const markup = html.replace(OPAQUE, (_span, attrs?: string, body?: string) => {
+    if (attrs !== undefined && EMBED_IN_SCRIPT.test(`${attrs}${body ?? ''}`)) byScript = true;
+    return ' ';
+  });
+  return byScript || EMBED_IN_MARKUP.test(markup);
+}
 
 /** Last `</body>`, case-insensitive — the insertion point when there is one. */
 const BODY_CLOSE = /<\/body\s*>(?![\s\S]*<\/body\s*>)/i;
@@ -67,7 +94,7 @@ export function widgetEmbed(docId: string, workspaceId: string): string {
  * hand-written page without one is still a page a reviewer wants to comment on.
  */
 export function injectWidget(html: string, docId: string, workspaceId: string): string {
-  if (ALREADY_EMBEDDED.test(html)) return html;
+  if (alreadyEmbedded(html)) return html;
   const embed = widgetEmbed(docId, workspaceId);
   if (BODY_CLOSE.test(html)) return html.replace(BODY_CLOSE, `${embed}$&`);
   return `${html}${embed}`;

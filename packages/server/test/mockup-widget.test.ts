@@ -37,6 +37,41 @@ describe('injectWidget', () => {
     expect(injectWidget(programmatic, 'doc-1', 'w-1')).toBe(programmatic);
   });
 
+  /** How many widget elements the page will mount. */
+  const embeds = (html: string): number => html.split('<claude-feedback-widget ').length - 1;
+
+  it('adds the widget to a mock that only MENTIONS it — a copied stylesheet, a comment, prose', () => {
+    // The board's own chrome carries this selector, so a mock that inlines
+    // board.css used to be served without a widget and could not be commented on.
+    const copiedChrome =
+      '<html><head><style>body:has(claude-feedback-widget) .dock { bottom: 64px; }</style></head><body><h1>Board</h1></body></html>';
+    const commented =
+      '<html><body><!-- the claude-feedback-widget is added by the server --><h1>Mock</h1></body></html>';
+    const prose = '<html><body><p>Comments go through claude-feedback-widget.</p></body></html>';
+    for (const page of [copiedChrome, commented, prose]) {
+      expect(embeds(injectWidget(page, 'doc-1', 'w-1'))).toBe(1);
+    }
+  });
+
+  it('does not add a second widget to a mock that embeds its own after a style block', () => {
+    const style = '<style>body:has(claude-feedback-widget) .dock { bottom: 64px; }</style>';
+    const byElement = `<html><head>${style}</head><body><claude-feedback-widget workspace-id="w-9" doc-id="mine"></claude-feedback-widget></body></html>`;
+    const byScriptTag = `<html><head>${style}</head><body><script src="http://example.test/widget.iife.js" data-doc-id="mine"></script></body></html>`;
+    const byInit = `<html><head>${style}</head><body><script>FeedbackWidget.init({ docId: "mine" })</script></body></html>`;
+    const byCreate = `<html><body>${style}<script>document.body.append(document.createElement("claude-feedback-widget"))</script></body></html>`;
+    for (const page of [byElement, byScriptTag, byInit, byCreate]) {
+      expect(injectWidget(page, 'doc-1', 'w-1')).toBe(page);
+    }
+  });
+
+  it('is not fooled by a comment opener inside a script into hiding the embed after it', () => {
+    // Stripping comments before scripts would read `<!--` … `-->` as one
+    // comment spanning the real embed, and bolt a second widget on.
+    const page =
+      '<html><body><script>const open = "<!--";</script><claude-feedback-widget workspace-id="w-9" doc-id="mine"></claude-feedback-widget><!-- end --></body></html>';
+    expect(injectWidget(page, 'doc-1', 'w-1')).toBe(page);
+  });
+
   it('appends when the page has no closing body tag', () => {
     const out = injectWidget('<h1>fragment</h1>', 'doc-1', 'w-1');
     expect(out.startsWith('<h1>fragment</h1>')).toBe(true);
