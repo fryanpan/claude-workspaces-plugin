@@ -56,7 +56,7 @@ export const PROBE_CONNECT_TIMEOUT_MS = 2_000;
  * should only lose to a server that is stuck, not to one that is busy.
  */
 export const PROBE_ANSWER_TIMEOUT_MS = 10_000;
-/** A reply whose header block has not ended by here is not an HTTP reply. */
+/** A reply whose header block has not ended by here is not an answer. */
 const MAX_HEAD_BYTES = 16 * 1024;
 
 /**
@@ -152,7 +152,12 @@ export function probeHealth(
     });
     socket.on('data', (chunk) => {
       head += chunk.toString('latin1');
-      if (!head.includes('\r\n\r\n') && head.length < MAX_HEAD_BYTES) return;
+      if (!head.includes('\r\n\r\n')) {
+        if (head.length < MAX_HEAD_BYTES) return;
+        // A status line with no end to its headers is a reply that stalled
+        // halfway, and a 200 at the top of it proves nothing.
+        return done({ verdict: 'no-answer', detail: 'the reply headers never ended' });
+      }
       const match = /^HTTP\/1\.[01] (\d{3})[ \r]/.exec(head);
       if (!match) return done({ verdict: 'no-answer', detail: 'the reply was not HTTP' });
       const status = Number(match[1]);

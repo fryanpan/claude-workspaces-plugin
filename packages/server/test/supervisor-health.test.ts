@@ -113,6 +113,16 @@ describe('probeHealth: one request, and the verdict names what failed', () => {
     expect((await probeHealth(port)).verdict).toBe('no-answer');
   });
 
+  it('no-answer: a 200 status line whose headers never end is not an answer', async () => {
+    const port = await rawServer((socket) =>
+      socket.write(`HTTP/1.1 200 OK\r\nx-filler: ${'a'.repeat(20 * 1024)}`),
+    );
+    expect(await probeHealth(port)).toEqual({
+      verdict: 'no-answer',
+      detail: 'the reply headers never ended',
+    });
+  });
+
   it('inconclusive: the host could not give the probe a socket', async () => {
     const fake = Object.assign(new EventEmitter(), { write: () => true, destroy: () => {} });
     const result = await probeHealth(8873, {
