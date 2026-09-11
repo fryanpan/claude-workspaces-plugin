@@ -72,10 +72,13 @@ export function spawnBunInstall(cwd: string): InstallRunner {
 export function installBeforeBoot(install: InstallRunner, log: (line: string) => void): boolean {
   const result = install();
   if (result.ok) return true;
+  // One line: the caller stamps it with a time, and bun's multi-line reason
+  // would otherwise leave its continuation lines undated in the err log.
+  const said = (result.detail ?? 'no detail').split(/\s*\n\s*/).join(' | ');
   log(
     '[supervisor] bun install --frozen-lockfile FAILED — refusing to boot the server over ' +
       'dependencies that do not match bun.lock. Nothing will serve until an install ' +
-      `succeeds; launchd relaunches this supervisor to retry. bun said: ${result.detail ?? 'no detail'}`,
+      `succeeds; launchd relaunches this supervisor to retry. bun said: ${said}`,
   );
   return false;
 }

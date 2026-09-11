@@ -77,6 +77,17 @@ describe('installBeforeBoot', () => {
     expect(lines[0]).toContain('refusing to boot');
     expect(lines[0]).toContain('error: lockfile had changes, but lockfile is frozen');
   });
+
+  it('keeps a multi-line reason on the one line the supervisor stamps', () => {
+    const lines: string[] = [];
+    installBeforeBoot(
+      () => ({ ok: false, detail: 'Resolving dependencies\nerror: frozen\nnote: re-run' }),
+      (l) => lines.push(l),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain('\n');
+    expect(lines[0]).toContain('Resolving dependencies | error: frozen | note: re-run');
+  });
 });
 
 /**
