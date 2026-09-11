@@ -28,6 +28,14 @@ export default defineConfig({
       ['packages/workspaces-app/**', 'happy-dom'],
       ['packages/widget/**', 'happy-dom'],
     ],
+    // A test that clicks a link used to make happy-dom LOAD the target over
+    // the network — `http://localhost:3000/w/…`, where nothing listens — and
+    // print the refusal. With navigation off it still moves `location` (the
+    // fallback that sets the URL stays on), which is all a test here reads.
+    // The `fetch` half of the same refusal is in vitest.setup.ts.
+    environmentOptions: {
+      happyDOM: { settings: { navigation: { disableMainFrameNavigation: true } } },
+    },
     setupFiles: ['./vitest.setup.ts'],
     include: [
       'packages/*/test/**/*.test.{ts,tsx}',
