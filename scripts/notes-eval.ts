@@ -17,8 +17,8 @@
  * where is it". It is measured against a list of the ideas in each tick,
  * written down once beside the fixture and corrected by hand afterwards
  * (`notes-eval-ideas.ts`), and it FAILS the run above the ratcheted bar in
- * `notes-eval.baseline.json` (`--ratchet` lowers it to a better run; the target
- * is five per cent) — unlike every other rate here, because its denominator is fixed rather than
+ * `notes-eval.baseline.json` (`--ratchet` lowers it to a better run, and
+ * nothing raises it) — unlike every other rate here, because its denominator is fixed rather than
  * re-derived, so it means the same thing on two different days.
  *
  * REAL MEETINGS ARE NOT IN THIS REPO. `--corpus <dir>` reads fixtures and
