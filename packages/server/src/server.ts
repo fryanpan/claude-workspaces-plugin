@@ -853,8 +853,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // needs it: the ydoc projection carries the notes and the audit log has
   // the event. Excluded here, on the server, because a bundle-side filter
   // only takes effect for sessions that have restarted onto it.
+  //
+  // `dispatch.requested` is excluded for the same reason and by the same
+  // argument: it is a timing marker for the audit log, nothing on any surface
+  // reads it, and relaying it would spend a wake turn of every other agent on
+  // the board every time the lead started a builder. The measurement it exists
+  // for is read out of `events.jsonl` after the fact, so the stream is not a
+  // path it needs.
   taskStore.onEvent((ev) => {
-    if (ev.type === 'task.noted') return;
+    if (ev.type === 'task.noted' || ev.type === 'dispatch.requested') return;
     const { type, ...rest } = ev;
     sse.broadcast(`ws~${ev.workspaceId}`, { event: type, ...rest });
   });

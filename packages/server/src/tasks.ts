@@ -1294,6 +1294,39 @@ export interface TaskNotedEvent {
   ts: number;
 }
 
+/**
+ * A lead asking for a builder lane — `POST /workspaces/<ws>/dispatches`, the
+ * route behind `register_dispatch`.
+ *
+ * The one event here that is written for a request that did NOT take effect:
+ * `outcome: 'cap-reached'` is a lane asked for while every slot was held, and
+ * it is the only record that the ask happened before the slot did. That is the
+ * point of the row — it is the marker that splits the wait between a row going
+ * in-progress and a builder's first breath into planning-or-gate (before) and
+ * queueing-for-capacity (after). See `dispatch-request-event.ts`.
+ *
+ * Deliberately NOT broadcast on the workspace stream (`server.ts`, the
+ * broadcast listener), for the reason `task.noted` is not: it is telemetry
+ * nobody acts on, and every attached MCP child relays a frame it has no line
+ * for as a channel message, which would spend a wake turn of every other agent
+ * on the board each time the lead started a builder.
+ */
+export interface DispatchRequestedEvent {
+  type: 'dispatch.requested';
+  workspaceId: string;
+  taskId: string;
+  /** `refused` is the registry declining the worktree; the 400s above it
+   *  (an unparseable task id or path) never reach here, because a request
+   *  that names no row is not a decision to run one. */
+  outcome: 'registered' | 'cap-reached' | 'refused';
+  /** Why the lead is running this row now, in the lead's own words. */
+  reason?: string;
+  /** The builder being put on the lane, when the caller named one. */
+  agentName?: string;
+  actor?: TaskActor;
+  ts: number;
+}
+
 export interface VoiceRequestEvent {
   type: 'voice.request';
   workspaceId: string;
@@ -1414,6 +1447,7 @@ export type TaskStoreEvent =
   | AgentAttachedEvent
   | AgentDetachedEvent
   | AgentHeartbeatEvent
+  | DispatchRequestedEvent
   | VoiceRequestEvent;
 
 /* `legacyTriageSidecarPaths` lives in `task-persistence.ts` now, next to
