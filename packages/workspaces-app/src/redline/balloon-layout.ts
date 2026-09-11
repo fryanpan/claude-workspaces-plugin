@@ -197,11 +197,10 @@ export function placeCards(
     const y = Math.max(m.minY, it.anchorY);
     // Clear of the band in the direction its own text lies. `min`/`max` and
     // not an assignment: a card already well outside stays where its text is.
-    // Near the top of a document there may be no room above the fold, and the
-    // caller clamps every position to >= 0 — so such a card renders at the top
-    // instead. That is the rule bending, not breaking: this branch only ever
-    // moves a card UP, towards its own anchor, so the one the reader glimpses
-    // is the one whose sentence just left the screen.
+    // Near the top of a document there is no room above the fold, so the
+    // answer is negative — above the document itself, where the scroller
+    // clips it. The caller must not clamp it back to zero: that put a sliver
+    // of the card on screen beside text it does not mark.
     result[i] =
       it.anchorBottom <= visible.top
         ? Math.min(y, visible.top - it.height - gap)

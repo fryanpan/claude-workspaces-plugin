@@ -28,6 +28,13 @@
  * past the fold, and reaches the words by scrolling down for them. The pane
  * used to pull itself down to the transcript, which is what took the
  * comments out of reach in the first place.
+ *
+ * AND TWO STATES THE FIRST FIX LEFT. A card whose text is just off the top,
+ * near the top of the doc, has no room above the fold — and the column
+ * clamped it to the document's top, back on screen. And a note landing above
+ * the comments moves their text at once while the cards waited out the
+ * column's 100ms debounce, beside the wrong lines or on screen for text that
+ * had left it. `clamped` and `landed` are those two.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -130,6 +137,17 @@ function measure(html: string, preset: 'ipad' | 'phone'): Probe {
   return JSON.parse((JSON.parse(r.stdout) as { result: string }).result) as Probe;
 }
 
+/** One launch per width, shared by every case below: the probe runs all its
+ *  arms in one page, and a second launch would pay for all of them again. */
+const probes = new Map<'ipad' | 'phone', Probe>();
+function probeFor(preset: 'ipad' | 'phone'): Probe {
+  const hit = probes.get(preset);
+  if (hit) return hit;
+  const got = measure(buildPage(), preset);
+  probes.set(preset, got);
+  return got;
+}
+
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   for (const runId of owned) {
@@ -147,7 +165,7 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
     it(
       `keeps every card with its own sentence through a meeting at ${width}`,
       () => {
-        const { watching, afterScrollBack, held, jumped, untouched } = measure(buildPage(), preset);
+        const { watching, afterScrollBack, held, jumped, untouched } = probeFor(preset);
 
         // THE CONTROLS. The reader really was down at the transcript, the
         // column really had cards to draw, and not one comment's sentence was
@@ -215,4 +233,69 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
       BROWSER_CASE_MS,
     );
   }
+});
+
+describe.skipIf(CHROME === null)('a margin comment shows only beside text on screen', () => {
+  it(
+    'at 1180x820 an open card whose text is just off the top paints nothing',
+    () => {
+      const { clamped } = probeFor('ipad');
+      // THE CONTROLS. The margin is the surface here, the card's text really
+      // is off screen, and the card is taller than the scroll offset — so
+      // there is no room for it between the document's top and the fold,
+      // which is the state the fault needs.
+      expect(clamped.placement).toBe('balloon');
+      expect(clamped.anchorOnScreen).toBe(false);
+      expect(clamped.cardHeight).toBeGreaterThan(clamped.scrollTop);
+      // THE FAULT: the column clamped the card to the document's top, and
+      // 128px of it painted beside the next paragraph (cardTop -108,
+      // cardBottom 128, text at -65..-25).
+      expect(clamped.cardOnScreen).toBe(false);
+      expect(clamped.cardBottom).toBeLessThanOrEqual(0);
+      // Still reachable: the "N above" pill counts it…
+      expect(clamped.hintAbove).toBeGreaterThan(0);
+      // …and scrolling back brings the card back beside its text.
+      expect(clamped.back?.anchorOnScreen).toBe(true);
+      expect(clamped.back?.cardOnScreen).toBe(true);
+      expect(Math.abs(clamped.back?.offsetFromAnchor ?? Number.NaN)).toBeLessThan(400);
+    },
+    BROWSER_CASE_MS,
+  );
+
+  it(
+    'at 1180x820 notes landing above the comments take the cards with the text on the next frame',
+    () => {
+      const { landed } = probeFor('ipad');
+      // THE CONTROLS. Every comment's text and card began on screen; after
+      // six notes the text had moved but was still on screen; after sixteen
+      // more only the title's comment was — and every card still existed.
+      expect(landed.placement).toBe('balloon');
+      expect(landed.before.beside).toBe(landed.before.threads);
+      expect(landed.nudged.per.every((p) => p.anchorOnScreen)).toBe(true);
+      expect(landed.pushed.per.filter((p) => p.anchorOnScreen)).toHaveLength(1);
+      expect(landed.pushed.cards).toBe(landed.pushed.threads);
+      // THE FAULT, one frame after the notes landed. The column waited out
+      // its 100ms debounce first: the cards sat 374-452px above their text,
+      // and once the text was pushed off the bottom, three cards painted on
+      // screen beside notes they do not mark.
+      expect(landed.offsetsNudged).toEqual(landed.offsetsSettled);
+      expect(landed.nudged.detached).toBe(0);
+      expect(landed.pushed.detached).toBe(0);
+    },
+    BROWSER_CASE_MS,
+  );
+
+  it(
+    'at 430 there is no margin, so neither arm paints a balloon',
+    () => {
+      // The cards sit in the flow under their text at this width; the margin
+      // rule has nothing to apply to, and the reading says so.
+      const { clamped, landed } = probeFor('phone');
+      expect(clamped.placement).toBe('inline');
+      expect(clamped.balloonsPainted).toBe(0);
+      expect(landed.placement).toBe('inline');
+      expect(landed.balloonsPainted).toBe(0);
+    },
+    BROWSER_CASE_MS,
+  );
 });
