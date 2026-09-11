@@ -315,16 +315,16 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     // A finger on the saved card, while the resting card's field has focus.
     await tap(`${SHADOW}.querySelector('.saved')`);
     await look('savedTapped');
-    // Zoomed in and scrolled down inside the zoom: the visual viewport is
-    // half the height and starts partway down the layout viewport, as it does
-    // when an iPad's keyboard pushes the page up.
+    // Zoomed in and scrolled down and right inside the zoom: the visual
+    // viewport is half the height and starts partway down the layout
+    // viewport, as when an iPad's keyboard pushes the page up, and partway in.
     await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await settle();
     await cdp.send('Input.dispatchMouseEvent', {
       type: 'mouseWheel',
       x: 300,
       y: 300,
-      deltaX: 0,
+      deltaX: 600,
       deltaY: 1000,
     });
     await settle();

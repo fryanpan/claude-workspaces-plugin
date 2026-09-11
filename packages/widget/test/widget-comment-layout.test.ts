@@ -214,11 +214,12 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(card[1]).toBeGreaterThanOrEqual(top);
       expect(card[3]).toBeLessThanOrEqual(top + height);
       // Sideways too: zoomed in, the window's right edge is off screen.
-      expect(left + width, 'CONTROL: the right edge of the window is off screen').toBeLessThan(
-        1164,
-      );
+      expect(left + width, 'CONTROL: the right edge is off screen').toBeLessThan(1164);
       expect(card[0]).toBeGreaterThanOrEqual(left);
       expect(card[2]).toBeLessThanOrEqual(left + width);
+      // And a line's element end, though that element is off to the left.
+      expect(box(l.el.narrow)[2], 'CONTROL: an element is off to the left').toBeLessThan(left);
+      for (const [x1] of l.lines) expect(x1).toBeGreaterThanOrEqual(left);
     });
 
     it('stays clear of the FAB and the list button for an element low on the screen', () => {
@@ -234,21 +235,39 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(overlap(card, l.el.low)).toBe(0);
     });
 
+    it('puts the dot on an element that sits lower than the top of the buttons', () => {
+      // Held to the card's room, which ends above the FAB, the dot sat above it.
+      for (const name of ['onLowDesk', 'lowOpen', 'lowTwice']) {
+        const l = look(1180, name);
+        const el = box(l.el.low);
+        const floor = Math.min(...l.controls.map((c) => c[1]));
+        expect(el[1], `CONTROL: ${name}: it starts below the buttons`).toBeGreaterThan(floor);
+        expect(l.lines.length, `CONTROL: ${name}: a card is joined to it`).toBeGreaterThan(0);
+        for (const [x1, y1] of l.lines) {
+          const dx = Math.max(el[0] - x1, 0, x1 - el[2]);
+          const dy = Math.max(el[1] - y1, 0, y1 - el[3]);
+          expect(Math.hypot(dx, dy), `${name}: the dot is off its element`).toBeLessThanOrEqual(4);
+        }
+      }
+    });
+
     it('keeps every line on screen for an element taller than the screen', () => {
       // The line ran from the card to the element's far edge, off the bottom
       // of the screen and through whatever bar the page keeps there.
       const l = look(1180, 'onTall');
+      const [top, height] = l.vv;
       expect(box(l.el.tall)[3], 'CONTROL: the element runs past the bottom').toBeGreaterThan(820);
       expect(l.snippet, 'CONTROL: its card is open').toBe('The route map');
       expect(l.lines.length, 'CONTROL: and has a line').toBeGreaterThan(0);
-      const floor = Math.min(...l.controls.map((c) => c[1]));
-      for (const [, y1, , y2] of l.lines) {
+      for (const [x1, y1, x2, y2] of l.lines) {
         for (const y of [y1, y2]) {
-          expect(y).toBeGreaterThanOrEqual(0);
-          expect(y, 'a line runs down into the buttons or off the screen').toBeLessThanOrEqual(
-            floor,
-          );
+          expect(y).toBeGreaterThanOrEqual(top);
+          expect(y, 'a line runs off the screen').toBeLessThanOrEqual(top + height);
         }
+        // Nor through a button: the box it spans, a pixel wider so it has area.
+        const [lo, hi] = [Math.min, Math.max].map((f) => [f(x1, x2), f(y1, y2)]);
+        const span: Box = [lo[0], lo[1], hi[0] + 1, hi[1] + 1];
+        for (const c of l.controls) expect(overlap(span, c), 'through a button').toBe(0);
       }
     });
 

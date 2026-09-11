@@ -57,9 +57,11 @@ export function placeCards(w: FeedbackWidgetEl): void {
   // The part of the page actually on screen: above an iPad's keyboard, and
   // inside a pinch-zoom, on both axes. The window's size knows about neither.
   const vv = window.visualViewport;
-  let top = (vv?.offsetTop ?? 0) + 8;
-  let bot = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
+  const screenTop = (vv?.offsetTop ?? 0) + 8;
+  const screenBot = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
   const x = (vv ? vv.offsetLeft + vv.width : window.innerWidth) - 16 - CARD_W;
+  let top = screenTop;
+  let bot = screenBot;
   // The mode's own buttons in the card's column — Done, the FAB's X, the list
   // — stay uncovered: the card's room ends where they start.
   for (const o of w.shadow.querySelectorAll('.fab, .fab-list, .picker-banner')) {
@@ -110,13 +112,16 @@ export function placeCards(w: FeedbackWidgetEl): void {
     if (!r) continue;
     // The line leaves the element's own edge — a dot on it, so it lands ON
     // the thing — and meets the card on the side that faces it. That edge is
-    // held to the card's room on screen: an element taller than the screen,
-    // or scrolled partly off it, sent the line out past the screen's edge,
-    // through whatever bar the page keeps there.
-    const ex = beside ? r.right + 4 : Math.min(Math.max(x + 24, r.left), r.right);
+    // held to the screen: an element taller than it, or scrolled partly off
+    // it, sent the line out past its edge. The screen, not the card's room:
+    // held there, the dot for an element below the FAB's top sat above it.
+    const ex = Math.max(
+      (vv?.offsetLeft ?? 0) + 8,
+      Math.min(beside ? r.right + 4 : Math.min(Math.max(x + 24, r.left), r.right), x + CARD_W + 8),
+    );
     const ey = Math.max(
-      top,
-      Math.min(beside ? r.top + 10 : y > r.top ? r.bottom + 2 : r.top - 2, bot),
+      screenTop,
+      Math.min(beside ? r.top + 10 : y > r.top ? r.bottom + 2 : r.top - 2, screenBot),
     );
     const cx = beside ? x : Math.max(ex, x + 12);
     const cy = beside ? y + 12 : y > r.top ? y : y + h;
