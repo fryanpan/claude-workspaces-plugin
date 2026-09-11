@@ -9,6 +9,7 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
+  ACCESS_TOKEN_ENV,
   EVAL_KEYCHAIN_SERVICE,
   EVAL_KEY_ENV,
   KEYCHAIN_SERVICE,
@@ -172,6 +173,19 @@ describe('describeClaudeKey — the one boot line', () => {
     const line = describeClaudeKey({}, keychain({ [EVAL_KEYCHAIN_SERVICE]: 'fake-eval-key' }).read);
     expect(line).toContain(`the eval key (${EVAL_KEYCHAIN_SERVICE})`);
     expect(line).not.toContain('fake-eval-key');
+  });
+
+  it('a CI access token with no eval key: says notes spend the token, not "no Claude"', () => {
+    const env = { [ACCESS_TOKEN_ENV]: 'fake-run-token' };
+    const line = describeClaudeKey(env, keychain(PROD_ITEMS).read);
+    expect(line).toContain(`meeting notes spend the access token in ${ACCESS_TOKEN_ENV}`);
+    expect(line).not.toContain('running without Claude');
+    expect(line).not.toContain('fake-run-token');
+    // And the notes composer's own resolver agrees that the token is live.
+    expect(resolveCredentialFrom(undefined, keychain({}).read, env)).toEqual({
+      kind: 'token',
+      value: 'fake-run-token',
+    });
   });
 
   it('prod names prod’s item, and its hint when the item is missing', () => {

@@ -35,7 +35,7 @@ import {
   parseSummaryResponse,
 } from '@claude-workspaces/core/summary-prompt';
 import type { Thread } from '@claude-workspaces/core/types';
-import { claudeKeyAddHint, claudeKeyServices } from './claude-key-source.ts';
+import { ACCESS_TOKEN_ENV, claudeKeyAddHint, claudeKeyServices } from './claude-key-source.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -138,9 +138,6 @@ export function resolveKeyFrom(
 export type SummaryCredential =
   | { readonly kind: 'key'; readonly value: string }
   | { readonly kind: 'token'; readonly value: string };
-
-/** Env var holding an already-exchanged access token. */
-export const ACCESS_TOKEN_ENV = 'CW_SUMMARY_ACCESS_TOKEN';
 
 /**
  * The one auth header this credential sends. A key goes in `x-api-key`; a

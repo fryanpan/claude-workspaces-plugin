@@ -58,6 +58,11 @@ export const EVAL_KEYCHAIN_SERVICE = 'claude-workspaces-eval-api-key';
  *  service name uppercased, dashes to underscores. */
 export const EVAL_KEY_ENV = 'CLAUDE_WORKSPACES_EVAL_API_KEY';
 
+/** Env var holding an already-exchanged access token — CI mints one from its
+ *  own OIDC identity. Only the meeting-notes adapters accept one; the rest
+ *  send a key or nothing. */
+export const ACCESS_TOKEN_ENV = 'CW_SUMMARY_ACCESS_TOKEN';
+
 /** Is this process the prod launchd service? */
 export function isProdService(env: EnvLike): boolean {
   return env[LAUNCHD_JOB_ENV] === PROD_SERVICE_LABEL;
@@ -90,17 +95,22 @@ export function claudeKeyAddHint(env: EnvLike): string {
   return `security add-generic-password -a "$USER" -s ${claudeKeyServices(env)[0]} -w`;
 }
 
-/** What goes off-machine only with a key, named once so the boot line and the docs agree. */
-const CLAUDE_FEATURES =
-  'thread summaries, meeting notes and task capture, the review gate, effort estimates ' +
-  'and the voice fast path';
+/** What goes off-machine only with a key, named once so every boot line agrees. */
+const KEY_ONLY_FEATURES =
+  'thread summaries, task capture, the review gate, effort estimates and the voice fast path';
 
 /**
- * The boot's single line on which key this server spends, or that it spends
- * none. It names Keychain items, never a value: `read`'s answer is only
- * tested for presence.
+ * The boot's single line on which credential this server spends, or that it
+ * spends none. It names Keychain items and variables, never a value: `read`'s
+ * answer and the token are only tested for presence.
+ *
+ * A token counts as well as a key, because the meeting-notes adapters take one
+ * (`resolveCredentialFrom`) and prefer it — a line saying "no Claude" while
+ * notes were leaving the machine on a token would be the silent case this
+ * line exists to end.
  */
 export function describeClaudeKey(env: EnvLike, read: (service: string) => string | null): string {
+  const prod = isProdService(env);
   const found = claudeKeyServices(env).some((service) => {
     try {
       return Boolean(read(service));
@@ -109,14 +119,21 @@ export function describeClaudeKey(env: EnvLike, read: (service: string) => strin
       return false;
     }
   });
-  if (isProdService(env)) {
-    return found
-      ? `[claude] prod service: Claude calls spend prod's key (${KEYCHAIN_SERVICE}).`
-      : `[claude] prod service with no key: ${CLAUDE_FEATURES} are off. ` +
-          `Add one with: ${claudeKeyAddHint(env)}`;
+  const token = Boolean(env[ACCESS_TOKEN_ENV]?.trim());
+  const who = prod ? 'prod service' : 'not the prod service';
+  const tokenNote = token
+    ? ` Meeting notes spend the access token in ${ACCESS_TOKEN_ENV} instead.`
+    : '';
+  if (found) {
+    const key = prod
+      ? `prod's key (${KEYCHAIN_SERVICE})`
+      : `the eval key (${EVAL_KEYCHAIN_SERVICE}), never prod's`;
+    return `[claude] ${who}: Claude calls spend ${key}.${tokenNote}`;
   }
-  return found
-    ? `[claude] not the prod service: Claude calls spend the eval key (${EVAL_KEYCHAIN_SERVICE}), never prod's.`
-    : `[claude] not the prod service and no eval key: running without Claude — ${CLAUDE_FEATURES} are off. ` +
-        `Prod's key is never read outside the launchd service. Add the eval key with: ${claudeKeyAddHint(env)}`;
+  const missing = prod ? 'no key' : 'no eval key';
+  const neverProd = prod ? '' : " Prod's key is never read outside the launchd service.";
+  const off = token
+    ? `meeting notes spend the access token in ${ACCESS_TOKEN_ENV}; ${KEY_ONLY_FEATURES} are off.`
+    : `running without Claude — meeting notes, ${KEY_ONLY_FEATURES} are off.`;
+  return `[claude] ${who} with ${missing}: ${off}${neverProd} Add the key with: ${claudeKeyAddHint(env)}`;
 }

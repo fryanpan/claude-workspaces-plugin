@@ -34,15 +34,12 @@
  * `SummaryCredential`, whose value reaches exactly one header.
  */
 import {
+  ACCESS_TOKEN_ENV,
   EVAL_KEYCHAIN_SERVICE,
   EVAL_KEY_ENV,
   withoutProdMarker,
 } from '../packages/server/src/claude-key-source.ts';
-import {
-  ACCESS_TOKEN_ENV,
-  type SummaryCredential,
-  resolveCredentialFrom,
-} from '../packages/server/src/summarize.ts';
+import { type SummaryCredential, resolveCredentialFrom } from '../packages/server/src/summarize.ts';
 
 /** The Keychain item the eval reads, and its env override. Prod's is a
  *  different name on purpose. */
