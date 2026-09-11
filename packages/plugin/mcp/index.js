@@ -17747,7 +17747,7 @@ async function handleDocsTool(name, a, ctx) {
         ...contextAfter !== undefined ? { contextAfter } : {},
         ...occurrence !== undefined ? { occurrence } : {},
         ...replaceAll === true ? { replaceAll: true } : {},
-        ...parseInlineMarks === true ? { parseInlineMarks: true } : {},
+        ...typeof parseInlineMarks === "boolean" ? { parseInlineMarks } : {},
         ...suggest === true ? { suggest: true, author: suggestionAuthor() } : {}
       });
       return ok2(res);
@@ -17756,7 +17756,7 @@ async function handleDocsTool(name, a, ctx) {
       const { docId, threadId, replacement, parseInlineMarks, suggest } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/rewrite_region`, {
         replacement,
-        ...parseInlineMarks === true ? { parseInlineMarks: true } : {},
+        ...typeof parseInlineMarks === "boolean" ? { parseInlineMarks } : {},
         ...suggest === true ? { suggest: true, author: suggestionAuthor() } : {}
       });
       return ok2(res);
@@ -19447,7 +19447,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.211";
+var PLUGIN_VERSION = "0.1.213";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
