@@ -272,7 +272,15 @@ export function mountMeetingCleanupOffer(opts: {
     ev.stopImmediatePropagation();
     close();
   };
-  document.addEventListener('keydown', onKeydown);
+  // CAPTURE, and that is the whole answer to "which modal does this Escape
+  // belong to". The thread modal and the thread view keep their own Escape
+  // handlers on `document`, in the bubble phase, and between two listeners on
+  // one node the winner is whichever was ADDED first — an order no surface
+  // here controls. A keystroke is targeted at the focused control inside this
+  // card, so the capture phase reaches `document` on the way DOWN, before any
+  // of them: while this dialog is up it is the layer the person is looking at
+  // (`z-index` above the modal stack), so it is the layer one press closes.
+  document.addEventListener('keydown', onKeydown, true);
 
   return {
     offer(id) {
@@ -293,7 +301,7 @@ export function mountMeetingCleanupOffer(opts: {
       close();
     },
     destroy() {
-      document.removeEventListener('keydown', onKeydown);
+      document.removeEventListener('keydown', onKeydown, true);
       root.remove();
     },
   };

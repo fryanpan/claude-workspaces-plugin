@@ -74,8 +74,11 @@ const tab = (shiftKey = false): KeyboardEvent => {
   return ev;
 };
 const shiftTab = (): KeyboardEvent => tab(true);
+/** Escape, dispatched where a real one lands: the focused control. */
 const escape = (): void => {
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  (document.activeElement ?? document).dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+  );
 };
 
 /** A fetch that records its calls and answers with `reply`. */
@@ -246,6 +249,28 @@ describe('the tidy-up offer', () => {
     outside.focus();
     expect(tab().defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(outside);
+  });
+
+  it('takes the Escape the layers under it would otherwise have taken', () => {
+    // A recording can end while a thread modal is open, and this dialog is
+    // the layer on top when it does. Those layers keep their own Escape
+    // handlers on `document`, in the bubble phase; between two listeners on
+    // one node the winner is whichever was added first, which nothing here
+    // controls — so this one runs in the capture phase instead.
+    const underneath = vi.fn();
+    document.addEventListener('keydown', underneath);
+    try {
+      const offer = mount(stubFetch());
+      // Closed, it takes nothing: the layer under it still gets its press.
+      escape();
+      expect(underneath).toHaveBeenCalledTimes(1);
+      offer.offer('m-1');
+      escape();
+      expect(offerEl().hidden).toBe(true);
+      expect(underneath).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', underneath);
+    }
   });
 
   it('closes on Escape and on the scrim, without running anything', () => {

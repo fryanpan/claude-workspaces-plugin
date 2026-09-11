@@ -2603,7 +2603,14 @@ button.lz-speaker:hover .lz-speaker-pill {
 .cleanup-offer {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  /* ABOVE THE WHOLE MODAL STACK — the thread view (1100), the thread modal
+     and its scrim (1190/1200), the topmost sheet (1201). A recording ending
+     is the newest thing on screen and arrives on its own clock, so it can
+     land while any of those is open; under them it would be an invisible
+     dialog holding the focus, and its Escape would close the layer the
+     person can actually see. The keydown handler takes the same position in
+     the capture phase for the same reason. */
+  z-index: 1300;
   display: flex;
   align-items: center;
   justify-content: center;

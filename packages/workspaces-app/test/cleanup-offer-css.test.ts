@@ -56,6 +56,21 @@ describe('the offer at the end of a finished meeting', () => {
     expect(root.background).toContain('rgba(27, 31, 35, 0.45)');
   });
 
+  it('sits above every layer that could be open when a recording ends', () => {
+    // A recording ends on its own clock, so it can land while a thread modal
+    // or the thread view is open. Under them this would be an invisible
+    // dialog holding the focus, whose Escape closed the layer the person can
+    // actually see.
+    const zOf = (el: HTMLElement): number => Number(styleOf(el).zIndex);
+    const ours = zOf(scrim());
+    for (const under of ['thread-modal', 'thread-modal-scrim', 'thread-view']) {
+      expect(ours).toBeGreaterThan(zOf(attach(under)));
+    }
+    // Positive control: those layers do carry a z-index of their own, so the
+    // comparison is against a number rather than against `auto` read as NaN.
+    expect(zOf(attach('thread-modal'))).toBeGreaterThan(0);
+  });
+
   it('gives each answer a target for a finger, not a line of text', () => {
     const go = styleOf(goIn(scrim()));
     // Padding rather than a fixed height, so a label that wraps on the phone
