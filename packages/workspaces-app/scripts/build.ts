@@ -141,15 +141,17 @@ async function emit(buildId: string): Promise<boolean> {
   }
 
   // The settings page: its own entry (served at /app/settings.js by the shell
-  // the server renders for /settings/*). Splitting off — the page is a list
-  // and a textarea, and it deliberately shares nothing with the board's
-  // bundle: it is reached from the board, not part of it.
+  // the server renders for /settings/*). It shares nothing with the board's
+  // bundle: it is reached from the board, not part of it. Splitting is ON for
+  // the board's reason: each prompt edits in the markdown composer, and
+  // without splitting its Tiptap chunk would be inlined into the entry that
+  // paints the list.
   const settingsResult = await Bun.build({
     entrypoints: [join(pkgRoot, 'src', 'settings', 'settings-app.ts')],
     outdir: dist,
     target: 'browser',
     format: 'esm',
-    splitting: false,
+    splitting: true,
     sourcemap: 'external',
     define,
     naming: { entry: 'settings.js', chunk: '[name]-[hash].js', asset: '[name].[ext]' },

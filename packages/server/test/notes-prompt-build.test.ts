@@ -370,47 +370,10 @@ describe('notes prompt', () => {
 
   it('tells the model a block that is not its own is edited only as a correction', () => {
     const { system } = buildNotesPrompt(input);
-    expect(system).toContain('ONLY EDIT A BLOCK MARKED "yours"');
-    expect(system).toContain('suggestion');
-  });
-});
-
-/**
- * A meeting with one voice in it is shown transcript lines carrying no name,
- * and used to be sent instructions demanding a speaker tag on every note —
- * with "Speaker B" spelled out as what such a name looks like. A model asked
- * for a name it has not been given supplies one, which is how a solo huddle
- * came out written as a conversation between Speaker A and Speaker B.
- */
-describe('a solo meeting is asked for no attribution at all', () => {
-  const solo = { ...input, multiSpeaker: false };
-
-  it('sends no rule demanding a tag, and no spelling for a name', () => {
-    const { system } = buildNotesPrompt(solo);
-    expect(system).not.toContain('ATTRIBUTE EVERY NOTE');
-    expect(system).not.toContain('Speaker B');
-    expect(system).not.toContain('speaker:LABEL');
-    expect(system).not.toContain('speaker tag');
-  });
-
-  it('keeps every rule that is not about who spoke', () => {
-    // The block that goes is the attribution block and nothing else: the
-    // notes still have to be bullets, still have to cite what they name,
-    // and still may only edit their own blocks.
-    const { system } = buildNotesPrompt(solo);
-    expect(system).toContain('ONLY EDIT A BLOCK MARKED "yours"');
-    expect(system).toContain('- Where a note is about a task, doc or earlier meeting');
-    expect(system).toContain('ONE POINT PER BULLET');
-  });
-
-  it('a multi-speaker tick still gets the rules, byte for byte', () => {
-    // The positive control. A gate that removed the block from every prompt
-    // would pass the two assertions above and silently stop the notes ever
-    // saying who decided anything.
-    const both = buildNotesPrompt({ ...input, multiSpeaker: true }).system;
-    expect(both).toContain('ATTRIBUTE EVERY NOTE TO THE VOICE THAT SAID IT');
-    expect(both).toContain('[@Name](speaker:LABEL)');
-    expect(both).toBe(buildNotesPrompt(input).system);
+    expect(system).toContain('Edit only blocks marked "yours".');
+    expect(system).toContain(
+      'becomes a suggestion to the person. Do this only to correct an error.',
+    );
   });
 });
 

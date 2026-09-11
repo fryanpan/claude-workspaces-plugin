@@ -32,8 +32,9 @@ import { DEFAULT_NOTES_INSTRUCTIONS } from '../src/notes-prompt-store.ts';
 import { PROMPT_CATALOG } from '../src/prompt-catalog.ts';
 import { PROMPTS_FILENAME, PROMPT_MAX_CHARS, createPromptStore } from '../src/prompt-store.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { readPreMarkdownDefault } from './pre-markdown-defaults.ts';
 
-const author = { id: 'user-tester', name: 'Robin Vale' };
+const author = { id: 'user-tester', name: 'Riverbend reviewer' };
 
 describe('the prompt store', () => {
   const dirs: string[] = [];
@@ -92,16 +93,22 @@ describe('the prompt store', () => {
    * rather than naming the two that are over 4,000 today, so a prompt that
    * grows past the cap later fails here instead of in Bryan's editor.
    *
-   * The two controls beside it: two of the shipped defaults really are over
-   * the old ceiling (or the round-trip proves nothing), and a cap still
-   * exists (or "it saves" is not a fact about the cap at all).
+   * Since the markdown rewrite no shipped default is over 4,000 any more, so
+   * the old-ceiling half of this is now carried by the words written before
+   * it: the notetaking instructions as they read before markdown (7,979
+   * characters, kept under `fixtures/`) must still save, because an override
+   * written before markdown can be that long. And a cap still exists, or "it
+   * saves" is not a fact about the cap at all.
    */
-  it('round-trips every shipped default, which the old 4,000-char cap did not', () => {
+  it('round-trips every shipped default, and words as long as the old default', () => {
     const editable = PROMPT_CATALOG.filter((p) => p.editable && p.scope === 'server');
-    expect(editable.length).toBeGreaterThan(0);
+    expect(editable.map((p) => p.id)).toContain('meeting-notes');
     // Control: without this, a cap of 4,000 would pass the loop below.
-    const overOldCap = PROMPT_CATALOG.filter((p) => p.default.length > 4_000).map((p) => p.id);
-    expect(overOldCap).toEqual(['meeting-notes', 'meeting-capture']);
+    const old = readPreMarkdownDefault('meeting-notes');
+    expect(old.length).toBeGreaterThan(4_000);
+    expect(
+      createPromptStore({ dataDir: dataDir() }).write('meeting-notes', `${old} (kept)`),
+    ).toEqual({ ok: true });
 
     const store = createPromptStore({ dataDir: dataDir() });
     for (const def of editable) {

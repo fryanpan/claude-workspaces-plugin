@@ -1,3 +1,4 @@
+import { CAPTURE_ITEM_SHAPES } from '../packages/server/src/meeting-capture-prompt.ts';
 /**
  * What the research, lookup and correction intents cost the capture prompt,
  * per tick.
@@ -28,13 +29,8 @@
  * The transcript below is invented. The repo is public.
  */
 import type { NotesTurn } from '../packages/server/src/meeting-notes.ts';
-import {
-  CORRECTION_PROMPT_RULE,
-  LOOKUP_PROMPT_RULE,
-  RESEARCH_PROMPT_RULE,
-  REVIEW_PROMPT_RULE,
-  buildTaskCapturePrompt,
-} from '../packages/server/src/meeting-task-capture.ts';
+import { buildTaskCapturePrompt } from '../packages/server/src/meeting-task-capture.ts';
+import { withoutSection } from '../packages/server/src/prompt-sections.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
 
@@ -69,95 +65,19 @@ async function countTokens(key: string, system: string, user: string): Promise<n
 }
 
 /**
- * The prompt as it read BEFORE an intent existed: its rule block removed,
- * and its line struck from the JSON shape. Both are standing text paid on
- * every tick, so both belong in the delta.
+ * The prompt without one intent: its `###` section removed by heading, and
+ * its line struck from the output format. Both are standing text paid on
+ * every tick, so both belong in the delta. Throws when either is missing, so
+ * a reworded prompt fails loudly instead of pricing an intent at zero.
  */
-function without(system: string, rule: readonly string[], shapeLines: readonly string[]): string {
-  let out = system.replace(`\n${rule.join('\n')}\n`, '\n');
-  if (out === system) throw new Error('baseline strip found no rule to remove');
-  for (const line of shapeLines) {
-    const next = out.replace(`${line}\n`, '');
-    if (next === out) throw new Error(`baseline strip found no shape line: ${line}`);
-    out = next;
+function without(system: string, heading: string, kind: string): string {
+  const cut = withoutSection(system, heading);
+  if (cut === system) throw new Error(`baseline strip found no "### ${heading}" section`);
+  const shape = CAPTURE_ITEM_SHAPES.find((line) => line.startsWith(`{"kind":"${kind}"`));
+  if (!shape || !cut.includes(`${shape}\n`)) {
+    throw new Error(`baseline strip found no shape line for ${kind}`);
   }
-  return out;
-}
-
-const RESEARCH_SHAPE = [
-  '         |{"kind":"research","topic":"...","question":"...",',
-  '           "requester":"who asked, omitted if unclear"}',
-];
-const LOOKUP_SHAPE = ['         |{"kind":"lookup","query":"..."}]}'];
-const CORRECTION_SHAPE = ['         |{"kind":"correction","wrong":"...","right":"..."}]}'];
-const REVIEW_SHAPE = [
-  '         |{"kind":"review","question":"...",',
-  '           "requester":"who asked, omitted if unclear"}]}',
-];
-
-/** The header as the review intent left it, and as it read before. */
-const REVIEW_HEADER = {
-  from: [
-    'You listen to a live working meeting and extract six things: task',
-    'REQUESTS, task REFERENCES, RESEARCH asks, LOOKUP asks, CORRECTIONS and',
-    'REVIEW asks. Answer with JSON only, this shape:',
-  ].join('\n'),
-  to: [
-    'You listen to a live working meeting and extract five things: task',
-    'REQUESTS, task REFERENCES, RESEARCH asks, LOOKUP asks and CORRECTIONS.',
-    'Answer with JSON only, this shape:',
-  ].join('\n'),
-};
-
-/**
- * The prompt as it read before the review intent: its rule, its shape lines,
- * the count in the header, and the closing bracket handed back to the
- * correction line. NOT stripped, because they cannot be told apart from the
- * text around them: the direct-ask examples the same change added to the
- * request and research rules ("make that a task", "can you research X").
- * They are a few words each and ride in the "+ review ask" delta.
- */
-function withoutReview(system: string): string {
-  const stripped = without(system, REVIEW_PROMPT_RULE, REVIEW_SHAPE);
-  const restored = stripped.replace(REVIEW_HEADER.from, REVIEW_HEADER.to);
-  if (restored === stripped) throw new Error('baseline strip found no review header to rewrite');
-  return restored.replace(
-    '         |{"kind":"correction","wrong":"...","right":"..."}\n',
-    '         |{"kind":"correction","wrong":"...","right":"..."}]}\n',
-  );
-}
-
-/**
- * The header line names the intents by count, so it moves with every one
- * added and belongs in the delta of whichever intent moved it last. Stripped
- * back to the wording that stood before the correction intent — otherwise its
- * measured cost would be one word short of the truth.
- */
-const CORRECTION_HEADER = {
-  from: [
-    'You listen to a live working meeting and extract five things: task',
-    'REQUESTS, task REFERENCES, RESEARCH asks, LOOKUP asks and CORRECTIONS.',
-    'Answer with JSON only, this shape:',
-  ].join('\n'),
-  to: [
-    'You listen to a live working meeting and extract four things: task',
-    'REQUESTS, task REFERENCES, RESEARCH asks and LOOKUP asks. Answer with',
-    'JSON only, this shape:',
-  ].join('\n'),
-};
-
-/** The prompt as it read before the correction intent: its rule, its shape
- *  line, and the count in the header sentence. */
-function withoutCorrection(system: string): string {
-  const stripped = without(system, CORRECTION_PROMPT_RULE, CORRECTION_SHAPE);
-  const restored = stripped.replace(CORRECTION_HEADER.from, CORRECTION_HEADER.to);
-  if (restored === stripped) throw new Error('baseline strip found no header to rewrite');
-  // The lookup line ended the JSON shape before the correction line existed,
-  // and stripping the correction line took the closing bracket with it.
-  return restored.replace(
-    '         |{"kind":"lookup","query":"..."}\n',
-    '         |{"kind":"lookup","query":"..."}]}\n',
-  );
+  return cut.replace(`${shape}\n`, '');
 }
 
 async function main(): Promise<void> {
@@ -167,10 +87,10 @@ async function main(): Promise<void> {
   const key = resolveKeyFrom(flagKey, readKeychainPassword);
 
   const built = buildTaskCapturePrompt({ turns: tick, candidates });
-  const beforeReview = withoutReview(built.system);
-  const beforeCorrection = withoutCorrection(beforeReview);
-  const noLookup = without(beforeCorrection, LOOKUP_PROMPT_RULE, LOOKUP_SHAPE);
-  const neither = without(noLookup, RESEARCH_PROMPT_RULE, RESEARCH_SHAPE);
+  const beforeReview = without(built.system, 'Review', 'review');
+  const beforeCorrection = without(beforeReview, 'Correction', 'correction');
+  const noLookup = without(beforeCorrection, 'Lookup', 'lookup');
+  const neither = without(noLookup, 'Research', 'research');
 
   const stages: Array<[string, string]> = [
     ['requests + references only', neither],

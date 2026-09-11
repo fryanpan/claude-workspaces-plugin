@@ -123,6 +123,7 @@ export async function handlePromptRoutes(
       editable: def.editable,
       value: view.value,
       isDefault: view.isDefault,
+      ...(view.beforeMarkdown ? { writtenBeforeMarkdown: true } : {}),
       default: def.default,
       maxChars: PROMPT_MAX_CHARS,
     });

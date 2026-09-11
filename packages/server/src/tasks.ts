@@ -19,6 +19,10 @@ import type {
 } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import type { DecisionShapeGap } from './decision-shape.ts';
+import {
+  type BoardPromptMigration,
+  endBoardPromptBeforeMarkdown,
+} from './prompt-markdown-migration.ts';
 import { TaskDecisionStore } from './review-items/decisions.ts';
 import { ReviewJudgementStore } from './review-items/judgements.ts';
 import { ReviewItemQueries } from './review-items/queries.ts';
@@ -353,6 +357,9 @@ export interface BoardWorkspace {
    * reader, so the default lives in exactly one place.
    */
   effortEstimatePrompt?: string;
+  /** The run of the markdown-defaults migration on the two prompt fields
+   *  above (`prompt-markdown-migration.ts`). Present means it ran. */
+  promptMarkdownMigration?: BoardPromptMigration;
   /**
    * How many builders this board's lead may have dispatched at once — a
    * ceiling on `register_dispatch`, not a scheduler (Bryan, 2026-08-31: "add
@@ -2670,6 +2677,7 @@ export class TaskStore {
     const next = prompt?.trim();
     if (next === undefined || next === '') state.workspace.effortEstimatePrompt = undefined;
     else state.workspace.effortEstimatePrompt = next;
+    endBoardPromptBeforeMarkdown(state.workspace, 'effortEstimatePrompt');
     this.scheduleSave(workspaceId);
     const read = this.effortEstimatePrompt(workspaceId);
     return {

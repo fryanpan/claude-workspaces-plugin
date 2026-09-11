@@ -36,6 +36,10 @@ import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NOTES_PROMPT_FILENAME, readNotesPromptFile } from './notes-prompt-store.ts';
 import { PROMPT_CATALOG, type PromptId, promptDefinition } from './prompt-catalog.ts';
+import {
+  MARKDOWN_PROMPTS_FILE_VERSION,
+  migratePromptRecords,
+} from './prompt-markdown-migration.ts';
 
 /** `<dataDir>/prompts.json` — the whole override surface. */
 export const PROMPTS_FILENAME = 'prompts.json';
@@ -53,6 +57,11 @@ export const PROMPTS_FILENAME = 'prompts.json';
  * on you 658, review criteria 656. TWO of them are over the 4,000 this
  * product used to enforce, and one of those is the notetaking instructions —
  * the prompt this page exists to make editable.
+ *
+ * The markdown rewrite (2026-09-11) brought the longest default down to
+ * 3,654. The cap did not move with it: an override written before then can
+ * be the old 7,979-character notes prompt reworded, and it has to stay
+ * saveable.
  *
  * 16,000 is the longest shipped prompt with room to roughly treble it, which
  * is the room a person rewriting one actually needs — a prompt gets longer
@@ -73,11 +82,18 @@ export interface StoredPrompt {
    *  by a restore-to-default and by an overwrite: nothing here is ever
    *  destroyed, only superseded. */
   previous?: Array<{ value: string; replacedAt: number }>;
+  /** Saved before the defaults became markdown (`prompt-markdown-migration.ts`).
+   *  Dropped by the next save, which writes a fresh record. */
+  beforeMarkdown?: boolean;
 }
 
-/** The file's shape. `version` is here so a later change can read this one. */
+/**
+ * The file's shape. `version` is here so a later change can read this one:
+ * 1 is every file written before the markdown defaults, 2 is one the
+ * markdown migration has run on.
+ */
 export interface PromptsFile {
-  version: 1;
+  version: 1 | 2;
   prompts: Record<string, StoredPrompt>;
 }
 
@@ -88,6 +104,8 @@ export interface PromptView {
   /** True while nobody has written their own: the field is showing the
    *  shipped words, and saying so is the whole marker on the row. */
   isDefault: boolean;
+  /** The override in force was saved before the defaults became markdown. */
+  beforeMarkdown?: boolean;
 }
 
 export type PromptWriteResult =
@@ -109,7 +127,7 @@ export interface PromptStore {
 
 /** An empty file, used whenever the real one cannot be read or parsed. */
 function emptyFile(): PromptsFile {
-  return { version: 1, prompts: {} };
+  return { version: MARKDOWN_PROMPTS_FILE_VERSION, prompts: {} };
 }
 
 /**
@@ -123,8 +141,10 @@ function emptyFile(): PromptsFile {
 export function parsePromptsFile(raw: string): PromptsFile {
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== 'object') return emptyFile();
+  // Anything but a 2 is a file from before the markdown migration.
+  const version = (parsed as { version?: unknown }).version === 2 ? 2 : 1;
   const prompts = (parsed as { prompts?: unknown }).prompts;
-  if (!prompts || typeof prompts !== 'object') return emptyFile();
+  if (!prompts || typeof prompts !== 'object') return { version, prompts: {} };
   const out: Record<string, StoredPrompt> = {};
   for (const [id, rec] of Object.entries(prompts as Record<string, unknown>)) {
     if (!rec || typeof rec !== 'object') continue;
@@ -140,9 +160,10 @@ export function parsePromptsFile(raw: string): PromptsFile {
       ...(typeof r.updatedAt === 'number' ? { updatedAt: r.updatedAt } : {}),
       ...(r.updatedBy && typeof r.updatedBy === 'object' ? { updatedBy: r.updatedBy } : {}),
       ...(previous && previous.length > 0 ? { previous } : {}),
+      ...(r.beforeMarkdown === true ? { beforeMarkdown: true } : {}),
     };
   }
-  return { version: 1, prompts: out };
+  return { version, prompts: out };
 }
 
 /**
@@ -169,8 +190,13 @@ export function createPromptStore(opts: { dataDir: string }): PromptStore {
   };
   /** Has the one-shot migration off `notes-prompt.md` been attempted? */
   let migrated = false;
+  /** Has this process tried to save the markdown migration? */
+  let markdownSaveTried = false;
 
-  function load(): PromptsFile {
+  /** The file, and whether it came off disk — the only file the markdown
+   *  migration may rewrite. A missing file has nothing to move, and an
+   *  unreadable one must never be overwritten with an empty one. */
+  function load(): { file: PromptsFile; fromDisk: boolean } {
     let raw: string;
     try {
       raw = readFileSync(path, 'utf8');
@@ -181,15 +207,15 @@ export function createPromptStore(opts: { dataDir: string }): PromptStore {
       } else {
         announce(null);
       }
-      return emptyFile();
+      return { file: emptyFile(), fromDisk: false };
     }
     try {
       const file = parsePromptsFile(raw);
       announce(null);
-      return file;
+      return { file, fromDisk: true };
     } catch {
       announce(`[prompts] ${path} is not valid JSON; every prompt uses its default`);
-      return emptyFile();
+      return { file: emptyFile(), fromDisk: false };
     }
   }
 
@@ -231,9 +257,15 @@ export function createPromptStore(opts: { dataDir: string }): PromptStore {
     if (Object.hasOwn(file.prompts, 'meeting-notes')) return file;
     const legacy = readNotesPromptFile(opts.dataDir);
     if (legacy === null) return file;
+    // Nothing has written that file since before markdown, so its words are
+    // moved the way any other old override is, whatever version the file is.
+    const imported = migratePromptRecords<StoredPrompt>(
+      { 'meeting-notes': { value: legacy, updatedAt: Date.now() } },
+      Date.now(),
+    );
     const next: PromptsFile = {
-      version: 1,
-      prompts: { ...file.prompts, 'meeting-notes': { value: legacy, updatedAt: Date.now() } },
+      version: file.version,
+      prompts: { ...file.prompts, ...imported },
     };
     if (!save(next)) return file;
     console.log(
@@ -243,8 +275,31 @@ export function createPromptStore(opts: { dataDir: string }): PromptStore {
     return next;
   }
 
+  /**
+   * Move a version-1 file onto the markdown defaults
+   * (`prompt-markdown-migration.ts`).
+   *
+   * Applied to every read of a version-1 file, so the words sent are right
+   * even when the write fails; the write is tried once per process. A file
+   * that was never on disk is not created by it.
+   */
+  function migrateToMarkdown(file: PromptsFile, fromDisk: boolean): PromptsFile {
+    if (file.version >= MARKDOWN_PROMPTS_FILE_VERSION) return file;
+    const next: PromptsFile = {
+      version: MARKDOWN_PROMPTS_FILE_VERSION,
+      prompts: migratePromptRecords(file.prompts, Date.now()),
+    };
+    if (fromDisk && !markdownSaveTried) {
+      markdownSaveTried = true;
+      if (save(next)) console.log(`[prompts] moved ${path} onto the markdown defaults`);
+    }
+    return next;
+  }
+
   function current(): PromptsFile {
-    return migrateLegacyNotesPrompt(load());
+    const { file, fromDisk } = load();
+    const legacy = migrateLegacyNotesPrompt(file);
+    return migrateToMarkdown(legacy, fromDisk || legacy !== file);
   }
 
   return {
@@ -257,8 +312,13 @@ export function createPromptStore(opts: { dataDir: string }): PromptStore {
     view(id: PromptId): PromptView {
       const def = promptDefinition(id);
       if (!def) return { value: '', isDefault: true };
-      const override = overrideOf(current(), id);
-      return { value: override ?? def.default, isDefault: override === null };
+      const file = current();
+      const override = overrideOf(file, id);
+      return {
+        value: override ?? def.default,
+        isDefault: override === null,
+        ...(override !== null && file.prompts[id]?.beforeMarkdown ? { beforeMarkdown: true } : {}),
+      };
     },
     editedIds(): Set<string> {
       const file = current();
@@ -297,7 +357,7 @@ export function createPromptStore(opts: { dataDir: string }): PromptStore {
         ...(previous.length > 0 ? { previous } : {}),
       };
       const written: PromptsFile = {
-        version: 1,
+        version: MARKDOWN_PROMPTS_FILE_VERSION,
         prompts: { ...file.prompts, [id]: next },
       };
       return save(written) ? { ok: true } : { ok: false, error: 'write-failed' };

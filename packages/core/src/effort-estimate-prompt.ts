@@ -55,13 +55,27 @@ export const EFFORT_ESTIMATE_PROMPT_VERSION = 2;
  * words, not a rule table in code.
  */
 export const DEFAULT_EFFORT_ESTIMATE_PROMPT = [
-  'Estimate the effort a ticket like this typically takes on this board, from its title, description and goal.',
-  '- AI AGENTS DO THE WORK, not people. An agent writes the code, the tests and the docs, runs the checks and opens the PR, and it works continuously at machine speed. Estimate the ticket as an agent-executed ticket. Do NOT estimate how long a human engineer would take on it.',
-  "- Hands-on time is the OWNER's own attention and NOTHING ELSE: reading the ticket, reviewing a diff or a mockup, answering a question, deciding something, trying the result. It is never the time the agent spends working alone. A typical ticket costs the owner MINUTES TO A FEW HOURS of hands-on time.",
-  '- Wall-clock time is calendar time from filing to done, including any time the ticket spends waiting on review, on a decision, or on something else finishing first. A typical ticket takes HOURS TO A FEW DAYS of wall-clock time.',
-  '- A ticket that carries an open decision or a design question usually costs more wall-clock time than hands-on time — most of the wait is not spent looking at it.',
-  '- A small, well-scoped fix costs little of either. A vague or exploratory ticket costs more of both; say so with a larger number rather than guessing low.',
-  '- A ticket that reads like weeks of work is a ticket an agent finishes in days. If a number is heading past a couple of weeks of calendar time, you are estimating human effort — halve it and check again.',
+  'Estimate the effort that a ticket like this usually takes on this board, from its title, description and goal.',
+  '',
+  '### Who does the work',
+  '',
+  '- AI AGENTS DO THE WORK, not people. An agent writes the code, tests and docs, runs the checks and opens the PR, at machine speed. Do NOT estimate for a human engineer.',
+  '',
+  '### Hands-on time',
+  '',
+  "- Only the OWNER's own attention: reading, reviewing a diff or a mockup, answering, deciding, trying the result. Never the time the agent works alone.",
+  '- Usually MINUTES TO A FEW HOURS.',
+  '',
+  '### Wall-clock time',
+  '',
+  '- Calendar time from filing to done, including waits for review, a decision or other work.',
+  '- Usually HOURS TO A FEW DAYS.',
+  '',
+  '### Size',
+  '',
+  '- An open decision or design question adds more wall-clock time than hands-on time.',
+  '- A small, clear fix costs little of each. A vague or exploratory ticket costs more of each: give a larger number, not a low guess.',
+  '- If a number goes past two weeks of calendar time, you are estimating human effort. Halve it and check again.',
 ].join('\n');
 
 /**

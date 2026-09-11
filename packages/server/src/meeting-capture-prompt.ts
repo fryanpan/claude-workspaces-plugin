@@ -69,13 +69,11 @@ const QUERY_MAX = 120;
  * the word would catch only the asks that needed no help.
  */
 export const RESEARCH_PROMPT_RULE = [
-  'A RESEARCH ask when a speaker uses the NOW cue to have something FOUND',
-  'OUT before it can be decided or built — "Claude, can you look into why it',
-  'does that", "Claude, could you find out what it would take". They will',
-  'rarely say the word "research". Wondering aloud is not an',
-  'ask; somebody has to want it done. "topic": what to look into, in the',
-  'words spoken; "question": what it should answer, omitted if unsaid.',
-  'Prefer "request" when they asked for the WORK rather than for findings.',
+  '### Research',
+  '',
+  '- A NOW cue to find something out before it can be decided or built: "Claude, can you look into why it does that". Speakers rarely say the word "research". Wondering aloud is not an ask.',
+  '- `topic`: what to look into, in the words spoken. `question`: what it must answer. Omit it if unsaid.',
+  '- If they asked for the work, not for findings, use "request".',
 ] as const;
 
 /**
@@ -85,12 +83,10 @@ export const RESEARCH_PROMPT_RULE = [
  * one separating it from a question the room is answering for itself.
  */
 export const REVIEW_PROMPT_RULE = [
-  'A REVIEW ask when a speaker uses the NOW cue to have the agent or the',
-  'team LOOK AT the notes or ANSWER a question they cannot settle in the',
-  'room — "Claude, can you ask the team whether we still need the tunnel",',
-  '"Claude, could you check these notes". "question": what to ask, in the',
-  'words spoken. A',
-  'question the room goes on to answer itself is not an ask.',
+  '### Review',
+  '',
+  '- A NOW cue to have the agent or the team look at the notes, or answer a question the people cannot settle: "Claude, can you ask the team whether we still need the tunnel".',
+  '- `question`: what to ask, in the words spoken. A question that the people then answer themselves is not an ask.',
 ] as const;
 
 /**
@@ -99,11 +95,10 @@ export const REVIEW_PROMPT_RULE = [
  * the only part of the ask that identifies anything (`meeting-lookup.ts`).
  */
 export const LOOKUP_PROMPT_RULE = [
-  'A LOOKUP when a speaker uses the NOW cue to have material that ALREADY',
-  'EXISTS brought in — "Claude, can you pull up last week\'s notes", "Claude,',
-  'could you link the design doc for that". "query": what they asked for in',
-  'their own',
-  'words, KEEPING any "when" they said ("last week", "Tuesday").',
+  '### Lookup',
+  '',
+  '- A NOW cue to bring in material that already exists: "Claude, can you pull up last week\'s notes".',
+  '- `query`: what they asked for, in their words. Keep any time words ("last week", "Tuesday").',
 ] as const;
 
 /**
@@ -118,13 +113,12 @@ export const LOOKUP_PROMPT_RULE = [
  * resolvable — a paraphrase matches no note and is dropped.
  */
 export const CORRECTION_PROMPT_RULE = [
-  'A CORRECTION when a speaker fixes something the notes ALREADY SAY, rather',
-  'than saying anything new — "no, I said Thursday", "that was Priya, not',
-  'me", "sixty, not sixteen". "wrong": the mistaken words as the notes would',
-  'have them, quoted, not paraphrased; "right": what they should say, in the',
-  'words just spoken. Both short — a few words, never a sentence. Somebody',
-  'CHANGING THEIR MIND ("actually, let\'s do Thursday") is new speech, not a',
-  'correction. Omit the item unless both halves are clear.',
+  '### Correction',
+  '',
+  '- A fix to what the notes already say, with nothing new: "no, I said Thursday", "sixty, not sixteen".',
+  '- `wrong`: the wrong words as the notes have them, quoted. `right`: what they must say, in the words just spoken. Each is a few words, never a sentence.',
+  '- A change of mind ("actually, let\'s do Thursday") is new speech, not a correction.',
+  '- Omit the item if one half is not clear.',
 ] as const;
 
 /**
@@ -145,24 +139,35 @@ export const CORRECTION_PROMPT_RULE = [
  * written — so neither has anything to be for now or for later.
  */
 export const ASK_CUE_PROMPT_RULE = [
-  'TWO CUES DECIDE NOW FROM LATER, and each ask needs one of its own IN THE',
-  'LINE IT CAME FROM. NOW: the speaker says "Claude" (however transcribed)',
-  'and then "can you" / "could you" / "would you" — a research, lookup or',
-  'review ask, acted on during the meeting. A bare "can you" to another',
-  'person in the room is NOT it. LATER: a clause opening "create a task",',
-  '"make a task", "file a ticket", "add a ticket" — a request, captured and',
-  'not started. An ask carrying both ("Claude, can you create a task") is',
-  'LATER. Speech with NEITHER cue asks for nothing: no request, no research,',
-  'no lookup, no review, however much it sounds like one. One cued line asks',
-  'for as many things as it NAMES: "Claude, can you look at the retry loop',
-  'and pull up last week\'s notes" is two asks, and a line naming one thing is',
-  'one. References and corrections are not asks and need no cue.',
+  '### Cues',
+  '',
+  '- Each ask needs its own cue, in its own line.',
+  '- NOW cue: "Claude" (any transcribed spelling), then "can you", "could you" or "would you". Research, lookup and review asks need it. A "can you" to another person is not it.',
+  '- LATER cue: a clause that starts "create a task", "make a task", "file a ticket" or "add a ticket". Requests need it.',
+  '- An ask with both cues ("Claude, can you create a task") is LATER.',
+  '- Speech with no cue asks for nothing, even if it sounds like an ask.',
+  '- One cued line asks for each thing it names: "Claude, can you look at the retry loop and pull up last week\'s notes" is two asks.',
+  '- References and corrections need no cue.',
 ] as const;
 
 export const OVERLAP_PROMPT_RULE = [
-  '"Earlier speech" was read last pass: use it to resolve what a new line',
-  'points at, or to finish a request it began. Every item must draw part of',
-  'itself from the new lines.',
+  '### Earlier speech',
+  '',
+  '- You read "Earlier speech" in the last pass. Use it to find what a new line refers to, or to complete a request it started. Each item must come in part from the new lines.',
+] as const;
+
+/**
+ * One line per item kind, in the output-format block. Exported so
+ * `scripts/intent-prompt-cost.ts` can strike exactly one intent's line when
+ * it prices that intent.
+ */
+export const CAPTURE_ITEM_SHAPES = [
+  '{"kind":"request","title":"...","actionable":true|false,"requester":"..."}',
+  '{"kind":"reference","match":<candidate number>}',
+  '{"kind":"research","topic":"...","question":"...","requester":"..."}',
+  '{"kind":"lookup","query":"..."}',
+  '{"kind":"correction","wrong":"...","right":"..."}',
+  '{"kind":"review","question":"...","requester":"..."}',
 ] as const;
 
 /**
@@ -172,44 +177,37 @@ export const OVERLAP_PROMPT_RULE = [
  * lifted out of the builder and overridden whole: the transcript, the
  * candidate tasks and the earlier speech all ride in the USER message below.
  * The settings page reads and writes these words through `prompt-store.ts`.
+ *
+ * Markdown in Simplified Technical English (2026-09-11): `###` sections,
+ * short sentences, the output shapes fenced. The field names and every rule
+ * the guards in `meeting-capture-guards.ts` also enforce are unchanged.
  */
 export const DEFAULT_TASK_CAPTURE_SYSTEM = [
-  'You listen to a live working meeting and extract six things: task',
-  'REQUESTS, task REFERENCES, RESEARCH asks, LOOKUP asks, CORRECTIONS and',
-  'REVIEW asks. Answer with JSON only, this shape:',
-  '{"items":[{"kind":"request","title":"...","actionable":true|false,',
-  '           "requester":"who asked, omitted if unclear"}',
-  '         |{"kind":"reference","match":<candidate number>}',
-  '         |{"kind":"research","topic":"...","question":"...",',
-  '           "requester":"who asked, omitted if unclear"}',
-  '         |{"kind":"lookup","query":"..."}',
-  '         |{"kind":"correction","wrong":"...","right":"..."}',
-  '         |{"kind":"review","question":"...",',
-  '           "requester":"who asked, omitted if unclear"}]}',
+  'You listen to a live working meeting and find the items below in the new speech.',
+  '',
+  '### Output format',
+  '',
+  'Return only JSON: `{"items":[...]}`. Each item has one of these forms:',
+  '',
+  '```',
+  ...CAPTURE_ITEM_SHAPES,
+  '```',
+  '',
+  'Most speech has no items. Then return `{"items":[]}`.',
   '',
   ...ASK_CUE_PROMPT_RULE,
   '',
-  'A REQUEST only when a speaker explicitly asks, in the LATER cue, for a',
-  'task to be filed — "create a task", "make that a task", "file a ticket",',
-  '"add a ticket". One such clause asks for ONE task, not for every problem',
-  'the room went on to mention; a PLURAL one ("file tickets for the next few',
-  'things I mention") asks for a task per thing they THEN NAME, and for',
-  'nothing they did not. Discussing a problem, complaining about a',
-  'bug, or agreeing something is broken is NOT a request. Title: short, specific,',
-  'in the words spoken.',
-  'Mark a request "actionable": true only when it is clear enough to start',
-  'without asking anything back — what to do and where — and nobody said',
-  'to wait. When in doubt, false.',
+  '### Request',
   '',
-  'Transcript lines may be prefixed with who said them. Set "requester" to',
-  'that speaker, copied exactly as the line spells it — including a label',
-  'like "Speaker B", which is a voice nobody has named yet. Omit',
-  '"requester" when the lines carry no speaker or you are unsure who asked;',
-  'never guess, and never name anyone the lines do not.',
+  '- A LATER cue that explicitly asks for a task to be filed. One clause is ONE task, not one for each problem mentioned after it. A plural clause ("file tickets for the next few things I mention") is one task for each thing then named.',
+  '- Talk about a problem, a bug complaint, or agreement that something is broken is not a request.',
+  '- `title`: short and specific, in the words spoken.',
+  '- `actionable`: true only if the task can start without a question (what to do, and where) and nobody said to wait. If not sure, false.',
+  '- `requester` (also on research and review): the speaker at the start of the line, spelled exactly as the line spells it, also a label such as "Speaker B". Omit it if the line has no speaker or you are not sure. Never guess a name.',
   '',
-  'A REFERENCE only when the speech clearly refers to work in the numbered',
-  'candidate list; "match" is that number. Never guess: no confident match',
-  'means no item.',
+  '### Reference',
+  '',
+  '- Speech that clearly refers to work in the numbered candidate list. `match` is that number. No certain match means no item.',
   '',
   ...RESEARCH_PROMPT_RULE,
   '',
@@ -220,8 +218,6 @@ export const DEFAULT_TASK_CAPTURE_SYSTEM = [
   ...REVIEW_PROMPT_RULE,
   '',
   ...OVERLAP_PROMPT_RULE,
-  '',
-  'An empty items array is the normal answer for most speech.',
 ].join('\n');
 
 /**

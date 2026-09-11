@@ -246,6 +246,14 @@ body.settings-body {
 .prompt-editor-head .prompt-edited {
   align-self: baseline;
 }
+/* Beside "Edited": these words predate the markdown defaults, which is why
+   they read unlike their neighbours. Quieter than "Edited" — it explains the
+   words, it is not a second state to act on. */
+.prompt-before-md {
+  flex: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
 .prompt-box {
   flex: 1;
   min-height: 220px;
@@ -312,36 +320,53 @@ body.settings-body {
   display: flex;
   align-items: center;
 }
-.prompt-default-view pre {
-  margin: 8px 0 0;
-  max-height: 190px;
-  overflow: auto;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-  color: var(--fg-muted);
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
 /* Read-only prompts show their words and nothing to type in: the thread
    summary is versioned, and an edit marks every stored summary stale. */
 .prompt-readonly {
   flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* The markdown composer (styles.css, "md-composer") dressed as this page's
+   box. Its textarea is hidden once the editor mounts, so the box's look moves
+   onto the editor surface; `.prompt-box` above still dresses the plain
+   textarea shown until then, or for good if the editor chunk never lands. */
+.prompt-editor .md-composer {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.prompt-editor .md-composer-surface {
+  flex: 1 1 auto;
   min-height: 220px;
-  margin: 0;
-  overflow: auto;
+  max-height: none;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-panel);
+  background: var(--bg);
   color: var(--fg);
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.5;
-  white-space: pre-wrap;
+}
+.prompt-editor .md-composer-live:focus-within .md-composer-surface {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+/* A read-only view is words to read, not a box that failed: full strength on
+   the panel colour, rather than the composer's faded "sending" look. */
+.prompt-readonly .md-composer-disabled .md-composer-surface,
+.prompt-default-view .md-composer-disabled .md-composer-surface {
+  opacity: 1;
+  background: var(--bg-panel);
+  cursor: default;
+}
+.prompt-default-view .md-composer {
+  margin-top: 8px;
+}
+.prompt-default-view .md-composer-surface {
+  min-height: 0;
+  max-height: 190px;
+  color: var(--fg-muted);
 }
 
 /* ===== THE ONE-LINE REPORT ===== */
@@ -401,7 +426,8 @@ body.settings-body {
      field under 16px takes focus, and a prompt is the one field on this page
      someone types a paragraph into. Same reason the composer's own input
      carries the floor (board.css, "so iOS Safari doesn't zoom the field"). */
-  .prompt-box {
+  .prompt-box,
+  .prompt-editor .md-composer-surface {
     font-size: 16px;
   }
   /* The back link already says "Prompts"; the h1 beside it repeated the word

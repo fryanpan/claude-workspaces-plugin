@@ -7,6 +7,7 @@ import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-jud
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
 import { canonicalRepoRoot, normalizeDocOriginRepo } from '../doc-origin-repo.ts';
+import { type BoardPromptField, boardPromptBeforeMarkdown } from '../prompt-markdown-migration.ts';
 import { PROMPT_MAX_CHARS } from '../prompt-store.ts';
 import { redactCapChangeForVisitor } from '../share/redact-workspace.ts';
 import { PARALLELISM_CAP_MAX, PARALLELISM_CAP_MIN, type WorkspaceNotesHome } from '../tasks.ts';
@@ -312,10 +313,23 @@ export async function handleWorkspaceSettings(
       return j(404, { error: 'workspace not found' });
     }
     const notesHome = taskStore.notesHome(workspaceId);
+    // "Written before markdown": the board's own words, kept by the
+    // markdown-defaults migration and not saved over since.
+    const board = taskStore.getWorkspace(workspaceId);
+    const beforeMarkdown = (field: BoardPromptField): { writtenBeforeMarkdown?: true } =>
+      board && boardPromptBeforeMarkdown(board, field) ? { writtenBeforeMarkdown: true } : {};
     return j(200, {
       workspaceId,
-      reviewItemCriteria: { ...criteria, default: DEFAULT_REVIEW_ITEM_CRITERIA },
-      effortEstimatePrompt: { ...effortPrompt, default: DEFAULT_EFFORT_ESTIMATE_PROMPT },
+      reviewItemCriteria: {
+        ...criteria,
+        default: DEFAULT_REVIEW_ITEM_CRITERIA,
+        ...beforeMarkdown('reviewItemCriteria'),
+      },
+      effortEstimatePrompt: {
+        ...effortPrompt,
+        default: DEFAULT_EFFORT_ESTIMATE_PROMPT,
+        ...beforeMarkdown('effortEstimatePrompt'),
+      },
       // The same view `/parallelism-cap` serves, in this route's own
       // `{value, isDefault, default}` shape so the panel reads all three
       // settings alike; the slot count rides beside it.
