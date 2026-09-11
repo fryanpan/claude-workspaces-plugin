@@ -107,6 +107,17 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       }
     });
 
+    it('sizes its field at 16px, so iPad Safari does not zoom the page when it takes focus', () => {
+      // A zoom on focus moves the visual viewport the card is placed in.
+      for (const [width, name] of [
+        [1180, 'entered'],
+        [1180, 'onNarrow'],
+        [430, 'onLow'],
+      ] as const) {
+        expect(look(width, name).fieldPx, `${width} ${name}`).toBeGreaterThanOrEqual(16);
+      }
+    });
+
     it('stands level with an element that stops short of the margin, covering none of it', () => {
       const l = look(1180, 'onNarrow');
       const card = box(l.card);

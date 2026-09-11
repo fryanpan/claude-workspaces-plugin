@@ -305,13 +305,15 @@ export const widgetStyles = `
 .leader svg { width: 100%; height: 100%; }
 .leader polyline { fill: none; stroke: #8c959f; opacity: 0.7; }
 .leader circle { fill: #8c959f; }
+/* 16px at every width, or iOS zooms the page when the field takes focus,
+   and the zoom moves the visual viewport the card is placed in. */
 .composer textarea {
   width: 100%;
   border: 1px solid #d1d5da;
   border-radius: 6px;
   padding: 6px;
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
   resize: vertical;
 }
 .composer-actions {
@@ -433,15 +435,13 @@ export const widgetStyles = `
 .quick .composer-snippet { margin: 0; }
 .quick .composer-actions { display: contents; }
 /* One line that grows to four as you type, where the engine can size a
-   field to its content; one line, scrolling, where it cannot. 16px, or iOS
-   zooms the page on focus. */
+   field to its content; one line, scrolling, where it cannot. */
 .quick textarea {
   grid-area: 2 / 1 / 3 / 3;
   min-height: 44px;
   max-height: 96px;
   field-sizing: content;
   resize: none;
-  font-size: 16px;
 }
 .quick .submit { grid-area: 2 / 3; }
 .quick .composer-err { grid-column: 1 / -1; }

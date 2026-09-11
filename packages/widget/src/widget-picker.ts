@@ -185,10 +185,10 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   };
   const on = [
     ['pointermove', onMove],
+    ['pointerup', onTap],
     ['pointerdown', onDown],
     ['touchend', onDown],
     ['click', onDown],
-    ['pointerup', onTap],
     ['keydown', onKey],
     ['resize', onResize],
   ] as [string, EventListener][];

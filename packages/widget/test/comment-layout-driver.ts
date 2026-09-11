@@ -66,6 +66,8 @@ export interface Look {
   focus: string;
   /** The field's text. */
   draft: string | null;
+  /** The field's font size in px: under 16, iOS zooms the page on focus. */
+  fieldPx: number | null;
   /** The phone panel's Done, and its Post, when painted. */
   done: Box | null;
   post: Box | null;
@@ -194,6 +196,7 @@ const LOOK = `(() => {
     fab: !!box(sr.querySelector('.fab')),
     focus: document.activeElement === host ? (ae ? ae.tagName : 'host') : 'page',
     draft: sr.querySelector('.composer textarea')?.value ?? null,
+    fieldPx: c ? parseFloat(getComputedStyle(c.querySelector('textarea')).fontSize) : null,
     done: box(sr.querySelector('.composer .done')),
     post: box(sr.querySelector('.composer .submit')),
     outlined,
@@ -287,9 +290,8 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   await tap(fab);
   await look('entered');
   if (width > 1100) {
-    // The resting card stands over the corner where the page keeps its
-    // account link. Cancel puts it away, and the link can be tapped — to
-    // comment on it, not to follow it.
+    // The resting card stands over the page's account link. Cancel puts it
+    // away, and the link can be tapped — to comment on it, not to follow it.
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await look('restCancelled');
     await tap(el('acct'));
@@ -339,8 +341,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await look('portrait');
     await turn(width, height);
     await look('landscape');
-    // An element low on the screen, whose card level with it would reach the
-    // FAB and the list button in the corner.
+    // A low element, whose card level with it would reach the FAB and list button.
     await cdp.evaluate(`scrollTo(0, document.getElementById('low').offsetTop - ${height} + 90)`);
     await settle();
     await tap(el('low'));
@@ -362,8 +363,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await tap(fab);
     await tap(el('low'));
     await look('phoneBack');
-    // Cancel throws it away and hands back the prompt, whose Done ends the
-    // mode below.
+    // Cancel throws it away and hands back the prompt, whose Done ends the mode.
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await look('cancelled');
     // A link where the panel its tap opens stands by the time its click comes.
