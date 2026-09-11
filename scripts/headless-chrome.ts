@@ -151,6 +151,22 @@ export function killAndRemove(proc: ChildProcess | undefined, profile: string): 
 }
 
 /**
+ * `killAndRemove` for a caller that can await: wait for the process's own
+ * `exit` before removing the profile. The synchronous wait cannot see that —
+ * it blocks the loop that reaps the child, so a killed Chrome stays a zombie
+ * that `kill(pid, 0)` calls alive, and every call pays the whole
+ * `KILL_WAIT_MS`.
+ */
+export async function stopBrowser(proc: ChildProcess, profile: string): Promise<void> {
+  if (proc.exitCode === null && proc.signalCode === null) {
+    const gone = new Promise<void>((r) => proc.once('exit', () => r()));
+    proc.kill('SIGKILL');
+    await Promise.race([gone, sleep(KILL_WAIT_MS)]);
+  }
+  killAndRemove(proc, profile);
+}
+
+/**
  * Launch Chrome with `args` (build them with `chromeLaunchArgs`) and wait for
  * its CDP port.
  *
@@ -161,6 +177,17 @@ export function killAndRemove(proc: ChildProcess | undefined, profile: string): 
  * `onSpawn` fires before the first `await`, so a signal during startup finds a
  * browser to clean up. Nothing here removes the profile on failure: the caller
  * has it registered and its cleanup is the one that waits for Chrome to die.
+ *
+ * A launch that never announces a port is killed and replaced ONCE, with a
+ * fresh profile, and `onSpawn` fires again so the caller's cleanup follows
+ * the live browser. `timeoutMs` stays a per-launch budget; it is not raised.
+ * The stall is a Chrome that is alive and silent: on CI its stderr shows the
+ * usual D-Bus lines in its first three seconds and then nothing for the next
+ * twenty-seven, with no `DevTools listening` line ever. It has failed three
+ * different browser tests (ui-shot at 15s, again at 30s, and client-boot at
+ * 30s), which is what a wedged process looks like and not what a slow one
+ * does — waiting longer on the same process is the fix that already failed
+ * once. A Chrome that EXITS is still a failure at once.
  */
 export async function launchChrome(
   bin: string,
@@ -168,31 +195,45 @@ export async function launchChrome(
   timeoutMs: number,
   runId: string,
   onSpawn: (b: Browser) => void,
+  launches = 2,
 ): Promise<Browser> {
-  const profile = mkdtempSync(join(tmpdir(), profilePrefix(runId)));
-  const proc = spawn(bin, args(profile), { stdio: ['ignore', 'ignore', 'pipe'] });
-  const browser: Browser = { proc, profile, port: 0 };
-  onSpawn(browser);
   let stderr = '';
-  proc.stderr?.on('data', (d) => {
-    stderr += String(d);
-  });
-  const portFile = join(profile, 'DevToolsActivePort');
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (proc.exitCode !== null) {
-      throw new Error(`Chrome exited with ${proc.exitCode} before CDP came up:\n${stderr.trim()}`);
-    }
-    if (existsSync(portFile)) {
-      const port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
-      if (Number.isInteger(port) && port > 0) {
-        browser.port = port;
-        return browser;
+  for (let launch = 1; launch <= launches; launch++) {
+    const profile = mkdtempSync(join(tmpdir(), profilePrefix(runId)));
+    const proc = spawn(bin, args(profile), { stdio: ['ignore', 'ignore', 'pipe'] });
+    const browser: Browser = { proc, profile, port: 0 };
+    onSpawn(browser);
+    stderr = '';
+    proc.stderr?.on('data', (d) => {
+      stderr += String(d);
+    });
+    const portFile = join(profile, 'DevToolsActivePort');
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (proc.exitCode !== null) {
+        throw new Error(
+          `Chrome exited with ${proc.exitCode} before CDP came up:\n${stderr.trim()}`,
+        );
       }
+      if (existsSync(portFile)) {
+        const port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
+        if (Number.isInteger(port) && port > 0) {
+          browser.port = port;
+          return browser;
+        }
+      }
+      await sleep(50);
     }
-    await sleep(50);
+    if (launch < launches) {
+      // Worded apart from the final error: a launch that recovered is not a
+      // browser-stage failure, and ui-shot.test.ts asserts the difference.
+      console.error(`Chrome announced no DevTools port in ${timeoutMs}ms; relaunching it once`);
+      await stopBrowser(proc, profile);
+    }
   }
-  throw new Error(`CDP never came up within ${timeoutMs}ms:\n${stderr.trim()}`);
+  throw new Error(
+    `CDP never came up within ${timeoutMs}ms, on ${launches} launches:\n${stderr.trim()}`,
+  );
 }
 
 export async function pageSocketUrl(port: number, timeoutMs: number): Promise<string> {
