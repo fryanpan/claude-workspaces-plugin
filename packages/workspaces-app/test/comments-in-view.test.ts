@@ -235,6 +235,96 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
   }
 });
 
+describe.skipIf(CHROME === null)('the page holds still while the meeting writes', () => {
+  for (const preset of ['ipad', 'phone'] as const) {
+    const width = preset === 'ipad' ? '1180x820' : '430';
+    it(
+      `keeps the reader's line on its pixel through a tick at ${width}`,
+      () => {
+        const { bottomStill, aboveStill } = probeFor(preset);
+
+        // PARKED AT THE VERY FOOT, with the browser's own scroll anchoring
+        // left switched on. The controls: a real paragraph was on screen, the
+        // pane was at the end of its travel, the document grew, and the notes
+        // landed ABOVE the reader's line — so the layout moved that line and
+        // something had to move the pane by the same amount.
+        expect(bottomStill.eyeOnScreen).toBe(true);
+        expect(bottomStill.atBottom0).toBe(true);
+        expect(bottomStill.anchoringSuppressed).toBe(false);
+        // …and the browser's own hold is off on this pane, which is what
+        // keeps its pick out of the decision (this Chrome supports it).
+        expect(bottomStill.supportsAnchoring).toBe(true);
+        expect(bottomStill.paneOverflowAnchor).toBe('none');
+        expect(bottomStill.scrollHeight1).toBeGreaterThan(bottomStill.scrollHeight0);
+        expect(bottomStill.eyeContentY1).toBeGreaterThan(bottomStill.eyeContentY0 + 10);
+        // THE FAULT: the browser did it its own way — it holds whatever node
+        // it picked, which at the foot of a live meeting doc was not the
+        // reader's line, and the page moved under them (+44px at 1180x820,
+        // +26px at 430 on the tick). The page's own hold does it instead,
+        // and the browser's is switched off so the two cannot both correct
+        // the same insert.
+        expect(bottomStill.frames).toBeGreaterThan(3);
+        expect(bottomStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(bottomStill.eyeTop1 - bottomStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(bottomStill.scrollTop1).toBeGreaterThan(bottomStill.scrollTop0);
+
+        // AND ON A BROWSER WITH NO ANCHORING OF ITS OWN — Safari before 27,
+        // which is every iPad this product is read on today. The controls: the
+        // suppressing sheet really was in force, and the line really did move
+        // down the document, so nothing but the page could hold it.
+        expect(aboveStill.anchoringSuppressed).toBe(true);
+        expect(aboveStill.eyeOnScreen).toBe(true);
+        expect(aboveStill.eyeContentY1).toBeGreaterThan(aboveStill.eyeContentY0 + 10);
+        // THE FAULT: 67px at 1180 and 105px at 430 of the reader's own text
+        // pushed down the screen (154.75 and 131.19 in this fixture). The
+        // page moves the pane by what the layout moved the line, in the same
+        // frame, so the line itself does not move.
+        expect(aboveStill.frames).toBeGreaterThan(3);
+        expect(aboveStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(aboveStill.eyeTop1 - aboveStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(aboveStill.scrollTop1).toBeGreaterThan(aboveStill.scrollTop0);
+      },
+      BROWSER_CASE_MS,
+    );
+  }
+});
+
+describe.skipIf(CHROME === null)('a rewriting tick keeps the cards it does not touch', () => {
+  for (const preset of ['ipad', 'phone'] as const) {
+    const width = preset === 'ipad' ? '1180x820' : '430';
+    it(
+      `keeps every card in the document through a grouping tick at ${width}`,
+      () => {
+        const { cardsKept } = probeFor(preset);
+        // THE CONTROLS: the tick really rewrote blocks, and there really were
+        // cards to lose.
+        expect(cardsKept.editsApplied).toBe(2);
+        expect(cardsKept.editsFailed).toBe(0);
+        expect(cardsKept.threads).toBeGreaterThan(0);
+        expect(cardsKept.frames).toBeGreaterThan(10);
+        // …and the control that says what this is NOT about: every comment's
+        // anchor still resolved through the whole tick, before and after, so
+        // not one of them was orphaned. The cards left anyway.
+        expect(cardsKept.resolvedBefore.every(Boolean)).toBe(true);
+        expect(cardsKept.resolvedAfter.every(Boolean)).toBe(true);
+        expect(cardsKept.resolvedEnd.every(Boolean)).toBe(true);
+        // THE FAULT: every card gone — measured on the live board at 430 for
+        // 2.2s, with 276px of flow, because the mapped highlight positions
+        // the decoration plugin had cached went to zero width and nothing
+        // re-read the anchors. Here they never came back at all: no card in
+        // the document in any frame after the tick, and the flow 234px
+        // shorter for good.
+        expect(cardsKept.minCards).toBe(cardsKept.threads);
+        expect(cardsKept.framesMissing).toBe(0);
+        expect(cardsKept.rangeSpans).toBeGreaterThanOrEqual(cardsKept.threads);
+        // The flow never lost height under the reader either.
+        expect(cardsKept.minScrollHeight).toBeGreaterThanOrEqual(cardsKept.scrollHeight0);
+      },
+      BROWSER_CASE_MS,
+    );
+  }
+});
+
 describe.skipIf(CHROME === null)('a margin comment shows only beside text on screen', () => {
   it(
     'at 1180x820 an open card whose text is just off the top paints nothing',

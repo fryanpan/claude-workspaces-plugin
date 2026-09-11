@@ -25,6 +25,7 @@ import { mountCommentHints, tallyTotal } from '../src/comment-hints.ts';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { createMeetingLiveZone } from '../src/meeting-live-zone.ts';
 import { MountScope } from '../src/mount-scope.ts';
+import { mountReadingHold } from '../src/reading-hold.ts';
 import { mountMarkupMargin } from '../src/redline/markup-margin.ts';
 import { type ReviewChrome, mountReviewChrome } from '../src/review-chrome.ts';
 import { threadCards } from '../src/thread-morph.ts';
@@ -98,6 +99,13 @@ export interface Probe {
   clamped: ClampedReading;
   /** Notes landing above the reader's comments, read one frame later. */
   landed: LandedReading;
+  /** The reader parked at the very foot while a note lands below their line. */
+  bottomStill: StillReading;
+  /** The reader mid-doc, notes landing ABOVE them, on a browser with no
+   *  scroll anchoring of its own — an iPad before Safari 27. */
+  aboveStill: StillReading;
+  /** A block-rewriting tick arriving as a remote update: do the cards stay? */
+  cardsKept: CardsKeptReading;
 }
 
 /** Reaching a comment from the strip, with the transcript still growing. */
@@ -295,7 +303,10 @@ function mount(
   hintsInsets = () => hints.insets();
   // What `doc-margin.ts` does on every editor transaction: a note landing in
   // the prose reaches the column through here, not only through its size.
-  const onTransaction = (): void => {
+  const onTransaction = (props: { transaction: { docChanged: boolean } }): void => {
+    if (props.transaction.docChanged) {
+      chrome.refreshThreadDecorations(chrome.threadsPanel.getActive());
+    }
     margin.scheduleRelayout();
     hints.refresh();
   };
@@ -308,6 +319,8 @@ function mount(
     reducedMotion: () => true,
   });
   zone.begin(Date.now());
+  // The page's own hold, mounted where `doc-margin.ts` mounts it.
+  mountReadingHold({ scroller: editorEl, scope });
 
   return {
     scope,
@@ -464,6 +477,9 @@ async function probe(): Promise<string> {
   const untouched = await untouchedArm();
   const clamped = await clampedArm();
   const landed = await landedArm();
+  const bottomStill = await stillArm({ where: 'bottom', suppressAnchoring: false });
+  const aboveStill = await stillArm({ where: 'mid', suppressAnchoring: true });
+  const cardsKept = await cardsKeptArm();
   const out: Probe = {
     watching,
     afterScrollBack,
@@ -473,6 +489,9 @@ async function probe(): Promise<string> {
     untouched,
     clamped,
     landed,
+    bottomStill,
+    aboveStill,
+    cardsKept,
   };
   return JSON.stringify(out);
 }
@@ -745,6 +764,283 @@ async function clampedArm(): Promise<ClampedReading> {
     cardBottom: (p?.cardBottom ?? Number.NaN) - r.paneTop,
     hintAbove,
     back,
+  };
+  teardown(m);
+  return out;
+}
+
+/**
+ * Does the line the reader is actually looking at stay on its pixel while the
+ * meeting writes into the doc?
+ *
+ * Measured on a paragraph of the PROSE chosen before anything lands — the
+ * topmost one on screen — and sampled every frame, so a correction that
+ * arrives a frame late reads as a drift rather than as a hold.
+ */
+export interface StillReading {
+  /** Where the reader was parked, and whether the browser's own scroll
+   *  anchoring was suppressed for this arm (an iPad before Safari 27). */
+  where: 'bottom' | 'mid';
+  anchoringSuppressed: boolean;
+  /** What this browser would do on its own, unsuppressed. */
+  supportsAnchoring: boolean;
+  /** What the pane's own `overflow-anchor` computes to: the page holds the
+   *  reader's line itself, so the browser must not also be holding one of its
+   *  own choosing. `none` is the page having taken the decision. */
+  paneOverflowAnchor: string;
+  /** The control: a real paragraph of the prose, on screen when the notes
+   *  landed. */
+  eyeOnScreen: boolean;
+  eyeText: string;
+  /** Its top against the pane's top, before and after. */
+  eyeTop0: number;
+  eyeTop1: number;
+  /** The worst departure from `eyeTop0` in ANY frame of the tick. */
+  worstDrift: number;
+  frames: number;
+  /** Where in the document that line sits, before and after: growth above it
+   *  moves it, growth below it does not. Which of the two this arm built is
+   *  the control for what the hold had to do. */
+  eyeContentY0: number;
+  eyeContentY1: number;
+  scrollTop0: number;
+  scrollTop1: number;
+  /** The control: the document really grew under the reader. */
+  scrollHeight0: number;
+  scrollHeight1: number;
+  /** The control for `bottom`: the pane really was at the end of its travel. */
+  atBottom0: boolean;
+}
+
+/**
+ * A tick that REWRITES blocks, arriving the way a second viewer gets one:
+ * applied to another copy of the doc and synced in as a remote update.
+ *
+ * Grouping a topic in place (PR 863) deletes the bullets it groups and writes
+ * them back as list items, so every comment anchored in them stops resolving
+ * at that instant — and the card that was in the flow under the sentence goes
+ * with it, taking its height out of the document under the reader. Measured
+ * on the live board at 430: every inline card gone for 2.2s, 276px of flow
+ * with them, the pane clamped 1492 → 1310 → 1492.
+ */
+export interface CardsKeptReading {
+  placement: string;
+  threads: number;
+  /** The control: the tick really rewrote blocks. */
+  editsApplied: number;
+  editsFailed: number;
+  /** Frames sampled from just before the tick to well past it. */
+  frames: number;
+  /** The fewest cards in the document in ANY of those frames — the fault,
+   *  counted. Equal to `threads` when nothing ever left. */
+  minCards: number;
+  /** How many of those frames were short of a card. */
+  framesMissing: number;
+  /** The flow's height before the tick, its low-water mark through it, and
+   *  where it ended: a card leaving takes its own height out of the document. */
+  scrollHeight0: number;
+  minScrollHeight: number;
+  scrollHeight1: number;
+  outcomes: string[];
+  threadsCollected: number;
+  cardsAnywhere: number;
+  rangeSpans: number;
+  resolvedBefore: boolean[];
+  resolvedAfter: boolean[];
+  resolvedEnd: boolean[];
+}
+
+/** Emulate a browser with no scroll anchoring of its own — Safari 26 and
+ *  every iPad before it. Removing the sheet gives the browser back. */
+function suppressNativeAnchoring(on: boolean): void {
+  const id = 'civ-no-anchor';
+  document.getElementById(id)?.remove();
+  if (!on) return;
+  const style = document.createElement('style');
+  style.id = id;
+  style.textContent = '*{overflow-anchor:none!important}';
+  document.head.append(style);
+}
+
+async function stillArm(o: {
+  where: 'bottom' | 'mid';
+  suppressAnchoring: boolean;
+}): Promise<StillReading> {
+  const m = mount({ paragraphs: 40, threads: 4 });
+  await frame();
+  for (let i = 0; i < 10; i++) {
+    utter(m, 9);
+    await sleep(20);
+  }
+  await settle(m);
+  suppressNativeAnchoring(o.suppressAnchoring);
+
+  const tiptap = m.editor.editor;
+  if (o.where === 'bottom') {
+    // Twice, as `untouchedArm` does: the strip that arrives once the comments
+    // leave the screen takes its band out of the pane, so the first scroll can
+    // stop short of the end.
+    toFoot(m);
+    await settle(m);
+    toFoot(m);
+  } else {
+    m.editorEl.scrollTop = Math.round((m.editorEl.scrollHeight - m.editorEl.clientHeight) * 0.4);
+  }
+  await settle(m);
+
+  const paneTop = (): number => m.editorEl.getBoundingClientRect().top;
+  // The reader's line: the topmost paragraph of the PROSE still on screen.
+  // Chosen here and never re-chosen — the whole reading is about this one
+  // element's pixel.
+  const top0 = paneTop();
+  const eye =
+    Array.from(tiptap.view.dom.children).find((el) => {
+      const r = el.getBoundingClientRect();
+      return r.height > 0 && r.bottom > top0 + 1 && r.top < top0 + m.editorEl.clientHeight;
+    }) ?? null;
+  const topOfEye = (): number => (eye ? eye.getBoundingClientRect().top - paneTop() : Number.NaN);
+  const eyeTop0 = topOfEye();
+  const contentYOfEye = (): number => topOfEye() + m.editorEl.scrollTop;
+  const eyeContentY0 = contentYOfEye();
+  const scrollTop0 = m.editorEl.scrollTop;
+  const scrollHeight0 = m.editorEl.scrollHeight;
+  const atBottom0 = scrollTop0 >= scrollHeight0 - m.editorEl.clientHeight - 2;
+
+  // Every frame from here to the end of the tick, so a one-frame jump — the
+  // shape a repair that runs after layout leaves behind — cannot hide inside
+  // a before/after pair.
+  let worstDrift = 0;
+  let frames = 0;
+  let sampling = true;
+  const sample = (): void => {
+    if (!sampling) return;
+    frames++;
+    worstDrift = Math.max(worstDrift, Math.abs(topOfEye() - eyeTop0));
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+
+  // The tick: notes under the title — above the reader's line in both arms,
+  // which is what the layout has to be corrected for — and words into the
+  // transcript at the foot.
+  const underTitle = tiptap.state.doc.firstChild?.nodeSize ?? 0;
+  tiptap.commands.insertContentAt(underTitle, [
+    { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
+    { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
+  ]);
+  utter(m, 9);
+  await settle(m);
+  sampling = false;
+
+  const out: StillReading = {
+    where: o.where,
+    anchoringSuppressed: o.suppressAnchoring,
+    supportsAnchoring: typeof CSS !== 'undefined' && CSS.supports('overflow-anchor', 'auto'),
+    paneOverflowAnchor: getComputedStyle(m.editorEl).overflowAnchor,
+    eyeOnScreen: eye !== null,
+    eyeText: (eye?.textContent ?? '').slice(0, 40),
+    eyeTop0,
+    eyeTop1: topOfEye(),
+    worstDrift,
+    frames,
+    eyeContentY0,
+    eyeContentY1: contentYOfEye(),
+    scrollTop0,
+    scrollTop1: m.editorEl.scrollTop,
+    scrollHeight0,
+    scrollHeight1: m.editorEl.scrollHeight,
+    atBottom0,
+  };
+  suppressNativeAnchoring(false);
+  teardown(m);
+  return out;
+}
+
+async function cardsKeptArm(): Promise<CardsKeptReading> {
+  const m = mount({ paragraphs: 20, threads: 4 });
+  await frame();
+  for (let i = 0; i < 6; i++) {
+    utter(m, 9);
+    await sleep(20);
+  }
+  m.editorEl.scrollTop = 0;
+  await settle(m);
+
+  const cardsNow = (): number =>
+    m.threadIds.filter((id) => threadCards(id).some((el) => m.editorEl.contains(el))).length;
+  const scrollHeight0 = m.editorEl.scrollHeight;
+  let minCards = cardsNow();
+  let minScrollHeight = scrollHeight0;
+  let framesMissing = 0;
+  let frames = 0;
+  let sampling = true;
+  const sample = (): void => {
+    if (!sampling) return;
+    frames++;
+    const n = cardsNow();
+    minCards = Math.min(minCards, n);
+    if (n < m.threadIds.length) framesMissing++;
+    minScrollHeight = Math.min(minScrollHeight, m.editorEl.scrollHeight);
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+
+  // The other copy of the doc — the one the server writes the tick into.
+  const remote = new Y.Doc();
+  Y.applyUpdate(remote, Y.encodeStateAsUpdate(m.ydoc));
+  prose.ensureBlockIds(remote);
+  const ids = prose
+    .addressableBlocks(prose.getProseFragment(remote))
+    .map((el) => prose.readBlockId(el))
+    .filter((id): id is string => id != null);
+  const result = prose.applyBlockEdits(
+    remote,
+    [
+      // A tick's own two shapes: a note under the heading it belongs to, and
+      // one at the end of the doc. Both are structural edits to the prose
+      // ABOVE and BELOW the reader's comments, and neither touches the text
+      // any of them is anchored to.
+      {
+        op: 'insert_under_heading',
+        headingId: ids[0] as string,
+        markdown: `- Note: ${speech(14)}`,
+      },
+      { op: 'insert_at_end', markdown: `- Note: ${speech(14)}` },
+    ],
+    {
+      author: 'meeting-notes',
+      suggestionAuthor: { id: 'meeting-notes', name: 'Meeting Assistant', color: '#6a8' },
+    },
+  );
+  const resolves = (): boolean[] =>
+    m.threadIds.map((id) => m.chrome.resolveThreadRange(id) != null);
+  const resolvedBefore = resolves();
+  Y.applyUpdate(m.ydoc, Y.encodeStateAsUpdate(remote, Y.encodeStateVector(m.ydoc)));
+  const resolvedAfter = resolves();
+  utter(m, 9);
+  await settle(m);
+  await sleep(400);
+  await settle(m);
+  sampling = false;
+
+  const out: CardsKeptReading = {
+    placement: cardPlacement(),
+    threads: m.threadIds.length,
+    editsApplied: result.applied,
+    editsFailed: result.failed,
+    frames,
+    minCards,
+    framesMissing,
+    scrollHeight0,
+    minScrollHeight,
+    scrollHeight1: m.editorEl.scrollHeight,
+    outcomes: result.outcomes.map((o) => `${o.op}:${o.status}:${o.error ?? ''}`),
+    resolvedBefore,
+    resolvedAfter,
+    resolvedEnd: resolves(),
+    threadsCollected: m.chrome.collectThreads().length,
+    cardsAnywhere: m.threadIds.reduce((n, id) => n + threadCards(id).length, 0),
+    rangeSpans: m.editor.editor.view.dom.querySelectorAll('.thread-range').length,
   };
   teardown(m);
   return out;
