@@ -643,11 +643,6 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
   }
 
   function revealThreadBalloon(id: string): boolean {
-    // The caller has just scrolled the sentence into view, and the column's own
-    // restack is debounced behind that scroll — so the card is still parked
-    // where its off-screen text was. Place it against the fold the reader is
-    // actually looking at before going looking for it.
-    positionBalloons();
     // Below the breakpoint the column is display:none — the balloon exists
     // in `rendered[]` but the user can't see it, and a silent scrollIntoView
     // no-op would eat the caller's drawer/thread-view fallback (the 901–
