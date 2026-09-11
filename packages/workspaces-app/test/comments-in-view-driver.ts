@@ -21,12 +21,12 @@ import { type User, createThread, prose } from '@claude-workspaces/core';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { balloonMarginVisible, cardPlacement } from '../src/card-placement.ts';
-import { mountCommentHints } from '../src/comment-hints.ts';
+import { mountCommentHints, tallyTotal } from '../src/comment-hints.ts';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { createMeetingLiveZone } from '../src/meeting-live-zone.ts';
 import { MountScope } from '../src/mount-scope.ts';
 import { mountMarkupMargin } from '../src/redline/markup-margin.ts';
-import { mountReviewChrome } from '../src/review-chrome.ts';
+import { type ReviewChrome, mountReviewChrome } from '../src/review-chrome.ts';
 import { threadCards } from '../src/thread-morph.ts';
 
 /** One comment card as it is painted, beside the text it marks. */
@@ -94,6 +94,10 @@ export interface Probe {
   held: HeldReading;
   /** The reader at the top while the transcript grows past the fold. */
   untouched: UntouchedReading;
+  /** A tall card whose text just left the top of a short scroll. */
+  clamped: ClampedReading;
+  /** Notes landing above the reader's comments, read one frame later. */
+  landed: LandedReading;
 }
 
 /** Reaching a comment from the strip, with the transcript still growing. */
@@ -194,7 +198,10 @@ interface Mounted {
   ydoc: Y.Doc;
   threadIds: string[];
   zone: ReturnType<typeof createMeetingLiveZone>;
+  chrome: ReviewChrome;
   refreshHints: () => void;
+  /** Threads the "N above" pill is counting right now. */
+  hintAbove: () => number;
   insets: () => { top: number; bottom: number };
   /** What a tap on the "N above" pill does — `doc-margin.ts`'s `jumpToThread`
    *  sequence: scroll the sentence a third of the way down, then ask the
@@ -286,6 +293,14 @@ function mount(
     scope,
   });
   hintsInsets = () => hints.insets();
+  // What `doc-margin.ts` does on every editor transaction: a note landing in
+  // the prose reaches the column through here, not only through its size.
+  const onTransaction = (): void => {
+    margin.scheduleRelayout();
+    hints.refresh();
+  };
+  tiptap.on('transaction', onTransaction);
+  scope.onCleanup(() => tiptap.off('transaction', onTransaction));
 
   const zone = createMeetingLiveZone({
     parent: editorEl,
@@ -301,6 +316,11 @@ function mount(
     ydoc,
     threadIds,
     zone,
+    chrome,
+    hintAbove: () => {
+      const last = hints.last();
+      return last ? tallyTotal(last.above) : 0;
+    },
     refreshHints: () => {
       hints.refresh();
       margin.relayout();
@@ -442,7 +462,18 @@ async function probe(): Promise<string> {
   const held = await heldArm();
   const jumped = await jumpArm();
   const untouched = await untouchedArm();
-  const out: Probe = { watching, afterScrollBack, target, held, jumped, untouched };
+  const clamped = await clampedArm();
+  const landed = await landedArm();
+  const out: Probe = {
+    watching,
+    afterScrollBack,
+    target,
+    held,
+    jumped,
+    untouched,
+    clamped,
+    landed,
+  };
   return JSON.stringify(out);
 }
 
@@ -640,6 +671,140 @@ async function untouchedArm(): Promise<UntouchedReading> {
     handScrollTop,
     newestOnScreen,
     handScrollTop1: m.editorEl.scrollTop,
+  };
+  teardown(m);
+  return out;
+}
+
+/** Balloons in the margin with a painted box — zero where there is no margin. */
+function balloonsPainted(m: Mounted): number {
+  return Array.from(m.editorEl.querySelectorAll<HTMLElement>('.cw-balloon-comment')).filter(
+    (el) => getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 0,
+  ).length;
+}
+
+/**
+ * An expanded card whose text has just scrolled off the top, near the top of
+ * the doc — where there is no room above the fold to put it.
+ */
+export interface ClampedReading {
+  placement: string;
+  balloonsPainted: number;
+  /** The control: the card is taller than the scroll offset, so it cannot
+   *  sit wholly above the fold and still below the document's top. */
+  cardHeight: number;
+  scrollTop: number;
+  /** The expanded card's text is off screen… */
+  anchorOnScreen: boolean;
+  /** …and so, the rule says, is its card. */
+  cardOnScreen: boolean;
+  /** Its card's top and bottom against the pane's top, in px. */
+  cardTop: number;
+  cardBottom: number;
+  /** The "N above" pill still counts it. */
+  hintAbove: number;
+  /** Back at the top: the text returns and the card with it. */
+  back: CardReading | null;
+}
+
+async function clampedArm(): Promise<ClampedReading> {
+  const m = mount({ paragraphs: 60, threads: 4 });
+  await frame();
+  const id = m.threadIds[0] as string;
+  // The reader has just written on the doc's first comment: its card is open,
+  // replies and composer and all.
+  m.chrome.threadsPanel.setActive(id);
+  await settle(m);
+  const pane = m.editorEl.getBoundingClientRect();
+  const span = m.editor.editor.view.dom.querySelector<HTMLElement>(
+    `.thread-range[data-thread-id="${CSS.escape(id)}"]`,
+  );
+  const anchorBottom =
+    (span?.getBoundingClientRect().bottom ?? 0) - pane.top + m.editorEl.scrollTop;
+  // Scroll the sentence just off the top — a little reading, nothing more.
+  m.editorEl.scrollTop = Math.ceil(anchorBottom) + 24;
+  await settle(m);
+  const r = read(m);
+  const p = r.per.find((x) => x.id === id);
+  const card = threadCards(id).find((el) => m.editorEl.contains(el)) as HTMLElement | undefined;
+  const cardHeight = card?.offsetHeight ?? 0;
+  const scrollTop = m.editorEl.scrollTop;
+  const hintAbove = m.hintAbove();
+
+  m.editorEl.scrollTop = 0;
+  await settle(m);
+  const back = read(m).per.find((x) => x.id === id) ?? null;
+  const out: ClampedReading = {
+    placement: r.placement,
+    balloonsPainted: balloonsPainted(m),
+    cardHeight,
+    scrollTop,
+    anchorOnScreen: p?.anchorOnScreen ?? false,
+    cardOnScreen: p?.cardOnScreen ?? false,
+    cardTop: (p?.cardTop ?? Number.NaN) - r.paneTop,
+    cardBottom: (p?.cardBottom ?? Number.NaN) - r.paneTop,
+    hintAbove,
+    back,
+  };
+  teardown(m);
+  return out;
+}
+
+/** Notes landing in the prose above the reader's comments, mid-meeting. */
+export interface LandedReading {
+  placement: string;
+  balloonsPainted: number;
+  /** Before anything lands: every comment's text and card on screen. */
+  before: Reading;
+  /** Six notes land under the title, above every comment but the one ON the
+   *  title; read ONE frame later. The text has moved down, still on screen. */
+  nudged: Reading;
+  /** Each card's offset from its text one frame after the notes landed, and
+   *  once every debounce has run — where the column means to put it. */
+  offsetsNudged: number[];
+  offsetsSettled: number[];
+  /** Sixteen more land and push that text off the bottom. One frame later. */
+  pushed: Reading;
+}
+
+async function landedArm(): Promise<LandedReading> {
+  const m = mount({ paragraphs: 30, threads: 4 });
+  for (let i = 0; i < 6; i++) utter(m, 9);
+  m.editorEl.scrollTop = 0;
+  await settle(m);
+  const before = read(m);
+  const tiptap = m.editor.editor;
+  // Straight under the title, in one transaction each — the way a tick's
+  // block edits arrive — while the transcript keeps growing at the foot.
+  const underTitle = tiptap.state.doc.firstChild?.nodeSize ?? 0;
+  const notes = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      type: 'paragraph',
+      content: [{ type: 'text', text: `Note ${i}: ${speech(18)}` }],
+    }));
+  const nextFrame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+  const offsets = (r: Reading): number[] => r.per.map((p) => Math.round(p.offsetFromAnchor));
+
+  tiptap.commands.insertContentAt(underTitle, notes(6));
+  utter(m, 9);
+  await nextFrame();
+  const nudged = read(m);
+  await settle(m);
+  const settled = read(m);
+
+  tiptap.commands.insertContentAt(underTitle, notes(16));
+  utter(m, 9);
+  await nextFrame();
+  const pushed = read(m);
+
+  const out: LandedReading = {
+    placement: before.placement,
+    balloonsPainted: balloonsPainted(m),
+    before,
+    nudged,
+    offsetsNudged: offsets(nudged),
+    offsetsSettled: offsets(settled),
+    pushed,
   };
   teardown(m);
   return out;

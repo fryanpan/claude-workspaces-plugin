@@ -595,7 +595,12 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
 
     let maxBottom = 0;
     for (let i = 0; i < rendered.length; i++) {
-      const y = Math.max(0, ys[i]);
+      // Never clamped to the document top. Only a card whose text is off the
+      // top of the screen can come back negative, and a clamp is what dragged
+      // it back down INTO the screen: near the top of a doc an expanded card
+      // painted its last 36px at the top of the column, beside a paragraph it
+      // is not about. Above zero the scroller clips it, which is the point.
+      const y = ys[i] as number;
       rendered[i].el.style.top = `${y - marginOffsetY}px`;
       maxBottom = Math.max(maxBottom, y + items[i].height);
 
@@ -713,8 +718,41 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
   }
   scope.onCleanup(stopMorphRestack);
 
+  /**
+   * The cards follow the text on the next frame, not after the debounce.
+   *
+   * A note landing above a comment moves its sentence at once — down the
+   * screen, or, with the reader below it, the browser's scroll anchoring
+   * moves the pane to hold their line — and a card left where the text used
+   * to be sits beside the wrong sentence, or on screen for text that has just
+   * left it. Measured at 1180x820: six notes landing above four comments
+   * left the cards 374-452px above their text until the 100ms debounce ran,
+   * and longer while notes kept landing. So each request also re-places the
+   * column on the next frame.
+   * Positions only: the rebuild still waits for the debounce, and so does a
+   * frame in which a note card's block was just rebuilt, because its anchor
+   * is detached until the relayout re-reads it.
+   */
+  let followRaf: number | null = null;
+  function followText(): void {
+    if (followRaf != null || typeof requestAnimationFrame !== 'function') return;
+    followRaf = requestAnimationFrame(() => {
+      followRaf = null;
+      if (scope.disposed) return;
+      if (rendered.some((r) => r.kind === 'note' && !r.anchor.isConnected)) return;
+      positionBalloons();
+    });
+  }
+  scope.onCleanup(() => {
+    if (followRaf != null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(followRaf);
+    }
+    followRaf = null;
+  });
+
   let timer: ReturnType<typeof setTimeout> | null = null;
   function scheduleRelayout(): void {
+    followText();
     if (timer != null) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
