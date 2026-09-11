@@ -163,6 +163,13 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(Math.round(lines)).toBe(3);
     });
 
+    it('leaves focus in the field when a finger lands on a saved card', () => {
+      const l = look(1180, 'savedTapped');
+      expect(look(1180, 'posted2').focus, 'CONTROL: the field had focus before').toBe('TEXTAREA');
+      expect(l.saves.length, 'CONTROL: a saved card was there to tap').toBeGreaterThan(0);
+      expect(l.focus).toBe('TEXTAREA');
+    });
+
     it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {
       const p = look(1180, 'portrait');
       expect(p.mode).toBe(true);

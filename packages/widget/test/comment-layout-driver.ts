@@ -260,6 +260,9 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await type(LONG);
     await enter();
     await look('posted2');
+    // A finger on the saved card, while the resting card's field has focus.
+    await tap(`${SHADOW}.querySelector('.saved')`);
+    await look('savedTapped');
     // An iPad turned to portrait mid-comment, and back.
     await tap(el('wide'));
     await type('Riverbend stop');

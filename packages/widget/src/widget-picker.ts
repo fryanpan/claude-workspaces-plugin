@@ -149,7 +149,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   // press on the page stops the compatibility events; our own chrome is left
   // alone, or its fields could not be focused at all.
   const onDown = (ev: PointerEvent) => {
-    if (hitTest(ev)) ev.preventDefault();
+    if (hitTest(ev) || (ev.composedPath()[0] as Element).closest?.('.saved')) ev.preventDefault();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key !== 'Escape') return;
