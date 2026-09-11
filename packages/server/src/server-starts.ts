@@ -143,10 +143,12 @@ export function markServerServing(
   facts: { servingAt: number; deployRanAt?: number },
 ): void {
   const entries = readServerStarts(file);
-  const i = entries.findLastIndex((e) => e.startedAt === start.startedAt && e.pid === start.pid);
-  if (i < 0) return;
-  entries[i] = { ...entries[i], ...facts };
-  writeServerStarts(file, entries);
+  const mine = entries.filter((e) => e.startedAt === start.startedAt && e.pid === start.pid).at(-1);
+  if (!mine) return;
+  writeServerStarts(
+    file,
+    entries.map((e) => (e === mine ? { ...e, ...facts } : e)),
+  );
 }
 
 /** This process's start, recorded with the facts only it can gather. */
