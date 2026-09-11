@@ -4,7 +4,7 @@
  * model or any server is involved.
  *
  *  - "Asking to go to an item with only vaguely relevant words has never
- *    worked (eg 'I want to go to the Akash review doc in QB')." A navigation
+ *    worked (eg 'I want to go to the Cairn review doc in QB')." A navigation
  *    ask resolves by TITLE SIMILARITY, and when the best two are too close to
  *    call the answer is a question rather than a guess.
  *  - "If I ask for a brief status update, that should be able to show me a
@@ -44,17 +44,17 @@ import {
  *  near-twin that makes the ask ambiguous, and a decoy sharing exactly one
  *  word with it. The shape is the fixture — the strings themselves carry no
  *  meaning beyond it. */
-const AKASH = 'Review: Akash — onboarding flow';
-const AKASH_TWIN = 'Review: Akash — billing flow';
+const CAIRN = 'Review: Cairn — onboarding flow';
+const CAIRN_TWIN = 'Review: Cairn — billing flow';
 const DECOY = 'Review: billing export';
 
 // ── Unit: the deterministic pieces ─────────────────────────────────────────
 
 describe('navigationAsk: which utterances are "take me to …"', () => {
   it('extracts the name from Bryan’s phrasing, dropping the board qualifier', () => {
-    const q = navigationAsk("I want to go to the 'Akash review doc' in QB", ['QB']);
+    const q = navigationAsk("I want to go to the 'Cairn review doc' in QB", ['QB']);
     expect(q).not.toBeNull();
-    expect(q?.toLowerCase()).toContain('akash');
+    expect(q?.toLowerCase()).toContain('cairn');
     expect(q?.toLowerCase()).not.toContain('qb');
   });
 
@@ -69,39 +69,39 @@ describe('resolveByTitle: vague words against the index', () => {
   const doc = (id: string, title: string) => ({ id, kind: 'doc' as const, title });
   const task = (id: string, title: string) => ({ id, kind: 'task' as const, title });
 
-  it('Bryan’s phrase finds the Akash review over a decoy sharing one word', () => {
-    const r = resolveByTitle('akash review', [doc('d-akash', AKASH), doc('d-decoy', DECOY)]);
+  it('Bryan’s phrase finds the Cairn review over a decoy sharing one word', () => {
+    const r = resolveByTitle('cairn review', [doc('d-cairn', CAIRN), doc('d-decoy', DECOY)]);
     expect(r.kind).toBe('hit');
-    if (r.kind === 'hit') expect(r.match.id).toBe('d-akash');
+    if (r.kind === 'hit') expect(r.match.id).toBe('d-cairn');
   });
 
   it('two near-identical titles are AMBIGUOUS, never a coin toss', () => {
-    const r = resolveByTitle('akash review', [
-      doc('d-akash', AKASH),
-      doc('d-twin', AKASH_TWIN),
+    const r = resolveByTitle('cairn review', [
+      doc('d-cairn', CAIRN),
+      doc('d-twin', CAIRN_TWIN),
       doc('d-decoy', DECOY),
     ]);
     expect(r.kind).toBe('ambiguous');
     if (r.kind === 'ambiguous') {
-      expect(r.matches.map((m) => m.id).sort()).toEqual(['d-akash', 'd-twin']);
+      expect(r.matches.map((m) => m.id).sort()).toEqual(['d-cairn', 'd-twin']);
     }
   });
 
   it('words that match nothing resolve to nothing — the model gets its turn', () => {
-    const r = resolveByTitle('flux capacitor', [doc('d-akash', AKASH), doc('d-decoy', DECOY)]);
+    const r = resolveByTitle('flux capacitor', [doc('d-cairn', CAIRN), doc('d-decoy', DECOY)]);
     expect(r.kind).toBe('none');
   });
 
   it('a slip in a LONG word still matches (speech is not typing); a short one does not', () => {
     // "onbording" — one letter dropped from a ten-letter word — is still the
-    // word. Below five letters a slip is not tolerated at all: "akesh" is a
-    // different name, not a mis-heard "akash", and guessing there is how a
+    // word. Below five letters a slip is not tolerated at all: "caern" is a
+    // different name, not a mis-heard "cairn", and guessing there is how a
     // four-letter "test" used to open "Testimonials".
-    const r = resolveByTitle('onbording flow', [doc('d-akash', AKASH), doc('d-decoy', DECOY)]);
+    const r = resolveByTitle('onbording flow', [doc('d-cairn', CAIRN), doc('d-decoy', DECOY)]);
     expect(r.kind).toBe('hit');
-    if (r.kind === 'hit') expect(r.match.id).toBe('d-akash');
+    if (r.kind === 'hit') expect(r.match.id).toBe('d-cairn');
     expect(wordsMatch('onbording', 'onboarding')).toBe(true);
-    expect(wordsMatch('akash', 'akesh')).toBe(false);
+    expect(wordsMatch('cairn', 'caern')).toBe(false);
   });
 
   it('a four-letter prefix is not a match: "test" opens neither Testing nor Testimonials', () => {
@@ -157,11 +157,11 @@ describe('navigationAsk: the board qualifier', () => {
   it('strips a trailing "in <board>" only for a board it KNOWS the name of', () => {
     // "open sign in flow" used to lose " in flow" and tie with "Signals".
     expect(navigationAsk('open sign in flow', ['QB'])).toBe('sign in flow');
-    expect(navigationAsk("I want to go to the 'Akash review doc' in QB", ['QB'])).toBe(
-      'the Akash review doc',
+    expect(navigationAsk("I want to go to the 'Cairn review doc' in QB", ['QB'])).toBe(
+      'the Cairn review doc',
     );
-    expect(navigationAsk('open the akash doc in the QB board', ['QB'])).toBe('the akash doc');
-    expect(navigationAsk('open the akash doc in QB')).toBe('the akash doc in QB');
+    expect(navigationAsk('open the cairn doc in the QB board', ['QB'])).toBe('the cairn doc');
+    expect(navigationAsk('open the cairn doc in QB')).toBe('the cairn doc in QB');
   });
 });
 
