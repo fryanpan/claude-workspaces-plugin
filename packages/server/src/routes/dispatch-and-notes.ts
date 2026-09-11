@@ -2,6 +2,7 @@ import { parseAgentNote, resolveNoteTarget } from '../agent-notes.ts';
 import { SHARED_IDENTITY_ERROR, SHARED_IDENTITY_MESSAGE } from '../agent-watches.ts';
 import { isSharedAgentName } from '../chat-audit.ts';
 import { isValidDispatchTaskId } from '../dispatch-registry.ts';
+import { recordDispatchRequested } from '../dispatch-request-event.ts';
 /**
  * Builder dispatches, and the notes a session writes onto the row it holds.
  *
@@ -26,7 +27,7 @@ export async function handleDispatchAndNoteRoutes(
     parallelismCapView,
     proposeAllowRule,
   } = ctx;
-  const { req, scope, visitor } = rq;
+  const { req, scope, visitor, authorFor } = rq;
   // --- REST: builder dispatches ---
   // The lead's statement that a builder is working a task in a private
   // worktree, so the stall loop can read worktree churn as the row
@@ -66,7 +67,30 @@ export async function handleDispatchAndNoteRoutes(
       // dispatch instead of a wake.
       const task = taskStore.getTask(taskId);
       const view = task ? parallelismCapView(task.workspaceId, taskId) : undefined;
+      // The moment the lead decided to run this row, recorded whichever way
+      // the request goes. Deferred and error-swallowing (see
+      // `dispatch-request-event.ts`), so nothing below waits on it and a
+      // failed write cannot turn a dispatch into an error. The board is the
+      // row's own when the store knows the row, and the board the path named
+      // when it does not — the same "cannot look, so cannot enforce" case the
+      // cap check just handled.
+      const author = authorFor(body?.author);
+      const noteRequest = (outcome: 'registered' | 'cap-reached' | 'refused'): void => {
+        recordDispatchRequested(taskStore, {
+          workspaceId: task?.workspaceId ?? scope.workspaceId,
+          taskId,
+          outcome,
+          reason: body?.reason,
+          ...(agentName ? { agentName } : {}),
+          ...(author ? { actor: author } : {}),
+          ts: Date.now(),
+        });
+      };
       if (view && view.free === 0) {
+        // The row this whole event exists for: a lane asked for while every
+        // slot was held. Nothing else on the board records that the ask came
+        // before the slot did.
+        noteRequest('cap-reached');
         return j(409, {
           error: 'parallelism-cap-reached',
           message: `parallelism cap (${view.cap}) reached — held by: ${holdersClause(view.holders)}`,
@@ -75,7 +99,11 @@ export async function handleDispatchAndNoteRoutes(
         });
       }
       const res = dispatches.register(taskId, worktreePath, agentName || undefined);
-      if (!res.ok) return j(400, { error: res.error });
+      if (!res.ok) {
+        noteRequest('refused');
+        return j(400, { error: res.error });
+      }
+      noteRequest('registered');
       return j(200, res);
     }
     return j(405, { error: 'method not allowed' });

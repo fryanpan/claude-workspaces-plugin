@@ -35,11 +35,14 @@ describe('dispatch tools', () => {
     expect(mcp.tool('register_dispatch_that_never_existed')).toBeUndefined();
   });
 
-  it('register_dispatch requires the task and the worktree path', () => {
+  it('register_dispatch requires the task and the worktree path, and takes a reason', () => {
     const decl = mcp.tool('register_dispatch');
     expect(decl).toBeDefined();
+    // `reason` is a property and NOT required: it feeds the board's timing
+    // marker, and a lead that leaves it out must still get its lane.
     expect(decl?.inputSchema?.required).toEqual(['workspaceId', 'taskId', 'worktreePath']);
     expect(Object.keys(decl?.inputSchema?.properties ?? {}).sort()).toEqual([
+      'reason',
       'taskId',
       'workspaceId',
       'worktreePath',
@@ -56,10 +59,24 @@ describe('dispatch tools', () => {
     expect(res.sent.map((r) => `${r.method} ${r.path}`)).toEqual([
       'POST /workspaces/w-1/dispatches',
     ]);
-    expect(res.sent[0]?.body).toEqual({
+    const body = res.sent[0]?.body as Record<string, unknown> | undefined;
+    expect(body?.taskId).toBe('t-K69wx');
+    expect(body?.worktreePath).toBe('/tmp/worktrees/builder-3');
+    // The author travels so the board can say WHO asked for the lane.
+    expect((body?.author as { id?: string } | undefined)?.id).toBeTruthy();
+    // …and a call that named no reason sends no empty one.
+    expect(body).not.toHaveProperty('reason');
+  });
+
+  it('register_dispatch carries a reason the lead gave, trimmed', async () => {
+    const res = await mcp.call('register_dispatch', {
+      workspaceId: 'w-1',
       taskId: 't-K69wx',
       worktreePath: '/tmp/worktrees/builder-3',
+      reason: '  next in the goal band  ',
     });
+    expect(res.isError).toBe(false);
+    expect((res.sent[0]?.body as Record<string, unknown>).reason).toBe('next in the goal band');
   });
 
   it('close_dispatch DELETEs the per-task route, with the id escaped into the path', async () => {
