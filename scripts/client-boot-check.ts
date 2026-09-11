@@ -33,7 +33,12 @@
  * The wait is a poll, never a sleep: the mount deadline is a ceiling, and a
  * page that mounts in 400ms costs 400ms.
  *
- * WHAT IT DOES NOT COVER. One page, one doc, desktop width, no interaction.
+ * THEN THE TWO PAGES THAT CARRY THE COMMENT WIDGET — the board, and a mockup
+ * with no script of its own — judged on two things only: one copy of Yjs per
+ * page (the doc page's count is read too), and a widget whose socket opened.
+ * See client-boot-widget.ts for why those two.
+ *
+ * WHAT IT DOES NOT COVER. One doc, desktop width, no interaction.
  * It is a boot check, not a UI suite — `bun run ui:shot` and the client tests
  * are the other tools. Widening it is fine; letting it get slow enough that
  * somebody takes it out of `verify` is not.
@@ -70,6 +75,7 @@ import {
   type Transfer,
   describeTransport,
 } from './client-boot-transport.ts';
+import { YjsWatch, loadWidgetPage, widgetPageFailures } from './client-boot-widget.ts';
 import {
   type Browser,
   Cdp,
@@ -207,8 +213,16 @@ async function postJson(url: string, body: unknown): Promise<Record<string, unkn
   return JSON.parse(text) as Record<string, unknown>;
 }
 
-/** A board and a file-backed markdown doc, and the page path that opens it. */
-async function seedDoc(base: string, dataDir: string): Promise<string> {
+interface Seeded {
+  boardId: string;
+  /** The path that opens the markdown doc. */
+  docPath: string;
+  /** The path that opens a mockup with no script of its own. */
+  mockupPath: string;
+}
+
+/** A board, a file-backed markdown doc and a mockup, and where each opens. */
+async function seedDoc(base: string, dataDir: string): Promise<Seeded> {
   const board = (await postJson(`${base}/workspaces`, {
     name: 'client boot check',
     author: { id: 'agent:client-boot-check', name: 'client-boot-check', kind: 'agent' },
@@ -239,10 +253,64 @@ async function seedDoc(base: string, dataDir: string): Promise<string> {
   // whatever answers on the tailnet. Concatenating the two produced a URL
   // Chrome refused outright, which was at least loud; a machine whose tailnet
   // name resolved would have quietly checked the WRONG server.
-  const raw = doc.meta?.reviewUrl;
+  const docPath = pagePath(doc, `/workspaces/${boardId}/docs`);
+
+  // A host page with no script of its own, so the only Yjs on it is the one
+  // the widget brings: the page every embed on somebody else's site is.
+  const mockupFile = join(dataDir, 'client-boot-mockup.html');
+  writeFileSync(
+    mockupFile,
+    '<!doctype html><html><head><title>Client boot mockup</title></head>' +
+      '<body><h1>Client boot mockup</h1><p>A page with no scripts.</p></body></html>\n',
+  );
+  const mockup = (await postJson(`${base}/workspaces/${boardId}/docs`, {
+    docId: 'client-boot-mockup',
+    type: 'mockup',
+    title: 'Client boot mockup',
+    sourceUrl: mockupFile,
+  })) as { docId?: string; meta?: { reviewUrl?: string } };
+  return { boardId, docPath, mockupPath: pagePath(mockup, `/workspaces/${boardId}/mockups`) };
+}
+
+function pagePath(resp: { docId?: string; meta?: { reviewUrl?: string } }, under: string): string {
+  const raw = resp.meta?.reviewUrl;
   if (raw) return raw.startsWith('/') ? raw : new URL(raw).pathname;
-  if (doc.docId) return `/workspaces/${boardId}/docs/${doc.docId}`;
-  throw new Error(`no reviewUrl or docId in the doc response: ${JSON.stringify(doc)}`);
+  if (resp.docId) return `${under}/${resp.docId}`;
+  throw new Error(`no reviewUrl or docId in the doc response: ${JSON.stringify(resp)}`);
+}
+
+const DOC_PAGE = 'the doc page';
+
+/**
+ * The board and the mockup: one copy of Yjs each, and a widget that came up.
+ * The doc page carries no widget, so only its Yjs count is read here — its
+ * boot was judged above. See client-boot-widget.ts.
+ */
+async function widgetPagesVerdict(
+  cdp: Cdp,
+  watch: YjsWatch,
+  base: string,
+  seeded: Seeded,
+  o: Options,
+): Promise<number> {
+  const failures: string[] = [];
+  const docDuplicates = watch.count(DOC_PAGE);
+  if (docDuplicates > 0) {
+    failures.push(`❌ ${DOC_PAGE}: Yjs was imported ${docDuplicates + 1} times.`);
+  }
+  for (const [name, path] of [
+    ['the board', `/workspaces/${seeded.boardId}/home`],
+    ['a mockup', seeded.mockupPath],
+  ] as const) {
+    const r = await loadWidgetPage(cdp, watch, name, `${base}${path}`, o);
+    const lines = widgetPageFailures(r);
+    if (lines.length === 0) {
+      console.log(`✅ ${name}: one copy of Yjs, and the comment widget's socket opened.`);
+    }
+    failures.push(...lines.map((l) => `${l}\n   ${r.url}`));
+  }
+  for (const f of failures) console.error(f);
+  return failures.length > 0 ? 1 : 0;
 }
 
 /** A page-side failure, in the form the summary prints. */
@@ -463,8 +531,8 @@ async function run(o: Options): Promise<number> {
     await waitForServer(base, server, bootDeadline);
     log(`server on ${base}, data dir ${dataDir}`);
 
-    const docPath = await seedDoc(base, dataDir);
-    const pageUrl = `${base}${docPath}`;
+    const seeded = await seedDoc(base, dataDir);
+    const pageUrl = `${base}${seeded.docPath}`;
     log(`opening ${pageUrl}`);
 
     const runId = resolveRunId();
@@ -478,59 +546,67 @@ async function run(o: Options): Promise<number> {
       },
     );
     cdp = await Cdp.connect(await pageSocketUrl(browser.port, 30_000));
-    const page = await loadDocPage(cdp, pageUrl, o);
-    const { errors, mounted, mountMs, loadMs } = page;
-    const transport =
-      loadMs === null || loadMs > SLOW_LOAD_MS
-        ? await describeTransport(page.transfers, page.pendingScripts, o.loadTimeoutMs)
-        : [];
-
-    if (mounted && errors.length === 0) {
-      console.log(
-        `✅ the built client booted: ${EDITOR_SELECTOR} mounted ${mountMs}ms after load, nothing threw.`,
-      );
-      if (transport.length > 0) {
-        console.log(`   The load itself took ${loadMs}ms, which is the transport:`);
-        for (const line of transport) console.log(line);
-      }
-      return 0;
-    }
-    if (loadMs === null) {
-      console.error(
-        `❌ the page never fired its load event within ${o.loadTimeoutMs}ms, so the editor\n` +
-          '   was never given the chance to mount. What the wire was doing:',
-      );
-      for (const line of transport) console.error(line);
-    } else if (!mounted) {
-      console.error(
-        `❌ ${EDITOR_SELECTOR} never mounted within ${o.timeoutMs}ms of the load event — the page rendered its\n` +
-          '   chrome and no editor, which is exactly what production served after PR 817.',
-      );
-    }
-    for (const e of errors) console.error(`❌ page ${e.kind}: ${e.text}`);
-    if (loadMs !== null && transport.length > 0) {
-      // Not the cause — the mount clock starts at the load event — but a
-      // reader of this failure should not have to rediscover the wire.
-      console.error(`   The load before it took ${loadMs}ms, which is the transport:`);
-      for (const line of transport) console.error(line);
-    }
-    if (loadMs === null) {
-      // Nothing about the bundle is known yet, so the bundle's usual suspects
-      // are not named: the wire above is the whole of what was measured.
-      console.error(`\n   ${pageUrl}\n   Raise --load-timeout if this machine is simply slow.`);
-      return 1;
-    }
-    console.error(
-      `\n   ${pageUrl}\n` +
-        '   Re-run with --keep --shot /tmp/boot.png to look at it. The two causes\n' +
-        '   seen so far are a dangling namespace getter (a `ns.NAME` read the\n' +
-        '   tree-shaker could not see, so the module was dropped) and an import\n' +
-        '   cycle — `bun run check:import-cycles` answers the second.',
-    );
-    return 1;
+    const watch = new YjsWatch(cdp);
+    watch.page(DOC_PAGE);
+    const docCode = await docPageVerdict(await loadDocPage(cdp, pageUrl, o), o, pageUrl);
+    const widgetCode = await widgetPagesVerdict(cdp, watch, base, seeded, o);
+    return Math.max(docCode, widgetCode);
   } finally {
     cleanup();
   }
+}
+
+/** Print the doc page's verdict; 0 when it booted clean. */
+async function docPageVerdict(page: PageResult, o: Options, pageUrl: string): Promise<number> {
+  const { errors, mounted, mountMs, loadMs } = page;
+  const transport =
+    loadMs === null || loadMs > SLOW_LOAD_MS
+      ? await describeTransport(page.transfers, page.pendingScripts, o.loadTimeoutMs)
+      : [];
+
+  if (mounted && errors.length === 0) {
+    console.log(
+      `✅ the built client booted: ${EDITOR_SELECTOR} mounted ${mountMs}ms after load, nothing threw.`,
+    );
+    if (transport.length > 0) {
+      console.log(`   The load itself took ${loadMs}ms, which is the transport:`);
+      for (const line of transport) console.log(line);
+    }
+    return 0;
+  }
+  if (loadMs === null) {
+    console.error(
+      `❌ the page never fired its load event within ${o.loadTimeoutMs}ms, so the editor\n` +
+        '   was never given the chance to mount. What the wire was doing:',
+    );
+    for (const line of transport) console.error(line);
+  } else if (!mounted) {
+    console.error(
+      `❌ ${EDITOR_SELECTOR} never mounted within ${o.timeoutMs}ms of the load event — the page rendered its\n` +
+        '   chrome and no editor, which is exactly what production served after PR 817.',
+    );
+  }
+  for (const e of errors) console.error(`❌ page ${e.kind}: ${e.text}`);
+  if (loadMs !== null && transport.length > 0) {
+    // Not the cause — the mount clock starts at the load event — but a
+    // reader of this failure should not have to rediscover the wire.
+    console.error(`   The load before it took ${loadMs}ms, which is the transport:`);
+    for (const line of transport) console.error(line);
+  }
+  if (loadMs === null) {
+    // Nothing about the bundle is known yet, so the bundle's usual suspects
+    // are not named: the wire above is the whole of what was measured.
+    console.error(`\n   ${pageUrl}\n   Raise --load-timeout if this machine is simply slow.`);
+    return 1;
+  }
+  console.error(
+    `\n   ${pageUrl}\n` +
+      '   Re-run with --keep --shot /tmp/boot.png to look at it. The two causes\n' +
+      '   seen so far are a dangling namespace getter (a `ns.NAME` read the\n' +
+      '   tree-shaker could not see, so the module was dropped) and an import\n' +
+      '   cycle — `bun run check:import-cycles` answers the second.',
+  );
+  return 1;
 }
 
 if (import.meta.main) {

@@ -115,8 +115,10 @@ describe('board UI routes (plan §3.12 commit 7)', () => {
       const htmlB = await (await fetch(`${base}/workspaces/${b}`)).text();
 
       for (const html of [htmlA, htmlB]) {
-        expect(html).toContain('/widget.esm.js');
         expect(html).toContain('<claude-feedback-widget');
+        // The element only: the board bundle imports the widget itself, so it
+        // shares the board's Yjs. `/widget.esm.js` carries a second copy.
+        expect(html).not.toContain('/widget.esm.js');
         expect(html).toContain(`doc-id="${BOARD_FEEDBACK_DOC_ID}"`);
       }
       // The board in the embed is the board the READER is on, not one home

@@ -26,4 +26,12 @@ import { connect } from '@claude-workspaces/core';
 import { browserStorage } from '../boot-env.ts';
 import { bootBoard } from './board-app.ts';
 
-void bootBoard({ document, location, history, localStorage: browserStorage, window, connect });
+void bootBoard({
+  document,
+  location,
+  history,
+  localStorage: browserStorage,
+  window,
+  connect,
+  loadWidget: () => import('@claude-workspaces/widget'),
+});
