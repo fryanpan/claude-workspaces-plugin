@@ -53,11 +53,11 @@ flowchart TB
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
-    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
+    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-method-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
-    prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
+    prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts · server-starts.ts"]
   end
   core["core — pure shared library"]
@@ -105,6 +105,17 @@ on, and `meeting-notes-composer.ts` is left with the HTTP seam. Two of the six a
 fields on a **board** rather than on the server and keep being written
 through `PUT /api/workspaces/<id>/settings` — `routes/prompts.ts` says so
 with `scope` rather than serving them twice, and the client hides the split.
+
+Every default is **markdown with `###` sections** (2026-09-11), and a caller
+that changes a prompt before it goes out does it by heading, never by an
+exact sentence: `prompt-sections.ts` cuts, replaces and appends whole
+sections, so a solo meeting drops `### Speakers and links` and a ledger
+method swaps `### Grouping` however the owner has reworded their bodies.
+`prompt-markdown-migration.ts` is the one-shot move of stored overrides onto
+those defaults — an override that is an old default word for word is
+soft-cleared, any other is kept and marked "written before markdown" — run
+by `prompt-store.ts` on a version-1 `prompts.json` and by the board hydrate
+on the two board fields.
 
 **Where a route lives.** Everything that decides which URL paths it answers is
 under `routes/`, `server.ts` composes and delegates to it and matches nothing
@@ -324,6 +335,20 @@ or above it when the element reaches into the margin, never over it — and is
 asked again every frame from the widget's existing rAF loop. It joins no data
 flow: it reads layout and writes only the widget's own shadow DOM.
 
+**The widget's mic belongs to the host that has one.** The board's own widget
+is bound to the Workspaces feedback doc, not to the board's project, so its
+buttons are about the app: the thread list steps up a slot and a microphone
+takes its place. `widget-mic.ts` is a top-level module of the widget package
+beside `widget-card.ts`, but it is a SECOND ENTRY
+(`@claude-workspaces/widget/mic`) that `widget.ts` never imports — it makes
+only the button, the readout and their rules, and the host wires its own
+capture to them. That keeps every byte of it out of `widget.iife.js`, which
+mock pages load against a hard size budget, and keeps voice capture in one
+place: `board/board-feedback-mic.ts` in `workspaces-app` mounts the mic and
+hands it `createVoiceCapture` (Space left to the board's dock), whose
+transcript is posted as a subject thread through the widget. No new data flow —
+it is the thread POST the typed composer already makes.
+
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,
 suggestions, anchors, presence, live notes. Agents hold no replica, so an agent
@@ -400,6 +425,12 @@ debounced snapshot of it.
 | --- | --- | --- |
 | **HTTP** | `server.ts`, `routes/**`, `middleware/**`, `shells.ts`, `request-admission.ts`, `request-attribution.ts`, `socket-handlers.ts` | The only code that knows about HTTP. Parse, admit, call one service, format. |
 | **Services / stores** | `doc-store.ts`, `tasks.ts` and the `task-*` stores, `review-items/**`, `home-pane.ts`, `share/**`, `auth/**`, the `meeting-*` and `notes-*` families, `sse.ts`, `activity.ts` | Owns durable state and orchestrates one change across stores and adapters. |
+
+`library.ts` joins the Board box in the services tier: it builds a board's
+Library — the meetings and files a person opens it to find — from the board's
+docs, its project repo's markdown files (`fs-scan.ts`) and its mounts. It owns
+no state; `routes/workspace-library.ts` answers the list and the one verb that
+binds a listed file, through `doc-store.ts` like every other bind.
 
 `notes-timing.ts` joins the same `notes-*` family in the services tier and
 changes none of the picture: it is where one meeting's per-tick latency is

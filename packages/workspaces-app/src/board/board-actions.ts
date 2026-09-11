@@ -86,7 +86,7 @@ export interface BoardState {
   homePollStarted: number;
   tab: BoardTab;
   doneWindow: DoneWindow;
-  view: 'board' | 'activity';
+  view: 'board' | 'activity' | 'library';
   /**
    * The board column is showing the restore list instead of the lanes.
    *

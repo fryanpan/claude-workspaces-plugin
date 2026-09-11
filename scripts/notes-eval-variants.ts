@@ -44,6 +44,7 @@ import {
 } from '../packages/server/src/notes-ledger.ts';
 import { composeSettings } from '../packages/server/src/notes-method-composer.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from '../packages/server/src/notes-prompt-store.ts';
+import { MAX_BULLET_WORDS } from '../packages/server/src/notes-quality.ts';
 import { type SummaryCredential, authHeader } from '../packages/server/src/summarize.ts';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -67,11 +68,17 @@ function swap(source: string, anchor: string, replacement: string): string {
   return source.replace(anchor, replacement);
 }
 
+/**
+ * The one-point rule in the shipped `### Notes` section, which the
+ * exploration variants below swap for their own writing rule. An exact
+ * sentence rather than a heading, on purpose: these variants replace one
+ * rule inside a section and keep the rest, and `swap` throws when the words
+ * move, so a reworded default fails the run loudly instead of measuring the
+ * baseline twice.
+ */
 const FLAT_RUN_ANCHOR = [
-  '- ONE POINT PER BULLET, AT MOST 20 WORDS — count them. A longer thought',
-  '  is two bullets, and a bullet that needs a dash, a semicolon or the word',
-  '  "and" to hold two ideas is already those two bullets. The speaker tag',
-  '  does not count towards the twenty.',
+  `- Write one point in each note. Use a maximum of ${MAX_BULLET_WORDS} words. The speaker tag is not part of the ${MAX_BULLET_WORDS}.`,
+  '- If a note needs "and", a dash or a semicolon to hold two ideas, write two notes.',
 ].join('\n');
 
 const NESTED_RULE = [
@@ -557,13 +564,7 @@ function anchoredHooks(): MeetingHooks {
 }
 
 const COMPRESS_ANCHOR = [
-  '- COMPRESS, NEVER DROP. What goes is the packaging: greetings, thinking',
-  '  aloud, false starts, a point already in the notes, the same point said',
-  '  again in other words. What STAYS is every idea. If the speech raised a',
-  '  subject the notes do not yet carry, it gets a note — even a small one,',
-  '  even a single sentence that mattered for a moment. Length is what you',
-  '  cut; ideas are not. When you must choose, write the idea in five words',
-  '  rather than leaving it out.',
+  '- Keep every idea, also a small idea. If you must choose, write the idea in five words. Do not drop it.',
 ].join('\n');
 
 /**

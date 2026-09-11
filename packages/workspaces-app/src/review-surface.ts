@@ -52,5 +52,9 @@ export interface ReviewSurface {
    *  an empty array to clear them. Optional: a surface that cannot host
    *  in-flow DOM simply omits it and mobile falls back to the sheet alone. */
   setInlineCards?: (cards: InlineThreadCard[]) => void;
+  /** Keep a range marked while a comment on it is being written, or clear
+   *  the mark with null. Optional: a surface without it shows the selection
+   *  it has, for as long as it has it. */
+  markPending?: (range: { from: number; to: number } | null) => void;
   destroy: () => void;
 }

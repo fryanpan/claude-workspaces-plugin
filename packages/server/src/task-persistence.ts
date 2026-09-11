@@ -32,6 +32,7 @@ import {
 import { join } from 'node:path';
 import { storedJudgement } from '@claude-workspaces/core';
 import type { Task, TaskStatus } from '@claude-workspaces/core/task-wire';
+import { migrateBoardPrompts } from './prompt-markdown-migration.ts';
 import type { ReviewItemPersistence } from './review-items/persistence.ts';
 import {
   type AgentStorePersistence,
@@ -367,6 +368,12 @@ export function hydrateTasksFromDisk(store: TaskPersistenceHost): void {
       // stranding them for real. Flattened HERE, at the one door a stored
       // list comes through, rather than in each reader.
       workspace.goals = flattenNestedGoals((workspace.goals ?? []) as readonly NestedGoalInput[]);
+      // The prompt defaults became markdown; an override that is the old
+      // default word for word goes back to the new one, any other is marked.
+      // In memory, like the migrations around it: the next write of the
+      // board saves it, and re-running it on the unsaved record gives the
+      // same answer.
+      migrateBoardPrompts(workspace, Date.now());
       const tasks = new Map<string, Task>();
       for (const task of parsed.tasks ?? []) {
         if (typeof task?.id !== 'string') continue;

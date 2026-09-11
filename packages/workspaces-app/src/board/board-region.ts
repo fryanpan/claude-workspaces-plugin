@@ -1,7 +1,7 @@
 /**
  * The board pane: the bands and rows, the lead strip, the restore list, and
  * the Activity feed that is a VIEW of this same pane rather than a page of
- * its own.
+ * its own — as is the Library, which paints itself and is only shown here.
  *
  * One responsibility — everything the middle column can be showing — and the
  * reason the Activity feed belongs in it is `state.view`: the feed and the
@@ -202,7 +202,9 @@ export function createBoardRegion(deps: BoardDeps): BoardRegion {
     // The restore list is still a vanilla renderer, so it gets its OWN
     // container: no vanilla code may `replaceChildren` a node holding a live
     // island, and `#board` is the island's host for the life of the page.
-    el('board').classList.toggle('hidden', showArchived);
+    // Hidden on Activity and the Library too: a board event repaints this
+    // region alone, and it must not bring the task list back over either.
+    el('board').classList.toggle('hidden', showArchived || state.view !== 'board');
     el('board-archived').classList.toggle('hidden', !showArchived);
     if (showArchived) {
       renderArchivedList(
@@ -272,11 +274,13 @@ export function createBoardRegion(deps: BoardDeps): BoardRegion {
     // a button that swapped ONE div, so the capture box and the review strip
     // stayed on screen over a feed they have nothing to do with.
     for (const id of ['board-quick', 'board-decisions', 'board-archived']) {
-      el(id).classList.toggle('board-hidden-by-view', state.view === 'activity');
+      el(id).classList.toggle('board-hidden-by-view', state.view !== 'board');
     }
+    // The Library paints itself (`library-page.ts`); this only decides it shows.
+    el('board-library').classList.toggle('hidden', state.view !== 'library');
+    board.classList.toggle('hidden', state.view !== 'board' || state.showArchived);
+    activity.classList.toggle('hidden', state.view !== 'activity');
     if (state.view === 'activity') {
-      board.classList.add('hidden');
-      activity.classList.remove('hidden');
       renderActivity(
         activity,
         state.events,
@@ -288,9 +292,6 @@ export function createBoardRegion(deps: BoardDeps): BoardRegion {
         },
         state.uptime,
       );
-    } else {
-      board.classList.remove('hidden');
-      activity.classList.add('hidden');
     }
   }
 

@@ -533,12 +533,12 @@ describe('the system prompt states the mood a thread is in', () => {
   const { system } = buildSummaryPrompt(thread());
 
   it('tells the model a proposal is not a decision and in-flight is not done', () => {
-    expect(system).toMatch(/proposal, recommendation, or plan is NOT a decision/i);
-    expect(system).toMatch(/in-flight work is NOT done/i);
+    expect(system).toContain('A proposal, a recommendation or a plan is not a decision');
+    expect(system).toContain('Future or in-flight work is not done.');
   });
 
   it('tells it the newest comment wins and to keep polarity and actor', () => {
-    expect(system).toMatch(/NEWEST comment wins/);
+    expect(system).toMatch(/The newest comment wins/);
     expect(system).toMatch(/Keep polarity exactly/);
     expect(system).toMatch(/Keep the actor/);
   });
@@ -547,9 +547,9 @@ describe('the system prompt states the mood a thread is in', () => {
     // The old examples were three completed states and one open question, and
     // the model wrote "Done" over threads that only proposed. Count the
     // examples by their listed word count, then the completed-mood openers.
-    const examples = system.match(/^ {2}"[^"]+" \(\d+ words\)$/gm) ?? [];
+    const examples = system.match(/^ {2}- "[^"]+" \(\d+ words\)$/gm) ?? [];
     expect(examples.length).toBeGreaterThanOrEqual(4);
-    const completed = examples.filter((e) => /^ {2}"(Fixed|Done|Agreed|Merged|Shipped)/.test(e));
+    const completed = examples.filter((e) => /^ {2}- "(Fixed|Done|Agreed|Merged|Shipped)/.test(e));
     expect(completed.length).toBeLessThan(examples.length / 2);
     // ...and at least one shows an OPEN ask and one a retraction, the two moods
     // the review found most often collapsed into "done".
@@ -558,7 +558,10 @@ describe('the system prompt states the mood a thread is in', () => {
   });
 
   it('keeps the delivery-status rule from the guard that preceded it', () => {
-    expect(system).toMatch(/DELIVERY STATUS IS NOT YOURS TO STATE/);
+    expect(system).toContain('### Delivery status');
+    expect(system).toContain(
+      'Never say that work merged, shipped, landed, was deployed or was released.',
+    );
   });
 });
 

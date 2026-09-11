@@ -56,6 +56,8 @@ export interface EditorHandle {
   /** Place comment cards in the flow, under the block they are anchored in
    *  (the mobile inline comment surface). Empty array clears them. */
   setInlineCards: (cards: InlineThreadCard[]) => void;
+  /** Keep the words a comment is being written about marked; null clears. */
+  markPending: (range: { from: number; to: number } | null) => void;
   getText: () => string;
   setMarkdown: (md: string) => void;
   getMarkdown: () => string;
@@ -321,6 +323,9 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     },
     setThreadRanges(ranges, activeId) {
       setThreadDecorations(editor.view, { ranges, activeId });
+    },
+    markPending(range) {
+      setThreadDecorations(editor.view, { pending: range });
     },
     setInlineCards(cards) {
       setThreadDecorations(editor.view, {

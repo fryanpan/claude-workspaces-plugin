@@ -64,7 +64,7 @@ describe('buildTaskCapturePrompt', () => {
 
   it('states that an empty items array is the normal answer', () => {
     const { system } = buildTaskCapturePrompt({ turns, candidates: [] });
-    expect(system.toLowerCase()).toContain('empty');
+    expect(system).toContain('Most speech has no items. Then return `{"items":[]}`.');
   });
 });
 
@@ -473,7 +473,7 @@ describe('who asked for the task', () => {
     expect(user).toContain('- Speaker B: File a ticket for that one.');
     expect(system).toContain('"requester"');
     // The same law the notes composer states: an unnamed voice stays a label.
-    expect(system).toContain('never guess');
+    expect(system).toContain('Never guess a name.');
   });
 
   it('leaves the lines bare when the tick carried no labels', () => {
@@ -666,8 +666,8 @@ describe('an ask that spans two ticks', () => {
     // The marking is what the model is told to do with those lines. Read on
     // one line: the prompt is hand-wrapped, so a phrase can straddle a break.
     const rule = system.replace(/\s+/g, ' ');
-    expect(rule).toContain('"Earlier speech" was read last pass');
-    expect(rule).toContain('Every item must draw part of itself from the new lines.');
+    expect(rule).toContain('You read "Earlier speech" in the last pass.');
+    expect(rule).toContain('Each item must come in part from the new lines.');
 
     // And the deterministic half: the row the previous pass filed is on the
     // board now, so a re-file of the same ask becomes a link to it.
@@ -823,7 +823,7 @@ describe('the research and lookup prompt', () => {
     expect(system).toContain('"kind":"lookup"');
     expect(system).toContain('rarely say the word');
     // The "when" clause is what makes a past meeting reachable at all.
-    expect(system).toContain('KEEPING any "when"');
+    expect(system).toContain('Keep any time words');
   });
 });
 
@@ -1100,7 +1100,7 @@ describe('parsing a review ask', () => {
     const { system } = buildTaskCapturePrompt({ turns: spoken, candidates: [] });
     expect(system).toContain('"kind":"review"');
     expect(system).toContain('ask the');
-    expect(system).toContain('answer itself is not an');
+    expect(system).toContain('A question that the people then answer themselves is not an ask.');
   });
 });
 
@@ -1308,10 +1308,10 @@ describe('the correction intent', () => {
   it('is offered in the prompt, with the words that separate it from new speech', () => {
     const { system } = buildTaskCapturePrompt({ turns: correcting, candidates: [] });
     expect(system).toContain('"kind":"correction","wrong":"...","right":"..."');
-    expect(system).toContain('A CORRECTION');
+    expect(system).toContain('### Correction');
     // The distinction the intent lives or dies on: overturning a decision is
     // the composer's job, not a correction.
-    expect(system).toContain('CHANGING THEIR MIND');
+    expect(system).toContain('A change of mind ("actually, let\'s do Thursday") is new speech');
   });
 
   it('reads a correction whose corrected words the tick actually carried', () => {

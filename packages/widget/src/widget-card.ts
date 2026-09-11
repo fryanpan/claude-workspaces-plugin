@@ -22,13 +22,14 @@ import type { FeedbackWidgetEl } from './widget.ts';
  *  bookkeeping, so nothing is written onto the host page's elements. */
 export const cardTarget = new WeakMap<Element, HTMLElement>();
 
-/** Words typed and not posted, by the element they are about (the widget
- *  itself for a comment on the page), kept when the mode closes over them. */
-export const drafts = new WeakMap<object, string>();
+/** Words typed and not posted, by the element they are about, kept when the
+ *  mode closes over them. */
+export const drafts = new WeakMap<HTMLElement, string>();
 export function keepDraft(el: FeedbackWidgetEl): void {
   const c = el.shadow.querySelector('.composer');
+  const t = c && cardTarget.get(c);
   const v = c?.querySelector('textarea')?.value;
-  if (c && v) drafts.set(cardTarget.get(c) ?? el, v);
+  if (t && v) drafts.set(t, v);
 }
 
 /**
@@ -48,7 +49,7 @@ export function isPhoneFace(): boolean {
 /** Must match `.composer` / `.saved` width in `styles.ts`. */
 const CARD_W = 280;
 const GAP = 12;
-/** A card about the page as a whole rests here: clear of the banner. */
+/** A card whose element has left the page stands here: clear of the banner. */
 const REST_Y = 72;
 
 export function placeCards(w: FeedbackWidgetEl): void {
@@ -62,9 +63,9 @@ export function placeCards(w: FeedbackWidgetEl): void {
   const x = (vv ? vv.offsetLeft + vv.width : window.innerWidth) - 16 - CARD_W;
   let top = screenTop;
   let bot = screenBot;
-  // The mode's own buttons in the card's column — Done, the FAB's X, the list
-  // — stay uncovered: the card's room ends where they start.
-  for (const o of w.shadow.querySelectorAll('.fab, .fab-list, .picker-banner')) {
+  // The mode's own buttons in the card's column — Done, the FAB's X, the list,
+  // the mic — stay uncovered: the card's room ends where they start.
+  for (const o of w.shadow.querySelectorAll('.fab, .fab-list, .fab-mic, .picker-banner')) {
     const b = o.getBoundingClientRect();
     if (b.width && b.right > x && b.left < x + CARD_W) {
       if (b.top > (top + bot) / 2) bot = Math.min(bot, b.top - 8);

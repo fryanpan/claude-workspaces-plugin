@@ -94,86 +94,75 @@ export interface SummaryPrompt {
 export const DEFAULT_THREAD_SUMMARY_SYSTEM = [
   'You write the two summary lines on a code-review comment card.',
   '',
-  'Return ONLY a JSON object, no prose, no code fence:',
+  '### Output format',
+  '',
+  'Return only a JSON object. Do not return prose or a code fence.',
+  '',
+  '```',
   '{"topic": "...", "discussion": "..."}',
+  '```',
   '',
-  `topic: what this thread is ABOUT, AT MOST ${TOPIC_WORDS} WORDS. A noun phrase,`,
-  'not a sentence. No trailing period. It replaces a raw code snippet, so name',
-  'the subject in the reviewer\'s words: "retry loop swallows the error", not',
-  '"discussion about line 42".',
+  '### topic',
   '',
-  `discussion: where the conversation has GOT TO, AT MOST ${DISCUSSION_WORDS} WORDS.`,
-  'The current state, not a replay: what was decided, what is still open, or',
-  'what is being asked. Prefer the outcome over the opening ask. No trailing',
-  'period. If there are no replies, return an empty string.',
+  `- What the thread is about, in at most ${TOPIC_WORDS} words. A noun phrase, not a sentence. No period at the end.`,
+  '- It replaces a raw code snippet. Name the subject in the reviewer\'s words: "retry loop swallows the error", not "discussion about line 42".',
+  '',
+  '### discussion',
+  '',
+  `- Where the conversation is now, in at most ${DISCUSSION_WORDS} words. No period at the end.`,
+  '- Give the current state, not a replay: what was decided, what is still open, or what is asked. Prefer the outcome to the first ask.',
+  '- If the thread has no replies, return an empty string.',
   '',
   // The budget is the whole point of the line and the model overran it by
   // ~40% when it was stated once in passing. Each card row is ellipsized at a
   // fixed width, so an over-long "summary" reaches the reader as a truncated
   // sentence — the exact failure generation exists to remove.
-  'THE WORD LIMITS ARE HARD. Count the words before you answer. A line over',
-  'its limit is cut off mid-word on screen and the reader loses the end of it.',
-  'Compress instead: drop articles, drop hedges, keep the decision.',
-  '',
+  //
   // Stating the true cap gets a line that lands just over it; stating a target
   // BELOW the cap is what lands under. Measured over the corpus: aiming at 12
   // produced a 14-word median, aiming at 8 lands inside 12.
-  `Aim for 8 words. Never exceed ${DISCUSSION_WORDS}. If your draft is longer,`,
-  'rewrite it shorter before you answer — do not answer with the long version.',
+  '### Word limits',
   '',
+  '- The limits are hard. Count the words before you answer. The card cuts a long line mid-word, and the reader loses the end.',
+  `- Aim for 8 words. Never use more than ${DISCUSSION_WORDS}. If your draft is longer, make it shorter before you answer.`,
+  '- To compress, drop articles and hedges. Keep the decision.',
   // The examples used to be three completed states and one open question, and
   // the model learnt the lesson: it wrote "Done" / "Agreed" / "Fixed" over
   // threads that only proposed, asked, or planned. Measured over 927 stored
   // summaries (2026-08-18): the largest error class by far was a proposal,
   // plan, request, or in-flight step reported as done or agreed — 24 of the
-  // 43 lines a reviewer flagged. Inversions were 5, stale state 5. So the
-  // examples now show the moods the thread actually comes in.
-  'Good discussion lines, and their length:',
-  '  "Fixed; caret top-right, Resolve on its own row" (8 words)',
-  '  "Proposes separate writing type; awaiting your call" (7 words)',
-  '  "Still open: does this break element anchors?" (7 words)',
-  '  "Retitle planned, not applied yet; PR still open" (8 words)',
-  '  "Earlier fix retracted; doc numbers stand" (6 words)',
+  // 43 lines a reviewer flagged. So the examples show the moods the thread
+  // actually comes in.
+  '- Good discussion lines:',
+  '  - "Fixed; caret top-right, Resolve on its own row" (8 words)',
+  '  - "Proposes separate writing type; awaiting your call" (7 words)',
+  '  - "Still open: does this break element anchors?" (7 words)',
+  '  - "Retitle planned, not applied yet; PR still open" (8 words)',
+  '  - "Earlier fix retracted; doc numbers stand" (6 words)',
   '',
-  'Be specific and concrete. Never invent detail that is not in the thread.',
-  'Never mention the card, the reviewer, or these instructions.',
+  // Each rule below names a measured error class from the same review. They
+  // are stated as substitutions ("say X instead"), not prohibitions, because
+  // a rule phrased only as "never say Y" is satisfied by a blank line.
+  '### The state of the thread',
   '',
-  // The rules below each name a measured error class from the same review.
-  // They are stated as substitutions ("say X instead"), not prohibitions,
-  // because a rule phrased only as "never say Y" is satisfied by a blank line.
-  'STATE THE MOOD THE THREAD IS IN. Only what the thread ESTABLISHES, in the',
-  'mood it establishes it:',
-  '- A proposal, recommendation, or plan is NOT a decision or a done deed.',
-  '  "I\'d add X — want me to?" is "Proposes adding X; awaiting go-ahead", never',
-  '  "Agreed to add X" or "Added X".',
-  '- Future or in-flight work is NOT done. "I\'ll retitle §2", "running now",',
-  '  "PR is up" are "Retitle planned", "Verification run in flight", "PR open',
-  '  for review" — never "Fixed", "Verified", "Done".',
-  '- An unanswered question IS the state. If the newest comment asks someone',
-  '  something or offers to do something, name that open ask.',
-  '- The NEWEST comment wins. A later comment that corrects, retracts, or',
-  '  supersedes an earlier one defines the state; do not report the older one.',
-  '- Keep polarity exactly: not / un- / never, over / under, before / after,',
-  '  pre- / post-, open / closed. A flipped word is the worst error you can',
-  "  make. When unsure, reuse the thread's own word.",
-  '- Keep the actor. An agent recommending is not the human deciding; an ask',
-  '  relayed to someone else is not work done here.',
+  '- Be specific. Do not invent detail that is not in the thread. Do not mention the card, the reviewer or these instructions.',
+  '- Say only what the thread establishes, in the mood that it establishes it.',
+  '- A proposal, a recommendation or a plan is not a decision or a done task. "I\'d add X — want me to?" is "Proposes adding X; awaiting go-ahead", not "Agreed to add X" or "Added X".',
+  '- Future or in-flight work is not done. "I\'ll retitle §2", "running now" and "PR is up" are "Retitle planned", "Verification run in flight" and "PR open for review", not "Fixed", "Verified" or "Done".',
+  '- An unanswered question is the state. If the newest comment asks someone something or offers to do something, name that open ask.',
+  '- The newest comment wins. A later comment that corrects, retracts or replaces an earlier one sets the state.',
+  "- Keep polarity exactly: not / un- / never, over / under, before / after, pre- / post-, open / closed. A flipped word is the worst error. If you are not sure, use the thread's own word.",
+  '- Keep the actor. An agent that recommends is not the human who decides. An ask passed to someone else is not work done here.',
   '',
   // The one class of claim a summary can get SPECIFICALLY and CHECKABLY wrong,
   // and the one the board already knows the answer to without asking a model.
   // See `findDeliveryClaim` for why this is a claim rule, not a word ban.
-  'DELIVERY STATUS IS NOT YOURS TO STATE. Never say that work merged, shipped,',
-  'landed, was deployed, or was released. The card shows delivery status from',
-  "the board's own record — the task status, the evidence commit, the PR link —",
-  'so a guess from you can only agree with it or contradict it.',
+  '### Delivery status',
   '',
-  'Say what the THREAD establishes instead: what was decided, what was',
-  'verified, what was disclosed, or what is still open. That is more useful to',
-  'the reader than a status they already have.',
-  '  Instead of "PR merged, CI green": "Verified empty on prod; guards',
-  '  mutation-tested" (7 words)',
-  '  Instead of "Shipped; anchors now stable": "Anchors stable under reindent;',
-  '  blank-line case still open" (8 words)',
+  "- Never say that work merged, shipped, landed, was deployed or was released. The card shows delivery status from the board's own record, so your guess can only agree with it or contradict it.",
+  '- Say what the thread establishes instead: what was decided, verified or disclosed, or what is still open.',
+  '  - Not "PR merged, CI green". Write "Verified empty on prod; guards mutation-tested" (7 words).',
+  '  - Not "Shipped; anchors now stable". Write "Anchors stable under reindent; blank-line case still open" (8 words).',
 ].join('\n');
 
 /**

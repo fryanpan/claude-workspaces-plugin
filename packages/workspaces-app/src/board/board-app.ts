@@ -71,6 +71,7 @@ import {
 import { wireBoardVoice } from './board-voice.ts';
 import { createBoardWalkthrough } from './board-walkthrough.ts';
 import { mountIslandProbe } from './island-probe.tsx';
+import { createLibraryPage } from './library-page.ts';
 import { createRepaintGuard } from './repaint-guard.ts';
 
 /**
@@ -457,6 +458,20 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     schedule: (paint) => repaintGuard.schedule(paint),
   });
 
+  // ── The Library page ────────────────────────────────────────────────────
+  // Owns its container and its own state; `setNav` only says when to show it.
+  const library = createLibraryPage({
+    root: el('board-library'),
+    workspaceId,
+    boardName: () => state.info?.name ?? '',
+    fetchJson,
+    send,
+    navigate: (href) => location.assign(href),
+    history,
+    here: () => location.href,
+  });
+  if (state.nav === 'library') void library.open();
+
   /**
    * The one writer of `nav`, `pane`, `tab` and `view`. Four destinations that
    * used to be a pane switch, a segmented filter and a toggle button, each
@@ -474,7 +489,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     // so carrying it across a nav tap would put a reader back on it later
     // with no memory of having asked.
     if (state.showArchived) setShowArchived(false);
-    state.view = nav === 'activity' ? 'activity' : 'board';
+    state.view = nav === 'activity' || nav === 'library' ? nav : 'board';
     const tab = tabForNav(nav);
     if (tab !== undefined) state.tab = tab;
     // Arriving at Home means arriving at the TOP of Home: `/workspaces/<id>/home`
@@ -495,6 +510,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     renderActivityRegion();
     if (nav === 'home') void loadHome();
     if (nav === 'activity') void loadEvents();
+    if (nav === 'library') void library.open();
   }
 
   // ── Task discussion ─────────────────────────────────────────────────────
@@ -707,8 +723,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   });
 
   // Controls.
-  // Home / Tasks / My Tasks / Activity — pushState every way, and the back
-  // button honours all four.
+  // Home / Tasks / My Tasks / Library / Activity — pushState every way, and
+  // the back button honours all five.
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.board-nav-item[data-nav]')) {
     btn.addEventListener('click', () => setNav((btn.dataset.nav as BoardNav) ?? 'tasks'));
   }

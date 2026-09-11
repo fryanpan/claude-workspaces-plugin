@@ -967,6 +967,13 @@ body.has-set .doc-switcher-caret {
   background: rgba(46, 125, 215, 0.22);
   border-bottom-color: rgba(46, 125, 215, 0.8);
 }
+/* The words a comment is being written about, while the composer is open —
+   the same wash the selection wears then (`styles.css`), held by a
+   decoration because the selection itself goes when the caret leaves. */
+#editor > .ProseMirror .comment-pending {
+  background: rgba(255, 213, 79, 0.85);
+  color: #1b1f23;
+}
 
 /* The highlight carries the SAME glyph as its card — comments mock 3. One
    glyph per state, everywhere it appears: blue bubble for a comment, amber

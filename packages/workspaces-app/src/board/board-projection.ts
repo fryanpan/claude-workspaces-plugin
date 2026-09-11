@@ -48,7 +48,7 @@ export function initialBoardState(bootLoc: BoardLocation): BoardState {
     homePollStarted: 0,
     tab: tabForNav(nav) ?? 'all',
     doneWindow: DEFAULT_DONE_WINDOW,
-    view: nav === 'activity' ? 'activity' : 'board',
+    view: nav === 'activity' || nav === 'library' ? nav : 'board',
     showArchived: bootLoc.archived,
     activityFilter: 'all',
     events: [],

@@ -72,6 +72,10 @@ export const widgetStyles = `
   justify-content: center;
 }
 .fab-list:hover { border-color: #2e7dd7; }
+/* The history folds away while comment mode is on — "I don't need to see the
+   comment history very often" (the owner, 2026-09-11). It is the node just
+   before the FAB, which wears .open while the mode is on. */
+.fab-list:has(+.open) { display: none; }
 .fab-list .count {
   position: absolute;
   top: -4px;
@@ -175,7 +179,7 @@ export const widgetStyles = `
 .auth-signout:hover { color: #1b1f23; }
 .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
 /* Pill buttons share one block; only coloring differs below. */
-.primary, .cancel, .resolve, .reopen, .done {
+.primary, .cancel, .resolve, .reopen {
   background: #fff;
   border: 1px solid #d1d5da;
   border-radius: 6px;
@@ -412,7 +416,7 @@ export const widgetStyles = `
    the bottom, above the dock — not a sheet, not a scrim, so the page behind
    keeps its place. After .picker-banner and .composer so it wins at equal
    specificity. The composer's panel replaces the prompt's while it is up, and
-   the floating buttons it would sit on fold away (Done is on the panel). */
+   the floating buttons it would sit on fold away. */
 .quick {
   top: auto;
   left: 0;
@@ -431,19 +435,27 @@ export const widgetStyles = `
 .picker-banner.quick > :first-child { flex: 1; }
 .picker-banner.quick .picker-cancel { color: #1b1f23; border-color: #d1d5da; }
 .picker-banner:has(~ .quick), .fab:has(~ .quick), .fab-list:has(~ .quick) { display: none; }
-.composer.quick { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
-.quick .composer-snippet { margin: 0; }
+/* One row, shaped like the doc page's composer — a small × for Cancel at the
+   far end from Post, the field as a pill, Post as a round arrow. The words
+   stay in the buttons for a screen reader; only the glyphs are drawn. */
+.composer.quick { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: end; }
 .quick .composer-actions { display: contents; }
+.quick .cancel { grid-area: 1 / 1; border: 0; background: none; font-size: 0; }
+.quick .cancel::before { content: "×"; font-size: 26px; color: #6e7781; }
+.quick .submit { border-radius: 50%; font-size: 0; }
+.quick .submit::before { content: "↑"; font-size: 20px; }
+.submit:disabled { opacity: 0.5; }
 /* One line that grows to four as you type, where the engine can size a
    field to its content; one line, scrolling, where it cannot. */
 .quick textarea {
-  grid-area: 2 / 1 / 3 / 3;
+  grid-area: 1 / 2;
+  border-radius: 22px;
+  padding: 10px 14px;
   min-height: 44px;
   max-height: 96px;
   field-sizing: content;
   resize: none;
 }
-.quick .submit { grid-area: 2 / 3; }
 .quick .composer-err { grid-column: 1 / -1; }
 
 

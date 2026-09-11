@@ -93,13 +93,12 @@ describe.skipIf(CHROME === null)('a press on the widget is not a press on the pa
       describe(`at ${width} ${how}`, () => {
         it('posts the comment, and opens nothing on the Post button', () => {
           const r = at(width, pierce);
-          // Nothing new opened about the button. At tablet width posting hands
-          // the mode back a fresh page-level composer, which is the behaviour
-          // the reopen is FOR; at phone width the mode rests in the banner.
-          // Asserted before the post, because this is the site the reported
-          // symptom shows up at: before the fix it read "Post".
+          // Nothing new opened about the button: a post leaves the mode in
+          // its banner at either width, with nothing to type into until the
+          // next element is picked. This is the site the reported symptom
+          // shows up at — before the fix it read "Post".
           expect(CHROME_SUBJECTS).not.toContain(r.afterPost.snippet);
-          expect(r.afterPost.snippet).toBe(width > 1100 ? 'About this page' : null);
+          expect(r.afterPost.snippet).toBeNull();
           // Exactly one comment, on the element that was picked — not two, and
           // not none. Before the fix the pierce cases posted NOTHING: the
           // press was preventDefaulted before the button's own click ran.
@@ -116,7 +115,7 @@ describe.skipIf(CHROME === null)('a press on the widget is not a press on the pa
           // Cancel throws the draft away and hands the mode back — it starts
           // nothing about itself and posts nothing.
           expect(CHROME_SUBJECTS).not.toContain(r.afterCancel.snippet);
-          expect(r.afterCancel.snippet).toBe(width > 1100 ? 'About this page' : null);
+          expect(r.afterCancel.snippet).toBeNull();
           expect(r.afterCancel.mode).toBe(true);
           expect(r.afterCancel.posts).toHaveLength(1);
         });

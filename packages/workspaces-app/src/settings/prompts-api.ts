@@ -33,6 +33,9 @@ export interface PromptDetail {
   /** The words in force: the override, or the shipped default. */
   value: string;
   isDefault: boolean;
+  /** The override in force was saved before the defaults became markdown,
+   *  and has not been saved over since. */
+  writtenBeforeMarkdown?: boolean;
   /** The shipped words, for the "Show the default" disclosure. */
   default: string;
 }
@@ -58,9 +61,16 @@ const BOARD_FIELD: Record<string, 'reviewItemCriteria' | 'effortEstimatePrompt'>
   'effort-estimate': 'effortEstimatePrompt',
 };
 
+interface BoardPromptSetting {
+  value?: string;
+  isDefault?: boolean;
+  default?: string;
+  writtenBeforeMarkdown?: boolean;
+}
+
 interface BoardSettings {
-  reviewItemCriteria?: { value?: string; isDefault?: boolean; default?: string };
-  effortEstimatePrompt?: { value?: string; isDefault?: boolean; default?: string };
+  reviewItemCriteria?: BoardPromptSetting;
+  effortEstimatePrompt?: BoardPromptSetting;
 }
 
 interface ServerPromptRow {
@@ -146,6 +156,7 @@ export function createPromptsApi(deps: PromptsApiDeps): PromptsApi {
         editable: row.editable,
         value: stored.value,
         isDefault: stored.isDefault === true,
+        ...(stored.writtenBeforeMarkdown === true ? { writtenBeforeMarkdown: true } : {}),
         default: typeof stored.default === 'string' ? stored.default : stored.value,
       };
     },

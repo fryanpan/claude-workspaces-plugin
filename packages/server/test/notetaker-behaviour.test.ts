@@ -67,15 +67,17 @@ const emptyInput: NotesComposeInput = {
 /* ===== The instruction reaches the model ===== */
 
 describe('the notetaking instructions', () => {
+  // The words are Bryan's Simplified Technical English draft (2026-09-11), so
+  // each rule below is pinned by the sentence that states it there. The
+  // comments are why the rule exists: every one was measured missing first.
   const system = buildNotesPrompt(emptyInput).system;
 
-  it('ask for paraphrase rather than a transcript with headings', () => {
-    expect(system).toMatch(/Paraphrase/);
-    expect(system).toMatch(/transcript with/i);
+  it('ask for paraphrase rather than a transcript', () => {
+    expect(system).toContain('Paraphrase. Do not copy the words of the speaker.');
   });
 
   it('state the twenty-word bar the eval measures', () => {
-    expect(system).toContain(`AT MOST ${MAX_BULLET_WORDS} WORDS`);
+    expect(system).toContain(`Use a maximum of ${MAX_BULLET_WORDS} words.`);
   });
 
   it('ask for list items, which is what the model does not do unprompted', () => {
@@ -84,17 +86,16 @@ describe('the notetaking instructions', () => {
     // good content, well organised, and not a set of notes: every
     // bullet-shaped check downstream read zero bullets, and a reader cannot
     // point at a line that is not a line. Naming the markdown is the fix.
-    expect(system).toContain('MARKDOWN LIST ITEM');
-    expect(system).toMatch(/beginning with[\s\S]{0,40}"- "/);
+    expect(system).toContain('Each note is one markdown list item. Do not write paragraphs.');
   });
 
   it('say that ideas are never dropped, only compressed', () => {
     // The rule this replaced ended "fewer, better notes beat complete ones",
     // which told the note-taker that leaving an idea out was a success. A
     // minute of real conversation then produced no note at all.
-    expect(system).toContain('COMPRESS, NEVER DROP');
+    expect(system).toContain('Keep every idea, also a small idea.');
+    expect(system).toContain('write the idea in five words. Do not drop it.');
     expect(system).not.toMatch(/fewer, better notes/i);
-    expect(system).toMatch(/every idea/i);
   });
 
   it('put no ceiling on how many edits one tick may write', () => {
@@ -102,45 +103,38 @@ describe('the notetaking instructions', () => {
     // which is a cap on how much a tick may RECORD and so a licence to drop
     // whatever a busy minute raised past the third idea. Lifting it moved the
     // longest AMI meeting from 57.3% of ideas in no note to 46.8%.
-    expect(system).toContain('WRITE ONE EDIT PER IDEA');
-    expect(system).toMatch(/no ceiling/i);
+    expect(system).toContain(
+      'Write one edit for each idea in the new speech. There is no maximum.',
+    );
     expect(system).not.toMatch(/edits is a normal tick/i);
   });
 
-  it('open a heading as soon as a subject has nowhere to go', () => {
+  it('open a heading as soon as a subject has nowhere to go, and never a second one', () => {
     // Headings used to wait until the discussion had "genuinely moved to a
     // different topic", which leaves an idea about a new subject with no
     // heading to sit under — and an idea with nowhere to go is dropped.
-    expect(system).toMatch(/heading is cheap/i);
+    expect(system).toContain('If no heading covers the topic, add a "### " heading');
+    expect(system).toContain('Do not make a second heading for a topic that has one.');
     expect(system).not.toMatch(/genuinely moved to a different topic/i);
   });
 
-  it('give open questions one fixed heading rather than a good place', () => {
-    // Both halves, and they are different rules: the FLOOR says a topic is
-    // not finished until what is open is written down, and HOW TO ORGANISE
-    // says where. Asserting only the heading text passed with the organising
-    // rule deleted, because the floor bullet quotes the same heading — an
-    // assertion that could not fail on the behaviour it named.
-    expect(system).toContain('### Open questions');
-    expect(system).toContain('ONE HEADING IS FIXED');
+  it('name what a topic should carry', () => {
+    expect(system).toContain(
+      'what the people discussed, why it is important, the next step and its owner',
+    );
   });
 
-  it('name the floor a finished topic has to reach', () => {
-    for (const asked of [
-      'what was discussed',
-      'what it means and why it matters',
-      'what was decided, and by whom',
-      'what happens next, and who owns it',
-      '(unconfirmed)',
-    ]) {
-      expect(system).toContain(asked);
-    }
+  it('mark a decision and an open question where a reader finds them', () => {
+    expect(system).toContain('**Decision:**');
+    expect(system).toContain('**Question:**');
   });
 
-  it('name the four things a note should carry', () => {
-    for (const asked of ['discussed', 'why it matters', 'decided', 'happens next']) {
-      expect(system).toContain(asked);
-    }
+  it('ask for a guess to be marked rather than dropped or asserted', () => {
+    expect(system).toContain('end it with "(unconfirmed)"');
+  });
+
+  it('keep a decision and an open question attributed', () => {
+    expect(system).toContain('A decision and an open question always get a tag.');
   });
 
   it('offer a missed sentence back as a second look, not as new speech', () => {
@@ -155,53 +149,39 @@ describe('the notetaking instructions', () => {
     expect(buildNotesPrompt(emptyInput).user).not.toContain('STILL IN NO NOTE');
   });
 
-  it('ask for topic headings that are reused rather than reopened', () => {
-    expect(system).toMatch(/### /);
-    expect(system).toMatch(/never open a second heading/i);
-  });
-
-  it('ask for a guess to be marked rather than dropped or asserted', () => {
-    expect(system).toContain('(unconfirmed)');
-  });
-
-  it('keep a decision and an open question attributed', () => {
-    expect(system).toMatch(/DECISION AND AN OPEN QUESTION ALWAYS KEEP THEIR SPEAKER TAG/);
-  });
-
   it('ask for the answer as edits addressed to block ids, not as prose', () => {
     // The whole contract in one instruction. A model that answers with the
     // notes as markdown composes nothing at all now (`readNotesEdits` throws),
     // so this sentence is load-bearing rather than stylistic.
-    expect(system).toContain('JSON array of EDITS');
-    expect(system).toMatch(/Never return prose/);
+    expect(system).toContain('Return only a JSON array of edits. Do not return prose');
     for (const op of ['insert_under_heading', 'insert_at_end', 'replace_block', 'delete_block']) {
-      expect(system).toContain(op);
+      expect(system).toContain(`"op":"${op}"`);
     }
   });
 
   it('let the note-taker revise its OWN bullet rather than contradict it', () => {
     // The rule that shipped before this said the opposite — new material at
     // the end, "never to restructure notes the new speech does not touch".
-    expect(system).toMatch(/overturns or corrects a bullet of YOURS, replace_block/);
+    expect(system).toContain('If the new speech corrects one of your notes, replace that note.');
     expect(system).not.toMatch(/never to restructure/);
   });
 
   it("say that a person's block may be proposed to, never rewritten", () => {
-    expect(system).toContain('ONLY EDIT A BLOCK MARKED "yours"');
-    expect(system).toMatch(/reaches them as a\s+suggestion/);
+    expect(system).toContain('Edit only blocks marked "yours".');
+    expect(system).toContain('becomes a suggestion to the person');
   });
 
   it('ask for a topic past the bar to be regrouped, by grouping not dropping', () => {
-    expect(system).toContain(`More than ${MAX_FLAT_RUN_BULLETS} bullets under one heading`);
+    expect(system).toContain(`more than ${MAX_FLAT_RUN_BULLETS} notes`);
     // Named as the op, not described as a shape: the regroup is a move, and a
     // model told only what the result should look like reaches for
     // replace_block plus delete_block, which retypes every folded point.
-    expect(system).toContain('nest_blocks');
-    expect(system).toMatch(/nest_blocks MOVES bullets/);
+    expect(system).toContain('"op":"nest_blocks"');
+    expect(system).toContain('Do not group with `replace_block` and `delete_block`.');
     // Grouping, not deleting. An earlier revision passed the bar by dropping a
     // point to get under the number, which trades a wall for a note nobody
     // wrote.
-    expect(system).toMatch(/GROUPING, never\s+by dropping a point/);
+    expect(system).toContain('Group the notes. Do not drop a point.');
   });
 });
 

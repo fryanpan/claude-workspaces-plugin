@@ -143,6 +143,9 @@ export class WorkspaceStore {
       // subscribed to a workspace that did not exist a line ago.
       ...(lead ? { leadAgentId: lead, leadAgentSince: now } : {}),
       createdAt: now,
+      // Born after the markdown defaults, so there is nothing to migrate —
+      // and words typed into it later must never read "written before".
+      promptMarkdownMigration: { at: now },
     };
     this.p.register(workspace.id, {
       workspace,
