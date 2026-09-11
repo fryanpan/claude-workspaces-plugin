@@ -183,12 +183,15 @@ KEYCHAIN_SERVICE = os.environ.get("SCRUB_HAIKU_KEYCHAIN_SERVICE") or "scrub-haik
 #                            somebody's to fix today — and warn on exhausted,
 #                            which nobody can fix before the reset date.
 #
-# THE VALUE BELOW IS THE PRE-DECISION ONE, and it is deliberately the weakest:
-# "warn-all" is what this gate already did, so the change shipped alongside it
-# is what a person is TOLD, not whether their push succeeds. Choosing among the
-# three is the repo owner's call and is filed as a decision on the ticket this
-# came from; when it is answered, this one assignment is the whole edit.
-UNAVAILABLE_POLICY = "warn-all"
+# ANSWERED by the repo owner on 2026-09-10: "Always block". A push that the
+# name-aware layer never saw is a push nobody checked for an unfamiliar real
+# name, and the regex layer passing says nothing about that — so the gate
+# refuses rather than waving it through with a banner. Exhausted is included
+# deliberately: nobody can fix a spend cap before its reset date, and a window
+# where the weaker check is the only one running is exactly the window this
+# decision exists to close. SCRUB_HAIKU_UNAVAILABLE overrides it for a push
+# that genuinely cannot wait, and says so in the banner when it does.
+UNAVAILABLE_POLICY = "block-all"
 
 EXHAUSTED = "exhausted"
 ABSENT = "absent"
