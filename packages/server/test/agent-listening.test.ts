@@ -18,41 +18,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  AGENT_LISTENING_EVENT,
-  agentListeningFrame,
-  stampListening,
-} from '../src/agent-listening.ts';
+import { AGENT_LISTENING_EVENT, agentListeningFrame } from '../src/agent-listening.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor } from './wait-for.ts';
 
 const RIVERBEND = 'agent-riverbend';
 const HARBORLIGHT = 'agent-harborlight';
-
-describe('stampListening', () => {
-  it('answers per row, and never drops one', () => {
-    const rows = [
-      { agentId: RIVERBEND, state: 'active' },
-      { agentId: HARBORLIGHT, state: 'away' },
-    ];
-    const out = stampListening(rows, new Set([RIVERBEND]));
-    // The roster stays whole: it is also the lead picker's options and the
-    // plugin-drift check's domain, both of which need the absent sessions.
-    expect(out.map((r) => r.agentId)).toEqual([RIVERBEND, HARBORLIGHT]);
-    expect(out.map((r) => r.listening)).toEqual([true, false]);
-    // Every other field rides through untouched.
-    expect(out[0]?.state).toBe('active');
-  });
-
-  it('says false rather than saying nothing', () => {
-    // The absent case has to be an explicit `false` on the wire. A reader
-    // that cannot tell "no" from "this server never answers the question"
-    // would draw a circle for somebody who left, which is the whole defect.
-    const [row] = stampListening([{ agentId: RIVERBEND }], new Set());
-    expect(row && 'listening' in row).toBe(true);
-    expect(row?.listening).toBe(false);
-  });
-});
 
 describe('agentListeningFrame', () => {
   it('carries the answer, not only the news', () => {
@@ -212,6 +183,25 @@ describe('the board roster, through the server', () => {
     // …and the row is still there. Not listening is not detached: the
     // roster keeps the session, the strip simply stops drawing it.
     expect((await roster()).map((a) => a.agentId)).toContain(RIVERBEND);
+  });
+
+  it('answers per agent — one listening, one attached and gone, on one board', async () => {
+    // The roster keeps both. Which of them to DRAW is the surface's call, so
+    // the wire says who is here rather than deciding for it — the same list
+    // is the lead picker's options and the plugin-drift check's domain.
+    for (const agentId of [RIVERBEND, HARBORLIGHT]) {
+      await post(`/workspaces/${workspaceId}/agents`, {
+        agentId,
+        runtime: 'claude-code-local',
+      });
+    }
+    const stream = await openAgentStream(RIVERBEND);
+    await waitFor(async () => (await listeningOf(RIVERBEND)) === true, {
+      describe: 'the roster to report the open stream',
+    });
+    expect(await listeningOf(HARBORLIGHT)).toBe(false);
+    expect((await roster()).map((a) => a.agentId).sort()).toEqual([HARBORLIGHT, RIVERBEND].sort());
+    await stream.stop();
   });
 
   it('a browser tab never makes an absent agent look present', async () => {

@@ -25,10 +25,12 @@
  * delivery decision where a bare subscriber count may only narrow one
  * (`task-agents.ts`, `AgentStreamProbe`).
  *
- * This module is deliberately pure: it takes the set of listening ids as data
- * rather than reaching for an `SseBus`, so the stamping and the frame can be
- * driven directly by a unit test and so no route has to know how the bus
- * spells a channel.
+ * WHERE THE ANSWER IS PUT ON A ROW is not here. The roster derives it inside
+ * `listAttachments` / `listPublicAttachments` (`task-agents.ts`), so a share
+ * visitor's copy still passes through the `PublicAttachment` allowlist, which
+ * is only a gate while nothing is added to a row downstream of it. This
+ * module owns the event and the frame: the push that tells an open board the
+ * answer changed, which no store write would otherwise announce.
  */
 
 /** The frame pushed when an agent's stream opens or closes. Transient — the
@@ -36,35 +38,12 @@
  *  rather than being told what was true before it left. */
 export const AGENT_LISTENING_EVENT = 'agent.listening';
 
-/** What the roster adds to every attachment row. Always explicit, never
- *  omitted-when-false: silence is what an older server sends, and a reader
- *  that cannot tell silence from "no" would draw a circle for an absent
- *  session — the one thing this field exists to prevent. */
-export interface ListeningFlag {
-  /** The agent's own event stream is open on this board right now. */
-  listening: boolean;
-}
-
-/**
- * Stamp each attachment row with whether that agent is holding a stream.
- *
- * Generic over the row so the two roster projections — the owner's
- * `DescribedAttachment` and a share visitor's redacted `PublicAttachment` —
- * both pass through without either being widened. Nothing is dropped here:
- * the roster is the full list of sessions that have sat at this board, and
- * which of them to DRAW is the surface's decision, not the wire's.
- */
-export function stampListening<T extends { agentId: string }>(
-  rows: readonly T[],
-  listening: ReadonlySet<string>,
-): Array<T & ListeningFlag> {
-  return rows.map((row) => ({ ...row, listening: listening.has(row.agentId) }));
-}
-
-export interface AgentListeningFrame extends ListeningFlag {
+export interface AgentListeningFrame {
   event: typeof AGENT_LISTENING_EVENT;
   workspaceId: string;
   agentId: string;
+  /** Whether that agent's own event stream is open, as of this frame. */
+  listening: boolean;
 }
 
 /**

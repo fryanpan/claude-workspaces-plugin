@@ -21,7 +21,6 @@
  * Same posture as `middleware/host-guard.ts` and `workspace-path.ts` on the
  * same problem.
  */
-import { stampListening } from '../agent-listening.ts';
 import { attachNotes } from '../attach-notes.ts';
 import { clientReleaseStatus } from '../client-release.ts';
 import {
@@ -56,16 +55,19 @@ export async function handleWorkspaceAttachments(
     // Attached is not present. The record outlives the session that wrote it,
     // so the roster alone answers "did anybody ever sit here" — the open
     // stream is what answers "is anybody there now" (agent-listening.ts).
-    // Stamped on every row rather than filtered here: the roster is also the
-    // lead picker's option list and the drift check's domain, both of which
-    // need the sessions that are NOT listening.
-    const listening = sse.agentsOn(`ws~${workspaceId}`);
-    const attachments = stampListening(
-      visitor
-        ? taskStore.listPublicAttachments(workspaceId)
-        : taskStore.listAttachments(workspaceId),
-      listening,
-    );
+    //
+    // `listening` is derived INSIDE these two reads, not stamped on their
+    // result here, and that placement is load-bearing rather than tidy:
+    // `PublicAttachment` is an allowlist that was rewritten field by field
+    // after a leak, and it is only a gate if nothing is added downstream of
+    // it. A field added to a visitor's row at this line would reach share
+    // visitors without ever being named there — which is the exact hole the
+    // rewrite closed. Every row the roster returns is kept, listening or
+    // not: this list is also the lead picker's options and the plugin-drift
+    // check's domain, and both need the sessions that are NOT here.
+    const attachments = visitor
+      ? taskStore.listPublicAttachments(workspaceId)
+      : taskStore.listAttachments(workspaceId);
     // Drift rides the same read the board already makes, so nobody has
     // to run a command to discover that a merge never reached them.
     // A plugin version is workspace-visible, not host-describing —
