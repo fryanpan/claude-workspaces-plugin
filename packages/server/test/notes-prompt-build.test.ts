@@ -9,27 +9,34 @@
  * All fixtures are synthetic. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
-import { input } from './notes-compose-input.ts';
+import {
+  MAX_CACHE_BREAKPOINTS,
+  type NotesPrompt,
+  buildNotesPrompt,
+} from '../src/notes-prompt-build.ts';
+import { input, withBullets } from './notes-compose-input.ts';
 
-/** `input`'s doc, grown to `n` bullets under its heading — a meeting long
- *  enough that the outline has a settled part as well as a live end. */
-function withBullets(n: number): NotesComposeInput {
-  return {
-    ...input,
-    outline: [
-      input.outline[0] as (typeof input.outline)[number],
-      ...Array.from({ length: n }, (_, i) => ({
-        id: `b${i}`,
-        kind: 'listItem' as const,
-        nodeName: 'listItem',
-        text: `point ${i}`,
-        author: 'meeting-notes',
-        underHeadingId: 'h1',
-      })),
-    ],
-  };
+/**
+ * The texts the API can match a cache entry on: the message so far, at each
+ * breakpoint. A hit is an EXACT match on one of these and nothing else, which
+ * is why the test works in these strings rather than in block indices.
+ */
+function breakpoints(prompt: NotesPrompt): string[] {
+  const out: string[] = [];
+  let acc = '';
+  for (const block of prompt.blocks) {
+    acc += block.text;
+    if (block.cached) out.push(acc);
+  }
+  return out;
+}
+
+/** How much of `next` an earlier tick's entry could serve, in characters. */
+function sharedPrefix(prev: NotesPrompt, next: NotesPrompt): number {
+  const seen = new Set(breakpoints(prev));
+  let best = 0;
+  for (const at of breakpoints(next)) if (seen.has(at)) best = Math.max(best, at.length);
+  return best;
 }
 
 describe('notes prompt', () => {
@@ -182,6 +189,54 @@ describe('notes prompt', () => {
     // assertion above would pass on a builder that dropped the block.
     expect(after.user).toContain('point 29, said better');
     expect(after.volatile).not.toBe(before.volatile);
+  });
+
+  it('a doc that grows rewrites a chunk of the table, not the whole of it', () => {
+    // THE BILL, AS AN ASSERTION. A cached block that grows is not a cheap
+    // block: the API reads nothing and writes the whole thing again at 1.25x
+    // (measured against the real endpoint, 2026-09-10). So what has to hold
+    // over a meeting is that every tick still OFFERS a breakpoint an earlier
+    // tick already wrote — and that what falls beyond it is small.
+    let written = 0;
+    let whole = 0;
+    let prev = buildNotesPrompt(withBullets(8));
+    for (let n = 9; n <= 108; n++) {
+      const next = buildNotesPrompt(withBullets(n));
+      written += next.stable.length - sharedPrefix(prev, next);
+      whole += next.stable.length;
+      prev = next;
+    }
+    // `whole` is what one breakpoint at the end of the table cost: every
+    // tick, the entire settled table, written again.
+    expect(written).toBeLessThan(whole / 4);
+    // The control. Without it this passes on a builder that stopped sending
+    // the doc at all, or that cached nothing and so shared nothing to write.
+    expect(written).toBeGreaterThan(0);
+    expect(whole).toBeGreaterThan(0);
+  });
+
+  it('never asks for more cache breakpoints than the API accepts', () => {
+    // Four is the limit, and a fifth marker is a refused request rather than
+    // a worse cache. The cut list has to collapse its duplicates to stay
+    // under it, which it does at every doc length rather than at most.
+    for (const n of [0, 1, 3, 4, 15, 16, 17, 63, 64, 65, 67, 68, 127, 128, 200]) {
+      const cached = buildNotesPrompt(withBullets(n)).blocks.filter((b) => b.cached);
+      expect(cached.length).toBeGreaterThan(0);
+      expect(cached.length).toBeLessThanOrEqual(MAX_CACHE_BREAKPOINTS);
+    }
+  });
+
+  it('the blocks it is sent as concatenate back into the prompt, row per line', () => {
+    // WHAT THE MODEL READS IS THE BLOCKS RUN TOGETHER, with nothing put
+    // between them. The first cut of this split sent two blocks and left the
+    // last settled row glued to the first live one — one line reading
+    // "...topic segmentsbmtw74y5f5ue1z sub-bullet yours ...", which is a
+    // corrupted table rather than a formatting nit.
+    const grown = withBullets(40);
+    const prompt = buildNotesPrompt(grown);
+    expect(prompt.blocks.map((b) => b.text).join('')).toBe(prompt.user);
+    const lines = new Set(prompt.user.split('\n').map((l) => l.split(' ')[0]));
+    for (const entry of grown.outline) expect(lines.has(entry.id)).toBe(true);
   });
 
   it('a doc too short to have a settled part is still shown whole', () => {

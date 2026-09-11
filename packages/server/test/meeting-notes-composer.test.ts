@@ -21,7 +21,7 @@ import type { NotesComposer } from '../src/meeting-notes.ts';
 import { isQuotaFailure } from '../src/model-quota.ts';
 import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import type { NotesComposeMeasure } from '../src/notes-timing.ts';
-import { input } from './notes-compose-input.ts';
+import { input, withBullets } from './notes-compose-input.ts';
 
 /** One edit, as a model would answer with it. */
 const ONE_EDIT = '[{"op":"insert_under_heading","headingId":"h1","markdown":"- the sync is slow"}]';
@@ -124,26 +124,43 @@ describe('createHaikuNotesComposer', () => {
     );
   });
 
-  it('takes the cache on the repeating head, and takes it nowhere else', async () => {
+  it('sends the prompt as the chunks it was cut into, marked where it said', async () => {
     // A marker in the wrong place is not a smaller win, it is no win at all:
-    // one after this tick's speech would cache a prefix that never recurs.
+    // one after this tick's speech would cache a prefix that never recurs,
+    // and one on a block that grows every tick writes the whole prefix again.
+    // MID-MEETING DOC, because a two-block doc is entirely live: a prompt
+    // built from `input` has one chunk and one tail whatever the composer
+    // does with them, so it cannot tell a sent ladder from a collapsed one.
+    const midMeeting = withBullets(40);
     const { impl, calls } = stubFetch({
       content: [{ text: ONE_EDIT }],
       stop_reason: 'end_turn',
     });
     const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
-    await composer?.compose(input);
+    await composer?.compose(midMeeting);
     const body = JSON.parse(String(calls[0]?.init.body)) as {
       messages: Array<{ content: Array<{ text: string; cache_control?: { type: string } }> }>;
     };
     const blocks = body.messages[0]?.content ?? [];
-    expect(blocks.length).toBe(2);
-    expect(blocks[0]?.cache_control).toEqual({ type: 'ephemeral' });
-    expect(blocks[1]?.cache_control).toBeUndefined();
-    // And the split is the one the prompt builder made, not some other one.
-    const { stable, volatile } = buildNotesPrompt(input);
-    expect(blocks[0]?.text).toBe(stable);
-    expect(blocks[1]?.text).toBe(volatile);
+    const built = buildNotesPrompt(midMeeting);
+    // The control on the fixture: it really does have a ladder to collapse.
+    expect(built.blocks.filter((b) => b.cached).length).toBeGreaterThan(1);
+    // The wire carries the builder's own blocks, in its own order.
+    expect(blocks.map((b) => b.text)).toEqual(built.blocks.map((b) => b.text));
+    // A breakpoint on every block the builder marked, and on no other. The
+    // LAST block is this tick's speech, and caching it would write an entry
+    // nothing can ever read back.
+    expect(blocks.map((b) => b.cache_control !== undefined)).toEqual(
+      built.blocks.map((b) => b.cached),
+    );
+    expect(blocks[blocks.length - 1]?.cache_control).toBeUndefined();
+    expect(blocks.filter((b) => b.cache_control !== undefined).length).toBeGreaterThan(0);
+    for (const b of blocks) {
+      if (b.cache_control !== undefined) expect(b.cache_control).toEqual({ type: 'ephemeral' });
+    }
+    // And nothing was lost or reordered in the cutting: what the model reads
+    // is the whole prompt.
+    expect(blocks.map((b) => b.text).join('')).toBe(built.user);
   });
 
   it('reports what the call cost in tokens, cache reads included', async () => {

@@ -49,3 +49,29 @@ export const input: NotesComposeInput = {
     repoRoot: '/repo/planning',
   },
 };
+
+/**
+ * The same tick against a doc `n` bullets long — a meeting far enough in that
+ * the outline has a settled part as well as a live end.
+ *
+ * A two-block doc is entirely live, so a prompt built from `input` alone has
+ * one cached chunk and one tail whatever the cutting rule is. Every assertion
+ * about the CUTTING needs a doc the rule actually cuts, or it passes on a
+ * builder that does not cut at all.
+ */
+export function withBullets(n: number): NotesComposeInput {
+  return {
+    ...input,
+    outline: [
+      input.outline[0] as (typeof input.outline)[number],
+      ...Array.from({ length: n }, (_, i) => ({
+        id: `b${i}`,
+        kind: 'listItem' as const,
+        nodeName: 'listItem',
+        text: `point ${i}`,
+        author: 'meeting-notes',
+        underHeadingId: 'h1',
+      })),
+    ],
+  };
+}

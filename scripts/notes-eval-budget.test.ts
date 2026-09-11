@@ -8,7 +8,14 @@
  * after the money is gone. So the arithmetic below is what stops it.
  */
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MAX_USD, SpendCapReached, costOf, overBudget } from './notes-eval.ts';
+import {
+  CACHE_BREAK_EVEN_RATIO,
+  DEFAULT_MAX_USD,
+  SpendCapReached,
+  cacheVerdict,
+  costOf,
+  overBudget,
+} from './notes-eval.ts';
 
 const prices = {
   cheap: { input: 1 / 1_000_000, output: 5 / 1_000_000 },
@@ -69,6 +76,57 @@ describe('what a run has spent', () => {
     // Every existing caller passes two fields, and an uncached path reports
     // no cache tokens. Neither may become NaN.
     expect(costOf({ cheap: { input: 1_000_000, output: 0 } }, prices)).toBeCloseTo(1);
+  });
+});
+
+describe('whether the cache is paying for itself', () => {
+  // THE SHARE SERVED FROM CACHE IS NOT THE VERDICT. A run can serve half its
+  // prompt from cache and cost MORE than one that cached nothing, because
+  // each of those reads was bought with a write at 1.25x. Only the ratio
+  // says which, and a dollar figure alone has hidden a losing cache before.
+  it('calls a cache that writes four times what it reads a loss, and prices agree', () => {
+    const losing = { cheap: { input: 0, output: 0, cacheRead: 250_000, cacheWrite: 1_000_000 } };
+    expect(cacheVerdict(250_000, 1_000_000)).toContain('LOSING MONEY');
+    // The claim under the word: sending those tokens plain would have been
+    // cheaper than caching them.
+    expect(costOf(losing, prices)).toBeGreaterThan(
+      costOf({ cheap: { input: 1_250_000, output: 0 } }, prices),
+    );
+  });
+
+  it('calls writing a little more than it reads a WIN, because 1:1 is not the bar', () => {
+    // The trap this exists for. "Writes outran reads" reads like a losing
+    // cache and is not one: the bar is 0.28, not 1. A run at 0.75 — which is
+    // what an hour of meeting measured before the chunks — was paying, badly.
+    expect(cacheVerdict(750_000, 1_000_000)).toContain('paying');
+    expect(
+      costOf({ cheap: { input: 0, output: 0, cacheRead: 750_000, cacheWrite: 1_000_000 } }, prices),
+    ).toBeLessThan(costOf({ cheap: { input: 1_750_000, output: 0 } }, prices));
+  });
+
+  it('calls a cache that reads far more than it writes a win, and prices agree', () => {
+    const paying = { cheap: { input: 0, output: 0, cacheRead: 1_800_000, cacheWrite: 180_000 } };
+    expect(cacheVerdict(1_800_000, 180_000)).toContain('paying');
+    expect(costOf(paying, prices)).toBeLessThan(
+      costOf({ cheap: { input: 1_980_000, output: 0 } }, prices),
+    );
+  });
+
+  it('puts the break-even exactly where the two prices meet', () => {
+    // Just under and just over the published ratio, checked against the
+    // arithmetic rather than against the constant restating itself.
+    const w = 1_000_000;
+    const under = Math.floor(CACHE_BREAK_EVEN_RATIO * w) - 1;
+    const over = Math.ceil(CACHE_BREAK_EVEN_RATIO * w) + 1;
+    expect(cacheVerdict(under, w)).toContain('LOSING MONEY');
+    expect(cacheVerdict(over, w)).toContain('paying');
+    expect(
+      costOf({ cheap: { input: 0, output: 0, cacheRead: under, cacheWrite: w } }, prices),
+    ).toBeGreaterThan(costOf({ cheap: { input: under + w, output: 0 } }, prices));
+  });
+
+  it('a run that wrote nothing is not a division by zero', () => {
+    expect(cacheVerdict(5_000, 0)).toContain('nothing written');
   });
 });
 

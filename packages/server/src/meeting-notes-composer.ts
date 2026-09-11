@@ -148,7 +148,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
             'api.anthropic.com. Turn off with CW_MEETING_NOTES=0.',
         );
       }
-      const { system, stable, volatile, user } = buildNotesPrompt(input, opts.instructions?.());
+      const { system, blocks, user } = buildNotesPrompt(input, opts.instructions?.());
       // Sizes and the model name, so a slow tick can be read back against
       // what it actually asked for. Reported BEFORE the call: a tick that
       // times out is exactly the one whose prompt size matters, and a report
@@ -169,10 +169,15 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
             model,
             max_tokens: maxTokens,
             system,
-            // TWO BLOCKS, AND THE BREAKPOINT BETWEEN THEM. The head is the
-            // instructions' company: project context and the doc as it
-            // stands, which read the same from tick to tick and grow at the
-            // end. The tail is this tick. One breakpoint, at the join.
+            // THE BLOCKS ARE THE PROMPT BUILDER'S, AND SO ARE THE
+            // BREAKPOINTS. It cuts the settled table at row counts that hold
+            // still while the doc grows past them, so a tick that wrote one
+            // note reads every chunk but the last and writes only that one.
+            // A marker in the wrong place is not a smaller win but no win:
+            // one after this tick's speech would cache a prefix that never
+            // recurs, and one on a block that grows every tick writes the
+            // whole prefix again at 1.25x, which is what an hour of meeting
+            // measured before the chunks existed.
             //
             // THE MARKER IS NOT A GUARANTEE. Every model has a minimum
             // cacheable prefix — 4096 tokens on Haiku 4.5, this composer's
@@ -185,10 +190,11 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
             messages: [
               {
                 role: 'user',
-                content: [
-                  { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
-                  { type: 'text', text: volatile },
-                ],
+                content: blocks.map((b) => ({
+                  type: 'text',
+                  text: b.text,
+                  ...(b.cached ? { cache_control: { type: 'ephemeral' } } : {}),
+                })),
               },
             ],
             ...(opts.effort ? { output_config: { effort: opts.effort } } : {}),

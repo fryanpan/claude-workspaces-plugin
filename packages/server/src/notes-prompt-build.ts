@@ -13,7 +13,20 @@
  * type: nothing that changes every tick may be appended to `stable`, and the
  * doc's outline may only GROW at its end — which is what
  * `NOTES_OUTLINE_DROP_STEP` is for. `meeting-notes-composer.ts` is where the
- * cache breakpoint is actually taken, on the boundary these two halves name.
+ * cache breakpoints are actually taken, on the boundaries `blocks` names.
+ *
+ * ONE BREAKPOINT WAS THE WRONG NUMBER, AND THE BILL SAID SO. A cached prefix
+ * that GROWS is not a cheap prefix: measured against the API on 2026-09-10, a
+ * request whose single cached block gained four lines read NOTHING from the
+ * cache and wrote the whole block again at 1.25x. So the doc growing at its
+ * end — the shape this file was built around — bought a full-price rewrite on
+ * every tick that wrote a note, and an hour of EN2001a billed 1.06M cache
+ * WRITES against 798k reads. Two breakpoints fix it: with the same four lines
+ * added after an earlier breakpoint, the head reads from cache and only the
+ * tail block is written. So the settled table is cut at QUANTIZED row counts
+ * (`NOTES_OUTLINE_CACHE_STEPS`) that hold still while the doc grows past
+ * them, and the last, smallest chunk is the only one an ordinary tick pays
+ * to write.
  *
  * It came out of the composer when the cache did, because "what do we ask"
  * and "how do we ask it" stopped being one subject the moment the answer to
@@ -62,27 +75,80 @@ export const NOTES_OUTLINE_DROP_STEP = 40;
  * How many blocks at the live end of the doc stay OUT of the cached half.
  *
  * The note-taker revises what it just wrote, so the bottom of the table is
- * the part that changes; the cached prefix has to stop above it. Twelve is
- * about four ticks' worth of bullets — comfortably more than the one or two
- * blocks a tick touches, and about 400 tokens of a five-thousand-token
- * prompt, so what it costs at full rate is a rounding error against what a
- * broken prefix costs.
+ * the part that changes; the cached prefix has to stop above it.
+ *
+ * FOUR, DOWN FROM TWELVE, AND THE LADDER IS WHY. Held-out rows are the one
+ * part of the prompt nothing can cache — they are paid at full rate on every
+ * tick of the meeting — so twelve of them cost about 470 tokens a tick. They
+ * were worth it while a revision inside the cached half rewrote the WHOLE
+ * prefix; with the chunk ladder a revision that deep rewrites one chunk, so
+ * the insurance stopped being worth its premium. Measured over the 306 ticks
+ * of EN2001a, twelve cost $0.90 against four's $0.79, and the plateau around
+ * four is flat: three and six are within a cent.
+ *
+ * It changes nothing the model READS. The rows either side of the cut are the
+ * same rows in the same order; the cut decides only which content block
+ * carries them.
  */
-export const NOTES_OUTLINE_LIVE_BLOCKS = 12;
+export const NOTES_OUTLINE_LIVE_BLOCKS = 4;
+
+/**
+ * The most cache breakpoints one request may carry. Anthropic's limit, and
+ * the reason `NOTES_OUTLINE_CACHE_STEPS` has room for three entries and not
+ * four: the settled table's own end is always a breakpoint too.
+ */
+export const MAX_CACHE_BREAKPOINTS = 4;
+
+/**
+ * Where the settled table is cut into cache blocks, coarsest first.
+ *
+ * A breakpoint only pays if the text BEFORE it is byte-identical to some
+ * earlier tick's. Cutting at "everything but the last few rows" is not that:
+ * the boundary moves every time a note is written, so nothing before it ever
+ * repeats. Cutting at a MULTIPLE of sixty-four rows is: the boundary holds
+ * still for sixty-four notes, and the chunk after it holds still for sixteen,
+ * and the one after that for four.
+ *
+ * So an ordinary tick reads everything up to the last boundary the doc has
+ * not yet grown past and writes only the rows beyond it — four rows, not five
+ * thousand tokens. One tick in four writes sixteen rows, one in sixteen
+ * writes sixty-four, and one in sixty-four writes the lot.
+ *
+ * 64/16/4, measured. The sweep over EN2001a's 306 recorded ticks is flat
+ * between 64/12/4 and 64/24/8 (all within a cent of $0.79) and falls off
+ * either side: 128/16/4 costs $1.04 because the coarse anchor is so rarely
+ * reached, and one step alone costs $1.33.
+ */
+export const NOTES_OUTLINE_CACHE_STEPS: readonly number[] = [64, 16, 4];
 
 /** The heading a meeting's section is opened under, as one markdown line. */
 const HEADING_LINE = `## ${MEETING_NOTES_HEADING}`;
 
+/** One content block of the user message, and whether a breakpoint ends it. */
+export interface NotesPromptBlock {
+  text: string;
+  /** True when a cache breakpoint is taken at the END of this block. */
+  cached: boolean;
+}
+
 /**
- * What one tick asks the model, split at the line the cache is taken on.
+ * What one tick asks the model, cut into the blocks it is sent as.
  *
- * `stable` is everything that reads the same from one tick to the next — the
- * project context and the doc as it stands. `volatile` is everything about
- * THIS tick. `user` is the two joined, which is what every caller that only
- * wants the words reads, and what the whole prompt was before the split.
+ * `blocks` is the wire form: the cached chunks in order, then the one block
+ * about this tick. Concatenating every `text` gives `user` EXACTLY, which is
+ * what the model reads — so a block that forgets its own separator is a
+ * corrupted prompt, not a formatting nit. It is also why every block after
+ * the first carries its leading newline: the first cut sent two blocks that
+ * butted a settled row straight against a live one, with no line break
+ * anywhere between them.
+ *
+ * `stable` is every cached chunk joined — everything that reads the same from
+ * one tick to the next. `volatile` is everything about THIS tick. `user` is
+ * the two joined, which is what every caller that only wants the words reads.
  */
 export interface NotesPrompt {
   system: string;
+  blocks: readonly NotesPromptBlock[];
   /** The cacheable head of the user message, and the tail after it. */
   stable: string;
   volatile: string;
@@ -135,12 +201,19 @@ export function buildNotesPrompt(
     for (const title of ctx.taskTitles) ctxLines.push(`  - ${title}`);
   }
   if (ctxLines.length > 0) parts.push(`Project context:\n${ctxLines.join('\n')}`);
-  // THE CACHE LINE. Everything above reads the same all meeting; the doc
-  // table below it only grows at its end. The doc's LIVE end and everything
-  // about this tick go after the line, because those are what change.
+  // THE FIRST CACHE BLOCK. Everything above reads the same all meeting, and
+  // the settled table follows it in chunks whose boundaries hold still while
+  // the doc grows. The doc's LIVE end and everything about this tick go after
+  // the last breakpoint, because those are what change.
   const doc = renderOutline(input);
-  parts.push(doc.head);
-  const stable = parts.join('\n\n');
+  parts.push(doc.chunks[0] ?? '');
+  const cached: NotesPromptBlock[] = [
+    { text: parts.join('\n\n'), cached: true },
+    // Each later chunk carries the newline that joins it to the one before,
+    // so the settled table reads as one table however it was cut.
+    ...doc.chunks.slice(1).map((text) => ({ text: `\n${text}`, cached: true })),
+  ];
+  const stable = cached.map((b) => b.text).join('');
   parts.length = 0;
   if (doc.tail.length > 0) parts.push(doc.tail);
   // IMMEDIATELY AFTER THE TABLE, because it is about the table: a directive
@@ -213,7 +286,34 @@ export function buildNotesPrompt(
       .join('\n')}`,
   );
   const volatile = parts.join('\n\n');
-  return { system, stable, volatile, user: `${stable}\n\n${volatile}` };
+  const blocks: NotesPromptBlock[] = [...cached, { text: `\n\n${volatile}`, cached: false }];
+  return { system, blocks, stable, volatile, user: `${stable}\n\n${volatile}` };
+}
+
+/**
+ * Where the settled table is cut, in row counts, coarsest boundary first.
+ *
+ * Every cut but the last is a multiple of one of `NOTES_OUTLINE_CACHE_STEPS`,
+ * which is the whole point: those numbers do not move when the doc grows by a
+ * row, so the text before them repeats and can be read rather than written.
+ * The last cut is the end of the settled table itself, wherever that falls.
+ *
+ * Duplicates are dropped rather than sent as empty blocks — a doc of exactly
+ * sixty-four settled rows has every step landing on the same row — which is
+ * also what keeps the count inside `MAX_CACHE_BREAKPOINTS`.
+ */
+export function outlineCacheCuts(
+  settled: number,
+  steps: readonly number[] = NOTES_OUTLINE_CACHE_STEPS,
+): number[] {
+  const cuts: number[] = [];
+  const last = (): number => cuts[cuts.length - 1] ?? 0;
+  for (const step of steps) {
+    const at = Math.floor(settled / step) * step;
+    if (at > last()) cuts.push(at);
+  }
+  if (settled > last()) cuts.push(settled);
+  return cuts;
 }
 
 /**
@@ -232,31 +332,33 @@ export function buildNotesPrompt(
  * suggestion, and the instructions say so.
  */
 /**
- * The doc as the model reads it, cut in two at the line the cache is taken on.
+ * The doc as the model reads it, cut into the chunks the cache is taken on.
  *
- * `head` is every block but the last `NOTES_OUTLINE_LIVE_BLOCKS`; `tail` is
- * those. The cut exists because of what a note-taker DOES: it revises the
- * bullet it wrote a moment ago. Measured over 395 consecutive tick pairs of
- * ten prod meetings, 31% of them changed the doc somewhere other than its
- * end — and a prompt cache is a prefix match, so one revised line near the
- * bottom threw the whole prompt back to full price. Every one of those breaks
- * was inside the last few blocks (the common prefix ran to 95%), so holding
- * the LIVE end of the doc out of the cached half costs a few hundred tokens
- * at full rate and buys the rest of it back.
+ * `chunks` is the settled table — every block but the last
+ * `NOTES_OUTLINE_LIVE_BLOCKS` — split at `outlineCacheCuts`; `tail` is those
+ * last blocks. The tail is held out because of what a note-taker DOES: it
+ * revises the bullet it wrote a moment ago. Measured over 305 consecutive
+ * tick pairs of an hour of EN2001a, 66% of them changed the doc only within
+ * its last four blocks, and 88% within its last twelve. A prompt cache is a
+ * prefix match, so a revised line inside a chunk throws that chunk and every
+ * chunk after it back to full price — which is why the chunks get smaller
+ * towards the live end, where the revisions are.
  *
- * The two are rendered as one table and joined back in order, so the rows the
+ * They are rendered as one table and joined back in order, so the rows the
  * model reads are the same rows in the same order — what changes is that a
  * blank line falls between the settled part and the live end, and that on the
- * wire they are two content blocks.
+ * wire they are several content blocks.
  */
-function renderOutline(input: NotesComposeInput): { head: string; tail: string } {
+function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: string } {
   if (input.outline.length === 0) {
     return {
-      head: [
-        'The doc is empty, and this meeting has no notes section yet.',
-        `Open one with a single insert_at_end carrying "${HEADING_LINE}", then`,
-        'insert_at_end the first notes under it.',
-      ].join('\n'),
+      chunks: [
+        [
+          'The doc is empty, and this meeting has no notes section yet.',
+          `Open one with a single insert_at_end carrying "${HEADING_LINE}", then`,
+          'insert_at_end the first notes under it.',
+        ].join('\n'),
+      ],
       tail: '',
     };
   }
@@ -288,21 +390,28 @@ function renderOutline(input: NotesComposeInput): { head: string; tail: string }
           `Open one with a single insert_at_end carrying "${HEADING_LINE}".`,
         ]
       : [`This meeting's notes are under heading ${input.notesHeadingId}.`];
-  // Never cut so deep that the head is a preamble with no table under it: a
-  // short doc stays whole and the tail is empty, which is the same prompt the
-  // whole thing was before.
-  const cut = Math.max(0, lines.length - NOTES_OUTLINE_LIVE_BLOCKS);
-  return {
-    head: [
-      ...preamble,
-      '',
-      'The doc, block by block — "id kind whose | text". Only the most recent',
-      'blocks are listed; every heading is. A "sub-bullet" sits under the',
-      '"bullet" above it.',
-      ...lines.slice(0, cut),
-    ].join('\n'),
-    tail: lines.slice(cut).join('\n'),
-  };
+  // Never cut so deep that the first chunk is a preamble with no table under
+  // it: a short doc stays whole and the tail is empty, which is the same
+  // prompt the whole thing was before.
+  const settled = Math.max(0, lines.length - NOTES_OUTLINE_LIVE_BLOCKS);
+  const head = [
+    ...preamble,
+    '',
+    'The doc, block by block — "id kind whose | text". Only the most recent',
+    'blocks are listed; every heading is. A "sub-bullet" sits under the',
+    '"bullet" above it.',
+  ].join('\n');
+  const chunks: string[] = [];
+  let from = 0;
+  for (const to of outlineCacheCuts(settled)) {
+    chunks.push(lines.slice(from, to).join('\n'));
+    from = to;
+  }
+  // The preamble rides the first chunk, and is the whole of it when the table
+  // has no settled rows yet.
+  if (chunks.length === 0) chunks.push(head);
+  else chunks[0] = `${head}\n${chunks[0]}`;
+  return { chunks, tail: lines.slice(settled).join('\n') };
 }
 
 /**
