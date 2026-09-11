@@ -241,7 +241,7 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
     it(
       `keeps the reader's line on its pixel through a tick at ${width}`,
       () => {
-        const { bottomStill, aboveStill } = probeFor(preset);
+        const { bottomStill, aboveStill, grownStill } = probeFor(preset);
 
         // PARKED AT THE VERY FOOT, with the browser's own scroll anchoring
         // left switched on. The controls: a real paragraph was on screen, the
@@ -283,6 +283,21 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
         expect(aboveStill.worstDrift).toBeLessThanOrEqual(2);
         expect(Math.abs(aboveStill.eyeTop1 - aboveStill.eyeTop0)).toBeLessThanOrEqual(2);
         expect(aboveStill.scrollTop1).toBeGreaterThan(aboveStill.scrollTop0);
+
+        // AND WHEN NOTHING MUTATES AT ALL: a block above the reader grows the
+        // way an image, an embed or a swapped font grows it, with no node
+        // added, removed or retyped. The controls are the same two — the sheet
+        // was in force, and the line really moved down the document — and the
+        // change was invisible to the mutation half of the hold, so only the
+        // resize half can have corrected it.
+        expect(grownStill.change).toBe('grow');
+        expect(grownStill.anchoringSuppressed).toBe(true);
+        expect(grownStill.eyeOnScreen).toBe(true);
+        expect(grownStill.eyeContentY1).toBeGreaterThan(grownStill.eyeContentY0 + 10);
+        expect(grownStill.frames).toBeGreaterThan(3);
+        expect(grownStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(grownStill.eyeTop1 - grownStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(grownStill.scrollTop1).toBeGreaterThan(grownStill.scrollTop0);
       },
       BROWSER_CASE_MS,
     );

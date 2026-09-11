@@ -148,7 +148,29 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
     refY = ref.getBoundingClientRect().top - paneTop();
   }
 
-  const observer = new MutationObserver(hold);
+  /**
+   * The other half of "something above the line changed height", and the one
+   * a mutation cannot see: a block that resizes with the DOM untouched. An
+   * image or an embed finishing its load, a web font swapping in, a card
+   * animating open — each reflows the flow above the reader without adding,
+   * removing or retyping a node, so `MutationObserver` never runs. Nothing
+   * else would correct those, because the browser's own anchoring is off.
+   *
+   * A `ResizeObserver` is delivered after layout and before paint, so a
+   * correction from here still lands in the frame that resized.
+   */
+  const sizes = new ResizeObserver(hold);
+  function watchBlocks(): void {
+    for (const block of blocks()) sizes.observe(block);
+  }
+  scope.onCleanup(() => sizes.disconnect());
+
+  const observer = new MutationObserver(() => {
+    hold();
+    // Blocks the tick just wrote are new elements; they have to be watched
+    // for the image that has not loaded yet.
+    watchBlocks();
+  });
   observer.observe(scroller, { childList: true, subtree: true, characterData: true });
   scope.onCleanup(() => observer.disconnect());
 
@@ -159,5 +181,6 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
   scope.listen(window, 'resize', repick);
 
   repick();
+  watchBlocks();
   return { heldBlock: () => ref, repick };
 }

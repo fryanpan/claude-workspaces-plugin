@@ -104,6 +104,9 @@ export interface Probe {
   /** The reader mid-doc, notes landing ABOVE them, on a browser with no
    *  scroll anchoring of its own — an iPad before Safari 27. */
   aboveStill: StillReading;
+  /** The reader parked mid-doc while a block above them grows with no DOM
+   *  mutation at all — an image finishing its load. */
+  grownStill: StillReading;
   /** A block-rewriting tick arriving as a remote update: do the cards stay? */
   cardsKept: CardsKeptReading;
 }
@@ -479,6 +482,7 @@ async function probe(): Promise<string> {
   const landed = await landedArm();
   const bottomStill = await stillArm({ where: 'bottom', suppressAnchoring: false });
   const aboveStill = await stillArm({ where: 'mid', suppressAnchoring: true });
+  const grownStill = await stillArm({ where: 'mid', suppressAnchoring: true, change: 'grow' });
   const cardsKept = await cardsKeptArm();
   const out: Probe = {
     watching,
@@ -491,6 +495,7 @@ async function probe(): Promise<string> {
     landed,
     bottomStill,
     aboveStill,
+    grownStill,
     cardsKept,
   };
   return JSON.stringify(out);
@@ -781,6 +786,10 @@ export interface StillReading {
   /** Where the reader was parked, and whether the browser's own scroll
    *  anchoring was suppressed for this arm (an iPad before Safari 27). */
   where: 'bottom' | 'mid';
+  /** What changed above the reader's line: notes written into the prose, or a
+   *  block above it growing with the DOM untouched — an image or an embed
+   *  finishing its load, which no mutation reports. */
+  change: 'notes' | 'grow';
   anchoringSuppressed: boolean;
   /** What this browser would do on its own, unsuppressed. */
   supportsAnchoring: boolean;
@@ -865,7 +874,9 @@ function suppressNativeAnchoring(on: boolean): void {
 async function stillArm(o: {
   where: 'bottom' | 'mid';
   suppressAnchoring: boolean;
+  change?: 'notes' | 'grow';
 }): Promise<StillReading> {
+  const change = o.change ?? 'notes';
   const m = mount({ paragraphs: 40, threads: 4 });
   await frame();
   for (let i = 0; i < 10; i++) {
@@ -923,17 +934,29 @@ async function stillArm(o: {
   // The tick: notes under the title — above the reader's line in both arms,
   // which is what the layout has to be corrected for — and words into the
   // transcript at the foot.
-  const underTitle = tiptap.state.doc.firstChild?.nodeSize ?? 0;
-  tiptap.commands.insertContentAt(underTitle, [
-    { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
-    { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
-  ]);
-  utter(m, 9);
+  if (change === 'notes') {
+    const underTitle = tiptap.state.doc.firstChild?.nodeSize ?? 0;
+    tiptap.commands.insertContentAt(underTitle, [
+      { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
+      { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
+    ]);
+    utter(m, 9);
+  } else {
+    // A block above the reader growing with NO mutation inside the pane: the
+    // shape an image, an embed or a font swap leaves behind. The rule is
+    // added to the document's head, which the hold's MutationObserver does
+    // not watch (it watches the scroller), so the only signal the hold gets
+    // is the resize itself — the same signal a decoded image gives it.
+    const grow = document.createElement('style');
+    grow.textContent = '#editor .ProseMirror > :first-child{min-height:240px}';
+    document.head.append(grow);
+  }
   await settle(m);
   sampling = false;
 
   const out: StillReading = {
     where: o.where,
+    change,
     anchoringSuppressed: o.suppressAnchoring,
     supportsAnchoring: typeof CSS !== 'undefined' && CSS.supports('overflow-anchor', 'auto'),
     paneOverflowAnchor: getComputedStyle(m.editorEl).overflowAnchor,
