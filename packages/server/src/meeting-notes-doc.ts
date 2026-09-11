@@ -98,6 +98,7 @@ import { type NotesQualityPassResult, runNotesQualityPass } from './notes-qualit
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
+import { resolveSchemeLinks } from './notes-scheme-links.ts';
 import { lastNotesHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
 import {
   reattributeNotesSection,
@@ -446,6 +447,18 @@ function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
  * one belief, and the addresses themselves are the evidence for whoever is
  * reading whether the compose prompt is drifting.
  */
+function noteSchemeCitations(
+  docId: string,
+  meetingId: string,
+  result: { linked: readonly string[]; dropped: readonly string[] },
+): void {
+  console.log(
+    `[meeting-notes] ${docId} meeting ${meetingId}: dropped ${result.dropped.length} ` +
+      `scheme citation${result.dropped.length === 1 ? '' : 's'} naming no row the tick was ` +
+      `given — ${result.dropped.join(', ')}`,
+  );
+}
+
 function noteInventedLinks(docId: string, meetingId: string, dropped: readonly string[]): void {
   console.log(
     `[meeting-notes] ${docId} meeting ${meetingId}: dropped ${dropped.length} invented ` +
@@ -551,10 +564,21 @@ export function applyNotesUpdate(
   // drive this function directly are both in that position, and stripping
   // every link out of a batch whose inputs are unknown would drop a citation
   // for having no evidence about it. The compose path always passes them.
+  //
+  // AND THE SCHEME PASS RUNS FIRST, because the two answer the same mistake
+  // at different stages: a citation written as `task:<title>` is not a URL at
+  // all, so the address check cannot judge it. Resolved here it becomes the
+  // row's real link, which the address check then recognises as one of the
+  // tick's own; unresolved it is gone before the check sees it.
+  const schemed =
+    update.linkSources === undefined
+      ? { edits: guarded.edits, linked: [] as string[], dropped: [] as string[] }
+      : resolveSchemeLinks(guarded.edits, update.linkSources.named ?? []);
+  if (schemed.dropped.length > 0) noteSchemeCitations(update.docId, update.meetingId, schemed);
   const linked =
     update.linkSources === undefined
-      ? { edits: guarded.edits, dropped: [] as string[] }
-      : stripInventedLinks(guarded.edits, {
+      ? { edits: schemed.edits, dropped: [] as string[] }
+      : stripInventedLinks(schemed.edits, {
           urls: update.linkSources.urls,
           // THE NOTES THEMSELVES ARE A SOURCE, and leaving them out was the
           // one way this check could destroy a real citation. A regroup
