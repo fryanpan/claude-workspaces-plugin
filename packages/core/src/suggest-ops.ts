@@ -385,7 +385,7 @@ function inlineAttrsAt(node: Y.XmlText, offset: number): Record<string, unknown>
 
 let sidCounter = 0;
 
-function newSid(): string {
+export function newSid(): string {
   sidCounter = (sidCounter + 1) % 36 ** 4;
   return `s-${Date.now().toString(36)}-${sidCounter.toString(36)}${Math.random()
     .toString(36)

@@ -32,8 +32,17 @@ export interface LiteralMarkdownFinding {
 
 const SNIPPET_MAX = 80;
 
-/** A heading run, as it renders when a heading was inserted as text. */
-const LITERAL_HEADING = /###/;
+/**
+ * A heading marker at the head of a line, as it renders when a heading was
+ * inserted as text.
+ *
+ * Line-leading, like the list markers below, because that is the only place
+ * markdown reads `###` as a heading. The first version matched `###`
+ * anywhere, so a bullet that merely QUOTES the syntax — Open a new "### "
+ * heading — raised a syncError on every later edit to the doc, while the
+ * file on disk was correct and there was nothing to repair.
+ */
+const LITERAL_HEADING = /^[ \t]*#{2,6}[ \t]+\S/;
 /**
  * A COMPLETE bold run: an opener and a closer on one line with content
  * between them.

@@ -96,6 +96,26 @@ describe('the post-write integrity read names the block that holds literal markd
     expect(detectLiteralMarkdown(fragment)).toBeNull();
   });
 
+  it('does not fire on a bullet that quotes heading syntax in its prose', () => {
+    // The prod shape: a bullet explaining the syntax, parsed from a correct
+    // file. `###` mid-line is words, not a heading anybody inserted.
+    const { fragment } = parseInto(
+      '- Open a new "### " heading for each topic.\n- A second item, so the list is a list.',
+    );
+    expect(detectLiteralMarkdown(fragment)).toBeNull();
+  });
+
+  it('still fires on a heading inserted as text at the head of a bullet line', () => {
+    // The positive control for the case above: the same list, with the
+    // marker where markdown would have read it as a heading.
+    const { fragment } = parseInto('- A list item.\n- Another item.');
+    const para = ((fragment.get(0) as Y.XmlElement).get(1) as Y.XmlElement).get(0) as Y.XmlElement;
+    (fragment.doc as Y.Doc).transact(() => {
+      (para.get(0) as Y.XmlText).insert(0, '### Sources\n');
+    });
+    expect(detectLiteralMarkdown(fragment)?.kind).toBe('heading');
+  });
+
   it('does not fire on a quoted list inside a blockquote', () => {
     const { fragment } = parseInto('> 1. at, as, it\n> 2. up, us, ox');
     expect(detectLiteralMarkdown(fragment)).toBeNull();

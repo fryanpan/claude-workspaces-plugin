@@ -16,12 +16,13 @@
  * public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT = { id: 'agent:note-taker', name: 'Note Taker', color: '#4a90d9' };
@@ -60,10 +61,10 @@ const post = (path: string, body: unknown) =>
   });
 
 /** A fresh markdown doc, bound to its own file, filed on the board. */
-async function makeDoc(): Promise<string> {
+async function makeDoc(body: string = BODY): Promise<string> {
   const docId = `blk-${seq++}`;
   const file = join(dataDir, `${docId}.md`);
-  writeFileSync(file, BODY);
+  writeFileSync(file, body);
   const res = await post(`/workspaces/${WS}/docs`, { docId, type: 'markdown', sourceUrl: file });
   expect(res.status).toBe(200);
   return docId;
@@ -324,5 +325,140 @@ describe('a person typing hands the block back', () => {
     expect(after.find((b) => b.text.includes('Agent line one.'))?.author).toBeUndefined();
     // The neighbour is untouched: the unit is the block, not the doc.
     expect(after.find((b) => b.text === 'Agent line two.')?.author).toBe(AGENT.id);
+  });
+});
+
+describe('a proposal against a code block a person owns', () => {
+  /**
+   * The prod incident: two `replace_block` edits, each aimed at a ~8,000
+   * character fenced block bound from a file, answered `suggested` — and
+   * straight afterwards `list_suggestions` was empty, accepting either id
+   * 404'd, and both blocks were gone from the doc and the file, old text and
+   * new. The editor half of that (a browser deleting a code block whose text
+   * carried marks) is `workspaces-app/test/code-block-suggestion.test.ts`;
+   * this is the server half, over the wire and down to the bytes on disk.
+   */
+  const CODE = Array.from(
+    { length: 200 },
+    (_, i) => `step ${String(i).padStart(3, '0')}: sluice.drain(gate=${i})`,
+  ).join('\n');
+  const DOC = `# Pump runbook\n\nRun these in order.\n\n\`\`\`text\n${CODE}\n\`\`\`\n\n## After\n\nCheck the gauges.\n`;
+  const REPLACEMENT = [
+    '### Gate sequence',
+    '',
+    '- Open the east gate first',
+    '  - then the west',
+    '',
+    '```ts',
+    'const gates = ["east", "west"];',
+    '```',
+  ].join('\n');
+
+  const fileOf = (docId: string) => join(dataDir, `${docId}.md`);
+  const disk = (docId: string) => readFileSync(fileOf(docId), 'utf8');
+  const pending = async (docId: string) =>
+    (
+      (await (await fetch(`${base}/workspaces/${WS}/docs/${docId}/suggestions`)).json()) as {
+        suggestions: Array<{ sid: string }>;
+      }
+    ).suggestions;
+  /** Land an applied edit and wait for the file to carry it: proof the
+   *  write-back ran, so what the file says next is the doc's answer. */
+  async function flushWith(docId: string, marker: string): Promise<string> {
+    const res = await blockEdits(docId, {
+      author: AGENT,
+      edits: [{ op: 'insert_at_end', markdown: marker }],
+    });
+    expect(await res.json()).toMatchObject({ applied: 1 });
+    return waitFor(() => (disk(docId).includes(marker) ? disk(docId) : null), {
+      describe: `the file to carry "${marker}"`,
+    });
+  }
+
+  async function propose(docId: string): Promise<string> {
+    const blockId = (await outline(docId)).find((b) => b.text.startsWith('step 000'))?.id;
+    expect(blockId, 'no code block in the outline').toBeDefined();
+    const res = await blockEdits(docId, {
+      author: AGENT,
+      edits: [{ op: 'replace_block', blockId, markdown: REPLACEMENT }],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      applied: number;
+      suggested: number;
+      outcomes: Array<{ status: string; suggestionId?: string }>;
+    };
+    expect(body).toMatchObject({ applied: 0, suggested: 1 });
+    const sid = body.outcomes[0]?.suggestionId as string;
+    // THE INVARIANT: an edit that did not apply is a proposal somebody can
+    // still find. Straight after, as in prod — not after some settling.
+    expect((await pending(docId)).map((s) => s.sid)).toEqual([sid]);
+    return sid;
+  }
+
+  it('keeps the code in the doc and the file until somebody accepts', async () => {
+    const docId = await makeDoc(DOC);
+    const sid = await propose(docId);
+
+    expect(await plainText(docId)).toContain('step 199: sluice.drain(gate=199)');
+    const written = await flushWith(docId, 'Footer from the note-taker.');
+    expect(written).toContain(`\`\`\`text\n${CODE}\n\`\`\``);
+    expect(written).not.toContain('Gate sequence');
+
+    const accepted = await post(`/workspaces/${WS}/docs/${docId}/suggestions/${sid}/accept`, {});
+    expect(accepted.status).toBe(200);
+    const after = await waitFor(
+      () => (disk(docId).includes('### Gate sequence') ? disk(docId) : null),
+      { describe: 'the accepted replacement on disk' },
+    );
+    // Accepted as BLOCKS — a heading, a nested list, a fence of its own —
+    // and not as markdown pasted inside the old fence, which is what the
+    // text-level proposal produced: the same strings, still in ```text.
+    expect(after).not.toContain('```text');
+    expect(after).not.toContain('step 000');
+    expect(after).toContain('- Open the east gate first\n  - then the west');
+    expect(after).toContain('```ts\nconst gates = ["east", "west"];\n```');
+    const heading = (await outline(docId)).find((b) => b.text === 'Gate sequence');
+    expect(heading?.kind).toBe('heading');
+    expect(await pending(docId)).toEqual([]);
+  });
+
+  it('puts the doc back exactly when somebody rejects', async () => {
+    const docId = await makeDoc(DOC);
+    const sid = await propose(docId);
+
+    const rejected = await post(`/workspaces/${WS}/docs/${docId}/suggestions/${sid}/reject`, {});
+    expect(rejected.status).toBe(200);
+    expect(await pending(docId)).toEqual([]);
+    const written = await flushWith(docId, 'Footer after the reject.');
+    expect(written).toBe(`${DOC}\nFooter after the reject.\n`);
+  });
+});
+
+describe('the literal-markdown syncError', () => {
+  it('stays quiet for a bullet that quotes heading syntax, and speaks for a real one', async () => {
+    const docId = await makeDoc(
+      '# Style notes\n\n- Open a new "### " heading for each topic.\n- Keep bullets short.\n',
+    );
+    const quiet = await blockEdits(docId, {
+      author: AGENT,
+      edits: [{ op: 'insert_at_end', markdown: 'A later edit.' }],
+    });
+    expect(quiet.status).toBe(200);
+    expect(((await quiet.json()) as { syncError?: unknown }).syncError).toBeUndefined();
+
+    // The positive control: the same response channel, on a doc that really
+    // does hold a heading as characters, still carries the error.
+    const ydoc = (handle.docStore.get(docId) as { ydoc: Y.Doc }).ydoc;
+    const para = prose
+      .addressableBlocks(prose.getProseFragment(ydoc))
+      .find((el) => prose.outlineTextOf(el) === 'A later edit.');
+    ydoc.transact(() => ((para as Y.XmlElement).get(0) as Y.XmlText).insert(0, '### Sources\n'));
+    const loud = await blockEdits(docId, {
+      author: AGENT,
+      edits: [{ op: 'insert_at_end', markdown: 'One more edit.' }],
+    });
+    const body = (await loud.json()) as { syncError?: { message: string } };
+    expect(body.syncError?.message).toContain('holds a heading');
   });
 });
