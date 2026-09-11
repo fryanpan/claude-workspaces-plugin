@@ -213,6 +213,30 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(overlap(card, l.el.low)).toBe(0);
     });
 
+    it('stacks two quick posts on an element low on the screen rather than piling them up', () => {
+      // A saved card stepped down past the one above it, off the bottom of the
+      // screen, and was clamped back on top of it.
+      for (const [name, count] of [
+        ['lowOpen', 2],
+        ['lowTwice', 3],
+      ] as const) {
+        const l = look(1180, name);
+        expect(box(l.el.low)[1], `CONTROL: ${name}'s element is low on the screen`).toBeGreaterThan(
+          820 / 2,
+        );
+        const cards = l.card ? [...l.saves, l.card] : l.saves;
+        expect(cards, `CONTROL: ${name} has cards to stack`).toHaveLength(count);
+        for (const [i, a] of cards.entries()) {
+          for (const b of cards.slice(i + 1))
+            expect(overlap(a, b), `${name}: two cards overlap`).toBe(0);
+          for (const c of l.controls)
+            expect(overlap(a, c), `${name}: a card covers a button`).toBe(0);
+          expect(a[1]).toBeGreaterThanOrEqual(0);
+          expect(a[3]).toBeLessThanOrEqual(820);
+        }
+      }
+    });
+
     it('keeps a typed draft through Done, Esc and X, and gives it back on that element', () => {
       expect(look(1180, 'done').card, 'CONTROL: Done took the card off screen').toBeNull();
       expect(look(1180, 'reentered').draft, 'the resting card is about the page').toBe('');

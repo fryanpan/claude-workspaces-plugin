@@ -394,6 +394,20 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await tap(done);
     await tap(fab);
     await look('restBack');
+    // Two quick posts on an element low on the screen: the second card and
+    // the first one's saved card stack, and so do the two saved cards.
+    await tap(`${SHADOW}.querySelector('.composer .cancel')`);
+    await cdp.evaluate('window.__hold = false');
+    await cdp.evaluate(`scrollTo(0, document.getElementById('low').offsetTop - ${height} + 90)`);
+    await settle();
+    await tap(el('low'));
+    await type('Lot A');
+    await enter();
+    await tap(el('low'));
+    await type('Lot B');
+    await look('lowOpen');
+    await enter();
+    await look('lowTwice');
     await tap(done);
   }
   return { width, height, looks };
