@@ -454,18 +454,26 @@ _HEADER_ENDS = ("@@", "GIT binary patch", "Binary files ")
 _SLICE_OVERLAP = 200
 
 
-def _slice_line(line: str, width: int) -> List[str]:
+def _slice_line(line: str, width: int, columns: int = 1) -> List[str]:
     """One diff line as lines of at most `width` characters.
 
     A single added line can be far longer than a piece — minified JSON, a data
     URL, a generated bundle — and without this it became one piece of whatever
     size it was, which is the large-input blind spot the pieces exist to
     close. Each slice keeps the line's diff sign, so the scanner still reads it
-    as added text, and neighbours overlap by `_SLICE_OVERLAP`.
+    as added text, and neighbours overlap by `_SLICE_OVERLAP`. A combined
+    (`--cc`) diff signs a line with one column per parent — ` +` is added
+    against the second parent — so the sign is `columns` characters wide;
+    keeping only the first would hand every later slice to the scanner as
+    context.
     """
     if len(line) <= width:
         return [line]
-    sign, body = (line[0], line[1:]) if line[:1] in ("+", "-", " ") else ("", line)
+    head = line[:columns]
+    if len(head) == columns and all(c in "+- " for c in head):
+        sign, body = head, line[columns:]
+    else:
+        sign, body = "", line
     span = width - len(sign)
     step = span - _SLICE_OVERLAP
     out = []
@@ -505,15 +513,19 @@ def split_patch(patch: str, limit: int | None = None) -> List[str]:
     # unsliced and unbreakable.
     lines: List[tuple] = []
     in_header = False
+    columns = 1
     for line in patch.split("\n"):
         if line.startswith(_FILE_STARTS):
             in_header = True
         elif line.startswith(_HEADER_ENDS):
             in_header = False
+        if line.startswith("@@"):
+            # `@@` is one parent, `@@@` two: the sign is one column per parent.
+            columns = max(1, len(line) - len(line.lstrip("@")) - 1)
         if in_header or line.startswith("@@"):
             lines.append((line, in_header))
         else:
-            lines.extend((part, False) for part in _slice_line(line, width))
+            lines.extend((part, False) for part in _slice_line(line, width, columns))
     pieces: List[str] = []
     current: List[str] = []
     size = 0

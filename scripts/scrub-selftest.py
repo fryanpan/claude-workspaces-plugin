@@ -806,6 +806,16 @@ def check_haiku_unavailable() -> None:
     expect("haiku pieces: a binary payload is split like any other content",
            0 if worst <= 30_000 else 1, 0, f"largest piece {worst}")
 
+    # A merge's combined diff signs a line with one column per parent. ` +`
+    # is added against the second parent, and every slice of a long one must
+    # still say so.
+    merge = ("diff --cc x.json\nindex 1,2..3\n--- a/x.json\n+++ b/x.json\n@@@ -1,1 -1,1 +1,2 @@@\n"
+             + " +" + "a" * 100_000)
+    lost = [p for p in haiku.split_patch(merge, 30_000)
+            if not p.split("\n")[-1].startswith(" +")]
+    expect("haiku pieces: every slice of a merge's added line still reads as added",
+           0 if not lost else 1, 0, f"{len(lost)} piece(s) lost the second column")
+
     # Pieces are combined leak-first. "Unavailable" goes to a policy that may
     # be set to warn, so a leak one piece FOUND must not be turned into a
     # banner because a different piece of the same push timed out.
