@@ -64,6 +64,51 @@ describe('buildLibrary', () => {
   });
 
   /**
+   * Finding 2. Binding is what gives a doc a title, so a row that switched to
+   * it read as though the file had been renamed the moment somebody opened
+   * it — with the naming pass run per-list, the label could change shape too.
+   */
+  it('keeps a file row named by its file after a doc with a title holds it', () => {
+    const listing = sources({
+      markdownFiles: () => [
+        { relPath: 'docs/README.md', mtimeMs: 4_000 },
+        { relPath: 'client/README.md', mtimeMs: 5_000 },
+      ],
+      docKeyOf: (id) => (id === 'd-plan' ? makeDocKey(REPO, 'docs/plan.md') : undefined),
+      docs: [meta('d-plan', { title: 'Riverbend project plan' })],
+    });
+    const before = buildLibrary(listing);
+    expect(before.files.map((r) => r.name)).toEqual([
+      'client/README.md',
+      'docs/README.md',
+      'plan.md',
+    ]);
+
+    // The same repo, with `docs/README.md` now a doc of this board carrying a
+    // title an agent gave it.
+    const keys: Record<string, string> = {
+      'd-plan': makeDocKey(REPO, 'docs/plan.md'),
+      'd-readme': makeDocKey(REPO, 'docs/README.md'),
+    };
+    const after = buildLibrary(
+      sources({
+        markdownFiles: listing.markdownFiles,
+        docKeyOf: (id) => keys[id],
+        fileMtime: (id) => (id === 'd-readme' ? 4_000 : undefined),
+        docs: [
+          meta('d-plan', { title: 'Riverbend project plan' }),
+          meta('d-readme', { title: 'How the client boots' }),
+        ],
+      }),
+    );
+    expect(after.files.map((r) => r.name)).toEqual([
+      'client/README.md',
+      'docs/README.md',
+      'plan.md',
+    ]);
+  });
+
+  /**
    * Finding 1. `lastActivityAt` moves for a comment and stands still for a
    * `git pull`; an unopened file's row is its mtime. One column, two
    * measurements — so a bound doc's row reads from the file as well.
@@ -85,8 +130,7 @@ describe('buildLibrary', () => {
     );
     expect(lib.files.map((r) => [r.name, r.at])).toEqual([
       ['README.md', 6_000],
-      // The bound doc, timed by its file — `lastActivityAt` is far newer.
-      ['Volunteer handbook', 4_000],
+      ['handbook.md', 4_000],
       // No clock reading at all rather than a substitute — and last, because
       // unknown is not "oldest".
       ['A doc whose file went away', undefined],
@@ -131,7 +175,9 @@ describe('buildLibrary', () => {
       { name: 'guide/README.md', at: 4_000, open: 'docs/guide/README.md' },
       // Not `./README.md`: a root file keeps its bare name.
       { name: 'README.md', at: 3_000, open: 'README.md' },
-      { name: 'Riverbend project plan', at: 2_000, href: '/workspaces/w-test/docs/d-plan' },
+      // The bound doc is its FILE here — same name it had before anybody
+      // opened it, same clock as the rows around it.
+      { name: 'plan.md', at: 2_000, href: '/workspaces/w-test/docs/d-plan' },
     ]);
   });
 

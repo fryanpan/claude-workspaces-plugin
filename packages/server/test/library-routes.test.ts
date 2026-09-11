@@ -14,6 +14,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   utimesSync,
@@ -98,9 +99,41 @@ describe('library routes', () => {
     const lib = await items();
     expect(lib.project?.name).toBeTruthy();
     const byName = new Map(lib.files.map((f) => [f.name, f]));
-    expect(byName.get('Volunteer handbook')?.href).toMatch(/^\/workspaces\/[^/]+\/docs\//);
+    expect(byName.get('handbook.md')?.href).toMatch(/^\/workspaces\/[^/]+\/docs\//);
     expect(byName.get('tide-gauge.md')?.open).toBe('docs/tide-gauge.md');
     expect(lib.files.some((f) => f.name.includes('hidden'))).toBe(false);
+  });
+
+  /**
+   * Finding 2, end to end. Opening a file must change nothing about how it is
+   * named — not the row, and not the bytes' own address on disk.
+   *
+   * The second half is a control that was green before the fix too: no code
+   * path here has ever renamed a source file, and asserting it is how a later
+   * "tidy the filename on bind" stays impossible.
+   */
+  it('leaves a file named as it was — in the list and on disk — after a doc holds it', async () => {
+    const before = (await items()).files.find((f) => f.open === 'docs/tide-gauge.md');
+    expect(before?.name).toBe('tide-gauge.md');
+
+    // Bound the way an agent's `attach_markdown` binds one, title and all:
+    // the state every board of Bryan's is in, and the one the row read from.
+    const bound = await at(`/workspaces/${WS}/docs`, {
+      method: 'POST',
+      body: JSON.stringify({
+        docId: 'tide-gauge',
+        type: 'markdown',
+        sourceUrl: join(repo, 'docs', 'tide-gauge.md'),
+        title: 'Tide gauge notes',
+      }),
+    });
+    expect(bound.status).toBe(200);
+
+    const after = (await items()).files.find((f) => f.name === 'tide-gauge.md');
+    // Same label, now a doc of this board rather than a file to open.
+    expect(after?.href).toMatch(/^\/workspaces\/[^/]+\/docs\//);
+    expect(after?.open).toBeUndefined();
+    expect(readdirSync(join(repo, 'docs'))).toEqual(['tide-gauge.md']);
   });
 
   /**
@@ -109,7 +142,7 @@ describe('library routes', () => {
    * and this assertion could not have been written.
    */
   it('reads a bound doc row from its file on disk, not the doc activity', async () => {
-    const bound = () => items().then((l) => l.files.find((f) => f.name === 'Volunteer handbook'));
+    const bound = () => items().then((l) => l.files.find((f) => f.name === 'handbook.md'));
     const first = await bound();
     expect(typeof first?.at).toBe('number');
 

@@ -33,7 +33,16 @@ import { scanFolderPaths } from './fs-scan.ts';
  */
 
 export interface LibraryRow {
-  /** The title a person knows it by: the doc's title, or the file's name. */
+  /**
+   * The title a person knows it by: a meeting's title, or — for anything in
+   * the Files list that has a file — THE FILE'S NAME, bound or not.
+   *
+   * A file row is named by its file for one reason: a doc's title is the
+   * first thing binding changes, so a row that switched to it read as though
+   * the file had been renamed the moment somebody opened it. It never was —
+   * nothing here writes to the filesystem — but a list whose labels move
+   * under the reader is the same failure as one that did.
+   */
   name: string;
   /**
    * Epoch ms. A meeting: when it started. A file: WHEN ITS BYTES LAST
@@ -270,50 +279,93 @@ function docHref(workspaceId: string, meta: DocMeta): string | undefined {
   return undefined;
 }
 
+/** A board doc bound for the Files list, held until every path is known. */
+interface DocFileRow {
+  /** The repo its key names, when it has one. */
+  repoKey?: string;
+  /** Its path in that repo — what it is NAMED by, when the repo is this
+   *  board's project and the project is visible from here. */
+  relPath?: string;
+  /** What it reads as when there is no file name to go by. */
+  title: string;
+  at?: number;
+  href: string;
+}
+
 /** Build the Library for one board. */
 export function buildLibrary(src: LibrarySources): LibraryPayload {
   const meetings: LibraryRow[] = [];
-  const files: LibraryRow[] = [];
+  const docFiles: DocFileRow[] = [];
 
   for (const meta of src.docs) {
     // A review's member (a diff file, a folder bind's opened file) belongs to
     // that review's own page, and a task's description is the task. Neither
     // is a document somebody files on a board.
     if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
+    const href = docHref(src.workspaceId, meta);
+    if (!href) continue;
     const key = src.docKeyOf(meta.docId);
+    const parsed = key ? parseDocKey(key) : undefined;
+    const keyRel = parsed?.relPath;
+    const title = meta.title?.trim() || (keyRel ? posix.basename(keyRel) : meta.docId);
     const held = src.lastMeeting(meta.docId);
     const discussion = meta.huddle === true && meta.huddleKind !== 'plan';
-    const keyRel = key ? parseDocKey(key)?.relPath : undefined;
-    const name = meta.title?.trim() || (keyRel ? posix.basename(keyRel) : meta.docId);
     if (held !== undefined || discussion) {
-      const href = docHref(src.workspaceId, meta);
-      if (href) meetings.push({ name, at: held?.startedAt ?? meta.createdAt, href });
+      // A meeting keeps its TITLE: its file is a huddle note in the data dir,
+      // named after nothing a person chose.
+      meetings.push({ name: title, at: held?.startedAt ?? meta.createdAt, href });
       continue;
     }
     // The Files list's one clock, for a bound doc exactly as for a loose
-    // file: the bytes' own mtime. `lastActivityAt` measured the DOC — it
-    // moved for a comment and stood still for a `git pull` — so a column
-    // headed "Modified" was answering two questions at once.
-    const href = docHref(src.workspaceId, meta);
-    if (href) files.push({ name, at: src.fileMtime(meta.docId), href });
+    // file: the bytes' own mtime.
+    docFiles.push({
+      repoKey: parsed?.repoKey,
+      relPath: keyRel,
+      title,
+      href,
+      at: src.fileMtime(meta.docId),
+    });
   }
 
   const repoKey = projectRepoKey(src.docs, src.docKeyOf);
   const root = repoKey ? src.projectRoot(repoKey) : null;
-  let project: LibraryProject | null = null;
-  if (repoKey && root) {
-    project = {
-      name: projectName(repoKey, root),
-      path: abbreviateHome(root, src.home ?? homedir()),
+  const loose = repoKey && root ? looseFiles(src, repoKey, root) : [];
+  const project: LibraryProject | null =
+    repoKey && root
+      ? { name: projectName(repoKey, root), path: abbreviateHome(root, src.home ?? homedir()) }
+      : null;
+
+  // A doc is named by its file only when that file is one THIS LISTING
+  // ALREADY SHOWS — the project's, and the project visible from here. A doc
+  // of some other repo, or any doc at all when a local-only project is hidden
+  // off the box, keeps its title: a filename the listing itself is refusing
+  // to print must not arrive by the other door.
+  const named = (d: DocFileRow): string | undefined =>
+    root !== null && d.repoKey === repoKey ? d.relPath : undefined;
+  // ONE naming pass over every file the list shows, bound docs included. Run
+  // separately, a file and the doc that later held it disambiguated against
+  // different sets, so opening `docs/README.md` could move the row from
+  // `docs/README.md` to `README.md` — the rename this list must not perform.
+  const names = displayNames([
+    ...docFiles.flatMap((d) => {
+      const rel = named(d);
+      return rel === undefined ? [] : [rel];
+    }),
+    ...loose.map((f) => f.relPath),
+  ]);
+  const files: LibraryRow[] = docFiles.map((d) => {
+    const rel = named(d);
+    return {
+      name: (rel === undefined ? undefined : names.get(rel)) ?? d.title,
+      at: d.at,
+      href: d.href,
     };
-    const loose = looseFiles(src, repoKey, root);
-    const names = displayNames(loose.map((f) => f.relPath));
-    for (const f of loose) {
-      const name = names.get(f.relPath) ?? f.relPath;
-      if (isMarkdownPath(f.relPath)) files.push({ name, at: f.mtimeMs, open: f.relPath });
-      else if (f.fileId) {
-        files.push({ name, at: f.mtimeMs, href: `/mounts/${encodeURIComponent(f.fileId)}/raw` });
-      }
+  });
+  for (const f of loose) {
+    const name = names.get(f.relPath) ?? f.relPath;
+    if (isMarkdownPath(f.relPath)) files.push({ name, at: f.mtimeMs, open: f.relPath });
+    else if (f.fileId) {
+      files.push({ name, at: f.mtimeMs, href: `/mounts/${encodeURIComponent(f.fileId)}/raw` });
     }
   }
 
