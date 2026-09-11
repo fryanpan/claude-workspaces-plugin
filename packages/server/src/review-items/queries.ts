@@ -6,10 +6,12 @@
  * answered in exactly one place.
  */
 import {
+  type ReviewInfoRequest,
   type TaskReviewItem,
   isReviewItemGated,
   isReviewItemHeld,
   isReviewItemOpen,
+  latestThreadedQuestion,
   readTaskReviewItem,
   reviewItemState,
   reviewWithdrawn,
@@ -55,6 +57,23 @@ export function isReviewItemOnQueue(item: TaskReviewItem): boolean {
     !reviewWithdrawn(item.review) &&
     reviewItemState(item) !== 'waiting'
   );
+}
+
+/**
+ * The question that took this item OFF the queue: the reader asked back, and
+ * its filer has not revised since. `undefined` for every other item —
+ * answered, gated, withdrawn, or still in front of the reader.
+ *
+ * The fourth exclusion above, read the other way round, so the stall wake can
+ * name what `isReviewItemOnQueue` dropped. Only a revision puts such an item
+ * back (`reviewItemState`); a reply on the question's thread does not, which
+ * is how two items sat off their reader's queue for 38 hours on 2026-09-09
+ * while their filer believed the question answered.
+ */
+export function pendingQuestionOf(item: TaskReviewItem): ReviewInfoRequest | undefined {
+  if (!isReviewItemOpen(item) || isReviewItemGated(item) || reviewWithdrawn(item.review)) return;
+  if (reviewItemState(item) !== 'waiting') return;
+  return latestThreadedQuestion(item);
 }
 
 export class ReviewItemQueries {
