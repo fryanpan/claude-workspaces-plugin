@@ -66,12 +66,14 @@
  * THE CORPUS is AMI (CC BY 4.0), excerpted into committed fixtures by
  * `notes-eval-fixtures.ts`. Speakers are letters; no fixture names a person.
  */
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { prose } from '../packages/core/src/index.ts';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NoteReference, NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
+import { meetingTranscriptPath } from '../packages/server/src/meetings.ts';
 import {
   findInventedLinks,
   notesLinkSources,
@@ -89,10 +91,13 @@ import {
   unlinkedReferences,
   verbatimBullets,
 } from '../packages/server/src/notes-quality.ts';
-import { median } from '../packages/server/src/notes-timing.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { type SummaryCredential, authHeader } from '../packages/server/src/summarize.ts';
-import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
+import {
+  type NotesTickHarness,
+  type NotesTickHarnessOptions,
+  createNotesTickHarness,
+} from '../packages/server/test/notes-tick-harness.ts';
 import { EVAL_CREDENTIAL_HELP, resolveEvalCredentialFrom } from './eval-credential.ts';
 import { FIXTURE_DIR, type NotesEvalFixture, staleClockWarning } from './notes-eval-fixtures.ts';
 import {
@@ -774,6 +779,108 @@ interface Options {
   /** Where each meeting's final notes are written, so a person can read what
    *  the rate is a rate OVER. Absent, nothing is written. */
   dumpDir?: string;
+  /**
+   * The server data dir this run stands up for itself — a throwaway one, one
+   * per run, holding each meeting's transcript and the tick timings the
+   * pipeline writes beside it.
+   *
+   * NOT OPTIONAL, and that is the point. Every at-stop check that reads
+   * meeting state reads it from here, and the version of this file that
+   * passed no data dir at all did not degrade: `voicesOf` came back with no
+   * labels, so `unknownVoices` reported EVERY genuine speaker tag as a voice
+   * the meeting never had, and the coverage half of the same line read "no
+   * ideas heard" over a meeting that had said plenty. A number that fires on
+   * every run of every method carries no signal, and this one was acted on.
+   */
+  dataDir: string;
+}
+
+/**
+ * The settled turns of the ticks this run will actually play, written as the
+ * relay writes them — one JSON line per turn, in the order they settled.
+ *
+ * ONLY THE TICKS PLAYED. A `--smoke` slice plays three of twelve, and a
+ * transcript holding all twelve would have the at-stop coverage check score
+ * the notes against nine ticks of speech the meeting never reached.
+ *
+ * The turn numbers match the harness's own: it numbers every utterance it
+ * speaks from zero, in order, so the file and the session agree about which
+ * turn is which. Returns the path, so a caller can say where it went.
+ */
+export function writeEvalTranscript(
+  dataDir: string,
+  docId: string,
+  meetingId: string,
+  ticks: readonly { turns: readonly { speaker?: string; text: string }[] }[],
+): string {
+  const path = meetingTranscriptPath(dataDir, docId, meetingId);
+  mkdirSync(dirname(path), { recursive: true });
+  const rows: string[] = [];
+  for (const tick of ticks) {
+    for (const turn of tick.turns) {
+      rows.push(
+        JSON.stringify({
+          turn: rows.length,
+          text: turn.text,
+          ts: 1_000 + rows.length,
+          ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}),
+        }),
+      );
+    }
+  }
+  writeFileSync(path, rows.length > 0 ? `${rows.join('\n')}\n` : '');
+  return path;
+}
+
+/**
+ * The harness one meeting of a run is driven through, with its own words on
+ * disk beside it.
+ *
+ * THE TRANSCRIPT AND THE DATA DIR ARE ONE DECISION, so they are made in one
+ * place. Every at-stop check reads the meeting's state out of the data dir,
+ * and a harness built without one does not report an empty meeting — it
+ * reports every genuine speaker tag as a voice the room never had, and the
+ * coverage half of the same line as "no ideas heard". Separating the write
+ * from the wiring is how that came to be true for a year of runs.
+ *
+ * Exported so a test can drive a whole meeting through this exact wiring with
+ * a scripted composer, and read the line it ends with.
+ */
+export function evalMeetingHarness(
+  fixture: NotesEvalFixture,
+  ticks: NotesEvalFixture['ticks'],
+  dataDir: string,
+  compose: NotesTickHarnessOptions['compose'],
+): NotesTickHarness {
+  // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
+  // ('d-meeting', 'm1'), which was harmless while meetings ran one at a time
+  // and is not once `--jobs` runs four at once: four sessions sharing one doc
+  // id share every log line and every piece of state keyed on it.
+  // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately — the ids
+  // it falls back to ARE the harness's defaults, so the two runs differ in
+  // nothing else. It is the positive control for that finding: without it,
+  // "the collapse stopped happening" is a claim about a run that also changed
+  // something else.
+  const shared = process.env.CW_NOTES_EVAL_SHARED_IDS === '1';
+  const docId = shared ? 'd-meeting' : `d-${fixture.meeting}`;
+  const meetingId = shared ? 'm1' : `m-${fixture.meeting}`;
+  writeEvalTranscript(dataDir, docId, meetingId, ticks);
+  return createNotesTickHarness({
+    docId,
+    meetingId,
+    dataDir,
+    doc: `## Meeting notes\n\n- ${HUMAN_LINE}\n`,
+    docTitle: `${fixture.meeting} (AMI)`,
+    workspaceId: 'w-eval',
+    tasks: fixture.board.map((b) => ({ id: taskIdOf(b.url), title: b.title, status: 'todo' })),
+    // A real compose, and its reply grows with the notes: by the twentieth
+    // tick of a meeting the model is rewriting two pages. The composer's own
+    // timeout is 30s and this has to sit above it, or a tick that WOULD have
+    // landed is recorded as a failure and every tick behind it fails too —
+    // the composes are serialized on one chain.
+    tickTimeoutMs: 60_000,
+    compose,
+  });
 }
 
 function loadFixtures(only: readonly string[], dir: string): NotesEvalFixture[] {
@@ -855,55 +962,41 @@ async function runMeeting(
    */
   const budget = new JudgeBudget(opts.judgePerMeeting, ticks.length);
 
-  const harness = createNotesTickHarness({
-    // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
-    // ('d-meeting', 'm1'), which was harmless while meetings ran one at a
-    // time and is not once `--jobs` runs four at once: four sessions sharing
-    // one doc id share every log line and every piece of state keyed on it.
-    // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately. It is
-    // the positive control for the finding: without it, "the collapse stopped
-    // happening" is a claim about a run that also changed nothing else.
-    ...(process.env.CW_NOTES_EVAL_SHARED_IDS === '1'
-      ? {}
-      : { docId: `d-${fixture.meeting}`, meetingId: `m-${fixture.meeting}` }),
-    doc: `## Meeting notes\n\n- ${HUMAN_LINE}\n`,
-    docTitle: `${fixture.meeting} (AMI)`,
-    workspaceId: 'w-eval',
-    tasks: fixture.board.map((b) => ({ id: taskIdOf(b.url), title: b.title, status: 'todo' })),
-    // A real compose, and its reply grows with the notes: by the twentieth
-    // tick of a meeting the model is rewriting two pages. The composer's own
-    // timeout is 30s and this has to sit above it, or a tick that WOULD have
-    // landed is recorded as a failure and every tick behind it fails too —
-    // the composes are serialized on one chain.
-    tickTimeoutMs: 60_000,
-    compose: async (input: NotesComposeInput) => {
-      const extra = await hooks.before(input, tickNumber, tickTranscript);
-      const edits = await composer.compose({ ...input, ...extra });
-      // CW_NOTES_EVAL_OPS=1 prints the op mix per tick. A meeting whose notes
-      // end EMPTY after fifty ticks is not a note-taker that wrote nothing —
-      // it is one that wrote and then deleted, and the two look identical in
-      // every other number this run prints.
-      if (process.env.CW_NOTES_EVAL_OPS === '1') {
-        // The ids an edit names, and — for a delete — the words it is about to
-        // remove. A tick that took the notes from forty bullets to none is
-        // only legible if the log says WHAT it deleted, not just that it
-        // deleted something.
-        const byId = new Map(input.outline.map((e) => [e.id, e]));
-        const mix = edits
-          .map((e) => {
-            const id = 'blockId' in e ? e.blockId : 'headingId' in e ? e.headingId : undefined;
-            if (e.op !== 'delete_block') return `${e.op}(${id ?? '-'})`;
-            const gone = byId.get(id as string);
-            return `delete_block(${id}: ${gone?.kind ?? '?'} "${(gone?.text ?? '?').slice(0, 40)}")`;
-          })
-          .join(' ');
-        console.log(
-          `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ` +
-            `heading=${input.notesHeadingId ?? 'none'} :: ${mix || '(none)'}`,
-        );
-      }
-      return edits;
-    },
+  // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
+  // ('d-meeting', 'm1'), which was harmless while meetings ran one at a
+  // time and is not once `--jobs` runs four at once: four sessions sharing
+  // one doc id share every log line and every piece of state keyed on it.
+  // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately — the ids
+  // below ARE the harness's defaults, so the two runs differ in nothing else.
+  // It is the positive control for that finding: without it, "the collapse
+  // stopped happening" is a claim about a run that also changed nothing else.
+  const harness = evalMeetingHarness(fixture, ticks, opts.dataDir, async (input) => {
+    const extra = await hooks.before(input, tickNumber, tickTranscript);
+    const edits = await composer.compose({ ...input, ...extra });
+    // CW_NOTES_EVAL_OPS=1 prints the op mix per tick. A meeting whose notes
+    // end EMPTY after fifty ticks is not a note-taker that wrote nothing —
+    // it is one that wrote and then deleted, and the two look identical in
+    // every other number this run prints.
+    if (process.env.CW_NOTES_EVAL_OPS === '1') {
+      // The ids an edit names, and — for a delete — the words it is about to
+      // remove. A tick that took the notes from forty bullets to none is
+      // only legible if the log says WHAT it deleted, not just that it
+      // deleted something.
+      const byId = new Map(input.outline.map((e) => [e.id, e]));
+      const mix = edits
+        .map((e) => {
+          const id = 'blockId' in e ? e.blockId : 'headingId' in e ? e.headingId : undefined;
+          if (e.op !== 'delete_block') return `${e.op}(${id ?? '-'})`;
+          const gone = byId.get(id as string);
+          return `delete_block(${id}: ${gone?.kind ?? '?'} "${(gone?.text ?? '?').slice(0, 40)}")`;
+        })
+        .join(' ');
+      console.log(
+        `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ` +
+          `heading=${input.notesHeadingId ?? 'none'} :: ${mix || '(none)'}`,
+      );
+    }
+    return edits;
   });
 
   let before = '';
@@ -1128,16 +1221,19 @@ async function runMeeting(
   // less. `turnsLost` is the lost-idea rate — settled turns no successful
   // compose ever carried — and the latencies are compose-and-write only,
   // because this harness fires its own ticks (see `NotesTickHarness.timing`).
-  const latencies = harness
-    .timing()
-    .rows()
-    .map((r) => r.settledToWrittenMs)
-    .filter((v): v is number => v !== null);
-  const lost = harness.summary()?.turnsLost ?? 0;
-  if (latencies.length > 0) {
+  //
+  // READ OFF THE SUMMARY, NOT OFF `harness.timing()`. A harness given a data
+  // dir does not use the log it was handed: the notes sinks supply their own,
+  // file-backed one, and the harness's stays empty. So the read that looks
+  // more direct returns nothing at all here, and the line it prints would have
+  // gone silent — the numbers still reach the summary, which is where the
+  // session's own log puts them.
+  const summary = harness.summary();
+  const lost = summary?.turnsLost ?? 0;
+  if (summary?.latencyMedianMs !== undefined && summary.latencyWorstMs !== undefined) {
     console.log(
       `  ${fixture.meeting}: ${lost} turn(s) in no note, compose→written median ` +
-        `${Math.round(median(latencies) ?? 0)}ms, worst ${Math.round(Math.max(...latencies))}ms`,
+        `${Math.round(summary.latencyMedianMs)}ms, worst ${Math.round(summary.latencyWorstMs)}ms`,
     );
   }
   console.log(
@@ -1370,6 +1466,13 @@ async function main(argv: string[]): Promise<number> {
     corpusDir,
     ideas,
     variant,
+    // ONE THROWAWAY DATA DIR FOR THE RUN, shared by every meeting in it, so
+    // `CW_NOTES_EVAL_SHARED_IDS=1` still collides two meetings on one doc id
+    // in the state that is keyed on it. Removed in the `finally` below: it
+    // holds transcripts the fixtures already carry and timings nothing reads
+    // after the run, and a run that left one behind per invocation would fill
+    // a temp dir with copies of the corpus.
+    dataDir: mkdtempSync(join(tmpdir(), 'cw-notes-eval-')),
     ...(dumpDir ? { dumpDir } : {}),
   };
   const ticksWanted = smoke ? 3 : Number.POSITIVE_INFINITY;
@@ -1421,6 +1524,7 @@ async function main(argv: string[]): Promise<number> {
     return 1;
   } finally {
     setIdeaUsageSink(null);
+    rmSync(opts.dataDir, { recursive: true, force: true });
   }
   // Rows come back in whatever order the meetings finished. A table that
   // reorders itself between runs cannot be diffed against another variant's.

@@ -229,6 +229,13 @@ export interface NotesTickHarness {
    * script cannot fake: the compose, the write, and how far a tick's words
    * had to travel behind another tick. `scripts/notes-latency-check.ts` is
    * where the clocks are measured, on a virtual clock that has them.
+   *
+   * EMPTY WHEN `dataDir` IS SET, and that is not a bug here. The notes sinks
+   * supply their own file-backed log whenever there is a data dir to write it
+   * into, and it replaces the one this harness hands them — so the rows go to
+   * the meeting's timing file and to `summary()`'s latency fields, and this
+   * log is never recorded into. Read `summary()` for a meeting with a data
+   * dir; read this one for a meeting without.
    */
   timing(): NotesTimingLog;
   readonly ydoc: Y.Doc;
