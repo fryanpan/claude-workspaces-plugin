@@ -3,10 +3,11 @@
  *
  * In the 2026-09-10 meeting the pane painted a smear — one run of speech drawn
  * over another, unreadable at a glance — and a later moment in the same meeting
- * was clean. The trigger is a tick that composed nothing: the server reports
- * `empty` and drops those turns from its carry, so they stay at the head of the
- * live stream for the rest of the meeting and every later tick composes turns
- * with a survivor in front of them. Lifting those into a chunk — a block ABOVE
+ * was clean. The trigger is a SURVIVOR IN FRONT of the words a tick is
+ * composing: a failed tick's words go into the session's carry, the next tick
+ * composes them, and its `composing` frame names only its own turns — so the
+ * carried ones sit at the head of the stream, unnamed, while it runs. Lifting
+ * the composing words into a chunk — a block ABOVE
  * the stream — made the hold measure a whole line of drop with no tail to
  * indent past, so it pulled the stream up onto the chunk. Measured before the
  * fix: 157.5px of one line over another at 1180x820, 92px at 430, both runs
@@ -276,7 +277,7 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         expect(tap.pinned).toBe(false);
 
         // The meeting really ran: thirty writes, sampled every frame, with
-        // ticks that composed nothing leaving words stranded in the stream —
+        // failed ticks carrying words past a later tick's composing frame —
         // the state the smear needs.
         // Thirty note-writes that actually WROTE one: the ticks that composed
         // nothing and the ticks that failed are extra, not part of the count.
@@ -286,16 +287,18 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         // while measuring the meeting perfectly well. What has to be non-zero
         // is the number of samples that could SEE two runs at once.
         expect(meeting.compared).toBeGreaterThan(meeting.written);
-        // Ticks that composed nothing really did strand words: their turns
-        // went back to the stream and no later tick ever named them again,
-        // which is the state every smear measured here needed.
+        // Failed ticks really did carry words past a later tick's `composing`
+        // frame, and that frame really did run with one of them in front of
+        // it — the split that cannot lift, which is the state every smear
+        // measured here needed. Without both counts the zero below would be
+        // about a stream that never had a survivor in it.
         expect(meeting.stranded).toBeGreaterThan(0);
-        expect(meeting.streaming).toBeGreaterThanOrEqual(meeting.stranded);
+        expect(meeting.surviving).toBeGreaterThan(0);
         expect(meeting.worst.area).toBeLessThan(SMEAR_PX2);
 
         expect(unhurried.compared).toBeGreaterThan(unhurried.written);
         expect(unhurried.stranded).toBeGreaterThan(0);
-        expect(unhurried.streaming).toBeGreaterThanOrEqual(unhurried.stranded);
+        expect(unhurried.surviving).toBeGreaterThan(0);
         expect(unhurried.worst.area).toBeLessThan(SMEAR_PX2);
 
         // Three voices, so nearly every turn carries a speaker pill. Without
@@ -304,6 +307,7 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         expect(voices.pills).toBeGreaterThan(1);
         expect(voices.compared).toBeGreaterThan(voices.written);
         expect(voices.stranded).toBeGreaterThan(0);
+        expect(voices.surviving).toBeGreaterThan(0);
         expect(voices.worst.area).toBeLessThan(SMEAR_PX2);
       },
       BROWSER_CASE_MS,
