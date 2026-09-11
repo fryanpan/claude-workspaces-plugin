@@ -1484,9 +1484,26 @@ export class DocStore {
       const path = park.retryPath;
       if (!path || this.deferredBinds.has(docId)) continue;
       if (boundFiles.quarantined(path) || boundFiles.busy()) continue;
-      this.hydrateDoc(docId);
+      this.rehydrateUntouched(docId);
     }
     if (![...this.parkedSources.values()].some((p) => p.retryPath)) this.disarmParkRetry();
+  }
+
+  /**
+   * `hydrateDoc` on the store's own behalf — a parked doc's retry, or its
+   * deferred read landing — which is nobody reaching for the doc. The hydrate
+   * goes through `getOrCreate`, which stamps `lastTouchedAt`, so a doc whose
+   * file never comes back would be re-stamped on every retry and never go
+   * idle, although a park is deliberately no eviction hold.
+   */
+  private rehydrateUntouched(docId: string, opts: { liveWins?: boolean } = {}): boolean {
+    const touched = this.lastTouchedAt.get(docId);
+    try {
+      return this.hydrateDoc(docId, opts);
+    } finally {
+      if (touched === undefined) this.lastTouchedAt.delete(docId);
+      else this.lastTouchedAt.set(docId, touched);
+    }
   }
 
   private armParkRetry(): void {
@@ -1831,7 +1848,7 @@ export class DocStore {
         if (!this.docs.has(docId) || this.bindings.has(docId)) return;
         const editedAfter = this.docs.get(docId)?.lastContentChangeAt;
         const editedInGap = editedAfter !== undefined && editedAfter !== editedBefore;
-        this.hydrateDoc(docId, editedInGap ? { liveWins: true } : {});
+        this.rehydrateUntouched(docId, editedInGap ? { liveWins: true } : {});
       })
       .catch((err) => {
         console.error(`[doc-store] ${docId}: deferred bind failed:`, err);

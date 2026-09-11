@@ -26,8 +26,11 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DOC_STORE_TIMINGS } from '../src/doc-store-timings.ts';
+import { DocStore } from '../src/doc-store.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { boundFiles } from '../src/slow-fs.ts';
+import { SseBus } from '../src/sse.ts';
+import { createWebhookDispatcher } from '../src/webhooks.ts';
 import { type AccessHarness, accessHarness } from './access-share.ts';
 import { makeFifo, releaseFifosIn } from './fifo.ts';
 import { waitFor, waitForFile } from './wait-for.ts';
@@ -149,5 +152,83 @@ describe('a resident doc parked on a file that stopped answering', () => {
       body: JSON.stringify({ find: 'recovered', replace: 'restored' }),
     });
     expect(((await after.json()) as { syncError?: unknown }).syncError).toBeUndefined();
+  });
+});
+
+describe('a parked doc whose file never comes back', () => {
+  /** `IDLE_EVICT_MS` in doc-store.ts: two days untouched. */
+  const IDLE_MS = 2 * 24 * 60 * 60 * 1000;
+  let dataDir: string;
+  let boundPath: string;
+  let store: DocStore | undefined;
+  let clock: ReturnType<typeof spyOn> | undefined;
+  /** The store's own clock, which idleness is measured on. */
+  let storeNow = Date.now();
+
+  const newStore = () =>
+    new DocStore({
+      dataDir,
+      sse: new SseBus(),
+      webhooks: createWebhookDispatcher({ onLog: () => {} }),
+      decorateDocMeta: (m) => ({ ...m, reviewUrl: `http://test/review/${m.docId}` }),
+      now: () => storeNow,
+    });
+
+  beforeEach(() => {
+    boundFiles.reset();
+    storeNow = Date.now();
+    dataDir = mkdtempSync(join(tmpdir(), 'park-idle-data-'));
+    boundPath = join(dataDir, 'ledger.md');
+    writeFileSync(boundPath, FIRST);
+    const first = newStore();
+    first.getOrCreate(DOC_ID, { type: 'markdown', sourceUrl: boundPath });
+    expect(first.attachFile(DOC_ID, boundPath).ok).toBe(true);
+    first.flush();
+    first.stop();
+    unlinkSync(boundPath);
+    makeFifo(boundPath);
+  });
+
+  afterEach(async () => {
+    clock?.mockRestore();
+    clock = undefined;
+    store?.stop();
+    store = undefined;
+    await releaseFifosIn(dataDir);
+    boundFiles.reset();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('still goes idle: its retries are not somebody reaching for it', async () => {
+    store = newStore();
+    store.get(DOC_ID);
+    await waitFor(
+      () =>
+        boundFiles.quarantined(boundPath) &&
+        store?.getDocStatus(DOC_ID)?.sourceParked?.reason.includes('quarantined'),
+      { describe: 'the first read to be written off' },
+    );
+
+    // Nobody touches the doc for two days, and meanwhile the backoff expires
+    // and the store retries the file — which is still a pipe, so the retry
+    // is written off and the doc parks again.
+    storeNow += IDLE_MS + 1;
+    const skew = DOC_STORE_TIMINGS.boundReadRetryMs + 1;
+    const realNow = Date.now.bind(Date);
+    clock = spyOn(Date, 'now').mockImplementation(() => realNow() + skew);
+    await waitFor(
+      () => {
+        const park = store?.getDocStatus(DOC_ID)?.sourceParked;
+        return (
+          park?.at === storeNow &&
+          park.reason.includes('quarantined') &&
+          boundFiles.quarantined(boundPath)
+        );
+      },
+      { describe: 'a retry to run and be written off' },
+    );
+
+    // Parked is no eviction hold, and a retry is no reach: the doc goes.
+    expect(store.evictIdleDocs()).toContain(DOC_ID);
   });
 });
