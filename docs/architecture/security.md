@@ -121,6 +121,8 @@ Secrets are kept in the macOS Keychain or in files only the owner's account can 
 
 The server creates its own key files on first use and resets their permissions if they already exist. All signed tokens go through one module, so there is one place a signature is checked.
 
+Claude has two keys, and the process decides which one it may read. Prod's key (`claude-workspaces-summary-api-key`) is read only by the prod launchd service, which is recognised by the `XPC_SERVICE_NAME` that launchd sets to the job's label, so it needs no setting of its own. Every other process reads the eval key (`claude-workspaces-eval-api-key`): staging, dev servers, tests, CI, and the eval and cost scripts. Without an eval key, that process runs with Claude switched off and says so once at boot (`packages/server/src/claude-key-source.ts`).
+
 ## Reporting a vulnerability
 
 Please do not open a public issue. Report privately through GitHub's [private vulnerability reporting](https://github.com/fryanpan/claude-workspaces-plugin/security/advisories/new) on this repository, with what you did, what you saw, and the version or commit you tested. This is a personal project with no bug bounty and no response-time promise, but reports are read and acted on.

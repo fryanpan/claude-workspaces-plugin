@@ -36,7 +36,7 @@ import {
 } from '@claude-workspaces/core';
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
-import { KEYCHAIN_SERVICE } from '../summarize.ts';
+import { claudeKeyAddHint } from '../claude-key-source.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import {
   type DocResourceRouteRequest,
@@ -476,7 +476,7 @@ export async function handleDocThreadRoutes(
       if (!summarizer?.enabled) {
         return j(503, {
           error: 'summaries disabled',
-          detail: `set CW_SUMMARIES=1 and add a key: security add-generic-password -a "$USER" -s ${KEYCHAIN_SERVICE} -w`,
+          detail: `set CW_SUMMARIES=1 and add a key: ${claudeKeyAddHint(process.env)}`,
         });
       }
       // Already summarized as it stands: answer with what is stored

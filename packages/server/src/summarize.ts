@@ -24,7 +24,7 @@
  */
 
 import { summaryHash } from '@claude-workspaces/core';
-import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { type EnvLike, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import {
   SUMMARY_PROMPT_VERSION,
   type StoredSummary,
@@ -35,23 +35,9 @@ import {
   parseSummaryResponse,
 } from '@claude-workspaces/core/summary-prompt';
 import type { Thread } from '@claude-workspaces/core/types';
+import { claudeKeyAddHint, claudeKeyServices } from './claude-key-source.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
-/** Keychain service holding the key. Env override: CW_SUMMARY_API_KEY. */
-export const KEYCHAIN_SERVICE = 'claude-workspaces-summary-api-key';
-
-/**
- * The pre-rename service name, still read if the current one holds nothing.
- *
- * Deliberately NOT migrated by `scripts/migrate-rename.ts`. Copying a
- * keychain item means reading the secret out and writing it back, which puts
- * the key in a process's memory and its argv for the benefit of saving one
- * manual command — and the operator re-keying by hand is both cheap and the
- * act of consent this feature is gated on. Reading the old name costs one
- * failed lookup at construction and keeps summaries alive across the flag day
- * with nobody touching the keychain at all.
- */
-export const KEYCHAIN_SERVICE_LEGACY = 'live-feedback-summary-api-key';
 const MODEL = 'claude-haiku-4-5-20251001';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 /** Long enough to coalesce a burst of edits, short enough to feel live. */
@@ -108,21 +94,26 @@ export interface ScheduleArgs {
  * Resolve the API key once. Returns null when there is none, which is the
  * documented "feature off" state rather than an error.
  *
- * ONLY the dedicated entry counts — either Keychain service above, or the
- * `CW_SUMMARY_API_KEY` env override. It used to fall back to
- * `ANTHROPIC_API_KEY`, which is set in most Claude Code launch environments:
- * that turned an opt-in feature into one that switched itself on for every
- * peer who installed the plugin, shipping their review comments and anchored
- * source lines off-machine without anyone choosing it. Adding the dedicated
- * entry is the act of consent; a key that happens to be in the environment
- * for other reasons is not.
+ * ONLY a dedicated entry counts, and WHICH one depends on the process
+ * (`claude-key-source.ts`): the prod launchd service reads prod's item and
+ * its pre-rename name; every other process — staging, dev, tests, CI, the
+ * cost scripts — reads the eval item and nothing else, so it cannot spend
+ * prod's key even on a machine that holds it.
+ *
+ * It used to fall back to `ANTHROPIC_API_KEY`, which is set in most Claude
+ * Code launch environments: that turned an opt-in feature into one that
+ * switched itself on for every peer who installed the plugin, shipping their
+ * review comments and anchored source lines off-machine without anyone
+ * choosing it. Adding the dedicated entry is the act of consent; a key that
+ * happens to be in the environment for other reasons is not.
  */
 export function resolveKeyFrom(
   explicit: string | null | undefined,
   read: (service: string) => string | null,
+  env: EnvLike = process.env,
 ): string | null {
   if (explicit !== undefined) return explicit || null;
-  for (const service of [KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY]) {
+  for (const service of claudeKeyServices(env)) {
     try {
       const key = read(service);
       if (key) return key;
@@ -182,7 +173,7 @@ export function resolveCredentialFrom(
   if (explicit !== undefined) return explicit ? { kind: 'key', value: explicit } : null;
   const token = env[ACCESS_TOKEN_ENV]?.trim();
   if (token) return { kind: 'token', value: token };
-  const key = resolveKeyFrom(undefined, read);
+  const key = resolveKeyFrom(undefined, read, env);
   return key ? { kind: 'key', value: key } : null;
 }
 
@@ -274,7 +265,7 @@ export class ThreadSummarizer {
         warnedNoKey = true;
         console.log(
           '[summarize] no API key; thread summaries stay deterministic. ' +
-            `Add one with: security add-generic-password -a "$USER" -s ${KEYCHAIN_SERVICE} -w`,
+            `Add one with: ${claudeKeyAddHint(process.env)}`,
         );
       }
       return;

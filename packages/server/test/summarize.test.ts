@@ -21,9 +21,13 @@ import type { Thread, User } from '@claude-workspaces/core/types';
 import {
   KEYCHAIN_SERVICE,
   KEYCHAIN_SERVICE_LEGACY,
-  ThreadSummarizer,
-  resolveKeyFrom,
-} from '../src/summarize.ts';
+  LAUNCHD_JOB_ENV,
+  PROD_SERVICE_LABEL,
+} from '../src/claude-key-source.ts';
+import { ThreadSummarizer, resolveKeyFrom } from '../src/summarize.ts';
+
+/** The environment launchd hands the prod service — the only one that may read prod's item. */
+const PROD_ENV = { [LAUNCHD_JOB_ENV]: PROD_SERVICE_LABEL };
 
 const alice: User = { id: 'u1', name: 'Alice', kind: 'known', color: '#111111' };
 
@@ -856,6 +860,9 @@ describe('ThreadSummarizer.backfill', () => {
  * the flag day is that the reader tries the old service name second. Nothing
  * else asserts that, and its failure is silent: summaries simply stop, which
  * reads as the feature having been switched off.
+ *
+ * These are PROD's lookups, so each case runs under the prod service's
+ * environment; what every other process reads is `claude-key-source.test.ts`.
  */
 describe('resolveKeyFrom — which keychain service the key comes from', () => {
   /** Records every lookup, so the ORDER is observable and not just the result. */
@@ -875,20 +882,20 @@ describe('resolveKeyFrom — which keychain service the key comes from', () => {
 
   it('prefers the current service name', () => {
     const k = keychain({ [KEYCHAIN_SERVICE]: 'new-key', [KEYCHAIN_SERVICE_LEGACY]: 'old-key' });
-    expect(resolveKeyFrom(undefined, k.read)).toBe('new-key');
+    expect(resolveKeyFrom(undefined, k.read, PROD_ENV)).toBe('new-key');
     // It stopped at the first hit rather than reading both and picking.
     expect(k.asked).toEqual([KEYCHAIN_SERVICE]);
   });
 
   it('falls back to the pre-rename service when the current one is empty', () => {
     const k = keychain({ [KEYCHAIN_SERVICE_LEGACY]: 'old-key' });
-    expect(resolveKeyFrom(undefined, k.read)).toBe('old-key');
+    expect(resolveKeyFrom(undefined, k.read, PROD_ENV)).toBe('old-key');
     expect(k.asked).toEqual([KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY]);
   });
 
   it('is null when neither name holds anything — the documented "off" state', () => {
     const k = keychain({});
-    expect(resolveKeyFrom(undefined, k.read)).toBeNull();
+    expect(resolveKeyFrom(undefined, k.read, PROD_ENV)).toBeNull();
     // The positive controls above are what make this absence mean something:
     // the same fake DOES return a key when one is planted.
     expect(k.asked).toEqual([KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY]);
@@ -896,8 +903,8 @@ describe('resolveKeyFrom — which keychain service the key comes from', () => {
 
   it('an explicit key short-circuits both lookups', () => {
     const k = keychain({ [KEYCHAIN_SERVICE]: 'new-key' });
-    expect(resolveKeyFrom('given', k.read)).toBe('given');
-    expect(resolveKeyFrom(null, k.read)).toBeNull();
+    expect(resolveKeyFrom('given', k.read, PROD_ENV)).toBe('given');
+    expect(resolveKeyFrom(null, k.read, PROD_ENV)).toBeNull();
     expect(k.asked).toEqual([]);
   });
 });

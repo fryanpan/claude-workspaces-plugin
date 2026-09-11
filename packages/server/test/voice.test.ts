@@ -16,8 +16,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  EVAL_KEYCHAIN_SERVICE,
+  KEYCHAIN_SERVICE,
+  KEYCHAIN_SERVICE_LEGACY,
+  LAUNCHD_JOB_ENV,
+  PROD_SERVICE_LABEL,
+} from '../src/claude-key-source.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY } from '../src/summarize.ts';
 import { TaskStore, type TaskStoreEvent, voiceQueuePath } from '../src/tasks.ts';
 import { resolveVoiceAction } from '../src/voice-action.ts';
 import {
@@ -921,6 +927,8 @@ describe('voice routing (§3.8)', () => {
   // or a machine holding only the legacy entry has working summaries and a
   // silently dead voice fast path — which is exactly how it shipped.
   describe('haikuVoiceComplete — which keychain service the key comes from', () => {
+    /** The prod service's environment — the only one whose lookups these are. */
+    const env = { [LAUNCHD_JOB_ENV]: PROD_SERVICE_LABEL };
     const fakeKeychain = (entries: Record<string, string>) => {
       const asked: string[] = [];
       const readKey = (service: string): string => {
@@ -934,28 +942,36 @@ describe('voice routing (§3.8)', () => {
 
     it('resolves through the injected reader, new name first', () => {
       const k = fakeKeychain({ [KEYCHAIN_SERVICE]: 'new-key' });
-      const complete = haikuVoiceComplete({ readKey: k.readKey });
+      const complete = haikuVoiceComplete({ readKey: k.readKey, env });
       expect(complete).not.toBeNull();
       expect(k.asked).toEqual([KEYCHAIN_SERVICE]);
     });
 
     it('falls back to the legacy service when only the old entry exists', () => {
       const k = fakeKeychain({ [KEYCHAIN_SERVICE_LEGACY]: 'old-key' });
-      const complete = haikuVoiceComplete({ readKey: k.readKey });
+      const complete = haikuVoiceComplete({ readKey: k.readKey, env });
       expect(complete).not.toBeNull();
       expect(k.asked).toEqual([KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY]);
     });
 
     it('returns null when neither entry exists', () => {
       const k = fakeKeychain({});
-      expect(haikuVoiceComplete({ readKey: k.readKey })).toBeNull();
+      expect(haikuVoiceComplete({ readKey: k.readKey, env })).toBeNull();
       expect(k.asked).toEqual([KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY]);
+    });
+
+    it('outside prod, reads the eval item and never prod’s, even when prod’s is present', () => {
+      const k = fakeKeychain({ [KEYCHAIN_SERVICE]: 'fake-prod-key' });
+      expect(haikuVoiceComplete({ readKey: k.readKey, env: {} })).toBeNull();
+      expect(k.asked).toEqual([EVAL_KEYCHAIN_SERVICE]);
+      const e = fakeKeychain({ [EVAL_KEYCHAIN_SERVICE]: 'fake-eval-key' });
+      expect(haikuVoiceComplete({ readKey: e.readKey, env: {} })).not.toBeNull();
     });
 
     it('an explicit apiKey wins and the keychain is never consulted', () => {
       const k = fakeKeychain({ [KEYCHAIN_SERVICE]: 'ignored' });
-      expect(haikuVoiceComplete({ apiKey: 'explicit', readKey: k.readKey })).not.toBeNull();
-      expect(haikuVoiceComplete({ apiKey: null, readKey: k.readKey })).toBeNull();
+      expect(haikuVoiceComplete({ apiKey: 'explicit', readKey: k.readKey, env })).not.toBeNull();
+      expect(haikuVoiceComplete({ apiKey: null, readKey: k.readKey, env })).toBeNull();
       expect(k.asked).toEqual([]);
     });
   });

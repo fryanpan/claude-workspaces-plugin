@@ -11,7 +11,12 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY } from '../packages/server/src/summarize.ts';
+import {
+  KEYCHAIN_SERVICE,
+  KEYCHAIN_SERVICE_LEGACY,
+  LAUNCHD_JOB_ENV,
+  PROD_SERVICE_LABEL,
+} from '../packages/server/src/claude-key-source.ts';
 import {
   EVAL_ACCESS_TOKEN_ENV,
   EVAL_CREDENTIAL_HELP,
@@ -51,6 +56,16 @@ describe('the eval credential', () => {
       [KEYCHAIN_SERVICE_LEGACY]: 'older-prod-value',
     });
     expect(resolveEvalCredentialFrom(undefined, k.read, {})).toBeNull();
+    expect(k.asked).toEqual([EVAL_KEYCHAIN_SERVICE]);
+  });
+
+  it('refuses prod’s key even when run inside the prod service’s environment', () => {
+    // The server reads prod's item under launchd's marker; the eval must not,
+    // wherever it happens to be started from.
+    const k = keychain({ [KEYCHAIN_SERVICE]: 'prod-value' });
+    expect(
+      resolveEvalCredentialFrom(undefined, k.read, { [LAUNCHD_JOB_ENV]: PROD_SERVICE_LABEL }),
+    ).toBeNull();
     expect(k.asked).toEqual([EVAL_KEYCHAIN_SERVICE]);
   });
 
