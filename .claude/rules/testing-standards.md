@@ -187,7 +187,9 @@ below are the ones a test author is most likely to be reasoning about.
 | `typecheck` | type errors; neither runner typechecks |
 | `test:audit` | the mechanical half of this file, ratcheted |
 
-The other eleven — lint, coverage, `loc:audit`, the import-direction and
-architecture gates, the widget build and its size budget, the build-id and
-MCP-bundle checks, the leak-gate self-test, the plugin-version gate — are
-members of the same command. This table names four; `verify` runs fifteen.
+The rest — the ci.yml parity check, lint, coverage, `loc:audit`, the
+import-direction and import-cycle gates, the architecture gate, the widget
+build and its size budget, the build-id and MCP-bundle checks, the leak-gate
+self-test, the client-boot check, the plugin-version gate — are members of the
+same command. This table names four; `bun run verify --list` names them all,
+and is the only count that cannot go stale.

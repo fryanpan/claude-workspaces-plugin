@@ -160,8 +160,10 @@ body.board-body {
    buttons for each active user instead of the long form"). Initials in the
    circle, the full name/where/liveness line in the title + aria-label. The
    liveness classes from the long-form strip still apply — they are bare
-   class selectors, so `board-presence-unresponsive` keeps its yellow border,
-   `board-presence-away` its fade, `board-following` its accent ring. */
+   class selectors, so `board-presence-unresponsive` keeps its yellow border
+   and `board-following` its accent ring. There is no faded state left: a
+   circle is drawn only for an agent that is listening, so every circle here
+   means present and an absent session is simply not drawn. */
 .board-presence-circle {
   position: relative;
   display: inline-flex;
@@ -602,12 +604,18 @@ body.board-body {
 .board-presence-agent .board-presence-name::before {
   content: "🤖 ";
 }
+/* Present but wedged: the process is up and on the wire, and the model has
+   made no call for half an hour. Worth a ring — it is the fault a reader most
+   wants to catch — and NOT worth a fade, because the session is there. */
 .board-presence-unresponsive {
   border-color: var(--yellow);
 }
-.board-presence-away {
-  opacity: 0.65;
-}
+/* The fade that used to live here is gone, and its absence is the feature.
+   Every circle in the strip now stands for an agent holding its event stream
+   (`agent-listening.ts`), so there is no longer a "might be there" to draw:
+   an absent session has no circle at all. A dimmed one said maybe, and maybe
+   is what sent Bryan to chat to ask whether anybody was listening — which is
+   the question this strip exists to answer without him asking. */
 .board-following {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);

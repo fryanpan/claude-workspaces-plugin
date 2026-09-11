@@ -40,7 +40,7 @@ describe('publicAttachment is an allowlist', () => {
   it('CONTROL: the fields a visitor is meant to get all survive', () => {
     // Without this, "the extra field is gone" below would pass on a function
     // that returned an empty object.
-    const out = publicAttachment(attachment(), NOW);
+    const out = publicAttachment(attachment(), NOW, true);
     expect(out.workspaceId).toBe('w-fixture');
     expect(out.agentId).toBe('agent-fixture');
     expect(out.runtime).toBe('claude-code-local');
@@ -52,10 +52,15 @@ describe('publicAttachment is an allowlist', () => {
     // Derived, and the reason this projection exists at all.
     expect(out.state).toBe('active');
     expect(out.stateLabel).toBe('active');
+    // Derived too, and handed DOWN rather than read here: the store owns the
+    // stream question, and a caller that put the answer on the row after this
+    // function returned would be adding a field a visitor gets without it
+    // ever being named below.
+    expect(out.listening).toBe(true);
   });
 
   it('drops `endpoint` — the host-machine fact this projection was built for', () => {
-    expect('endpoint' in publicAttachment(attachment(), NOW)).toBe(false);
+    expect('endpoint' in publicAttachment(attachment(), NOW, false)).toBe(false);
   });
 
   it('drops a field it was never told about — what a denylist cannot do', () => {
@@ -67,6 +72,7 @@ describe('publicAttachment is an allowlist', () => {
         internalSocketPath: '/fixture/socket',
       }),
       NOW,
+      false,
     );
     expect('hostWorkingDir' in out).toBe(false);
     expect('internalSocketPath' in out).toBe(false);
@@ -82,9 +88,21 @@ describe('publicAttachment is an allowlist', () => {
         'runtime',
         'state',
         'stateLabel',
+        'listening',
         'workspaceId',
       ].sort(),
     );
+  });
+
+  it('carries `listening` independently of the clocks — the socket is its own evidence', () => {
+    // The pair that would collapse if `listening` were ever derived from the
+    // heartbeat instead of handed in: a stale record that IS on the wire, and
+    // a fresh one that is not. `isDeliverable` already lets the socket beat
+    // the clock; this keeps the displayed row honest about which is which.
+    const stale = attachment();
+    stale.lastHeartbeat = NOW - 60 * 60_000;
+    expect(publicAttachment(stale, NOW, true).listening).toBe(true);
+    expect(publicAttachment(attachment(), NOW, false).listening).toBe(false);
   });
 
   it('an absent optional stays ABSENT rather than becoming an explicit undefined', () => {
@@ -93,7 +111,7 @@ describe('publicAttachment is an allowlist', () => {
     const bare = attachment();
     bare.pluginVersion = undefined;
     bare.processId = undefined;
-    const out = publicAttachment(bare, NOW);
+    const out = publicAttachment(bare, NOW, false);
     expect('pluginVersion' in out).toBe(false);
     expect('processId' in out).toBe(false);
     // Control: the required fields are still there on the same call.
@@ -103,6 +121,6 @@ describe('publicAttachment is an allowlist', () => {
   it('still derives the state it is asked for — away, not just active', () => {
     const stale = attachment();
     stale.lastHeartbeat = NOW - 60 * 60_000;
-    expect(publicAttachment(stale, NOW).state).toBe('away');
+    expect(publicAttachment(stale, NOW, false).state).toBe('away');
   });
 });

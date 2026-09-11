@@ -214,10 +214,17 @@ export function attachmentStateLabel(state: AttachmentState): string {
   }
 }
 
-/** An attachment plus its derived state, computed at read time. */
+/** An attachment plus its derived state, computed at read time.
+ *
+ *  `listening` is derived like the other two and for the same reason: it is
+ *  true of RIGHT NOW and nothing writes it. The record says a session sat
+ *  down here and outlives that session; the open stream says somebody is
+ *  there (`agent-listening.ts`). */
 export type DescribedAttachment = AgentAttachment & {
   state: AttachmentState;
   stateLabel: string;
+  /** This agent's own event stream is open on this board. */
+  listening: boolean;
 };
 
 /** The §4 record WITHOUT `endpoint`, plus derived state — what agent.*
@@ -244,11 +251,23 @@ export type PublicAttachment = Pick<
   | 'processId'
   | 'state'
   | 'stateLabel'
+  | 'listening'
 >;
 
+/**
+ * The visitor's copy of one row.
+ *
+ * `listening` is a PARAMETER rather than something read here, because this
+ * function takes no probe and no bus — the store owns the stream question and
+ * hands the answer down. It is named in the Pick above like every other
+ * field, which is the point: the allowlist is the only door, and adding a
+ * field to the result anywhere downstream of this function would reopen the
+ * hole the field-by-field rewrite closed.
+ */
 export function publicAttachment(
   att: AgentAttachment,
   now: number,
+  listening: boolean,
   thresholds?: AttachmentThresholds,
 ): PublicAttachment {
   const state = attachmentState(att, now, thresholds);
@@ -266,6 +285,7 @@ export function publicAttachment(
     ...(att.processId !== undefined ? { processId: att.processId } : {}),
     state,
     stateLabel: attachmentStateLabel(state),
+    listening,
   };
 }
 
@@ -553,7 +573,12 @@ export class AgentStore {
           type: 'agent.attached',
           workspaceId,
           agentId: into,
-          attachment: publicAttachment(survivor, now, this.p.thresholds),
+          attachment: publicAttachment(
+            survivor,
+            now,
+            this.listeningNow(survivor),
+            this.p.thresholds,
+          ),
           ts: now,
         });
       }
@@ -691,7 +716,12 @@ export class AgentStore {
       type: 'agent.attached',
       workspaceId,
       agentId: opts.agentId,
-      attachment: publicAttachment(attachment, now, this.p.thresholds),
+      attachment: publicAttachment(
+        attachment,
+        now,
+        this.listeningNow(attachment),
+        this.p.thresholds,
+      ),
       ts: now,
     });
     return {
@@ -888,7 +918,12 @@ export class AgentStore {
       type: 'agent.heartbeat',
       workspaceId,
       agentId,
-      attachment: publicAttachment(attachment, now, this.p.thresholds),
+      attachment: publicAttachment(
+        attachment,
+        now,
+        this.listeningNow(attachment),
+        this.p.thresholds,
+      ),
       ts: now,
     });
     // A heartbeat is an observation, and every observation is a chance to hand
@@ -976,7 +1011,12 @@ export class AgentStore {
       type: 'agent.detached',
       workspaceId,
       agentId,
-      attachment: publicAttachment(attachment, now, this.p.thresholds),
+      attachment: publicAttachment(
+        attachment,
+        now,
+        this.listeningNow(attachment),
+        this.p.thresholds,
+      ),
       ts: now,
     });
     return true;
@@ -992,7 +1032,12 @@ export class AgentStore {
       .sort((a, b) => a.agentId.localeCompare(b.agentId))
       .map((att) => {
         const s = attachmentState(att, now, this.p.thresholds);
-        return { ...att, state: s, stateLabel: attachmentStateLabel(s) };
+        return {
+          ...att,
+          state: s,
+          stateLabel: attachmentStateLabel(s),
+          listening: this.listeningNow(att),
+        };
       });
   }
 
@@ -1003,7 +1048,20 @@ export class AgentStore {
     const now = this.p.now();
     return Array.from(state.attachments.values())
       .sort((a, b) => a.agentId.localeCompare(b.agentId))
-      .map((att) => publicAttachment(att, now, this.p.thresholds));
+      .map((att) => publicAttachment(att, now, this.listeningNow(att), this.p.thresholds));
+  }
+
+  /**
+   * Is this agent holding its own event stream on this board right now?
+   *
+   * The same probe `isDeliverable` asks, read for display rather than for a
+   * delivery decision. It lives here rather than in the route because the
+   * route must not add fields to a visitor's row: `PublicAttachment` is an
+   * allowlist, and it only holds if every field in the answer passes through
+   * it. Derived at read time, never stored — a stream closing writes nothing.
+   */
+  private listeningNow(att: Pick<AgentAttachment, 'workspaceId' | 'agentId'>): boolean {
+    return this.p.agentStreamProbe(att.workspaceId, att.agentId);
   }
 
   /**

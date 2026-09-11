@@ -111,6 +111,7 @@ export function createBoardLoads(deps: BoardLoadDeps): BoardLoads {
         state?: PresenceAgent['state'];
         stateLabel?: string;
         lastToolCallAt: number;
+        listening?: boolean;
       }>;
       seat?: LeadSeatView;
       pluginRelease?: PluginRelease;
@@ -139,6 +140,11 @@ export function createBoardLoads(deps: BoardLoadDeps): BoardLoads {
         state: a.state ?? 'away',
         stateLabel: a.stateLabel ?? a.state ?? 'away',
         lastToolCallAt: a.lastToolCallAt,
+        // Silence means no, and this is the one place that can tell silence
+        // apart from an answer. A server too old to stamp the field cannot
+        // say whether anybody is on the wire, and "cannot say" must not draw
+        // a circle — the strip's whole claim is that a circle means present.
+        listening: a.listening === true,
       })),
     );
     renderPresenceRegion();

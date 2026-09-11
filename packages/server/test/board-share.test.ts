@@ -569,6 +569,49 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
       expect((await pub(`/workspaces/${otherId}/agents`, otherCookie)).status).toBe(200);
       expect((await pub(`/workspaces/${boardId}/agents`, otherCookie)).status).toBe(403);
     });
+
+    it('gives a visitor EXACTLY the allowlisted fields — nothing added downstream of the projection', async () => {
+      // The property, not the field. `publicAttachment` is an allowlist and
+      // `public-attachment-allowlist.test.ts` proves a record's unlisted key
+      // never survives it — but that only protects a visitor while the
+      // projection is the LAST thing to touch the row. A route that stamps
+      // one more field onto the result afterwards reaches a visitor without
+      // ever being named in the allowlist, and every test at the function
+      // level still passes. This is the one that does not: it reads the real
+      // route as a real visitor and pins the key SET.
+      //
+      // So a new field is a deliberate act in two places — the Pick and this
+      // list — which is the cost the leak this projection was rewritten for
+      // is worth.
+      await post(`/workspaces/${boardId}/agents`, {
+        agentId: 'agent-riverbend',
+        runtime: 'webhook',
+        endpoint: 'https://agents.internal.example/hooks/riverbend',
+        capabilities: ['tasks.write'],
+      });
+      const r = await pub(`/workspaces/${boardId}/agents`, boardCookie);
+      expect(r.status).toBe(200);
+      const seen = (await r.json()) as { attachments: Array<Record<string, unknown>> };
+      const row = seen.attachments.find((a) => a.agentId === 'agent-riverbend');
+      expect(row, 'the visitor sees the agent at all').toBeDefined();
+      expect(Object.keys(row ?? {}).sort()).toEqual(
+        [
+          'agentId',
+          'capabilities',
+          'lastHeartbeat',
+          'lastToolCallAt',
+          'listening',
+          'runtime',
+          'state',
+          'stateLabel',
+          'workspaceId',
+        ].sort(),
+      );
+      // `listening` is one of them, and it is false: this session attached
+      // over REST and never opened an event stream, which is precisely the
+      // attached-but-absent row the board must not draw a circle for.
+      expect(row?.listening).toBe(false);
+    });
   });
 
   describe('the board page a member is served', () => {
