@@ -95,6 +95,17 @@ export interface MeetingLiveZone {
    * note is composed asynchronously and lands seconds after `stopped`.
    */
   washActive(): boolean;
+  /**
+   * Keep the wash alive for `ms` from now, whatever the grace says.
+   *
+   * The tidy-up pass (`meeting-cleanup-offer.ts`) is a person asking for
+   * notes minutes after the recording stopped, and the notes it writes are
+   * the freshest thing on the page — exactly what the tint is for. Without
+   * this they land untinted, because `WASH_GRACE_MS` has long run out and
+   * `settle-wash.ts` reads `isLive()` at the instant the remote transaction
+   * arrives. A held wash never shortens one already running.
+   */
+  holdWash(ms: number): void;
   destroy(): void;
 }
 
@@ -198,6 +209,8 @@ export function createMeetingLiveZone(opts: {
 
   let live = false;
   let endedAt = 0;
+  /** While `now()` is under this, the wash fires — see `holdWash`. */
+  let washHeldUntil = 0;
   /** Whether this meeting has ever reported a tick. One that does is driven
    *  by its frames alone; see `clearSettled`. */
   let sawProgress = false;
@@ -425,7 +438,23 @@ export function createMeetingLiveZone(opts: {
     settling.add(c);
     // Pin the height BEFORE anything animates: from here nothing this chunk
     // does can move a word below it, for the whole of the fade.
+    //
+    // THE PIN CAN GO STALE, AND IS ALLOWED TO. A chunk's line count is not a
+    // property of its words: `.lz-head` is floated into the zone's top-right
+    // corner, so the line at the top of the zone is short by the label's
+    // width. A chunk is mounted at the FOOT of the stack, below the label,
+    // where its words fit one line — and the collapse of the chunks above
+    // then slides it UP into that corner, where the same words can need two.
+    // Growing the slot to match would step every word below it down by a line
+    // mid-collapse, which is the one thing this pin exists to prevent, so the
+    // slot keeps the height it promised and `.lz-slot`'s `overflow: clip`
+    // (doc.css) stops the extra line being painted over the chunk below.
+    // Measured before the clip, at 430 over a thirty-write meeting: 818px² of
+    // one opaque run drawn over another. The class is what turns that clip on,
+    // so it goes on with the height it is there to hold: a slot that has made
+    // no promise keeps its chunk's full hit area.
     c.slot.style.height = `${c.slot.getBoundingClientRect().height}px`;
+    c.slot.classList.add('is-pinned');
     const reduced = reducedMotion();
     step(c, NOTE_LAND_MS, () => {
       c.body.classList.add('is-fading');
@@ -691,7 +720,11 @@ export function createMeetingLiveZone(opts: {
       render();
     },
     active: () => live,
-    washActive: () => live || (endedAt > 0 && now() - endedAt < WASH_GRACE_MS),
+    washActive: () =>
+      live || (endedAt > 0 && now() - endedAt < WASH_GRACE_MS) || now() < washHeldUntil,
+    holdWash(ms) {
+      washHeldUntil = Math.max(washHeldUntil, now() + ms);
+    },
     destroy() {
       live = false;
       clearChunks();

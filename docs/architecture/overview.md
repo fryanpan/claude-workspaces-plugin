@@ -404,6 +404,18 @@ restart mid-recording keeps writing under the section it opened rather than
 opening a second one. Ids and a block id, no meeting words, so it sits with
 `notes-timing.ts` rather than with the stores that own durable text.
 
+`notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
+the picture either: it is the at-stop tidy-up, and it is deliberately not a
+second note-taking path — it reuses `NotesComposer`, the shared
+`applyBlockEdits` and the same authorship rules, adding only the whole
+transcript, a restraint directive and the gate that decides which of the
+returned edits a cleanup is allowed to make. One route calls it
+(`routes/meetings-calendar.ts`); nothing else does. `notes-cleanup-scope.ts`
+is that gate, split out because it answers a different question: not "run a
+pass" but "for a block the model has named, may this pass touch it at all" —
+section membership, comment anchors, and whose material it is. Pure, or a
+read of the doc; it composes nothing.
+
 `meeting-stream-set.ts` joins that services tier inside the `meeting-*`
 family and moves nothing in the picture: it is the fan-out one level below
 `meeting-protocol.ts`, opening an engine session per audio stream and folding
@@ -529,6 +541,12 @@ section with its own state and no dependency on the rest of the form. It is
 also the client half of the `notes-method` route, so a switch made while a
 meeting is running goes over the meeting socket and one made at rest goes over
 HTTP.
+`meeting-cleanup-offer.ts` joins the same view tier and changes no layer: it
+is the one button a finished recording leaves at the end of the prose, asking
+whether to read the notes once more, plus the POST that press makes. It is
+the client half of `notes-cleanup-pass.ts` on the server, and it is separate
+from the strip because the strip is chrome for a meeting that is HAPPENING
+and this exists only once one has stopped.
 `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing

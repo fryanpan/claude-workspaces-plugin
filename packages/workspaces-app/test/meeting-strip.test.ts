@@ -310,6 +310,7 @@ function mount(
     listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
     loadSpeakers?: () => Promise<DocSpeakers | null>;
     onMeetingChange?: (meetingId: string | null) => void;
+    onMeetingEnded?: (meetingId: string) => void;
     loadTranscript?: () => Promise<{ lines: string[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
@@ -947,6 +948,95 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
     h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
     expect(onMeetingChange.mock.calls.map((c) => c[0])).toEqual([null, 'm2', 'm2']);
+  });
+
+  /**
+   * The tidy-up offer is raised by this callback, so a doc that merely SHOWS
+   * an old meeting's cast must never see it fire. Both ways a recording can
+   * end have their own case, because each closes the socket — which detaches
+   * its handlers — so a meeting only ever travels one of them.
+   */
+  it('reports the end the server announces, once', async () => {
+    const onMeetingEnded = vi.fn();
+    const h = mount(undefined, { onMeetingEnded });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 1_000, engine: 'test' });
+    // A live meeting has ended nothing yet.
+    expect(onMeetingEnded).not.toHaveBeenCalled();
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 2_000 });
+    expect(onMeetingEnded.mock.calls.map((c) => c[0])).toEqual(['m2']);
+  });
+
+  it('reports an end from a press of Stop, which the server frame never follows', async () => {
+    const onMeetingEnded = vi.fn();
+    const h = mount(undefined, { onMeetingEnded });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm3', startedAt: 1_000, engine: 'test' });
+    // `stop()` detaches the socket's handlers, so the server's `stopped` is
+    // never read here: without its own call the offer would never appear on
+    // the one path most meetings actually end by.
+    h.pressStop();
+    expect(onMeetingEnded.mock.calls.map((c) => c[0])).toEqual(['m3']);
+  });
+
+  /**
+   * A bad end is still an end, and it is the end whose notes most need the
+   * pass: a meeting that dropped its connection has a gap in its live notes
+   * and a whole transcript on disk that could close it. Each of these paths
+   * ends a recording somewhere different in the strip, so each gets its own
+   * case rather than one standing for the rest.
+   */
+  it('offers a tidy-up after a server error, and after an unavailable', async () => {
+    for (const frame of [
+      { type: 'error', message: 'the engine went away' },
+      { type: 'unavailable', reason: 'engine_unavailable', message: 'the engine refused' },
+    ]) {
+      const onMeetingEnded = vi.fn();
+      const h = mount(undefined, { onMeetingEnded });
+      h.pressStart({ pick: 'Just me' });
+      await settle();
+      h.sockets[0]?.onopen?.();
+      h.sockets[0]?.serve({ type: 'ready', meetingId: 'm-bad', startedAt: 1_000, engine: 'test' });
+      h.sockets[0]?.serve(frame);
+      expect(onMeetingEnded.mock.calls.map((c) => c[0])).toEqual(['m-bad']);
+    }
+  });
+
+  it('offers a tidy-up once the reconnect has given up on a dropped meeting', async () => {
+    const onMeetingEnded = vi.fn();
+    const h = mount(undefined, { onMeetingEnded });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm-drop', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.onclose?.();
+    // Still trying: the meeting is not over, so there is nothing to offer yet.
+    expect(h.root.dataset.state).toBe('recording');
+    expect(onMeetingEnded).not.toHaveBeenCalled();
+    for (let i = 0; i < 40 && h.root.dataset.state === 'recording'; i++) {
+      h.fireRetry();
+      h.clock.at += 10_000;
+      h.sockets[h.sockets.length - 1]?.onclose?.();
+    }
+    expect(h.root.dataset.state).toBe('error');
+    expect(onMeetingEnded.mock.calls.map((c) => c[0])).toEqual(['m-drop']);
+  });
+
+  it('offers nothing for a start that never became a meeting', async () => {
+    // No `ready`, so no meeting id, so no transcript and nothing to tidy —
+    // the guard that makes it safe to fire on every bad end.
+    const onMeetingEnded = vi.fn();
+    const h = mount(undefined, { onMeetingEnded });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'unavailable', reason: 'not_configured', message: 'no key' });
+    expect(h.root.dataset.state).toBe('unavailable');
+    expect(onMeetingEnded).not.toHaveBeenCalled();
   });
 
   it('settles to idle when the server reports the meeting stopped', async () => {

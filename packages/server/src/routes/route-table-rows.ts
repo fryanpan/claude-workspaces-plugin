@@ -282,6 +282,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/meetings', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/meetings/:meetingId', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/meetings/:meetingId/speakers', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/meetings/:meetingId/notes-cleanup', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/notes-method', 'GET PUT'],
     ['share-scope', '/workspaces/:ws/docs/:docId/meeting-bot', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/meeting-bot', 'POST DELETE'],

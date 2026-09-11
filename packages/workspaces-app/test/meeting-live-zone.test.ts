@@ -256,6 +256,25 @@ describe('the provisional live zone', () => {
     expect(zone.washActive()).toBe(false);
   });
 
+  it('a held wash outlives the grace window, and never shortens one', () => {
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'words.', final: true });
+    zone.end();
+    // A tidy-up asked for long after the stop: the notes it writes are the
+    // freshest thing on the page and must still tint.
+    clock += WASH_GRACE_MS + 1;
+    expect(zone.washActive()).toBe(false);
+    zone.holdWash(60_000);
+    expect(zone.washActive()).toBe(true);
+    // A second, shorter hold cannot cut the first one short.
+    zone.holdWash(1);
+    clock += 30_000;
+    expect(zone.washActive()).toBe(true);
+    clock += 30_001;
+    expect(zone.washActive()).toBe(false);
+  });
+
   it('destroy removes the zone element', () => {
     const zone = createMeetingLiveZone({ parent, now });
     zone.destroy();

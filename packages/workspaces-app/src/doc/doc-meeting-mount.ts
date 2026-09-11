@@ -26,6 +26,7 @@ import {
 import type { LeadBanner } from '../lead-banner.ts';
 import { mountLeadBanner } from '../lead-banner.ts';
 import { createMeetingBotClient } from '../meeting-bot-client.ts';
+import { mountMeetingCleanupOffer } from '../meeting-cleanup-offer.ts';
 import { type MeetingLiveZone, createMeetingLiveZone } from '../meeting-live-zone.ts';
 import { othersOnDoc } from '../meeting-solo.ts';
 import { type MeetingStripHandle, mountMeetingStrip } from '../meeting-strip.ts';
@@ -127,6 +128,16 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
   });
   const zone = liveZone;
   scope.onCleanup(() => zone.destroy());
+  // The offer to read the notes once more, when a recording ends. It sits
+  // where the live zone sat — the end of the prose, next to the notes it is
+  // about — and it holds the settle wash open across its request, so the
+  // notes a tidy-up writes highlight like every other note of the meeting.
+  const cleanupOffer = mountMeetingCleanupOffer({
+    docId,
+    parent: editorMount,
+    liveZone: zone,
+  });
+  scope.onCleanup(() => cleanupOffer.destroy());
   // Nothing here counts the tinted notes any more: the new-content
   // indicator does, off the same editor transaction the margin already
   // listens to (doc-margin.ts), so a note arriving, stepping down or ageing
@@ -176,7 +187,13 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
     // knows when the doc moves between meetings — so the menu below cannot
     // go on offering the last meeting's cast as targets for a note being
     // written in this one.
-    onMeetingChange: (meetingId) => speakers.meetingChanged(meetingId),
+    onMeetingChange: (meetingId) => {
+      speakers.meetingChanged(meetingId);
+      // A new meeting is starting (`null`) or the doc has moved on: an offer
+      // to tidy the last one is no longer the offer to make.
+      if (meetingId === null) cleanupOffer.withdraw();
+    },
+    onMeetingEnded: (meetingId) => cleanupOffer.offer(meetingId),
     // The other record: what the meeting HEARD, behind the panel's fold.
     // Before this it lived only in the `-raw-transcript.md` beside the
     // server's data dir, which is nowhere for anyone not on that machine.
