@@ -223,6 +223,26 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(l.draft).toBe('');
     });
 
+    it('gives each element its own draft when a tap moves from one to the other', () => {
+      // Both had words kept. The card used to carry the open one's words onto
+      // the other element and throw that element's own away.
+      const l = look(1180, 'switched');
+      expect(l.snippet, 'CONTROL: the card moved').toBe('The full timetable, across the page');
+      expect(l.draft).toBe('Timetable note');
+      const back = look(1180, 'switchedBack');
+      expect(back.snippet, 'CONTROL: and moved back').toBe('Ferry times Six sailings');
+      expect(back.draft).toBe('Ferry note');
+    });
+
+    it('keeps the words typed in the resting card when a tap opens an element with its own', () => {
+      const l = look(1180, 'fromRest');
+      expect(l.snippet, 'CONTROL: the card moved').toBe('The full timetable, across the page');
+      expect(l.draft).toBe('Timetable note');
+      const back = look(1180, 'restBack');
+      expect(back.snippet, 'CONTROL: the resting card is about the page').toBe('About this page');
+      expect(back.draft).toBe('About the day');
+    });
+
     it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {
       const p = look(1180, 'portrait');
       expect(p.mode).toBe(true);

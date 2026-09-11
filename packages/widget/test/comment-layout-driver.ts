@@ -245,6 +245,13 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...k });
     await settle();
   };
+  /** Esc from script: after a CDP Escape, headless Chromium stops acking the
+   *  next touch (the page itself stays responsive), so the key is dispatched
+   *  where the mode listens for it. */
+  const escape = async (): Promise<void> => {
+    await cdp.evaluate(`dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+    await settle();
+  };
   const looks: Record<string, Look> = {};
   const look = async (name: string): Promise<void> => {
     looks[name] = (await cdp.evaluate(LOOK)) as Look;
@@ -326,11 +333,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await look('reentered');
     await tap(el('low'));
     await look('reopened');
-    // Esc from script: after a CDP Escape, headless Chromium stops acking the
-    // next touch (the page itself stays responsive), so the key is dispatched
-    // where the mode listens for it.
-    await cdp.evaluate(`dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
-    await settle();
+    await escape();
     await look('escaped');
     await tap(el('low'));
     await look('reopenedEsc');
@@ -355,6 +358,32 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await tap(fab);
     await tap(el('low'));
     await look('afterPending');
+    // Words kept on two elements, then a tap from one to the other: each card
+    // shows its own, and the words it leaves wait on theirs.
+    await cdp.evaluate('scrollTo(0, 0)');
+    await settle();
+    await tap(el('narrow'));
+    await type('Ferry note');
+    await escape();
+    await tap(el('wide'));
+    await type('Timetable note');
+    await escape();
+    await tap(el('narrow'));
+    await tap(el('wide'));
+    await look('switched');
+    await tap(el('narrow'));
+    await look('switchedBack');
+    // The same from the card the mode rests in, whose words are the page's.
+    await escape();
+    await tap(done);
+    await tap(fab);
+    await type('About the day');
+    await tap(el('wide'));
+    await look('fromRest');
+    await escape();
+    await tap(done);
+    await tap(fab);
+    await look('restBack');
     await tap(done);
   }
   return { width, height, looks };

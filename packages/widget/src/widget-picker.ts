@@ -354,13 +354,14 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   // The draft moves with you. Tapping an element while a draft is open
   // RE-ANCHORS what you were writing rather than throwing it away and
   // starting again — the composer is replaced, the sentence is not.
-  // Or, with nothing open, what was kept for this element when the mode last
-  // closed over it.
+  // Unless this element has words of its own waiting: then those come back,
+  // and the ones being left are kept on the element (or page) they were
+  // about, rather than carried over the top of them.
   const key = target ?? el;
+  const own = drafts.get(key);
+  if (own) keepDraft(el);
   const carried =
-    (existing?.querySelector('textarea') as HTMLTextAreaElement | null)?.value ||
-    drafts.get(key) ||
-    '';
+    own || (existing?.querySelector('textarea') as HTMLTextAreaElement | null)?.value || '';
   drafts.delete(key);
   existing?.remove();
   const quick = isPhoneFace();
