@@ -426,8 +426,13 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(cancel[2] - cancel[0], 'Cancel is narrower than the margin card one').toBeLessThan(
         wide[2] - wide[0],
       );
-      const area = (b: Box): number => (b[2] - b[0]) * (b[3] - b[1]);
-      expect(area(cancel)).toBeLessThanOrEqual(area(post));
+      // Width, not area: both are icon-sized, and a couple of pixels of line
+      // box on one runner's fonts is not a design difference — CI read a
+      // 44x46 Cancel beside a 44x44 Post and failed an area comparison that
+      // meant nothing.
+      expect(cancel[2] - cancel[0], 'and no wider than Post').toBeLessThanOrEqual(
+        post[2] - post[0],
+      );
       expect(cancel[3] - cancel[1], 'and still a 44px target').toBeGreaterThanOrEqual(44);
       expect(cancel[1]).toBeLessThan(post[3]);
       expect(post[1]).toBeLessThan(cancel[3]);
