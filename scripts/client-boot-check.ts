@@ -38,12 +38,25 @@
  * are the other tools. Widening it is fine; letting it get slow enough that
  * somebody takes it out of `verify` is not.
  *
- *   bun run check:client-boot [--keep] [--port N] [--timeout MS] [--shot out.png]
+ * LOAD AND MOUNT ARE TIMED SEPARATELY. The mount ceiling starts at the load
+ * event, because what happens before it is the transport delivering the
+ * bundle and what happens after it is the bundle building the editor — and
+ * only the second is what this check is for. They shared one ten-second clock
+ * until 2026-09-11, when a Mac whose loopback ran at ~135 KB/s took 15s to
+ * deliver `app.js` and failed the check for every builder on a page that
+ * mounted 41ms after it loaded. A slow load is now measured against a control
+ * and named (client-boot-transport.ts), not reported as a broken page.
  *
- *   --keep      leave the data dir and the client release root behind
- *   --port      first port to try (default 8800; the server walks up if busy)
- *   --timeout   ceiling for the editor to mount, in ms (default 10000)
- *   --shot      write a PNG of the loaded page, for looking at a failure
+ *   bun run check:client-boot [--keep] [--port N] [--timeout MS]
+ *                             [--load-timeout MS] [--shot out.png]
+ *
+ *   --keep          leave the data dir and the client release root behind
+ *   --port          port to bind (default 0: the OS picks a free one). A
+ *                   reserved fleet port is refused.
+ *   --timeout       ceiling for the editor to mount after the load event, in
+ *                   ms (default 10000)
+ *   --load-timeout  ceiling for the load event itself, in ms (default 90000)
+ *   --shot          write a PNG of the loaded page, for looking at a failure
  */
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -51,6 +64,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareClientRelease } from '../packages/server/src/client-release.ts';
+import { reservedPortOwner } from '../packages/server/src/reserved-ports.ts';
+import {
+  RESOURCE_TIMING_PROBE,
+  type Transfer,
+  describeTransport,
+} from './client-boot-transport.ts';
 import {
   type Browser,
   Cdp,
@@ -82,9 +101,26 @@ const EDITOR_SELECTOR = '#editor > .ProseMirror';
  *  makes this browser a returning visitor rather than a first arrival. */
 const IDENTITY_NAME_KEY = 'feedback-user-name';
 
+/** A load slower than this gets its transport measured and reported, even
+ *  when the check passes — so the machine's state is named on the day it
+ *  starts, not on the day it crosses the ceiling. */
+const SLOW_LOAD_MS = 5_000;
+
+/**
+ * Ports this check never binds, even when asked: the server's reserved list,
+ * plus two it does not carry. 7903 is another fleet service; 8800 was this
+ * check's own default, which meant every `verify` on the machine bound the
+ * same fixed port that other tooling also reaches for.
+ */
+const CHECK_AVOIDS: Readonly<Record<number, string>> = {
+  7903: 'a fleet service outside the server list',
+  8800: "this check's old fixed default",
+};
+
 interface Options {
   port: number;
   timeoutMs: number;
+  loadTimeoutMs: number;
   keep: boolean;
   shot?: string;
 }
@@ -94,19 +130,25 @@ export function parseArgs(argv: readonly string[]): Options {
     const i = argv.indexOf(`--${name}`);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const num = (name: string, fallback: number): number => {
+  const num = (name: string, fallback: number, min = 1): number => {
     const raw = read(name);
     if (raw === undefined) return fallback;
     const n = Number(raw);
-    if (!Number.isInteger(n) || n <= 0) throw new Error(`--${name}: expected a positive integer`);
+    if (!Number.isInteger(n) || n < min) {
+      throw new Error(`--${name}: expected an integer of at least ${min}`);
+    }
     return n;
   };
+  // 0, so the OS picks: a fixed default is a port every run on the machine
+  // competes for, and bin.ts announces the one it actually bound.
+  const port = num('port', 0, 0);
+  const owner = reservedPortOwner(port) ?? CHECK_AVOIDS[port];
+  if (owner)
+    throw new Error(`--port ${port} is reserved (${owner}); omit --port to let the OS pick`);
   return {
-    // 8800, not 8787: packages/server/src/reserved-ports.ts owns 8787, 8791,
-    // 7900 and 7902, and bin.ts refuses them. Above the reserved band this
-    // cannot collide with prod, staging, or the fleet's webhook receiver.
-    port: num('port', 8800),
+    port,
     timeoutMs: num('timeout', 10_000),
+    loadTimeoutMs: num('load-timeout', 90_000),
     keep: argv.includes('--keep'),
     ...(read('shot') !== undefined ? { shot: read('shot') as string } : {}),
   };
@@ -228,12 +270,23 @@ export function exceptionText(params: Record<string, unknown>): string {
  * would find a console that had already scrolled past it, on a page that no
  * longer has the object that threw.
  */
+interface PageResult {
+  errors: PageError[];
+  mounted: boolean;
+  /** From the load event to the mount (or to the mount deadline). */
+  mountMs: number;
+  /** From navigation to the load event; null when it never came. */
+  loadMs: number | null;
+  transfers: Transfer[];
+  /** Scripts the page names that had not finished arriving when it was read. */
+  pendingScripts: string[];
+}
+
 async function loadDocPage(
   cdp: Cdp,
   url: string,
-  timeoutMs: number,
-  shot: string | undefined,
-): Promise<{ errors: PageError[]; mounted: boolean; mountMs: number }> {
+  o: Pick<Options, 'timeoutMs' | 'loadTimeoutMs' | 'shot'>,
+): Promise<PageResult> {
   const errors: PageError[] = [];
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
@@ -277,21 +330,37 @@ async function loadDocPage(
   const loaded = cdp.once('Page.loadEventFired');
   const nav = await cdp.send('Page.navigate', { url });
   if (nav.errorText) throw new Error(`navigation failed: ${nav.errorText}`);
-  await withTimeout(loaded, timeoutMs, 'page load');
+  let loadMs: number | null = null;
+  try {
+    await withTimeout(loaded, o.loadTimeoutMs, 'page load');
+    loadMs = Date.now() - started;
+  } catch {
+    // Reported by the caller with the transport measured, not thrown as a
+    // bare timeout — see the module comment.
+  }
 
   // Poll, never sleep: a mount that takes 300ms costs 300ms, and the deadline
-  // is only ever paid by a page that is actually broken.
+  // is only ever paid by a page that is actually broken. The clock starts at
+  // the load event, so it measures the bundle and not the wire.
   const probe = `!!document.querySelector(${JSON.stringify(EDITOR_SELECTOR)})`;
   let mounted = false;
-  const deadline = started + timeoutMs;
-  while (Date.now() < deadline) {
+  const mountFrom = Date.now();
+  const deadline = mountFrom + o.timeoutMs;
+  while (loadMs !== null && Date.now() < deadline) {
     if (await cdp.evaluate(probe)) {
       mounted = true;
       break;
     }
     await sleep(100);
   }
-  const mountMs = Date.now() - started;
+  const mountMs = Date.now() - mountFrom;
+  const { done, scripts } = JSON.parse(String(await cdp.evaluate(RESOURCE_TIMING_PROBE))) as {
+    done: Transfer[];
+    scripts: string[];
+  };
+  const arrived = new Set(done.map((t) => t.url));
+  const pendingScripts = scripts.filter((src) => !arrived.has(src));
+  const shot = o.shot;
 
   if (shot) {
     const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
@@ -301,7 +370,7 @@ async function loadDocPage(
   // A late exception — one thrown after the editor mounted, during hydration
   // or a first render — is still a broken page, so give the listeners a beat.
   await sleep(250);
-  return { errors, mounted, mountMs };
+  return { errors, mounted, mountMs, loadMs, transfers: done, pendingScripts };
 }
 
 async function run(o: Options): Promise<number> {
@@ -409,21 +478,48 @@ async function run(o: Options): Promise<number> {
       },
     );
     cdp = await Cdp.connect(await pageSocketUrl(browser.port, 30_000));
-    const { errors, mounted, mountMs } = await loadDocPage(cdp, pageUrl, o.timeoutMs, o.shot);
+    const page = await loadDocPage(cdp, pageUrl, o);
+    const { errors, mounted, mountMs, loadMs } = page;
+    const transport =
+      loadMs === null || loadMs > SLOW_LOAD_MS
+        ? await describeTransport(page.transfers, page.pendingScripts, o.loadTimeoutMs)
+        : [];
 
     if (mounted && errors.length === 0) {
       console.log(
-        `✅ the built client booted: ${EDITOR_SELECTOR} mounted in ${mountMs}ms, nothing threw.`,
+        `✅ the built client booted: ${EDITOR_SELECTOR} mounted ${mountMs}ms after load, nothing threw.`,
       );
+      if (transport.length > 0) {
+        console.log(`   The load itself took ${loadMs}ms, which is the transport:`);
+        for (const line of transport) console.log(line);
+      }
       return 0;
     }
-    if (!mounted) {
+    if (loadMs === null) {
       console.error(
-        `❌ ${EDITOR_SELECTOR} never mounted within ${o.timeoutMs}ms — the page rendered its\n` +
+        `❌ the page never fired its load event within ${o.loadTimeoutMs}ms, so the editor\n` +
+          '   was never given the chance to mount. What the wire was doing:',
+      );
+      for (const line of transport) console.error(line);
+    } else if (!mounted) {
+      console.error(
+        `❌ ${EDITOR_SELECTOR} never mounted within ${o.timeoutMs}ms of the load event — the page rendered its\n` +
           '   chrome and no editor, which is exactly what production served after PR 817.',
       );
     }
     for (const e of errors) console.error(`❌ page ${e.kind}: ${e.text}`);
+    if (loadMs !== null && transport.length > 0) {
+      // Not the cause — the mount clock starts at the load event — but a
+      // reader of this failure should not have to rediscover the wire.
+      console.error(`   The load before it took ${loadMs}ms, which is the transport:`);
+      for (const line of transport) console.error(line);
+    }
+    if (loadMs === null) {
+      // Nothing about the bundle is known yet, so the bundle's usual suspects
+      // are not named: the wire above is the whole of what was measured.
+      console.error(`\n   ${pageUrl}\n   Raise --load-timeout if this machine is simply slow.`);
+      return 1;
+    }
     console.error(
       `\n   ${pageUrl}\n` +
         '   Re-run with --keep --shot /tmp/boot.png to look at it. The two causes\n' +

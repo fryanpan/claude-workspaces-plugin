@@ -24,6 +24,7 @@ import { listMeetings, meetingTranscriptPath } from '../src/meetings.ts';
 import { type ShareTarget, shareScopeAllows } from '../src/middleware/host-guard.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 // bun's per-test timeout defaults to 5000ms, and a wait budget above the
@@ -244,8 +245,13 @@ describe('meeting audio socket', () => {
     client.start();
     const ready = await client.waitFor('ready');
     client.speak(2);
-    // Let the partials land before stopping, so the stop is genuinely mid-turn.
-    await new Promise((r) => setTimeout(r, 100));
+    // Let the partials land before stopping, so the stop is genuinely mid-turn:
+    // one per chunk, polled rather than slept for the reason the socket-goes-
+    // away case below gives.
+    await waitFor(() => client.of('transcript').length >= 2, {
+      timeout: 15_000,
+      describe: 'both partials',
+    });
     client.stop();
     await client.waitFor('stopped');
     const stored = readFileSync(
@@ -262,21 +268,29 @@ describe('meeting audio socket', () => {
     client.start();
     const ready = await client.waitFor('ready');
     client.speak(7);
-    await new Promise((r) => setTimeout(r, 100));
+    // Close once the server has consumed all seven chunks — the seventh
+    // settles the turn, and the final transcript frame says so. This was a
+    // fixed 100ms, which raced macOS loopback: seven back-to-back sends were
+    // measured arriving as three, then four more 103ms later (Python to
+    // Python, so not Bun), and a close sent behind held audio reached the
+    // server's close handler 4.2s later — past the old two-second poll.
+    await waitFor(() => client.of('transcript').some((f) => f.final === true), {
+      timeout: 15_000,
+      describe: 'the settled turn',
+    });
     client.ws.close();
     // The record must close itself; nothing sent `stop`.
-    const deadline = Date.now() + 2_000;
-    let meetings: Array<{ endedAt: number | null; turns?: number }> = [];
-    while (Date.now() < deadline) {
-      const body = (await (
-        await fetch(`${base}/workspaces/${WS}/docs/tab-closed/meetings`)
-      ).json()) as {
-        meetings: Array<{ endedAt: number | null; turns?: number }>;
-      };
-      meetings = body.meetings;
-      if (meetings[0]?.endedAt !== null) break;
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    const meetings = await waitFor(
+      async () => {
+        const body = (await (
+          await fetch(`${base}/workspaces/${WS}/docs/tab-closed/meetings`)
+        ).json()) as {
+          meetings: Array<{ endedAt: number | null; turns?: number }>;
+        };
+        return body.meetings[0]?.endedAt != null ? body.meetings : undefined;
+      },
+      { timeout: 15_000, describe: 'the meeting to end without a stop' },
+    );
     expect(meetings).toHaveLength(1);
     expect(meetings[0]?.endedAt).not.toBeNull();
     expect(meetings[0]?.turns).toBe(1);

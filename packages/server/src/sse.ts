@@ -1,5 +1,6 @@
 import { newEventId } from './event-id.ts';
 import type { ReplayMarks } from './sse-marks.ts';
+import { type SseStreamWriter, createSseStreamWriter } from './sse-writer.ts';
 
 /**
  * Anything broadcast over SSE: thread/suggestion webhook payloads and the
@@ -642,31 +643,27 @@ export function openSseStream(
    */
   keepaliveMs: number = SSE_KEEPALIVE_MS,
 ): Response {
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-  const encoder = new TextEncoder();
+  // Every write goes through the writer, which hands it to the socket one
+  // event-loop turn later: see sse-writer.ts for the macOS hold it avoids.
+  let out: SseStreamWriter | null = null;
   let remove: (() => void) | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(c) {
-      controller = c;
+      const writer = createSseStreamWriter(c);
+      out = writer;
       const sink = {
         write: (event: string, data: unknown, id?: string) => {
-          if (!controller) return;
           const payload = transform
             ? transform(data as SsePayload & Record<string, unknown>)
             : data;
           const idLine = id ? `id: ${id}\n` : '';
-          const body = `${idLine}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-          controller.enqueue(encoder.encode(body));
+          writer.write(`${idLine}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
         },
-        close: () => {
-          try {
-            controller?.close();
-          } catch {}
-        },
+        close: () => writer.close(),
       };
       // initial comment so proxies flush headers
-      c.enqueue(encoder.encode(':ok\n\n'));
+      writer.write(':ok\n\n');
       remove = bus.add(docId, sink, shareId, agentId, shareMember);
       // Catch-up, BETWEEN registration and the first live write. Everything
       // in start() runs synchronously on one event loop, so no broadcast can
@@ -695,7 +692,7 @@ export function openSseStream(
       // periodic keepalive
       const keepalive = setInterval(() => {
         try {
-          c.enqueue(encoder.encode(':ka\n\n'));
+          writer.write(':ka\n\n');
         } catch {
           clearInterval(keepalive);
         }
@@ -704,6 +701,7 @@ export function openSseStream(
       (c as unknown as { _keepalive?: ReturnType<typeof setInterval> })._keepalive = keepalive;
     },
     cancel() {
+      out?.cancel();
       remove?.();
       const ka = (this as unknown as { _keepalive?: ReturnType<typeof setInterval> })._keepalive;
       if (ka) clearInterval(ka);
