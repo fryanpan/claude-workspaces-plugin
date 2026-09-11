@@ -3538,11 +3538,12 @@ body.board-body {
   font-variant-numeric: tabular-nums;
 }
 /* The two tables: one grid line per row, the time in a fixed right column
-   under its own header. */
+   under its own header. 104px, not 84: the header now NAMES its clock
+   ("File modified"), and a header that ellipsizes says nothing at all. */
 .library-cols,
 .library-tbl .library-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px;
+  grid-template-columns: minmax(0, 1fr) 104px;
   column-gap: 16px;
   align-items: center;
 }

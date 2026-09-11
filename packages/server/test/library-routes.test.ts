@@ -10,7 +10,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type LibraryPayload, createMarkdownLister } from '../src/library.ts';
@@ -93,6 +101,22 @@ describe('library routes', () => {
     expect(byName.get('Volunteer handbook')?.href).toMatch(/^\/workspaces\/[^/]+\/docs\//);
     expect(byName.get('tide-gauge.md')?.open).toBe('docs/tide-gauge.md');
     expect(lib.files.some((f) => f.name.includes('hidden'))).toBe(false);
+  });
+
+  /**
+   * Finding 1, on the real path: the row's time is the FILE's, so backdating
+   * the bytes moves it. Before, a bound doc's row read the doc's own activity
+   * and this assertion could not have been written.
+   */
+  it('reads a bound doc row from its file on disk, not the doc activity', async () => {
+    const bound = () => items().then((l) => l.files.find((f) => f.name === 'Volunteer handbook'));
+    const first = await bound();
+    expect(typeof first?.at).toBe('number');
+
+    const when = new Date(Date.now() - 9 * 86_400_000);
+    utimesSync(join(repo, 'handbook.md'), when, when);
+    const second = await bound();
+    expect(second?.at).toBe(when.getTime());
   });
 
   it('lists a discussion huddle under meetings', async () => {

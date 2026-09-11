@@ -104,6 +104,29 @@ describe('the Library front page', () => {
     expect(first.querySelector('.library-when')?.textContent).toBe('just now');
   });
 
+  it('says so, rather than guessing, for a file with no readable clock', async () => {
+    const noClock: LibraryPayload = {
+      project: null,
+      meetings: [],
+      files: [{ name: 'gone.md', href: '/f/9' }],
+    };
+    const { page, root } = drive({ payload: noClock });
+    await page.open();
+    expect(root.querySelector('.library-when')?.textContent).toBe('—');
+  });
+
+  it('names the clock in the header of each column', async () => {
+    const { page, root } = drive();
+    await page.open();
+    const headers = [...root.querySelectorAll('.library-cols')].map((h) =>
+      [...h.children].map((c) => c.textContent),
+    );
+    expect(headers).toEqual([
+      ['Title', 'Held'],
+      ['Name', 'File modified'],
+    ]);
+  });
+
   it('opens a full list, with its own history entry and a way back', async () => {
     const { page, root, history } = drive();
     await page.open();

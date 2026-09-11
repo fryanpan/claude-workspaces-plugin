@@ -5,8 +5,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   LIBRARY_MAX_HITS,
+  LIBRARY_NO_TIME,
   type LibraryPayload,
   libraryAgo,
+  libraryWhenColumn,
   searchLibrary,
 } from '../src/board/library-model.ts';
 
@@ -35,6 +37,14 @@ describe('libraryAgo', () => {
 
   it('reads a time slightly in the future as just now, not a negative age', () => {
     expect(libraryAgo(NOW + 5_000, NOW)).toBe('just now');
+  });
+});
+
+describe('the time column', () => {
+  it('reads an em dash, never a substituted clock, when the row carries none', () => {
+    // Positive control on the same function: a row that HAS one still reads.
+    expect(libraryWhenColumn({ name: 'Volunteer handbook', at: NOW - HOUR }, NOW)).toBe('1h ago');
+    expect(libraryWhenColumn({ name: 'A doc whose file went away' }, NOW)).toBe(LIBRARY_NO_TIME);
   });
 });
 

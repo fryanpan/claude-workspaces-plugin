@@ -35,8 +35,17 @@ import { scanFolderPaths } from './fs-scan.ts';
 export interface LibraryRow {
   /** The title a person knows it by: the doc's title, or the file's name. */
   name: string;
-  /** Epoch ms — when the meeting was held, or when the file last changed. */
-  at: number;
+  /**
+   * Epoch ms. A meeting: when it started. A file: WHEN ITS BYTES LAST
+   * CHANGED ON DISK, for every row of the list and not only the ones nobody
+   * has opened — the column used to mix that with a doc's last activity,
+   * so two rows of the same list answered two different questions.
+   *
+   * Absent for a file this server cannot stat: a doc bound to a path that
+   * has gone, or to something that is not a file at all. The page says so
+   * rather than substituting a clock it does have.
+   */
+  at?: number;
   /** Where the row opens: a doc's page on this board, or a mounted file. */
   href?: string;
   /** A project markdown file with no doc on this board yet: its path from the
@@ -76,8 +85,18 @@ export interface LibrarySources {
   docs: readonly DocMeta[];
   /** A doc's repo+path identity (`doc-key.ts`), when it has one. */
   docKeyOf: (docId: string) => string | undefined;
-  /** When the doc's most recent meeting started, or undefined if it never held one. */
-  lastMeetingAt: (docId: string) => number | undefined;
+  /** The doc's most recent meeting, or undefined if it never held one. */
+  lastMeeting: (docId: string) => { startedAt: number; endedAt: number | null } | undefined;
+  /**
+   * When the file this doc is bound to last changed on disk, or undefined
+   * when there is no file here to read.
+   *
+   * The Files list's ONE clock. A doc's own `lastActivityAt` is a different
+   * measurement — it moves for a comment, and not for a `git pull` that
+   * rewrote the file — so a list built from both answered "modified" two
+   * ways in one column.
+   */
+  fileMtime: (docId: string) => number | undefined;
   /** The checkout a project's files are read from, or null when none is left. */
   projectRoot: (repoKey: string) => string | null;
   /** The project's markdown files. */
@@ -90,8 +109,16 @@ export interface LibrarySources {
 
 const isMarkdownPath = (relPath: string): boolean => relPath.toLowerCase().endsWith('.md');
 
-/** Most recent first; ties by name so the order is stable across loads. */
+/**
+ * Most recent first; ties by name so the order is stable across loads. A row
+ * whose clock could not be read sorts after every row that has one — it is
+ * not "oldest", it is unknown, and putting it at the top would be a guess.
+ */
 function byRecency(a: LibraryRow, b: LibraryRow): number {
+  if (a.at === undefined || b.at === undefined) {
+    if (a.at !== b.at) return a.at === undefined ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  }
   return b.at - a.at || a.name.localeCompare(b.name);
 }
 
@@ -254,17 +281,21 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     // is a document somebody files on a board.
     if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
     const key = src.docKeyOf(meta.docId);
-    const heldAt = src.lastMeetingAt(meta.docId);
+    const held = src.lastMeeting(meta.docId);
     const discussion = meta.huddle === true && meta.huddleKind !== 'plan';
     const keyRel = key ? parseDocKey(key)?.relPath : undefined;
     const name = meta.title?.trim() || (keyRel ? posix.basename(keyRel) : meta.docId);
-    if (heldAt !== undefined || discussion) {
+    if (held !== undefined || discussion) {
       const href = docHref(src.workspaceId, meta);
-      if (href) meetings.push({ name, at: heldAt ?? meta.createdAt, href });
+      if (href) meetings.push({ name, at: held?.startedAt ?? meta.createdAt, href });
       continue;
     }
+    // The Files list's one clock, for a bound doc exactly as for a loose
+    // file: the bytes' own mtime. `lastActivityAt` measured the DOC — it
+    // moved for a comment and stood still for a `git pull` — so a column
+    // headed "Modified" was answering two questions at once.
     const href = docHref(src.workspaceId, meta);
-    if (href) files.push({ name, at: meta.lastActivityAt ?? meta.createdAt, href });
+    if (href) files.push({ name, at: src.fileMtime(meta.docId), href });
   }
 
   const repoKey = projectRepoKey(src.docs, src.docKeyOf);

@@ -23,7 +23,7 @@ import {
   type LibraryList,
   type LibraryPayload,
   type LibraryRow,
-  libraryAgo,
+  libraryWhenColumn,
   searchLibrary,
 } from './library-model.ts';
 
@@ -52,9 +52,15 @@ export interface LibraryPage {
   open(): Promise<void>;
 }
 
+/**
+ * The second column NAMES ITS CLOCK. "Modified" alone was read off two
+ * different measurements — a bound doc's last activity and an unopened file's
+ * mtime — and a reader comparing two rows of one list had no way to know.
+ * One clock now, and the header says which one it is.
+ */
 const COLUMNS: Record<'meetings' | 'files', [string, string]> = {
-  meetings: ['Title', 'When'],
-  files: ['Name', 'Modified'],
+  meetings: ['Title', 'Held'],
+  files: ['Name', 'File modified'],
 };
 const HEADINGS: Record<'meetings' | 'files', { recent: string; all: string; more: string }> = {
   meetings: { recent: 'Recent meetings', all: 'All meetings', more: 'See all meetings' },
@@ -93,7 +99,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       : `href="#" data-open="${escapeHtml(row.open ?? '')}"`;
     const name = hit?.nameHtml ?? escapeHtml(row.name);
     const label = hit ? `<span class="library-hitpath">${hit.listHtml}</span>` : '';
-    return `<a class="library-row" ${target} title="${escapeHtml(row.name)}"><span class="library-name">${name}</span>${label}<span class="library-when">${escapeHtml(libraryAgo(row.at, now()))}</span></a>`;
+    return `<a class="library-row" ${target} title="${escapeHtml(row.name)}"><span class="library-name">${name}</span>${label}<span class="library-when">${escapeHtml(libraryWhenColumn(row, now()))}</span></a>`;
   }
 
   function tableHtml(which: 'meetings' | 'files', rows: LibraryRow[]): string {

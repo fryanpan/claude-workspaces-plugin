@@ -10,7 +10,12 @@
 /** One row, as the server sends it (`packages/server/src/library.ts`). */
 export interface LibraryRow {
   name: string;
-  at: number;
+  /**
+   * A meeting's start, or a file's last change ON DISK. Absent for a file
+   * this server could not stat — the column says so rather than borrowing a
+   * different clock for that one row.
+   */
+  at?: number;
   /** Opens as a plain link. */
   href?: string;
   /** A project file with no doc yet — opened by `POST …/library/open`. */
@@ -47,6 +52,18 @@ export function libraryAgo(at: number, now: number): string {
   if (d < 30) return `${Math.floor(d / 7)}w ago`;
   if (d < 365) return `${Math.floor(d / 30)}mo ago`;
   return `${Math.floor(d / 365)}y ago`;
+}
+
+/**
+ * What a row's time column reads when the server could not stat its file.
+ * An em dash, not a guess: the doc is still openable, and the one thing the
+ * page must not do is print a clock it did not measure.
+ */
+export const LIBRARY_NO_TIME = '—';
+
+/** The row's age, or the em dash when there is no clock reading for it. */
+export function libraryWhenColumn(row: LibraryRow, now: number): string {
+  return row.at === undefined ? LIBRARY_NO_TIME : libraryAgo(row.at, now);
 }
 
 /** One search hit, and which list it came from. */

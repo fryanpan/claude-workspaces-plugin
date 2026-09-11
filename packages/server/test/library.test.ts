@@ -31,7 +31,8 @@ function sources(over: Partial<LibrarySources> = {}): LibrarySources {
     workspaceId: 'w-test',
     docs: [],
     docKeyOf: () => undefined,
-    lastMeetingAt: () => undefined,
+    lastMeeting: () => undefined,
+    fileMtime: () => undefined,
     projectRoot: () => '/box/dev/riverbend',
     markdownFiles: () => [],
     mountedFiles: () => [],
@@ -50,7 +51,8 @@ describe('buildLibrary', () => {
           meta('d-plan', { title: 'Saltmarsh plan', huddle: true, huddleKind: 'plan' }),
           meta('d-note', { title: 'Volunteer handbook', lastActivityAt: 5_000 }),
         ],
-        lastMeetingAt: (id) => (id === 'd-sync' ? 9_000 : undefined),
+        lastMeeting: (id) => (id === 'd-sync' ? { startedAt: 9_000, endedAt: null } : undefined),
+        fileMtime: (id) => (id === 'd-note' ? 5_000 : 2_000),
       }),
     );
     expect(lib.meetings.map((r) => [r.name, r.at])).toEqual([
@@ -59,6 +61,36 @@ describe('buildLibrary', () => {
     ]);
     expect(lib.files.map((r) => r.name)).toEqual(['Volunteer handbook', 'Saltmarsh plan']);
     expect(lib.meetings[0]?.href).toBe('/workspaces/w-test/docs/d-sync');
+  });
+
+  /**
+   * Finding 1. `lastActivityAt` moves for a comment and stands still for a
+   * `git pull`; an unopened file's row is its mtime. One column, two
+   * measurements — so a bound doc's row reads from the file as well.
+   */
+  it('times every file row by its file on disk, never the doc activity', () => {
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-note', { title: 'Volunteer handbook', lastActivityAt: 9_999_999 }),
+          meta('d-gone', { title: 'A doc whose file went away', lastActivityAt: 8_888_888 }),
+        ],
+        docKeyOf: (id) => (id === 'd-note' ? makeDocKey(REPO, 'handbook.md') : undefined),
+        fileMtime: (id) => (id === 'd-note' ? 4_000 : undefined),
+        markdownFiles: () => [
+          { relPath: 'handbook.md', mtimeMs: 4_000 },
+          { relPath: 'README.md', mtimeMs: 6_000 },
+        ],
+      }),
+    );
+    expect(lib.files.map((r) => [r.name, r.at])).toEqual([
+      ['README.md', 6_000],
+      // The bound doc, timed by its file — `lastActivityAt` is far newer.
+      ['Volunteer handbook', 4_000],
+      // No clock reading at all rather than a substitute — and last, because
+      // unknown is not "oldest".
+      ['A doc whose file went away', undefined],
+    ]);
   });
 
   it("leaves out a review's members and the board's own namespaces", () => {
@@ -81,6 +113,7 @@ describe('buildLibrary', () => {
       sources({
         docs,
         docKeyOf: (id) => keys[id],
+        fileMtime: (id) => (id === 'd-plan' ? 2_000 : undefined),
         markdownFiles: () => [
           { relPath: 'docs/plan.md', mtimeMs: 2_000 },
           { relPath: 'README.md', mtimeMs: 3_000 },
@@ -98,7 +131,7 @@ describe('buildLibrary', () => {
       { name: 'guide/README.md', at: 4_000, open: 'docs/guide/README.md' },
       // Not `./README.md`: a root file keeps its bare name.
       { name: 'README.md', at: 3_000, open: 'README.md' },
-      { name: 'Riverbend project plan', at: 1_000, href: '/workspaces/w-test/docs/d-plan' },
+      { name: 'Riverbend project plan', at: 2_000, href: '/workspaces/w-test/docs/d-plan' },
     ]);
   });
 

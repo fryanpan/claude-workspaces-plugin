@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
@@ -106,6 +107,7 @@ function sourcesFor(
   const { docStore, mounts, dataDir } = ctx;
   const ids = new Set(scope.board.docIds);
   const docs = docStore.list().filter((m) => ids.has(m.docId));
+  const boundPaths = new Map(docs.map((m) => [m.docId, m.sourceUrl]));
   // A local-only project's files must not leave the machine, and their NAMES
   // are the first thing that would: off the box, such a project lists only
   // the docs already filed on the board, exactly as `/mounts/<id>` refuses
@@ -116,12 +118,25 @@ function sourcesFor(
     workspaceId: scope.workspaceId,
     docs,
     docKeyOf: (docId) => docStore.repos.primaryKeyFor(docId),
-    lastMeetingAt: (docId) => {
-      let latest: number | undefined;
+    lastMeeting: (docId) => {
+      let latest: { startedAt: number; endedAt: number | null } | undefined;
       for (const m of listMeetings(dataDir, docId)) {
-        if (latest === undefined || m.startedAt > latest) latest = m.startedAt;
+        if (latest === undefined || m.startedAt > latest.startedAt) {
+          latest = { startedAt: m.startedAt, endedAt: m.endedAt };
+        }
       }
       return latest;
+    },
+    // Read off the metas already in hand, never `docStore.get`: hydrating
+    // every doc on the board to draw a list of them is the wrong price for a
+    // page view. `statSync` never materializes a cloud-synced file, so an
+    // online-only file costs a syscall rather than a download — the same
+    // reason `createMarkdownLister` stats instead of reading.
+    fileMtime: (docId) => {
+      const path = boundPaths.get(docId);
+      if (path === undefined || !path.startsWith('/')) return undefined;
+      const st = statSync(path, { throwIfNoEntry: false });
+      return st?.isFile() ? st.mtimeMs : undefined;
     },
     projectRoot: (repoKey) => (hidden(repoKey) ? null : mounts.rootFor(repoKey)),
     markdownFiles: ctx.markdownFiles,
