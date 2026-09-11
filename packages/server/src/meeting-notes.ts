@@ -1062,6 +1062,27 @@ export function beginNotesSession(
    */
   let priorRaw: NotesTurn[] = [];
   let lastTickNo = 0;
+  /**
+   * The one promise every write on this meeting orders itself behind — the
+   * composes, the renames, the engine's late reattributions, the note-taker
+   * change lines.
+   *
+   * IT MAY NEVER REJECT, AND THAT IS WHAT `onChain` IS FOR. A rejected
+   * promise is not a step that failed, it is a chain that has STOPPED: every
+   * `chain.then(step)` after it skips its callback and re-raises, so one
+   * thrown line silently ends the note-taking for the rest of the meeting —
+   * no tick composes, no `notes_progress` frame reaches the live zone to
+   * take its words back off the screen, and `end()`'s own `await settle()`
+   * throws before it can emit the meeting summary. The evidence is an
+   * absence in the log, which is the hardest kind to read: a meeting that
+   * wrote a note and then quietly stopped looks exactly like a meeting
+   * nobody spoke in.
+   *
+   * Not hypothetical. `nameSpeaker` puts `onRelabel` on this chain, and a
+   * person naming a voice mid-meeting is an ordinary gesture; so is the
+   * eager section open, whose `lifecycle` call sits outside the compose's
+   * own try. Neither one is worth a meeting.
+   */
   let chain: Promise<void> = Promise.resolve();
   const names: Record<string, string> = {};
   /**
@@ -1134,6 +1155,27 @@ export function beginNotesSession(
 
   const lifecycle = (phase: NotesTickLifecycle['phase'], tick: number, turns: number[]) =>
     deps.onTickLifecycle?.({ docId: ids.docId, meetingId: ids.meetingId, tick, phase, turns });
+
+  /**
+   * Append a step to `chain` that cannot poison it.
+   *
+   * Every step reports its own failures already — a compose that threw, a
+   * write the doc refused, an outline that would not read. What this catches
+   * is the throw nobody expected, and it turns it into one error line and a
+   * chain that is still usable, instead of a meeting that ends without
+   * saying so. Reported through `onError` for the same reason every other
+   * pipeline failure is: `meeting-notes-doc.ts` prints those, so the line
+   * lands in the log beside the tick it belongs to.
+   */
+  const onChain = (step: () => void | Promise<void>): void => {
+    chain = chain.then(step).catch((err) => {
+      deps.onError?.(
+        `${ids.docId} meeting ${ids.meetingId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+  };
 
   /**
    * The tick waiting behind a compose that is RUNNING, if one is.
@@ -1269,7 +1311,7 @@ export function beginNotesSession(
       // The composer is idle. This tick gets its own compose, exactly as
       // every tick did before merging existed — merging an idle moment would
       // fold two separate stretches of the meeting into one note for nothing.
-      chain = chain.then(() => guarded(tick));
+      onChain(() => guarded(tick));
       return;
     }
     if (queued !== null) {
@@ -1291,7 +1333,7 @@ export function beginNotesSession(
     // helped itself to the next tick would run ahead of a rename queued
     // between the two — which is the rename landing under the compose it was
     // supposed to correct.
-    chain = chain.then(async () => {
+    onChain(async () => {
       drainScheduled = false;
       const merged = queued;
       queued = null;
@@ -2005,7 +2047,7 @@ export function beginNotesSession(
       // the first revision and marked unsure by the second.
       if (reattributionQueued) return;
       reattributionQueued = true;
-      chain = chain.then(applyRevisions);
+      onChain(applyRevisions);
     },
   });
 
@@ -2037,7 +2079,7 @@ export function beginNotesSession(
       // minute and contradicts the UI is worse than none.
       const at = clock();
       // One line, on the chain, addressed to this meeting's own section.
-      chain = chain.then(() => {
+      onChain(() => {
         let outline: readonly prose.OutlineEntry[] = [];
         try {
           outline = deps.readOutline?.({ docId: ids.docId, meetingId: ids.meetingId }) ?? [];
@@ -2130,7 +2172,7 @@ export function beginNotesSession(
       // before the rename), and the rewrite has to land after it, not under
       // it. Every later tick then reads an outline that already says the new
       // name, so it never comes back.
-      chain = chain.then(() => {
+      onChain(() => {
         deps.onRelabel?.({
           docId: ids.docId,
           meetingId: ids.meetingId,
@@ -2142,14 +2184,29 @@ export function beginNotesSession(
       });
     },
     async end(): Promise<void> {
-      ticker.end();
-      await settle();
-      if (carry.length > 0) {
-        // The last compose before the end failed and nothing after it could
-        // retry. One more attempt; if this one fails too the words stay in
-        // the transcript record and the notes go without them.
-        composeTick({ tick: lastTickNo + 1, reason: 'end', turns: [] });
+      // THE SUMMARY IS EMITTED WHATEVER HAPPENS ABOVE IT, and this try is the
+      // whole reason. Every line below it is instrumentation — the last
+      // compose, the final outline read, the timing file — and a meeting that
+      // ends without a word in the log about how much of itself reached the
+      // notes is exactly the state a production meeting was found in. The
+      // counts a failed stop can still report are worth more than silence,
+      // and the failure itself is now named rather than inferred from what is
+      // missing.
+      try {
+        ticker.end();
         await settle();
+        if (carry.length > 0) {
+          // The last compose before the end failed and nothing after it could
+          // retry. One more attempt; if this one fails too the words stay in
+          // the transcript record and the notes go without them.
+          composeTick({ tick: lastTickNo + 1, reason: 'end', turns: [] });
+          await settle();
+        }
+      } catch (err) {
+        deps.onError?.(
+          `${ids.docId} meeting ${ids.meetingId}: the final notes pass failed — ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
       }
       if (refusedTooLong > 0) {
         deps.onError?.(
@@ -2190,7 +2247,13 @@ export function beginNotesSession(
           deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
         }
       }
-      ideas.close(finalNotes);
+      // Guarded for the reason the whole prologue above is: everything from
+      // here to the summary is bookkeeping, and none of it is worth the line.
+      try {
+        ideas.close(finalNotes);
+      } catch (err) {
+        deps.onError?.(err instanceof Error ? err.message : 'notes idea ledger close failed');
+      }
       // NOT an `onError`. A lost idea is a measurement, not a stage that
       // threw: the deterministic check is a proxy (`notes-idea-coverage.ts`)
       // and every caller treats `onError` as "something in the pipeline
@@ -2204,7 +2267,11 @@ export function beginNotesSession(
       const latencies = (timing?.rows() ?? [])
         .map((r) => r.settledToWrittenMs)
         .filter((v): v is number => v !== null);
-      timing?.summary();
+      try {
+        timing?.summary();
+      } catch (err) {
+        deps.onError?.(err instanceof Error ? err.message : 'notes timing summary failed');
+      }
       // Summed at the stop over rows written as the meeting ran, so the
       // total is arithmetic over what the API reported rather than a rate
       // anybody measured once. A meeting that never reached a model has no

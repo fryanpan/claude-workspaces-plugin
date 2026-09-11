@@ -25,6 +25,7 @@ import { type NotesHeadingMemory, withServerNotesSinks } from '../src/meeting-no
 import {
   type NotesComposeInput,
   type NotesMeetingSummary,
+  type NotesRelabel,
   type TickScheduler,
   beginNotesSession,
 } from '../src/meeting-notes.ts';
@@ -145,6 +146,13 @@ export interface NotesTickHarnessOptions {
   /** Share a heading memory across two harnesses to model a second meeting on
    *  one doc. */
   heading?: NotesHeadingMemory;
+  /**
+   * A caller's own rename sink, run after the doc's — the seam
+   * `withServerNotesSinks` offers as `onRelabel`, and the only one a script
+   * can make throw. It is here so a test can ask what a THROWING step on the
+   * compose chain does to the ticks behind it.
+   */
+  onRelabel?: (relabel: NotesRelabel) => void;
   /** A doc a second harness is already driving, so two meetings can run over
    *  one `Y.Doc`. */
   ydoc?: Y.Doc;
@@ -199,6 +207,8 @@ export interface NotesTickHarnessOptions {
 export interface NotesTickHarness {
   /** Settle these utterances as turns. Nothing is written until `tick()`. */
   say(...utterances: Utterance[]): void;
+  /** Name a voice mid-meeting, the way a tap on a speaker pill does. */
+  nameSpeaker(label: string, name: string): void;
   /** Let the room fall quiet: fire the pause tick and wait for its write. */
   tick(): Promise<TickSnapshot>;
   /** `say` then `tick` — the ordinary unit of a script. */
@@ -308,6 +318,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
       onMeetingSummary: (s) => {
         summary = s;
       },
+      ...(opts.onRelabel ? { onRelabel: opts.onRelabel } : {}),
       onTickLifecycle: (event) => {
         // Every terminal phase, `empty` included: this set is what `tick()`
         // waits on, and a tick that composed nothing is as finished as one
@@ -398,6 +409,9 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     async speak(...utterances) {
       harness.say(...utterances);
       return harness.tick();
+    },
+    nameSpeaker(label, name) {
+      session.nameSpeaker(label, name);
     },
     sayPartial(text, speaker) {
       const turn = turnNo++;
