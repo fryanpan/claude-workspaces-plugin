@@ -111,7 +111,7 @@ describe('a grouping cannot be shared on its own', () => {
       shareLinkHosts: ['share.example.test'],
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     // A real board. This is what `create_workspace` makes, and it is the
     // only id the share routes will accept after this change.
@@ -202,7 +202,7 @@ describe('a grouping cannot be shared on its own', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     // No re-seed: the restart is on the SAME data dir, so `boardId` — the
     // board every fixture here is filed on and every share is scoped to —
     // comes back with it. A fresh board would be an empty one, and the

@@ -60,7 +60,7 @@ describe("a linked doc's discussion counts too", () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-threads-stall-'));
     handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: QUIET_MS });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

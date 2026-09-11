@@ -61,7 +61,7 @@ describe('a resident doc parked on a file that stopped answering', () => {
     // Round one: the file answers. Create, bind and attach the doc, then shut
     // down so the next round has to hydrate it from disk.
     const first = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${first.port}`;
+    const base = `http://127.0.0.1:${first.port}`;
     const post = (path: string, body: unknown) =>
       fetch(`${base}${path}`, {
         method: 'POST',
@@ -94,7 +94,7 @@ describe('a resident doc parked on a file that stopped answering', () => {
 
   it('tells an editor it is parked, then re-binds once the quarantine expires', async () => {
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     const docUrl = `${base}/workspaces/${ws}/docs/${DOC_ID}`;
     const status = async () => (await (await fetch(`${docUrl}/status`)).json()) as Status;
 

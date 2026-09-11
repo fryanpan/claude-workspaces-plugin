@@ -30,7 +30,7 @@ function resolveBaseUrl(): string {
   if (discovery) {
     try {
       const j = JSON.parse(readFileSync(discovery, 'utf8')) as { port?: number };
-      if (j.port) return `http://localhost:${j.port}`;
+      if (j.port) return `http://127.0.0.1:${j.port}`;
     } catch {
       // fall through
     }

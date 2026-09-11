@@ -106,7 +106,7 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     workspaceId = await newBoard('huddle-board');
   });
 
@@ -273,7 +273,7 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
         dataDir,
         ...access.serverOptions,
       });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       const row = (await boardDocs(workspaceId)).find((d) => d.docId === r.docId);
       expect(row?.huddle).toBe(true);
       expect(row?.title).toBe(r.meta.title);

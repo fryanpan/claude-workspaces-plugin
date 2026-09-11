@@ -54,7 +54,7 @@ describe('Cloudflare Access JWT verification', () => {
 
     dataDir = mkdtempSync(join(tmpdir(), 'cf-access-test-'));
     handle = createServer({ port: 0, dataDir, cfAccess });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     // Through the handle: these servers gate an unauthenticated POST, which
     // is the very thing they exist to prove.
     WS = seedBoardOnHandle(handle);
@@ -196,7 +196,7 @@ describe('a verified Access email mints the same identity as a code', () => {
       emailCodeSignIn: true,
       cfAccess: { teamDomain: TEAM, audience: AUD, jwks: { keys: [publicJwk] } },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     // Through the handle: these servers gate an unauthenticated POST, which
     // is the very thing they exist to prove.
     WS = seedBoardOnHandle(handle);
@@ -305,7 +305,7 @@ describe('server with cfAccess unset (default)', () => {
   });
 
   it('serves requests without any auth check', async () => {
-    const r = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/docs`);
+    const r = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/docs`);
     expect(r.status).toBe(200);
   });
 });

@@ -122,7 +122,7 @@ describe('sharing gate over HTTP', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     // A board is the unit of sharing, so the bind is filed on one and the
     // share below covers that board. The bind's own id is a GROUPING and can

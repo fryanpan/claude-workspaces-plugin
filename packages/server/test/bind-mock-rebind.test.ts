@@ -24,7 +24,7 @@ describe('bind_mock rebind (POST /workspaces/<ws>/docs on an existing mockup doc
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-rebind-test-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

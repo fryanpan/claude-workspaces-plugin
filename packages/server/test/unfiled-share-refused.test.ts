@@ -82,7 +82,7 @@ describe('the Unfiled board cannot be shared', () => {
   let boardId: string;
 
   const local = (path: string, body: unknown, method = 'POST') =>
-    fetch(`http://localhost:${handle.port}${path}`, {
+    fetch(`http://127.0.0.1:${handle.port}${path}`, {
       method,
       headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
       body: JSON.stringify(body),

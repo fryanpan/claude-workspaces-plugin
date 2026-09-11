@@ -33,6 +33,7 @@ function startCaptureServer(): {
   const hits: CapturedRequest[] = [];
   const server = Bun.serve({
     port: 0,
+    hostname: '127.0.0.1',
     async fetch(req) {
       const buf = await req.arrayBuffer();
       const bytes = new Uint8Array(buf);
@@ -502,6 +503,7 @@ describe('server Sentry: configured — reaches Sentry end to end', () => {
     const docId = `w-${crypto.randomUUID()}`;
     const testServer = Bun.serve({
       port: 0,
+      hostname: '127.0.0.1',
       async fetch(req) {
         const pathname = new URL(req.url).pathname;
         return withRouteSpan(req, pathname, async () => new Response('ok'));

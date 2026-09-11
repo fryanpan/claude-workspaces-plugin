@@ -102,8 +102,8 @@ describe('ws sync', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-ws-'));
     handle = createServer({ port: 0, dataDir });
-    wsBase = `ws://localhost:${handle.port}`;
-    restBase = `http://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
+    restBase = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(restBase);
   });
 

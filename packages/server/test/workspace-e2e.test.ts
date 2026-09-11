@@ -26,7 +26,7 @@ describe('workspace folder-review e2e (HTTP)', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'ws-e2e-data-'));
     folder = mkdtempSync(join(tmpdir(), 'ws-e2e-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     // A small workspace: one markdown, one ts, one json — nested so the tree

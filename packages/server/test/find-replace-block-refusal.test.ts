@@ -25,7 +25,7 @@ describe('find_and_replace refusal names the verb that does the job', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-far-block-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const file = join(dataDir, 'far-block.md');
     writeFileSync(file, 'A paragraph holding the anchor phrase.\n');

@@ -30,7 +30,7 @@ describe('find_and_replace — replaceAll over HTTP', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-far-bulk-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

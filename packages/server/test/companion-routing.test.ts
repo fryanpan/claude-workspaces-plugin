@@ -122,7 +122,7 @@ describe('companion (:edit) doc comments route to the member watchers', () => {
     writeFileSync(join(repo, 'README.md'), '# Title\n\nBody changed.\n');
     writeFileSync(join(repo, 'Main.kt'), 'fun main() { println("x") }\n');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

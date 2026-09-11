@@ -67,7 +67,7 @@ describe(`POST /workspaces/${WS}/docs/:id/threads dedupes a repeated requestId`,
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'double-comment-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const file = join(dataDir, 'plan.md');
     writeFileSync(file, '# Plan\n\nThe sample paragraph needs a review.\n');
@@ -279,7 +279,7 @@ describe('a requestId retry on a review-item anchor is deduped before the waitin
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'double-comment-review-item-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

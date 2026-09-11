@@ -29,7 +29,7 @@ describe('projection narrows legacy triagedAgainst rows', () => {
     // Phase 1: a normal board with one placed task, then stop the server so
     // the sidecar can be aged into the legacy shape by hand.
     let seed: ServerHandle | null = createServer({ port: 0, dataDir });
-    const seedBase = `http://localhost:${seed.port}`;
+    const seedBase = `http://127.0.0.1:${seed.port}`;
     const mk = await fetch(`${seedBase}/workspaces`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -58,7 +58,7 @@ describe('projection narrows legacy triagedAgainst rows', () => {
 
     // Phase 2: the server every reader actually talks to.
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

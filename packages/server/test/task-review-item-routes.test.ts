@@ -105,7 +105,7 @@ describe('task review-item routes', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-review-item-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
   afterAll(async () => {
     await handle.stop();

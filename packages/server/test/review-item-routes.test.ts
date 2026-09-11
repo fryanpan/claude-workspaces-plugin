@@ -102,7 +102,7 @@ async function seedThread(docId: string, review?: ReviewPayload): Promise<Thread
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'review-item-routes-'));
   handle = createServer({ port: 0, dataDir });
-  base = `http://localhost:${handle.port}`;
+  base = `http://127.0.0.1:${handle.port}`;
   WS = await seedBoard(base);
 });
 afterAll(async () => {
@@ -873,7 +873,7 @@ describe('undo respects the visitor gate — a share visitor cannot spend the AP
       debounceMs: 10 * 60_000,
     });
     gatedHandle = createServer({ port: 0, dataDir: gatedDir, summarizer });
-    gatedBase = `http://localhost:${gatedHandle.port}`;
+    gatedBase = `http://127.0.0.1:${gatedHandle.port}`;
     WS = await seedBoard(gatedBase);
   });
   afterAll(async () => {

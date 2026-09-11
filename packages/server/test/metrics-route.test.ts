@@ -72,7 +72,7 @@ describe('GET /api/metrics', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'metrics-route-'));
     srcDir = mkdtempSync(join(tmpdir(), 'metrics-route-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

@@ -136,7 +136,7 @@ describe('spoken asks on a huddle doc', () => {
         },
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     workspaceId = (
       (await (await post('/workspaces', { name: 'spoken-asks-board' })).json()) as {
@@ -164,7 +164,7 @@ describe('spoken asks on a huddle doc', () => {
   });
 
   it('files the task, the research row with its placeholder, and the review thread', async () => {
-    const ws = new WebSocket(`ws://localhost:${handle.port}${meetingSocketPath(WS, docId)}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}${meetingSocketPath(WS, docId)}`);
     ws.binaryType = 'arraybuffer';
     const frames: Array<{ type: string; final?: boolean; text?: string }> = [];
     ws.addEventListener('message', (ev) => frames.push(JSON.parse(ev.data as string)));

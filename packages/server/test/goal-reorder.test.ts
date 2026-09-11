@@ -424,7 +424,7 @@ describe('POST /workspaces/:id/goals/reorder', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'goal-reorder-http-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

@@ -85,7 +85,7 @@ describe('operator routes refuse browser callers', () => {
         minIntervalMs: 0,
       }),
     });
-    return `http://localhost:${handle.port}`;
+    return `http://127.0.0.1:${handle.port}`;
   };
 
   afterEach(async () => {

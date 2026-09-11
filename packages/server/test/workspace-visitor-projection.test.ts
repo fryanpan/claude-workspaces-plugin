@@ -97,7 +97,7 @@ describe('a share visitor reads a projected workspace, not the stored record', (
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', { name: 'search-revamp' });
     expect(ws.status).toBe(200);

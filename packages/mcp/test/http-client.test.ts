@@ -41,13 +41,13 @@ describe('resolveBaseUrl', () => {
 
   it('reads the port out of the discovery file when no override is set', () => {
     expect(resolveBaseUrl(worldWithDiscovery(JSON.stringify({ port: 8787 })))).toBe(
-      'http://localhost:8787',
+      'http://127.0.0.1:8787',
     );
   });
 
   it('honours a non-default port, which is the whole reason discovery exists', () => {
     expect(resolveBaseUrl(worldWithDiscovery(JSON.stringify({ port: 51234 })))).toBe(
-      'http://localhost:51234',
+      'http://127.0.0.1:51234',
     );
   });
 
@@ -96,9 +96,9 @@ describe('resolveBaseUrl', () => {
       existsSync: () => true,
       readFileSync: () => JSON.stringify({ port }),
     });
-    expect(resolveBaseUrl(deps)).toBe('http://localhost:8787');
+    expect(resolveBaseUrl(deps)).toBe('http://127.0.0.1:8787');
     port = 8790;
-    expect(resolveBaseUrl(deps)).toBe('http://localhost:8790');
+    expect(resolveBaseUrl(deps)).toBe('http://127.0.0.1:8790');
   });
 });
 

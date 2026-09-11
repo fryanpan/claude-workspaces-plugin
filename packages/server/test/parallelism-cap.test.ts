@@ -261,7 +261,7 @@ describe('the cap through the server', () => {
       // deterministic on every platform (see dispatch-routes.test.ts).
       dispatchWatchFactory: () => ({ close: () => {} }),
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

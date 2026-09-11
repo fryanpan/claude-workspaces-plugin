@@ -80,7 +80,7 @@ describe('a doc thread reaches the boards holding the doc', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'board-doc-events-'));
     srcDir = mkdtempSync(join(tmpdir(), 'board-doc-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

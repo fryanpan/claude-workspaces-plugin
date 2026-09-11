@@ -40,7 +40,7 @@ describe('deletedSnippet anchor hint (HTTP)', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'delsnip-data-'));
     folder = mkdtempSync(join(tmpdir(), 'delsnip-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     mkdirSync(join(folder, 'src'));

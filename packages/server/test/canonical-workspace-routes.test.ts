@@ -100,7 +100,7 @@ describe('the board collections that moved under /workspaces/<id>', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'canonical-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

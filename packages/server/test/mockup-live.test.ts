@@ -74,7 +74,7 @@ describe('a bound mockup updates in place and keeps its rounds', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-mock-live-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

@@ -31,6 +31,7 @@ function startCaptureServer(): { dsn: string; hits: () => Hit[]; stop: () => voi
   const hits: Hit[] = [];
   const server = Bun.serve({
     port: 0,
+    hostname: '127.0.0.1',
     async fetch(req) {
       const bytes = new Uint8Array(await req.arrayBuffer());
       const isGzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
@@ -61,7 +62,7 @@ let h: ServerHandle;
 let dataDir: string;
 
 const fromBox = (method: string, extra: Record<string, string> = {}) =>
-  fetch(`http://localhost:${h.port}/api/sentry`, {
+  fetch(`http://127.0.0.1:${h.port}/api/sentry`, {
     method,
     headers: { host: `localhost:${h.port}`, ...extra },
   });
@@ -182,7 +183,7 @@ describe('/api/sentry with a DSN pointed at a capture server', () => {
   it('refuses a browser (origin header) on GET and POST alike, sending nothing', async () => {
     const hitsBefore = capture.hits().length;
     for (const method of ['GET', 'POST']) {
-      const r = await fromBox(method, { origin: `http://localhost:${h.port}` });
+      const r = await fromBox(method, { origin: `http://127.0.0.1:${h.port}` });
       expect(r.status).toBeGreaterThanOrEqual(400);
     }
     await flushServerSentry(1000);

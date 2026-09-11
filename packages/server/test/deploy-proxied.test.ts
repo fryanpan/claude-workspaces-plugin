@@ -117,7 +117,7 @@ afterAll(async () => {
 
 /** The operator, through the edge, with a valid Access token. */
 const viaEdge = (path: string, method: string) =>
-  fetch(`http://localhost:${h.port}${path}`, {
+  fetch(`http://127.0.0.1:${h.port}${path}`, {
     method,
     headers: {
       host: PROXIED_HOST,
@@ -129,7 +129,7 @@ const viaEdge = (path: string, method: string) =>
 
 /** The same call from the box itself — no hop. */
 const fromBox = (path: string, method: string) =>
-  fetch(`http://localhost:${h.port}${path}`, {
+  fetch(`http://127.0.0.1:${h.port}${path}`, {
     method,
     headers: { host: `localhost:${h.port}`, 'content-type': 'application/json' },
   });

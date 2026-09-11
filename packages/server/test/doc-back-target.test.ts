@@ -68,7 +68,7 @@ describe('a doc knows which board to go back to', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-back-'));
     folder = mkdtempSync(join(tmpdir(), 'doc-back-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -211,7 +211,7 @@ describe('the back target is not handed to a share visitor', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const p = join(dataDir, 'shared.md');

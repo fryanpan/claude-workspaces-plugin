@@ -59,7 +59,7 @@ describe('resources under the workspace path', () => {
     appDist = mkdtempSync(join(tmpdir(), 'ws-routes-app-'));
     writeFileSync(join(appDist, 'index.html'), '<!doctype html><title>app shell</title>');
     handle = createServer({ port: 0, dataDir, markdownAppDistDir: appDist });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const ws = await post('/workspaces', { name: 'route-home', goal: 'Route it.' });
     wsId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;

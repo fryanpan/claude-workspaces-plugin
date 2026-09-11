@@ -461,7 +461,7 @@ describe('attachment routes + lead-addressed delivery', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'attach-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

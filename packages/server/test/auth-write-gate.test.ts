@@ -95,14 +95,14 @@ async function boot(requireSignInToWrite?: boolean): Promise<Booted> {
     emailCodeSignIn: true,
     ...(requireSignInToWrite === undefined ? {} : { requireSignInToWrite }),
   });
-  const ws = await seedBoard(`http://localhost:${handle.port}`);
+  const ws = await seedBoard(`http://127.0.0.1:${handle.port}`);
   cleanups.push(async () => {
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
   });
   return {
-    base: `http://localhost:${handle.port}`,
-    wsBase: `ws://localhost:${handle.port}`,
+    base: `http://127.0.0.1:${handle.port}`,
+    wsBase: `ws://127.0.0.1:${handle.port}`,
     dataDir,
     handle,
     ws,

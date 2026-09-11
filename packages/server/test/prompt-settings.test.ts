@@ -154,7 +154,7 @@ describe('the prompt routes', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-prompt-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
   afterAll(async () => {
     await handle.stop();

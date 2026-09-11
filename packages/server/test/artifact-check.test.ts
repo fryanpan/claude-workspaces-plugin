@@ -460,7 +460,7 @@ describe('server wiring: REST done-transition triggers the check', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'artifact-wire-'));
     const handle = createServer({ port: 0, dataDir, artifactCheckFetch: impl });
     const post = (path: string, payload: unknown) =>
-      fetch(`http://localhost:${handle.port}${path}`, {
+      fetch(`http://127.0.0.1:${handle.port}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),

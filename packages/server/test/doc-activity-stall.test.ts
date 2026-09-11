@@ -58,7 +58,7 @@ describe("a task's linked doc counts as the task moving", () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-activity-'));
     handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: QUIET_MS });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

@@ -68,8 +68,8 @@ describe('hydration doors the request prewarm does not cover', () => {
     const first = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     // Seeded once, on the FIRST server: the board lives in the data dir the
     // restarts share, so every server below addresses the same one.
-    WS = await seedBoard(`http://localhost:${first.port}`);
-    const created = await fetch(`http://localhost:${first.port}/workspaces/${WS}/docs`, {
+    WS = await seedBoard(`http://127.0.0.1:${first.port}`);
+    const created = await fetch(`http://127.0.0.1:${first.port}/workspaces/${WS}/docs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ docId: DOC_ID, type: 'markdown', sourceUrl: boundPath }),
@@ -106,7 +106,7 @@ describe('hydration doors the request prewarm does not cover', () => {
 
   it('a docId in the request BODY parks its doc and leaves health answering', async () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     // Nothing in this URL names a doc, so `docIdsAddressedBy` finds nothing
     // and the prewarm does not run. The route still hydrates DOC_ID to
@@ -127,7 +127,7 @@ describe('hydration doors the request prewarm does not cover', () => {
 
   it('a fan-out over board docIds parks its doc and leaves health answering', async () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     // `listThreads` is the exact call the home queue, the workspace listing
     // and the archive route make for EVERY docId on a board. None of those
@@ -173,7 +173,7 @@ describe('hydration doors the request prewarm does not cover', () => {
     writeFileSync(boundPath, '# Notes\n\nA readable first version.\n');
 
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     const rebind = await fetch(`${base}/workspaces/${WS}/docs`, {
       method: 'POST',

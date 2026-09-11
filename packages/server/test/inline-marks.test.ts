@@ -24,7 +24,7 @@ describe('find_and_replace over HTTP keeps the marks on a bound file', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-marks-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

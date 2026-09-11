@@ -169,7 +169,7 @@ describe("a bot's state on the doc's own event stream", () => {
       meetingBot: vendor,
       meetingBotWebhookSecret: WEBHOOK_SECRET,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const path = join(dataDir, 'harborlight-sync.md');
     writeFileSync(path, '# Harborlight sync\n\nAgenda.\n');

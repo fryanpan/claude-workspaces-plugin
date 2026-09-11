@@ -188,7 +188,7 @@ describe('host gate + share scoping over HTTP', () => {
       share: { config: SHARE_CONFIG, cfApi: makeMockCfApi({ apps: [], policies: [] }) },
     });
     handle = createServer(serverOptions());
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     // Two file-backed docs in two separate workspaces; only one workspace
@@ -244,7 +244,7 @@ describe('host gate + share scoping over HTTP', () => {
     await handle.stop();
     writeFileSync(join(dataDir, 'shares.json'), JSON.stringify([shared], null, 2));
     handle = createServer(serverOptions());
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     // The URL opens the BOARD. There is no entry doc any more — `docId` is
     // empty on every record — and the grant was never it: scope is the board,
@@ -702,7 +702,7 @@ describe('workspace share over HTTP', () => {
       share: { config: SHARE_CONFIG, cfApi: makeMockCfApi({ apps: [], policies: [] }) },
     });
     handle = createServer(serverOptions2());
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     // A board that is NOT the shared one, for the doc the share must not
     // reach. It has to exist somewhere: a doc filed on no board is reachable
     // by nobody, which would make "the share cannot read it" pass without
@@ -751,7 +751,7 @@ describe('workspace share over HTTP', () => {
     await handle.stop();
     writeFileSync(join(dataDir, 'shares.json'), JSON.stringify([shared], null, 2));
     handle = createServer(serverOptions2());
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     shareHost = shared.hostname;
     expect(shared.workspaceId).toBe(boardId);
     // The share opens the board; the folder is reached because it is filed on

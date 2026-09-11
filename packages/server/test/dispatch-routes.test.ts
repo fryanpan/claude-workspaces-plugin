@@ -127,7 +127,7 @@ describe('builder dispatches through the server', () => {
         return { close: () => fired.delete(path) };
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

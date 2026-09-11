@@ -155,7 +155,7 @@ describe('doc.sync_error reaches a watching SSE stream (HTTP end-to-end)', () =>
     path = join(dataDir, 'doc.md');
     writeFileSync(path, DOC);
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

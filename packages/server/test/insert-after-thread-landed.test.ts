@@ -45,7 +45,7 @@ describe('insert_after on a thread', () => {
     const path = join(dataDir, 'doc.md');
     writeFileSync(path, DOC);
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     ws = await seedBoard(base);
     const create = await fetch(`${base}/workspaces/${ws}/docs`, {
       method: 'POST',

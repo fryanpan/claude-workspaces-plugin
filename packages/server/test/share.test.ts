@@ -110,7 +110,7 @@ describe('share REST endpoints', () => {
       dataDir,
       share: { config: SHARE_CONFIG, cfApi: makeMockCfApi(cfState) },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     // A board first — `POST /workspaces` with a `name` rather than a
     // `folderPath`. This is the only id the share routes accept.
@@ -152,7 +152,7 @@ describe('share REST endpoints', () => {
     // unconditionally and would say nothing about whether sharing is wired.
     const dd = mkdtempSync(join(tmpdir(), 'share-noshare-'));
     const h = createServer({ port: 0, dataDir: dd });
-    const r = await fetch(`http://localhost:${h.port}/api/share/link`, {
+    const r = await fetch(`http://127.0.0.1:${h.port}/api/share/link`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ workspaceId: 'x', allowDomains: ['@x.com'] }),
@@ -337,7 +337,7 @@ describe('share REST endpoints', () => {
       dataDir,
       share: { config: SHARE_CONFIG, cfApi: makeMockCfApi(cfState) },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const list = await fetch(`${base}/api/share`).then(
       (r) => r.json() as Promise<{ shares: { workspaceId: string }[] }>,

@@ -73,7 +73,7 @@ describe('/api/repos', () => {
     wt = join(tmp, 'wt-feature');
     git(main, 'worktree', 'add', wt, '-b', 'feature');
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

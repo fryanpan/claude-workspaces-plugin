@@ -21,7 +21,7 @@ describe('board load reports', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'load-reports-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const mk = await fetch(`${base}/workspaces`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

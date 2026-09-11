@@ -56,7 +56,7 @@ describe('board workspace + task routes', () => {
     folder = mkdtempSync(join(tmpdir(), 'taskr-folder-'));
     writeFileSync(join(folder, 'README.md'), '# Entry\n\nRead me.\n');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -1215,7 +1215,7 @@ describe('board workspace + task routes', () => {
       const second = createServer({ port: 0, dataDir });
       try {
         const got = await fetch(
-          `http://localhost:${second.port}/workspaces/${wsId}/tasks?format=json`,
+          `http://127.0.0.1:${second.port}/workspaces/${wsId}/tasks?format=json`,
           {
             headers: { host: `localhost:${second.port}` },
           },

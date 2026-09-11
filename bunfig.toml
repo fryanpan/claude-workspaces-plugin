@@ -9,4 +9,7 @@ preload = [
   # imports the server, because the doc cadences resolve at module load.
   "./packages/server/test/timing.preload.ts",
   "./packages/server/test/fd-contention.preload.ts",
+  # Every test server binds 127.0.0.1, so no other loopback listener can
+  # answer a connect meant for it.
+  "./packages/server/test/loopback-bind.preload.ts",
 ]

@@ -228,6 +228,39 @@ describe('the audit enumerates untracked files', () => {
 });
 
 /**
+ * A connect to "localhost" in the server suite leaks a macOS kernel TCP
+ * control block about one time in eight (see `localhostConnects` in
+ * scripts/test-audit.ts). The probe plants the two shapes that connect beside
+ * the three that merely NAME localhost, so a detector widened to the bare
+ * word — which would demand rewriting every Host header a host-guard test is
+ * about — goes red here as surely as one that stops seeing the connects.
+ */
+const LOCALHOST_PROBE = [
+  "const port = Number(process.env.PORT ?? '0');",
+  'await fetch(`http://localhost:${port}/api/docs`);',
+  "Bun.connect({ hostname: 'localhost', port, socket: { data() {} } });",
+  "await fetch(`http://127.0.0.1:${port}/`, { headers: { host: `localhost:${port}`, origin: 'http://localhost:5173' } });",
+  '// a comment naming ws://localhost:${port} is prose, not a connect',
+  '',
+].join('\n');
+
+describe('the audit counts connects to localhost in the server suite', () => {
+  it('names each connect by line, leaves Host and Origin values alone, and fails', () => {
+    expect(existsSync(PROBE_ABS)).toBe(false);
+    writeFileSync(PROBE_ABS, LOCALHOST_PROBE);
+    const run = runAudit('--list');
+
+    const named = run.stdout
+      .split('\n')
+      .filter((l) => l.includes(PROBE_REL))
+      .map((l) => l.trim().split(/\s+/)[0]);
+    expect(named).toEqual([`${PROBE_REL}:2`, `${PROBE_REL}:3`]);
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('localhostConnects: 2 > 0');
+  }, 30_000);
+});
+
+/**
  * The source-shape check's own blind spots, and the two negatives that keep
  * closing them from swallowing the whole suite.
  *

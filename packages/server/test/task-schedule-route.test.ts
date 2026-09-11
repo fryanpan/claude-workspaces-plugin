@@ -46,7 +46,7 @@ describe('POST /workspaces/:ws/tasks/:id/schedule', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-schedule-route-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const { workspace } = (await (
       await post('/workspaces', { name: 'Harbour Lights', goal: 'Keep the lamps lit.' })
     ).json()) as { workspace: { id: string } };

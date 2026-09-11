@@ -184,7 +184,7 @@ describe('a real stream on the real route keeps a working agent reachable', () =
     // Millisecond windows so the observed clock can be waited out — the same
     // staleness a nineteen-minute grep produces in production.
     handle = createServer({ port: 0, dataDir, heartbeatFreshMs: 40, observedWorkFreshMs: 40 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

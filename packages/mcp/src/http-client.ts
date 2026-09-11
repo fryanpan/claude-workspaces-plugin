@@ -33,6 +33,13 @@ export interface DiscoveryDeps {
  * another MCP server on developer machines and silently routed every call to
  * the wrong process. If discovery is unavailable this throws, and the message
  * names both places it looked.
+ *
+ * The discovered URL is IP-literal. Bun races `::1` against `127.0.0.1` for
+ * "localhost" and abandons the loser mid-handshake; on macOS each abandoned
+ * attempt that was still in SYN_SENT strands a kernel TCP control block
+ * nothing can free short of a reboot. Measured through this function: +124
+ * per 1000 new connections as `localhost`, 0 as `127.0.0.1`. The server binds
+ * the wildcard, so the IPv4 loopback always reaches it.
  */
 export function resolveBaseUrl(deps: DiscoveryDeps): string {
   const override = readRenamedEnv(deps.env, 'CW_BASE_URL');
@@ -41,7 +48,7 @@ export function resolveBaseUrl(deps: DiscoveryDeps): string {
   if (discovery) {
     try {
       const j = JSON.parse(deps.readFileSync(discovery, 'utf8')) as { port?: number };
-      if (j.port) return `http://localhost:${j.port}`;
+      if (j.port) return `http://127.0.0.1:${j.port}`;
     } catch {
       // fall through to throw — corrupt discovery file
     }

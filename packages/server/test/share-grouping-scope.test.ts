@@ -214,7 +214,7 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     boardA = await newBoard('board-alpha');
     boardB = await newBoard('board-beta');
@@ -394,7 +394,7 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
       const cookie = share.headers;
 
       const client = connectDoc(
-        `ws://localhost:${handle.port}/workspaces/${boardA}/docs/${encodeURIComponent(memberA)}/y`,
+        `ws://127.0.0.1:${handle.port}/workspaces/${boardA}/docs/${encodeURIComponent(memberA)}/y`,
         {
           ...share.headers,
         },

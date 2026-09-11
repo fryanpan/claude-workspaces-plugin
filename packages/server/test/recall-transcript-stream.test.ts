@@ -128,7 +128,7 @@ describe("a bot meeting's live turns on the doc's own event stream", () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-recall-stream-'));
     handle = createServer({ port: 0, dataDir, meetingBot: vendor });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const path = join(dataDir, 'standup.md');
     writeFileSync(path, '# Standup\n\nAgenda.\n');
@@ -163,7 +163,7 @@ describe("a bot meeting's live turns on the doc's own event stream", () => {
     expect(token).toMatch(/^[0-9a-f]{32}$/);
 
     // The vendor dials us, and the meeting accepts its token.
-    const ws = new WebSocket(`ws://localhost:${handle.port}/recall/${token}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/recall/${token}`);
     await new Promise<void>((resolve, reject) => {
       ws.addEventListener('open', () => resolve());
       ws.addEventListener('error', () => reject(new Error('recall socket refused')));

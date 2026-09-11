@@ -80,7 +80,7 @@ describe('a held review item past the quiet window is the lead’s finding', () 
       stallNudgeQuietMs: QUIET_MS,
       keepMovingCadenceMs: 0,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

@@ -84,7 +84,7 @@ describe('every live document that holds content has an address', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-address-'));
     srcDir = mkdtempSync(join(tmpdir(), 'doc-address-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const wsRes = await post('/workspaces', { name: 'addresses', goal: 'Hold every doc.' });
     ws = ((await wsRes.json()) as { workspace: { id: string } }).workspace.id;

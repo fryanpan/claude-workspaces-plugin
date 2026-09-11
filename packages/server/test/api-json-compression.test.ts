@@ -135,7 +135,7 @@ describe(`GET /workspaces/${WS}/docs over the wire`, () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'api-gzip-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     // Enough docs that the listing clears the threshold, as the real one does
     // by three orders of magnitude.

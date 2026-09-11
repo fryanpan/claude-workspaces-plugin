@@ -41,7 +41,7 @@ describe('the keep-moving route', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'keep-moving-route-'));
     access = await accessHarness();
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     boardId = await seedBoard(base, { name: 'Harbour plan' });
     share = await mintAccessShare(base, access, boardId);
   });

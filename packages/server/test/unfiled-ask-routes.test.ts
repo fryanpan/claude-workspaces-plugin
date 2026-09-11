@@ -54,7 +54,7 @@ describe('the unfiled-ask nudge on the note route', () => {
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'unfiled-ask-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

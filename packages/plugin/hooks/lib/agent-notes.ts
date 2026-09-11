@@ -46,7 +46,8 @@ export interface NotePayload {
 
 export type Decision = { post: NotePayload } | { skip: string };
 
-export const DEFAULT_BASE_URL = 'http://localhost:8787';
+/** IP-literal for the reason `resolveBaseUrl` in packages/mcp/src/http-client.ts gives. */
+export const DEFAULT_BASE_URL = 'http://127.0.0.1:8787';
 export const POST_TIMEOUT_MS = 1500;
 const SHORT_STRING_MAX = 200;
 
@@ -98,7 +99,7 @@ export function resolveBaseUrl(
     try {
       const port = discoveryPort();
       if (typeof port === 'number' && Number.isFinite(port) && port > 0) {
-        return `http://localhost:${port}`;
+        return `http://127.0.0.1:${port}`;
       }
     } catch {
       // absent

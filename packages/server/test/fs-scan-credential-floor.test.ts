@@ -119,7 +119,7 @@ describe('over the real routes: context-file refuses the un-ignored .env', () =>
   let reviewId: string;
 
   const local = (path: string, init: RequestInit = {}) =>
-    fetch(`http://localhost:${handle.port}${path}`, {
+    fetch(`http://127.0.0.1:${handle.port}${path}`, {
       ...init,
       headers: {
         host: `localhost:${handle.port}`,
@@ -147,7 +147,7 @@ describe('over the real routes: context-file refuses the un-ignored .env', () =>
     clearListingCache();
 
     handle = createServer({ port: 0, dataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     const bound = (await local('/workspaces', {
       method: 'POST',
       body: JSON.stringify({ folderPath: repo, hubWorkspaceId: WS }),

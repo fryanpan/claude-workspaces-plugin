@@ -195,7 +195,7 @@ describe('calendar routes', () => {
       meetingBotWebhookSecret: WEBHOOK_SECRET,
       calendarBot: { client: fakes.client, google: fakes.google, vault: fakes.vault },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
   afterAll(async () => {
@@ -473,7 +473,7 @@ describe('calendar routes without the feature', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'calendar-off-'));
     const handle = createServer({ port: 0, dataDir });
     try {
-      const base = `http://localhost:${handle.port}`;
+      const base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
       const status = (await (await fetch(`${base}/api/calendar`)).json()) as {
         configured: boolean;

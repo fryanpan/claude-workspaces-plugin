@@ -290,7 +290,7 @@ describe('the at-rest route', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-notes-method-route-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     ws = await seedBoard(base);
   });
   afterAll(async () => {

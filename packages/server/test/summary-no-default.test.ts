@@ -83,7 +83,7 @@ describe('createServer builds no summarizer of its own', () => {
 
   /** Create a doc + one thread on a running server. */
   async function seed(handle: ServerHandle, docId: string): Promise<void> {
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const file = join(dataDir, `${docId}.md`);
     writeFileSync(file, `# Doc\n\n${SNIPPET}\n`);

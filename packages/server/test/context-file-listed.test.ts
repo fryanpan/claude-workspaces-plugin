@@ -64,7 +64,7 @@ describe('context-file opens only what git ls-files shows', () => {
   let reviewId: string;
 
   const post = (path: string, body: unknown) =>
-    fetch(`http://localhost:${handle.port}${path}`, {
+    fetch(`http://127.0.0.1:${handle.port}${path}`, {
       method: 'POST',
       headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
       body: JSON.stringify(body),
@@ -73,7 +73,7 @@ describe('context-file opens only what git ls-files shows', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'ctx-listed-data-'));
     handle = createServer({ port: 0, dataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     ({ repo, base } = makeRepo());
     const bind = await post(`/workspaces/${WS}/attachments`, { repo, base });
     expect(bind.status).toBe(200);
@@ -166,7 +166,7 @@ describe('the non-git listing carries its own floor', () => {
   let workspaceId: string;
 
   const post = (path: string, body: unknown) =>
-    fetch(`http://localhost:${handle.port}${path}`, {
+    fetch(`http://127.0.0.1:${handle.port}${path}`, {
       method: 'POST',
       headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
       body: JSON.stringify(body),
@@ -175,7 +175,7 @@ describe('the non-git listing carries its own floor', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'nogit-listed-data-'));
     handle = createServer({ port: 0, dataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     // Deliberately NOT a git repo — `git ls-files` exits non-zero here, which
     // is the whole point of this block.
     folder = mkdtempSync(join(tmpdir(), 'nogit-listed-'));
@@ -219,7 +219,7 @@ describe('the non-git listing carries its own floor', () => {
     // The refusal above and the listing are the same rule; a tree that still
     // advertised `.env` would be telling a visitor a path worth guessing.
     const res = await fetch(
-      `http://localhost:${handle.port}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/files`,
+      `http://127.0.0.1:${handle.port}/workspaces/${WS}/attachments/${encodeURIComponent(workspaceId)}/files`,
       { headers: { host: `localhost:${handle.port}` } },
     );
     expect(res.status).toBe(200);

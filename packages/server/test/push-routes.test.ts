@@ -57,7 +57,7 @@ async function start(opts: { client?: boolean; publicBaseUrl?: string } = {}) {
     ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}),
   });
   handle = server;
-  return { base: `http://localhost:${server.port}`, dataDir, port: server.port };
+  return { base: `http://127.0.0.1:${server.port}`, dataDir, port: server.port };
 }
 
 function subscription(endpoint = 'https://push.example.com/s/abc') {

@@ -60,7 +60,7 @@ describe('the review API', () => {
     writeFileSync(join(folder, 'README.md'), '# Entry\n\nbody\n');
     writeFileSync(join(folder, 'sub', 'two.md'), '# Two\n\nmore\n');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const board = await post('/workspaces', { name: 'a board', goal: 'Ship it.' });

@@ -30,7 +30,7 @@ describe('suggested edits — HTTP routes', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-suggest-routes-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -262,6 +262,7 @@ describe('suggested edits — HTTP routes', () => {
   it('fires suggestion.created / suggestion.accepted / suggestion.rejected webhooks — watchers hear the verdict', async () => {
     const sink = Bun.serve({
       port: 0,
+      hostname: '127.0.0.1',
       async fetch(req) {
         hits.push(await req.json());
         return new Response('ok');
@@ -269,7 +270,7 @@ describe('suggested edits — HTTP routes', () => {
     });
     const hits: Array<{ event: string; docId: string; sid: string }> = [];
     try {
-      const webhookUrl = `http://localhost:${sink.port}/hook`;
+      const webhookUrl = `http://127.0.0.1:${sink.port}/hook`;
       const file = join(dataDir, 'sug-hook.md');
       writeFileSync(file, 'Alpha beta gamma.\n');
       // `sug-hook` is the readable name; the server mints the id, and every

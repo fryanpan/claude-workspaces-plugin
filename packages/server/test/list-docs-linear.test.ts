@@ -73,7 +73,7 @@ describe(`GET /workspaces/${WS}/docs does not re-list the workspaces per row`, (
 
     dataDir = mkdtempSync(join(tmpdir(), 'list-docs-linear-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     // A board exists, so the workspace set is non-empty and a pass over it

@@ -101,7 +101,7 @@ describe('share visitors never spend the summary API key', () => {
       summarizer,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const file = join(dataDir, `${DOC}.md`);
     writeFileSync(file, `# Doc\n\n${SNIPPET}\n\nA second paragraph to find.\n`);
