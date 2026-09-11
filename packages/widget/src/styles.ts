@@ -263,26 +263,48 @@ export const widgetStyles = `
   text-align: center;
 }
 
-.composer {
+/* The comment card — a margin card at its element's height (placed by
+   widget-card.ts, whose CARD_W is this width), and the saved comment it turns
+   into on post — green edge, a brief wash, a tick. */
+.composer, .saved {
   position: fixed;
   z-index: 2147483647;
-  width: 300px;
+  width: 280px;
   background: #fff;
+  color: #1b1f23;
   border: 1px solid #d1d5da;
+  border-left: 3px solid #2e7dd7;
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-  padding: 10px;
+  box-shadow: 0 0 0 2px rgba(46,125,215,0.2), 0 4px 14px rgba(0,0,0,0.12);
+  padding: 10px 12px;
+  font-size: 13px;
 }
-.composer-snippet {
-  font-size: 11px;
+.saved {
+  border-left-color: #1f7a3a;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  animation: cw-saved 1.6s ease-out;
+}
+@keyframes cw-saved { from { background: #e8f5ed; } }
+.saved-text { overflow-wrap: anywhere; max-height: 4.5em; overflow: hidden; }
+.tick { float: right; margin-left: 6px; color: #1f7a3a; font-weight: 700; font-size: 11px; }
+.tick::before { content: "✓ "; }
+/* "on <b>Tomatoes</b>" — one line, the name in ink. The "on" is generated so
+   the line's text is the anchor's own words. */
+.composer-snippet, .saved-on {
+  font-size: 12px;
   color: #6e7781;
-  font-style: italic;
-  border-left: 2px solid #2e7dd7;
-  padding: 2px 6px;
   margin-bottom: 6px;
-  max-height: 4em;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
+.composer-snippet b, .saved-on b { color: #1b1f23; }
+.composer-snippet b::before, .saved-on b::before { content: "on "; font-weight: 400; color: #6e7781; }
+/* The faint line from a card to the element it is about. */
+.leader { position: fixed; inset: 0; pointer-events: none; z-index: 2147483646; }
+.leader svg { width: 100%; height: 100%; }
+.leader polyline { fill: none; stroke: #8c959f; opacity: 0.7; }
+.leader circle { fill: #8c959f; }
 .composer textarea {
   width: 100%;
   border: 1px solid #d1d5da;
@@ -384,6 +406,46 @@ export const widgetStyles = `
   justify-content: center;
   flex: 0 0 auto;
 }
+/* The phone face — the banner and the composer are both a compact panel along
+   the bottom, above the dock — not a sheet, not a scrim, so the page behind
+   keeps its place. After .picker-banner and .composer so it wins at equal
+   specificity. The composer's panel replaces the prompt's while it is up, and
+   the floating buttons it would sit on fold away (Done is on the panel). */
+.quick {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h));
+  width: auto;
+  transform: none;
+  border: 0;
+  border-top: 1px solid #d1d5da;
+  border-radius: 0;
+  background: #fff;
+  color: #6e7781;
+  box-shadow: 0 -6px 20px rgba(0,0,0,0.14);
+  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+}
+.picker-banner.quick > :first-child { flex: 1; }
+.picker-banner.quick .picker-cancel { color: #1b1f23; border-color: #d1d5da; }
+.picker-banner:has(~ .quick), .fab:has(~ .quick), .fab-list:has(~ .quick) { display: none; }
+.composer.quick { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.quick .composer-snippet { margin: 0; }
+.quick .composer-actions { display: contents; }
+/* One line that grows to four as you type, where the engine can size a
+   field to its content; one line, scrolling, where it cannot. 16px, or iOS
+   zooms the page on focus. */
+.quick textarea {
+  grid-area: 2 / 1;
+  min-height: 44px;
+  max-height: 96px;
+  field-sizing: content;
+  resize: none;
+  font-size: 16px;
+}
+.quick .cancel { grid-area: 1 / 2; }
+.quick .submit { grid-area: 2 / 2; }
+.quick .composer-err { grid-column: 1 / -1; }
 
 
 .thread-popover .actions textarea {

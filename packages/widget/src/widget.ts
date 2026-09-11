@@ -17,6 +17,7 @@ import {
   updateAuthUi,
   validateStoredAuth,
 } from './widget-auth.ts';
+import { placeCards } from './widget-card.ts';
 import { deepLinkThread, renderDockInto } from './widget-dock.ts';
 import {
   IGNORE_ATTR,
@@ -661,9 +662,11 @@ export class FeedbackWidgetEl extends HTMLElement {
     window.addEventListener('scroll', this.scrollHandler, { passive: true, capture: true });
     // A gentle rAF loop keeps pins attached during layout animations where
     // MutationObserver doesn't fire (e.g. CSS transitions, scroll in
-    // overflow containers). Position-only, no render.
+    // overflow containers). Position-only, no render. The comment card and
+    // its line ride the same loop, so they keep up with their element.
     const tick = () => {
       positionPins(this);
+      placeCards(this);
       this.rafId = requestAnimationFrame(tick);
     };
     this.rafId = requestAnimationFrame(tick);
