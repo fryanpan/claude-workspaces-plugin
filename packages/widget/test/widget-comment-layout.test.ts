@@ -157,12 +157,12 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       const p = look(1180, 'portrait');
       expect(p.mode).toBe(true);
       expect([box(p.card)[0], box(p.card)[2], box(p.card)[3]]).toEqual([0, 820, 1180]);
-      expect(p.draft).toBe('Riverbend stop');
+      expect(p.draft).toBe('Riverbend stop shelter');
       expect(p.snippet).toBe('The full timetable, across the page');
       expect(p.outlined).toBe('wide');
       const l = look(1180, 'landscape');
       expect(box(l.card)[2]).toBe(1180 - 16);
-      expect(l.draft).toBe('Riverbend stop');
+      expect(l.draft).toBe('Riverbend stop shelter');
       expect(l.snippet).toBe('The full timetable, across the page');
       expect(overlap(box(l.card), l.el.wide)).toBe(0);
     });

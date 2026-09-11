@@ -246,6 +246,8 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await tap(el('wide'));
     await type('Riverbend stop');
     await turn(820, 1180);
+    // Typing goes on where it left off, not at the start of the draft.
+    await type(' shelter');
     await look('portrait');
     await turn(width, height);
     await look('landscape');
