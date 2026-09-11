@@ -235,6 +235,8 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/review-items/:itemId` | GET | `routes/workspace-home.ts` | trusted-local |  |
 | `/workspaces/:ws/settings` | GET, PUT | `routes/workspace-settings.ts` | share-scope |  |
 | `/workspaces/:ws/tasks` | GET, POST | `routes/tasks-list-create.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId` | GET | `routes/task-page.ts` | trusted-local |  |
+| `/workspaces/:ws/tasks/:taskId/*` | GET | `routes/task-page.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/after` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/answer` | POST | `routes/task-answers.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/answer/undo` | POST | `routes/task-answers.ts` | share-scope |  |

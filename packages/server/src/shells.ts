@@ -415,6 +415,31 @@ created by an agent calling <code>create_workspace</code> (or
 <p><small><a href="/">all docs</a></small></p>`;
 }
 
+/**
+ * Nothing on this board answers to that address — rendered for the BROWSER
+ * that asked, with the board itself as the way out.
+ *
+ * One renderer for every member address under a board a person can open: a
+ * doc id that is on another board, a task id that has been archived away, a
+ * verb nothing serves. The board link is the point of it. The page a reader
+ * wanted is one tap away, and a not-found page whose only link is the server
+ * root sends them back through a list to find a board they were already on.
+ */
+export function renderBoardMemberNotFound(workspaceId: string, rest: string): string {
+  const board = escape(workspaceId);
+  const href = escape(`/workspaces/${encodeURIComponent(workspaceId)}`);
+  return `<!doctype html><meta charset="utf-8"><title>Not found · Workspaces</title>
+<style>body{font:15px/1.55 system-ui, sans-serif;margin:60px auto;max-width:560px;color:#222;padding:0 20px}
+h1{font-size:22px}code{background:#f3f3f3;padding:1px 5px;border-radius:3px;font-size:90%}
+small{color:#777}</style>
+<h1>Not found</h1>
+<p>Nothing on this board answers to <code>${escape(rest)}</code>. It may have
+been archived, or it may belong to a different board.</p>
+<p><a href="${href}">Open the board</a> (<code>${board}</code>) and look for it
+there.</p>
+<p><small><a href="/">all workspaces</a></small></p>`;
+}
+
 export function renderReviewNotFound(docId: string): string {
   const safe = escape(docId);
   return `<!doctype html><meta charset="utf-8"><title>Doc not found · Workspaces</title>

@@ -197,6 +197,23 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/tasks-list-create.ts', [['share-scope', '/workspaces/:ws/tasks', 'GET POST']]),
   ...family('routes/tasks-batch.ts', [['trusted-local', '/workspaces/:ws/tasks/batch', 'POST']]),
 
+  // The bare task address, which is a browser's rather than an API's: it
+  // redirects to `/workspaces/:ws?task=:taskId`. `trusted-local` because
+  // `shareScopeAllows` deliberately leaves bare `tasks/<id>` out of its
+  // table — a visitor reads a row over the board doc, not over this path —
+  // so the redirect reaches nobody the board page did not already reach.
+  //
+  // The wildcard row is the SAME module's second answer, and it is a row
+  // rather than an omission because an address that is answered is an address
+  // the inventory has to name: a GET under a task that no task route claims
+  // gets the readable not-found page from here. It does not widen the ones
+  // above it — a pattern nothing else matches is what reaches this module,
+  // and the specific rows keep their own gates.
+  ...family('routes/task-page.ts', [
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId', 'GET'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/*', 'GET'],
+  ]),
+
   ...family('routes/task-detail.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/detail', 'GET'],
   ]),
