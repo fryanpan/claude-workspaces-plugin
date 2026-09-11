@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { foldWithStrips, layoutBalloons } from '../src/redline/balloon-layout.ts';
+import { foldWithStrips, layoutBalloons, placeCards } from '../src/redline/balloon-layout.ts';
 
 describe('layoutBalloons', () => {
   it('returns an empty array for an empty list', () => {
@@ -218,5 +218,98 @@ describe('foldWithStrips', () => {
     const r = foldWithStrips({ ...m, band: { top: 0, bottom: 0 } });
     expect(r.floorY).toBe(0);
     expect(r.viewport.bottom).toBe(r.viewport.visibleBottom);
+  });
+});
+
+describe('placeCards', () => {
+  // The reader is 4000px down a long meeting doc, watching a transcript grow
+  // at the foot, and the "N above" strip covers the top 60px of the column.
+  const scrollTop = 4000;
+  const clientHeight = 800;
+  const visible = { top: scrollTop, bottom: scrollTop + clientHeight };
+  const { floorY, viewport } = foldWithStrips({
+    scrollTop,
+    clientHeight,
+    gap: 8,
+    minY: 0,
+    band: { top: 60, bottom: 0 },
+  });
+  const at = (anchorY: number, height = 100) => ({
+    anchorY,
+    anchorBottom: anchorY + 20,
+    height,
+  });
+  const place = (items: ReturnType<typeof at>[]) =>
+    placeCards(items, 8, { floorY, minY: 0, viewport, visible });
+  const paints = (y: number, height = 100): boolean =>
+    y + height > visible.top && y < visible.bottom;
+
+  it('leaves a card whose text is far above the fold at its own anchor', () => {
+    // The floor is 4060. Before this function that is where all three landed,
+    // stacked in the visible column beside nothing.
+    expect(place([at(120), at(300), at(900)])).toEqual([120, 300, 900]);
+  });
+
+  it('paints nothing in the band the reader can see when no text there is marked', () => {
+    for (const y of place([at(120), at(300), at(900)])) expect(paints(y)).toBe(false);
+  });
+
+  it('pushes a card whose text ends just above the fold clear of the band', () => {
+    // Its anchor is off screen by 10px; its own 100px body would reach 90px
+    // into the column. A card the reader can see is a claim about the text
+    // beside it, and there is no text beside it here.
+    const [y] = place([at(scrollTop - 30)]);
+    expect(paints(y as number)).toBe(false);
+    expect(y).toBe(visible.top - 108);
+  });
+
+  it('pushes a card whose text starts just below the fold clear of the band', () => {
+    const [y] = place([at(visible.bottom + 5)]);
+    expect(paints(y as number)).toBe(false);
+    expect(y).toBe(visible.bottom + 8);
+  });
+
+  it('floors a card whose text IS on screen under the top strip, as before', () => {
+    // The rule the fold exists for, unchanged: nothing comes to rest under
+    // the strip. 4010 is on screen and above the 4060 floor.
+    expect(place([at(4010)])).toEqual([4060]);
+  });
+
+  it('stacks on-screen cards against each other and not against off-screen ones', () => {
+    // Four cards far above the fold used to push the on-screen one down the
+    // column; now they take no part in its stack.
+    const ys = place([at(100), at(200), at(300), at(400), at(4300)]);
+    expect(ys[4]).toBe(4300);
+  });
+
+  it('treats every card as on screen when nothing could be measured', () => {
+    // happy-dom, or a hidden pane: `visible` is absent and the column behaves
+    // exactly as it did before the fold was a question.
+    expect(placeCards([at(120), at(300)], 8, { floorY, minY: 0, viewport })).toEqual([4060, 4168]);
+  });
+
+  it('near the top of the document, a card just scrolled off stays beside its own text', () => {
+    // The caller clamps every position to >= 0, so a card asking to sit above
+    // the document top renders AT the top. That is the rule still holding
+    // rather than escaping: this branch can only move a card up, towards its
+    // own anchor, never down into the band. What the reader glimpses near the
+    // top of a document is the card whose sentence is a few pixels off screen
+    // — never one from a thousand lines away, which is the whole bug.
+    const shallow = { top: 50, bottom: 850 };
+    const [y] = placeCards([{ anchorY: 0, anchorBottom: 20, height: 100 }], 8, {
+      floorY: 50,
+      minY: 0,
+      visible: shallow,
+    });
+    expect(y).toBeLessThanOrEqual(0);
+    expect(Math.max(0, y as number)).toBeLessThanOrEqual(20);
+  });
+
+  it('keeps the returned array index-aligned with the input', () => {
+    // Mixed on- and off-screen, given out of anchor order.
+    const ys = place([at(4300), at(120), at(4100)]);
+    expect(ys[1]).toBe(120);
+    expect(ys[0]).toBeGreaterThanOrEqual(4300);
+    expect(ys[2]).toBe(4100);
   });
 });
