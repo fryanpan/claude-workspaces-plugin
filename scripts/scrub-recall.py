@@ -349,6 +349,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
+    if args.runs < 1 or args.jobs < 1:
+        ap.error("--runs and --jobs must be at least 1: a sweep of nothing has no rate to pass")
 
     only = [s for s in args.only.split(",") if s] or None
     cases = load_cases(only)

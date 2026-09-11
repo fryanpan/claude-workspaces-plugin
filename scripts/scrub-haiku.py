@@ -442,6 +442,12 @@ def read_keychain(service: str) -> str | None:
 # A combined diff (`--cc`, which the push patch uses for merges) opens a file
 # with `diff --cc`, not `diff --git`.
 _FILE_STARTS = ("diff --git ", "diff --cc ", "diff --combined ")
+# What ends a file's header block: its first hunk, or — for a binary change,
+# which has no hunk — the line that stands in for one. `push_patch` does not
+# pass `--binary` today, so only the one-line `Binary files` form arrives; a
+# `GIT binary patch` payload would otherwise be header all the way down, and
+# a header block is never split.
+_HEADER_ENDS = ("@@", "GIT binary patch", "Binary files ")
 
 # Characters two neighbouring slices of one long line share, so a name that
 # straddles a cut is read whole by one of them.
@@ -502,7 +508,7 @@ def split_patch(patch: str, limit: int | None = None) -> List[str]:
     for line in patch.split("\n"):
         if line.startswith(_FILE_STARTS):
             in_header = True
-        elif line.startswith("@@"):
+        elif line.startswith(_HEADER_ENDS):
             in_header = False
         if in_header or line.startswith("@@"):
             lines.append((line, in_header))

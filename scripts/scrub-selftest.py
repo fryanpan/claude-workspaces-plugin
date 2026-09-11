@@ -798,6 +798,14 @@ def check_haiku_unavailable() -> None:
         expect(f"haiku pieces: ...and the token is whole in one of them ({label})",
                0 if any("NEEDLE_7Q" in p for p in pieces) else 1, 0)
 
+    # A binary change has no `@@`, so its payload must not count as the file's
+    # header — a header block is never split.
+    binary = ("diff --git a/x.bin b/x.bin\nindex 1..2 100644\nGIT binary patch\nliteral 90000\n"
+              + "\n".join("z" + "A" * 65 for _ in range(1_500)))
+    worst = max(len(p) for p in haiku.split_patch(binary, 30_000))
+    expect("haiku pieces: a binary payload is split like any other content",
+           0 if worst <= 30_000 else 1, 0, f"largest piece {worst}")
+
     # Pieces are combined leak-first. "Unavailable" goes to a policy that may
     # be set to warn, so a leak one piece FOUND must not be turned into a
     # banner because a different piece of the same push timed out.
