@@ -74,9 +74,17 @@ export function wireDocRename(deps: DocRenameDeps): () => void {
     input.focus();
     input.select();
 
-    /** Put the crumb back exactly as it was, whatever ended the edit. */
-    const restore = (label: string): void => {
-      editing = false;
+    /**
+     * Put the crumb back, whatever ended the edit.
+     *
+     * `unlock` is false while a PUT is in flight. The editor is gone from the
+     * screen by then — a person watching sees their new name — but a second
+     * editor opened in that window would be torn out from under them when the
+     * first request answered and re-rendered the crumb. So the field stays
+     * shut until the request it started has settled.
+     */
+    const restore = (label: string, unlock = true): void => {
+      if (unlock) editing = false;
       input.remove();
       titleEl.textContent = label;
     };
@@ -93,12 +101,16 @@ export function wireDocRename(deps: DocRenameDeps): () => void {
         restore(shown);
         return;
       }
-      restore(next);
-      const ok = await send(api(`docs/${encodeURIComponent(docId)}/title`), next);
-      // A refused rename puts the old label back rather than leaving the
-      // screen claiming a name the server does not hold.
-      if (!ok) titleEl.textContent = shown;
-      else deps.onRenamed(next);
+      restore(next, false);
+      try {
+        const ok = await send(api(`docs/${encodeURIComponent(docId)}/title`), next);
+        // A refused rename puts the old label back rather than leaving the
+        // screen claiming a name the server does not hold.
+        if (!ok) titleEl.textContent = shown;
+        else deps.onRenamed(next);
+      } finally {
+        editing = false;
+      }
     };
 
     listen(input, 'keydown', ((ev: KeyboardEvent) => {

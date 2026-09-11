@@ -27,6 +27,7 @@ import {
   DEFAULT_MEETING_RETENTION,
   type MeetingRetention,
   meetingRetentionKeeps,
+  noteMeetingProvider,
   parseMeetingRetention,
 } from './meeting-home.ts';
 import {
@@ -505,6 +506,15 @@ export class MeetingStore {
     if (meetingRetentionKeeps(retention, 'transcript')) {
       mkdirSync(dirname(transcriptPath), { recursive: true });
       appendFileSync(transcriptPath, '');
+    }
+    // Somebody is listening now, so the filing stops saying nobody was. Only
+    // for a doc already filed as a meeting, and never at the cost of the
+    // recording: a filing index that cannot be written is a worse record, not
+    // a reason to refuse the conversation.
+    try {
+      noteMeetingProvider(dataDir, docId, args.engine);
+    } catch (err) {
+      console.error(`[meeting] could not name the provider for ${docId}:`, err);
     }
     return this.open({
       docId,

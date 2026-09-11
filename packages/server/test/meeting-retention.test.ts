@@ -18,7 +18,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { MeetingRetention } from '../src/meeting-home.ts';
+import {
+  type MeetingRetention,
+  meetingFilingFor,
+  recordMeetingFiling,
+} from '../src/meeting-home.ts';
 import {
   MeetingStore,
   listMeetings,
@@ -95,6 +99,31 @@ describe('a project that keeps less', () => {
       'none',
       'transcripts',
     ]);
+  });
+
+  it('names the provider on the filing once a meeting actually starts', () => {
+    // A meeting is filed when the huddle markdown is written, before anything
+    // has heard a word, so the provider on that line is 'none'. Starting the
+    // recording is the moment the answer exists — and it has to reach the
+    // filing, or the Library says every meeting was transcribed by nobody.
+    recordMeetingFiling(dataDir, {
+      docId: 'd-riverbend',
+      workspaceId: 'w-riverbend',
+      filedAt: 1_000,
+      repoKey: 'git:example.com/harborlight/riverbend',
+      leadAgentId: 'a-saltmarsh',
+      kind: 'discussion',
+      provider: 'none',
+      relPath: 'docs/meetings/huddle-20260911-1405-x7q2.md',
+      retention: 'transcripts',
+    });
+
+    hold('d-riverbend', 'transcripts');
+    expect(meetingFilingFor(dataDir, 'd-riverbend')?.provider).toBe('mock');
+    // Nothing else the meeting was filed with moved.
+    expect(meetingFilingFor(dataDir, 'd-riverbend')?.relPath).toBe(
+      'docs/meetings/huddle-20260911-1405-x7q2.md',
+    );
   });
 
   it('keeps everything when the project cannot be asked', () => {

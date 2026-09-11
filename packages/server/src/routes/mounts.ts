@@ -312,28 +312,34 @@ export async function handleMountRoutes(
     }
     const gitignore =
       body?.gitignore === undefined ? (current?.gitignore ?? false) : body.gitignore === true;
-    const project = mounts.setMeetings(at.repoKey, { relPath, retention, gitignore });
-    // Mounted as well as recorded: rule 5 says a meeting lands in a MOUNTED
-    // folder, and a folder nobody mounted gives its files no address, so the
-    // Library would list a meeting it could not open.
     const folderAbs = join(at.checkoutRoot, relPath);
-    // Created here rather than at the first meeting: mounting refuses a path
-    // that is not a directory, so a folder that does not exist yet would be
-    // recorded with no address and the Library would list meetings it could
-    // not open — the one failure this route exists to prevent.
+    /**
+     * The folder is made and mounted BEFORE the choice is stored, and the
+     * order is the whole correctness of this route.
+     *
+     * The folder is created here rather than at the first meeting because
+     * mounting refuses a path that is not a directory, and a home with no
+     * address would have the Library listing meetings it cannot open. But a
+     * refused request must also leave the project exactly as it was: storing
+     * first meant a 400 still moved every future meeting to a folder that
+     * could not be written — a rejected settings call changing behaviour,
+     * which is worse than the failure it was reporting.
+     */
     try {
       mkdirSync(folderAbs, { recursive: true });
     } catch (err) {
       return j(400, { error: 'meetings folder could not be created', detail: String(err) });
     }
     const mounted = mounts.mount(folderAbs);
+    if (!mounted.ok)
+      return j(400, { error: 'meetings folder could not be mounted', mountError: mounted.error });
+    const project = mounts.setMeetings(at.repoKey, { relPath, retention, gitignore });
     const gitignoreResult = applyMeetingGitignore(folderAbs, gitignore);
     return j(200, {
       ok: true,
       repoKey: project.repoKey,
       meetings: project.meetings,
-      mountId: mounted.ok ? mounted.mount.mountId : null,
-      ...(mounted.ok ? {} : { mountError: mounted.error }),
+      mountId: mounted.mount.mountId,
       gitignoreResult,
     });
   }

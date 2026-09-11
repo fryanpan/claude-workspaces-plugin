@@ -142,6 +142,28 @@ describe('wireDocRename', () => {
     expect(titleEl.querySelector('input')).not.toBeNull();
   });
 
+  it('stays shut while its request is in flight, so a slow rename loses nothing', async () => {
+    let answerThe: ((ok: boolean) => void) | null = null;
+    wire({ send: (_url, _title) => new Promise<boolean>((r) => (answerThe = r)) });
+    titleEl.click();
+    field().value = 'Riverbend winter plan';
+    press('Enter');
+    await settled();
+
+    // The name is on screen and the editor is gone, but a click cannot open a
+    // second one: the answer to the first request is still coming, and it
+    // would tear the second editor out from under whoever was typing in it.
+    expect(titleEl.textContent).toBe('Riverbend winter plan');
+    titleEl.click();
+    expect(titleEl.querySelector('input')).toBeNull();
+
+    (answerThe as unknown as (ok: boolean) => void)(true);
+    await settled();
+    // Settled, so the field opens again — the positive control on the lock.
+    titleEl.click();
+    expect(titleEl.querySelector('input')).not.toBeNull();
+  });
+
   it('sends one request when the commit races its own blur', async () => {
     wire();
     titleEl.click();

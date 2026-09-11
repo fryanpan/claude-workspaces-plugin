@@ -254,6 +254,28 @@ export function meetingFilingFor(dataDir: string, docId: string): MeetingFiling 
 }
 
 /**
+ * Say who heard this meeting, once something does.
+ *
+ * A meeting is filed the moment it is opened, before anybody has spoken, so
+ * its provider starts as `none`. Left there it would be a lie by omission: a
+ * meeting transcribed by an engine would read in this index exactly like one
+ * nobody listened to, and telling those apart is the entire reason the field
+ * exists. So the first recording on the doc appends a fresh line naming the
+ * engine, and the fold's last-line-wins rule does the rest — no rewrite, the
+ * same shape every other record here uses.
+ *
+ * Only for a doc already filed as a meeting. A recording started on an
+ * ordinary project doc has no board, no project and no kind to claim, and
+ * inventing a filing for it would put a document in the meetings index that
+ * nobody ever called a meeting.
+ */
+export function noteMeetingProvider(dataDir: string, docId: string, provider: string): void {
+  const filed = meetingFilingFor(dataDir, docId);
+  if (!filed || filed.provider === provider) return;
+  recordMeetingFiling(dataDir, { ...filed, provider });
+}
+
+/**
  * The file name a meeting's markdown takes inside the project's folder.
  *
  * The doc's ALIAS, which is already `huddle-20260829-1405-x7q2` — readable,

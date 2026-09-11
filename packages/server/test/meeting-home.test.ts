@@ -37,6 +37,7 @@ import {
   meetingFilingIndexPath,
   meetingGitignorePath,
   meetingRetentionKeeps,
+  noteMeetingProvider,
   parseMeetingRetention,
   recordMeetingFiling,
 } from '../src/meeting-home.ts';
@@ -151,6 +152,27 @@ describe('meeting-home', () => {
       recordMeetingFiling(tmp, filing({ docId: 'd-after', filedAt: 2_000 }));
 
       expect(listMeetingFilings(tmp).map((f) => f.docId)).toEqual(['d-tide', 'd-after']);
+    });
+
+    it('names the provider once something hears the meeting, and only then', () => {
+      recordMeetingFiling(tmp, filing());
+      expect(meetingFilingFor(tmp, 'd-tide')?.provider).toBe('none');
+
+      noteMeetingProvider(tmp, 'd-tide', 'assemblyai');
+      const heard = meetingFilingFor(tmp, 'd-tide');
+      expect(heard?.provider).toBe('assemblyai');
+      // Everything else the meeting was filed with survives the update.
+      expect(heard).toEqual({ ...filing(), provider: 'assemblyai' });
+
+      // Saying the same thing twice appends nothing — the index is a record,
+      // not a log of every time somebody asked.
+      const before = readFileSync(meetingFilingIndexPath(tmp), 'utf8');
+      noteMeetingProvider(tmp, 'd-tide', 'assemblyai');
+      expect(readFileSync(meetingFilingIndexPath(tmp), 'utf8')).toBe(before);
+
+      // A doc nobody filed as a meeting stays out of the index entirely.
+      noteMeetingProvider(tmp, 'd-plain', 'assemblyai');
+      expect(meetingFilingFor(tmp, 'd-plain')).toBeUndefined();
     });
 
     it('falls back to honest values when a stored line says something unknown', () => {

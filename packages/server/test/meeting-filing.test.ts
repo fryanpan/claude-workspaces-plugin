@@ -203,6 +203,25 @@ describe('a meeting filed into its project', () => {
     expect(stored.meetings.retention).toBe('none');
   });
 
+  it('changes nothing when the folder cannot be made', async () => {
+    await ok(await setMeetings({ meetingsPath: 'docs/meetings' }));
+    // A file where the folder would go: the choice cannot be applied, so it
+    // must not be stored either. A refused settings call that still moved
+    // every future meeting would break the feature while reporting failure.
+    mkdirSync(join(repo, 'notes'), { recursive: true });
+    writeFileSync(join(repo, 'notes', 'archive'), 'not a folder\n');
+    const refused = await setMeetings({ meetingsPath: 'notes/archive' });
+    expect(refused.status).toBe(400);
+
+    const stored = await ok<{ meetings: { relPath: string } }>(
+      await at(`/api/mounts/meetings?path=${encodeURIComponent(repo)}`),
+    );
+    expect(stored.meetings.relPath).toBe('docs/meetings');
+    // And a meeting still lands where the project actually said.
+    const talk = await ok<{ docId: string }>(await startHuddle(WS, 'discussion'));
+    expect(filingFor(talk.docId)?.relPath?.startsWith('docs/meetings/')).toBe(true);
+  });
+
   it('lets a person rename the meeting, and refuses a blank name', async () => {
     await ok(await setMeetings({ meetingsPath: 'docs/meetings' }));
     const talk = await ok<{ docId: string; meta: { title: string } }>(
