@@ -113,6 +113,23 @@ describe('the unfiled-ask nudge on the note route', () => {
     expect(counted().agents).toMatchObject([{ unfiledAsks: 1, totalAsks: 1, days: 1 }]);
   });
 
+  it('nudges the same way when the hook names the task itself', async () => {
+    // The route answers on two branches — an explicit `taskId`, and one it
+    // resolves from the agent's claim. A nudge wired into only one of them
+    // reaches only the hooks that happen to take that path.
+    const wsId = await boardWithLead();
+    const taskId = await inProgressRow(wsId, 'Only claim');
+    const r = await post(`/workspaces/${wsId}/agents/cartographer/notes`, {
+      agent: 'cartographer',
+      kind: 'turn',
+      text: 'Both arms are green. Want me to ship it tonight?',
+      at: Date.now(),
+      taskId,
+    });
+    expect(r.status).toBe(202);
+    expect(await r.json()).toMatchObject({ taskId, unfiledAsk: expect.any(String) });
+  });
+
   it('says nothing when the turn asked nothing', async () => {
     const wsId = await boardWithLead();
     await inProgressRow(wsId, 'Only claim');

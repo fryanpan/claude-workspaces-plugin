@@ -88,12 +88,19 @@ describe('the window a board surface reads', () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
+  /** The clock moves between publishes on purpose: a correction is a LATER
+   *  row for the same day, and a frozen clock would make the two rows
+   *  indistinguishable — which is exactly the case latest-wins exists for. */
+  let clock = 0;
+  const tick = () => {
+    clock += 60_000;
+    return clock;
+  };
+
   function seeded(): ChatAudit {
     dir = mkdtempSync(join(tmpdir(), 'chat-audit-window-'));
-    const store = new ChatAudit({
-      dataDir: dir,
-      now: () => Date.parse('2026-09-10T09:00:00.000Z'),
-    });
+    clock = Date.parse('2026-09-10T09:00:00.000Z');
+    const store = new ChatAudit({ dataDir: dir, now: tick });
     store.publish({
       day: '2026-09-10',
       auditor: 'Team Lead',
@@ -104,7 +111,7 @@ describe('the window a board surface reads', () => {
       auditor: 'Team Lead',
       entries: [
         { agent: 'Riverbend', unfiledAsks: 1, totalAsks: 2 },
-        { agent: 'Harborlight', unfiledAsks: 7, totalAsks: 7 },
+        { agent: 'Wayfarer', unfiledAsks: 7, totalAsks: 7 },
       ],
     });
     store.publish({
@@ -118,8 +125,10 @@ describe('the window a board surface reads', () => {
   it('sums each agent over the window, worst first, and leaves older days out', () => {
     const view = seeded().window(7, '2026-09-10');
     expect(view).toMatchObject({ days: 7, from: '2026-09-04' });
+    // Worst first, which is not alphabetical here — the surface names a few
+    // agents and drops the rest, so the order decides who gets named.
     expect(view.agents).toEqual([
-      { agent: 'Harborlight', unfiledAsks: 7, totalAsks: 7, days: 1 },
+      { agent: 'Wayfarer', unfiledAsks: 7, totalAsks: 7, days: 1 },
       { agent: 'Riverbend', unfiledAsks: 5, totalAsks: 11, days: 2 },
     ]);
   });

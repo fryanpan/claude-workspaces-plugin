@@ -27,6 +27,9 @@ describe('detectAsk — what counts as an ask', () => {
   it('counts a stock deferral with no question mark', () => {
     expect(asks('Three commits are ready. Say the word and I will push.')).toBe(true);
     expect(asks('The rewrite is drafted — your call whether it ships tonight.')).toBe(true);
+    // An offer without the question mark. The `?` case below would pass even
+    // if the offer family were deleted, so this is the one that holds it up.
+    expect(asks('Left the old one in place. I can revert it if you want me to.')).toBe(true);
   });
 
   it('counts a wait named in the third person, which is how a lead writes it', () => {
@@ -87,13 +90,23 @@ describe('proseOf', () => {
     );
   });
 
-  it('does not weld two sentences together when it removes a span', () => {
+  it('does not weld the words on either side of a span it removes', () => {
     // A removed code span that closed one sentence must not let the next
-    // sentence's subject count as the previous sentence's reader.
+    // sentence's subject count as the previous sentence's reader — and with
+    // no spaces around the span, removing it to nothing fuses two words.
     const out = proseOf('The value is `a ? b : c`. Nothing is pending.');
-    expect(out).toContain('The value is');
     expect(out).toContain('Nothing is pending.');
     expect(out).not.toContain('?');
+    expect(proseOf('The value is`a ? b : c`Nothing is pending.')).toContain('is Nothing');
+  });
+
+  it('drops a fenced block whole, question marks and all', () => {
+    const out = proseOf('Ran it:\n\n```sh\nls -l && echo $?\n```\n\nNothing is pending.');
+    expect(out).not.toContain('?');
+    expect(out).not.toContain('ls -l');
+    expect(out).toContain('Nothing is pending.');
+    // And the fence does not turn the code into an ask.
+    expect(asks('Ran it:\n\n```sh\nis this your branch?\n```\n\nNothing is pending.')).toBe(false);
   });
 });
 
