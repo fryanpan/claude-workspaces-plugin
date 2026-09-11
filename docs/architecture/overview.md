@@ -516,6 +516,24 @@ the block ids into the prompt so the note-taker groups that topic instead of
 extending it. It counts runs the way `flatBulletRuns` does, deliberately, so
 the directive can never fire on a topic the eval calls fine.
 
+WHAT A MEETING COSTS is three modules and no new box, and the point of them is
+that one price table answers both ends. `core/model-cost.ts` is that table —
+dollars per million tokens per model family, the cache read and write
+multipliers, and the two functions everything else calls (`dollars` for one
+call's usage, `perHour` for a total over an elapsed meeting). It sits in core
+because the chooser row, the meeting's own report and `scripts/notes-eval.ts`
+all quote a price and must not each carry their own arithmetic.
+`notes-spend.ts` joins the `notes-*` services family and is pure: a meeting's
+recorded calls in, the total and the compose/capture split out, with any model
+the table cannot price NAMED rather than counted as free. `notes-cost-store.ts`
+sits with `notes-timing.ts` and `notes-heading-store.ts` in that same family —
+one small file under the data dir (`meetings/notes-cost.json`) holding, per
+note-taker, the last twenty finished meetings as a timestamp, a duration, a
+dollar amount and a call count. No meeting content and not even a doc id, so
+it belongs with the timing files rather than with the stores that own durable
+text. The figure it answers rides the chooser's existing
+`GET …/notes-method` read; no route is added.
+
 `notes-edit-guard.ts` joins the DOMAIN tier below as well, and it moves no
 boundary either: it is one function over values — a tick's edit list and the
 block id of the section this meeting writes under, in; the edits that may be

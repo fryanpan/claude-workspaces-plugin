@@ -23,7 +23,7 @@ import { liveTuningKeys } from '@claude-workspaces/core';
 import { advancedControls, buildAdvancedSection } from './meeting-advanced.ts';
 import type { AdvancedState } from './meeting-advanced.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
-import { appendNotetakerFold } from './meeting-notetaker.ts';
+import { type NotesPerHour, appendNotetakerFold } from './meeting-notetaker.ts';
 import { type TranscriptReader, mountTranscriptFold } from './meeting-transcript-panel.ts';
 
 /**
@@ -68,6 +68,10 @@ export interface ChooserState {
   /** When the current note-taker was picked, if it was picked during THIS
    *  meeting: the "since 10:38" on the row that is on. */
   methodSince: string;
+  /** What an hour has cost on each method, measured over finished meetings
+   *  and read at mount. Absent until that read answers, and on a server that
+   *  has measured nothing — rows then show the eval's guess marked `est.`. */
+  methodPerHour?: NotesPerHour;
   /** The call the bot would be sent to join. */
   chooseBotUrl: string;
   /** The name that bot wears in the meeting. */

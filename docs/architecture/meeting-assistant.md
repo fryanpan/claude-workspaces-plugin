@@ -261,6 +261,18 @@ knowing who spoke, which is why the room has to be claimed rather than
 assumed. The notes composer and task capture are separate Haiku
 calls and are not in these numbers.
 
+**And the model half, which the transcription table above does not cover.**
+Every Claude call a tick makes — the compose, and the task-capture pass that
+runs on the same tick — now records the `usage` block the API answered with,
+beside that tick's timing row. The stop sums them through `notes-spend.ts`,
+states the meeting's own dollars and dollars-per-hour in its `[meeting-notes]`
+line split compose-versus-capture, and files the meeting's cost into
+`notes-cost-store.ts`. The chooser's per-hour figure is then that rolling
+measurement rather than a number typed out of an eval, and a note-taker with
+no finished meeting behind it says so by marking its figure an estimate. The
+capture pass used to throw its `usage` away, which is why the figure a person
+read was a fraction of the bill.
+
 Each
 `Turn` carries `speaker_label`; turns under ~1s of audio carry a placeholder
 (`PENDING`/`UNKNOWN`) the engine adapter maps to "no speaker". A

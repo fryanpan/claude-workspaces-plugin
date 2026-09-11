@@ -73,10 +73,13 @@ import {
   retractQuotaNotice,
 } from './notes-quota-notice.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
+import { type MeetingSpend, meetingSpend } from './notes-spend.ts';
 import {
+  type NotesCallUsage,
   type NotesComposeMeasure,
   type NotesTickTiming,
   type NotesTimingLog,
+  type NotesTokenUsage,
   median,
 } from './notes-timing.ts';
 import {
@@ -170,6 +173,20 @@ export interface NotesMeetingSummary {
    */
   latencyMedianMs?: number;
   latencyWorstMs?: number;
+  /**
+   * WHAT THE MEETING COST, summed from the usage every model call reported.
+   *
+   * Absent only when the meeting made no priced call at all — a mock
+   * composer, a session with notes off. Present and zero would be a claim
+   * that the meeting was free, which is a different statement.
+   */
+  spend?: MeetingSpend;
+  /**
+   * Wall-clock milliseconds from the session opening to its stop — the
+   * denominator of the per-hour figure, and measured over the MEETING rather
+   * than over the work, so a quiet opening does not inflate the rate.
+   */
+  elapsedMs: number;
 }
 
 /** One settled turn as a tick's delta carries it. */
@@ -700,6 +717,15 @@ export interface MeetingNotesDeps {
     meetingId: string;
     turns: readonly NotesTurn[];
     /**
+     * Where the pass reports what its model call cost. The compose has the
+     * same seam (`NotesComposeInput.measure`); this one exists because the
+     * capture call was billed on every tick and recorded nowhere, which is
+     * how a meeting's per-hour figure came to be a third of the bill.
+     *
+     * Sizes and counts only, never the words.
+     */
+    measure: (m: { model: string; usage: NotesTokenUsage }) => void;
+    /**
      * The turns the PREVIOUS tick's capture saw, so an ask that straddles the
      * boundary between them still files the right row. Marked as already read
      * downstream; the capture pass decides how much of it to use.
@@ -1132,6 +1158,17 @@ export function beginNotesSession(
   let composing = false;
   const clock = deps.now ?? (() => Date.now());
   /**
+   * When this session opened, and every priced call it has made.
+   *
+   * THE DENOMINATOR OF THE FIGURE. "Dollars per meeting-hour" needs an hour,
+   * and the only clock that measures the meeting rather than the work is the
+   * one that starts here and is read at `end()`. Tick timings cannot stand in
+   * for it: they begin at the first pause, and a meeting's quiet opening
+   * would shrink the denominator and inflate the rate.
+   */
+  const meetingStartedAt = clock();
+  const meetingCalls: NotesCallUsage[] = [];
+  /**
    * When each turn's words stopped changing — the moment Bryan finished the
    * sentence, as the pipeline first knew it. A final frame stamps it; a
    * partial stamps it only if the turn has none yet, so a turn that runs for
@@ -1296,6 +1333,21 @@ export function beginNotesSession(
       let measured: NotesComposeMeasure = {};
       let composeMs = 0;
       let applyMs = 0;
+      /**
+       * Every model call THIS tick made, in the order they were made —
+       * capture first, compose after it.
+       *
+       * Appended to the meeting's running list as it goes rather than
+       * gathered at the stop, because a tick that fails after its call still
+       * spent the money: the compose's `measure` fires before the reply is
+       * parsed and the capture's before its items are, so a tick that throws
+       * on either is still on the bill.
+       */
+      const tickCalls: NotesCallUsage[] = [];
+      const recordCall = (c: NotesCallUsage): void => {
+        tickCalls.push(c);
+        meetingCalls.push(c);
+      };
       const report = (outcome: NotesTickTiming['outcome'], edits: readonly prose.BlockEdit[]) => {
         if (timing === undefined) return;
         const end = clock();
@@ -1319,6 +1371,7 @@ export function beginNotesSession(
           outputTokens: measured.usage?.outputTokens ?? null,
           cacheReadTokens: measured.usage?.cacheReadTokens ?? null,
           cacheWriteTokens: measured.usage?.cacheWriteTokens ?? null,
+          calls: [...tickCalls],
           composeMs,
           model: measured.model ?? null,
           applyMs,
@@ -1365,6 +1418,7 @@ export function beginNotesSession(
             meetingId: ids.meetingId,
             turns,
             priorTurns,
+            measure: (m) => recordCall({ call: 'capture', model: m.model, usage: m.usage }),
           });
           taskLinks = captured.tasks;
           docLinks = captured.docs;
@@ -1603,6 +1657,18 @@ export function beginNotesSession(
           ...input,
           measure: (m) => {
             measured = { ...measured, ...m };
+            // A usage block is the composer saying what the API charged, and
+            // it arrives once per call. Booked the moment it lands, under
+            // whatever model the same report named — the composer reports the
+            // model before it sends and the usage after, so by now both are
+            // in `measured`.
+            if (m.usage) {
+              recordCall({
+                call: 'compose',
+                model: measured.model ?? deps.composer.name,
+                usage: m.usage,
+              });
+            }
           },
         });
         composeMs = clock() - composeCallStart;
@@ -2139,9 +2205,16 @@ export function beginNotesSession(
         .map((r) => r.settledToWrittenMs)
         .filter((v): v is number => v !== null);
       timing?.summary();
+      // Summed at the stop over rows written as the meeting ran, so the
+      // total is arithmetic over what the API reported rather than a rate
+      // anybody measured once. A meeting that never reached a model has no
+      // spend to state, which is not the same as a spend of zero.
+      const spend = meetingCalls.length > 0 ? meetingSpend(meetingCalls) : undefined;
       deps.onMeetingSummary?.({
         docId: ids.docId,
         meetingId: ids.meetingId,
+        elapsedMs: Math.max(0, clock() - meetingStartedAt),
+        ...(spend ? { spend } : {}),
         ticks: lastTickNo,
         turnsSettled: settledTurns.size,
         turnsComposed: composedTurns.size,

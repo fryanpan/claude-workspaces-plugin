@@ -70,7 +70,7 @@
  * can finish the job: the notes are in the doc, not here.
  */
 
-import { readyToWork, spinoffBody, spinoffDocHref } from '@claude-workspaces/core';
+import { type TokenUsage, readyToWork, spinoffBody, spinoffDocHref } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import {
   type SpentCues,
@@ -221,7 +221,28 @@ export interface TaskCaptureInput {
    * on a new subject. Absent, each reply is guarded on its own.
    */
   spentCues?: SpentCues;
+  /**
+   * Where this call reports what it cost, if it reached a model at all.
+   *
+   * THE SAME SEAM THE COMPOSE HAS, and it exists for the same reason: the
+   * only place that knows what a call was billed is the reply's `usage`
+   * block, and the pass that reads it is not the pass that keeps the
+   * meeting's books. Sizes and counts only — never the words.
+   *
+   * It was the absence of this that made the capture pass free on paper: the
+   * call went out on every tick, the usage block came back, and nothing read
+   * it. A tick's compose was in the timing file and its capture was nowhere.
+   */
+  measure?: NotesCallMeasureSink;
 }
+
+/** What a capture call reports about itself: which model, and what it used. */
+export interface NotesCallMeasure {
+  model: string;
+  usage: TokenUsage;
+}
+
+export type NotesCallMeasureSink = (m: NotesCallMeasure) => void;
 
 export interface TaskCaptureExtractor {
   readonly name: string;
@@ -406,6 +427,8 @@ export interface RunTaskCaptureInput {
   priorTurns?: readonly NotesTurn[];
   /** This meeting's spent cue lines — see {@link TaskCaptureInput.spentCues}. */
   spentCues?: SpentCues;
+  /** Passed straight to the extractor — see {@link TaskCaptureInput.measure}. */
+  measure?: NotesCallMeasureSink;
 }
 
 /**
@@ -440,6 +463,7 @@ export async function runTaskCapture(
       ...(input.priorTurns !== undefined ? { priorTurns: input.priorTurns } : {}),
       ...(input.docTitle !== undefined ? { docTitle: input.docTitle } : {}),
       ...(input.spentCues !== undefined ? { spentCues: input.spentCues } : {}),
+      ...(input.measure !== undefined ? { measure: input.measure } : {}),
     });
   } catch (err) {
     deps.onError?.(err instanceof Error ? err.message : 'task capture failed');
@@ -825,7 +849,31 @@ export function createHaikuTaskCaptureExtractor(
         });
         // The status is safe to surface; the key never is.
         if (!res.ok) throw new Error(`task capture HTTP ${res.status}`);
-        const body = (await res.json()) as { content?: Array<{ text?: string }> };
+        const body = (await res.json()) as {
+          content?: Array<{ text?: string }>;
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
+        };
+        // WHAT IT COST, BEFORE THE REPLY IS READ. The money was spent whether
+        // or not the items parse, and a reply this pass makes nothing of is
+        // exactly the tick a cost report must not drop: a capture pass that
+        // returns junk on every tick would otherwise read as free.
+        const u = body.usage;
+        if (u) {
+          input.measure?.({
+            model: CAPTURE_MODEL,
+            usage: {
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              cacheReadTokens: u.cache_read_input_tokens ?? 0,
+              cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+            },
+          });
+        }
         const text = body.content?.map((b) => b.text ?? '').join('') ?? '';
         return parseTaskCaptureReply(
           text,

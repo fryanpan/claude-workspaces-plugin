@@ -4,6 +4,7 @@ import {
   NOTES_METHODS,
   NOTES_METHOD_INFO,
   type NotesMethod,
+  notesMethodDetail,
   notesMethodInfo,
   notesMethodLabel,
   notesMethodUsesLedger,
@@ -25,7 +26,10 @@ describe('the method table covers the union', () => {
   });
 
   test('every row says completeness and price, because those are what a person picks on', () => {
-    for (const row of NOTES_METHOD_INFO) expect(row.detail).toMatch(/\$\d+\.\d\d\/hr$/);
+    for (const row of NOTES_METHOD_INFO) {
+      expect(row.completeness.length).toBeGreaterThan(0);
+      expect(notesMethodDetail(row.id)).toMatch(/^.+ · \$\d+\.\d\d\/hr est\.$/);
+    }
   });
 });
 

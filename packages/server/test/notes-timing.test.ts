@@ -37,6 +37,7 @@ const row = (over: Partial<NotesTickTiming> = {}): NotesTickTiming => ({
   outputTokens: null,
   cacheReadTokens: null,
   cacheWriteTokens: null,
+  calls: [],
   composeMs: 800,
   model: null,
   applyMs: 5,
