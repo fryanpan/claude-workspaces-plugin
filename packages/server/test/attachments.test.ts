@@ -115,7 +115,7 @@ describe('publicAttachment (the shape events and visitors get)', () => {
     expect(pub.stateLabel).toBe('active');
     // The absence under test:
     expect('endpoint' in pub).toBe(false);
-    expect(JSON.stringify(pub)).not.toContain('9099');
+    expect(JSON.stringify(pub)).not.toContain(ENDPOINT);
   });
 });
 
@@ -171,10 +171,13 @@ describe('TaskStore attachment registry', () => {
     // digits, and this record carries three `Date.now()` millisecond stamps —
     // so the search space includes ~30 digit positions that no test controls.
     // It duly fired: CI went red on `lastHeartbeat: 1786980999099`, where the
-    // endpoint was correctly absent and the CLOCK spelled the needle. The
-    // sibling `publicAttachment` case above never tripped only because its
-    // timestamps are hand-written constants. Structural check first, since it
-    // is the assertion actually being made.
+    // endpoint was correctly absent and the CLOCK spelled the needle. Fixing
+    // this one site was not enough — four siblings in this file kept the bare
+    // port and went red together on 2026-09-11, when every `Date.now()` in the
+    // suite began `1789099…`. They all match the whole endpoint now, positive
+    // assertions included: a four-digit needle is no more trustworthy when a
+    // test wants it PRESENT. Structural check first, since it is the assertion
+    // actually being made.
     expect('endpoint' in (e.attachment as Record<string, unknown>)).toBe(false);
     expect(JSON.stringify(e)).not.toContain(ENDPOINT);
 
@@ -368,10 +371,10 @@ describe('TaskStore attachment registry', () => {
     const sidecar = attachmentsSidecarPath(dataDir, ws.id);
     expect(existsSync(sidecar)).toBe(true);
     // The endpoint lives in the sidecar (server-side file), like private-meta.
-    expect(readFileSync(sidecar, 'utf8')).toContain('9099');
+    expect(readFileSync(sidecar, 'utf8')).toContain(ENDPOINT);
     // And NOT in the tasks sidecar — separate state, separate file.
     const tasksSidecar = join(dataDir, 'workspaces', `${ws.id}.tasks.json`);
-    expect(readFileSync(tasksSidecar, 'utf8')).not.toContain('9099');
+    expect(readFileSync(tasksSidecar, 'utf8')).not.toContain(ENDPOINT);
 
     const reborn = new TaskStore({ dataDir, debounceMs: 5 });
     const list = reborn.listAttachments(ws.id);
@@ -630,7 +633,7 @@ describe('attachment routes + lead-addressed delivery', () => {
       expect(sse.events).toContain('agent.detached');
       // The wire never carries the endpoint — the SSE feed is a share-visitor
       // surface once commit 8 opens it.
-      expect(sse.data.join('\n')).not.toContain('9099');
+      expect(sse.data.join('\n')).not.toContain(ENDPOINT);
       // Positive control: the same data lines DO carry the agent identity.
       expect(sse.data.join('\n')).toContain('"agentId":"lead"');
 
@@ -714,7 +717,7 @@ describe('attachment routes + lead-addressed delivery', () => {
     expect(dump).toContain('agent-board-lead');
     // The absences under test: no attachment record, no endpoint, and not
     // even the agent id of the agent that attached.
-    expect(dump).not.toContain('9099');
+    expect(dump).not.toContain(ENDPOINT);
     expect(dump).not.toContain('relay-agent');
     expect(dump).not.toContain('lastHeartbeat');
     expect(dump).not.toContain('capabilities');
