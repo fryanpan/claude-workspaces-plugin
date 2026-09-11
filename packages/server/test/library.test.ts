@@ -108,6 +108,30 @@ describe('buildLibrary', () => {
     ]);
   });
 
+  it("takes the project from the board's own docs, not a review's members", () => {
+    const other = 'git:example.com/harborlight/saltmarsh';
+    const keys: Record<string, string> = {
+      'd-plan': makeDocKey(REPO, 'docs/plan.md'),
+      'r-1:a.md': makeDocKey(other, 'a.md'),
+      'r-1:b.md': makeDocKey(other, 'b.md'),
+      'task:t-1': makeDocKey(other, 'c.md'),
+    };
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-plan', { title: 'Riverbend project plan' }),
+          meta('r-1:a.md', { setId: 'r-1', relPath: 'a.md' }),
+          meta('r-1:b.md', { setId: 'r-1', relPath: 'b.md' }),
+          meta('task:t-1', { title: 'A task body' }),
+        ],
+        docKeyOf: (id) => keys[id],
+      }),
+    );
+    // Three docs of the other repo against one of this board's — and the
+    // board's own doc still names the project.
+    expect(lib.project?.name).toBe('riverbend');
+  });
+
   it('lists no project files for a board whose docs sit in no repo', () => {
     let asked = false;
     const lib = buildLibrary(

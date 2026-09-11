@@ -98,6 +98,11 @@ function byRecency(a: LibraryRow, b: LibraryRow): number {
 /**
  * The repo holding most of this board's docs, or null when none of them sits
  * in a repo. Ties go to the lexically first key so two loads cannot disagree.
+ *
+ * Counted over the docs the Library would LIST, so a review's members, a
+ * folder bind's children and the task bodies cannot choose the project: a
+ * diff review of some other repo puts dozens of docs on a board, and the
+ * board's own handful would lose the vote to files nobody filed.
  */
 export function projectRepoKey(
   docs: readonly DocMeta[],
@@ -105,6 +110,7 @@ export function projectRepoKey(
 ): string | null {
   const counts = new Map<string, number>();
   for (const meta of docs) {
+    if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
     const key = docKeyOf(meta.docId);
     const repoKey = key ? parseDocKey(key)?.repoKey : undefined;
     if (repoKey) counts.set(repoKey, (counts.get(repoKey) ?? 0) + 1);
