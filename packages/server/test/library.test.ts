@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
@@ -21,6 +21,7 @@ import {
   abbreviateHome,
   buildLibrary,
   displayNames,
+  openableFiles,
 } from '../src/library.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -130,6 +131,45 @@ describe('library helpers', () => {
     expect([...names.values()]).toEqual(['README.md', 'a/README.md', 'notes.md']);
   });
 
+  it('keeps adding folders until each ambiguous name is one file', () => {
+    const names = displayNames([
+      'client/docs/README.md',
+      'server/docs/README.md',
+      'docs/README.md',
+      'plan.md',
+    ]);
+    // One folder would leave the first two BOTH reading `docs/README.md`.
+    expect([...names.values()]).toEqual([
+      'client/docs/README.md',
+      'server/docs/README.md',
+      'docs/README.md',
+      'plan.md',
+    ]);
+  });
+
+  it('offers a mounted markdown file to open, naming the mount it came from', () => {
+    const offered = openableFiles(
+      sources({
+        docs: [meta('d-plan', { title: 'Plan' })],
+        docKeyOf: () => makeDocKey(REPO, 'docs/plan.md'),
+        markdownFiles: () => [
+          { relPath: 'docs/plan.md', mtimeMs: 1 },
+          { relPath: 'README.md', mtimeMs: 2 },
+        ],
+        mountedFiles: () => [
+          { fileId: 'f-side', relPath: 'notes/side.md', mtimeMs: 3 },
+          { fileId: 'f-png', relPath: 'notes/shot.png', mtimeMs: 4 },
+        ],
+      }),
+    );
+    // The repo's own listing answers null — its bytes are under the project
+    // root. The mounted one answers its address, because its bytes are not.
+    expect([...offered]).toEqual([
+      ['README.md', null],
+      ['notes/side.md', 'f-side'],
+    ]);
+  });
+
   it('abbreviates the home directory and nothing that merely starts with it', () => {
     expect(abbreviateHome('/box/dev/p', '/box')).toBe('~/dev/p');
     expect(abbreviateHome('/boxed/p', '/box')).toBe('/boxed/p');
@@ -198,6 +238,7 @@ describe('library routes', () => {
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
+    rmSync(`${repo}-side`, { recursive: true, force: true });
   });
 
   it('lists the bound doc and the unbound project file, and nothing git ignores', async () => {
@@ -233,6 +274,37 @@ describe('library routes', () => {
     const rows = lib.files.filter((f) => f.href === href || f.open === 'docs/tide-gauge.md');
     expect(rows).toEqual([expect.objectContaining({ href })]);
     expect((await open('docs/tide-gauge.md')).status).toBe(404);
+  });
+
+  it('opens a mounted file from the checkout its mount recorded', async () => {
+    // A second working copy of the same project, holding a file the main
+    // checkout does not have. Only the mount lists it, so only the mount
+    // knows which bytes the path means.
+    const side = `${repo}-side`;
+    git(repo, 'worktree', 'add', '-q', side, '-b', 'side');
+    mkdirSync(join(side, 'notes'));
+    writeFileSync(join(side, 'notes', 'survey.md'), '# Saltmarsh survey\n\nSide-checkout copy.\n');
+    const mounted = await at('/api/mounts', {
+      method: 'POST',
+      body: JSON.stringify({ path: join(side, 'notes') }),
+    });
+    expect(mounted.status).toBe(200);
+
+    const lib = await items();
+    expect(lib.files.some((f) => f.open === 'notes/survey.md')).toBe(true);
+    // Positive control on the same server: the main checkout's own file opens.
+    expect((await open('docs/tide-gauge.md')).status).toBe(200);
+
+    const res = await open('notes/survey.md');
+    expect(res.status).toBe(200);
+    const { docId } = (await res.json()) as { docId: string };
+    const page = await at(`/workspaces/${WS}/docs/${encodeURIComponent(docId)}?format=json`);
+    expect(page.status).toBe(200);
+    const doc = (await page.json()) as { meta: { sourceUrl?: string } };
+    // The bytes bound are the side checkout's. Joining the path to the MAIN
+    // checkout instead would bind a file that is not there at all.
+    expect(doc.meta.sourceUrl).toBe(realpathSync(join(side, 'notes', 'survey.md')));
+    expect(readFileSync(join(side, 'notes', 'survey.md'), 'utf8')).toContain('Side-checkout copy.');
   });
 
   it('refuses a path the listing does not offer', async () => {

@@ -140,24 +140,90 @@ export function abbreviateHome(path: string, home: string): string {
 
 /**
  * File names as a reader tells them apart. A bare `README.md` is ambiguous in
- * any repo with more than one, so a name that occurs twice in the list takes
- * its folder in front of it — and only then, because a path on every row is
- * the thing this page exists to spare the reader.
+ * any repo with more than one, so a name that occurs twice in the list grows
+ * folders in front of it — one segment at a time, until the label is that
+ * file's alone — because a path on every row is the thing this page exists to
+ * spare the reader. One segment is not always enough: `client/docs/README.md`
+ * beside `server/docs/README.md` would leave both rows reading
+ * `docs/README.md`, which is the ambiguity again with more words.
  */
 export function displayNames(relPaths: readonly string[]): Map<string, string> {
-  const seen = new Map<string, number>();
-  for (const rel of relPaths) {
-    const name = posix.basename(rel);
-    seen.set(name, (seen.get(name) ?? 0) + 1);
-  }
+  const paths = [...new Set(relPaths)];
+  const parts = new Map(paths.map((rel) => [rel, rel.split('/').filter((s) => s && s !== '.')]));
+  const label = (rel: string, depth: number): string => {
+    const segs = parts.get(rel) ?? [rel];
+    return segs.slice(-depth).join('/');
+  };
   const out = new Map<string, string>();
-  for (const rel of relPaths) {
-    const name = posix.basename(rel);
-    const parent = posix.basename(posix.dirname(rel));
-    out.set(
-      rel,
-      (seen.get(name) ?? 0) > 1 && parent && parent !== '.' ? `${parent}/${name}` : name,
-    );
+  for (const rel of paths) {
+    const mine = parts.get(rel) ?? [rel];
+    let depth = 1;
+    while (
+      depth < mine.length &&
+      paths.some((o) => o !== rel && label(o, depth) === label(rel, depth))
+    ) {
+      depth += 1;
+    }
+    out.set(rel, label(rel, depth));
+  }
+  return out;
+}
+
+/** One project file the listing offers, with the mount it was found through
+ *  when it came from one. */
+type LooseFile = ProjectFile & { fileId?: string };
+
+/** The doc keys this board's docs already hold — the files the repo listing
+ *  must not offer a second time, and a second bind for. */
+function coveredKeys(src: LibrarySources): Set<string> {
+  const covered = new Set<string>();
+  for (const meta of src.docs) {
+    if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
+    const key = src.docKeyOf(meta.docId);
+    if (key) covered.add(key);
+  }
+  return covered;
+}
+
+/** Every project file no doc of this board holds yet: the repo's own markdown
+ *  first, then whatever the mounts add. One list, built once, so what the page
+ *  offers and what `open` accepts can never disagree. */
+function looseFiles(src: LibrarySources, repoKey: string, root: string): LooseFile[] {
+  const covered = coveredKeys(src);
+  const loose: LooseFile[] = [];
+  const listed = new Set<string>();
+  for (const f of src.markdownFiles(root)) {
+    if (covered.has(makeDocKey(repoKey, f.relPath))) continue;
+    listed.add(f.relPath);
+    loose.push(f);
+  }
+  for (const f of src.mountedFiles(repoKey)) {
+    if (listed.has(f.relPath) || covered.has(makeDocKey(repoKey, f.relPath))) continue;
+    listed.add(f.relPath);
+    loose.push(f);
+  }
+  return loose;
+}
+
+/**
+ * The markdown files this board's Library offers to `POST …/library/open`, by
+ * repo-relative path, each answering the MOUNT it was found through or null
+ * when the repo listing found it under the project root itself.
+ *
+ * The distinction is the whole point of this export: a mount remembers the
+ * checkout its bytes came from, and that need not be the checkout
+ * `projectRoot` answers with. Joining such a path to the project root reads a
+ * different working copy's file of the same name, or nothing at all — so the
+ * opener resolves a mounted path through the mount rather than through the
+ * root, and this map is how it knows which it has.
+ */
+export function openableFiles(src: LibrarySources): Map<string, string | null> {
+  const repoKey = projectRepoKey(src.docs, src.docKeyOf);
+  const root = repoKey ? src.projectRoot(repoKey) : null;
+  const out = new Map<string, string | null>();
+  if (!repoKey || !root) return out;
+  for (const f of looseFiles(src, repoKey, root)) {
+    if (isMarkdownPath(f.relPath)) out.set(f.relPath, f.fileId ?? null);
   }
   return out;
 }
@@ -175,9 +241,6 @@ function docHref(workspaceId: string, meta: DocMeta): string | undefined {
 export function buildLibrary(src: LibrarySources): LibraryPayload {
   const meetings: LibraryRow[] = [];
   const files: LibraryRow[] = [];
-  // Every file a board doc already covers — the repo listing below must not
-  // offer a second row, and a second bind, for the same file.
-  const covered = new Set<string>();
 
   for (const meta of src.docs) {
     // A review's member (a diff file, a folder bind's opened file) belongs to
@@ -185,7 +248,6 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     // is a document somebody files on a board.
     if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
     const key = src.docKeyOf(meta.docId);
-    if (key) covered.add(key);
     const heldAt = src.lastMeetingAt(meta.docId);
     const discussion = meta.huddle === true && meta.huddleKind !== 'plan';
     const keyRel = key ? parseDocKey(key)?.relPath : undefined;
@@ -207,18 +269,7 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
       name: projectName(repoKey, root),
       path: abbreviateHome(root, src.home ?? homedir()),
     };
-    const loose: Array<ProjectFile & { fileId?: string }> = [];
-    const listed = new Set<string>();
-    for (const f of src.markdownFiles(root)) {
-      if (covered.has(makeDocKey(repoKey, f.relPath))) continue;
-      listed.add(f.relPath);
-      loose.push(f);
-    }
-    for (const f of src.mountedFiles(repoKey)) {
-      if (listed.has(f.relPath) || covered.has(makeDocKey(repoKey, f.relPath))) continue;
-      listed.add(f.relPath);
-      loose.push(f);
-    }
+    const loose = looseFiles(src, repoKey, root);
     const names = displayNames(loose.map((f) => f.relPath));
     for (const f of loose) {
       const name = names.get(f.relPath) ?? f.relPath;

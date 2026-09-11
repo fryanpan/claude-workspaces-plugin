@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { makeDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
-import { type LibrarySources, type ProjectFile, buildLibrary, projectRepoKey } from '../library.ts';
+import {
+  type LibrarySources,
+  type ProjectFile,
+  buildLibrary,
+  openableFiles,
+  projectRepoKey,
+} from '../library.ts';
 import { listMeetings } from '../meetings.ts';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
 import { type WorkspaceScope, restIs } from '../middleware/workspace-scope.ts';
@@ -34,6 +40,11 @@ import type { BoardWorkspace, TaskStore } from '../tasks.ts';
  * exists, because whether a hidden file exists is itself what must not be told.
  * A symlink inside the root that points outside it is refused after the
  * lexical check, the way `openContextFile` refuses one.
+ *
+ * A path the listing found through a MOUNT resolves through that mount
+ * (`resolveFile`), never by joining it to the project root: a mount records
+ * the checkout its bytes came from, which may be a worktree the root is not,
+ * and the same relative path in the other checkout is a different file.
  */
 
 export interface LibraryRoutesContext {
@@ -144,10 +155,23 @@ async function openFile(
   if (!repoKey || !root) return j(404, { error: 'not-listed' });
   // The listing is the rule: the path opens only if this board's Library
   // offers it, which is what keeps an ignored or hidden file shut.
-  const offered = buildLibrary(src).files.some((f) => f.open === relPath);
-  if (!offered) return j(404, { error: 'not-listed' });
-  const abs = join(root, relPath);
-  if (!isWithinRoot(root, abs)) return j(400, { error: 'bad-path' });
+  const offered = openableFiles(src);
+  if (!offered.has(relPath)) return j(404, { error: 'not-listed' });
+  const fileId = offered.get(relPath) ?? null;
+  let abs: string;
+  if (fileId) {
+    // Through the mount, so the bytes come from the checkout the mount
+    // recorded. `resolveFile` re-checks the whole address — recorded, live
+    // mount, servable spelling, and inside that mount after symlinks.
+    const resolved = ctx.mounts.resolveFile(fileId);
+    if (!resolved || resolved.repoKey !== repoKey || resolved.file.relPath !== relPath) {
+      return j(404, { error: 'not-listed' });
+    }
+    abs = resolved.abs;
+  } else {
+    abs = join(root, relPath);
+    if (!isWithinRoot(root, abs)) return j(400, { error: 'bad-path' });
+  }
 
   const hrefOf = (docId: string): string =>
     `/workspaces/${encodeURIComponent(scope.workspaceId)}/docs/${encodeURIComponent(docId)}`;
