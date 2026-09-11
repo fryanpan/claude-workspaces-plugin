@@ -158,7 +158,9 @@ The full delivery model is [docs/process/delivery.md](docs/process/delivery.md)
 recorded as an INTENT: `GET /api/deploy` shows `verification` — `pending`
 until the restarted server confirms its own boot, `boot-failed` if it never
 does (a 200 on the POST is not delivery; read the verdict). Manual fallback
-when the server is down (run `bun install` yourself after the pull):
+when the server is down — no `bun install` step: the restarted supervisor runs
+the frozen install before it builds or boots, and a failed one boots nothing
+and says why in `com.fryanpan.claude-workspaces.err.log`:
 
 ```bash
 # in PROD'S OWN checkout — see "Where prod lives" below. NOT Bryan's working copy.

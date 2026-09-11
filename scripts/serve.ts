@@ -17,7 +17,8 @@
  * Modes:
  *   default     — DEV: server runs under `bun --watch` (hot-reload on any
  *                 imported change) + a workspaces-app bundler in --watch mode.
- *   --no-watch  — PROD: rebuilds the browser bundles once, publishes them as
+ *   --no-watch  — PROD: installs dependencies from bun.lock, rebuilds the
+ *                 browser bundles once, publishes them as
  *                 an immutable client release outside this checkout, and runs
  *                 the server as a plain long-lived process against it. No
  *                 bundler, no hot-reload: deploys are deliberate (git pull +
@@ -39,6 +40,7 @@ import {
   prepareClientRelease,
 } from '../packages/server/src/client-release.ts';
 import { resolveDataDir } from '../packages/server/src/data-dir.ts';
+import { installBeforeBoot, spawnBunInstall } from '../packages/server/src/dependency-install.ts';
 import { readDeploySource } from '../packages/server/src/deploy-source.ts';
 import { stamped } from '../packages/server/src/log-stamp.ts';
 import {
@@ -170,8 +172,13 @@ const port = await resolvePort();
 //      being served.
 //
 // A failed build keeps the previous release live (stale beats down), loudly.
+//
+// Dependencies come first, because both builds and the server import them. A
+// failed install is the one step that does NOT fall back: see
+// `installBeforeBoot` for why nothing boots over it.
 const clientArgs: string[] = [];
 if (noWatch) {
+  if (!installBeforeBoot(spawnBunInstall(repoRoot), note)) process.exit(1);
   const failures: string[] = [];
   for (const pkg of ['widget', 'workspaces-app']) {
     const r = spawnSync('bun', ['run', join(repoRoot, 'packages', pkg, 'scripts', 'build.ts')], {

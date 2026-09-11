@@ -153,6 +153,11 @@ both browser bundles at startup, before the server process spawns. **Restarting
 prod is the deploy.** A build that fails logs loudly and leaves the previous
 client serving — stale beats down.
 
+Before either build it runs `bun install --frozen-lockfile`, so a pull that
+added a package cannot restart into a missing import. That step does not fall
+back: a failed install boots nothing, writes its reason to the err log, and
+exits non-zero so launchd retries it.
+
 ### Running it
 
 ```bash
