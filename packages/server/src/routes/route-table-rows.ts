@@ -170,6 +170,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/workspace-related.ts', [
     ['trusted-local', '/workspaces/:ws/related-work', 'GET'],
   ]),
+  // The Library's data names files in a repo on this machine, so it is not on
+  // `shareScopeAllows` even though the page it feeds is a board tab; both
+  // handlers refuse a share visitor as well.
+  ...family('routes/workspace-library.ts', [
+    ['trusted-local', '/workspaces/:ws/library/items', 'GET'],
+    ['trusted-local', '/workspaces/:ws/library/open', 'POST'],
+  ]),
 
   ...family('routes/workspace-settings.ts', [
     ['trusted-local', '/workspaces/:ws/goal', 'PUT'],
@@ -414,6 +421,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/sw.js.map', 'GET'],
     ['share-scope', '/workspaces/:ws/mine', 'GET'],
     ['share-scope', '/workspaces/:ws/activity', 'GET'],
+    ['share-scope', '/workspaces/:ws/library', 'GET'],
     ['share-scope', '/workspaces/:ws/mockups/:docId', 'GET'],
     ['share-scope', '/workspaces/:ws/attachments/:setId', 'GET'],
     ['trusted-local', '/demos/*', 'GET'],

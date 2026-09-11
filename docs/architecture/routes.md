@@ -216,6 +216,9 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/import-tasks` | POST | `routes/workspace-content.ts` | trusted-local |  |
 | `/workspaces/:ws/keep-moving` | GET | `routes/workspace-keep-moving.ts` | trusted-local |  |
 | `/workspaces/:ws/lead` | PUT | `routes/workspace-settings.ts` | trusted-local |  |
+| `/workspaces/:ws/library` | GET | `routes/shell-static.ts` | share-scope |  |
+| `/workspaces/:ws/library/items` | GET | `routes/workspace-library.ts` | trusted-local |  |
+| `/workspaces/:ws/library/open` | POST | `routes/workspace-library.ts` | trusted-local |  |
 | `/workspaces/:ws/links:titles` | POST | `routes/task-status-links.ts` | trusted-local |  |
 | `/workspaces/:ws/load-reports` | GET, POST | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/manifest.webmanifest` | GET | `routes/workspace-manifest.ts` | share-scope |  |

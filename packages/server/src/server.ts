@@ -34,6 +34,7 @@ import { createHomePane } from './home-pane.ts';
 import { spokenReviewComment } from './huddle.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
+import { createMarkdownLister } from './library.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
@@ -113,6 +114,7 @@ import {
   handleTaskRoutes,
 } from './routes/tasks.ts';
 import { createUpgradeStream } from './routes/upgrade-stream.ts';
+import { type LibraryRoutesContext, handleLibraryRoutes } from './routes/workspace-library.ts';
 import {
   type WorkspaceRoutesContext,
   handleWorkspaceAttachmentRoutes,
@@ -1804,6 +1806,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
   };
 
+  /** The board's Library — its meetings and its project's files, and the
+   *  verb that opens a project file nobody has bound yet. */
+  const libraryRoutesCtx: LibraryRoutesContext = {
+    docStore,
+    taskStore,
+    taskProjection,
+    mounts: mountStore,
+    dataDir,
+    j,
+    safeJson,
+    unfileFromDefault,
+    markdownFiles: createMarkdownLister(),
+    requestAddress: (req) => server.requestIP(req)?.address,
+  };
+
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
   const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
 
@@ -2493,6 +2510,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           url,
           visitor,
         });
+        if (handled) return handled;
+      }
+      // --- The board's Library --- ./routes/workspace-library.ts. Both of its
+      // paths sit under `library/`, which no other family claims, so the
+      // position is not load-bearing.
+      {
+        const handled = await handleLibraryRoutes(libraryRoutesCtx, { scope, req, visitor });
         if (handled) return handled;
       }
       // --- REST: agent attachments (§4) --- see
