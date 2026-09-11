@@ -183,6 +183,40 @@ export function overBudget(spent: number, cap: number): boolean {
 export const CACHE_READ_MULTIPLIER = 0.1;
 export const CACHE_WRITE_MULTIPLIER = 1.25;
 
+/**
+ * The read-to-write ratio a cache has to beat before it is worth having.
+ *
+ * A token read from cache bills at 0.1x input and a token written into a
+ * five-minute entry at 1.25x, against 1x for sending it plain. So caching R
+ * tokens and writing W of them is cheaper than sending R + W only while
+ * 0.1R + 1.25W < R + W — that is, while R/W > 0.25/0.9.
+ */
+export const CACHE_BREAK_EVEN_RATIO: number =
+  (CACHE_WRITE_MULTIPLIER - 1) / (1 - CACHE_READ_MULTIPLIER);
+
+/**
+ * What the read and write counts SAY, in the one sentence a reader needs.
+ *
+ * The share served from cache is not the verdict and has hidden a losing
+ * cache before: a run can serve half its prompt from cache and still cost
+ * more than one that cached nothing, because every one of those reads was
+ * paid for by a write at 1.25x. The ratio is the verdict, and it has a fixed
+ * number to beat.
+ *
+ * A run that wrote nothing is not a run that paid nothing. Its reads still
+ * bill at 0.1x — it is only that this run bought none of the entries it read
+ * from, because they were written before the window it measured. Saying
+ * "free" there would understate the bill of exactly the run whose cache is
+ * working best.
+ */
+export function cacheVerdict(cacheRead: number, cacheWrite: number): string {
+  if (cacheWrite === 0)
+    return `nothing written this run — its ${cacheRead} read token(s) still bill at ${CACHE_READ_MULTIPLIER}x`;
+  const ratio = cacheRead / cacheWrite;
+  const verdict = ratio > CACHE_BREAK_EVEN_RATIO ? 'paying' : 'LOSING MONEY';
+  return `read/write ${ratio.toFixed(2)} against ${CACHE_BREAK_EVEN_RATIO.toFixed(2)} break-even — ${verdict}`;
+}
+
 export function costOf(
   counts: Readonly<
     Record<string, { input: number; output: number; cacheRead?: number; cacheWrite?: number }>
@@ -941,7 +975,8 @@ function report(
         // cacheable size is ignored silently, and a zero here is what says so.
         (u.cacheRead + u.cacheWrite > 0
           ? `, ${u.cacheRead} cache read / ${u.cacheWrite} cache write` +
-            ` (${((100 * u.cacheRead) / Math.max(1, u.input + u.cacheRead + u.cacheWrite)).toFixed(0)}% of prompt served from cache)`
+            ` (${((100 * u.cacheRead) / Math.max(1, u.input + u.cacheRead + u.cacheWrite)).toFixed(0)}% of prompt served from cache,` +
+            ` ${cacheVerdict(u.cacheRead, u.cacheWrite)})`
           : '') +
         `, $${cost.toFixed(4)}`,
     );
