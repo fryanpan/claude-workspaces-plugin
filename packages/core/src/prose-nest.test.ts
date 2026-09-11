@@ -210,6 +210,43 @@ describe('what stops the reach', () => {
     expect(md(doc)).toBe('## Meeting notes\n\n- lead\n  - ours\n- theirs');
   });
 
+  it("a person's bullet nested under a NEIGHBOUR, in a list the reach would cross", () => {
+    // The bullet we name is entirely ours, top to bottom. What is not ours is
+    // nested under the bullet BESIDE it, so only the list-level judgement can
+    // see it — and only if that judgement descends. Named this way on purpose:
+    // hang the person's line under the bullet being moved and the per-member
+    // check refuses it, which hides whether the reach ever looked.
+    const doc = notesDoc(
+      '## Meeting notes\n\n- one\n- two\n\nA paragraph note.\n\n- neighbour\n    - theirs\n- ours\n',
+    );
+    findBlockById(getProseFragment(doc), idOf(doc, 'theirs'))?.removeAttribute('cwAuthor');
+    const before = md(doc);
+    const res = apply(doc, [
+      { op: 'nest_blocks', leadBlockId: idOf(doc, 'one'), blockIds: [idOf(doc, 'ours')] },
+    ]);
+    expect(res.outcomes).toEqual([
+      { op: 'nest_blocks', status: 'failed', error: 'nothing-to-nest' },
+    ]);
+    expect(md(doc)).toBe(before);
+  });
+
+  it("a person's bullet nested under ours, in the note-taker's OWN list", () => {
+    // Same subtree, no reach involved at all: the bullet to move is an
+    // ordinary sibling of the lead. The member check has to descend for the
+    // same reason the reach does, or the commonest regroup of all carries
+    // somebody's reply a level deeper without asking.
+    const doc = notesDoc('## Meeting notes\n\n- lead\n- ours\n    - theirs\n');
+    findBlockById(getProseFragment(doc), idOf(doc, 'theirs'))?.removeAttribute('cwAuthor');
+    const before = md(doc);
+    const res = apply(doc, [
+      { op: 'nest_blocks', leadBlockId: idOf(doc, 'lead'), blockIds: [idOf(doc, 'ours')] },
+    ]);
+    expect(res.outcomes).toEqual([
+      { op: 'nest_blocks', status: 'failed', error: 'nothing-to-nest' },
+    ]);
+    expect(md(doc)).toBe(before);
+  });
+
   it('a bullet in the other list that a person owns', () => {
     const doc = notesDoc('## Meeting notes\n\n- one\n- two\n\nA paragraph note.\n\n- three\n');
     const theirs = findBlockById(getProseFragment(doc), idOf(doc, 'three'));

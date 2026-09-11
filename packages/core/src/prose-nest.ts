@@ -84,6 +84,34 @@ function nestedListOf(lead: Y.XmlElement, author: string): Y.XmlElement {
 }
 
 /**
+ * Whether every list item anywhere inside `el` is this author's.
+ *
+ * ONE PREDICATE, BECAUSE THE SAME MISTAKE HAS THREE ROUTES. A regroup moves a
+ * block by cloning it and deleting the original, and a clone carries its whole
+ * subtree — so "is this ours to move" is never a question about one element,
+ * it is a question about everything under it. That was got wrong three
+ * separate times: widening `precedingBlock` would have merged a person's
+ * paragraph into our list, a sibling list was gathered from before it was
+ * judged, and the judgement itself read only a list's DIRECT children so a
+ * person's bullet nested one level down was carried along. Each was found on
+ * its own. This exists so a fourth route has nothing new to get wrong: both
+ * places that decide what may move ask this, and it descends.
+ *
+ * Only list ITEMS are judged. A list container carries `cwAuthor` just when
+ * this agent's own insert built it — one that came back off disk carries
+ * nothing, because markdown has nowhere to put the attribute — so a container
+ * is never the evidence.
+ */
+function everyListItemIsOurs(el: Y.XmlElement, author: string): boolean {
+  for (const kid of el.toArray() as unknown[]) {
+    if (!(kid instanceof Y.XmlElement)) continue;
+    if (kid.nodeName === 'listItem' && readBlockAuthor(kid) !== author) return false;
+    if (!everyListItemIsOurs(kid, author)) return false;
+  }
+  return true;
+}
+
+/**
  * The lists a regroup may gather from: the lead's own, and the sibling lists
  * a note the note-taker itself wrote has cut it off from.
  *
@@ -121,16 +149,14 @@ function reachableLists(list: Y.XmlElement, author: string): Y.XmlElement[] {
     if (isUnclaimedBlankParagraph(el)) return true;
     if (!(el instanceof Y.XmlElement)) return false;
     if (el.nodeName === 'heading') return false;
-    // A LIST IS JUDGED BY ITS ITEMS, NOT BY ITS OWN MARK. A list container
-    // carries `cwAuthor` only when this agent's own insert built it; one that
-    // came back off disk carries nothing, because markdown has nowhere to put
-    // the attribute. Its items are the thing a reach would step over, so they
-    // are what decides.
+    // A LIST IS JUDGED BY ITS ITEMS, AT EVERY DEPTH — see
+    // {@link everyListItemIsOurs}. An empty list is not evidence of anything
+    // and is not crossed.
     if (isList(el)) {
       const items = (el.toArray() as unknown[]).filter(
         (kid): kid is Y.XmlElement => kid instanceof Y.XmlElement && kid.nodeName === 'listItem',
       );
-      return items.length > 0 && items.every((kid) => readBlockAuthor(kid) === author);
+      return items.length > 0 && everyListItemIsOurs(el, author);
     }
     return readBlockAuthor(el) === author;
   };
@@ -195,7 +221,11 @@ export function nestBlocksUnderLead(
       if (!(el instanceof Y.XmlElement)) continue;
       if (el === lead || el.nodeName !== 'listItem') continue;
       if (!wanted.has(readBlockId(el) ?? ' ')) continue;
+      // AND EVERYTHING UNDER IT, because the move is a clone of the whole
+      // subtree: a bullet of ours carrying a person's reply beneath it takes
+      // their words along with it. Same rule as the reach, same predicate.
       if (readBlockAuthor(el) !== opts.author) continue;
+      if (!everyListItemIsOurs(el, opts.author)) continue;
       members.push({ el, from });
     }
   }
