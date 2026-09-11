@@ -2937,6 +2937,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // below are still live — after `docStore.flush()` that write would have
       // nowhere left to land.
       server.stop(true);
+      // AFTER the sockets, never before: the force-close above fired every
+      // stream's close handler synchronously, and each one arms a held
+      // departure. Stopping earlier would leave exactly those timers behind
+      // to outlive the bus they were going to broadcast on.
+      stallWiring.stopListeningAnnouncer();
       // Close the books on any live meeting, so a restart never finds a doc
       // marked as recording by a socket that died with the process. Awaited
       // because the close handlers above start their teardowns async, and

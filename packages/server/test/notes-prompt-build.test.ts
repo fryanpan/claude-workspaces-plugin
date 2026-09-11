@@ -11,8 +11,10 @@
 import { describe, expect, it } from 'bun:test';
 import {
   MAX_CACHE_BREAKPOINTS,
+  NOTES_OUTLINE_CACHE_STEPS,
   type NotesPrompt,
   buildNotesPrompt,
+  outlineCacheCuts,
 } from '../src/notes-prompt-build.ts';
 import { input, withBullets } from './notes-compose-input.ts';
 
@@ -223,6 +225,45 @@ describe('notes prompt', () => {
       const cached = buildNotesPrompt(withBullets(n)).blocks.filter((b) => b.cached);
       expect(cached.length).toBeGreaterThan(0);
       expect(cached.length).toBeLessThanOrEqual(MAX_CACHE_BREAKPOINTS);
+    }
+  });
+
+  it('holds the limit against a ladder somebody lengthened, and loses no row', () => {
+    // THE TEST ABOVE PASSES ON THE SHIPPED LADDER AND WOULD GO ON PASSING
+    // THROUGH THE BUG. Three steps fit under the limit by arithmetic nobody
+    // wrote down, so a fourth added to `NOTES_OUTLINE_CACHE_STEPS` — the
+    // obvious way to tune this — asks for five markers, and the API refuses
+    // the whole request rather than caching less of it. A meeting that takes
+    // no notes is a worse outcome than one that pays full price, so the cut
+    // list holds the limit itself whatever ladder it is handed.
+    const overlong = [64, 32, 16, 8, 4];
+    // The control on the fixture: this ladder really does overflow without
+    // the cap, or the assertion below is vacuous.
+    expect(overlong.length + 1).toBeGreaterThan(MAX_CACHE_BREAKPOINTS);
+    for (let settled = 0; settled <= 200; settled++) {
+      const cuts = outlineCacheCuts(settled, overlong);
+      expect(cuts.length).toBeLessThanOrEqual(MAX_CACHE_BREAKPOINTS);
+      // Capping may cost a breakpoint; it may never cost a ROW. The last cut
+      // is the end of the settled table, so every settled row is still sent.
+      expect(cuts[cuts.length - 1] ?? 0).toBe(settled);
+      expect([...cuts].sort((a, b) => a - b)).toEqual(cuts);
+      expect(new Set(cuts).size).toBe(cuts.length);
+    }
+  });
+
+  it('cuts on a ladder that descends, because an ascending one silently collapses', () => {
+    // Not a style rule. `outlineCacheCuts` only ever moves forwards, so a
+    // ladder written smallest-first takes the finest cut first and then finds
+    // every coarser boundary already behind it — one chunk, no ladder, and
+    // nothing anywhere says so: the prompt is still correct and the bill
+    // quietly doubles. Asserted as the collapse it causes, then on the
+    // constant that must not cause it.
+    const ascending = [4, 16, 64];
+    expect(outlineCacheCuts(100, ascending).length).toBe(1);
+    expect(outlineCacheCuts(100, [...ascending].reverse()).length).toBeGreaterThan(1);
+    for (const [i, step] of NOTES_OUTLINE_CACHE_STEPS.entries()) {
+      expect(step).toBeGreaterThan(0);
+      if (i > 0) expect(step).toBeLessThan(NOTES_OUTLINE_CACHE_STEPS[i - 1] as number);
     }
   });
 

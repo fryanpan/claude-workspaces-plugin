@@ -39,7 +39,7 @@ import {
   pendingDeclaration,
   reviewAnswered,
 } from '@claude-workspaces/core';
-import { agentListeningFrame } from './agent-listening.ts';
+import { ListeningAnnouncer } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
@@ -204,6 +204,11 @@ export interface StallWiring {
   /** The keep-moving verdicts, for the one route that reads them. Read-only
    *  by type: recording happens on the stall tick and nowhere else. */
   keepMoving: Pick<KeepMovingRecorder, 'latest' | 'history'>;
+  /** Drop every held departure. Call it AFTER the sockets come down, never
+   *  before: `server.stop(true)` fires each close handler synchronously, so
+   *  stopping first would arm one timer per connected agent on the way out
+   *  and leave them to outlive the bus they would broadcast on. */
+  stopListeningAnnouncer: () => void;
 }
 
 export function createStallWiring(ctx: StallWiringContext): StallWiring {
@@ -334,14 +339,19 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   // open board without a reload. Transient rather than buffered: who is here
   // is a fact about now, and replaying it to a page that reconnects would
   // hand it a reading from before it left.
+  // Through the announcer, not straight out: a transient on a board channel
+  // wakes every agent session attached to it, and a socket moving is not by
+  // itself news. A reconnect is a close and an open with no change between
+  // them, and announcing both is what was costing attached peers a turn per
+  // blip per board.
+  const listeningAnnouncer = new ListeningAnnouncer((frame) =>
+    sse.broadcastTransient(`ws~${frame.workspaceId}`, frame),
+  );
   sse.onAgentStreams = (channel, agentId) => {
     if (!channel.startsWith('ws~')) return;
     const workspaceId = channel.slice('ws~'.length);
     leadPresence.notify(workspaceId);
-    sse.broadcastTransient(
-      channel,
-      agentListeningFrame(workspaceId, agentId, sse.agentsOn(channel).has(agentId)),
-    );
+    listeningAnnouncer.observe(workspaceId, agentId, sse.agentsOn(channel).has(agentId));
   };
 
   const readyNudger = new ReadyWorkNudger({
@@ -1137,5 +1147,12 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     }
   };
 
-  return { leadPresence, readyNudger, stallNudger, onLiveDocEvent, keepMoving };
+  return {
+    leadPresence,
+    readyNudger,
+    stallNudger,
+    onLiveDocEvent,
+    keepMoving,
+    stopListeningAnnouncer: () => listeningAnnouncer.stop(),
+  };
 }
