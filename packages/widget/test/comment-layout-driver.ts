@@ -29,6 +29,9 @@ import {
 import { chromeLaunchArgs, profilesOfRun, resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
 
 const TAG = 'claude-feedback-widget';
+/** A comment longer than a saved card shows. */
+const LONG =
+  'the timetable is missing Sunday, and the Riverbend ferry leaves from the north pier on holidays, not the south one, which the page says twice and the map says once';
 const SHADOW = `document.querySelector('${TAG}').shadowRoot`;
 
 /** [left, top, right, bottom], rounded. */
@@ -44,6 +47,9 @@ export interface Look {
   saved: { box: Box; text: string } | null;
   /** Every saved card on screen. */
   saves: Box[];
+  /** The last saved card's text: its height, its line height, and the
+   *  height its whole text would need. */
+  savedText: [number, number, number] | null;
   /** Each leader line's two ends. */
   lines: Array<[number, number, number, number]>;
   /** The banner when it is painted, else null. */
@@ -90,7 +96,7 @@ function pageHtml(bundle: string): string {
 <body>
 <header><h1 id="title">Harborlight open day</h1></header>
 <main>
- <div id="narrow">Ferry times</div>
+ <div id="narrow">Ferry times<br>Six sailings</div>
  <div id="wide">The full timetable, across the page</div>
  <div id="spacer"></div>
  <div id="low">Parking</div>
@@ -147,6 +153,18 @@ const LOOK = `(() => {
     snippet: sr.querySelector('.composer-snippet')?.textContent ?? null,
     saved: s ? { box: box(s), text: s.textContent } : null,
     saves: [...sr.querySelectorAll('.saved')].map(box),
+    savedText: (() => {
+      const all = sr.querySelectorAll('.saved-text');
+      const t = all[all.length - 1];
+      if (!t) return null;
+      // One line's height, under the same styles: a sibling holding one word.
+      const one = t.cloneNode();
+      one.textContent = 'x';
+      t.after(one);
+      const line = one.getBoundingClientRect().height;
+      one.remove();
+      return [t.getBoundingClientRect().height, line, t.scrollHeight];
+    })(),
     lines,
     banner: box(b),
     tick: !!t && !t.hidden,
@@ -239,7 +257,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await tap(el('wide'));
     await look('onWide');
     // A second post while the first one's saved card still shows.
-    await type('the timetable is missing Sunday');
+    await type(LONG);
     await enter();
     await look('posted2');
     // An iPad turned to portrait mid-comment, and back.

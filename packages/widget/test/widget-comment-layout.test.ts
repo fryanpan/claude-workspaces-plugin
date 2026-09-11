@@ -91,7 +91,8 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       // The right margin: its right edge 16px in from the viewport's.
       expect(card[2]).toBe(1180 - 16);
       expect(Math.abs(card[1] - el[1]), 'level with its element').toBeLessThanOrEqual(1);
-      expect(l.snippet).toBe('Ferry times');
+      // Two lines of text read as two words apart, not run together.
+      expect(l.snippet).toBe('Ferry times Six sailings');
     });
 
     it('is joined to that element by a line from its edge to the card', () => {
@@ -145,12 +146,21 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
 
     it('stacks a second saved card below the first rather than over it', () => {
       const l = look(1180, 'posted2');
-      expect(l.posts).toEqual(['ferry times are wrong', 'the timetable is missing Sunday']);
+      expect(l.posts).toHaveLength(2);
+      expect(l.posts[1]).toMatch(/^the timetable is missing Sunday/);
       expect(l.saves, 'CONTROL: both saved cards are still up').toHaveLength(2);
       const cards = [...l.saves, box(l.card)];
       for (const [i, a] of cards.entries()) {
         for (const b of cards.slice(i + 1)) expect(overlap(a, b), 'two cards overlap').toBe(0);
       }
+    });
+
+    it('ends a long saved comment on a whole line, never partway through one', () => {
+      const [h, line, full] = look(1180, 'posted2').savedText ?? [0, 1, 0];
+      expect(full, 'CONTROL: the comment is longer than the card shows').toBeGreaterThan(h + line);
+      const lines = h / line;
+      expect(Math.abs(lines - Math.round(lines)), `${lines} lines shown`).toBeLessThan(0.05);
+      expect(Math.round(lines)).toBe(3);
     });
 
     it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {

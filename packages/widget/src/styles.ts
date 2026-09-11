@@ -285,7 +285,7 @@ export const widgetStyles = `
   animation: cw-saved 1.6s ease-out;
 }
 @keyframes cw-saved { from { background: #e8f5ed; } }
-.saved-text { overflow-wrap: anywhere; max-height: 4.5em; overflow: hidden; }
+.saved-text { overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .tick { float: right; margin-left: 6px; color: #1f7a3a; font-weight: 700; font-size: 11px; }
 .tick::before { content: "✓ "; }
 /* "on <b>Tomatoes</b>" — one line, the name in ink. The "on" is generated so

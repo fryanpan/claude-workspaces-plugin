@@ -378,7 +378,7 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   // reads "on <quote>"; the "on" is drawn by the stylesheet, so the text a
   // reader (or a test) takes from the line is the anchor's own words.
   const head = target
-    ? `<b>${escape((anchor as ElementAnchor).snippet.text)}</b>`
+    ? `<b>${escape((target.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) || (anchor as ElementAnchor).snippet.text)}</b>`
     : 'About this page';
   composer.innerHTML = `
       <div class="composer-snippet">${head}</div>
