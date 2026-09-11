@@ -15233,7 +15233,7 @@ var TOOL_LIST = {
     },
     {
       name: "post_reply",
-      description: "Reply to a thread. Pass review when the reply asks a person to decide or to look at something. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
+      description: "Reply to a thread. Pass review when the reply asks a person to decide or look. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16359,7 +16359,7 @@ var TOOL_LIST = {
     },
     {
       name: "create_tasks",
-      description: "File work on a board. This is the only create verb, and it always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced at the bottom of Backlog. New tasks land in triage until task_transition releases them. A bad task returns in failures by index, never rejecting the batch. `held: true` means it waits off the reader's queue until revise_review_item closes `heldReason`.",
+      description: "File work on a board. This is the only create verb. It always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced in Backlog. New tasks stay in triage until task_transition releases them. A bad task returns in failures by index, not rejecting the batch. `held: true` means it waits off the queue until revise_review_item closes `heldReason`.",
       inputSchema: {
         type: "object",
         properties: {
