@@ -39,7 +39,7 @@ import {
   pendingDeclaration,
   reviewAnswered,
 } from '@claude-workspaces/core';
-import { agentListeningFrame } from './agent-listening.ts';
+import { ListeningAnnouncer } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
@@ -334,14 +334,19 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   // open board without a reload. Transient rather than buffered: who is here
   // is a fact about now, and replaying it to a page that reconnects would
   // hand it a reading from before it left.
+  // Through the announcer, not straight out: a transient on a board channel
+  // wakes every agent session attached to it, and a socket moving is not by
+  // itself news. A reconnect is a close and an open with no change between
+  // them, and announcing both is what was costing attached peers a turn per
+  // blip per board.
+  const listeningAnnouncer = new ListeningAnnouncer((frame) =>
+    sse.broadcastTransient(`ws~${frame.workspaceId}`, frame),
+  );
   sse.onAgentStreams = (channel, agentId) => {
     if (!channel.startsWith('ws~')) return;
     const workspaceId = channel.slice('ws~'.length);
     leadPresence.notify(workspaceId);
-    sse.broadcastTransient(
-      channel,
-      agentListeningFrame(workspaceId, agentId, sse.agentsOn(channel).has(agentId)),
-    );
+    listeningAnnouncer.observe(workspaceId, agentId, sse.agentsOn(channel).has(agentId));
   };
 
   const readyNudger = new ReadyWorkNudger({
