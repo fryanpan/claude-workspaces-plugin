@@ -184,6 +184,16 @@ export interface NotesTickHarnessOptions {
    * by the twentieth tick of a meeting.
    */
   tickTimeoutMs?: number;
+  /**
+   * The task-capture extractor, wired the way the server wires it. Present,
+   * every tick runs a capture pass before its compose — which is what a test
+   * about what a tick COSTS needs, because the capture call is the half that
+   * used to go unrecorded. Needs `workspaceId` and `captureBoard` too: a
+   * capture pass with no board has nothing to file against.
+   */
+  taskExtractor?: import('../src/meeting-task-capture.ts').TaskCaptureExtractor;
+  /** The board that capture pass files and finds against. */
+  captureBoard?: import('../src/meeting-task-capture.ts').TaskCaptureBoard;
 }
 
 export interface NotesTickHarness {
@@ -288,6 +298,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
           return composed;
         },
       },
+      ...(opts.taskExtractor ? { taskExtractor: opts.taskExtractor } : {}),
       // Pause ticks only. A ceiling would fire on its own inside `fire()` and
       // turn a script's third tick into somebody else's second.
       cadenceMs: Number.POSITIVE_INFINITY,
@@ -313,6 +324,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
         taskLinks.push({ taskId, docId: linkedDocId });
       },
       ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
+      ...(opts.captureBoard ? { captureBoard: () => opts.captureBoard as never } : {}),
       ...(qualityBoard ? { qualityBoard: () => qualityBoard } : {}),
       ...(opts.heading ? { heading: opts.heading } : {}),
     },
