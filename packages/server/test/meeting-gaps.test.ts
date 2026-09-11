@@ -10,7 +10,7 @@
  * All fixtures are synthetic; the repo is public.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
@@ -20,7 +20,7 @@ import {
   rawTranscriptPath,
   readMeetingJson,
 } from '../src/meeting-raw.ts';
-import { MeetingStore, listMeetings } from '../src/meetings.ts';
+import { MeetingStore, listMeetings, meetingIndexPath } from '../src/meetings.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
 
 const dirs: string[] = [];
@@ -284,6 +284,141 @@ describe('a gap that crossed the reconnect', () => {
     });
     expect(block).toContain('the microphone stopped here and did not come back');
     expect(block).not.toContain('_(no settled turns)_');
+  });
+});
+
+/**
+ * The outages a resumed leg has to work out for ITSELF.
+ *
+ * The block above drives `formatRawSegment` with the gaps handed to it ready
+ * made, which proves the WORDS and nothing about who chose them. Choosing is
+ * the part that was wrong: which of a meeting's outages belong to the leg
+ * being appended, which recovery the block before the restart could not know
+ * about, and whether the index gets the gap when the leg settled no turns at
+ * all. Those three answers live in `flushRawSegments`, and all three could be
+ * deleted with the whole server suite still green. These drive a real resume
+ * and read both files back.
+ *
+ * The timestamps are chosen rather than clocked. `recordGap` reads `Date.now()`
+ * with no way in, and every case here is about which SIDE of the restart a gap
+ * fell on — so the gap lines go onto the append-only index directly, in the
+ * shape `recordGap` writes, at times this test picked. `start` and `resume`
+ * take the same clock, so the whole fixture is one arithmetic.
+ */
+describe('the outages a resumed leg has to work out for itself', () => {
+  /** Anchored in the past so a real `stop()` always lands after the fixture. */
+  const STARTED = Date.now() - 600_000;
+  const RESUMED = STARTED + 300_000;
+
+  /** A gap line exactly as `recordGap` appends one, at a time we chose. */
+  function writeGapLine(dir: string, meetingId: string, row: Record<string, unknown>): void {
+    appendFileSync(meetingIndexPath(dir, 'd1'), `${JSON.stringify({ meetingId, ...row })}\n`);
+  }
+
+  /** The leg before the socket dropped: one turn, so there is a file to resume onto. */
+  function legOne(dir: string) {
+    const store = new MeetingStore(dir, { docInfo: () => ({ title: 'Weekly sync' }) });
+    const meeting = store.start({
+      docId: 'd1',
+      engine: 'mock',
+      sampleRate: 16_000,
+      mode: 'conversation',
+      now: STARTED,
+    });
+    if (!meeting) throw new Error('the doc was already recording');
+    meeting.recordTurn(0, 'Before the socket dropped.');
+    return { store, meeting, meetingId: meeting.meetingId };
+  }
+
+  /** Pick the meeting up again on the chosen clock. */
+  function legTwo(store: MeetingStore, meetingId: string) {
+    const again = store.resume({
+      docId: 'd1',
+      meetingId,
+      engine: 'mock',
+      sampleRate: 16_000,
+      mode: 'conversation',
+      now: RESUMED,
+    });
+    if (!again) throw new Error('the resume was refused');
+    return again;
+  }
+
+  const transcript = (dir: string) =>
+    readFileSync(rawTranscriptPath(dir, 'd1', 'weekly-sync'), 'utf8');
+
+  it('writes a turnless leg’s outage to the index the record is folded from', () => {
+    // The meeting a gap matters most on: the capture was dead for the whole
+    // leg, which is WHY there are no turns. The index update used to sit past
+    // the early return that the turn count alone decided.
+    const dir = dataDir();
+    const { store, meeting, meetingId } = legOne(dir);
+    meeting.stop();
+    writeGapLine(dir, meetingId, {
+      gapStream: 'mic',
+      gapFrom: RESUMED + 1_000,
+      gapReason: 'ended',
+    });
+    legTwo(store, meetingId).stop();
+
+    const seg = readMeetingJson(dir, 'd1')?.segments.find((s) => s.meetingId === meetingId);
+    expect(seg?.gaps?.map((g) => g.stream)).toEqual(['mic']);
+    expect(seg?.gaps?.[0]?.to).toBeNull();
+  });
+
+  it('appends a continuation block for a leg whose only news is the outage', () => {
+    const dir = dataDir();
+    const { store, meeting, meetingId } = legOne(dir);
+    meeting.stop();
+    writeGapLine(dir, meetingId, {
+      gapStream: 'mic',
+      gapFrom: RESUMED + 1_000,
+      gapReason: 'ended',
+    });
+    legTwo(store, meetingId).stop();
+
+    expect(transcript(dir)).toContain('the microphone stopped here and did not come back');
+  });
+
+  it('states the recovery the block before the restart could not know about', () => {
+    // That block reported the loss as still open, because it was, and an
+    // append-only file cannot go back and add the ending.
+    const dir = dataDir();
+    const { store, meeting, meetingId } = legOne(dir);
+    writeGapLine(dir, meetingId, {
+      gapStream: 'system',
+      gapFrom: RESUMED - 120_000,
+      gapReason: 'ended',
+    });
+    meeting.stop();
+    const again = legTwo(store, meetingId);
+    writeGapLine(dir, meetingId, { gapStream: 'system', gapTo: RESUMED + 30_000 });
+    again.recordTurn(1, 'Are we back?');
+    again.stop();
+
+    expect(transcript(dir)).toContain(
+      'the loss it ends is the one the block above reports as still open',
+    );
+  });
+
+  it('does not reprint an outage the block before the restart already closed', () => {
+    // Printed twice, one outage reads as two — and the second one is a loss
+    // the meeting never had.
+    const dir = dataDir();
+    const { store, meeting, meetingId } = legOne(dir);
+    writeGapLine(dir, meetingId, {
+      gapStream: 'system',
+      gapFrom: RESUMED - 120_000,
+      gapReason: 'ended',
+    });
+    writeGapLine(dir, meetingId, { gapStream: 'system', gapTo: RESUMED - 60_000 });
+    meeting.stop();
+    const again = legTwo(store, meetingId);
+    again.recordTurn(1, 'Carrying on.');
+    again.stop();
+
+    const text = transcript(dir);
+    expect(text.split('nothing from it was recorded').length - 1).toBe(1);
   });
 });
 
