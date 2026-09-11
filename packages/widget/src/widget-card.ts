@@ -45,8 +45,18 @@ const REST_Y = 72;
 export function placeCards(w: FeedbackWidgetEl): void {
   const lead = w.shadow.querySelector('.leader') as HTMLElement | null;
   if (!lead) return;
-  const vh = window.innerHeight;
+  let top = 8;
+  let bot = window.innerHeight - 8;
   const x = window.innerWidth - 16 - CARD_W;
+  // The mode's own buttons in the card's column — Done, the FAB's X, the list
+  // — stay uncovered: the card's room ends where they start.
+  for (const o of w.shadow.querySelectorAll('.fab, .fab-list, .picker-banner')) {
+    const b = o.getBoundingClientRect();
+    if (b.width && b.right > x && b.left < x + CARD_W) {
+      if (b.top > (top + bot) / 2) bot = Math.min(bot, b.top - 8);
+      else top = Math.max(top, b.bottom + 8);
+    }
+  }
   let lines = '';
   // The composer is placed first and keeps its spot; a saved card still
   // showing its tick steps below every card already placed rather than over
@@ -65,10 +75,10 @@ export function placeCards(w: FeedbackWidgetEl): void {
       ? REST_Y
       : beside
         ? r.top
-        : r.bottom + GAP + h <= vh || r.top - GAP - h < 0
+        : r.bottom + GAP + h <= bot || r.top - GAP - h < top
           ? r.bottom + GAP
           : r.top - GAP - h;
-    y = Math.max(8, Math.min(y, vh - h - 8));
+    y = Math.max(top, Math.min(y, bot - h));
     for (let moved = true; moved; ) {
       moved = false;
       for (const [a, b] of taken) {
@@ -78,6 +88,7 @@ export function placeCards(w: FeedbackWidgetEl): void {
         }
       }
     }
+    y = Math.min(y, bot - h);
     taken.push([y, y + h + 10]);
     c.style.left = `${x}px`;
     c.style.top = `${y}px`;

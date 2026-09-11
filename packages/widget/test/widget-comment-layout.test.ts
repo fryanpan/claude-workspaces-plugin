@@ -170,6 +170,19 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(l.focus).toBe('TEXTAREA');
     });
 
+    it('stays clear of the FAB and the list button for an element low on the screen', () => {
+      const l = look(1180, 'onLowDesk');
+      const card = box(l.card);
+      expect(l.controls.length, 'CONTROL: the mode has buttons painted').toBeGreaterThan(0);
+      const reach = box(l.el.low)[1] + (card[3] - card[1]);
+      expect(
+        reach,
+        'CONTROL: a card level with the element would reach the buttons',
+      ).toBeGreaterThan(Math.min(...l.controls.map((c) => c[1])));
+      for (const c of l.controls) expect(overlap(card, c), 'the card covers a button').toBe(0);
+      expect(overlap(card, l.el.low)).toBe(0);
+    });
+
     it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {
       const p = look(1180, 'portrait');
       expect(p.mode).toBe(true);

@@ -50,6 +50,8 @@ export interface Look {
   /** The last saved card's text: its height, its line height, and the
    *  height its whole text would need. */
   savedText: [number, number, number] | null;
+  /** The mode's own buttons that are painted: the FAB and the list. */
+  controls: Box[];
   /** Each leader line's two ends. */
   lines: Array<[number, number, number, number]>;
   /** The banner when it is painted, else null. */
@@ -88,6 +90,7 @@ function pageHtml(bundle: string): string {
  h1{margin:0;font-size:22px}
  main{padding:24px}
  #narrow{width:220px;height:70px;background:#eef5ea}
+ #low{width:220px}
  #wide{height:70px;margin-top:40px;background:#eef5ea}
  #spacer{height:560px}
  #low{height:60px;background:#eef5ea}
@@ -165,6 +168,7 @@ const LOOK = `(() => {
       one.remove();
       return [t.getBoundingClientRect().height, line, t.scrollHeight];
     })(),
+    controls: [...sr.querySelectorAll('.fab, .fab-list')].map(box).filter(Boolean),
     lines,
     banner: box(b),
     tick: !!t && !t.hidden,
@@ -272,6 +276,12 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await look('portrait');
     await turn(width, height);
     await look('landscape');
+    // An element low on the screen, whose card level with it would reach the
+    // FAB and the list button in the corner.
+    await cdp.evaluate(`scrollTo(0, document.getElementById('low').offsetTop - ${height} + 90)`);
+    await settle();
+    await tap(el('low'));
+    await look('onLowDesk');
   } else {
     await tap(el('narrow'));
     await type('ferry times are wrong');
