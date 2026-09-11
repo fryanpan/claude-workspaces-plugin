@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-method-*.ts<br/>transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
@@ -535,6 +535,14 @@ inside the store's own reads, where the visitor allowlist can name it. This
 module reaches for no bus of its own, which is why it sits here and not beside
 `sse.ts`.
 
+`sse-writer.ts` sits beside `sse.ts` and draws no new boundary either: both
+streams (`sse.ts` per doc, `sse-mux.ts` per tab) write through it instead of
+straight onto their controllers. It hands one stream's queued frames to its
+socket per event-loop turn, because under Bun on macOS a chunk written to a
+second socket in the same turn is held for about 100ms. That is the delay the
+board's wake frames and every comment broadcast were paying on the machine
+prod runs on.
+
 `path-params.ts` joins that row for the same reason and from the same problem:
 it decodes one path segment, answering rather than throwing on a stray `%`, and
 `server.ts` calls it once at the front door so no route can be reached with a
@@ -669,7 +677,7 @@ flowchart LR
   subgraph f1["A comment: browser → .ydoc → agent"]
     B1[Browser] -->|Yjs update over WS| R1["Live doc<br/>doc-store.ts"]
     R1 -->|debounced persist| Y1[(".ydoc · bound .md")]
-    R1 -->|thread event| S1["SSE bus<br/>sse.ts · sse-mux.ts"]
+    R1 -->|thread event| S1["SSE bus<br/>sse.ts · sse-mux.ts · sse-writer.ts"]
     S1 -->|channel frame| A1["Agent<br/>mcp watch_doc"]
   end
   subgraph f2["A task: MCP tool → board"]

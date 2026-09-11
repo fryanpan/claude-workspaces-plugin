@@ -40,6 +40,7 @@
  * is the property that keeps this from trading a socket storm for a
  * reconnect storm.
  */
+import { type SseStreamWriter, createSseStreamWriter } from './sse-writer.ts';
 import { SSE_KEEPALIVE_MS, type SseBus } from './sse.ts';
 
 /** What one watch key resolves to on the wire. `ws:<id>` keys broadcast on
@@ -79,8 +80,9 @@ export interface AgentMuxStreamOptions {
  */
 export function openAgentMuxStream(opts: AgentMuxStreamOptions): Response {
   const { bus, agentId, keys, channelFor } = opts;
-  const encoder = new TextEncoder();
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  // Written through sse-writer.ts, which hands frames to the socket one turn
+  // later — the macOS hold it avoids is described there.
+  let out: SseStreamWriter | null = null;
   /** watch key → the board disposer for its registration. */
   const subscribed = new Map<string, () => void>();
   let unsubscribeWatchSet: (() => void) | null = null;
@@ -90,28 +92,20 @@ export function openAgentMuxStream(opts: AgentMuxStreamOptions): Response {
    *  can tell which of its N subscriptions a frame arrived on — that tag is
    *  what makes a single socket equivalent to N. */
   const emit = (watchKey: string, event: string, data: unknown, id?: string): void => {
-    if (!controller) return;
+    if (!out) return;
     const payload =
       data !== null && typeof data === 'object'
         ? { ...(data as Record<string, unknown>), watchKey }
         : { event, watchKey };
     const idLine = id ? `id: ${id}\n` : '';
-    controller.enqueue(
-      encoder.encode(`${idLine}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`),
-    );
+    out.write(`${idLine}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
   };
 
   /** The per-channel sink the board writes through. One object per key, so the
    *  tag is decided at registration rather than guessed at write time. */
   const sinkFor = (watchKey: string) => ({
     write: (event: string, data: unknown, id?: string) => emit(watchKey, event, data, id),
-    close: () => {
-      try {
-        controller?.close();
-      } catch {
-        // Already gone; the disposers below are the bookkeeping either way.
-      }
-    },
+    close: () => out?.close(),
   });
 
   /**
@@ -147,10 +141,10 @@ export function openAgentMuxStream(opts: AgentMuxStreamOptions): Response {
 
   const stream = new ReadableStream<Uint8Array>({
     start(c) {
-      controller = c;
+      out = createSseStreamWriter(c);
       // Flush headers through any proxy before anything else, exactly as the
       // per-key stream does.
-      c.enqueue(encoder.encode(':ok\n\n'));
+      out.write(':ok\n\n');
       sync();
       // Catch-up, BETWEEN registration and the first live write, and
       // synchronous for the same reason `openSseStream` gives: nothing can be
@@ -188,14 +182,15 @@ export function openAgentMuxStream(opts: AgentMuxStreamOptions): Response {
       unsubscribeWatchSet = opts.onWatchSetChanged?.(() => sync()) ?? null;
       keepalive = setInterval(() => {
         try {
-          c.enqueue(encoder.encode(':ka\n\n'));
+          out?.write(':ka\n\n');
         } catch {
           if (keepalive) clearInterval(keepalive);
         }
       }, opts.keepaliveMs ?? SSE_KEEPALIVE_MS);
     },
     cancel() {
-      controller = null;
+      out?.cancel();
+      out = null;
       for (const dispose of subscribed.values()) dispose();
       subscribed.clear();
       unsubscribeWatchSet?.();
