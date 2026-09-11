@@ -1646,7 +1646,8 @@ export class DocStore {
       // A mockup's binding is watch-only, so hydration re-arms it exactly as
       // it re-arms a code doc's: a mock whose source is still being edited
       // must keep updating the pages people have open across a restart.
-      return this.attachMockupFile(docId, src).ok;
+      // With the pool's stat, so arming the poll takes none of its own here.
+      return this.bindings.attachMockupFile(docId, src, preread ? { preread } : {}).ok;
     }
     return false;
   }
