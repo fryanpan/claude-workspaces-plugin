@@ -3427,7 +3427,11 @@ body.board-body {
   gap: 10px;
   min-height: 28px;
 }
+/* The name keeps its width and the path gives way: a checkout path is
+   usually the long one, and the project's name is what the header is for. */
 .library-proj {
+  flex: 0 0 auto;
+  max-width: 100%;
   font-size: 17px;
   font-weight: 650;
   letter-spacing: -0.01em;
