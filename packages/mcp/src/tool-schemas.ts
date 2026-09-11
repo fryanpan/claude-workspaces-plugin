@@ -268,7 +268,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'post_status',
       description:
-        "One line to a few sentences on where the work stands; lands on the task's Activity tab, never as a comment. Omit taskId to post to your current in-progress task. Your end-of-turn message already reaches the same tab on its own, so this is for a milestone worth naming — started, blocked on what, PR open, done. Refused when empty or over 4000 chars.",
+        'Share a major milestone update to the the activity stream (e.g. build, test, review, or deploy done). Only the first ~20 words appear in Home activity feed.  Full update may be up to 4000 chars in task activity feed.',
       inputSchema: {
         type: 'object',
         properties: {
