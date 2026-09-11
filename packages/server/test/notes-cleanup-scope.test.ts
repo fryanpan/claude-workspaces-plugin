@@ -12,14 +12,8 @@
 
 import { describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
-import {
-  claimForCleanup,
-  confineToSection,
-  releaseClaims,
-  sectionIds,
-} from '../src/notes-cleanup-scope.ts';
-import { NOTES_AUTHOR_ID, type NotesDocStore } from '../src/notes-doc-access.ts';
-import { DOC, NOTES, docStoreFrom, idOf } from './notes-cleanup-fixture.ts';
+import { confineToSection, sectionIds } from '../src/notes-cleanup-scope.ts';
+import { DOC, docStoreFrom } from './notes-cleanup-fixture.ts';
 
 describe('the section a cleanup may touch', () => {
   it('runs from the meeting heading to the next section, and no further', () => {
@@ -45,68 +39,65 @@ describe('what the gate refuses', () => {
   // vacuous without it: an unowned heading is refused by the ownership
   // check, so the guard it means to prove is never reached.
   //
-  // `marksLive` is true and `b2` is unmarked: a doc still carrying the
-  // note-taker's marks, with one block inside its section that a person wrote
-  // or has since edited. That is the state criterion 2.3 protects.
+  // `b2` is unmarked, inside the section: a block a person wrote there, or
+  // one of the note-taker's they have since edited. The document records
+  // those two the same way, and that is the state criterion 2.3 protects.
+  //
+  // WHAT THIS FILE CAN AND CANNOT SEE. The gate decides which edits reach the
+  // document, not which of them land as rewrites — that is `applyBlockEdits`,
+  // reading each block's own mark. So a `replace_block` on `b2` coming back
+  // KEPT is the whole of what the gate promises; that it then reaches a person
+  // as a redline and leaves their words byte-identical is asserted on a real
+  // document in `notes-cleanup-suggestions.test.ts`. What the gate does decide
+  // by itself is the DELETE and the NEST, and those are the assertions below
+  // that bite.
   const scope = {
     blocks: new Set(['h1', 'b1', 'b2']),
     headings: new Set(['h1']),
     owned: new Set(['h1', 'b1']),
-    attributed: new Set(['h1', 'b1']),
-    marksLive: true,
     headingId: 'h1',
   };
 
-  it("keeps a rewrite of a person's block as an OFFER, never as a rewrite", () => {
+  it("keeps a rewrite of a person's block, rather than dropping it", () => {
     const edit: prose.BlockEdit = { op: 'replace_block', blockId: 'b2', markdown: '- rewritten' };
-    const { kept, proposeOnly, refused } = confineToSection([edit], scope);
-    // Kept, so it reaches the write path — and named in `proposeOnly`, which
-    // is what stops the pass claiming the block and turning the redline
-    // `applyBlockEdits` would file into a rewrite of their line.
+    const { kept, refused } = confineToSection([edit], scope);
     expect(kept).toEqual([edit]);
-    expect([...proposeOnly]).toEqual(['b2']);
     expect(refused).toBe(0);
-    // The note-taker's own bullet is the control: same section, same op, and
-    // it comes back with nothing to hold back.
-    const own = confineToSection(
-      [{ op: 'replace_block', blockId: 'b1', markdown: '- tightened' }],
-      scope,
-    );
-    expect(own.kept).toHaveLength(1);
-    expect([...own.proposeOnly]).toEqual([]);
+    // The note-taker's own bullet takes the same route through the gate —
+    // which is the point: one predicate admits both, and the document decides
+    // what happens to each.
+    expect(
+      confineToSection([{ op: 'replace_block', blockId: 'b1', markdown: '- tightened' }], scope)
+        .kept,
+    ).toHaveLength(1);
   });
 
   it("makes no offer on a person's block somebody has commented on", () => {
-    // BOTH gates, on one block. Marks live and `b2` unmarked makes it a
-    // person's, so the rewrite path is already closed; the comment is what
-    // closes the OFFER path too. Without a case where both hold at once, the
-    // commented check on an offer is unreachable and untested — the
-    // marks-gone case below cannot reach it, because there `b2` is the
-    // pass's own to rewrite.
+    // BOTH gates, on one block. `b2` unmarked already closes the rewrite;
+    // the comment is what closes the OFFER too, and a suggestion re-creates
+    // no text, so this is a stricter rule than the anchor argument needs.
     const commented = { ...scope, commented: new Set(['b2']) };
-    const { kept, proposeOnly, refused } = confineToSection(
+    const { kept, refused } = confineToSection(
       [{ op: 'replace_block', blockId: 'b2', markdown: '- rewritten' }],
       commented,
     );
     expect(kept).toEqual([]);
-    expect([...proposeOnly]).toEqual([]);
     expect(refused).toBe(1);
-    // Control: the identical block with no thread pointing into it IS offered
-    // on, so the refusal above is the comment and not the ownership.
-    expect([
-      ...confineToSection([{ op: 'replace_block', blockId: 'b2', markdown: '- rewritten' }], scope)
-        .proposeOnly,
-    ]).toEqual(['b2']);
+    // Control: the identical block with no thread pointing into it IS kept,
+    // so the refusal above is the comment and not the ownership.
+    expect(
+      confineToSection([{ op: 'replace_block', blockId: 'b2', markdown: '- rewritten' }], scope)
+        .kept,
+    ).toHaveLength(1);
   });
 
   it("drops a DELETE of a person's block — a strikethrough is not an improvement", () => {
-    const { kept, proposeOnly, refused } = confineToSection(
-      [{ op: 'delete_block', blockId: 'b2' }],
-      scope,
-    );
+    const { kept, refused } = confineToSection([{ op: 'delete_block', blockId: 'b2' }], scope);
     expect(kept).toEqual([]);
-    expect([...proposeOnly]).toEqual([]);
     expect(refused).toBe(1);
+    // Control: the same op on the note-taker's own bullet IS kept, so the
+    // refusal is whose the block is and not the verb.
+    expect(confineToSection([{ op: 'delete_block', blockId: 'b1' }], scope).kept).toHaveLength(1);
   });
 
   it('drops an edit aimed outside the section', () => {
@@ -153,148 +144,86 @@ describe('what the gate refuses', () => {
   });
 
   /**
-   * THE ONE THING THE LOOSENED GATE CHANGED, at the level it was changed.
+   * A BLOCK THE DOCUMENT RECORDS NO AUTHOR FOR.
    *
-   * The same unmarked block, the same edit, the same section — and the only
-   * difference is whether the doc still carries a mark of the note-taker's
-   * anywhere. `b2` is what an unmarked block looks like in both states, and
-   * the point of `claimable` is that they are not the same state.
+   * The gate used to ask a second question about the rest of the document: if
+   * no mark of the note-taker's survived anywhere, an unmarked block was
+   * nobody's and the pass could bring it into line. That test fails in the
+   * direction that matters. A person editing the LAST marked block on a doc
+   * clears that mark themselves, and the doc then reads exactly like one
+   * reparsed from disk — so the line they had just finished writing, and every
+   * other line in the section, would flip from protected to rewritable in the
+   * instant they typed. The question is gone: the pass rewrites what the doc
+   * records as its own and offers on everything else.
+   *
+   * `owned` empty is that state — a reparse from disk, or the release the next
+   * recording performs. Every case here pairs with a control that puts the
+   * mark back, so a refusal is the missing mark and not the verb.
    */
-  describe('an unmarked block, in the two states a doc can be in', () => {
+  describe('a block the document records no author for', () => {
+    const lost = { ...scope, owned: new Set<string>() };
+    const mineToo = { ...scope, owned: new Set(['h1', 'b1', 'b2']) };
     const rewriteB2: prose.BlockEdit[] = [
       { op: 'replace_block', blockId: 'b2', markdown: '- brought into line' },
     ];
 
-    it("offers rather than rewrites while a mark of the note-taker's survives", () => {
-      const { kept, proposeOnly } = confineToSection(rewriteB2, { ...scope, marksLive: true });
-      expect(kept).toEqual(rewriteB2);
-      expect([...proposeOnly]).toEqual(['b2']);
+    it('is kept for a REPLACE, so an improvement still reaches the reader', () => {
+      // The offer path is the whole reason the pass is not simply mute on such
+      // a doc. What it becomes once it lands is the document's answer, proved
+      // in `notes-cleanup-suggestions.test.ts`.
+      expect(confineToSection(rewriteB2, lost).kept).toEqual(rewriteB2);
     });
 
-    it('admits it once every mark is gone — nothing there is recorded as anyone’s', () => {
-      // A reparse from disk, or the next recording's release: no owner is
-      // provable, so nothing in the doc is attributable to a person either.
-      const lost = {
-        ...scope,
-        owned: new Set<string>(),
-        attributed: new Set<string>(),
-        marksLive: false,
-      };
-      const { kept, proposeOnly } = confineToSection(rewriteB2, lost);
-      expect(kept).toEqual(rewriteB2);
-      // Nothing held back: this one is a rewrite, which is the whole point of
-      // the marks-gone mode.
-      expect([...proposeOnly]).toEqual([]);
+    it('is NOT deleted — the old gate deleted it', () => {
+      // THE ASSERTION THAT SEPARATES THE TWO READINGS at this level. A delete
+      // is admitted only for a block the pass owns, and here it owns nothing.
+      const del: prose.BlockEdit[] = [{ op: 'delete_block', blockId: 'b2' }];
+      expect(confineToSection(del, lost).kept).toEqual([]);
+      expect(confineToSection(del, lost).refused).toBe(1);
+      expect(confineToSection(del, mineToo).kept).toEqual(del);
     });
 
-    it("still refuses to REWRITE another agent's block on a doc whose marks are gone", () => {
-      // A release names ONE author, so a second agent's mark outlives the
-      // note-taker's. A block it is maintaining is not this pass's to rewrite
-      // — it is offered to whoever holds it, on the same terms as a person's.
-      const lost = {
-        ...scope,
-        owned: new Set<string>(),
-        attributed: new Set(['b2']),
-        marksLive: false,
-      };
-      const { kept, proposeOnly } = confineToSection(rewriteB2, lost);
-      expect(kept).toEqual(rewriteB2);
-      expect([...proposeOnly]).toEqual(['b2']);
+    it('is not moved under another bullet either', () => {
+      const nest: prose.BlockEdit[] = [{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }];
+      expect(confineToSection(nest, lost).kept).toEqual([]);
+      expect(confineToSection(nest, mineToo).kept).toEqual(nest);
     });
 
-    it('still refuses it when a comment points into it, in either state', () => {
-      const commented = new Set(['b2']);
-      const lost = {
-        ...scope,
-        owned: new Set<string>(),
-        attributed: new Set<string>(),
-        marksLive: false,
-        commented,
-      };
-      // Out of reach BOTH ways: not rewritten, and not even offered on. The
-      // pass adds beside a bullet somebody is already discussing.
-      const { kept, proposeOnly } = confineToSection(rewriteB2, lost);
-      expect(kept).toEqual([]);
-      expect([...proposeOnly]).toEqual([]);
-      // And nesting one is still allowed, because it re-creates no text.
+    it('is out of reach BOTH ways once a comment points into it', () => {
+      // Not rewritten, and not even offered on: the pass adds beside a bullet
+      // somebody is already discussing.
+      const commented = { ...lost, commented: new Set(['b2']) };
+      expect(confineToSection(rewriteB2, commented).kept).toEqual([]);
+      // And nesting a commented block is still allowed where the pass owns
+      // it, because a move re-creates no text and the anchor rides along.
       expect(
-        confineToSection([{ op: 'nest_blocks', leadBlockId: 'b2', blockIds: ['b1'] }], lost).kept,
+        confineToSection([{ op: 'nest_blocks', leadBlockId: 'b2', blockIds: ['b1'] }], {
+          ...mineToo,
+          commented: new Set(['b2']),
+        }).kept,
       ).toHaveLength(1);
     });
 
-    it('still refuses the section heading itself once the marks are gone', () => {
-      const lost = {
-        ...scope,
-        owned: new Set<string>(),
-        attributed: new Set<string>(),
-        marksLive: false,
-      };
+    it('does not make the section heading fair game', () => {
       expect(confineToSection([{ op: 'delete_block', blockId: 'h1' }], lost).kept).toEqual([]);
+      // Nor with the mark back on: the heading is refused for being the
+      // section's address, which ownership never had a say in.
+      expect(confineToSection([{ op: 'delete_block', blockId: 'h1' }], mineToo).kept).toEqual([]);
     });
 
-    it('still refuses anything outside the section once the marks are gone', () => {
-      const lost = {
-        ...scope,
-        owned: new Set<string>(),
-        attributed: new Set<string>(),
-        marksLive: false,
-      };
+    it('does not open the rest of the document either', () => {
       expect(confineToSection([{ op: 'delete_block', blockId: 'elsewhere' }], lost).kept).toEqual(
         [],
       );
     });
-  });
-});
 
-describe('claiming what an admitted edit names', () => {
-  const rewriteOne = (store: NotesDocStore, needle: string): prose.BlockEdit[] => [
-    { op: 'replace_block', blockId: idOf(store, needle), markdown: '- tightened' },
-  ];
-
-  it('claims only what an admitted edit names, and nothing while the marks live', () => {
-    // Marks gone: the one block the edit names is claimed, and only it.
-    const lost = docStoreFrom(NOTES, []);
-    expect(claimForCleanup(lost.ydoc, rewriteOne(lost.store, 'harbour run'))).toEqual([
-      idOf(lost.store, 'harbour run'),
-    ]);
-    expect(prose.readOutline(lost.ydoc).filter((b) => b.author !== undefined)).toHaveLength(1);
-    // Marks live: the gate only ever admits blocks already marked ours, so
-    // there is nothing left to claim and the doc is not written to.
-    const live = docStoreFrom(NOTES, ['Meeting notes']);
-    expect(claimForCleanup(live.ydoc, rewriteOne(live.store, 'harbour run'))).toEqual([]);
-  });
-
-  it('claims nothing on a block the gate admitted only as an offer', () => {
-    // THE HALF THAT KEEPS A SUGGESTION A SUGGESTION. Same doc, same edit,
-    // same block — the only difference is whether the block's id is in
-    // `proposeOnly`, and a claim here would hand the block to the write path
-    // as the pass's own and rewrite somebody's line.
-    const { ydoc, store } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
-    const edits = rewriteOne(store, 'Kestrel Lane');
-    const theirs = idOf(store, 'Kestrel Lane');
-    expect(claimForCleanup(ydoc, edits, new Set([theirs]))).toEqual([]);
-    expect(prose.readOutline(ydoc).find((b) => b.id === theirs)?.author).toBeUndefined();
-    // Positive control: without the set, this very block IS claimed — so the
-    // zero above is the exclusion working, not an unclaimable block.
-    expect(claimForCleanup(ydoc, edits)).toEqual([theirs]);
-    expect(prose.readOutline(ydoc).find((b) => b.id === theirs)?.author).toBe(NOTES_AUTHOR_ID);
-  });
-
-  it('hands a claim back, and hands back only its own', () => {
-    // A claim made for an edit that then failed has to be undone, or the next
-    // pass reads it as permission to rewrite a line this one never changed.
-    const { ydoc, store } = docStoreFrom(NOTES, []);
-    const mine = idOf(store, 'harbour run');
-    expect(claimForCleanup(ydoc, rewriteOne(store, 'harbour run'))).toEqual([mine]);
-    expect(releaseClaims(ydoc, [mine])).toBe(1);
-    expect(prose.readOutline(ydoc).find((b) => b.id === mine)?.author).toBeUndefined();
-
-    // Somebody else's mark is not this pass's to remove — releasing an id it
-    // never claimed changes nothing, and says so.
-    const held = idOf(store, 'Kestrel Lane');
-    const el = prose.findBlockById(prose.getProseFragment(ydoc), held);
-    if (el) prose.setBlockAuthor(el, 'some-other-agent');
-    expect(releaseClaims(ydoc, [held])).toBe(0);
-    expect(prose.readOutline(ydoc).find((b) => b.id === held)?.author).toBe('some-other-agent');
+    it('can still have a new bullet added beside it', () => {
+      // The pass is not reduced to silence on such a doc: an insert names a
+      // heading and no owner, and it always could.
+      expect(
+        confineToSection([{ op: 'insert_under_heading', headingId: 'h1', markdown: '- new' }], lost)
+          .kept,
+      ).toHaveLength(1);
+    });
   });
 });

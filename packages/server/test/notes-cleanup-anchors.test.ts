@@ -86,8 +86,6 @@ describe('a bullet somebody has commented on', () => {
       blocks: new Set(['h1', 'b1', 'b2']),
       headings: new Set(['h1']),
       owned: new Set(['b1', 'b2']),
-      attributed: new Set(['b1', 'b2']),
-      marksLive: true,
       headingId: 'h1',
       commented: new Set(['b1']),
     };

@@ -237,12 +237,11 @@ describe('a block that changes hands while the compose is in flight', () => {
 /**
  * A RECORDING THAT STARTS WHILE THE MODEL IS THINKING.
  *
- * It takes the document out from under the answer in two ways at once: a live
- * note-taker is now composing into the same section, and starting a meeting
- * releases every authorship mark on the doc — which is the state `claimable`
- * reads as "nobody's", and the loosest the gate ever gets. So a person's line
- * in that section would be rewritten by a gate that was right when it was
- * asked and is wrong by the time it is used.
+ * It takes the document out from under the answer. A live note-taker is now
+ * composing into the same section against speech this pass never heard, and
+ * starting a meeting releases every authorship mark on the doc, so the pass
+ * can no longer tell its own work from anybody's. Its answer is about a
+ * meeting that has ended; the notes are about one that is running.
  */
 describe('a meeting that starts while the pass is composing', () => {
   it('writes nothing at all, and says which of the two it is', async () => {
@@ -284,9 +283,8 @@ describe('a meeting that starts while the pass is composing', () => {
   });
 
   it('runs normally when nothing started — the control', async () => {
-    // The same composer, the same released marks, the same edit. Only the
-    // recording differs, which is what makes the refusal above the meeting
-    // and not the release.
+    // The same doc, the same edit, and nothing recording. The pass runs and
+    // files its offer, which is what makes the refusal above the meeting.
     const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
@@ -311,6 +309,92 @@ describe('a meeting that starts while the pass is composing', () => {
     expect(result.ok).toBe(true);
     expect(result.suggested).toBe(1);
     expect(markdownNow()).toContain('Kestrel Lane keeps the winter crew');
+  });
+});
+
+/**
+ * A SECTION LINE ON A DOC WHOSE MARKS HAVE ALL BEEN LOST.
+ *
+ * `cwAuthor` does not survive a markdown round trip, `releaseNotesAuthorship`
+ * drops every mark when the next recording starts, and a person editing the
+ * last marked block clears the last one by hand. The document records no
+ * difference between those, so it cannot say whether an unmarked line in the
+ * section is the note-taker's old work or something a person typed there.
+ *
+ * An earlier reading of this PR resolved that in the pass's favour and
+ * rewrote the line. This is the same fixture and the same edit, resolved the
+ * other way — with the control immediately below it, so that "offers" is not
+ * quietly "never rewrites anything any more".
+ */
+describe('an unmarked line in the section, on a doc that records no authors at all', () => {
+  const THEIRS = 'The harbour run moves to the half hour from April';
+
+  it('is offered on, and is byte-identical afterwards', async () => {
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, []);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const target = idOf(store, 'harbour run');
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'replace_block',
+            blockId: target,
+            markdown: '- Harbour run: half-hourly from April',
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(0);
+    expect(result.suggested).toBe(1);
+    expect(result.applied).toBe(0);
+
+    const pending = suggestOps.listSuggestions(ydoc);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.deletedText).toBe(THEIRS);
+    expect(pending[0]?.insertedText).toBe('Harbour run: half-hourly from April');
+    // The block is still unclaimed: the pass wrote no mark to make the line
+    // its own, so the next pass offers all over again rather than rewriting.
+    expect(prose.readOutline(ydoc).find((b) => b.id === target)?.author).toBeUndefined();
+
+    // The whole of what "do not rewrite human text" means here: saying no
+    // gives the document back exactly as it was.
+    expect(markdownNow()).toContain(THEIRS);
+    suggestOps.rejectSuggestion(ydoc, pending[0]?.sid ?? '');
+    expect(markdownNow()).toBe(before);
+  });
+
+  it("is rewritten outright when the doc DOES record it as the pass's own — the control", async () => {
+    // Identical fixture, identical edit; the one difference is the mark. Without
+    // this, turning every edit in the file into a suggestion would pass too.
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'replace_block',
+            blockId: idOf(store, 'harbour run'),
+            markdown: '- Harbour run: half-hourly from April',
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.applied).toBe(1);
+    expect(result.suggested).toBe(0);
+    expect(suggestOps.listSuggestions(ydoc)).toHaveLength(0);
+    expect(markdownNow()).toContain('Harbour run: half-hourly from April');
+    expect(markdownNow()).not.toContain(THEIRS);
   });
 });
 

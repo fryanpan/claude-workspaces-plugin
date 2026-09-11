@@ -335,9 +335,9 @@ export async function handleMeetingCalendarRoutes(
     // ANY live meeting on this doc is refused, not just this one, for the
     // reason a live rename is: the session on the socket is composing against
     // this very section, and a second writer working from a transcript that
-    // is still growing would race it. A DIFFERENT meeting recording is if
-    // anything worse — starting it released every authorship mark on the doc,
-    // which is the loosest `claimable` ever is.
+    // is still growing would race it. A DIFFERENT meeting recording is no
+    // better: starting it released every authorship mark on the doc, so the
+    // pass can no longer tell its own work from anybody's.
     //
     // This check is here to save the price of a compose. The one that HOLDS
     // is `recordingNow` below, because a recording can start while the model

@@ -21,7 +21,6 @@ import {
   MAX_CLEANUP_TRANSCRIPT_CHARS,
   runNotesCleanupPass,
 } from '../src/notes-cleanup-pass.ts';
-import { notesMarksLive } from '../src/notes-cleanup-scope.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import {
   DOC,
@@ -203,21 +202,20 @@ describe('running a pass', () => {
 });
 
 /**
- * What happens on a doc where NOTHING is marked.
+ * WHAT HAPPENS ON A DOC WHERE NOTHING IS MARKED.
  *
  * `cwAuthor` is a Yjs attribute, so it does not survive a markdown round trip
  * — a doc reparsed from disk comes back with no authorship at all — and
  * `releaseNotesAuthorship` drops the previous meeting's claim the moment a new
- * recording starts. Both leave the same state, and it is not the state above:
- * the doc records nothing about ANYBODY, so an unmarked block is unknown
- * rather than a person's.
+ * recording starts. A person editing the last marked block reaches the same
+ * state one block at a time. The document does not record which of those
+ * happened, so the pass treats every line there as somebody else's: it offers,
+ * and it adds, and it rewrites nothing.
  *
- * The gate used to read the two states identically and refuse both. It could
- * then not change a single word on a reparsed doc — including words it had
- * written itself — while still being free to append new bullets under the
- * heading, because an insert names a heading and no owner. Able to add to a
- * document it could not tidy was the worst of both, and Bryan chose the
- * looser rule ("Bring into line") over gating on authorship.
+ * An earlier reading of this PR went the other way — nothing marked meant
+ * nothing was anybody's, so the pass could bring the whole section into line.
+ * The cases below are that reading's own cases, inverted, with the document
+ * asserted rather than the counts.
  */
 describe('a doc whose marks have all been lost', () => {
   /** Round-trip a doc through markdown, the way a reparse from disk does. */
@@ -230,30 +228,30 @@ describe('a doc whose marks have all been lost', () => {
   };
 
   it('really does lose cwAuthor through a markdown round trip', () => {
-    // The premise every assertion below rests on, measured rather than
-    // assumed — and with a positive control that it was there to begin with.
+    // The premise every case below rests on, measured rather than assumed —
+    // and with a positive control that the mark was there to begin with.
     const { ydoc } = docStoreFrom(NOTES, ['Meeting notes']);
     expect(prose.readOutline(ydoc).some((b) => b.author === NOTES_AUTHOR_ID)).toBe(true);
-    expect(notesMarksLive(ydoc)).toBe(true);
     expect(prose.readOutline(reparsed(ydoc)).some((b) => b.author !== undefined)).toBe(false);
-    expect(notesMarksLive(reparsed(ydoc))).toBe(false);
   });
 
-  it('brings an unmarked bullet in its own section into line', async () => {
-    // THE CASE THE OLD GATE REFUSED. Same edit, same doc, same section: all
-    // that differs from the case above is that no mark survives anywhere, so
-    // nothing here is recorded as a person's.
+  it('never deletes a bullet in its own section, and never moves one', async () => {
+    // Both were admitted while an unmarked block counted as nobody's. Neither
+    // is an improvement to a line somebody may have written, and neither can
+    // be offered as a redline, so both are dropped.
     const { store, markdownNow } = docStoreFrom(NOTES, []);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const before = markdownNow();
     const result = await runNotesCleanupPass(
       depsFor(
         store,
         stubComposer([
+          { op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') },
           {
-            op: 'replace_block',
-            blockId: idOf(store, 'harbour run'),
-            markdown: '- [@Ivo](speaker:B) moves the harbour run to the half hour from April',
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'harbour run'),
+            blockIds: [idOf(store, 'Kestrel Lane')],
           },
         ]),
         dataDir,
@@ -261,24 +259,15 @@ describe('a doc whose marks have all been lost', () => {
       ),
       { docId: DOC, meetingId: MEETING },
     );
-    expect(result.refused).toBe(0);
-    // APPLIED, not suggested. There are two ownership rules and loosening the
-    // gate alone leaves the second one turning every rewrite into a redline —
-    // "Show me first" is the option Bryan did not pick, and it is the answer
-    // for a line the doc records as SOMEBODY's, not for one it records as
-    // nobody's.
-    expect(result.applied).toBe(1);
-    expect(result.suggested).toBe(0);
-    expect(result.touched).toBe(1);
-    expect(markdownNow()).toContain('moves the harbour run to the half hour from April');
-    expect(markdownNow()).not.toContain('The harbour run moves to the half hour from April');
+    expect(result.refused).toBe(2);
+    expect(result.touched).toBe(0);
+    expect(markdownNow()).toBe(before);
   });
 
-  it('tells the model the section is its own, rather than calling every line theirs', async () => {
-    // Without this the loosening would be inert: the outline prints `theirs`
-    // straight off the mark, so on this doc every line would read as a
-    // person's and the model would leave all of them alone whatever the gate
-    // allowed.
+  it('tells the model those lines are not its own, and claims none of them', async () => {
+    // The prompt and the gate are one answer. The model is told the section is
+    // somebody's, so it spends the pass offering and adding rather than
+    // proposing rewrites the gate would turn into redlines it never intended.
     const { store } = docStoreFrom(NOTES, []);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
@@ -288,14 +277,17 @@ describe('a doc whose marks have all been lost', () => {
       meetingId: MEETING,
     });
     const input = composer.seen[0];
-    expect(input?.claimed?.has(idOf(store, 'harbour run'))).toBe(true);
-    expect(input?.humanNotes ?? []).not.toContain(
-      'The harbour run moves to the half hour from April',
+    expect(input?.claimed?.size).toBe(0);
+    expect(input?.humanNotes).toContain('The harbour run moves to the half hour from April');
+    // Control: the same fixture with the marks intact names that very bullet
+    // as the pass's own, so the zero above is the missing mark.
+    const live = docStoreFrom(NOTES, ['Meeting notes']);
+    const seenLive = stubComposer([]);
+    await runNotesCleanupPass(
+      depsFor(live.store, seenLive, dataDir, idOf(live.store, 'Meeting notes')),
+      { docId: DOC, meetingId: MEETING },
     );
-    // The doc's own body, outside the meeting's section, is still theirs —
-    // the pass has no business claiming a line it never wrote near.
-    expect(input?.claimed?.has(idOf(store, 'My own line about the slipway'))).toBe(false);
-    expect(input?.humanNotes).toContain('My own line about the slipway, which nobody may rewrite.');
+    expect(seenLive.seen[0]?.claimed?.has(idOf(live.store, 'harbour run'))).toBe(true);
   });
 
   it("still leaves the doc's own body alone, outside the meeting's section", async () => {
@@ -322,77 +314,6 @@ describe('a doc whose marks have all been lost', () => {
     const after = markdownNow();
     expect(after).toContain('My own line about the slipway, which nobody may rewrite.');
     expect(after).not.toContain('Rewritten by a robot');
-  });
-
-  it('hands its claim back when the edit it claimed for fails', async () => {
-    // A CLAIM IS A WRITE. Claiming happens before the batch, because
-    // `applyBlockEdits` reads the mark to decide rewrite-or-redline — so an
-    // edit that then fails leaves the block marked as the pass's own, on a
-    // run that changed nothing. The next pass would read that mark as
-    // permission and rewrite in silence a line this one never touched.
-    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, []);
-    const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
-    const target = idOf(store, 'harbour run');
-    const before = markdownNow();
-    const heading = idOf(store, 'Meeting notes');
-    const result = await runNotesCleanupPass(
-      depsFor(
-        store,
-        stubComposer([{ op: 'replace_block', blockId: target, markdown: '   ' }]),
-        dataDir,
-        heading,
-      ),
-      { docId: DOC, meetingId: MEETING },
-    );
-    expect(result.failed).toBe(1);
-    expect(result.touched).toBe(0);
-    expect(prose.readOutline(ydoc).find((b) => b.id === target)?.author).toBeUndefined();
-    expect(markdownNow()).toBe(before);
-
-    // Control: the same block and an edit that DOES land keeps its claim, so
-    // the release above is the failure and not a pass that never claims.
-    const landed = await runNotesCleanupPass(
-      depsFor(
-        store,
-        stubComposer([
-          { op: 'replace_block', blockId: target, markdown: '- Harbour run: half-hourly' },
-        ]),
-        dataDir,
-        heading,
-      ),
-      { docId: DOC, meetingId: MEETING },
-    );
-    expect(landed.applied).toBe(1);
-    expect(prose.readOutline(ydoc).find((b) => b.text.includes('half-hourly'))?.author).toBe(
-      NOTES_AUTHOR_ID,
-    );
-  });
-
-  it('keeps a claim on a block some OTHER edit in the batch did change', async () => {
-    // The batch nests the bullet and then fails to rewrite it. The block IS
-    // the pass's work now — it moved — so handing the claim back on account
-    // of the second edit would leave a block it wrote reading as nobody's.
-    const { store, ydoc } = docStoreFrom(NOTES, []);
-    const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
-    const lead = idOf(store, 'harbour run');
-    const moved = idOf(store, 'Kestrel Lane');
-    const result = await runNotesCleanupPass(
-      depsFor(
-        store,
-        stubComposer([
-          { op: 'nest_blocks', leadBlockId: lead, blockIds: [moved] },
-          { op: 'replace_block', blockId: moved, markdown: '   ' },
-        ]),
-        dataDir,
-        idOf(store, 'Meeting notes'),
-      ),
-      { docId: DOC, meetingId: MEETING },
-    );
-    expect(result.applied).toBe(1);
-    expect(result.failed).toBe(1);
-    expect(prose.readOutline(ydoc).find((b) => b.id === moved)?.author).toBe(NOTES_AUTHOR_ID);
   });
 
   it('may still ADD a point it heard, as it always could', async () => {

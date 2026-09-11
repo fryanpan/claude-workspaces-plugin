@@ -2095,13 +2095,14 @@ share visitor, refuses a doc that is recording — ANY meeting on it, not just
 the one addressed — and 404s a meeting the doc never held.
 
 **And it asks again after the compose**, because a recording can start while
-the model is thinking, and that one moment changes the document in two ways at
-once: a live note-taker is composing into the same section, and
-`releaseNotesAuthorship` has just dropped every mark on the doc, which is the
-state `claimable` reads as nobody's and the loosest the gate ever gets. So a
-person's line would be rewritten by a gate that was right when it was asked.
-The route's own check is there to save the price of a compose; `recordingNow`
-on `NotesCleanupDeps` is the one that holds, and its refusal is `recording`.
+the model is thinking, and that moment takes the document out from under the
+answer: a live note-taker is now composing into the same section against
+speech this pass never heard, and `releaseNotesAuthorship` has just dropped
+every mark on the doc, so the pass can no longer tell its own work from
+anybody's. Its answer is about a meeting that has ended; the notes are about
+one that is running. The route's own check is there to save the price of a
+compose; `recordingNow` on `NotesCleanupDeps` is the one that holds, and its
+refusal is `recording`.
 
 **The offer belongs to the meeting that ended**, and a new recording takes it
 off the screen at once — even with the last one's request still on the wire.
@@ -2128,9 +2129,13 @@ sorts every edit into one of them:
 
 | the block | `replace_block` | `delete_block` / `nest_blocks` |
 | --- | --- | --- |
-| the pass's own | rewritten | applied |
-| somebody else's, in this meeting's section | **offered as a suggestion** | dropped |
+| recorded as the pass's own | rewritten | applied |
+| anything else in this meeting's section | **offered as a suggestion** | dropped |
 | commented on, outside the section, or the section heading | dropped | dropped |
+
+"Anything else" is the whole of the second row: a person's line, another
+agent's, and a line whose author the document no longer records. The pass
+rewrites what it can prove is its own work and argues with the rest.
 
 An offer is a redline on their own line, to accept or reject; their words are
 byte-identical until they answer, and rejecting it restores the document byte
@@ -2184,13 +2189,21 @@ first arm proves nothing without it), and **each of those twice**, because
 the gate has two states and they are not the same experiment (below).
 `--only <substring>` runs one arm; `--show` prints the doc a run changed.
 
-The column that separates the two gates is `existing lines changed`, not
-`touched`. An insert has always been allowed on a doc whose marks are gone —
-it names a heading and no owner — so `touched` alone cannot tell an addition
-from the rewrite that used to be impossible. A line of the notes that is
-there before and gone after is a line the old gate could not have altered.
+The column to read is `existing lines changed`, not `touched`. An insert is
+allowed on any doc — it names a heading and no owner — so `touched` alone
+cannot tell an addition from a change to a line that was already there.
 
-Measured 2026-09-10 on Haiku 4.5:
+**Every marks-gone row below measures a rewrite mode that has since been
+withdrawn** (above: an unprovable author is a line to offer on, never one to
+take). On such a doc the pass now proposes those same edits and they land as
+redlines nobody has accepted, so the `existing lines changed` figures for
+those arms are not what the shipped pass does — they are what the reading it
+replaced did, kept here because they are the evidence that the reading was
+loose rather than the evidence that it was needed. The marks-live rows are
+unaffected: nothing about that path changed. Re-running is a paid pass over a
+corpus and has not been done.
+
+Measured 2026-09-10 on Haiku 4.5, against the gate as it stood that morning:
 
 | arm | runs | blocks touched | existing lines changed | docs changed |
 | --- | --- | --- | --- | --- |
@@ -2199,35 +2212,31 @@ Measured 2026-09-10 on Haiku 4.5:
 | RESTRAINT, marks gone | 24 | 9 | 5 | 5 |
 | CONTROL, marks gone | 8 | 48 | 24 | 8 |
 
-**The arms carry no human line inside the notes section**, so the table below
-measures the rewrite path and says nothing about the offer path — every block
-under `## Meeting notes` in both fixtures is the note-taker's (marks live) or
-nobody's (marks gone). What a suggestion does to somebody's line is proven by
-`notes-cleanup-pass.test.ts` instead, which can assert the thing that matters
-— their text byte-identical until they answer — and a sampled measurement
-never could.
+**No arm carries a human line inside the notes section**, so the table
+measures the rewrite path and says nothing about the offer path either way —
+every block under `## Meeting notes` in both fixtures is the note-taker's
+(marks live) or unmarked throughout (marks gone). What an offer does to
+somebody's line is proven in `notes-cleanup-suggestions.test.ts` instead,
+which can assert the thing that matters — their text byte-identical until they
+answer — and a sampled measurement never could.
 
-**Restraint is perfect while the marks live and merely good once they are
-gone**, and that gap is the price of the looser gate rather than a defect in
-it. Three of the five changed lines were read back with `--show`: one trimmed
-a word with no change of meaning, one added a speaker tag to a bullet that is
-not a decision, and one corrected a figure to what the transcript actually
-says ("four extra staff"). The other two were counted, not inspected. Nothing
-was lost in the three that were read; the notes churned.
+**Restraint on the shipped path is the marks-live row: 1 block touched in 18
+runs and no existing line changed.** That is the number the criterion is about,
+because a doc whose marks survive is the ordinary case — a meeting that has
+just ended. The marks-gone rows measure the withdrawn mode; the five existing
+lines those runs changed are five lines the pass would now offer on instead.
+Three of the five were read back with `--show`: one trimmed a word with no
+change of meaning, one added a speaker tag to a bullet that is not a decision,
+and one corrected a figure to what the transcript actually says ("four extra
+staff"). Nothing was lost in the three that were read; the notes churned. As
+offers they would all three be answerable rather than churn, which is the
+argument for the rule as it now stands.
 
-**And the same two arms under the OLD gate say what the loosening bought and
-what it cost**, on 4 runs each rather than argued:
-
-| arm, marks gone | gate | proposed | refused | touched | existing lines changed |
-| --- | --- | --- | --- | --- | --- |
-| CONTROL (poor notes) | old | 6 | 3 | 3 | **0** |
-| CONTROL (poor notes) | new | 6 | 0 | 6 | **3** |
-| RESTRAINT (good notes) | old | 0 | 0 | 0 | 0 |
-| RESTRAINT (good notes) | new | — | — | 9 in 24 runs | 5 in 24 runs |
-
-The old gate refused half of every batch on a marks-gone doc and left the
-three lumpy bullets exactly as it found them — it could only add beside them.
-That is the "can add but cannot tidy" state the loosening exists to end.
+**What the pass can no longer do on a marks-gone doc, and what it can.** It
+cannot rewrite, delete or regroup a line already there; it can add a bullet
+under a heading, and it can offer a better wording on any line in its section.
+The earlier "can add but cannot tidy" complaint that drove the loosening is
+answered by the offer rather than by the rewrite.
 
 **What "good" turns out to mean is narrower than it sounds, and the harness is
 how that was found.** The first restraint fixture wrote its decision bullets
@@ -2239,98 +2248,91 @@ pass leaves alone notes that are good BY THE RULES THE LIVE NOTE-TAKER WRITES
 BY. A doc whose notes were written some other way will be brought into line
 with them.
 
-### Whose material is it — and why "unmarked" means two things
+### Whose material is it — and why an unmarked line is never the pass's
 
 `cwAuthor` records the AGENT that wrote a block. **Nothing records a person.**
-A person's own line is unmarked because they typed it, and
-`clearAuthorshipOnPersonEdit` unmarks one of the note-taker's the instant a
-person touches it. So on a doc whose marks are intact, *unmarked* IS the
-doc's record that a person wrote or edited the line, and criterion 2.3 —
-respect notes written by humans — puts it out of reach.
+So a line can be unmarked for four different reasons, and the document records
+no difference between them:
 
-The two ways the marks go away are both WHOLESALE and neither says anything
-about a person: a markdown round trip has nowhere to put the attribute (a
-reparse from disk), and `releaseNotesAuthorship` drops every one of them when
-the next recording starts. A doc in that state records nothing about anybody,
-so an unmarked block there is UNKNOWN, not a person's.
+- a person typed it there during the meeting;
+- a person edited one of the note-taker's, and `clearAuthorshipOnPersonEdit`
+  took the mark off as they typed;
+- the doc went through a markdown round trip, which has nowhere to put a Yjs
+  attribute — a reparse from disk;
+- `releaseNotesAuthorship` dropped every mark when the next recording started.
 
-`claimable` is the one predicate, with those two modes:
+`claimable` therefore asks one question and only one: **does the document
+record this block as the note-taker's own?** What it does, the pass rewrites.
+Everything else it may offer on.
 
-- **the marks live** — take what is marked ours, and nothing else;
-- **the marks are gone** — take what is marked as nobody's. A second agent's
-  mark outlives the note-taker's, because a release names one author, and a
-  block that agent is maintaining is not this pass's to rewrite either.
+**The reading this replaced tried to tell those four apart** by looking at the
+rest of the document: if any of the note-taker's marks survived elsewhere, an
+unmarked block was a person's; if none did, the marks had gone wholesale, the
+doc recorded nothing about anybody, and the pass could bring the section into
+line. It reads as a fair inference and it fails in the direction that matters.
+A person editing the LAST note-taker-marked block on a doc clears that mark
+themselves — so the document flips into its loosest state in the instant
+somebody types, and the line they have just finished writing, along with every
+other line in the section, goes from protected to rewritable. That is the
+opposite of the rule (*"do not rewrite human text"*), reached by a route
+nobody would choose. An unprovable author is a line to offer on.
 
-`notesMarksLive` reads the whole ydoc rather than the outline, because the
-outline is capped at `CLEANUP_OUTLINE_BLOCKS` and a mark older than the cap
-would read as no mark at all — the direction that LOOSENS the gate, so the
-one it must not get wrong. A doc that will not walk answers `true`: claiming
-nothing costs a tidy-up, claiming everything costs somebody their notes.
+**What the pass loses on such a doc is the rewrite, not the pass.** It still
+adds what the meeting shows is missing — an insert names a heading and no
+owner — and every improvement to a line already there reaches the reader as a
+redline they answer. Before the offer path existed this same rule left the
+pass able to add to a document it could not tidy, which is why the earlier
+reading was chosen; the offer is what makes the conservative answer a
+complete one rather than a mute one.
 
-**The gate this replaced read the two states identically** and so could not
-change a single word on a reparsed doc — including words it had written
-itself — while still being free to append new bullets under the heading,
-because an insert names a heading and no owner. Able to add to a document it
-could not tidy was the worst of both, and Bryan chose the looser rule ("Bring
-into line") over gating on authorship.
-
-**There are two ownership rules in the write path, not one, and the pass has
-to steer both.** `confineToSection` decides which edits are proposed;
-`prose.applyBlockEdits` then compares each target's `cwAuthor` against the
-writing agent and turns an unmatched one into a SUGGESTION rather than a
-rewrite. Making them agree is `claimForCleanup`: it stamps the note-taker's
-mark on exactly the blocks an admitted edit NAMES — never a whole section,
-because a pass that stamped everything it might touch would write to the doc
-on a run that changed nothing, and a run that changes nothing has to leave the
-doc alone.
-
-Keeping them deliberately APART is `proposeOnly`, the ids `confineToSection`
-admitted as offers. Those are never claimed, and that is the only thing
-standing between the redline somebody is meant to accept or reject and a
-silent rewrite of their line. Loosening the gate while forgetting the claim
-leaves every rewrite a redline; claiming while forgetting the offer set turns
-every offer into a rewrite. The two failures are opposite and the code is one
-line each, which is why they are said together everywhere they appear.
+**There are two ownership decisions in the write path, and the fix is to ask
+them the same question rather than to keep them in step.**
+`confineToSection` decides which edits reach the document; `prose.applyBlockEdits`
+then compares each target's `cwAuthor` against the writing agent and turns an
+unmatched one into a SUGGESTION rather than a rewrite. Both now read the same
+mark, and **the pass never writes one**. An earlier version of this PR stamped
+the note-taker's mark on the blocks the gate had decided to rewrite, so that
+the write path would agree with it, and had to carry a set of exceptions — the
+blocks it must NOT stamp — to stop that move turning somebody's redline into a
+silent rewrite of their line. The stamping existed only to serve the
+marks-gone rewrite mode; with that mode withdrawn it had nothing left to do,
+and it and its exception list are gone. A cleanup that changes no words now
+writes no attribute either, and the failure mode where a claim outlives a
+failed edit cannot arise.
 
 **The whole gate is read AFTER the compose, and that is not a detail.** A
 model call takes seconds; the doc is live for every one of them. Somebody
 typing into a bullet is precisely how the note-taker's mark comes off it
 (`clearAuthorshipOnPersonEdit`), so a gate built from the outline the PROMPT
 was given would still have that block marked as the pass's own and would
-rewrite the sentence they had just finished. Section membership, ownership,
-`notesMarksLive` and the comment set are all re-read once the answer is back.
-The prompt necessarily saw the older document — that is what the model
-answered about — but nothing is WRITTEN on the strength of it. `ownership()`
-exists to be called twice for exactly this reason.
+rewrite the sentence they had just finished. Section membership, ownership and
+the comment set are all re-read once the answer is back. The prompt
+necessarily saw the older document — that is what the model answered about —
+but nothing is WRITTEN on the strength of it. `ownership()` exists to be
+called twice for exactly this reason.
 
-**And a claim is a write, so one made for an edit that then failed goes
-back.** Claiming has to happen before the batch, because `applyBlockEdits`
-reads the mark to decide rewrite-or-redline; an edit that fails afterwards
-would otherwise leave its target marked as the pass's own on a run that
-changed nothing — and the NEXT cleanup would read that mark as permission to
-rewrite in silence a line this one never touched. `claimsToHandBack` reads
-the per-edit outcomes and `releaseClaims` undoes those claims, sparing any
-block some other edit in the same batch did change.
+**And the prompt is told the same thing the gate enforces**, from the same
+predicate. `claimed` on `NotesComposeInput` is the pass's own work inside this
+meeting's section, and `humanNotes` is every other line with words in it. On a
+doc that records no authors at all, `claimed` is empty and every line is named
+as somebody's — which is the honest description of that document and the one
+that spends the pass on offers and additions rather than on rewrites the gate
+would silently convert. Nothing sets `claimed` on a tick.
 
-**And the prompt is told the same thing the gate enforces.** The outline
-prints `theirs` straight off the mark, so on a marks-gone doc it would call
-every line a person's and the model would leave all of them alone whatever
-the gate allowed — a loosening that measured as no change. `claimed` on
-`NotesComposeInput` is the same predicate, and `humanNotes` is its complement
-among the unmarked lines. Nothing sets `claimed` on a tick.
-
-`notes-cleanup-scope.test.ts` drives all of it directly: the same unmarked
-block, the same edit, the same section, rewritten in one state and merely
-offered on in the other. `notes-cleanup-suggestions.test.ts` is the half a
-gate-level test cannot show — a person's bullet inside the section comes back
-as a pending suggestion whose deleted half is their own words, the block still
-unclaimed, and rejecting it restores the document byte for byte, while a
-delete or a nest of the same bullet is dropped and files nothing.
-`notes-cleanup-pass.test.ts` holds the rest: an unmarked bullet on a
-marks-gone doc is rewritten rather than redlined (`suggested` is 0), the
-doc's own body outside the section is neither rewritten nor offered on, and
-the premise itself is measured rather than assumed, authorship present before
-a markdown round trip and absent after.
+`notes-cleanup-scope.test.ts` drives the gate directly, and what it can assert
+is which edits reach the document: the delete and the nest of a block the pass
+does not own are dropped, each against a control that puts the mark back.
+Whether a kept `replace_block` lands as a rewrite or as a redline is the
+document's answer, not the gate's, so it is asserted on a real doc in
+`notes-cleanup-suggestions.test.ts` — a person's bullet, and an unmarked
+bullet on a doc with no marks anywhere, each coming back as a pending
+suggestion whose deleted half is the original words, the block still
+unclaimed, and rejecting it restoring the document byte for byte; with the
+same fixture and the same edit rewritten outright once the mark IS the
+note-taker's, so that "offers" cannot quietly become "never rewrites
+anything". `notes-cleanup-pass.test.ts` holds the rest, including the premise
+measured rather than assumed: authorship present before a markdown round trip
+and absent after.
 
 ## Is anybody listening — lead presence (`lead-presence.ts`)
 

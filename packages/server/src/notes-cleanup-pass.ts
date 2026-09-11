@@ -18,17 +18,17 @@
  *
  * WHAT NO WORDING OF A PROMPT CAN UNDO (`confineToSection`):
  *
- * - **A person's line is never REWRITTEN — and it may still be argued
- *   with.** An edit naming a block the doc records as somebody else's never
- *   changes their words; a `replace_block` on one lands as a redline
- *   SUGGESTION they accept or reject, and their line stays byte-identical
- *   until they do (Bryan, 2026-09-10: *"the rule was do not rewrite human
- *   text. But if you spot an improvement, use the suggest and edit tool to
- *   suggest an edit"*). Only the replace is offered that way — a proposed
- *   deletion or nesting of their line is dropped, because neither is an
- *   improvement to what they wrote. What "records as somebody else's" means
- *   is the one thing this gate has to get right, and it is not the same
- *   question as "does the note-taker still own it" — see `claimable`.
+ * - **The pass rewrites its own work and nothing else — and it may still
+ *   argue with the rest.** A `replace_block` naming a block the doc does not
+ *   record as the note-taker's own lands as a redline SUGGESTION to accept or
+ *   reject, and that line stays byte-identical until somebody answers it
+ *   (Bryan, 2026-09-10: *"the rule was do not rewrite human text. But if you
+ *   spot an improvement, use the suggest and edit tool to suggest an edit"*).
+ *   Only the replace is offered that way — a proposed deletion or nesting of
+ *   somebody's line is dropped, because neither is an improvement to what
+ *   they wrote. A block whose author the document no longer records is not
+ *   the pass's either, however the mark came to be missing; see `claimable`
+ *   for why that is the safe way round and not the timid one.
  * - **Nothing outside this meeting's own section moves.** The section is the
  *   heading the meeting opened plus its blocks; an edit naming anything else
  *   — an earlier meeting's notes, the doc's own body — is dropped.
@@ -48,12 +48,9 @@ import { prose, speakerDisplayName } from '@claude-workspaces/core';
 import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-notes.ts';
 import { listMeetings, readTranscript } from './meetings.ts';
 import {
-  claimForCleanup,
   claimable,
   commentedBlockIds,
   confineToSection,
-  notesMarksLive,
-  releaseClaims,
   sectionIds,
 } from './notes-cleanup-scope.ts';
 import {
@@ -111,8 +108,9 @@ export const CLEANUP_DIRECTIVE = [
   '  under the wrong heading, a topic left as a wall of bullets past the',
   '  regrouping bar. Bullets that read fine where they are stay where they',
   '  are.',
-  '- Lines marked "theirs" were written by a PERSON. Never delete one, never',
-  '  move or nest one, and do not repeat what they say.',
+  '- Lines marked "theirs" are not yours: a person wrote them, or the document',
+  '  no longer records who did. Never delete one, never move or nest one, and',
+  '  do not repeat what they say.',
   '- YOU MAY STILL OFFER AN IMPROVEMENT ON A LINE MARKED "theirs", and you',
   '  cannot rewrite one by accident: name it in a replace_block with your',
   '  better wording and it reaches them as a SUGGESTION on their own line,',
@@ -195,12 +193,12 @@ export interface NotesCleanupDeps {
    * Is ANY meeting recording this doc right now?
    *
    * Asked again after the compose, because a recording that starts while the
-   * model is thinking changes the answer underneath this pass in two ways at
-   * once: a live note-taker is composing into the same section, and
-   * `releaseNotesAuthorship` has just dropped every mark on the doc — which
-   * is the state `claimable` reads as "nobody's", and the loosest the gate
-   * ever gets. Writing a pre-compose answer into that document is how a
-   * person's line gets rewritten by a gate that was right when it was asked.
+   * model is thinking takes the document out from under this answer. A live
+   * note-taker is now composing into the same section against speech this
+   * pass never heard, and `releaseNotesAuthorship` has just dropped every
+   * mark on the doc, so the pass no longer recognises its own work from
+   * anybody's. Its answer is about a meeting that is over; the notes are
+   * about one that is running.
    *
    * The route refuses a recording doc before it pays for a compose; this is
    * the check that actually holds, because only it runs late enough. Absent
@@ -226,21 +224,16 @@ export function cleanupTurns(
 }
 
 /**
- * Whose each block is, as of this read of the doc.
+ * Which blocks the doc records as the note-taker's own, as of this read.
  *
  * Called TWICE on purpose — once on the outline the model was shown, to say
  * what the prompt claims, and once after the compose, to say what the gate
- * enforces. They are the same three fields read the same way, and the whole
- * point is that they can legitimately disagree by the time the model answers.
+ * enforces. It is the same field read the same way, and the whole point is
+ * that the two reads can legitimately disagree by the time the model answers.
  */
-function ownership(
-  outline: readonly prose.OutlineEntry[],
-  ydoc: Parameters<typeof notesMarksLive>[0],
-): { owned: Set<string>; attributed: Set<string>; marksLive: boolean } {
+function ownership(outline: readonly prose.OutlineEntry[]): { owned: Set<string> } {
   return {
     owned: new Set(outline.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id)),
-    attributed: new Set(outline.filter((e) => e.author !== undefined).map((e) => e.id)),
-    marksLive: notesMarksLive(ydoc),
   };
 }
 
@@ -261,39 +254,6 @@ function namesOf(
     // A record that will not read costs the pass its names, never itself.
   }
   return {};
-}
-
-/**
- * The blocks this batch claimed and then did not change.
- *
- * `outcomes` is per edit and in the order they were sent, so a `failed` one
- * names its own target. A block some OTHER edit in the same batch did change
- * keeps its claim: it is the pass's own work now, whatever else failed
- * alongside it. Absent outcomes mean the store refused the whole batch, so
- * every claim goes back.
- */
-function claimsToHandBack(
-  edits: readonly prose.BlockEdit[],
-  outcomes: readonly prose.BlockEditOutcome[] | undefined,
-  claimed: readonly string[],
-): string[] {
-  if (claimed.length === 0) return [];
-  const held = new Set(claimed);
-  if (outcomes === undefined) return [...held];
-  const targets = (edit: prose.BlockEdit): string[] =>
-    edit.op === 'replace_block' || edit.op === 'delete_block'
-      ? [edit.blockId]
-      : edit.op === 'nest_blocks'
-        ? [edit.leadBlockId, ...edit.blockIds]
-        : [];
-  const back = new Set<string>();
-  const kept = new Set<string>();
-  edits.forEach((edit, i) => {
-    const into = outcomes[i]?.status === 'failed' ? back : kept;
-    for (const id of targets(edit)) if (held.has(id)) into.add(id);
-  });
-  for (const id of kept) back.delete(id);
-  return [...back];
 }
 
 const refusal = (reason: NotesCleanupRefusal, line: string): NotesCleanupResult => ({
@@ -355,16 +315,13 @@ export async function runNotesCleanupPass(
     return refusal('no-section', 'notes cleanup: the notes section is no longer in the doc');
   }
   const turns = cleanupTurns(transcript, namesOf(deps.dataDir, docId, meetingId));
-  const shown = ownership(outline, doc.ydoc);
-  const ours = claimable({ ...shown, marksLive: shown.marksLive });
-  // WHAT THE MODEL IS TOLD AND WHAT THE GATE ENFORCES ARE ONE ANSWER. A gate
-  // that admits a block the prompt has just called a person's writing changes
-  // nothing, because the model does as it is told; the outline's `theirs` is
-  // read straight off the mark, so on a doc whose marks are gone it would
-  // call every line a person's. `claimed` is the same predicate the gate
-  // uses, and `humanNotes` is its complement among the unmarked lines: a line
-  // this pass may not claim, either because the marks are live and it is not
-  // ours or because it sits outside this meeting's section, where nothing is.
+  const shown = ownership(outline);
+  const ours = claimable(shown);
+  // WHAT THE MODEL IS TOLD AND WHAT THE GATE ENFORCES ARE ONE ANSWER, drawn
+  // from one predicate. `claimed` is the pass's own work inside this meeting's
+  // section — the lines it may rewrite outright — and `humanNotes` is every
+  // other line with words in it: somebody else's, or one whose author the doc
+  // no longer records, and the model may offer on either but rewrite neither.
   // Headings are left out of the list — it is about lines, and the outline
   // already says which heading each line sits under.
   const shownSection = sectionIds(outline, headingId);
@@ -416,18 +373,17 @@ export async function runNotesCleanupPass(
   // document the model answered about — but nothing is written on the
   // strength of it.
   const now = readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS });
-  const { kept, proposeOnly, refused } = confineToSection(edits, {
+  const { kept, refused } = confineToSection(edits, {
     ...sectionIds(now, headingId),
-    ...ownership(now, doc.ydoc),
+    ...ownership(now),
     headingId,
     commented: commentedBlockIds(doc.ydoc),
   });
-  // BOTH HALVES OF THE SAME SENTENCE. The blocks the gate called ours have to
-  // be marked ours, or every one of them lands as a redline instead of a
-  // rewrite; the blocks it admitted only as an OFFER must not be, or the
-  // redline somebody is meant to accept or reject becomes a silent rewrite of
-  // their line. See `claimForCleanup`.
-  const claimedIds = claimForCleanup(doc.ydoc, kept, proposeOnly);
+  // NOTHING HAPPENS BETWEEN THE GATE AND THE WRITE, and that is the point.
+  // The pass stamps no authorship on anything: `applyBlockEdits` reads each
+  // block's own mark — one this pass never wrote — and rewrites its own work
+  // while filing a redline on anybody else's. See `confineToSection`.
+  //
   // A store that refuses the whole batch — the doc has gone, or is not prose —
   // reports no counts at all. Reading that as zeros is the honest answer: it
   // changed nothing, which is what the numbers below say.
@@ -436,16 +392,6 @@ export async function runNotesCleanupPass(
     written !== null && 'applied' in written
       ? { applied: written.applied, suggested: written.suggested, failed: written.failed }
       : { applied: 0, suggested: 0, failed: written === null ? 0 : kept.length };
-  // A claim is a write, so one made for an edit that then failed has to go
-  // back — see `releaseClaims`.
-  releaseClaims(
-    doc.ydoc,
-    claimsToHandBack(
-      kept,
-      written !== null && 'outcomes' in written ? written.outcomes : undefined,
-      claimedIds,
-    ),
-  );
   const touched = result.applied + result.suggested;
   return {
     ok: true,
