@@ -189,12 +189,35 @@ export interface TimingReport {
   /** How many episodes were refused a slot outright. Zero on any history older
    *  than the event. */
   capRefusals: number;
+  /**
+   * Episodes that carry an ask but no lane record yet — a request still queued
+   * behind the cap, or simply one made minutes ago.
+   *
+   * Reported rather than dropped, because it is the number that says how much
+   * of the window is still in flight, and because it is exactly the population
+   * that must NOT feed the split (see `report`).
+   */
+  stillOpen: number;
   /** `planning`, `queueing`, or `unsplit` when nothing carried the marker. */
   dominant: 'planning' | 'queueing' | 'unsplit';
 }
 
-/** Fold episodes into the report. `atCapacity` is the parallelism cap the
- *  boards were running under; it decides only the pressure split. */
+/**
+ * Fold episodes into the report. `atCapacity` is the parallelism cap the boards
+ * were running under; it decides only the pressure split.
+ *
+ * **The two split legs are drawn from ONE cohort: episodes holding both an ask
+ * and a lane record.** The whole output of this tool is a comparison between
+ * those two medians, so measuring them over different populations would let the
+ * verdict move without any duration changing. It did: planning used to take
+ * every episode that carried an ask, queueing only those that also had a lane,
+ * so a tail of requests still waiting at the cap — long planning legs, no queue
+ * leg at all — could drag the planning median up and make the tool report
+ * `planning` on nothing but unfinished work. Refusing to name a leg when the
+ * marker is missing is worth nothing if the cohorts silently diverge instead.
+ *
+ * The excluded episodes are counted as `stillOpen` rather than dropped.
+ */
 export function report(eps: Episode[], atCapacity: number): TimingReport {
   const planningValues: number[] = [];
   const queueValues: number[] = [];
@@ -202,13 +225,19 @@ export function report(eps: Episode[], atCapacity: number): TimingReport {
   const pressured: number[] = [];
   const free: number[] = [];
   let capRefusals = 0;
+  let stillOpen = 0;
   for (const ep of eps) {
     if (ep.requestedOutcome === 'cap-reached') capRefusals += 1;
-    if (ep.requestedAt !== undefined) planningValues.push(ep.requestedAt - ep.flipAt);
+    if (ep.requestedAt !== undefined && ep.laneAt === undefined) stillOpen += 1;
     if (ep.laneAt === undefined) continue;
     const whole = ep.laneAt - ep.flipAt;
     wholeValues.push(whole);
-    if (ep.requestedAt !== undefined) queueValues.push(ep.laneAt - ep.requestedAt);
+    if (ep.requestedAt !== undefined) {
+      // Both legs, or neither. One `if` on purpose: two would be two chances
+      // for the cohorts to come apart again.
+      planningValues.push(ep.requestedAt - ep.flipAt);
+      queueValues.push(ep.laneAt - ep.requestedAt);
+    }
     (ep.inProgressAtFlip >= atCapacity ? pressured : free).push(whole);
   }
   const planning = leg(planningValues);
@@ -227,6 +256,7 @@ export function report(eps: Episode[], atCapacity: number): TimingReport {
     underPressure: leg(pressured),
     withSlotsFree: leg(free),
     capRefusals,
+    stillOpen,
     dominant,
   };
 }
@@ -286,6 +316,7 @@ function main(): void {
   printLeg(`flip → lane, ≥${atCapacity} running`, whole.underPressure);
   printLeg(`flip → lane, <${atCapacity} running`, whole.withSlotsFree);
   console.log(`\n  dispatches the cap refused: ${whole.capRefusals}`);
+  console.log(`  asked but no lane record yet: ${whole.stillOpen} (excluded from the split)`);
   console.log(`  dominant leg: ${whole.dominant}`);
   if (whole.dominant === 'unsplit') {
     console.log(

@@ -49,6 +49,34 @@ describe('reading a board log for dispatch timing', () => {
     expect(r.dominant).toBe('queueing');
   });
 
+  it('measures both legs over the SAME episodes, so unfinished asks cannot flip the verdict', () => {
+    // Three finished runs whose real answer is queueing — 2m of planning
+    // against 20m of queue — plus five asks still waiting with no lane record.
+    // Feeding those five into planning alone drags its median to 100m and
+    // makes the tool say `planning` on nothing but work that has not happened
+    // yet, which is the failure this asserts against.
+    const rows: EventRow[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const id = `t-done-${i}`;
+      rows.push(flip(id, 0), asked(id, 2 * MIN), noted(id, 22 * MIN));
+    }
+    for (let i = 0; i < 5; i += 1) {
+      const id = `t-open-${i}`;
+      rows.push(flip(id, 0), asked(id, 100 * MIN, 'cap-reached'));
+    }
+    const r = report(episodes(rows), 4);
+    // The verdict first, because it is the whole output of the tool and the
+    // thing the divergence moved: with the cohorts apart this reads `planning`.
+    expect(r.dominant).toBe('queueing');
+    expect(r.planning.count).toBe(3);
+    expect(r.queueing.count).toBe(3);
+    expect(r.planning.medianMs).toBe(2 * MIN);
+    expect(r.queueing.medianMs).toBe(20 * MIN);
+    // Excluded, not lost — the count is what says how much is still in flight.
+    expect(r.stillOpen).toBe(5);
+    expect(r.capRefusals).toBe(5);
+  });
+
   it('refuses to split a log written before the marker existed', () => {
     // Every episode here has both ENDS and no middle — exactly the history
     // this measurement inherits. Reporting a dominant leg off that would be
