@@ -193,6 +193,15 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(overlap(card, l.el.low)).toBe(0);
     });
 
+    it('keeps a typed draft through Done, Esc and X, and gives it back on that element', () => {
+      expect(look(1180, 'done').card, 'CONTROL: Done took the card off screen').toBeNull();
+      expect(look(1180, 'reentered').draft, 'the resting card is about the page').toBe('');
+      expect(look(1180, 'reopened').draft).toBe('Riverbend stop shelter');
+      expect(look(1180, 'escaped').card, 'CONTROL: Esc closed the card').toBeNull();
+      expect(look(1180, 'reopenedEsc').draft).toBe('Riverbend stop shelter');
+      expect(look(1180, 'reopenedX').draft).toBe('Riverbend stop shelter');
+    });
+
     it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {
       const p = look(1180, 'portrait');
       expect(p.mode).toBe(true);

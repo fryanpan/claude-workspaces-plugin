@@ -157,6 +157,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     // exits the mode. Matches every modal-inside-a-mode convention.
     const composer = el.shadow.querySelector('.composer');
     if (composer) {
+      keepDraft(el);
       closeComposer(el, composer);
       return;
     }
@@ -177,16 +178,13 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     if (isPhoneFace() === phone) return;
     const c = el.shadow.querySelector('.composer');
     const t = c ? cardTarget.get(c) : undefined;
-    const draft = c?.querySelector('textarea')?.value ?? '';
     exitFeedbackMode(el);
     enterFeedbackMode(el);
     if (t) {
       el.hoverEl = t;
       setHighlight(el, t);
       openComposerForElement(el, t);
-    } else if (draft) openDefaultComposer(el);
-    const ta = el.shadow.querySelector('.composer textarea') as HTMLTextAreaElement | null;
-    if (ta) ta.value = draft;
+    } else if (drafts.has(el)) openDefaultComposer(el);
   };
   window.addEventListener('resize', onResize);
 
@@ -196,7 +194,10 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     clearHighlight(el);
     el.hoverEl = null;
     // Done means done: nothing of the mode stays on the page — not a card, not
-    // an empty composer resting where the mode had been.
+    // an empty composer resting where the mode had been. Typed words are not
+    // the mode's to discard, though: they wait for that element to be opened
+    // again (Cancel is the one way to drop them).
+    keepDraft(el);
     for (const n of el.shadow.querySelectorAll('.composer, .saved, .leader')) n.remove();
     banner.remove();
     fab?.setAttribute('aria-pressed', 'false');
@@ -207,6 +208,15 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('resize', onResize);
   };
+}
+
+/** Words typed and not posted, by the element they are about (the widget
+ *  itself for a comment on the page), kept when the mode closes over them. */
+const drafts = new WeakMap<object, string>();
+function keepDraft(el: FeedbackWidgetEl): void {
+  const c = el.shadow.querySelector('.composer');
+  const v = c?.querySelector('textarea')?.value;
+  if (c && v) drafts.set(cardTarget.get(c) ?? el, v);
 }
 
 /** Leaving the mode takes its composer with it, draft and all, as the mock's
@@ -367,7 +377,14 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   // The draft moves with you. Tapping an element while a draft is open
   // RE-ANCHORS what you were writing rather than throwing it away and
   // starting again — the composer is replaced, the sentence is not.
-  const carried = (existing?.querySelector('textarea') as HTMLTextAreaElement | null)?.value ?? '';
+  // Or, with nothing open, what was kept for this element when the mode last
+  // closed over it.
+  const key = target ?? el;
+  const carried =
+    (existing?.querySelector('textarea') as HTMLTextAreaElement | null)?.value ||
+    drafts.get(key) ||
+    '';
+  drafts.delete(key);
   existing?.remove();
   const quick = isPhoneFace();
   const composer = document.createElement('div');

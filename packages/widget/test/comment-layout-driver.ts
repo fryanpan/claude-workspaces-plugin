@@ -317,6 +317,27 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   }
   await tap(done);
   await look('done');
+  if (width > 1100) {
+    // Done, Esc and the FAB's X each close over a typed draft; opening the
+    // element again brings it back.
+    await tap(fab);
+    await look('reentered');
+    await tap(el('low'));
+    await look('reopened');
+    // Esc from script: after a CDP Escape, headless Chromium stops acking the
+    // next touch (the page itself stays responsive), so the key is dispatched
+    // where the mode listens for it.
+    await cdp.evaluate(`dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+    await settle();
+    await look('escaped');
+    await tap(el('low'));
+    await look('reopenedEsc');
+    await tap(fab);
+    await tap(fab);
+    await tap(el('low'));
+    await look('reopenedX');
+    await tap(done);
+  }
   return { width, height, looks };
 }
 
