@@ -35,7 +35,7 @@ const transcript = (turn: number, text: string, final: boolean) => ({
   text,
   final,
   speaker: 'p7',
-  speakerName: 'Rowan Pike',
+  speakerName: 'Trent Archivist',
 });
 
 describe('the channel gate on meeting frames', () => {

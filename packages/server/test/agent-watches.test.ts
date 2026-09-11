@@ -353,7 +353,7 @@ describe('POST /api/agents/:id/merge re-keys watches so delivery follows the new
 
     const comment = (text: string) =>
       post(`/workspaces/${wsId}/docs/watched/threads`, {
-        author: { id: 'known-jordan', name: 'Jordan', kind: 'person' },
+        author: { id: 'known-carol', name: 'Carol', kind: 'person' },
         text,
         anchor: { kind: 'subject' },
       });
@@ -500,7 +500,7 @@ describe('POST /api/agents/:id/merge — review findings', () => {
       (
         await req(`/workspaces/${wsId}/docs/watched/threads`, {
           body: {
-            author: { id: 'known-jordan', name: 'Jordan', kind: 'person' },
+            author: { id: 'known-carol', name: 'Carol', kind: 'person' },
             text: 'posted before the merge, never acked',
             anchor: { kind: 'subject' },
           },
@@ -541,7 +541,7 @@ describe('POST /api/agents/:id/merge — review findings', () => {
       (
         await req(`/workspaces/${wsId}/docs/watched/threads`, {
           body: {
-            author: { id: 'known-jordan', name: 'Jordan', kind: 'person' },
+            author: { id: 'known-carol', name: 'Carol', kind: 'person' },
             text: 'still here after the dry run',
             anchor: { kind: 'subject' },
           },

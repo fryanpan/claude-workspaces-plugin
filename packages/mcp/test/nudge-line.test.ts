@@ -446,7 +446,7 @@ describe('stalledLine', () => {
       parallelismCap: {
         value: 1,
         lastChange: {
-          actor: { id: 'known-jordan', name: 'Jordan', kind: 'person' },
+          actor: { id: 'known-carol', name: 'Carol', kind: 'person' },
           ts: 8 * 60 * 60_000,
           from: 4,
           to: 1,
@@ -454,7 +454,7 @@ describe('stalledLine', () => {
       },
     });
     expect(line).toContain(
-      '9 open task(s) checked; 4 beyond the parallelism cap of 1, set by Jordan 2h ago (was 4), and not judged',
+      '9 open task(s) checked; 4 beyond the parallelism cap of 1, set by Carol 2h ago (was 4), and not judged',
     );
   });
 

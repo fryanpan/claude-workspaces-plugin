@@ -15,7 +15,7 @@
  *    lastHeartbeat, stale lastToolCallAt — the usage-limit outage shape)
  *    from active and away. We never guess from absence of activity.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the carol@partner.example
  * register. The repo is public.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
@@ -36,7 +36,7 @@ import {
 } from '../src/tasks.ts';
 import { type AgentStream, openWorkspaceStream } from './agent-stream.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known' };
+const PERSON = { id: 'known-carol', name: 'Carol', kind: 'known' };
 
 /** A synthetic host-machine-describing endpoint. Must never leave REST. */
 const ENDPOINT = 'http://127.0.0.1:9099/hooks/agent-relay';

@@ -39,8 +39,8 @@ import { widgetToken } from '../src/auth/widget-token.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
 /** Two invented agents. Neither name resolves to anything real. */
-const MIRA = 'agent-mira';
-const RENZO = 'agent-renzo';
+const MALLORY = 'agent-mallory';
+const TRENT = 'agent-trent';
 
 /** Both doors onto the same feed, driven by every case below. */
 const ROUTES = [
@@ -56,7 +56,7 @@ describe('an agent feed is readable only by that agent', () => {
   const get = (path: string, headers: Record<string, string> = {}) =>
     fetch(`${base}${path}`, { headers: { host: `localhost:${handle.port}`, ...headers } });
 
-  /** The token this server would hand MIRA's own process. */
+  /** The token this server would hand MALLORY's own process. */
   const tokenFor = async (agentId: string): Promise<string> => {
     const res = await get(`/api/agents/${agentId}/token`);
     expect(res.status, await res.clone().text()).toBe(200);
@@ -88,8 +88,8 @@ describe('an agent feed is readable only by that agent', () => {
 
     for (const route of ROUTES) {
       it(`serves ${route.name} to the agent's own token`, async () => {
-        const res = await get(route.path(MIRA), {
-          authorization: `Bearer ${await tokenFor(MIRA)}`,
+        const res = await get(route.path(MALLORY), {
+          authorization: `Bearer ${await tokenFor(MALLORY)}`,
         });
         // Status only, never the body: one of these two routes answers with
         // an SSE stream that stays open, so reading it waits forever.
@@ -98,25 +98,25 @@ describe('an agent feed is readable only by that agent', () => {
       });
 
       it(`refuses ${route.name} to another agent's token`, async () => {
-        // The whole point. Renzo's process holds a perfectly valid token --
-        // it just does not speak for Mira, whose id Renzo could derive from
+        // The whole point. Trent's process holds a perfectly valid token --
+        // it just does not speak for Mallory, whose id Trent could derive from
         // her name in a second.
-        const res = await get(route.path(MIRA), {
-          authorization: `Bearer ${await tokenFor(RENZO)}`,
+        const res = await get(route.path(MALLORY), {
+          authorization: `Bearer ${await tokenFor(TRENT)}`,
         });
         expect(res.status).toBe(403);
         expect(((await res.json()) as { error: string }).error).toBe('agent-token-mismatch');
       });
 
       it(`refuses ${route.name} to a caller with no token`, async () => {
-        const res = await get(route.path(MIRA));
+        const res = await get(route.path(MALLORY));
         expect(res.status).toBe(401);
         expect(((await res.json()) as { error: string }).error).toBe('agent-token-required');
       });
 
       it(`refuses ${route.name} to a forged token`, async () => {
-        const res = await get(route.path(MIRA), {
-          authorization: `Bearer at1.${MIRA}.notavalidmacatall`,
+        const res = await get(route.path(MALLORY), {
+          authorization: `Bearer at1.${MALLORY}.notavalidmacatall`,
         });
         expect(res.status).toBe(403);
         expect(((await res.json()) as { error: string }).error).toBe('agent-token-mismatch');
@@ -132,7 +132,7 @@ describe('an agent feed is readable only by that agent', () => {
         // The rollout promise: a session running a bundle that predates the
         // header keeps its watch restore and its stream. Cutting it off is
         // the outage the multiplexed route was built to end.
-        const res = await get(route.path(MIRA));
+        const res = await get(route.path(MALLORY));
         expect(res.status).toBe(200);
         await release(res);
       });
@@ -141,8 +141,8 @@ describe('an agent feed is readable only by that agent', () => {
         // A WRONG token is never a fall-back onto the legacy path. Without
         // this, presenting a bad token would be strictly better for an
         // attacker than presenting none.
-        const res = await get(route.path(MIRA), {
-          authorization: `Bearer ${await tokenFor(RENZO)}`,
+        const res = await get(route.path(MALLORY), {
+          authorization: `Bearer ${await tokenFor(TRENT)}`,
         });
         expect(res.status).toBe(403);
       });
@@ -150,7 +150,7 @@ describe('an agent feed is readable only by that agent', () => {
       it(`refuses ${route.name} to a browser`, async () => {
         // A page on another local port has a loopback peer address too, and
         // rides the owner's session. Enforced regardless of the flag.
-        const res = await get(route.path(MIRA), { origin: 'http://localhost:5173' });
+        const res = await get(route.path(MALLORY), { origin: 'http://localhost:5173' });
         expect(res.status).toBe(403);
         expect(((await res.json()) as { error: string }).error).toBe('agent-stream-browser');
       });
@@ -167,7 +167,7 @@ describe('an agent feed is readable only by that agent', () => {
         // rather than the code. The `agent-stream-proxied` refusal these
         // routes make on their own -- for a `cf-ray` on a host admission DOES
         // admit -- is pinned directly on `authorizeAgentCaller` below.
-        const res = await get(route.path(MIRA), { 'cf-ray': '8f0aa11223344556-SJC' });
+        const res = await get(route.path(MALLORY), { 'cf-ray': '8f0aa11223344556-SJC' });
         expect(res.status).toBe(403);
       });
     }
@@ -179,20 +179,20 @@ describe('an agent feed is readable only by that agent', () => {
     it('hands the same token back on every ask', async () => {
       // Stateless: the token is an HMAC over the id, so a re-mint is not a
       // rotation and a restarted child does not invalidate its own stream.
-      expect(await tokenFor(MIRA)).toBe(await tokenFor(MIRA));
+      expect(await tokenFor(MALLORY)).toBe(await tokenFor(MALLORY));
     });
 
     it('mints different tokens for different agents', async () => {
-      expect(await tokenFor(MIRA)).not.toBe(await tokenFor(RENZO));
+      expect(await tokenFor(MALLORY)).not.toBe(await tokenFor(TRENT));
     });
 
     it('refuses a browser and a proxied request', async () => {
-      expect((await get(`/api/agents/${MIRA}/token`, { origin: 'http://x.test' })).status).toBe(
+      expect((await get(`/api/agents/${MALLORY}/token`, { origin: 'http://x.test' })).status).toBe(
         403,
       );
       // As above: on a loopback Host the host gate refuses the `cf-ray`
       // first. Still 403, still never a token.
-      expect((await get(`/api/agents/${MIRA}/token`, { 'cf-ray': 'abc-SJC' })).status).toBe(403);
+      expect((await get(`/api/agents/${MALLORY}/token`, { 'cf-ray': 'abc-SJC' })).status).toBe(403);
     });
 
     it('refuses the shared identity, whose token every session would hold', async () => {
@@ -211,12 +211,12 @@ describe('the at1 token format', () => {
   const KEY = agentTokenKey('a-test-base-key-that-is-not-a-real-one');
 
   it('round-trips the agent it was minted for', () => {
-    expect(verifyAgentToken(mintAgentToken(MIRA, KEY), KEY)?.agentId).toBe(MIRA);
+    expect(verifyAgentToken(mintAgentToken(MALLORY, KEY), KEY)?.agentId).toBe(MALLORY);
   });
 
   it('does not verify under a different base key', () => {
     const other = agentTokenKey('a-different-base-key');
-    expect(verifyAgentToken(mintAgentToken(MIRA, KEY), other)).toBeNull();
+    expect(verifyAgentToken(mintAgentToken(MALLORY, KEY), other)).toBeNull();
   });
 
   it('refuses a genuine token from another protocol signed with the same base key', () => {
@@ -227,7 +227,7 @@ describe('the at1 token format', () => {
     const foreign = mintToken(
       widgetToken,
       {
-        identityId: MIRA,
+        identityId: MALLORY,
         sessionId: 's1',
         sessionIssuedAt: 1,
         expiresAt: Date.now() + 60_000,
@@ -239,8 +239,8 @@ describe('the at1 token format', () => {
   });
 
   it('refuses a tampered agent id', () => {
-    const minted = mintAgentToken(MIRA, KEY);
-    expect(verifyAgentToken(minted.replace(MIRA, RENZO), KEY)).toBeNull();
+    const minted = mintAgentToken(MALLORY, KEY);
+    expect(verifyAgentToken(minted.replace(MALLORY, TRENT), KEY)).toBeNull();
   });
 });
 
@@ -251,7 +251,7 @@ describe('authorizeAgentCaller', () => {
 
   const check = (over: Partial<Parameters<typeof authorizeAgentCaller>[0]> = {}) =>
     authorizeAgentCaller({
-      agentId: MIRA,
+      agentId: MALLORY,
       req: req(),
       address: '127.0.0.1',
       key: KEY,
@@ -277,7 +277,7 @@ describe('authorizeAgentCaller', () => {
 
   it('reports a token caller as proven and a bare one as legacy', () => {
     const withToken = check({
-      req: req({ authorization: `Bearer ${mintAgentToken(MIRA, KEY)}` }),
+      req: req({ authorization: `Bearer ${mintAgentToken(MALLORY, KEY)}` }),
     });
     expect(withToken).toEqual({ ok: true, proof: 'token' });
     expect(check()).toEqual({ ok: true, proof: 'legacy' });
@@ -308,12 +308,12 @@ describe('the deprecation-window warning', () => {
   it('logs once per agent id per route, not once per request', () => {
     const lines: string[] = [];
     const warn = createLegacyAgentWarner((m) => lines.push(m));
-    warn(MIRA, '/events/agent/<id>');
-    warn(MIRA, '/events/agent/<id>');
-    warn(MIRA, '/api/agents/<id>/watches');
-    warn(RENZO, '/events/agent/<id>');
+    warn(MALLORY, '/events/agent/<id>');
+    warn(MALLORY, '/events/agent/<id>');
+    warn(MALLORY, '/api/agents/<id>/watches');
+    warn(TRENT, '/events/agent/<id>');
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain(MIRA);
+    expect(lines[0]).toContain(MALLORY);
     expect(lines[0]).toContain('CW_REQUIRE_AGENT_TOKEN');
   });
 });

@@ -47,7 +47,7 @@
  * your own note is bookkeeping, and proposing a change to somebody else's is
  * a request.
  *
- * A SPEAKER TAG IS OUT OF BOUNDS. A site sitting inside `[@Devi](speaker:B)`
+ * A SPEAKER TAG IS OUT OF BOUNDS. A site sitting inside `[@Mallory](speaker:B)`
  * is an ATTRIBUTION, and rewriting its text while the href still names voice
  * B would leave the tag claiming that B is called something B is not.
  * Attribution moves by the reassign gesture; it never moves by a spoken

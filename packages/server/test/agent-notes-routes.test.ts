@@ -11,7 +11,7 @@
  * control for that: a server that quietly filtered would pass every other
  * test here and still hide the fact from the hook's author.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the carol@partner.example
  * register. The repo is public.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -27,7 +27,7 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { workspaceDocId } from '../src/task-projection.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+const PERSON = { id: 'known-carol', name: 'Carol', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 type ProjectedNote = { at: number; kind: string; text: string; agent: string };

@@ -119,7 +119,7 @@ export const LOOKUP_PROMPT_RULE = [
  */
 export const CORRECTION_PROMPT_RULE = [
   'A CORRECTION when a speaker fixes something the notes ALREADY SAY, rather',
-  'than saying anything new — "no, I said Thursday", "that was Priya, not',
+  'than saying anything new — "no, I said Thursday", "that was Trent, not',
   'me", "sixty, not sixteen". "wrong": the mistaken words as the notes would',
   'have them, quoted, not paraphrased; "right": what they should say, in the',
   'words just spoken. Both short — a few words, never a sentence. Somebody',

@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { createAgentTokenStore, pathNeedsAgentToken } from '../src/agent-token.ts';
 
-const AGENT = 'agent-mira';
+const AGENT = 'agent-mallory';
 
 interface Call {
   url: string;
@@ -54,16 +54,16 @@ const okToken = (token: string): Response =>
 
 describe('the MCP agent-token store', () => {
   it('asks the right route and puts the token on the header', async () => {
-    const s = store(() => okToken('at1.agent-mira.macbytes'));
-    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mira.macbytes' });
-    expect(s.calls[0]?.url).toBe('http://localhost:9999/api/agents/agent-mira/token');
+    const s = store(() => okToken('at1.agent-mallory.macbytes'));
+    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mallory.macbytes' });
+    expect(s.calls[0]?.url).toBe('http://localhost:9999/api/agents/agent-mallory/token');
   });
 
   it('mints once however many callers ask', async () => {
     // The restore, the first watch and the stream open within milliseconds
     // of each other at session start. Without single-flight that is three
     // mints racing.
-    const s = store(() => okToken('at1.agent-mira.macbytes'));
+    const s = store(() => okToken('at1.agent-mallory.macbytes'));
     const [a, b, c] = await Promise.all([s.headers(), s.headers(), s.headers()]);
     expect([a, b, c].every((h) => h.authorization !== undefined)).toBe(true);
     expect(s.calls).toHaveLength(1);
@@ -85,10 +85,10 @@ describe('the MCP agent-token store', () => {
     // restarts under us routinely — so the next call must try again.
     const s = store((n) => {
       if (n === 1) throw new Error('ECONNREFUSED');
-      return okToken('at1.agent-mira.later');
+      return okToken('at1.agent-mallory.later');
     });
     expect(await s.headers()).toEqual({});
-    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mira.later' });
+    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mallory.later' });
   });
 
   it('sends no header when the answer is a refusal rather than a token', async () => {
@@ -108,41 +108,41 @@ describe('the MCP agent-token store', () => {
     // What a key rotation on the server looks like from here: the held
     // token stops verifying, the loop drops it, and the next attempt gets a
     // live one instead of redialling a dead value forever.
-    const s = store((n) => okToken(n === 1 ? 'at1.agent-mira.old' : 'at1.agent-mira.new'));
-    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mira.old' });
+    const s = store((n) => okToken(n === 1 ? 'at1.agent-mallory.old' : 'at1.agent-mallory.new'));
+    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mallory.old' });
     s.forget();
-    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mira.new' });
+    expect(await s.headers()).toEqual({ authorization: 'Bearer at1.agent-mallory.new' });
     expect(s.calls).toHaveLength(2);
   });
 });
 
 describe('which paths carry the bearer', () => {
   it('carries it on the durable watch set and nothing else', () => {
-    expect(pathNeedsAgentToken('/api/agents/agent-mira/watches')).toBe(true);
-    expect(pathNeedsAgentToken('/api/agents/agent-mira/watches?x=1')).toBe(true);
+    expect(pathNeedsAgentToken('/api/agents/agent-mallory/watches')).toBe(true);
+    expect(pathNeedsAgentToken('/api/agents/agent-mallory/watches?x=1')).toBe(true);
     // The merge route has its own operator gate and asks for no token; the
     // mint route is fetched by the store itself, not through `http`.
-    expect(pathNeedsAgentToken('/api/agents/agent-mira/merge')).toBe(false);
-    expect(pathNeedsAgentToken('/api/agents/agent-mira/token')).toBe(false);
+    expect(pathNeedsAgentToken('/api/agents/agent-mallory/merge')).toBe(false);
+    expect(pathNeedsAgentToken('/api/agents/agent-mallory/token')).toBe(false);
     // The bulk of the surface. Every one of these used to trigger a mint.
     expect(pathNeedsAgentToken('/workspaces/w-1/goals')).toBe(false);
     expect(pathNeedsAgentToken('/api/docs/d-1/threads')).toBe(false);
     // Not a prefix match: a path that merely starts the same way is not it.
-    expect(pathNeedsAgentToken('/api/agents/agent-mira/watches/extra')).toBe(false);
+    expect(pathNeedsAgentToken('/api/agents/agent-mallory/watches/extra')).toBe(false);
   });
 
   it('mints nothing for a path that does not need one', async () => {
     // The regression this predicate exists for: an unrelated tool call must
     // not wait on, or record, a token request.
-    const s = store(() => okToken('at1.agent-mira.macbytes'));
+    const s = store(() => okToken('at1.agent-mallory.macbytes'));
     expect(await s.headersFor('/workspaces/w-1/goals')).toEqual({});
     expect(s.calls).toHaveLength(0);
   });
 
   it('mints for the watch set', async () => {
-    const s = store(() => okToken('at1.agent-mira.macbytes'));
-    expect(await s.headersFor('/api/agents/agent-mira/watches')).toEqual({
-      authorization: 'Bearer at1.agent-mira.macbytes',
+    const s = store(() => okToken('at1.agent-mallory.macbytes'));
+    expect(await s.headersFor('/api/agents/agent-mallory/watches')).toEqual({
+      authorization: 'Bearer at1.agent-mallory.macbytes',
     });
     expect(s.calls).toHaveLength(1);
   });

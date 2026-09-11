@@ -3,7 +3,7 @@
  * measured against.
  *
  * Every value here is invented. The register is the repo's usual
- * `jordan@partner.example` one: no real person, agent, goal or ticket title
+ * `carol@partner.example` one: no real person, agent, goal or ticket title
  * appears, because the repo is public and this file is a fixture, not a
  * capture.
  *
@@ -66,7 +66,7 @@ const GOALS_TEXT = [
   'the band tells them what is left',
   'no decision is lost to a stray tap',
 ] as const;
-const AGENTS = ['Ada Lint', 'Bo Refactor', 'Cy Ratchet', 'Dee Probe', 'Eli Budget'] as const;
+const AGENTS = ['Eve Lint', 'Bo Refactor', 'Cy Ratchet', 'Bob Probe', 'Baz Budget'] as const;
 const GOAL_IDS = ['g-payload', 'g-queue', 'g-bands', 'g-restore'] as const;
 
 const PROSE =
@@ -96,7 +96,7 @@ function trail(rand: () => number, stops: number, closed: boolean): TaskTransiti
       // The STORED actor carries an id; `projectTask` narrows it to name and
       // kind on the way to the wire. The fixture has to hold the wide shape
       // or it would be measuring a projection that had less to drop.
-      by: { id: `agent-${idx}`, name: AGENTS[idx] ?? 'Ada Lint', kind: 'agent' },
+      by: { id: `agent-${idx}`, name: AGENTS[idx] ?? 'Eve Lint', kind: 'agent' },
       // The prose the trim drops. Present on the fixture so the control can
       // show what carrying it would cost.
       note: filler(110),
@@ -110,7 +110,7 @@ function notes(rand: () => number, count: number): TaskNote[] {
     ts: FIXTURE_NOW - i * 90_000,
     kind: 'turn' as const,
     text: filler(120 + Math.floor(rand() * 80)),
-    agent: AGENTS[i % AGENTS.length] ?? 'Ada Lint',
+    agent: AGENTS[i % AGENTS.length] ?? 'Eve Lint',
   }));
 }
 
@@ -127,7 +127,7 @@ function reviews(index: number, count: number): Task['reviews'] {
       ],
     },
     createdAt: FIXTURE_NOW - 3 * DAY,
-    createdBy: AGENTS[i % AGENTS.length] ?? 'Ada Lint',
+    createdBy: AGENTS[i % AGENTS.length] ?? 'Eve Lint',
   }));
 }
 
@@ -184,8 +184,8 @@ export function boardFixture(): {
         `${PERSONAS[i % PERSONAS.length]} can ${VERBS[i % VERBS.length]} ` +
         `so that ${GOALS_TEXT[i % GOALS_TEXT.length]}`,
       status: open ? (i % 10 === 0 ? 'in-progress' : 'todo') : 'done',
-      assignee: AGENTS[i % AGENTS.length] ?? 'Ada Lint',
-      assigneeId: `agent-${(AGENTS[i % AGENTS.length] ?? 'ada lint').toLowerCase().replace(' ', '-')}`,
+      assignee: AGENTS[i % AGENTS.length] ?? 'Eve Lint',
+      assigneeId: `agent-${(AGENTS[i % AGENTS.length] ?? 'eve lint').toLowerCase().replace(' ', '-')}`,
       goal: GOAL_IDS[i % GOAL_IDS.length] ?? 'g-payload',
       order: i,
       after: i % 7 === 0 ? [`fixture-task-${String(Math.max(0, i - 3)).padStart(4, '0')}`] : [],
@@ -313,7 +313,7 @@ export function boardFixture(): {
               ? {
                   answer: {
                     text: filler(220),
-                    by: 'Ada Lint',
+                    by: 'Eve Lint',
                     ts: FIXTURE_NOW - DAY,
                     optionId: 'o-narrow',
                   },
@@ -381,7 +381,7 @@ export function boardFixture(): {
       // a public repo. Same length, so the array weighs what a real one does.
       docIds: Array.from({ length: 120 }, (_, i) => `fixture-doc-${String(i).padStart(4, '0')}`),
       createdAt: FIXTURE_NOW - 400 * DAY,
-      leadAgentId: 'agent-ada-lint',
+      leadAgentId: 'agent-eve-lint',
       leadAgentSince: FIXTURE_NOW - 9 * DAY,
     },
     // The STORED goal rows. `projectGoalMeta` derives the rest of each
@@ -395,7 +395,7 @@ export function boardFixture(): {
       title: `${GOALS_TEXT[i % GOALS_TEXT.length]}`,
       body: filler(2_400),
       status: 'in-progress',
-      assignee: AGENTS[i % AGENTS.length] ?? 'Ada Lint',
+      assignee: AGENTS[i % AGENTS.length] ?? 'Eve Lint',
       goal: gid,
       order: i,
       after: [],

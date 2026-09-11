@@ -122,9 +122,9 @@ const GOOD = [
   '',
   '### Decisions and who has them',
   '',
-  '- [@Ivo](speaker:B) keeps the winter crew on until April rather than letting them go in February — four staff for two months, out of the maintenance budget',
-  '- [@Ivo](speaker:B) sends the letter to season ticket holders in the first week of March, before renewals',
-  '- [@Wren](speaker:A) circulates the timetable draft on Friday',
+  '- [@Trent](speaker:B) keeps the winter crew on until April rather than letting them go in February — four staff for two months, out of the maintenance budget',
+  '- [@Trent](speaker:B) sends the letter to season ticket holders in the first week of March, before renewals',
+  '- [@Bob](speaker:A) circulates the timetable draft on Friday',
 ].join('\n');
 
 /**
@@ -235,7 +235,7 @@ function writeTranscript(dataDir: string): void {
         engine: 'mock',
         sampleRate: 16000,
       }),
-      JSON.stringify({ meetingId: MEETING, speakers: { A: 'Wren', B: 'Ivo' } }),
+      JSON.stringify({ meetingId: MEETING, speakers: { A: 'Bob', B: 'Trent' } }),
       JSON.stringify({ meetingId: MEETING, endedAt: 99, turns: TRANSCRIPT.length }),
     ].join('\n')}\n`,
   );

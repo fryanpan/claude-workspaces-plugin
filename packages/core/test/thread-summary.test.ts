@@ -22,9 +22,9 @@ import {
 } from '../src/thread-summary.ts';
 import type { Thread, User } from '../src/types.ts';
 
-const alex: User = { id: 'u-alex', name: 'Alex', kind: 'known', color: '#2e7dd7' };
-const sam: User = { id: 'u-sam', name: 'Sam', kind: 'known', color: '#e36f1e' };
-const jordan: User = { id: 'u-jordan', name: 'Jordan', kind: 'known', color: '#8957e5' };
+const alice: User = { id: 'u-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+const dave: User = { id: 'u-dave', name: 'Dave', kind: 'known', color: '#e36f1e' };
+const carol: User = { id: 'u-carol', name: 'Carol', kind: 'known', color: '#8957e5' };
 
 /**
  * Build a thread the way production builds one: a real Y.Doc, a real
@@ -72,7 +72,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 20],
-        author: alex,
+        author: alice,
         first: 'We should rethrow on the last attempt.',
       });
       const s = threadSummary(t);
@@ -85,7 +85,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'Still relevant?',
         orphan: true,
       });
@@ -97,11 +97,11 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'The retry loop swallows the underlying error.',
         replies: [
-          { author: sam, text: 'Do we keep the fallback path at all?' },
-          { author: jordan, text: 'Keep it — two callers depend on the degraded response.' },
+          { author: dave, text: 'Do we keep the fallback path at all?' },
+          { author: carol, text: 'Keep it — two callers depend on the degraded response.' },
         ],
       });
       const s = threadSummary(t);
@@ -114,9 +114,9 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'opening',
-        replies: [{ author: sam, text: `first line\n\n${long}` }],
+        replies: [{ author: dave, text: `first line\n\n${long}` }],
       });
       const s = threadSummary(t);
       expect(s.discussion.length).toBeLessThanOrEqual(DISCUSSION_MAX);
@@ -139,7 +139,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: 'Rollout is Scheduled for the second week.\n',
         range: [11, 20],
-        author: alex,
+        author: alice,
         first: 'Is this 10 days notice or 120?',
       });
       expect(t.anchor.kind === 'text-range' && t.anchor.snippet.text).toBe('Scheduled');
@@ -153,7 +153,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 30],
-        author: alex,
+        author: alice,
         first: 'We should rethrow on the last attempt.',
       });
       expect(threadSummary(t).topic).toBe('The retry loop swallows the un');
@@ -165,7 +165,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: 'Rollout is Scheduled for the second week.\n',
         range: [11, 20],
-        author: alex,
+        author: alice,
         first: '   ',
       });
       expect(threadSummary(t).topic).toBe('Scheduled');
@@ -175,7 +175,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [5, 5],
-        author: alex,
+        author: alice,
         first: 'Jitter is missing from the backoff.',
       });
       expect(t.anchor.kind === 'text-range' && t.anchor.snippet.text).toBe('');
@@ -188,7 +188,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: jordan,
+        author: carol,
         first: 'No jitter here, so failures retry in lockstep.',
       });
       const s = threadSummary(t);
@@ -205,9 +205,9 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: jordan,
+        author: carol,
         first: 'opening',
-        replies: [{ author: sam, text: '   ' }],
+        replies: [{ author: dave, text: '   ' }],
       });
       const s = threadSummary(t);
       expect(s.discussionKind).toBe('none');
@@ -220,13 +220,13 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: sam,
+        author: dave,
         first: 'Is the timeout per attempt?',
-        replies: [{ author: alex, text: 'Per attempt.' }],
+        replies: [{ author: alice, text: 'Per attempt.' }],
       });
       const p = threadSummary(t).participants;
-      expect(p?.repliers.map((u) => u.name)).toEqual(['Alex']);
-      expect(p?.label).toEqual({ kind: 'named', name: 'Alex', text: 'Alex replied' });
+      expect(p?.repliers.map((u) => u.name)).toEqual(['Alice']);
+      expect(p?.label).toEqual({ kind: 'named', name: 'Alice', text: 'Alice replied' });
       // The swatch colour rides along with the replier.
       expect(p?.repliers[0]?.color).toBe('#2e7dd7');
     });
@@ -235,15 +235,15 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'The retry loop swallows the error.',
         replies: [
-          { author: sam, text: 'Agreed.' },
-          { author: jordan, text: 'Keep it.' },
+          { author: dave, text: 'Agreed.' },
+          { author: carol, text: 'Keep it.' },
         ],
       });
       const p = threadSummary(t).participants;
-      expect(p?.repliers.map((u) => u.name)).toEqual(['Sam', 'Jordan']);
+      expect(p?.repliers.map((u) => u.name)).toEqual(['Dave', 'Carol']);
       expect(p?.label).toEqual({ kind: 'count', count: 2, text: '+2 others' });
     });
 
@@ -251,16 +251,16 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'opening',
         replies: [
-          { author: jordan, text: 'one' },
-          { author: sam, text: 'two' },
-          { author: jordan, text: 'three' },
+          { author: carol, text: 'one' },
+          { author: dave, text: 'two' },
+          { author: carol, text: 'three' },
         ],
       });
       const p = threadSummary(t).participants;
-      expect(p?.repliers.map((u) => u.id)).toEqual(['u-jordan', 'u-sam']);
+      expect(p?.repliers.map((u) => u.id)).toEqual(['u-carol', 'u-dave']);
       expect(p?.label).toEqual({ kind: 'count', count: 2, text: '+2 others' });
     });
 
@@ -268,9 +268,9 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'opening',
-        replies: [{ author: alex, text: 'Actually, on reflection, drop the fallback.' }],
+        replies: [{ author: alice, text: 'Actually, on reflection, drop the fallback.' }],
       });
       const s = threadSummary(t);
       // No participants row — nobody else has spoken…
@@ -281,17 +281,17 @@ describe('threadSummary', () => {
     });
 
     it('treats a same-name different-id replier as a distinct person', () => {
-      const otherAlex: User = { id: 'anon-9', name: 'Alex', kind: 'anon', color: '#2da44e' };
+      const otherAlice: User = { id: 'anon-9', name: 'Alice', kind: 'anon', color: '#2da44e' };
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'opening',
-        replies: [{ author: otherAlex, text: 'different person, same display name' }],
+        replies: [{ author: otherAlice, text: 'different person, same display name' }],
       });
       const p = threadSummary(t).participants;
       expect(p?.repliers.map((u) => u.id)).toEqual(['anon-9']);
-      expect(p?.label).toEqual({ kind: 'named', name: 'Alex', text: 'Alex replied' });
+      expect(p?.label).toEqual({ kind: 'named', name: 'Alice', text: 'Alice replied' });
     });
   });
 
@@ -303,7 +303,7 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: `${XSS} and more text after it`,
         range: [0, XSS.length],
-        author: alex,
+        author: alice,
         first: 'opening',
         replies: [{ author: evil, text: `reply ${XSS}` }],
       });
@@ -331,9 +331,9 @@ describe('threadSummary', () => {
       const t = makeThread({
         docText: DOC,
         range: [0, 14],
-        author: alex,
+        author: alice,
         first: 'opening',
-        replies: [{ author: sam, text: 'a reply' }],
+        replies: [{ author: dave, text: 'a reply' }],
       });
       const before = JSON.stringify(t);
       const a = threadSummary(t);
@@ -357,7 +357,7 @@ describe('summaryKey', () => {
     // the topic line, so two short ranges would both fall back to `first`
     // and the key below would hold still for a reason that is not the bug.
     range: [0, 22] as [number, number],
-    author: alex,
+    author: alice,
     first: 'The error is swallowed here.',
   };
 
@@ -368,8 +368,8 @@ describe('summaryKey', () => {
   });
 
   it('moves when the discussion line does, at an identical reply count', () => {
-    const a = makeThread({ ...base, replies: [{ author: sam, text: 'Keep the fallback.' }] });
-    const b = makeThread({ ...base, replies: [{ author: sam, text: 'Drop the fallback.' }] });
+    const a = makeThread({ ...base, replies: [{ author: dave, text: 'Keep the fallback.' }] });
+    const b = makeThread({ ...base, replies: [{ author: dave, text: 'Drop the fallback.' }] });
     // The two threads are otherwise indistinguishable to a caller's key: same
     // anchor, same author, same number of comments.
     expect(b.commentCount).toBe(a.commentCount);
@@ -377,14 +377,14 @@ describe('summaryKey', () => {
   });
 
   it('moves when the participants row does, at an identical reply count', () => {
-    const a = makeThread({ ...base, replies: [{ author: sam, text: 'Agreed.' }] });
-    const b = makeThread({ ...base, replies: [{ author: jordan, text: 'Agreed.' }] });
+    const a = makeThread({ ...base, replies: [{ author: dave, text: 'Agreed.' }] });
+    const b = makeThread({ ...base, replies: [{ author: carol, text: 'Agreed.' }] });
     expect(b.commentCount).toBe(a.commentCount);
     expect(summaryKey(b)).not.toBe(summaryKey(a));
   });
 
   it('holds still when nothing the card shows has changed', () => {
-    const opts = { ...base, replies: [{ author: sam, text: 'Agreed.' }] };
+    const opts = { ...base, replies: [{ author: dave, text: 'Agreed.' }] };
     expect(summaryKey(makeThread(opts))).toBe(summaryKey(makeThread(opts)));
   });
 });
@@ -411,9 +411,9 @@ describe('summaryPending', () => {
   const base = {
     docText: DOC,
     range: [4, 14] as [number, number],
-    author: alex,
+    author: alice,
     first: 'The error is swallowed here.',
-    replies: [{ author: sam, text: 'Agreed, fixing it now.' }],
+    replies: [{ author: dave, text: 'Agreed, fixing it now.' }],
   };
   const NOW = 1_000_000;
   /** Activity + a generation queued for it just happened. */
@@ -542,7 +542,7 @@ describe('summaryPending', () => {
   });
 
   it('a CURRENT stored summary beats a (mistaken) pending stamp', () => {
-    const t = makeThread({ ...base, replies: [{ author: sam, text: 'Yes.' }] });
+    const t = makeThread({ ...base, replies: [{ author: dave, text: 'Yes.' }] });
     t.summary = { topic: 'Real topic', discussion: 'Real state', hash: summaryHash(t) };
     t.summaryPending = true;
     const s = threadSummary(t);
@@ -567,7 +567,7 @@ describe('a malformed anchor', () => {
     const t = makeThread({
       docText: DOC,
       range: [4, 14],
-      author: alex,
+      author: alice,
       first: 'The error is swallowed here.',
     });
     const broken = { ...t, anchor: { kind: 'element' } as unknown as Thread['anchor'] };
@@ -596,10 +596,10 @@ describe('the prompt stamp survives the ydoc', () => {
     createThread(doc, {
       threadId: 't1',
       anchor: TextRange.createFromOffsets(ytext, 0, 20),
-      createdBy: alex,
+      createdBy: alice,
       firstComment: { id: 'c0', text: 'We should rethrow on the last attempt.' },
     });
-    postReply(doc, 't1', { id: 'c1', author: sam, text: 'Agreed — proposing a fix.' });
+    postReply(doc, 't1', { id: 'c1', author: dave, text: 'Agreed — proposing a fix.' });
     return {
       doc,
       read: () => {

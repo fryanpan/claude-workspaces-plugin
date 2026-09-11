@@ -691,8 +691,8 @@ export function applyNotesRelabel(docStore: NotesDocStore, relabel: NotesRelabel
   //
   // The untagged sweep runs FIRST, and the order is load-bearing. It looks for
   // the old display name on word boundaries, and an extension rename leaves
-  // that name inside the new one — retag first and the sweep finds "Devi"
-  // inside the "@Devi Raman" it has just written, and makes it "@Devi Raman
+  // that name inside the new one — retag first and the sweep finds "Mallory"
+  // inside the "@Mallory Cartographer" it has just written, and makes it "@Mallory Cartographer
   // Raman". Sweeping first, the sweep sees only the old spelling everywhere it
   // appears, and the retag that follows canonicalises every tag for this voice
   // — including any the sweep had no way to reach, and including the ones it

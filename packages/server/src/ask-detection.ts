@@ -130,7 +130,7 @@ export function findAsk(
     for (let m = re.exec(src); m !== null; m = re.exec(src)) {
       // Where the NAME is, not where the match starts. The match may begin at
       // a line start well outside the code span that quotes the address —
-      // testing `m.index` let `Fixture: \`Jordan: ship now?\` — worth it?`
+      // testing `m.index` let `Fixture: \`Carol: ship now?\` — worth it?`
       // anchor on the quoted address and count a later prose "?" as its own.
       const nameAt = m.index + m[0].indexOf(name);
       if (code.some(([a, b]) => nameAt >= a && nameAt < b)) continue;

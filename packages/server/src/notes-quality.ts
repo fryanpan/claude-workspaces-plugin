@@ -41,7 +41,7 @@ export interface NotesTopic {
  * a ticket cost a bullet its length budget, which would teach exactly the
  * wrong lesson.
  *
- * A SPEAKER TAG COLLAPSES TO NOTHING AT ALL. `[@Priya](speaker:A)` is
+ * A SPEAKER TAG COLLAPSES TO NOTHING AT ALL. `[@Trent](speaker:A)` is
  * attribution the instructions require and promise is free of the twenty-word
  * budget, so charging for it here would fail a nineteen-word note for obeying
  * them.

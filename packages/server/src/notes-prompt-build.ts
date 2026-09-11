@@ -486,7 +486,7 @@ function turnSuffix(t: NotesTurn, reason: NotesTick['reason']): string {
 }
 
 /**
- * "Devi (B): " — the name to write and the label to tag with, in the one
+ * "Mallory (B): " — the name to write and the label to tag with, in the one
  * place the composer reads them from. A turn the session never mapped a
  * label onto keeps the bare name; a turn with no voice at all keeps none.
  */

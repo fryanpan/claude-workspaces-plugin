@@ -36,7 +36,7 @@ export interface ParallelismCapPayload {
 }
 
 /**
- * "cap 1, set by Jordan 2h ago, was 4" — the cap named WITH its author in
+ * "cap 1, set by Carol 2h ago, was 4" — the cap named WITH its author in
  * one clause, so wherever a line holds rows for the cap the reader learns who
  * moved it in the same sentence (a moved cap is never a mystery). A cap nobody
  * has moved is stated bare: inventing a setter would be the lie the clause

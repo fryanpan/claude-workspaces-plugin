@@ -30,7 +30,7 @@ import {
 } from '../src/mux-loop.ts';
 import type { Watcher } from '../src/sse-loop.ts';
 
-const AGENT = 'agent-mira';
+const AGENT = 'agent-mallory';
 
 /** One 200 response whose body is `text`, as an SSE stream that then ends. */
 function sse(text: string, status = 200): Response {
@@ -421,11 +421,11 @@ describe('a position is not held forever', () => {
 describe('the stream proves which agent it is', () => {
   it('carries the agent bearer on the connect, alongside the cursor', async () => {
     const h = harness([() => sse(':ok\n\n')], {
-      authHeaders: async () => ({ authorization: 'Bearer at1.agent-mira.macbytes' }),
+      authHeaders: async () => ({ authorization: 'Bearer at1.agent-mallory.macbytes' }),
     });
     await h.loop.ensureOpen();
     await settle();
-    expect(h.attempts[0]?.headers?.authorization).toBe('Bearer at1.agent-mira.macbytes');
+    expect(h.attempts[0]?.headers?.authorization).toBe('Bearer at1.agent-mallory.macbytes');
   });
 
   it('sends no authorization when no token could be had', async () => {
@@ -441,7 +441,7 @@ describe('the stream proves which agent it is', () => {
     // What a server-side key rotation looks like from here. Without the
     // drop the loop would redial the same dead value until the session ends.
     const h = harness([() => sse('', 403), () => sse(':ok\n\n')], {
-      authHeaders: async () => ({ authorization: 'Bearer at1.agent-mira.stale' }),
+      authHeaders: async () => ({ authorization: 'Bearer at1.agent-mallory.stale' }),
     });
     await h.loop.ensureOpen();
     await settle();
@@ -452,7 +452,7 @@ describe('the stream proves which agent it is', () => {
     // A 502 from a restarting server says nothing about the token. Dropping
     // it there would mint on every blip.
     const h = harness([() => sse('', 502), () => sse(':ok\n\n')], {
-      authHeaders: async () => ({ authorization: 'Bearer at1.agent-mira.fine' }),
+      authHeaders: async () => ({ authorization: 'Bearer at1.agent-mallory.fine' }),
     });
     await h.loop.ensureOpen();
     await settle();

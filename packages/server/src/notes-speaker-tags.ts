@@ -241,7 +241,7 @@ const NAME_SEPARATOR = /^[ \t]*(?::|—|–)[ \t]*/;
  * pass decides a turn belonged to nobody, and the mention it wrote goes.
  *
  * Deleting only the mention's own span leaves the punctuation that was
- * introducing it: `[@Devi](speaker:B) wants the gate` came out as a bullet
+ * introducing it: `[@Mallory](speaker:B) wants the gate` came out as a bullet
  * opening with two spaces and a lowercase verb. So the separator or the one
  * spare space goes too, and a sentence the name was opening gets its capital
  * back — from the marks already at that position, so a bolded lead stays

@@ -43,7 +43,7 @@ const NEEDLE = 'EDIT-FROM-AN-UNSIGNED-BROWSER';
 const SIGNED_NEEDLE = 'EDIT-FROM-A-SIGNED-BROWSER';
 const AGENT_NEEDLE = 'EDIT-FROM-AN-AGENT';
 
-const reviewer: User = { id: 'known-dana', name: 'Dana', kind: 'known', color: '#2e7dd7' };
+const reviewer: User = { id: 'known-eve', name: 'Eve', kind: 'known', color: '#2e7dd7' };
 
 const fakeAnchor: ElementAnchor = {
   kind: 'element',

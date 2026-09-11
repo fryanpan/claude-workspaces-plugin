@@ -15,7 +15,7 @@ import { voiceRequestLine } from '../src/voice-line.ts';
 
 const SPOKEN = {
   transcript: 'mark this done',
-  actor: { id: 'known-jordan', name: 'Jordan' },
+  actor: { id: 'known-carol', name: 'Carol' },
   context: { surface: 'task', taskId: 't-a1', visibleHeading: 'Search revamp' },
 };
 
@@ -54,7 +54,7 @@ describe('voiceRequestLine', () => {
 
     it('carries the speaker and where they were standing', () => {
       const text = voiceRequestLine(applied) as string;
-      expect(text).toContain('Jordan');
+      expect(text).toContain('Carol');
       expect(text).toContain('t-a1');
       expect(text).toContain('Search revamp');
     });
@@ -94,7 +94,7 @@ describe('voiceRequestLine', () => {
     it('renders the imperative, unchanged', () => {
       const text = voiceRequestLine(sent) as string;
       expect(text).toBe(
-        '[voice.request] by Jordan (at task t-a1, near "Search revamp"): ' +
+        '[voice.request] by Carol (at task t-a1, near "Search revamp"): ' +
           '"file a ticket for the flaky upload" — act on it through the task/edit tools; ' +
           'the speaker was told: "Heard "file a ticket for the flaky upload". Sent to the workspace agent."',
       );

@@ -32,7 +32,7 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { taskBodyDocId } from '../src/task-projection.ts';
 import { type ArtifactCheck, type Ref, type Task, TaskStore } from '../src/tasks.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known' };
+const PERSON = { id: 'known-carol', name: 'Carol', kind: 'known' };
 const PR_URL = 'https://github.com/example-org/example-repo/pull/1669';
 const PR_API = 'https://api.github.com/repos/example-org/example-repo/pulls/1669';
 const REPO_API = 'https://api.github.com/repos/example-org/example-repo';
@@ -439,7 +439,7 @@ describe('server wiring: REST done-transition triggers the check', () => {
   // Route-level proof of the glue in server.ts: the subscription, the store
   // write, and the system comment on the task's body doc — with the fetch
   // stubbed through ServerOptions so nothing leaves the process.
-  const REST_PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+  const REST_PERSON = { id: 'known-carol', name: 'Carol', kind: 'known', color: '#2e7dd7' };
 
   async function until<T>(read: () => T | undefined): Promise<T> {
     for (let i = 0; i < 80; i++) {

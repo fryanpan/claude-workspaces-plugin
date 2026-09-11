@@ -765,7 +765,7 @@ describe('Access-mode shares over HTTP', () => {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            author: { id: 'same-browser', name: 'Casey', kind: 'anon', color: '#123456' },
+            author: { id: 'same-browser', name: 'Carol', kind: 'anon', color: '#123456' },
             text: `from the ${label} link`,
             find: 'Body',
           }),

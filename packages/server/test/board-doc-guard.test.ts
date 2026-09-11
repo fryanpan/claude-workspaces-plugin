@@ -18,7 +18,7 @@
  *     Y.Doc while `wired` still said "guarded", so every later client write
  *     stood — silently, until the process restarted.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the carol@partner.example
  * register. The repo is public.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';

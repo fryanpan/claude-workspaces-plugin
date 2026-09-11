@@ -358,7 +358,7 @@ describe('classifyActor', () => {
   it('keeps the legacy agent signals and person classification', async () => {
     const { classifyActor } = await import('../src/actor-identity.ts');
     expect(classifyActor({ id: 'known-agent', name: 'Agent', kind: 'known' })).toBe('agent');
-    expect(classifyActor({ id: 'anon-abc123', name: 'Casey', kind: 'known' })).toBe('person');
+    expect(classifyActor({ id: 'anon-abc123', name: 'Carol', kind: 'known' })).toBe('person');
     expect(classifyActor({ id: 'known-bryan', name: 'Bryan', kind: 'known' })).toBe('person');
   });
 

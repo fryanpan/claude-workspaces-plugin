@@ -25,7 +25,7 @@ const CLAUSE = 'walk its links as the propagation checklist';
 const ANSWERED = {
   taskId: 't-synthetic',
   answer: 'Rebuild after the freeze.',
-  actor: { name: 'Alex' },
+  actor: { name: 'Alice' },
 };
 
 describe('decisionAnsweredLine', () => {
@@ -33,7 +33,7 @@ describe('decisionAnsweredLine', () => {
     const line = decisionAnsweredLine({ ...ANSWERED, links: [] });
     expect(line).toContain('[decision.answered]');
     expect(line).toContain('t-synthetic');
-    expect(line).toContain('by Alex');
+    expect(line).toContain('by Alice');
     expect(line).toContain('Rebuild after the freeze.');
   });
 

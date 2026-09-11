@@ -131,8 +131,8 @@ function joinWords(raw: unknown): string {
  * A speaker label for a participant id.
  *
  * The pipeline's `speaker` is an opaque LABEL that `speakerDisplayName` turns
- * into "Speaker A" until someone names it. Putting "Jordan Alvarez" in that
- * field directly would render "Speaker Jordan Alvarez" everywhere. So a bot
+ * into "Speaker A" until someone names it. Putting "Carol Signalman" in that
+ * field directly would render "Speaker Carol Signalman" everywhere. So a bot
  * meeting synthesises a label per participant and NAMES it immediately with
  * the platform's own name — which means the entire rename machinery, the
  * record's name map, and the notes composer's display logic all work
@@ -150,7 +150,7 @@ export function labelForParticipant(id: number): string {
  *
  * WHY UNIQUENESS IS THIS MODULE'S PROBLEM. Composed notes carry no per-mention
  * attribution — the display name is the only handle they give — so two voices
- * called "Alex" make "Alex" in the notes ambiguous, and the notes session
+ * called "Alice" make "Alice" in the notes ambiguous, and the notes session
  * detects exactly that and REFUSES to rewrite retroactively. A meeting with
  * two Alexes is ordinary; a meeting where renaming one silently reattributes
  * the other's words is not. Disambiguating at the seam is cheap and keeps the

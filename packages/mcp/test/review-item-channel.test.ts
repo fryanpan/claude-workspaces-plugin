@@ -4,7 +4,7 @@
  * The server frame for a thread anchored to a review item carries
  * `reviewItemId` (top level, and on `thread.anchor`). The channel renderer
  * rebuilds each line by hand, so unless it reads that field the agent gets
- * `[created] Jordan: Twice per what?` with a doc id and a thread id — and has
+ * `[created] Carol: Twice per what?` with a doc id and a thread id — and has
  * to call list_threads to learn which of its items the question is about,
  * which is the lookup `revise_review_item` should not need.
  *
@@ -46,11 +46,11 @@ describe('a review-item comment names the item on the channel', () => {
       docId: 'task:t-4',
       threadId: 'th-1',
       reviewItemId: 'ri-9',
-      comment: { author: { name: 'Jordan' }, text: 'Twice per what?', ts: FIXED_MS },
+      comment: { author: { name: 'Carol' }, text: 'Twice per what?', ts: FIXED_MS },
     });
     // The meta is for tooling; `content` is what turns "somebody commented on
     // the task" into "revise this item".
-    expect(only(frames).content).toBe('[created] on review item ri-9 — Jordan: Twice per what?');
+    expect(only(frames).content).toBe('[created] on review item ri-9 — Carol: Twice per what?');
   });
 
   it('carries the id in the structured meta as well', async () => {
@@ -59,14 +59,14 @@ describe('a review-item comment names the item on the channel', () => {
       docId: 'task:t-4',
       threadId: 'th-1',
       reviewItemId: 'ri-9',
-      comment: { author: { name: 'Jordan' }, text: 'Twice per what?' },
+      comment: { author: { name: 'Carol' }, text: 'Twice per what?' },
     });
     expect(only(frames).meta).toMatchObject({
       doc_id: 'task:t-4',
       thread_id: 'th-1',
       review_item_id: 'ri-9',
       event: 'thread.created',
-      author: 'Jordan',
+      author: 'Carol',
     });
   });
 
@@ -75,7 +75,7 @@ describe('a review-item comment names the item on the channel', () => {
     await messages.emitChannelMessage('thread.replied', {
       docId: 'task:t-4',
       threadId: 'th-2',
-      comment: { author: { name: 'Jordan' }, text: 'ok' },
+      comment: { author: { name: 'Carol' }, text: 'ok' },
       thread: { anchor: { kind: 'review-item', reviewItemId: 'ri-7' } },
     });
     const f = only(frames);
@@ -88,7 +88,7 @@ describe('a review-item comment names the item on the channel', () => {
     await messages.emitChannelMessage('thread.replied', {
       docId: 'plan',
       threadId: 'th-3',
-      comment: { author: { name: 'Jordan' }, text: 'ok' },
+      comment: { author: { name: 'Carol' }, text: 'ok' },
       // A prose anchor that happens to carry the field must not be read as an
       // item, or every doc comment claims to be one.
       thread: { anchor: { kind: 'text', reviewItemId: 'ri-7' } },

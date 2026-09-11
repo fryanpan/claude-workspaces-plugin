@@ -27,7 +27,7 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-sam', name: 'Sam Reviewer', kind: 'person' };
+const PERSON = { id: 'known-dave', name: 'Dave Reviewer', kind: 'person' };
 const LEAD = { id: 'agent-beacon-bot', name: 'Beacon Bot', kind: 'agent' };
 
 /**

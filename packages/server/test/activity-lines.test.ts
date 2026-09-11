@@ -13,7 +13,7 @@
  * with the real client model. `board-presence-model.ts` is pure (no DOM, no fetch), so
  * a server test can import it directly.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the carol@partner.example
  * register. The repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -29,7 +29,7 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { type Task, eventsLogPath } from '../src/tasks.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON: User = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+const PERSON: User = { id: 'known-carol', name: 'Carol', kind: 'known', color: '#2e7dd7' };
 const AGENT: User = {
   id: 'agent-search-revamp',
   name: 'Search Revamp',
@@ -105,7 +105,7 @@ describe('the activity view renders the rows the server really wrote', () => {
     expect(row).toBeDefined();
     const line = describeEvent(row as ActivityEvent, () => 'Ship Thursday or Friday?');
     // Positive control: the row renders at all, with actor and title…
-    expect(line).toContain('Jordan');
+    expect(line).toContain('Carol');
     expect(line).toContain('Ship Thursday or Friday?');
     // …and the verbatim answer is the point of the row.
     expect(line).toContain('Ship Friday, not Thursday.');
@@ -122,7 +122,7 @@ describe('the activity view renders the rows the server really wrote', () => {
     // assertions below vacuous.
     expect(row).toBeDefined();
     const line = describeEvent(row as ActivityEvent, () => 'Ship Thursday or Friday?');
-    expect(line).toContain('Jordan');
+    expect(line).toContain('Carol');
     expect(line).toContain('Ship Thursday or Friday?');
     expect(line).toContain('Ship Friday, not Thursday.');
     // Not the bare slug a missing switch case falls through to.
@@ -197,7 +197,7 @@ describe('the activity view renders the rows the server really wrote', () => {
     const set = rowsOf('task.due_set').at(-1);
     expect(set).toBeDefined();
     const line = describeEvent(set as ActivityEvent, () => 'Cut the release note');
-    expect(line).toContain('Jordan');
+    expect(line).toContain('Carol');
     expect(line).toContain('Cut the release note');
     expect(line).toContain(new Date(due).toLocaleDateString());
     expect(line).not.toContain('task.due_set');

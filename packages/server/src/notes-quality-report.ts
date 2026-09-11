@@ -253,7 +253,7 @@ const PLACEHOLDER_NAME = /^speaker\s+\S+$/i;
  * two halves:
  *
  * - A label somebody NAMED must carry that name, or the placeholder. With
- *   A named Priya and B named Wren, a tag reading Priya on `speaker:B` is
+ *   A named Trent and B named Bob, a tag reading Trent on `speaker:B` is
  *   reported — both names are real and both labels are real, and the pairing
  *   is still a sentence attributed to the person who did not say it. Pooling
  *   the names accepted it, which is the bug this half exists to close.

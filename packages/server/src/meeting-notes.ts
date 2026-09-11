@@ -188,7 +188,7 @@ export interface NotesTurn {
    *
    * The name is what a reader recognises and the label is what survives
    * being renamed, so the notes need both: the tag the composer writes shows
-   * the name and CARRIES the label (`[@Devi](speaker:B)`), which is what
+   * the name and CARRIES the label (`[@Mallory](speaker:B)`), which is what
    * lets a later rename find every mention of that voice without searching
    * for a string that two voices might share. Absent on the way out of the
    * ticker, where `speaker` IS the label.
@@ -548,8 +548,8 @@ export interface NotesRelabel {
    *
    * False when another voice answers to the same display name. A tagged
    * mention is unaffected either way — the label says which voice it is —
-   * but the words "Alex" in a sentence do not, and rewriting them would
-   * silently reattribute the other Alex. Notes composed before tags existed
+   * but the words "Alice" in a sentence do not, and rewriting them would
+   * silently reattribute the other Alice. Notes composed before tags existed
    * are all untagged, which is why this path survives at all.
    */
   rewriteUntagged: boolean;
@@ -1031,7 +1031,7 @@ export function beginNotesSession(
   /**
    * The turns the last capture pass read, kept RAW for the same reason as
    * `carry`: a voice named since then must reach the next pass under its new
-   * name, and a display name mapped twice would wrap ("Speaker Jordan").
+   * name, and a display name mapped twice would wrap ("Speaker Carol").
    * One tick deep — the capture pass takes the tail it can afford.
    */
   let priorRaw: NotesTurn[] = [];
@@ -2043,8 +2043,8 @@ export function beginNotesSession(
       names[speaker] = given;
       const to = speakerDisplayName(speaker, names);
       if (from === to) return;
-      // Two voices can be called the same thing — two people named Alex, or
-      // a slip. Then the WORDS "Alex" in the notes do not say which of them,
+      // Two voices can be called the same thing — two people named Alice, or
+      // a slip. Then the WORDS "Alice" in the notes do not say which of them,
       // and rewriting them would silently reattribute the other's speech.
       // A TAGGED mention is not in that position: it carries the label, so
       // it renames whatever the display names collide to. So ambiguity no
