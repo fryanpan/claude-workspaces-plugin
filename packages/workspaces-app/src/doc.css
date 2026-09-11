@@ -2485,15 +2485,46 @@ button.lz-speaker:hover .lz-speaker-pill {
   margin: 0;
   padding: 0;
 }
-/* overflow is withheld until the collapse: as a block formatting context the
-   slot would refuse to sit beside the floated corner label, and the chunk's
-   words would jump the moment they were split off. By the time this lands the
-   chunk is at opacity 0 and its height is already pinned.
+/* A PINNED SLOT HOLDS ITS CHUNK INSIDE IT, and only a pinned one has to.
+   `settle` in meeting-live-zone.ts fixes the slot's height so that nothing the
+   chunk does can move a word below it — and that height then goes stale: the
+   collapse slides the chunk UP into the corner where `.lz-head`'s float
+   shortens the top line, and the same words can need one line more than the
+   slot promised. Growing the slot would step every word below it down a line
+   mid-collapse, which is what the pin exists to prevent, so the extra line
+   sits outside the box that holds it and this is what stops it being painted
+   over the chunk below. Measured without it at 430 over a thirty-write
+   meeting: 818px² of one opaque run drawn over another.
+   `clip`, NEVER `hidden`: `hidden` makes the slot a block formatting context,
+   which refuses to sit beside that float, so the chunk's words would move on
+   the one frame the split promises nothing moves on. `clip` is not a scroll
+   container, establishes no BFC and changes no layout at all — it only stops
+   the paint. meeting-live-overdraw.test.ts measures that pair in a browser.
+   WHAT IT COSTS, measured over a thirty-write meeting: a chunk is taller than
+   its slot in 3.7% of sampled frames at 430 and 1.3% at 1180x820, and what is
+   cropped in those frames is one line — of words already written into the
+   note, in a block that is fading out. The alternatives are all dearer. Growing
+   the slot steps every word below it down a line mid-collapse. Stopping the
+   re-wrap needs the slot to be a block formatting context, which moves the
+   words on the split frame. A gutter the label's width, reserved on every line
+   so nothing ever re-wraps, costs 21% of the transcript's width at 430 for the
+   whole meeting.
+   ON THE PIN, NOT ON EVERY SLOT, because a clip clips hit-testing too, and
+   `.lz-speaker`'s tap target is 8px of padding above and below its line
+   (cancelled by negative margins, so the line never grows for it). A chunk is
+   unpinned for the whole of its compose — the long, readable part of its life,
+   and the part somebody taps a name in — and pinned only for the fade and the
+   collapse that take it away. */
+.lz-slot.is-pinned {
+  overflow: clip;
+}
+/* The collapse itself is only the height travel. A collapsing slot is always a
+   pinned one — `settle` pins it and then starts this — so the clip above is
+   already holding by the time this lands.
    Under reduced motion meeting-live-zone.ts sets --lz-collapse-ms to 0 on the
    slot, so the travel goes and the fade above stays — less movement, not none
    (owner, 2026-09-05: the instant swap "was too sudden"). */
 .lz-slot.is-collapsing {
-  overflow: hidden;
   transition: height var(--lz-collapse-ms) var(--lz-ease-settle);
 }
 /* The stream is held over the break the split just made in its line —
