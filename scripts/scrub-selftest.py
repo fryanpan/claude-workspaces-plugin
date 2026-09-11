@@ -784,8 +784,12 @@ def check_haiku_unavailable() -> None:
     # into slices rather than sent whole, and a token straddling a cut is
     # still read whole by one slice.
     head = "diff --git a/x.json b/x.json\n--- a/x.json\n+++ b/x.json\n@@ -0,0 +1 @@\n"
-    for at, label in ((100_000, "late in the line"), (14_995, "across a cut")):
-        body = "a" * at + "NEEDLE_7Q" + "b" * (120_000 - at)
+    cases = ((100_000, "late in the line", ""), (14_995, "across a cut", ""),
+             # An added line whose text begins `++ ` reads `+++ `, a file
+             # header's spelling, and was once passed through unsliced.
+             (100_000, "a line that reads like a header", "++ "))
+    for at, label, lead in cases:
+        body = lead + "a" * at + "NEEDLE_7Q" + "b" * (120_000 - at)
         pieces = haiku.split_patch(head + "+" + body, 30_000)
         worst = max(len(p) for p in pieces)
         expect(f"haiku pieces: a line longer than a piece stays under the cap ({label})",

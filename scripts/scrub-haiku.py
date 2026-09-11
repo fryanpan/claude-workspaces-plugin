@@ -439,7 +439,9 @@ def read_keychain(service: str) -> str | None:
     return proc.stdout.strip() or None
 
 
-_FILE_HEADER_STARTS = ("diff --git ", "index ", "--- ", "+++ ", "@@")
+# A combined diff (`--cc`, which the push patch uses for merges) opens a file
+# with `diff --cc`, not `diff --git`.
+_FILE_STARTS = ("diff --git ", "diff --cc ", "diff --combined ")
 
 # Characters two neighbouring slices of one long line share, so a name that
 # straddles a cut is read whole by one of them.
@@ -491,35 +493,43 @@ def split_patch(patch: str, limit: int | None = None) -> List[str]:
     if len(patch) <= limit:
         return [patch]
     width = limit // 2
-    lines: List[str] = []
+    # (line, is_header). A line is a file header only between a file's
+    # `diff` line and its first `@@`: an added line whose text starts `++ `
+    # reads `+++ ` too, and taking it for a header let a 100KB line through
+    # unsliced and unbreakable.
+    lines: List[tuple] = []
+    in_header = False
     for line in patch.split("\n"):
-        if line.startswith(_FILE_HEADER_STARTS):
-            lines.append(line)
+        if line.startswith(_FILE_STARTS):
+            in_header = True
+        elif line.startswith("@@"):
+            in_header = False
+        if in_header or line.startswith("@@"):
+            lines.append((line, in_header))
         else:
-            lines.extend(_slice_line(line, width))
+            lines.extend((part, False) for part in _slice_line(line, width))
     pieces: List[str] = []
     current: List[str] = []
     size = 0
     header: List[str] = []
     hunk = ""
-    for line in lines:
-        if line.startswith("diff --git "):
+    for line, is_header in lines:
+        opens_file = is_header and line.startswith(_FILE_STARTS)
+        if opens_file:
             header = [line]
             hunk = ""
-        elif header and not hunk and line.startswith(("index ", "--- ", "+++ ")):
+        elif is_header:
             header.append(line)
         elif line.startswith("@@"):
             hunk = line
         if size + len(line) > limit and current:
             # Never break between a file's header lines and its first hunk:
             # a piece that opened there would name a path and show nothing.
-            if not (header and line.startswith(("index ", "--- ", "+++ "))):
+            if not (is_header and not opens_file):
                 pieces.append("\n".join(current))
-                current = list(header)
-                if hunk and not line.startswith(("@@", "diff --git ")):
+                current = [] if opens_file else list(header)
+                if hunk and not opens_file and not line.startswith("@@"):
                     current.append(hunk)
-                if line.startswith("diff --git "):
-                    current = []
                 size = sum(len(x) + 1 for x in current)
         current.append(line)
         size += len(line) + 1
