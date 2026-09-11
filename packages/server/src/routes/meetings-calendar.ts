@@ -36,6 +36,7 @@ import { type MeetingStore, listMeetings } from '../meetings.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { type WorkspaceScope, matchRest } from '../middleware/workspace-scope.ts';
 import { runNotesCleanupPass } from '../notes-cleanup-pass.ts';
+import { readPerHourByMethod } from '../notes-cost-store.ts';
 import { createNotesHeadingFileStore } from '../notes-heading-store.ts';
 import { readNotesMethodRecord, writeNotesMethod } from '../notes-method-store.ts';
 import {
@@ -189,6 +190,13 @@ export async function handleMeetingCalendarRoutes(
         docId,
         method: held?.method ?? DEFAULT_NOTES_METHOD,
         changes: held?.changes ?? [],
+        // WHAT AN HOUR HAS COST on each method, over this server's own
+        // finished meetings. It rides this read because this is the one call
+        // the chooser already makes at mount, and because the figure is
+        // exactly the second thing the row it feeds is for — the first being
+        // the method this doc holds. A method nobody has run is absent, and
+        // the row then shows the eval's prediction marked as an estimate.
+        perHour: readPerHourByMethod(dataDir),
       });
     }
     const body = (await req.json().catch(() => null)) as {
