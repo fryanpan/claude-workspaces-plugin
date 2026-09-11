@@ -130,6 +130,24 @@ describe('the unfiled-ask nudge on the note route', () => {
     expect(await r.json()).toMatchObject({ taskId, unfiledAsk: expect.any(String) });
   });
 
+  it('still delivers the note when the audit log cannot be written', async () => {
+    // The judgement is an addition to a route that worked without it. A full
+    // disk must cost the caller its nudge and nothing else — the note itself
+    // is what the Activity tab is made of.
+    const wsId = await boardWithLead();
+    const taskId = await inProgressRow(wsId, 'Only claim');
+    handle.chatAudit.recordLive = () => {
+      throw new Error('EROFS: read-only file system');
+    };
+    const r = await note('cartographer', 'Both arms are green. Want me to ship it tonight?');
+    expect(r.status).toBe(202);
+    expect(await r.json()).toMatchObject({ taskId });
+    const { notes } = await jj<{ notes: Array<{ text: string }> }>(
+      await fetch(`${base}/workspaces/${wsId}/agents/Cartographer/notes`),
+    );
+    expect(notes[0]?.text).toContain('Want me to ship it tonight?');
+  });
+
   it('says nothing when the turn asked nothing', async () => {
     const wsId = await boardWithLead();
     await inProgressRow(wsId, 'Only claim');
