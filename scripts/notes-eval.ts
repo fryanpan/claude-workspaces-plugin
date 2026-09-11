@@ -70,7 +70,13 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { prose } from '../packages/core/src/index.ts';
+import {
+  CACHE_BREAK_EVEN_RATIO,
+  CACHE_READ_MULTIPLIER,
+  CACHE_WRITE_MULTIPLIER,
+  MODEL_PRICES_PER_MILLION,
+  type prose,
+} from '../packages/core/src/index.ts';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NoteReference, NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
 import { meetingTranscriptPath } from '../packages/server/src/meetings.ts';
@@ -118,22 +124,29 @@ const JUDGE_LABEL = 'claude-sonnet-5 (judge)';
 const NOTES_MODEL = 'claude-haiku-4-5-20251001';
 
 /**
- * What a thousand tokens costs, per model, in dollars — input then output.
- * Used only to print what the run spent; a figure that drifts makes the
- * report wrong in a way nobody notices, so it is stated here rather than
- * buried in a multiplication.
+ * What a token costs, per model, in dollars — input then output.
+ *
+ * DERIVED FROM CORE'S TABLE, not a second copy of it. This file used to hold
+ * its own prices, and the chooser held a third set as strings; a price that
+ * lives in more than one place is a price that drifts in one of them, and the
+ * one that drifted was the one a person read. `packages/core/model-cost.ts`
+ * is the table now — adding a model there is the whole of pricing it here.
+ *
+ * The judge is the one row core cannot have: it is not a model, it is a
+ * BOOKING — Sonnet's price under a name of its own, so that `--variant
+ * sonnet` composing on the same model does not merge the cost of MEASURING a
+ * variant into the cost of running it.
  */
 const PRICES: Record<string, { input: number; output: number }> = {
+  ...Object.fromEntries(
+    Object.entries(MODEL_PRICES_PER_MILLION).map(([model, p]) => [
+      model,
+      { input: p.input / 1_000_000, output: p.output / 1_000_000 },
+    ]),
+  ),
+  // Keyed on the dated snapshot this script actually sends, since `costOf`
+  // looks models up by the exact string the API reported.
   [NOTES_MODEL]: { input: 1 / 1_000_000, output: 5 / 1_000_000 },
-  // Sonnet 5 and Opus 5 are here because `--variant sonnet|opus` composes on
-  // them. A model priced at zero would report a variant as free, which is the
-  // one wrong number this table must never print.
-  'claude-sonnet-5': { input: 2 / 1_000_000, output: 10 / 1_000_000 },
-  'claude-opus-5': { input: 5 / 1_000_000, output: 25 / 1_000_000 },
-  // The judge, booked under a name of its own at Sonnet's price. `--variant
-  // sonnet` composes on the same model, and one row for both would report the
-  // cost of MEASURING that variant as part of what it costs to run — the one
-  // confusion this whole table exists to prevent.
   [JUDGE_LABEL]: { input: 2 / 1_000_000, output: 10 / 1_000_000 },
 };
 
@@ -186,8 +199,7 @@ export function overBudget(spent: number, cap: number): boolean {
  * expressed as multipliers of the model's own input price rather than as new
  * per-model numbers to keep in step.
  */
-export const CACHE_READ_MULTIPLIER = 0.1;
-export const CACHE_WRITE_MULTIPLIER = 1.25;
+export { CACHE_READ_MULTIPLIER, CACHE_WRITE_MULTIPLIER };
 
 /**
  * The read-to-write ratio a cache has to beat before it is worth having.
@@ -197,8 +209,7 @@ export const CACHE_WRITE_MULTIPLIER = 1.25;
  * tokens and writing W of them is cheaper than sending R + W only while
  * 0.1R + 1.25W < R + W — that is, while R/W > 0.25/0.9.
  */
-export const CACHE_BREAK_EVEN_RATIO: number =
-  (CACHE_WRITE_MULTIPLIER - 1) / (1 - CACHE_READ_MULTIPLIER);
+export { CACHE_BREAK_EVEN_RATIO };
 
 /**
  * What the read and write counts SAY, in the one sentence a reader needs.

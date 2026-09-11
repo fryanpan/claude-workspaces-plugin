@@ -9,6 +9,7 @@ export * from './meeting-streams.ts';
 export * from './meeting-tuning.ts';
 export * from './meeting-bot.ts';
 export * from './meeting-timing.ts';
+export * from './model-cost.ts';
 export * from './redline.ts';
 export * from './note-suggestion.ts';
 export * from './related-work.ts';

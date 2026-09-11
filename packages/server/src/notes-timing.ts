@@ -1,3 +1,6 @@
+import { appendFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 /**
  * WHERE A NOTE'S MINUTE WENT.
  *
@@ -27,9 +30,7 @@
  * what was said, and it is already as private as the meeting was; a second
  * file repeating it in a different shape would be a second thing to protect.
  */
-import { appendFileSync } from 'node:fs';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import type { TokenUsage } from '@claude-workspaces/core';
 
 /** Why the tick fired, as the ticker reported it. */
 export type NotesTimingReason = 'pause' | 'cadence' | 'end';
@@ -101,6 +102,17 @@ export interface NotesTickTiming {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
+  /**
+   * EVERY MODEL CALL THIS TICK MADE, compose and capture alike, each with the
+   * model that billed it.
+   *
+   * The four flat fields above are the COMPOSE call and only ever were, which
+   * is how the capture pass came to be invisible on a bill it was adding a
+   * dollar an hour to. They stay because the timing file has readers that
+   * know that shape; this is the one a total is summed over, and a tick that
+   * made no priced call carries an empty array rather than a zero.
+   */
+  calls: readonly NotesCallUsage[];
   /**
    * Time to the first token of the reply. Null on a composer that does not
    * stream — today's does not, so this reads null in every live meeting and
@@ -179,14 +191,33 @@ export function median(values: readonly number[]): number | null {
  * nothing looks exactly like one that caches everything until this is read
  * back.
  */
-export interface NotesTokenUsage {
-  /** Fresh input tokens, billed at the full rate. */
-  inputTokens: number;
-  outputTokens: number;
-  /** Served from an existing cache entry, billed at a tenth. */
-  cacheReadTokens: number;
-  /** Written into a new cache entry, billed at 1.25x. */
-  cacheWriteTokens: number;
+export type NotesTokenUsage = TokenUsage;
+
+/**
+ * WHICH CALL A TICK MADE. A tick is not one model call: the capture pass runs
+ * first and the compose runs after it, on the same words, and the two are
+ * billed separately.
+ *
+ * Named rather than counted, because the two answer different questions. The
+ * compose is what the notes cost; the capture is what listening for asks
+ * costs, and it is the one a person might reasonably turn off
+ * (`CW_MEETING_TASKS=0`). A meeting total that cannot be split into the two
+ * cannot answer "what would turning capture off save".
+ */
+export type NotesCallKind = 'compose' | 'capture';
+
+/**
+ * One model call a tick made, as the API itself reported it.
+ *
+ * THE MODEL IS PART OF THE RECORD, not a lookup against whatever the server
+ * composes with today. A meeting composed on Haiku and captured on Haiku
+ * still costs what those calls cost at the time, and a tick recorded before a
+ * model change must not be re-priced by the change.
+ */
+export interface NotesCallUsage {
+  call: NotesCallKind;
+  model: string;
+  usage: NotesTokenUsage;
 }
 
 /** What the composer may report about one compose, if it knows. */

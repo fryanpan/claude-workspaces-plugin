@@ -52,7 +52,13 @@
  * own provenance rather than off the voice.
  */
 
-import { contentKind, prose as proseNs } from '@claude-workspaces/core';
+import {
+  contentKind,
+  formatDollars,
+  formatPerHour,
+  perHour,
+  prose as proseNs,
+} from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { docLookupUrl } from './meeting-lookup.ts';
@@ -79,6 +85,7 @@ import {
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
 import { meetingTimingPath } from './meetings.ts';
+import { recordMeetingCost } from './notes-cost-store.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -93,11 +100,13 @@ import {
   LEGACY_TRANSCRIPT_HEADING,
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
+import { readNotesMethod } from './notes-method-store.ts';
 import { NOTES_OUTLINE_DROP_STEP, NOTES_OUTLINE_RECENT_BLOCKS } from './notes-prompt-build.ts';
 import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
+import { resolveSchemeLinks } from './notes-scheme-links.ts';
 import { lastNotesHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
 import {
   reattributeNotesSection,
@@ -446,6 +455,18 @@ function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
  * one belief, and the addresses themselves are the evidence for whoever is
  * reading whether the compose prompt is drifting.
  */
+function noteSchemeCitations(
+  docId: string,
+  meetingId: string,
+  result: { linked: readonly string[]; dropped: readonly string[] },
+): void {
+  console.log(
+    `[meeting-notes] ${docId} meeting ${meetingId}: dropped ${result.dropped.length} ` +
+      `scheme citation${result.dropped.length === 1 ? '' : 's'} naming no row the tick was ` +
+      `given — ${result.dropped.join(', ')}`,
+  );
+}
+
 function noteInventedLinks(docId: string, meetingId: string, dropped: readonly string[]): void {
   console.log(
     `[meeting-notes] ${docId} meeting ${meetingId}: dropped ${dropped.length} invented ` +
@@ -551,10 +572,21 @@ export function applyNotesUpdate(
   // drive this function directly are both in that position, and stripping
   // every link out of a batch whose inputs are unknown would drop a citation
   // for having no evidence about it. The compose path always passes them.
+  //
+  // AND THE SCHEME PASS RUNS FIRST, because the two answer the same mistake
+  // at different stages: a citation written as `task:<title>` is not a URL at
+  // all, so the address check cannot judge it. Resolved here it becomes the
+  // row's real link, which the address check then recognises as one of the
+  // tick's own; unresolved it is gone before the check sees it.
+  const schemed =
+    update.linkSources === undefined
+      ? { edits: guarded.edits, linked: [] as string[], dropped: [] as string[] }
+      : resolveSchemeLinks(guarded.edits, update.linkSources.named ?? []);
+  if (schemed.dropped.length > 0) noteSchemeCitations(update.docId, update.meetingId, schemed);
   const linked =
     update.linkSources === undefined
-      ? { edits: guarded.edits, dropped: [] as string[] }
-      : stripInventedLinks(guarded.edits, {
+      ? { edits: schemed.edits, dropped: [] as string[] }
+      : stripInventedLinks(schemed.edits, {
           urls: update.linkSources.urls,
           // THE NOTES THEMSELVES ARE A SOURCE, and leaving them out was the
           // one way this check could destroy a real citation. A regroup
@@ -780,7 +812,37 @@ export function meetingSummaryLine(
       ? `, settled-to-written median ${Math.round(summary.latencyMedianMs)}ms / worst ` +
         `${Math.round(summary.latencyWorstMs ?? summary.latencyMedianMs)}ms`
       : '') +
+    // THE BILL, on the same line as everything else a meeting says about
+    // itself. Split compose / capture because the second is the half a person
+    // can switch off, and per-hour beside the total because the total alone
+    // cannot be compared between a ten-minute huddle and an afternoon.
+    meetingSpendPhrase(summary) +
     (qualityLine === undefined ? '' : ` | ${qualityLine}`)
+  );
+}
+
+/**
+ * What the meeting cost, as the summary line says it: `, $1.83 (compose
+ * $1.21, capture $0.62) — $2.44/hr`.
+ *
+ * EMPTY WHEN THERE IS NOTHING MEASURED, rather than `$0.00`: a meeting whose
+ * composer never reached a model did not cost nothing, it reported nothing,
+ * and the two must not read the same. The per-hour half drops out on its own
+ * when the meeting has no measurable length, for the same reason.
+ *
+ * An unpriced model is said out loud. Its tokens are real and its dollars are
+ * in no total, so a line that swallowed it would print a figure that is short
+ * by an unknown amount and look exactly like a complete one.
+ */
+export function meetingSpendPhrase(summary: NotesMeetingSummary): string {
+  const spend = summary.spend;
+  if (!spend || spend.calls === 0) return '';
+  const rate = perHour(spend.totalUsd, summary.elapsedMs);
+  return (
+    `, ${formatDollars(spend.totalUsd)} (compose ${formatDollars(spend.byCall.compose)}, ` +
+    `capture ${formatDollars(spend.byCall.capture)})` +
+    (rate === null ? '' : ` — ${formatPerHour(rate)}`) +
+    (spend.unpricedModels.length > 0 ? `, plus unpriced ${spend.unpricedModels.join(', ')}` : '')
   );
 }
 
@@ -933,7 +995,7 @@ export function withServerNotesSinks(
   const captureIntents: MeetingNotesDeps['captureIntents'] =
     options.captureIntents ??
     (extractor && captureBoard
-      ? async ({ docId, turns, priorTurns }) => {
+      ? async ({ docId, turns, priorTurns, measure }) => {
           // The doc's board is the capture's scope: a meeting on a doc no
           // workspace owns or holds has no board to find or create on.
           const doc = deps.docStore().get(docId);
@@ -981,6 +1043,12 @@ export function withServerNotesSinks(
               turns,
               priorTurns,
               spentCues: spentCuesFor(docId),
+              // WHAT THE CAPTURE CALL COST. It has to be carried all the way
+              // down to the extractor: this assembly is the only thing
+              // standing between the session's ledger and the one place that
+              // sees the API's `usage` block, and while it dropped the sink
+              // every tick's capture was billed and recorded nowhere.
+              measure,
             },
           );
         }
@@ -1012,6 +1080,39 @@ export function withServerNotesSinks(
       // fact about the notes, and it rides the SAME line so that nobody has
       // to join two of them to ask the one question.
       const quality = qualityPass(summary);
+      // WHAT IT COST, INTO THE ROLLING FIGURE, before the line is built — the
+      // chooser's number is an average over finished meetings and this
+      // meeting has just finished. Booked against the method the DOC holds at
+      // the stop: a switch mid-meeting composes the rest of the meeting on
+      // the new method and writes its own trace line, so the method it ended
+      // on is the one whose cost this meeting is mostly evidence about.
+      //
+      // A MEETING THAT CALLED A MODEL THE TABLE CANNOT PRICE IS NOT RECORDED.
+      // Its unpriced calls contribute no dollars while its full length still
+      // counts in the denominator, so filing it would drag every later figure
+      // down by an amount nothing names — the same silent understatement this
+      // whole change exists to end. A model rollout therefore freezes the
+      // figure at its last honest value until the table learns the new price,
+      // which is a stale number a person can reason about rather than a
+      // confident wrong one.
+      if (
+        deps.dataDir !== undefined &&
+        summary.spend &&
+        summary.spend.calls > 0 &&
+        summary.spend.unpricedModels.length === 0
+      ) {
+        recordMeetingCost(
+          deps.dataDir,
+          readNotesMethod(deps.dataDir, summary.docId),
+          {
+            at: Date.now(),
+            ms: summary.elapsedMs,
+            usd: summary.spend.totalUsd,
+            calls: summary.spend.calls,
+          },
+          (message) => console.error(message),
+        );
+      }
       const line = meetingSummaryLine(summary, quality?.line);
       // Only a meeting that actually lost words — or whose notes went past a
       // quality bar — is an error. A clean one is still logged, because the

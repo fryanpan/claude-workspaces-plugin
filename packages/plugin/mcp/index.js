@@ -15106,12 +15106,12 @@ var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
 // packages/mcp/src/tool-schemas.ts
 var REVIEW_ITEM_SCHEMA = {
   type: "object",
-  description: "Declares this a Review Item, putting it on the reviewer's Home queue once it passes the board's quality gate. Omit it for ordinary comments — status notes and closing remarks are not review items. headline is the item title; missing or multi-line is refused, over-long files anyway with advice. Everything else goes in detail, in whatever shape the ask wants to read.",
+  description: "Makes this comment a review item on the reader's Home queue, once the board's quality gate passes it. Omit it for an ordinary comment. A missing or multi-line headline is refused. Put everything else in detail.",
   properties: {
     review_type: {
       type: "string",
       enum: ["decision", "question"],
-      description: "'decision' offers named options to pick between (2-6 required). 'question' asks someone to read or look at something and answer in their own words."
+      description: "Use 'decision' to offer 2-6 named options. Use 'question' to ask for an answer in the reader's own words."
     },
     shape: {
       type: "string",
@@ -15119,29 +15119,29 @@ var REVIEW_ITEM_SCHEMA = {
     },
     headline: {
       type: "string",
-      description: "Name what needs deciding, in words someone who has not seen this work would use. One line."
+      description: "Name what needs deciding, in words a reader who has not seen this work would use. One line."
     },
     detail: {
       type: "string",
-      description: "Everything the reader needs and does not have — what is at stake, what to look at, the context behind it — in whatever order the ask reads best. No prescribed structure. Write it for someone reading on a phone, away from the work: spell out names and acronyms the first time, and prefer a plain sentence to a compressed one. Markdown and inline links welcome."
+      description: "Everything the reader needs and does not have: what is at stake, what to look at, and the context behind it. Write it for a reader on a phone, away from the work. Markdown and inline links are allowed."
     },
     options: {
       type: "array",
-      description: "For 'decision' only: 2-6 options. Refused on a 'question'.",
+      description: "For 'decision' only. Pass 2 to 6 options. Options on a 'question' are refused.",
       items: {
         type: "object",
         properties: {
           id: {
             type: "string",
-            description: "Stable id; the answer records which one was picked."
+            description: "Stable id for this option. The answer records which id the reader picked."
           },
           label: {
             type: "string",
-            description: "The button the reader taps, in their words rather than yours — one to three words, ≤28 chars."
+            description: "The button the reader taps, in their words. One to three words, 28 characters or fewer."
           },
           detail: {
             type: "string",
-            description: "What choosing it costs or buys, in a plain sentence. Aim for ≤50 words."
+            description: "What this option costs or buys, in a plain sentence of 50 words or fewer."
           }
         },
         required: ["id", "label"]
@@ -15152,23 +15152,23 @@ var REVIEW_ITEM_SCHEMA = {
 };
 var TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
-  description: "A review item on this ticket — the question, with its own blurb above its own options. A ticket can carry several open at once, so the ticket title keeps naming the work while headline names what is being asked. Same payload and same refusals as a comment-borne declaration."
+  description: "A review item on this task, with its own headline and its own options. A task can carry several open items at once. Same payload and same refusals as a review item on a comment."
 };
 var NEW_TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
-  description: "A question about the work this task creates — for when you are filing the work and the question together. If the question came up while working a task that already exists, hang it there with add_review_item instead, so the ask keeps the context of the work that raised it. The ticket title names the work; headline names the ask."
+  description: "A question about the work this task creates, for when you file the work and the question together. For a question that came up on a task that already exists, use add_review_item instead. The task title names the work, and headline names the ask."
 };
 var TOOL_LIST = {
   tools: [
     {
       name: "list_docs",
-      description: 'List review docs registered on the server — ONE PAGE at a time. The default answer is the 50 most recently active docs as compact rows (docId, title, type, sourceUrl, relPath, setId, boardId, timestamps, thread counts, reviewUrl) plus `nextCursor`; pass it back as `cursor` for the next page, and stop when it is null. It is never the whole server: the unscoped dump ran to several megabytes. Narrow with `workspaceId`, `kind`, `query` (case-insensitive substring over title / docId / alias / relPath / sourceUrl — the cheap way to ask "is this file under review?"), or `sourcePrefix`. `full: true` swaps the compact row for the whole doc meta on that page; walk the cursor with `full: true` and `limit: 500` when you really need everything.',
+      description: "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "Only docs in this workspace. Matches board membership and the reviewId folder binds / diff reviews stamp on their members. An unknown id returns an empty list."
+            description: "Only docs on this board. An unknown id returns an empty list."
           },
           kind: {
             type: "string",
@@ -15177,7 +15177,7 @@ var TOOL_LIST = {
           },
           query: {
             type: "string",
-            description: "Case-insensitive substring matched against title, docId, alias, relPath and sourceUrl. A file basename finds the doc bound to that file."
+            description: "Case-insensitive substring, matched against title, docId, alias, relPath and sourceUrl. A file basename finds the doc bound to that file."
           },
           sourcePrefix: {
             type: "string",
@@ -15185,15 +15185,15 @@ var TOOL_LIST = {
           },
           limit: {
             type: "number",
-            description: "Rows per page, 1–500. Default 50."
+            description: "Rows per page, 1-500. Default 50."
           },
           cursor: {
             type: "string",
-            description: "The `nextCursor` from the previous page. Omit for the first page."
+            description: "The nextCursor from the previous page. Omit it for the first page."
           },
           full: {
             type: "boolean",
-            description: "Return the whole doc meta for each row on this page (bind configuration, diff fields, owner, provenance) instead of the compact row. Default false."
+            description: "Return the whole doc meta for each row instead of the compact row. Default false."
           }
         },
         required: ["workspaceId"]
@@ -15201,13 +15201,13 @@ var TOOL_LIST = {
     },
     {
       name: "list_threads",
-      description: "List comment threads in a doc, optionally filtered by status.",
+      description: "List the comment threads on a doc. Pass status to return only the threads in that state.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           status: { type: "string", enum: ["open", "resolved"] }
@@ -15217,13 +15217,13 @@ var TOOL_LIST = {
     },
     {
       name: "get_thread",
-      description: "Fetch a single thread by id with all comments.",
+      description: "Read one thread by id, with all of its comments.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" }
@@ -15233,13 +15233,13 @@ var TOOL_LIST = {
     },
     {
       name: "post_reply",
-      description: "Reply to an existing thread. Pass review when the reply is asking a person to decide or look; without it, it is an ordinary comment and does not enter the queue. A review payload is judged by the same quality gate a ticket item passes: `held: true` means the item is off the queue until you revise it, and the result names the gap plus the revise_review_item(docId=…, threadId=…, commentId=…) call that ends the hold. A comment is an ask, a decision, or a reply to a person — where the work stands goes through post_status instead. Returns threadUrl, the link to hand a peer. When you passed review, the result also carries reviewItemId — the universal id of the item. Keep it: the NEXT round is one call, revise_review_item(workspaceId, reviewItemId, headline/detail/options), which rewrites this same item and keeps the earlier rounds readable on it. Raising a second thread for round 2 is the duplicate the queue exists to remove.",
+      description: "Reply to a thread. Pass review when the reply asks a person to decide or look. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" },
@@ -15251,24 +15251,24 @@ var TOOL_LIST = {
     },
     {
       name: "edit_comment",
-      description: "Replace the words of a comment that is already posted, keeping what it said before on the comment's edit trail. Use it to repair a comment — a link that no longer resolves, a name that changed, a figure you got wrong — not to change what somebody asked: correcting a review item is revise_review_item, which re-runs the quality gate. Any author's comment may be edited and the editor is recorded on the trail, because the sweeps this exists for fix links other people wrote. Refused when the text is identical to what is already there.",
+      description: "Replace the words of a posted comment, and keep the old words on its edit trail. Use it to repair a link, a name or a figure. To change what an item asks, use revise_review_item. Text identical to the current text is refused.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" },
           commentId: {
             type: "string",
-            description: "Which comment on the thread — get_thread lists them with their ids."
+            description: "Which comment on the thread. get_thread lists the comments with their ids."
           },
-          text: { type: "string", description: "The words the comment should say now." },
+          text: { type: "string", description: "The words the comment says now." },
           reason: {
             type: "string",
-            description: "Why you changed it, kept on the trail entry beside the old words. One line."
+            description: "Why you changed it. One line, kept on the edit trail beside the old words."
           }
         },
         required: ["workspaceId", "docId", "threadId", "commentId", "text"]
@@ -15276,18 +15276,18 @@ var TOOL_LIST = {
     },
     {
       name: "post_status",
-      description: "One line to a few sentences on where the work stands; lands on the task's Activity tab, never as a comment. Omit taskId to post to your current in-progress task. Your end-of-turn message already reaches the same tab on its own, so this is for a milestone worth naming — started, blocked on what, PR open, done. Refused when empty or over 4000 chars.",
+      description: "Share a major milestone update to the activity stream (e.g. build, test, review, or deploy done). Only the first sentence appears in the Home activity feed, cut at 200 characters. The full update may be up to 4000 chars in the task activity feed.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD the task is on — every note is addressed under one. With taskId it goes to /workspaces/<workspaceId>/tasks/<taskId>/notes; without, to your own notes on that board, where the server pins it to your current claim there. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board."
+            description: "The board the task is on. Omit it only when the session was launched with CW_WORKSPACE_ID, which then names the board."
           },
           text: { type: "string" },
           taskId: {
             type: "string",
-            description: "The task to report on. Omit it and the note lands on your current in-progress task; with none, it is kept on your own recent-activity list only."
+            description: "The task to report on. Omit it and the note lands on your current in-progress task."
           }
         },
         required: ["text"]
@@ -15295,13 +15295,13 @@ var TOOL_LIST = {
     },
     {
       name: "create_thread",
-      description: "Open a comment thread on a doc. Pass find to anchor it to a phrase; omit find entirely for a thread about the doc as a whole — that is how you comment on a task, whose body doc is task:<taskId> and is often empty. Pass review when you are asking a person to decide or look; leave it off for notes you are recording. A review payload goes through the same quality gate a ticket item does: `held: true` in the result means it is off the reader's queue until you revise it, and the result carries the reason plus the exact revise_review_item(docId=…, threadId=…, commentId=…) call that lifts it. Returns threadUrl — hand that to a peer instead of pasting the report into chat. When you passed review, the result also carries reviewItemId — the universal id of the item. Keep it: the NEXT round is one call, revise_review_item(workspaceId, reviewItemId, headline/detail/options), which rewrites this same item and keeps the earlier rounds readable on it. Raising a second thread for round 2 is the duplicate the queue exists to remove.",
+      description: "Open a comment thread on a doc. Pass find to anchor the thread to a phrase, or omit find for a thread about the whole doc. Pass review when you ask a person to decide or to look. `held: true` in the result means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: {
             type: "string",
@@ -15309,7 +15309,7 @@ var TOOL_LIST = {
           },
           find: {
             type: "string",
-            description: 'Text to anchor to. Omit entirely for a thread about the whole doc; an empty string is rejected rather than treated as "no anchor".'
+            description: "Text to anchor the thread to. Omit it for a thread about the whole doc. An empty string is refused."
           },
           contextBefore: { type: "string" },
           contextAfter: { type: "string" },
@@ -15322,13 +15322,13 @@ var TOOL_LIST = {
     },
     {
       name: "resolve_thread",
-      description: "Mark a thread as resolved. THREAD-SCOPED: it retires every review item on the thread, so use withdraw_review_item to take back one of your own asks while the others stay answerable.",
+      description: "Mark a thread resolved. It retires every review item on the thread, so use withdraw_review_item to take back one of your own asks while the others stay answerable.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" }
@@ -15338,19 +15338,19 @@ var TOOL_LIST = {
     },
     {
       name: "summarize_thread",
-      description: "Regenerate a thread's collapsed-card summary lines now. Normally unnecessary — the server does it automatically about 3s after any change — so reach for it only when you need the card correct before handing someone the URL. A 503 means summaries are disabled and retrying will not help; a 409 means a reply landed mid-call, so just call again.",
+      description: "Regenerate a thread's collapsed-card summary now. The server regenerates it automatically after a change, so call this only when the card must be correct before you hand someone the URL. A 503 means summaries are off. A 409 means a reply landed mid-call, so call again.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" },
           force: {
             type: "boolean",
-            description: "Regenerate even when the stored summary is already current. Use when the existing line reads wrong, not routinely — it is a billed call."
+            description: "Regenerate even when the stored summary is current. Each call is billed, so use it only when the stored line reads wrong."
           }
         },
         required: ["workspaceId", "docId", "threadId"]
@@ -15358,13 +15358,13 @@ var TOOL_LIST = {
     },
     {
       name: "reopen_thread",
-      description: "Reopen a resolved thread.",
+      description: "Reopen a resolved thread so that it takes replies again.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" }
@@ -15374,13 +15374,13 @@ var TOOL_LIST = {
     },
     {
       name: "get_doc",
-      description: "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against and reflects concurrent edits. The result is body-sized and has run to 320KB on a real doc — if the question is health or shape rather than text, call doc_status.",
+      description: "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against. The result can run to hundreds of kilobytes, so call doc_status when you only need health or shape.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" }
         },
@@ -15389,13 +15389,13 @@ var TOOL_LIST = {
     },
     {
       name: "doc_status",
-      description: "Cheap doc health check — metadata and counts, no body, a few hundred bytes where get_doc can run to hundreds of KB. Use it to ask whether a doc is still bound and where, whether the last sync wedged (syncError), how big get_doc would be, and whether anything is waiting.",
+      description: "Read a doc's health and counts without its body. It answers whether the doc is still bound, where it is bound, whether the last sync failed (syncError), and how large get_doc would be.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" }
         },
@@ -15404,17 +15404,17 @@ var TOOL_LIST = {
     },
     {
       name: "attach_markdown",
-      description: "Attach a markdown file to a board as a live document: the server parses it into the editor and keeps file and doc in sync both ways, within about a second. The file must already exist and path should be absolute. Once bound, never Write/Edit that file — route edits through find_and_replace or set_doc_content, or the next flush silently overwrites them. Returns the minted docId — store that, not the name you passed — plus the review URL. Auto-subscribes you to its comments.",
+      description: "Attach a markdown file to a board as a live doc. The server parses the file into the editor and keeps file and doc in sync both ways. The file must already exist, and path should be absolute. After the bind, edit only through these tools, because the next flush overwrites a direct file write. Returns the minted docId and the review URL.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: {
             type: "string",
-            description: "A readable name for the doc, not its address — the server mints the real id and returns it, and the name becomes an alias that also works. Store the returned id. Reusing a name reuses that doc. `task:`, `ws:` and `goal:` are the server's namespaces and are refused."
+            description: "A readable name for the doc, not its address. The server mints the real id, returns it, and keeps this name as an alias. Reusing a name reuses that doc. The `task:`, `ws:` and `goal:` namespaces are refused."
           },
           path: { type: "string" },
           title: { type: "string" },
@@ -15422,7 +15422,7 @@ var TOOL_LIST = {
           subscribe: { type: "boolean" },
           producedBy: {
             type: "object",
-            description: "Optional provenance for the activity event stream: {agentId?, sessionId?}. Captured into doc meta so hands-on activity events can attribute the doc to the producing agent + session. If omitted, agentId is derived from the owner cwd and sessionId stays null.",
+            description: "Optional provenance for the activity stream: {agentId?, sessionId?}. Without it the server derives agentId from the owner cwd and leaves sessionId null.",
             properties: {
               agentId: { type: "string" },
               sessionId: { type: "string" }
@@ -15434,19 +15434,19 @@ var TOOL_LIST = {
     },
     {
       name: "set_doc_content",
-      description: "Replace a whole doc with new markdown — the safe path for a comprehensive rewrite, and a LAST resort while a human is in the doc: a scoped request gets a scoped tool (find_and_replace, rewrite_thread_region, edit_at_anchor), never a full rewrite from your in-context copy. If a human edited after your last read the server refuses with 409 stale-write (their edit time included) — re-read with get_doc, re-apply your change onto the current content, and only then retry with confirmOverwriteHumanEdits: true. Every accepted rewrite first backs up the replaced markdown under the server data dir. Applies as a block-level diff, so untouched blocks keep their comment threads. Use this rather than writing the bound file or deleting and re-creating the doc; both race the write-back and both have destroyed content. On a task body prefer rewrite_task, which also retitles and carries a reason. Refuses an empty document.",
+      description: "Replace a whole doc with new markdown. Use it for a comprehensive rewrite only. A scoped change gets a scoped tool: find_and_replace, rewrite_thread_region or edit_at_anchor. A human edit made after your last read is refused with 409 stale-write. Re-read with get_doc, re-apply your change, then retry with confirmOverwriteHumanEdits. On a task body use rewrite_task. An empty document is refused.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           markdown: { type: "string", description: "Full replacement markdown for the doc." },
           confirmOverwriteHumanEdits: {
             type: "boolean",
-            description: "Acknowledge a 409 stale-write refusal AFTER re-reading the doc and re-applying your change onto its current content. Never pass it pre-emptively — it disables the guard that keeps a stale copy from destroying a human’s concurrent edits."
+            description: "Acknowledge a 409 stale-write refusal, after you re-read the doc and re-applied your change onto its current content. It turns off the guard against overwriting a human's concurrent edits, so never pass it in advance."
           }
         },
         required: ["workspaceId", "docId", "markdown"]
@@ -15454,13 +15454,13 @@ var TOOL_LIST = {
     },
     {
       name: "reparse_from_disk",
-      description: "Force-pull a bound file from disk into the live doc — recovery for when an external edit did not propagate. Destructive: un-flushed live edits are overwritten and anchors in replaced regions can orphan. Reach for it when get_doc returns stale content or a syncError, not routinely.",
+      description: "Force-pull a bound file from disk into the live doc. It overwrites un-flushed live edits, and anchors in the replaced regions can orphan. Use it when get_doc returns stale content or a syncError.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" }
         },
@@ -15469,13 +15469,13 @@ var TOOL_LIST = {
     },
     {
       name: "delete_doc",
-      description: "Permanently delete a review doc, including the record the activity analyses are rebuilt from. Reach for archive_doc instead unless you mean to destroy it — that retires the doc the same way and unarchive_doc reverses it. The source .md on disk is untouched either way. Refuses while open threads remain unless you pass force.",
+      description: "Permanently delete a review doc, and the record the activity analyses are rebuilt from. Use archive_doc instead unless you mean to destroy it, because unarchive_doc reverses that. The source file on disk is untouched. Open threads refuse the call unless you pass force.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           force: {
@@ -15488,17 +15488,17 @@ var TOOL_LIST = {
     },
     {
       name: "attach_mockup",
-      description: "Serve an HTML mockup at /workspaces/<workspaceId>/mockups/<docId> and bind it for comments — the server reads the file at sourceHtmlPath on each request, so edits show up on reload, and captures what it read so the link keeps working after your scratch directory is cleaned up. An unreadable sourceHtmlPath fails HERE rather than 404ing later in front of the reviewer. Hand the returned meta.reviewUrl to a person. Single-file mockups only: relative CSS/JS siblings will not resolve. Idempotent.",
+      description: "Serve an HTML mockup at /workspaces/<workspaceId>/mockups/<docId> and bind it for comments. The server re-reads sourceHtmlPath on each request, so an edit appears on reload. An unreadable path fails this call instead of the reviewer's. Single-file mockups only, because relative CSS and JS siblings do not resolve. Hand meta.reviewUrl to a person.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: {
             type: "string",
-            description: "A readable name for the doc, not its address — the server mints the real id and returns it, and the name becomes an alias that also works. Store the returned id. Reusing a name reuses that doc. `task:`, `ws:` and `goal:` are the server's namespaces and are refused."
+            description: "A readable name for the doc, not its address. The server mints the real id, returns it, and keeps this name as an alias. Reusing a name reuses that doc. The `task:`, `ws:` and `goal:` namespaces are refused."
           },
           sourceHtmlPath: { type: "string" },
           title: { type: "string" },
@@ -15509,23 +15509,23 @@ var TOOL_LIST = {
     },
     {
       name: "attach_folder",
-      description: "Attach a folder or worktree as a browsable workspace — an alias for create_diff_review with no base. The reviewer picks files from the menu under the filename in the topbar — they open lazily, and markdown opens editable. Prefer create_diff_review directly: passing a base gets you the changed-files diff on top of browsing.",
+      description: "Attach a folder or worktree as a browsable review. The reviewer picks files from the menu under the filename in the topbar, and a markdown file opens editable. Prefer create_diff_review, which adds the changed-files diff on top of browsing.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           folderPath: { type: "string" },
           exclude: {
             type: "array",
             items: { type: "string" },
-            description: "Path prefixes (relative to the folder) to keep out of the review, e.g. ['node_modules', 'vendor']. Persisted, so refresh_attachment_set replays it."
+            description: "Path prefixes, relative to the folder, to keep out of the review. The server stores them, so refresh_attachment_set replays them."
           },
           setId: {
             type: "string",
-            description: "The attachment SET's own id, to re-use rather than mint one — the id this call returned last time. It was spelled `workspaceId` here until the routes cutover, which is the word every other tool uses for the BOARD; this call is the one that takes both, so they are spelled apart."
+            description: "The attachment set's own id, to reuse instead of minting one. It is the id this call returned last time. On this call `workspaceId` names the board instead."
           },
           title: { type: "string" },
           include: { type: "array", items: { type: "string" } },
@@ -15533,7 +15533,7 @@ var TOOL_LIST = {
           subscribe: { type: "boolean" },
           producedBy: {
             type: "object",
-            description: "Optional provenance for the activity event stream: {agentId?, sessionId?}. Stored on every doc the bind creates so hands-on activity events can attribute them to the producing agent + session.",
+            description: "Optional provenance for the activity stream: {agentId?, sessionId?}. The server stores it on every doc the bind creates.",
             properties: {
               agentId: { type: "string" },
               sessionId: { type: "string" }
@@ -15545,36 +15545,36 @@ var TOOL_LIST = {
     },
     {
       name: "create_diff_review",
-      description: "Review a git diff PR-style: one doc per changed file, unified diffs with line-anchored comments. By default it diffs base against the working tree and re-renders within a second as you keep editing — the live-loop mode; pass target to freeze it at a commit, or omit base to browse a folder with no diff. Once the attachment set exists prefer refresh_attachment_set, which re-reads without re-minting docIds. Hand the human entryUrl. Narrow a large repo with exclude before raising maxFiles.",
+      description: "Review a git diff the way a pull request reads: one doc per changed file, with line-anchored comments. By default it diffs base against the working tree and re-renders as you edit. Pass target to pin it to a commit, or omit base to browse the folder. Hand entryUrl to the reviewer.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
-          repo: { type: "string", description: "Absolute path to the local git repo/worktree." },
+          repo: { type: "string", description: "Absolute path to the local git repo or worktree." },
           base: {
             type: "string",
-            description: 'Base ref (the "before" side). OMIT for a BROWSE workspace: no diff — the whole folder is navigable from the all-files sidebar, files open lazily (markdown editable, source read-only).'
+            description: 'Base ref, the "before" side. Omit it to browse the folder with no diff, where files open lazily and markdown opens editable.'
           },
           target: {
             type: "string",
-            description: "Optional target ref. Omit to review the LIVE working tree (default); pass a ref to pin the review to that commit."
+            description: "Target ref. Omit it to review the live working tree, or pass a ref to pin the review to that commit."
           },
           reviewId: {
             type: "string",
-            description: "Optional review/workspace id. Defaults to <repo-basename>-<base7>-<target7|live>."
+            description: "Review id. Defaults to <repo-basename>-<base7>-<target7|live>."
           },
           title: { type: "string" },
           exclude: {
             type: "array",
             items: { type: "string" },
-            description: "Path prefixes (relative to repo root) to leave out of the review."
+            description: "Path prefixes, relative to the repo root, to leave out of the review."
           },
           groups: {
             type: "array",
-            description: 'Split the changed files by intent, the way you would split a branch into commits; first group is read first. A path matches a file exactly or as a directory prefix, first group wins, unlisted files land in "Other". Optional `details` is a 1–2 sentence intro under the group title, capped at 500 characters — a longer one is rejected, not truncated. Omit `groups` for the built-in heuristic.',
+            description: 'Split the changed files by intent, the way you would split a branch into commits. The reviewer reads the first group first. A path matches a file exactly or as a directory prefix, the first group wins, and unlisted files land in "Other". Optional `details` is a one or two sentence intro, refused over 500 characters.',
             items: {
               type: "object",
               properties: {
@@ -15589,7 +15589,7 @@ var TOOL_LIST = {
           subscribe: { type: "boolean" },
           producedBy: {
             type: "object",
-            description: "Optional provenance for the activity event stream: {agentId?, sessionId?}. Stored on every doc the review creates.",
+            description: "Optional provenance for the activity stream: {agentId?, sessionId?}. The server stores it on every doc the review creates.",
             properties: {
               agentId: { type: "string" },
               sessionId: { type: "string" }
@@ -15601,13 +15601,13 @@ var TOOL_LIST = {
     },
     {
       name: "delete_attachment_set",
-      description: "Retire a whole attachment set — a diff review or an attached folder — as one unit. It archives by default: live docs stop, the set drops off the workspace listing and any board, source files are untouched, and unarchive_attachment_set reverses it. Prefer archive_attachment_set, which takes a reason and needs no force. purge: true is the destructive path; it removes the records the activity analyses are rebuilt from. Refuses all-or-nothing while any member has open threads.",
+      description: "Retire a whole attachment set, a diff review or an attached folder, as one unit. It archives by default, and unarchive_attachment_set reverses that. Source files are untouched. Prefer archive_attachment_set, which takes a reason and needs no force. `purge: true` destroys the records instead. Open threads refuse the whole call unless you pass force.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           setId: {
             type: "string",
@@ -15619,7 +15619,7 @@ var TOOL_LIST = {
           },
           purge: {
             type: "boolean",
-            description: "Destroy the persisted state instead of archiving it. Default false, and leaving it false is almost always right — a purged .ydoc cannot be restored and silently shortens the history the weekly analyses read."
+            description: "Destroy the persisted state instead of archiving it. Default false. A purged doc cannot be restored."
           }
         },
         required: ["workspaceId", "setId"]
@@ -15627,13 +15627,13 @@ var TOOL_LIST = {
     },
     {
       name: "archive_attachment_set",
-      description: "Retire a finished attachment set without deleting anything — the verb for when the work a diff review covered has merged. Members drop off the workspace listing and stop costing a poll; nothing is destroyed, and unarchive_attachment_set restores the whole thing, threads and board links included. Open threads do not block it; that is the point. Pass a reason — usually the PR that merged.",
+      description: "Retire a finished attachment set without deleting anything. Members drop off the board listing and stop costing a poll, and unarchive_attachment_set restores them with their threads and board links. Open threads do not block the call. Pass a reason, usually the pull request that merged.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           setId: {
             type: "string",
@@ -15641,7 +15641,7 @@ var TOOL_LIST = {
           },
           reason: {
             type: "string",
-            description: 'Why this attachment set is finished — e.g. "merged in #301".'
+            description: 'Why this attachment set is finished, for example "merged in #301".'
           }
         },
         required: ["workspaceId", "setId"]
@@ -15649,13 +15649,13 @@ var TOOL_LIST = {
     },
     {
       name: "unarchive_attachment_set",
-      description: "Bring an archived attachment set back: every member returns with its threads, its file bindings and its board entries intact. This is what makes archive_attachment_set safe to call. restore-collision means a docId was re-minted while it was away and nothing moved.",
+      description: "Bring an archived attachment set back. Every member returns with its threads, its file bindings and its board entries. A restore-collision means a docId was re-minted while the set was away, and nothing moved.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           setId: { type: "string" }
         },
@@ -15664,18 +15664,18 @@ var TOOL_LIST = {
     },
     {
       name: "archive_doc",
-      description: "Retire one finished doc — a bound markdown doc or a mockup — without deleting anything. It drops off the workspace listing and any board and stops costing a poll; the source file and the record are untouched, and unarchive_doc restores it. Prefer this over delete_doc, which purges. Use archive_attachment_set instead if the doc belongs to an attachment set; task bodies and board docs cannot be archived.",
+      description: "Retire one finished doc, a bound markdown doc or a mockup, without deleting anything. It drops off the board listing, the source file is untouched, and unarchive_doc restores it. Use archive_attachment_set for a doc that belongs to an attachment set. Task bodies and board docs are refused.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           reason: {
             type: "string",
-            description: 'Why this doc is finished — e.g. "draft published".'
+            description: 'Why this doc is finished, for example "draft published".'
           }
         },
         required: ["workspaceId", "docId"]
@@ -15683,13 +15683,13 @@ var TOOL_LIST = {
     },
     {
       name: "unarchive_doc",
-      description: "Bring an archived doc back with its threads, file binding and its board entry intact. This is what makes archive_doc safe to call.",
+      description: "Bring an archived doc back with its threads, its file binding and its board entry.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" }
         },
@@ -15698,13 +15698,13 @@ var TOOL_LIST = {
     },
     {
       name: "list_archived_attachments",
-      description: 'Everything archived on this server, newest first, in two keys: archived for whole attachment sets (feed to unarchive_attachment_set) and docs for single docs (feed to unarchive_doc). Each carries when, by whom, the reason, and the boards it will return to. This is the answer to "what can I bring back".',
+      description: "List everything archived on this server, newest first, under two keys. `archived` holds whole attachment sets for unarchive_attachment_set. `docs` holds single docs for unarchive_doc. Each entry carries when, who, the reason, and the boards it returns to.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           }
         },
         required: ["workspaceId"]
@@ -15712,7 +15712,7 @@ var TOOL_LIST = {
     },
     {
       name: "delete_workspace",
-      description: "Permanently delete a board and all of its tasks, docs and history. Reach for archive_workspace instead in almost every case — this one cannot be undone. Refuses while open tasks remain unless you pass force. Docs attached to the board survive: attaching is a link, not ownership.",
+      description: "Permanently delete a board with all of its tasks, docs and history. Use archive_workspace instead in almost every case, because this call cannot be undone. Open tasks refuse it unless you pass force. Attached docs survive, because attaching is a link, not ownership.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15723,7 +15723,7 @@ var TOOL_LIST = {
           },
           purge: {
             type: "boolean",
-            description: "Only meaningful when the id turns out to be a REVIEW: destroy its persisted state instead of archiving it. Default false."
+            description: "Only meaningful when the id names a review. Destroy its persisted state instead of archiving it. Default false."
           }
         },
         required: ["workspaceId"]
@@ -15731,13 +15731,13 @@ var TOOL_LIST = {
     },
     {
       name: "refresh_attachment_set",
-      description: "Re-reconcile an existing attachment set against what is on disk now, without re-minting any docId — so every comment thread survives. Use it instead of re-attaching when files have moved under it. Files you changed since join it; a file reverted, deleted or renamed away is marked stale rather than removed. Read stale after a rename — those threads are stranded on a file nobody will open. Pinned sets are refused; their content is a commit.",
+      description: "Re-reconcile an attachment set against what is on disk now, without re-minting any docId, so every comment thread survives. Use it when files moved under the set. A file that was reverted, deleted or renamed away is marked stale, not removed. Pinned sets are refused.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           setId: {
             type: "string",
@@ -15749,13 +15749,13 @@ var TOOL_LIST = {
     },
     {
       name: "set_attachment_groups",
-      description: `Re-group an existing diff review's file list in place, so you can organise it without tearing the attachment set down and losing its comments. Groups claim files by exact path or directory prefix, first group wins, and anything unclaimed lands in "Other". Pass an empty array to fall back to the built-in heuristic. Optional per-group details is a one- or two-sentence intro; over 500 chars is rejected.`,
+      description: 'Re-group a diff review\'s file list in place, keeping its comments. A group claims files by exact path or directory prefix, the first group wins, and unclaimed files land in "Other". Pass an empty array for the built-in heuristic. Optional `details` is refused over 500 characters.',
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           setId: {
             type: "string",
@@ -15763,7 +15763,7 @@ var TOOL_LIST = {
           },
           groups: {
             type: "array",
-            description: "Ordered groups. Empty array = fall back to the heuristic.",
+            description: "Ordered groups. An empty array falls back to the built-in heuristic.",
             items: {
               type: "object",
               properties: {
@@ -15780,13 +15780,13 @@ var TOOL_LIST = {
     },
     {
       name: "find_and_replace",
-      description: "Replace plain text in a doc with other plain text. find matches the doc's plain text, not markdown — marks are preserved automatically. Exception: a find that IS pipe-table row syntax (| a | b |) matches table rows structurally, cells compared by text with whitespace ignored, so a row quoted from the .md works; the replace must keep the same row/cell shape. Disambiguate repeats with contextBefore / contextAfter or occurrence, or pass replaceAll for a mechanical sweep. A no-match returns a hint quoting the doc's actual characters; copy the find from that rather than guessing. Pass parseInlineMarks to read markdown in replace as real marks, and suggest: true to propose the edit instead of applying it. INLINE ONLY: replace goes inside one existing block, so block-level markdown in it — a heading, a list item, a rule, a fence — is refused with block-markdown-in-replacement; use insert_blocks_after_thread or insert_blocks_at_anchor for those.",
+      description: "Replace plain text in a doc with other plain text. find matches the doc's plain text, not markdown, and marks are preserved. A find written as pipe-table row syntax matches table rows structurally. Disambiguate repeats with contextBefore, contextAfter or occurrence, or pass replaceAll. A no-match returns a hint quoting the doc's actual characters. replace stays inside one block, so block-level markdown in it is refused with block-markdown-in-replacement.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           find: { type: "string" },
@@ -15796,7 +15796,7 @@ var TOOL_LIST = {
           occurrence: { type: "number" },
           replaceAll: {
             type: "boolean",
-            description: "Replace every occurrence in one call, marks carried per site — for a mechanical sweep, instead of looping occurrence by occurrence. Mutually exclusive with `occurrence` and with `suggest`."
+            description: "Replace every occurrence in one call, with marks carried per site. Mutually exclusive with `occurrence` and with `suggest`."
           },
           parseInlineMarks: { type: "boolean" },
           suggest: {
@@ -15809,13 +15809,13 @@ var TOOL_LIST = {
     },
     {
       name: "rewrite_thread_region",
-      description: "Rewrite the text a thread is anchored to — the primary path for comment-driven edits, where a person commented and you are fixing exactly the range they commented on. Immune to concurrent edits, since the anchor resolves at apply time. Returns anchor-orphaned if they deleted the text; fall back to find_and_replace.",
+      description: "Rewrite the text a thread is anchored to. Use it for comment-driven edits, where a person commented and you fix the range they commented on. The anchor resolves at apply time, so a concurrent edit does not break it. It returns anchor-orphaned when the text is gone, and find_and_replace is then the fallback.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" },
@@ -15831,13 +15831,13 @@ var TOOL_LIST = {
     },
     {
       name: "list_suggestions",
-      description: "List every pending suggestion on a doc, from any author, in doc order. Use it to find a sid before accepting or rejecting, or to check whether your own suggest: true proposal is still pending.",
+      description: "List every pending suggestion on a doc, from any author, in doc order. Use it to find a sid before you accept or reject, or to check whether your own proposal is still pending.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" }
         },
@@ -15846,13 +15846,13 @@ var TOOL_LIST = {
     },
     {
       name: "accept_suggestion",
-      description: "Accept a pending suggestion by sid: it becomes real content and flushes to disk within about a second. A missing sid errors, which is also the right outcome when somebody else already resolved it.",
+      description: "Accept a pending suggestion by sid. It becomes real content and flushes to disk. A missing sid errors, which is also the answer when somebody else already resolved it.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           sid: { type: "string" }
@@ -15862,13 +15862,13 @@ var TOOL_LIST = {
     },
     {
       name: "reject_suggestion",
-      description: "Reject a pending suggestion by sid: restores exactly the pre-suggestion text (the proposed insert is removed, the proposed deletion is un-marked and kept). Missing sid → an error.",
+      description: "Reject a pending suggestion by sid. It restores the text from before the suggestion: the proposed insert goes, and the proposed deletion stays and loses its mark. A missing sid errors.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           sid: { type: "string" }
@@ -15878,13 +15878,13 @@ var TOOL_LIST = {
     },
     {
       name: "resolve_all_suggestions",
-      description: "Accept or reject EVERY pending suggestion on a doc in one call — the doc-level accept-all / reject-all. Pass `authorId` to resolve only one author's proposals, leaving everyone else's pending (list_suggestions returns each entry's `author.id`). Returns the count resolved and their sids.",
+      description: "Accept or reject every pending suggestion on a doc in one call. Pass `authorId` to resolve one author's proposals and leave the rest pending. Returns the count resolved and their sids.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           action: { type: "string", enum: ["accept", "reject"] },
@@ -15895,13 +15895,13 @@ var TOOL_LIST = {
     },
     {
       name: "insert_after_thread",
-      description: "Insert text at the END of a thread's anchored range (INLINE — stays in the same paragraph/heading, mid-sentence if the anchor ends there). For 'add a note right after this sentence.' A whole new paragraph or section goes to insert_blocks_after_thread. The result's `landed` is the doc text around the insert, read back after the write — if it is missing, nothing landed.",
+      description: "Insert text at the end of a thread's anchored range. The text stays inline, in the same paragraph or heading, so use it to add a note after a sentence. For a new paragraph or section use insert_blocks_after_thread. The result's `landed` is the doc text read back after the write.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" },
@@ -15912,13 +15912,13 @@ var TOOL_LIST = {
     },
     {
       name: "insert_blocks_after_thread",
-      description: `Insert new blocks — paragraphs, headings, lists, quotes, code — after the block holding a thread's anchor. Takes markdown. Use it for "add a section" or "add a paragraph below"; insert_after_thread is the inline sibling. An anchor inside a list item nests the new blocks under that item unless you pass placement top-level.`,
+      description: "Insert new blocks after the block holding a thread's anchor. It takes markdown, so use it for a new section, paragraph, list, quote or code. insert_after_thread is the inline sibling. An anchor inside a list item nests the new blocks under that item unless you pass placement top-level.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" },
@@ -15934,13 +15934,13 @@ var TOOL_LIST = {
     },
     {
       name: "create_anchor",
-      description: "Mint a private anchor at a text location and get back an id. It survives concurrent edits, so you can pin several spots now and rewrite each later without offsets shifting under you. Same disambiguation as find_and_replace.",
+      description: "Mint a private anchor at a text location and get back its id. The anchor survives concurrent edits, so you can pin several places now and rewrite each one later. Same disambiguation as find_and_replace.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           find: { type: "string" },
@@ -15954,13 +15954,13 @@ var TOOL_LIST = {
     },
     {
       name: "edit_at_anchor",
-      description: "Apply an inline edit at an anchor — replace the anchored range or insert_after it. The text stays inside the anchor's block, so use it for prose, not new structure. For headings, paragraphs, lists or tables use insert_blocks_at_anchor, or you get a literal ## Heading instead of a heading.",
+      description: "Apply an inline edit at an anchor, replacing the anchored range or inserting after it. The text stays inside the anchor's block, so use it for prose. For a heading, paragraph, list or table use insert_blocks_at_anchor, which parses the markdown.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           anchorId: { type: "string" },
@@ -15978,18 +15978,18 @@ var TOOL_LIST = {
     },
     {
       name: "read_doc_outline",
-      description: "The doc's blocks with the ID of each — the address to send an edit back with. Read this before apply_block_edits: every other doc tool addresses the doc by TEXT, and a text address moves under a doc somebody else is typing in (the heading gets renamed, the sentence you matched is rewritten), while a block id does not. Entries carry the block's text, its nearest heading, and which agent wrote it — a block still marked yours is one no person has touched since, and the only kind you may replace or delete outright. Pass headingsOnly for the cheap 'where could this go?' read, and recentBlocks to cap the tail so a doc that grows all meeting long does not grow your prompt with it.",
+      description: "Read the doc's blocks with the id of each, the address an edit sends back. Read it before apply_block_edits: a text address moves under a doc somebody else is typing in, and a block id does not. Each entry carries the block's text, its nearest heading, and which agent wrote it. A block still marked yours is one no person has touched, and the only kind you may replace outright.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           headingsOnly: {
             type: "boolean",
-            description: "Return only the headings — the outline you pick an insertion point from."
+            description: "Return only the headings, the outline you pick an insertion point from."
           },
           recentBlocks: {
             type: "number",
@@ -16001,13 +16001,13 @@ var TOOL_LIST = {
     },
     {
       name: "apply_block_edits",
-      description: "Apply several block-addressed edits as ONE transaction. Use it whenever you are making more than one change at a time: separate calls are separate transactions, so a reader watching the doc sees your batch arrive in pieces and a failure halfway leaves half of it applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Each edit is one of insert_under_heading (headingId + markdown), insert_at_end (markdown), replace_block (blockId + markdown) or delete_block (blockId). Replacing or deleting a block that is not still marked yours does not destroy it — it comes back as a SUGGESTION for the person to accept, so a block someone typed in is never overwritten by a batch.",
+      description: "Apply several block-addressed edits as ONE transaction. Use it whenever you make more than one change, because separate calls arrive in pieces and a failure halfway leaves half of it applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block that is no longer marked yours returns it as a suggestion for the person to accept.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           edits: {
@@ -16023,11 +16023,11 @@ var TOOL_LIST = {
                 headingId: { type: "string", description: "insert_under_heading only." },
                 blockId: {
                   type: "string",
-                  description: "replace_block / delete_block only — from read_doc_outline."
+                  description: "replace_block and delete_block only. Use an id from read_doc_outline."
                 },
                 markdown: {
                   type: "string",
-                  description: "The new block(s), for every op but delete_block."
+                  description: "The new block or blocks, for every op but delete_block."
                 }
               },
               required: ["op"]
@@ -16039,13 +16039,13 @@ var TOOL_LIST = {
     },
     {
       name: "insert_blocks_under_heading",
-      description: "Append markdown blocks at the END of a heading's section, addressed by the heading's ID rather than its wording — so a heading renamed since you read the outline still receives the text. The one-edit shortcut over apply_block_edits; batch with that instead when you are making more than one change, so a reader never sees half of it. Get headingId from read_doc_outline. Blocks are marked as yours, which is what later lets you rewrite them — until a person types in one, and then it is theirs.",
+      description: "Append markdown blocks at the END of a heading's section. It addresses the section by heading id, not by wording, so a renamed heading still receives the text. Get headingId from read_doc_outline. Use apply_block_edits instead when you make more than one change. New blocks are marked as yours until a person types in one.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           headingId: {
@@ -16059,13 +16059,13 @@ var TOOL_LIST = {
     },
     {
       name: "insert_blocks_at_anchor",
-      description: "Parse markdown and insert the resulting blocks after the block holding an anchor. This is the one for new sections, sub-headings and tables; edit_at_anchor keeps text trapped inside the block. An anchor inside a list item nests under that item unless you pass placement top-level.",
+      description: "Parse markdown and insert the resulting blocks after the block holding an anchor. Use it for a new section, sub-heading or table, which edit_at_anchor cannot make. An anchor inside a list item nests the blocks under that item unless you pass placement top-level.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           anchorId: { type: "string" },
@@ -16081,13 +16081,13 @@ var TOOL_LIST = {
     },
     {
       name: "delete_anchor",
-      description: "Remove a previously-created agent anchor. Useful for cleanup between tasks.",
+      description: "Remove an anchor you created. Use it to clean up between tasks.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           anchorId: { type: "string" }
@@ -16097,13 +16097,13 @@ var TOOL_LIST = {
     },
     {
       name: "delete_block_at_anchor",
-      description: "Delete the whole block an anchor points at. Use it when an empty find_and_replace is not enough — that empties a block's text but leaves the empty block rendering. For an anchor inside a list item or table cell only the innermost block goes; for a whole list or section use delete_blocks_in_range or delete_section.",
+      description: "Delete the whole block an anchor points at. An empty find_and_replace only empties a block's text and leaves the empty block rendering. For an anchor inside a list item or table cell, only the innermost block goes. For a whole list or section use delete_blocks_in_range or delete_section.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           threadId: { type: "string" },
@@ -16114,13 +16114,13 @@ var TOOL_LIST = {
     },
     {
       name: "delete_blocks_in_range",
-      description: 'Delete every top-level block from the one containing startFind through the one containing endFind. Block-inclusive on purpose: a partial match removes the entire containing block. Use it for trailing cruft or a span no heading bounds; for "delete this section" prefer delete_section, which is heading-aware.',
+      description: "Delete every top-level block from the one holding startFind through the one holding endFind. A partial match removes the whole containing block. Use it for trailing cruft or a span no heading bounds. For a section use delete_section, which is heading-aware.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           startFind: { type: "string" },
@@ -16135,13 +16135,13 @@ var TOOL_LIST = {
     },
     {
       name: "delete_section",
-      description: 'Delete a heading and everything under it, down to the next heading at the same level or above. The tool for "delete the X section" — a dozen find_and_replace calls in one, without the empty blocks they leave behind. Pass level or occurrence when the heading text repeats. Returns the heading that ended the run, so you can confirm what was kept.',
+      description: "Delete a heading and everything under it, down to the next heading at the same level or above. Pass level or occurrence when the heading text repeats. Returns the heading that ended the run, so you can confirm what was kept.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           docId: { type: "string" },
           heading: { type: "string" },
@@ -16153,7 +16153,7 @@ var TOOL_LIST = {
     },
     {
       name: "observe_url",
-      description: "Return the SSE URL that streams live thread events for a doc. Useful for long-running agents.",
+      description: "Return the SSE URL that streams live thread events for a doc. Use it from a long-running agent.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16164,7 +16164,7 @@ var TOOL_LIST = {
     },
     {
       name: "watch_doc",
-      description: "Subscribe this session to a doc's comment events, delivered as channel messages. Usually unnecessary — attach_markdown, attach_mockup and most docId-bearing tools subscribe you already, and set_workspace_lead covers every doc on your board. Reach for it for a doc you have not otherwise touched, such as a peer's review you only want to observe. persisted: false means a restart will drop it.",
+      description: "Subscribe this session to a doc's comment events, delivered as channel messages. Most docId-bearing tools subscribe you already, and set_workspace_lead covers every doc on your board. Use it for a doc you have not otherwise touched, such as a peer's review you only want to observe. `persisted: false` means a restart drops the subscription.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16186,7 +16186,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_watched_docs",
-      description: "What this session is subscribed to — and, more usefully, what it is missing. coverage.unattachedBoards names boards you follow but are not live on, with what is queued for their lead and the remedy for each: set_workspace_lead when the seat is empty, heartbeat when it is yours and you went quiet, attach_agent when a live peer holds it. restore.status tells an empty list apart from a failed restore. coverage absent means unknown, never all-clear.",
+      description: "List what this session is subscribed to, and what it is missing. coverage.unattachedBoards names the boards you follow but are not live on, with what is queued for their lead and the remedy for each. restore.status tells an empty list apart from a failed restore. An absent coverage means unknown, not all-clear.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -16194,23 +16194,23 @@ var TOOL_LIST = {
     },
     {
       name: "share_workspace",
-      description: "Mint a share link for a board: anyone you send it to signs in once with their email and is a member of that board from then on; already signed in means straight in. A board is the unit of sharing — file a doc or review on one first; a review id is refused. Everything on that board travels with the share, so check what else is filed there, or give the review its own board. Returns a share.<domain>/s/<id> URL. Links are long-living: pass ttlSeconds only when you want one to lapse. allowDomains no longer restricts anything (one Access application covers the share hostname and the server records members itself) — it is accepted and ignored, and the reply says so. unshare stops new people redeeming without ejecting the ones already in; remove_share_member ends one person's access.",
+      description: "Mint a share link for a board. Anyone you send it to signs in once with their email, and is a member of that board from then on. A board is the unit of sharing, and a review id is refused. Everything filed on the board travels with the share, so check what else is there. Returns a share.<domain>/s/<id> URL.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD to share — the id create_workspace returned, the same one every other tool takes as workspaceId. NOT a review/attachment-set id."
+            description: "The board to share, the id create_workspace returned. A review or attachment-set id is refused."
           },
           ttlSeconds: {
             type: "number",
-            description: "Optional lifetime in seconds. Omit for a link with no expiry, which is the default."
+            description: "Optional lifetime in seconds. Omit it for a link with no expiry, which is the default."
           },
           label: { type: "string", description: "Human label shown in list_shares." },
           allowDomains: {
             type: "array",
             items: { type: "string" },
-            description: "Accepted and IGNORED — kept so an older caller is not refused. Anyone who opens the link and signs in becomes a member."
+            description: "Accepted and IGNORED, so that an older caller is not refused. Anyone who opens the link and signs in becomes a member."
           }
         },
         required: ["workspaceId"]
@@ -16218,7 +16218,7 @@ var TOOL_LIST = {
     },
     {
       name: "remove_share_member",
-      description: "End one person's access to a board they joined through a share link. Their next request is refused, and any live editing socket or event stream that membership had already opened is hung up — the reply says how many of each. Membership is per board, so their connections to any OTHER board they hold are untouched. This is the verb for ejecting somebody — unshare only stops new people redeeming the link, and never removes anyone already in. list_shares names every member and which link they came through.",
+      description: "End one person's access to a board they joined through a share link. Their next request is refused, and any live editing socket or event stream that membership opened is hung up. Membership is per board, so their access to another board is untouched. unshare only stops new people redeeming the link. list_shares names every member.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16230,7 +16230,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_share_ttl",
-      description: "Extend or shorten a live share. `ttlSeconds` is measured from now, so passing 3600 makes it expire an hour from this call regardless of when it was created. Takes effect immediately — an already-open browser is refused on its next request once the share lapses.",
+      description: "Extend or shorten a live share. `ttlSeconds` is measured from now, so 3600 expires the link one hour from this call. It takes effect immediately, and an open browser is refused on its next request once the share lapses.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16242,7 +16242,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_shares",
-      description: "Every share of every board: the links, who has redeemed each one and when, and whether each is live, revoked or expired — plus any shares still on the retired per-hostname mode, with their hostnames and allowed domains.",
+      description: "List every share of every board: the links, who redeemed each one and when, and whether each one is live, revoked or expired.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -16250,7 +16250,7 @@ var TOOL_LIST = {
     },
     {
       name: "unshare",
-      description: "Revoke a share by id. For a share link this stops anyone NEW redeeming it and leaves the people who already joined as members — use remove_share_member to eject somebody. For a share on the retired per-hostname mode it deletes the Cloudflare Access app and policy and removes the entry. Use it for early teardown; a link with a TTL otherwise lapses on its own, and one without never does.",
+      description: "Revoke a share by id. For a share link this stops anyone NEW redeeming it, and leaves the people who already joined as members, so use remove_share_member to eject somebody. Use it for an early teardown. A link with a TTL lapses on its own, and one without never does.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16261,7 +16261,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_sharing_enabled",
-      description: "Master switch for all external access. Off makes every share and link answer 403 — one call instead of revoking shares individually. It also hangs up open connections belonging to per-share visitors and to share-link members; a COLLABORATION-hostname visitor carries neither a share nor a membership, so their open socket survives until it drops. Existing shares are preserved and resume when it is back on; the local and tailnet surface is unaffected. Call with no argument to read the current state.",
+      description: "Master switch for all external access. Off makes every share and link answer 403, and hangs up the open connections of share visitors and share-link members. Existing shares are preserved and resume when it is on again. The local and tailnet surface is unaffected. Call it with no argument to read the current state.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16274,14 +16274,14 @@ var TOOL_LIST = {
     },
     {
       name: "create_workspace",
-      description: "Create a board: goals, tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals — write them with set_goal_list. A folder bind or diff review is content to file on a board, not another board.",
+      description: "Create a board: its goals, its tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals, so write them with set_goal_list.",
       inputSchema: {
         type: "object",
         properties: {
           name: { type: "string", description: 'Short handle, e.g. "search-revamp".' },
           leadAgentId: {
             type: "string",
-            description: "The agent responsible for this board. Defaults to this agent's identity — pass another only when you are setting a board up for someone else."
+            description: "The agent responsible for this board. Defaults to your own identity. Pass another only when you set a board up for someone else."
           },
           subscribe: { type: "boolean" }
         },
@@ -16290,26 +16290,26 @@ var TOOL_LIST = {
     },
     {
       name: "rename_workspace",
-      description: "Change a board's name. Nothing else moves — same id, same URL, same tasks, so every existing link keeps working. Renaming into a name another live board holds is allowed; the response names the collision in sameName. Use archive_workspace when the answer is that one of the two is over.",
+      description: "Change a board's name. The id, the URL and the tasks do not move, so every existing link keeps working. A name another live board already holds is allowed, and the response names the collision in sameName.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string", description: "Board workspace id." },
-          name: { type: "string", description: "The new name. Trimmed; may not be empty." }
+          name: { type: "string", description: "The new name. Trimmed, and may not be empty." }
         },
         required: ["workspaceId", "name"]
       }
     },
     {
       name: "archive_workspace",
-      description: "Stand a board down reversibly, when it is superseded, finished, or a duplicate. It stops ranking, refuses new tasks, and tells anyone who reads it why — but destroys nothing, and unretire_workspace reverses it. This is the one to reach for; delete_workspace is not reversible. Pass a reason; it is replayed in every refusal, and it is usually the board that replaced this one.",
+      description: "Stand a board down reversibly, when it is superseded, finished or a duplicate. It stops ranking, refuses new tasks, and tells a reader why. It destroys nothing, and unretire_workspace reverses it. Prefer it to delete_workspace, which cannot be undone. Pass a reason, which is replayed in every refusal.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string", description: "Board workspace id." },
           reason: {
             type: "string",
-            description: "Why, in one line. Shown to every agent that hits the retired board — name the board that replaced it if there is one."
+            description: "Why, in one line. Every agent that reaches the retired board reads it, so name the board that replaced it."
           }
         },
         required: ["workspaceId"]
@@ -16317,7 +16317,7 @@ var TOOL_LIST = {
     },
     {
       name: "unretire_workspace",
-      description: "Bring a retired board back. It ranks again, takes new work again, and stops warning readers. Nothing has to be restored — retiring only ever wrote one field — so this is a plain reversal and not a recovery.",
+      description: "Bring a retired board back. It ranks again, takes new work again, and stops warning readers.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16328,18 +16328,18 @@ var TOOL_LIST = {
     },
     {
       name: "set_workspace_lead",
-      description: "Declare yourself lead of a board. One call at session start and everything on it reaches you — task, decision and thread events on every doc filed there, plus voice notes — and it drains whatever queued while the seat was empty. Staying live is separate: delivery is gated on the server having observed you recently, so a quiet session drops out. Call heartbeat, and check list_watched_docs rather than assuming. Pass leadAgentId to hand the board to somebody else.",
+      description: "Declare yourself lead of a board. One call at session start routes everything on it to you: task, decision and thread events on every doc filed there, plus voice notes. It also drains whatever queued while the seat was empty. Delivery is gated on the server having observed you recently, so call heartbeat and check list_watched_docs. Pass leadAgentId to hand the board to somebody else.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string", description: "Board workspace id from create_workspace." },
           leadAgentId: {
             type: "string",
-            description: "The agent id taking responsibility. Omit it to declare yourself — the common case, and the only form that also attaches and subscribes you. Naming another agent hands the seat over and does nothing else."
+            description: "The agent id taking responsibility. Omit it to declare yourself, which is the only form that also attaches and subscribes you. Naming another agent hands the seat over and does nothing else."
           },
           takeover: {
             type: "boolean",
-            description: 'Take the seat from a different agent that currently holds it and is live — it evicts them silently and reroutes every lead-addressed delivery, so coordinate first. Default false: without it you get `declined: "lead-held"` naming the incumbent, and you stay attached either way.'
+            description: 'Take the seat from a live agent that holds it. It evicts them silently and reroutes every lead-addressed delivery, so coordinate first. Default false, which returns `declined: "lead-held"` naming the incumbent. You stay attached either way.'
           }
         },
         required: ["workspaceId"]
@@ -16347,88 +16347,88 @@ var TOOL_LIST = {
     },
     {
       name: "attach_doc",
-      description: "File an existing doc, diff review or folder bind onto a board, so its open comment threads reach that board's Home queue. A link only — the doc keeps its own URL and nothing is migrated. docId also accepts a review id, which attaches the whole review as one unit. Idempotent.",
+      description: "File an existing doc, diff review or folder bind onto a board, so its open comment threads reach that board's Home queue. It is a link only, so the doc keeps its own URL and nothing moves. docId also takes a review id, which attaches the whole review as one unit. Idempotent.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string", description: "Board workspace id from create_workspace." },
-          docId: { type: "string", description: "Doc id, or a diff-review/folder-bind id." }
+          docId: { type: "string", description: "Doc id, or a diff-review or folder-bind id." }
         },
         required: ["workspaceId", "docId"]
       }
     },
     {
       name: "create_tasks",
-      description: "File work on a board. Always takes a list; one task is a one-item list, so this is the only create verb. Per task: omit assignee and you own it, omit goal and it lands unplaced at the bottom of Backlog. Tasks you file land in triage — on the board, but not in anyone's queue until somebody moves them out with task_transition. A bad task never rejects the batch; it comes back in failures by index. Anything on a task that will reach the reader's queue passes the board's quality gate — a `review` payload, and the task's own question when it is `needs: 'decision'`. A task that comes back `held: true` is filed but OFF that queue until you close the gap in `heldReason`; the result carries the exact revise_review_item(…) call that lifts it, and every revision is judged again.",
+      description: "File work on a board. This is the only create verb. It always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced in Backlog. New tasks stay in triage until task_transition releases them. A bad task returns in failures by index, not rejecting the batch. `held: true` means it waits off the queue until revise_review_item closes `heldReason`.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string" },
           tasks: {
             type: "array",
-            description: 'The tasks, at most 100 — an oversized batch is refused whole; a tracker that big belongs in import_tasks_markdown. `title` is the only required field. `key` labels a task so a later task in the same batch can reference it: unique in the batch, not all digits, no leading "#". Tasks are created in order, so a task can only depend on one above it; a forward reference is refused.',
+            description: "The tasks, at most 100. A larger batch is refused whole, and belongs in import_tasks_markdown. `title` is the only required field. `key` labels a task so a later task in the same batch can reference it. Tasks are created in order, so a task can only depend on one above it.",
             items: {
               type: "object",
               properties: {
                 title: {
                   type: "string",
-                  description: "One line naming the work, in the form `<persona> can <do x> so that <goal y>` — one persona (Agent, Bryan, Collaborator), 20 words or less. A title that states an observation rather than an outcome gives a column of tasks nothing to prioritise by. Never refused; the lead's shape review is where a rough one gets rewritten."
+                  description: "One line naming the work, in the form `<persona> can <do x> so that <goal y>`. One persona: Agent, Bryan or Collaborator. 20 words or fewer. State an outcome rather than an observation, so a column of tasks can be ranked."
                 },
                 body: {
                   type: "string",
-                  description: "What the task is for, as a compact user story — `<persona> can <do x> so that <goal y>`, one persona (Agent, Bryan, Collaborator) — plus \"done when\" criteria for anything you hand over or park. Markdown; it comes back whole from next_tasks. On a `needs:'decision'` task this is required and must contain the actual question, the stakes, and what each option costs; a body with no question in it is refused."
+                  description: "What the task is for, as a compact user story, plus \"done when\" criteria for anything you hand over or park. Markdown, and next_tasks returns it whole. On a `needs: 'decision'` task the body must carry the question, the stakes and what each option costs, or it is refused."
                 },
                 key: {
                   type: "string",
-                  description: 'An optional label THIS batch uses to reference the task from a later task\'s `after` / `afterEnforce`. Unique within the batch; not all digits; must not start with "#". Means nothing outside this call.'
+                  description: 'An optional label THIS batch uses to reference the task from a later task\'s `after` or `afterEnforce`. Unique within the batch, not all digits, and must not start with "#". It means nothing outside this call.'
                 },
                 assignee: {
                   type: "string",
-                  description: "Who owns this task: 'human', or a named person or agent. Omit it and you own it. The bare word 'agent' is refused — it names a category rather than somebody; that refusal means your session was launched without CW_AGENT_NAME."
+                  description: "Who owns this task: 'human', or a named person or agent. Omit it and you own it. The bare word 'agent' is refused, and that refusal means the session was launched without CW_AGENT_NAME."
                 },
                 assigneeKind: {
                   type: "string",
                   enum: ["person", "agent"],
-                  description: "'person' or 'agent' — say which whenever `assignee` is a name that is not your own. The board cannot tell a person from an agent of the same name and will not guess, so an undeclared owner shows as \"not recorded\". Not needed for yourself or for 'human'."
+                  description: "'person' or 'agent'. Say which whenever `assignee` is a name that is not your own, because the board does not guess and shows an undeclared owner as \"not recorded\". Not needed for yourself or for 'human'."
                 },
                 needs: {
                   type: "string",
                   enum: ["action", "decision"],
-                  description: "Only meaningful when assignee is a human. 'decision' makes the ticket itself one decision, answered verbatim through answer_decision; it requires a decision-shaped `body`. The `review` field lets the ticket carry several separately-answered questions alongside the work."
+                  description: "Only meaningful when assignee is a human. 'decision' makes the task itself one decision, answered verbatim through answer_decision, and it requires a decision-shaped `body`. Use the `review` field for questions answered separately alongside the work."
                 },
                 options: {
                   type: "array",
-                  description: "Candidate answers for this task's one decision: [{label, detail?}]. `label` is recorded verbatim as the answer if picked; `detail` is what picking it costs. Two or more. They are a shortcut, not a closed set — writing a different answer stays available, so do not pad the list.",
+                  description: "Candidate answers for this task's one decision: [{label, detail?}]. `label` is recorded verbatim when picked, and `detail` is what picking it costs. Two or more. The reader can still write a different answer, so do not pad the list.",
                   items: { type: "object" }
                 },
                 review: NEW_TASK_REVIEW_ITEM_SCHEMA,
                 goal: {
                   type: "string",
-                  description: 'Goal id, or "chores". OMIT to leave this task UNPLACED at the bottom of Backlog for the lead to place. An explicit goal — even "chores" — is a placement.'
+                  description: 'Goal id, or "chores". OMIT it to leave the task unplaced at the bottom of Backlog for the lead to place. An explicit goal, even "chores", is a placement.'
                 },
                 order: { type: "number", description: "Fractional position within the goal." },
                 after: {
                   type: "array",
                   items: { type: "string" },
-                  description: 'What this task waits on ("don\'t start yet" is a dependency, not a status). An existing task id, or a task of THIS batch by index (`0`) or by another task\'s `key` (`"#seed"`).'
+                  description: 'What this task waits on. An existing task id, a task in THIS batch by index (`0`), or another task\'s `key` (`"#seed"`).'
                 },
                 afterEnforce: {
                   type: "array",
                   items: { type: "string" },
-                  description: "Subset of `after` that hard-blocks transitions while open. Every entry must also appear in `after`, or the task is refused rather than silently widening the gate."
+                  description: "Subset of `after` that hard-blocks transitions while open. Every entry must also appear in `after`, or the task is refused."
                 },
                 dueAt: {
                   type: "number",
-                  description: "Epoch ms. Optional at every level — never invent one."
+                  description: "Epoch ms. Optional at every level. Never invent one."
                 },
                 links: {
                   type: "array",
-                  description: "Refs this task mentions: {kind:'doc',docId} | {kind:'thread',docId,threadId} | {kind:'task',taskId} | {kind:'diff',workspaceId} | {kind:'url',url}. Use `url` for anything outside this server; http(s) only. A malformed ref is dropped into `ignoredLinks` rather than failing the task.",
+                  description: "Refs this task mentions: {kind:'doc',docId} | {kind:'thread',docId,threadId} | {kind:'task',taskId} | {kind:'diff',workspaceId} | {kind:'url',url}. Use `url` for anything outside this server, http(s) only. A malformed ref lands in `ignoredLinks` and does not fail the task.",
                   items: { type: "object" }
                 },
                 quote: {
                   type: "string",
-                  description: "The human's VERBATIM words, for chat-born asks — kept forever on the task. (For thread-born asks use spin_off_task, which captures the quote itself.)"
+                  description: "The person's VERBATIM words, for an ask that came from chat, kept on the task. For a thread-born ask use spin_off_task, which captures the quote itself."
                 }
               },
               required: ["title"]
@@ -16437,7 +16437,7 @@ var TOOL_LIST = {
           },
           sourceDoc: {
             type: "object",
-            description: "The doc these tasks were derived from — set it whenever you are filing tasks out of a doc, and every task gets a structured origin ref back to it (no separate link call). `mode` says what kind of doc: 'plan' (the default for an ordinary doc) files the tasks as DRAFTS — visible on the board, in no dispatch read, held in triage until a person approves the plan on the doc page, which releases them; 'discussion' (the default for a meeting notes doc) files them live immediately. A later edit to the doc flags still-open derived tasks as possibly stale.",
+            description: "The doc these tasks were derived from, which gives every task a structured origin ref back to it. `mode` says what kind of doc it is. 'plan', the default for an ordinary doc, files the tasks as DRAFTS, held in triage until a person approves the plan on the doc page. 'discussion', the default for meeting notes, files them live. A later doc edit flags still-open derived tasks as stale.",
             properties: {
               docId: { type: "string" },
               mode: { type: "string", enum: ["plan", "discussion"] }
@@ -16450,7 +16450,7 @@ var TOOL_LIST = {
     },
     {
       name: "spin_off_task",
-      description: "Turn a comment thread into a task. Captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body from it when you don't supply them. This is the verb for thread-born asks; create_tasks is for everything else.",
+      description: "Turn a comment thread into a task. It captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body when you do not supply them. Use create_tasks for an ask that did not come from a thread.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16459,17 +16459,17 @@ var TOOL_LIST = {
           workspaceId: { type: "string", description: "Board workspace the task lands in." },
           title: {
             type: "string",
-            description: "Override the drafted title — worth sending, since the draft is a clip of a comment and names what was said rather than what will be done. `<persona> can <do x> so that <goal y>`, 20 words or less."
+            description: "Override the drafted title. Worth sending, because the draft clips a comment and names what was said rather than what will be done. Use `<persona> can <do x> so that <goal y>`, 20 words or fewer."
           },
           body: { type: "string", description: "Override the drafted body." },
           assignee: {
             type: "string",
-            description: "Who owns it. Omit and you do — same rule as a create_tasks entry's assignee."
+            description: "Who owns it. Omit it and you do, the same rule as a create_tasks entry's assignee."
           },
           assigneeKind: {
             type: "string",
             enum: ["person", "agent"],
-            description: "'person' or 'agent' — say which whenever `assignee` is a name that is not your own. The board cannot tell a person from an agent of the same name and will not guess, so an undeclared owner shows as \"not recorded\". Not needed for yourself or for 'human'."
+            description: "'person' or 'agent'. Say which whenever `assignee` is a name that is not your own, because the board does not guess and shows an undeclared owner as \"not recorded\". Not needed for yourself or for 'human'."
           },
           needs: { type: "string", enum: ["action", "decision"] },
           goal: { type: "string", description: "Goal id. OMIT to route through triage." },
@@ -16481,7 +16481,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_review_item_criteria",
-      description: "Set what this board's quality gate judges a review item against — a natural-language prompt the judge reads verbatim before each add_review_item / revise_review_item. Omit `criteria` (or pass an empty string) to restore the default, which asks for a headline in the reader's words, stakes and what to look at in the detail, a cost on every option, inline links, and no raw ids or unexpanded acronyms. get_workspace shows the current text.",
+      description: "Set what this board's quality gate judges a review item against. The judge reads this prompt verbatim before each add_review_item and revise_review_item. Omit `criteria`, or pass an empty string, to restore the default. get_workspace shows the current text.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16492,7 +16492,7 @@ var TOOL_LIST = {
           },
           criteria: {
             type: "string",
-            description: "The criteria, as prose the judge will read. Up to 4,000 characters. Omit to restore the default."
+            description: "The criteria, as prose the judge reads. Up to 4,000 characters. Omit it to restore the default."
           }
         },
         required: ["workspaceId"]
@@ -16500,7 +16500,7 @@ var TOOL_LIST = {
     },
     {
       name: "get_workspace",
-      description: "Read a board's goals in priority order, with per-goal task counts, plus the parallelism cap — its value, slots in use and free, and who last moved it and when. First goal is the highest band. Call it before deciding what to work on — list_tasks returns goal ids only, so without this the ordering is invisible. Cheap by design: pair it with next_tasks, which carries the tasks themselves.",
+      description: "Read a board's goals in priority order, with per-goal task counts and the parallelism cap. The first goal is the highest band. Call it before deciding what to work on, because list_tasks returns goal ids only. Pair it with next_tasks, which carries the tasks themselves.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16511,18 +16511,18 @@ var TOOL_LIST = {
     },
     {
       name: "find_related_work",
-      description: "Before writing a plan, or creating a goal, ask what on this board already covers the request. Returns the goals and plan docs that line up — each with a score, a one-line reason and a relative link — or an empty list when nothing does. Cheap: token overlap plus the board's own links, no model call. If anything comes back, file ONE decision review item (extend / replace / new) and wait for the answer; if nothing does, plan from scratch. Either way the goal you create or update gets a description and a link to the doc the request came from.",
+      description: "Ask what on this board already covers a request, before you write a plan or create a goal. It returns the goals and plan docs that line up, each with a score, a one-line reason and a relative link. Nothing matching gives an empty list. It costs no model call. When something comes back, file one decision review item (extend, replace or new) and wait for the answer.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string" },
           text: {
             type: "string",
-            description: "The request in the words it was asked in. Scoring does not depend on length, so paste the whole ask rather than boiling it down to a keyword."
+            description: "The request in the words it was asked in. Scoring does not depend on length, so paste the whole ask rather than a keyword."
           },
           docId: {
             type: "string",
-            description: "The doc the request came out of — meeting notes, a huddle, a thread. A goal that already links it is returned even when its title shares no word with the request."
+            description: "The doc the request came out of, such as meeting notes or a thread. A goal that already links that doc is returned even when its title shares no word with the request."
           },
           limit: { type: "number", description: "How many matches to return. Default 5, max 20." }
         },
@@ -16531,7 +16531,7 @@ var TOOL_LIST = {
     },
     {
       name: "next_tasks",
-      description: 'The work queue: what to pick up next, in priority order, filtered to what you can actually do. Take the whole ready set, not just the first task. Each task carries its full description, blockedBy, ready, and bodyWrittenAt — descriptions age, so check that date before trusting one. Skip any task whose claimedBy is an active session that is not you. Triage tasks are never returned; read those with list_tasks(status:"triage"). The todo tasks on offer are TRIMMED to the board\'s free parallelism slots, so a short list is usually the cap rather than an empty band — `capacity` names the cap, the slots in use, and how many ready tasks were held back. list_tasks(status:"todo") shows every one of them.',
+      description: "The work queue: what to pick up next, in priority order, filtered to what you can do. Take the whole ready set, not just the first task. Skip a task whose claimedBy is an active session that is not you. The todo tasks are trimmed to the board's free parallelism slots, and `capacity` names the cap, the slots in use, and the ready tasks held back.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16544,7 +16544,7 @@ var TOOL_LIST = {
           },
           includeArchived: {
             type: "boolean",
-            description: "Include soft-deleted tasks. Default false, and leave it false here: an archived task is one somebody decided is not going to happen, so it is not work to pick up. Use `list_tasks` with this flag to FIND archived tasks."
+            description: "Include soft-deleted tasks. Default false, and leave it false here, because an archived task is one somebody decided will not happen. Use list_tasks with this flag to FIND archived tasks."
           }
         },
         required: ["workspaceId"]
@@ -16552,7 +16552,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_tasks",
-      description: "List a board's tasks, filtered by goal / status / assignee / needs. Tasks come back trimmed — no body, no transition history. Pass fields to narrow further; the default shape runs large on a big board. Archived tasks need includeArchived: true.",
+      description: "List a board's tasks, filtered by goal, status, assignee or needs. Tasks come back trimmed, with no body and no transition history. Pass fields to narrow further, because the default shape runs large on a big board. Archived tasks need includeArchived: true.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16561,18 +16561,18 @@ var TOOL_LIST = {
           status: {
             type: "string",
             enum: [...TASK_STATUSES],
-            description: 'status:"triage" is the sweep for tasks an agent filed that nobody has vetted. next_tasks never returns them, so this filter is the only way to enumerate what is waiting on a look.'
+            description: 'status:"triage" enumerates the tasks an agent filed that nobody has vetted. next_tasks never returns them, so this filter is the only way to find them.'
           },
           assignee: { type: "string" },
           needs: { type: "string", enum: ["action", "decision"] },
           fields: {
             type: "array",
             items: { type: "string" },
-            description: "Project each task to just these keys (`id` always included). Use it for board-wide sweeps so heavy per-task fields — reviews, infoRequests, options — don't overflow the result: fields:['title','status','assignee'] answers most triage questions in a few KB."
+            description: "Project each task to these keys, with `id` always included. Use it for board-wide sweeps, so that heavy fields such as reviews, infoRequests and options do not overflow the result."
           },
           includeArchived: {
             type: "boolean",
-            description: 'Include soft-deleted tasks, which are hidden by default. Each comes back carrying `archivedAt`, `archivedBy` and `archiveReason`, so this is the read behind "what did we archive, and why". `unarchive_task` puts one back.'
+            description: 'Include soft-deleted tasks, which are hidden by default. Each one carries `archivedAt`, `archivedBy` and `archiveReason`, so this is the read behind "what did we archive, and why". unarchive_task puts one back.'
           }
         },
         required: ["workspaceId"]
@@ -16580,13 +16580,13 @@ var TOOL_LIST = {
     },
     {
       name: "task_transition",
-      description: "The single gate for status changes (triage | todo | in-progress | done), attributed to you on the task's trail. It is also the only way to clear a triage task. Takes a GOAL id as `taskId` too: a goal in triage is a band nobody has agreed to — every task under it is held out of next_tasks and the ready nudge, and the stall check does not judge them — so moving a goal to `todo` releases its band and moving it to `triage` holds it again. Say what you did in `note` — the commit, the PR, what you verified — because the note is the whole of what the trail keeps. Re-sending the same status refuses; there is nothing to change.",
+      description: "The single gate for status changes (triage, todo, in-progress, done). It is the only way to clear a triage task. `taskId` also takes a GOAL id. A goal in triage holds every task under it out of next_tasks, so move the goal to `todo` to release the band. Say what you did in `note`, which is the whole of what the trail keeps. Re-sending the same status is refused.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           to: { type: "string", enum: [...TASK_STATUSES] },
@@ -16604,13 +16604,13 @@ var TOOL_LIST = {
     },
     {
       name: "assign_task",
-      description: "Hand a task to somebody: 'human', a person, or an agent's name. Use it the moment you find a task is not yours to finish — an unassigned blocker looks like work in flight to everyone reading the board. Refuses the bare word 'agent', which names a category rather than somebody. Status is untouched.",
+      description: "Hand a task to somebody: 'human', a person, or an agent's name. Use it as soon as you find a task is not yours to finish, because an unassigned blocker reads as work in flight. The bare word 'agent' is refused. Status is untouched.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           assignee: {
@@ -16620,7 +16620,7 @@ var TOOL_LIST = {
           assigneeKind: {
             type: "string",
             enum: ["person", "agent"],
-            description: "'person' or 'agent' — say which whenever `assignee` is a name that is not your own. The board cannot tell a person from an agent of the same name and will not guess, so an undeclared owner shows as \"not recorded\". Not needed for yourself or for 'human'."
+            description: "'person' or 'agent'. Say which whenever `assignee` is a name that is not your own, because the board does not guess and shows an undeclared owner as \"not recorded\". Not needed for yourself or for 'human'."
           }
         },
         required: ["workspaceId", "taskId", "assignee"]
@@ -16628,17 +16628,17 @@ var TOOL_LIST = {
     },
     {
       name: "block_task",
-      description: 'Say what a task is waiting for: name the ticket or tickets that have to close first. The task reads as Blocked on the board from that moment — the edge IS the state, there is no status to set — it leaves next_tasks and the stall check, and it comes free by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. A todo task and an in-progress task both read as Blocked; blocking one you are already working on is legitimate and says so on the board rather than silently dropping it from the queue. Adds to whatever the task already waits on; remove an edge with set_task_dependencies. This replaces park_task: "not now" belongs to whatever the work is waiting for, and triage is for tasks nobody has vetted yet. A task waiting on a PERSON is not blocked — leave it in-progress and file the ask with add_review_item.',
+      description: "Name the tasks that have to close before this one starts. The task reads as Blocked from that moment, leaves next_tasks and the stall check, and comes free when the last blocker closes. It adds to whatever the task already waits on, and set_task_dependencies removes an edge. A task waiting on a PERSON is not blocked: leave it in-progress and file the ask with add_review_item.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           blockedBy: {
-            description: "The task id, or ids, this task waits on. Each must be a task on the same board; an unknown id is refused rather than recorded, because a dangling edge blocks nothing and says it does.",
+            description: "The task id, or ids, this task waits on. Each must be a task on the same board, and an unknown id is refused rather than recorded.",
             oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }]
           }
         },
@@ -16647,18 +16647,18 @@ var TOOL_LIST = {
     },
     {
       name: "archive_task",
-      description: "Take a task off the board without destroying it — the soft delete, and the only removal a task has. Reach for it freely for a duplicate, a task the goal moved past, or a capture that turned out not to be work. It writes three fields and nothing else, so unarchive_task is a field clear rather than a restore. Archiving is not completing — if the work happened, use done. Write a reason.",
+      description: "Take a task off the board without destroying it. This is the soft delete, and the only removal a task has. Use it for a duplicate, a task the goal moved past, or a capture that turned out not to be work. unarchive_task reverses it. Archiving is not completing: when the work happened, use done.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           reason: {
             type: "string",
-            description: 'Why, in one line — e.g. "duplicate of the index task" or "the goal moved past this". Capped at 200 characters. Optional, and the task is archived either way; it is the half a later reader acts on.'
+            description: 'Why, in one line, for example "duplicate of the index task". Capped at 200 characters. Optional, and the task is archived either way.'
           }
         },
         required: ["workspaceId", "taskId"]
@@ -16666,13 +16666,13 @@ var TOOL_LIST = {
     },
     {
       name: "unarchive_task",
-      description: "Put an archived task back — it rejoins its band at the position, status and owner it always had. Find archived tasks with list_tasks(includeArchived: true). A task that was not archived answers changed: false rather than erroring.",
+      description: "Put an archived task back. It rejoins its band at the position, status and owner it had. Find archived tasks with list_tasks(includeArchived: true). A task that was not archived answers changed: false rather than erroring.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" }
         },
@@ -16681,26 +16681,26 @@ var TOOL_LIST = {
     },
     {
       name: "rewrite_task",
-      description: "Rewrite a task's title, body, or both, with a reason that rides the audit trail. Body is a whole-body replace — send the full markdown. The task's original words are preserved to quote automatically, so a rewrite is never the only record of what was said. When the words are a person's deliberate phrasing, ask on the task instead of replacing them.",
+      description: "Rewrite a task's title, body, or both, with a reason that rides the audit trail. Body is a whole-body replace, so send the full markdown. The task's original words are preserved and quoted automatically. When the words are a person's deliberate phrasing, ask on the task instead of replacing them.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           title: {
             type: "string",
-            description: "The new one-line name. Omit to keep the current one. Aim for `<persona> can <do x> so that <goal y>` — one persona, 20 words or less, never clipped mid-word; the full standard is in the `claude-workspaces:working-in-a-workspace` skill."
+            description: "The new one-line name. Omit it to keep the current one. Aim for `<persona> can <do x> so that <goal y>`, one persona, 20 words or fewer."
           },
           body: {
             type: "string",
-            description: "The FULL new description, replacing what is there. Omit to leave the body alone (a title-only fix). Open with the user story, keep it phone-readable, and state a falsifiable done-when."
+            description: "The FULL new description, replacing what is there. Omit it to leave the body alone. Open with the user story, keep it readable on a phone, and state a falsifiable done-when."
           },
           reason: {
             type: "string",
-            description: 'Why you are rewriting, in one line — e.g. "title named the artifact, not the outcome". Recorded on the audit entry and rendered in the activity feed, so the filer can see what the rewrite was for.'
+            description: 'Why you are rewriting, in one line, for example "title named the artifact, not the outcome". It is recorded on the audit entry and shown in the activity feed.'
           }
         },
         required: ["workspaceId", "taskId", "reason"]
@@ -16708,20 +16708,20 @@ var TOOL_LIST = {
     },
     {
       name: "set_task_goal",
-      description: "Place a task under a goal at an exact position — pick the spot, not just the bucket. position is fractional, so there is always room between two tasks; omit it for the bottom of the band. Every move is recorded, so regroup freely. When your move crosses a placement a person made, say why in a comment on the task.",
+      description: "Place a task under a goal at an exact position. `position` is fractional, so there is always room between two tasks. Omit it for the bottom of the band. Every move is recorded, so regroup freely. When your move crosses a placement a person made, say why in a comment on the task.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           goal: { type: "string", description: 'Goal id, or "chores".' },
           position: { type: "number" },
           batchId: {
             type: "string",
-            description: "Echo the batchId from the `workspace.goals_changed` event this placement answers. It ties the move to the goal edit that prompted it, so the activity view reads N moves as one edit instead of N unexplained rereviews."
+            description: "Echo the batchId from the `workspace.goals_changed` event this placement answers. It ties the move to the goal edit that prompted it, so the activity view reads many moves as one edit."
           }
         },
         required: ["workspaceId", "taskId", "goal"]
@@ -16729,7 +16729,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_goal_list",
-      description: "Add or remove a goal by submitting the board's whole ordered list. Send an entry with no id to add a band (the server mints it); send an existing id exactly as get_workspace reports it to keep one. A band you add starts in `triage` — not ready to work on: nothing under it is dispatched until somebody moves the goal to `todo` with task_transition(taskId: <goal id>, to: 'todo'). Use rename_goal to retitle and reorder_goals to re-prioritise — both are safer, because this is a full replace and any id you leave out is removed. Removing a band that still holds tasks is refused until you name it in drop.",
+      description: "Add or remove a goal by submitting the board's whole ordered list. An entry with no id adds a band. A new band starts in `triage`, and nothing under it is dispatched until task_transition moves the goal to `todo`. This is a full replace, so any id you leave out is removed. Removing a band that still holds tasks is refused until you name it in drop.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16741,7 +16741,7 @@ var TOOL_LIST = {
               properties: {
                 id: {
                   type: "string",
-                  description: "Omit to create this band — the server mints an opaque id and returns it in `created`. Include it, exactly as get_workspace reports it, to keep a band you already have. Goal ids are generated and permanent; an id this board does not hold is refused as `unknown-goal-id`."
+                  description: "Omit it to create this band, and the server returns the minted id in `created`. Goal ids are generated and permanent. Include it, exactly as get_workspace reports it, to keep a band you already have. An id this board does not hold is refused as `unknown-goal-id`."
                 },
                 title: { type: "string" },
                 dueAt: { type: "number" }
@@ -16752,7 +16752,7 @@ var TOOL_LIST = {
           drop: {
             type: "array",
             items: { type: "string" },
-            description: "Goal ids you intend to remove even though they still hold tasks — the acknowledgement that turns the refusal into the removal. Read what the refusal said each band holds first. Ids that are not actually being removed are ignored."
+            description: "Goal ids you intend to remove even though they still hold tasks. It turns the refusal into the removal, so read what the refusal said each band holds first. An id that is not being removed is ignored."
           }
         },
         required: ["workspaceId", "goals"]
@@ -16760,7 +16760,7 @@ var TOOL_LIST = {
     },
     {
       name: "rename_goal",
-      description: "Change a goal's title in place, by id. The id never moves, so no task moves. Use this rather than set_goal_list, which would make you restate every other band. dueAt is optional: a number sets it, null clears it, omitting it leaves it alone.",
+      description: "Change a goal's title in place, by id. The id never moves, so no task moves. Use it rather than set_goal_list, which would make you restate every other band. `dueAt` is optional: a number sets it, null clears it, and omitting it leaves it alone.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16780,7 +16780,7 @@ var TOOL_LIST = {
     },
     {
       name: "reorder_goals",
-      description: "Change the priority order of a board's goals — order is priority. Permutation only: order must be exactly the ids the board already holds, so nothing can be created, renamed or lost. Take the ids from get_workspace and send every goal whose reorderable is true. Use set_goal_list only when you actually mean to add or remove a band.",
+      description: "Change the priority order of a board's goals, because order is priority. Permutation only: `order` must be exactly the ids the board already holds, so nothing is created, renamed or lost. Take the ids from get_workspace and send every goal whose reorderable is true.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16788,7 +16788,7 @@ var TOOL_LIST = {
           order: {
             type: "array",
             items: { type: "string" },
-            description: "EVERY reorderable goal id, in the new priority order, highest first. Leaving one out is an error, not a demotion; including a non-reorderable goal (Backlog) is an error too."
+            description: "EVERY reorderable goal id, in the new priority order, highest first. Leaving one out is an error, not a demotion. Including a non-reorderable goal, such as Backlog, is an error too."
           }
         },
         required: ["workspaceId", "order"]
@@ -16796,15 +16796,15 @@ var TOOL_LIST = {
     },
     {
       name: "add_review_item",
-      description: "Hang a question on a ticket that already exists — the verb for a question that came up while working it, so the ask stays attached to the work that raised it. A ticket carries several at once, each answered on its own, so the title keeps naming the work and a second question needs no second ticket. When you are filing the work and the question together, use review on a create_tasks entry instead. Every item passes a quality gate (the board’s criteria, see set_review_item_criteria): a result with `held: true` means it is on the ticket but OFF the reader’s queue — fix the gap in `heldReason` with revise_review_item, which judges it again.",
+      description: "Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use `review` on a create_tasks entry. Every item passes the board's quality gate: `held: true` means it is OFF the reader's queue until revise_review_item closes `heldReason`.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
-          taskId: { type: "string", description: "The ticket the question hangs on." },
+          taskId: { type: "string", description: "The task the question hangs on." },
           review: TASK_REVIEW_ITEM_SCHEMA
         },
         required: ["workspaceId", "taskId", "review"]
@@ -16812,23 +16812,23 @@ var TOOL_LIST = {
     },
     {
       name: "answer_review_item",
-      description: "Record a person's verbatim answer to one review item on their behalf, for when they told you in chat or voice — in the UI they answer directly. Pass their exact words, never a paraphrase. Naming reviewItemId is what keeps several open questions on one ticket independently answerable. Does not transition the ticket; close it with task_transition once you have acted on the returned links.",
+      description: "Record a person's verbatim answer to one review item on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. reviewItemId keeps several open questions on one task independently answerable. It does not transition the task, so close that with task_transition once you have acted on the returned links.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           reviewItemId: {
             type: "string",
-            description: "Which item is being answered (from list_tasks / the ticket's `reviews`, or any queue row). Alone — no taskId — it addresses the item wherever it lives, a doc-thread item included. Omit it on a ticket that is itself a decision — the answer then lands on that decision."
+            description: "Which item is being answered, from list_tasks, the task's `reviews`, or any queue row. Alone, with no taskId, it addresses the item wherever it lives, a doc-thread item included. Omit it on a task that is itself a decision, and the answer lands on that decision."
           },
           text: { type: "string", description: "The human's verbatim answer." },
           answeredWith: {
             type: "string",
-            description: "The id of the option they picked, if they picked one. The answer is still `text` — pass the option's label as the text. Omit when they answered in their own words."
+            description: "The id of the option they picked, if they picked one. The answer is still `text`, so pass the option's label as the text. Omit it when they answered in their own words."
           }
         },
         required: ["workspaceId", "text"]
@@ -16836,18 +16836,18 @@ var TOOL_LIST = {
     },
     {
       name: "request_more_info",
-      description: "Ask a question BACK at a review item instead of answering it, on the human's behalf. The item stays open and stays counted on the queue, and the agent that raised it owes the context. This is what keeps a set of options from being a closed set — 'none of these, tell me X' is a real response to a decision.",
+      description: "Ask a question BACK at a review item instead of answering it, on the person's behalf. The item stays open and stays counted on the queue, and the agent that raised it owes the context. It is what keeps a set of options from being a closed set.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           reviewItemId: {
             type: "string",
-            description: "Which item is being asked about. Alone — no taskId — it addresses the item wherever it lives; on a doc-thread item the question posts as a reply on its thread. Omit on a ticket that is itself an old-style decision, same rule as answer_review_item."
+            description: "Which item is being asked about. Alone, with no taskId, it addresses the item wherever it lives, and on a doc-thread item the question posts as a reply on its thread. Omit it on a task that is itself a decision, the same rule as answer_review_item."
           },
           question: { type: "string", description: "What they want to know, verbatim." }
         },
@@ -16856,25 +16856,25 @@ var TOOL_LIST = {
     },
     {
       name: "revise_review_item",
-      description: "Rewrite one of your review items in place — the answer to a question somebody asked ON it, or the fix for an item the quality gate HELD (`held: true` from add_review_item, or a workspace.review_item_held wake). Pass only the fields that change; the previous words are kept as history. Address the item wherever you raised it: on a TICKET, `taskId` + `reviewItemId` (the id rides with the question on the task's thread); for the TICKET'S OWN decision — a `needs: 'decision'` task, which has no item id because its words ARE the title, body and options — `taskId` alone, the shape answer_decision takes for the same task; on a DOC THREAD, `docId` + `threadId` + `commentId` — the review is a payload on one comment, and `commentId` is the `thread.comments[].id` that create_thread / post_reply already handed you when you raised it. Half a doc address is refused, not guessed. EVERY form re-judges every revision — a held item reaches the reader's queue when it passes, and a revision that still misses the mark comes back `held: true` with the gap named. The ticket form additionally returns an already-queued item marked Revised, with their question quoted and the changed span highlighted, and `reply` posts on the asking thread in the same call. Revising a ticket's own decision rewrites the task's words, so rewrite_task does the same job and is judged the same way. The doc form has no `reply`; it rewrites the item, judges it, and tells the thread's watchers.",
+      description: "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: {
             type: "string",
-            description: "Ticket form: the ticket. With reviewItemId, one of the items filed on it; alone, the ticket's OWN decision."
+            description: "Task form: the task. With reviewItemId it names one of the items filed on it. Alone it names the task's OWN decision."
           },
           reviewItemId: {
             type: "string",
-            description: "Which item to revise. Alone — no taskId — it addresses the item wherever it lives, a doc-thread item included. With taskId, one of the items filed on that ticket. Omit for the ticket's own decision — the question a `needs: 'decision'` task asks in its title and body, which carries no item id."
+            description: "Which item to revise. Alone, with no taskId, it addresses the item wherever it lives, a doc-thread item included. With taskId it names one of the items filed on that task. Omit it for the task's own decision, which carries no item id."
           },
           docId: {
             type: "string",
-            description: "Doc-thread form: the doc the thread lives on. Pass with threadId and commentId."
+            description: "Doc-thread form: the doc the thread lives on. Pass it with threadId and commentId."
           },
           threadId: {
             type: "string",
@@ -16882,18 +16882,18 @@ var TOOL_LIST = {
           },
           commentId: {
             type: "string",
-            description: "Doc-thread form: the comment carrying the review payload — `thread.comments[].id` in what create_thread / post_reply returned when you raised the item."
+            description: "Doc-thread form: the comment carrying the review payload. It is the `thread.comments[].id` that create_thread or post_reply returned when you raised the item."
           },
           headline: TASK_REVIEW_ITEM_SCHEMA.properties.headline,
           detail: TASK_REVIEW_ITEM_SCHEMA.properties.detail,
           options: TASK_REVIEW_ITEM_SCHEMA.properties.options,
           reply: {
             type: "string",
-            description: "A reply on the thread that asked — one or two sentences pointing at what changed. Refused when nobody has asked on this item yet. Ticket form only: a doc-thread item already lives in a thread, so point at the change there with post_reply."
+            description: "A reply on the thread that asked, one or two sentences pointing at what changed. Refused when nobody has asked on this item yet. Task form only, because a doc-thread item already lives in a thread. Use post_reply there."
           },
           revisedRange: {
             type: "object",
-            description: "Which span of the NEW detail changed, as character offsets, when the diff would not say it well (you moved a paragraph, say). Omitted, the changed span is derived.",
+            description: "Which span of the NEW detail changed, as character offsets, for when the diff would not show it well. Omitted, the changed span is derived.",
             properties: { start: { type: "number" }, end: { type: "number" } },
             required: ["start", "end"]
           }
@@ -16903,21 +16903,21 @@ var TOOL_LIST = {
     },
     {
       name: "withdraw_review_item",
-      description: "Take back a review item — normally one you raised, for an ask that turned out to be wrong or that a later one replaced; any agent in the workspace can retire a stale one, and the item records who did. Address it by bare reviewItemId wherever it lives (a ticket item or a doc-thread item alike), or by the doc-thread triple as before. The reader stops being asked: it leaves their queue and reads as withdrawn where it was raised, with your reason beside it. Your words stay there verbatim, because they may already have read them. Prefer revise_review_item when the question still stands and only its wording is wrong; withdraw is for when there is nothing left to ask. On a shared doc thread this is how you clean up one of TWO items without touching the other — resolve_thread would retire the whole thread and take the live ask with it. Refused on an item somebody has already answered: that would retract their answer. `undo: true` puts it back.",
+      description: "Take back a review item. It leaves the reader's queue and reads as withdrawn, with your reason beside it. Any agent on the board can retire a stale one. Prefer revise_review_item when the question still stands and only its wording is wrong. On a shared thread use this rather than resolve_thread, which retires every item. Refused on an item somebody already answered. `undo: true` puts it back.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           reviewItemId: {
             type: "string",
-            description: "The item, by its id — from the queue row, the ticket, or add_review_item. Addresses either surface; no other id needed."
+            description: "The item, by its id, from the queue row, the task, or add_review_item. It addresses either surface, and needs no other id."
           },
           taskId: {
             type: "string",
-            description: "Optional with reviewItemId: the ticket you already know holds the item, skipping a lookup."
+            description: "Optional with reviewItemId: the task you already know holds the item, which skips a lookup."
           },
           docId: { type: "string", description: "Doc-thread form: the doc the thread lives on." },
           threadId: {
@@ -16926,11 +16926,11 @@ var TOOL_LIST = {
           },
           commentId: {
             type: "string",
-            description: "Doc-thread form: the comment carrying the review payload — `thread.comments[].id` in what create_thread / post_reply returned when you raised the item."
+            description: "Doc-thread form: the comment carrying the review payload. It is the `thread.comments[].id` that create_thread or post_reply returned when you raised the item."
           },
           reason: {
             type: "string",
-            description: 'One line on why, shown with the retracted item. Worth writing: "superseded by the item below" is the difference between a disappearance and a correction.'
+            description: 'One line on why, shown with the retracted item. "Superseded by the item below" is the difference between a disappearance and a correction.'
           },
           undo: {
             type: "boolean",
@@ -16942,23 +16942,23 @@ var TOOL_LIST = {
     },
     {
       name: "answer_decision",
-      description: "Record a person's verbatim answer to a decision task on their behalf, for when they told you in chat or voice — in the UI they answer directly. Pass their exact words, never a paraphrase. This answers the ticket's own decision; answer_review_item answers one of the items hanging on a ticket. Neither transitions the ticket — close it with task_transition once you have acted on the returned links.",
+      description: "Record a person's verbatim answer to a decision task on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. This answers the task's own decision, and answer_review_item answers one of the items hanging on a task. Neither transitions the task, so close it with task_transition.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           text: { type: "string", description: "The human's verbatim answer." },
           optionId: {
             type: "string",
-            description: "The id of the option they picked, if they picked one. The answer is still `text` — pass the option's label as the text. Omit when they answered in their own words."
+            description: "The id of the option they picked, if they picked one. The answer is still `text`, so pass the option's label as the text. Omit it when they answered in their own words."
           },
           reviewItemId: {
             type: "string",
-            description: "Which of the ticket's review items is being answered. Omit — as every caller before this field existed does — and the answer lands on the ticket's own decision, exactly as it always has."
+            description: "Which of the task's review items is being answered. Omit it and the answer lands on the task's own decision."
           }
         },
         required: ["workspaceId", "taskId", "text"]
@@ -16966,24 +16966,24 @@ var TOOL_LIST = {
     },
     {
       name: "set_task_dependencies",
-      description: "Set what a task waits on after it was created. after lists the ids it depends on; afterEnforce is the subset that hard-blocks its transitions. Replaces the whole edge set, so pass the full list. Reach for it the moment you find a task waiting on an open decision — that edge is the only record that the decision is blocking work.",
+      description: "Set what a task waits on after it was created. `after` lists the ids it depends on, and `afterEnforce` is the subset that hard-blocks its transitions. It replaces the whole edge set, so pass the full list. Use it as soon as you find a task waiting on an open decision. That edge is the only record that the decision blocks work.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
-          taskId: { type: "string", description: "The BLOCKED task — the one that waits." },
+          taskId: { type: "string", description: "The BLOCKED task, the one that waits." },
           after: {
             type: "array",
             items: { type: "string" },
-            description: "Task ids this waits on, in full. Must exist in the same workspace; a self-reference is refused."
+            description: "Task ids this task waits on, in full. Each must exist on the same board, and a self-reference is refused."
           },
           afterEnforce: {
             type: "array",
             items: { type: "string" },
-            description: "Subset of `after` that hard-blocks transitions while open. Every id here MUST also appear in `after` — the call is refused rather than silently widening `after`."
+            description: "Subset of `after` that hard-blocks transitions while open. Every id here MUST also appear in `after`, or the call is refused rather than silently widening `after`."
           }
         },
         required: ["workspaceId", "taskId", "after"]
@@ -16991,17 +16991,17 @@ var TOOL_LIST = {
     },
     {
       name: "set_task_schedule",
-      description: "Set, replace or clear the rule that says WHEN a task's work starts — the task files one occurrence per firing and the scheduler wakes its owner (docs/architecture/scheduled-tasks.md). Five rule kinds: once {kind:'once', at: <epoch ms>}; every {kind:'every', everyMs: 86400000}; calendar {kind:'calendar', times:[{hour:6, minute:47}], weekdays:[1]} (0 = Sunday; omit weekdays for every day; timezone is an IANA zone, absent reads as UTC); after-completion {kind:'after-completion', delayMs: 3600000} (the delay runs from the last instance closing); on-change {kind:'on-change', source:{kind:'doc', docId} | {kind:'task', taskId}, debounceMs?}. rule: null clears. Re-arming an UNCHANGED rule keeps its run history, so the floor stays at the last occurrence — but a rule that has not fired yet has no last occurrence, and its floor moves to the new arm time (a slot between the old arm time and now is lost); a CHANGED rule always starts from the arm time. Either way check nextAt in the reply. on-change is the newest kind (2026-09) and the only one that is not a clock. The reply is the stored schedule read back plus nextAt, the next firing — check it says what you meant. A validation refusal is the server's own message. Read a schedule later with list_tasks fields:['schedule']; not a due date, which is when work should be finished.",
+      description: "Set, replace or clear the rule that says WHEN a task's work starts. The task files one occurrence per firing, and the scheduler wakes its owner. Check `nextAt` in the reply, because a changed rule restarts from the arm time. This is not a due date, which is when work should finish.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string", description: "The task the rule is set on." },
           rule: {
-            description: "The rule object (see the description for the five kinds), or null to clear. Required — an absent rule is refused rather than read as a clear."
+            description: "The rule object, or null to clear. Five kinds. once {kind:'once', at}. every {kind:'every', everyMs}. calendar {kind:'calendar', times:[{hour, minute}], weekdays} where 0 is Sunday and no weekdays means every day. after-completion {kind:'after-completion', delayMs}, measured from the last instance closing. on-change {kind:'on-change', source:{kind:'doc', docId} or {kind:'task', taskId}, debounceMs}. An absent rule is refused rather than read as a clear."
           },
           timezone: {
             type: "string",
@@ -17009,7 +17009,7 @@ var TOOL_LIST = {
           },
           until: {
             type: "number",
-            description: 'Epoch ms after which the rule fires no more — the "until Dec" clause.'
+            description: "Epoch ms after which the rule fires no more."
           },
           onMissed: {
             type: "string",
@@ -17022,7 +17022,7 @@ var TOOL_LIST = {
     },
     {
       name: "import_tasks_markdown",
-      description: "Move a hand-maintained markdown tracker (headings + status tables) onto a board. Defaults to a dry run — it returns the mapping and creates nothing, so review that with the human, then call again with apply: true. Apply stamps the source file with a banner and a link so the old tracker cannot quietly stay a second source of truth, and a stamped file refuses re-import.",
+      description: "Move a hand-maintained markdown tracker, headings plus status tables, onto a board. It defaults to a dry run that returns the mapping and creates nothing, so review that with the person, then call again with apply: true. Apply stamps the source file with a banner and a link, and a stamped file refuses re-import.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17038,13 +17038,13 @@ var TOOL_LIST = {
     },
     {
       name: "link_refs",
-      description: "Link a task to a doc, thread, another task, a diff review, or a URL. Stored one way; the reverse direction is computed, so doc and thread payloads grow task chips automatically. Target existence is not checked — a dangling ref is visible and harmless.",
+      description: "Link a task to a doc, a thread, another task, a diff review, or a URL. The ref is stored one way and the reverse is computed, so doc and thread payloads grow task chips automatically. Target existence is not checked.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           ref: { type: "object" }
@@ -17054,13 +17054,13 @@ var TOOL_LIST = {
     },
     {
       name: "unlink_refs",
-      description: "Remove a stored ref from a task (the exact ref, same shapes as link_refs). Idempotent — `changed:false` means it was not linked. Cannot remove the `origin` ref a promotion recorded; origin is history, not a link.",
+      description: "Remove a stored ref from a task, using the exact ref and the same shapes as link_refs. Idempotent, so `changed: false` means it was not linked. The `origin` ref a promotion recorded cannot be removed.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string" },
           ref: { type: "object" }
@@ -17070,13 +17070,13 @@ var TOOL_LIST = {
     },
     {
       name: "list_backlinks",
-      description: "Which of THIS BOARD's tasks point at this ref. This is what a url ref is for: paste a pull request or a dashboard link and find what work already cites it before filing a duplicate. Counts a promotion's origin too, so a task promoted from a thread comes back for that thread without anyone linking it by hand. It used to answer across every board on the server; ask each board you are attached to if you need more than one.",
+      description: "Which of THIS BOARD's tasks point at a ref. Paste a pull request or a dashboard link to find what work already cites it before filing a duplicate. It counts a promotion's origin too, so a task promoted from a thread comes back for that thread. Ask each board separately.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           ref: { type: "object", description: "The ref to find citers of." }
         },
@@ -17085,7 +17085,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_agent",
-      description: "Register this session on a board without taking the lead seat — for a peer or subagent picking up work. The response is your fresh-context briefing: open gating decisions, the untriaged tasks to shape, and, if you lead the board, the voice notes that queued while nobody was live. It auto-subscribes you to board events. Call heartbeat every few minutes; after about five minutes of silence you show as away. ACT ON `sentry`: it names the Sentry projects this deployment raises alarms into, and a raised alarm reaches you only if you hold the subscription — which is keyed on your LAUNCH path, so a session started somewhere new holds nothing and is told nothing. Call sentry_watch_project on each slug it returns (idempotent, so it is free when you already hold it); sentry_list_my_watches is the check.",
+      description: "Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17108,7 +17108,7 @@ var TOOL_LIST = {
     },
     {
       name: "heartbeat",
-      description: "Prove this attached session is alive. Call it every few minutes while attached — after about five minutes you show as away, and lead-addressed deliveries only reach sessions the server has observed recently. Ordinary tool calls count too, so this matters most during a long stretch of thinking or a long-running command.",
+      description: "Prove this attached session is alive. Call it every few minutes while attached. After about five minutes you show as away, and lead-addressed deliveries only reach sessions the server observed recently. Ordinary tool calls count too, so this matters most during a long stretch of thinking or a long-running command.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17124,13 +17124,13 @@ var TOOL_LIST = {
     },
     {
       name: "register_dispatch",
-      description: "Tell the board a builder is working a task in a private git worktree, so the stall loop can read the worktree's file activity as the task moving instead of waking the lead over silence it cannot see. Call it when you spawn a builder; re-registering the same task replaces the old worktree. Close it with close_dispatch when the builder reaches terminal (done or died) — a worktree that is deleted closes its own dispatch.",
+      description: "Tell the board a builder is working a task in a private git worktree. The stall loop then reads the worktree's file activity as the task moving. Call it when you spawn a builder. Re-registering the same task replaces the old worktree. Close it with close_dispatch when the builder reaches terminal.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string", description: "The task the builder is working." },
           worktreePath: {
@@ -17139,7 +17139,7 @@ var TOOL_LIST = {
           },
           reason: {
             type: "string",
-            description: 'Why you are running this row NOW, in one short sentence — "next in the goal band", "unblocked by #863", "Bryan asked for it in the huddle". Recorded on the board as the moment you decided, which is what separates the time a row spent waiting on you or on a gate from the time its builder spent queueing for a free slot. Nothing reads it to make a decision; leaving it out costs only the attribution.'
+            description: 'Why you are running this task NOW, in one short sentence, such as "next in the goal band" or "unblocked by #863". It is recorded as the moment you decided. Leaving it out costs only the attribution.'
           }
         },
         required: ["workspaceId", "taskId", "worktreePath"]
@@ -17147,13 +17147,13 @@ var TOOL_LIST = {
     },
     {
       name: "close_dispatch",
-      description: "Close a builder dispatch registered with register_dispatch — the builder reached terminal (done or died), so the task's worktree no longer vouches for it. closed: false means no dispatch was open for that task, which is fine to ignore.",
+      description: "Close a builder dispatch registered with register_dispatch, once the builder is done or has died. `closed: false` means no dispatch was open for that task, which is safe to ignore.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           taskId: { type: "string", description: "The task whose dispatch to close." }
         },
@@ -17162,7 +17162,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_parallelism_cap",
-      description: "Set how many builders a board may have dispatched at once — the dispatch rule the lead skill describes. Every board starts on the default (4); lower it to keep this board from starving higher-priority projects, raise it when there is room. The change is recorded with you as the actor and takes effect on the next dispatch: nothing running is touched, register_dispatch simply refuses past the new number. Answers with the full view — the cap, the slots in use and who holds them, how many are free, and lastChange (who moved it, when, from what) — so you see in the same reply whether the board is already over it. The floor is one; pausing a board is archive_workspace, not a cap of zero.",
+      description: "Set how many builders a board may have dispatched at once. Every board starts on the default of 4. Lower it to keep this board from starving higher-priority projects. The change takes effect on the next dispatch, so nothing running is touched and register_dispatch refuses past the new number. The reply carries the cap, the slots in use, the free slots and lastChange. The floor is one.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17178,13 +17178,13 @@ var TOOL_LIST = {
     },
     {
       name: "register_worktree",
-      description: "Tell this machine that a directory is a checkout of a repo it already knows — a git worktree, a second clone, anywhere the same files live. A document's identity is its repo plus its path from the repo root, so a doc opened in a registered checkout is the SAME doc as in the main one, with the same id and the same comments; without the registration the server only knows the checkouts git itself lists. Register a worktree when you create it. Answers with the repo it joined and every checkout now known, and alreadyKnown: true if it was already registered. Machine-scoped, like request_plugin_refresh: it names host paths, so it takes no workspaceId and only works from the box.",
+      description: "Tell this machine that a directory is a checkout of a repo it already knows. A document's identity is its repo plus its path from the repo root. A doc opened in a registered checkout is therefore the SAME doc, with the same id and the same comments. Register a worktree when you create it. Machine-scoped: it takes no workspaceId and works only from the box.",
       inputSchema: {
         type: "object",
         properties: {
           path: {
             type: "string",
-            description: "Absolute path to the checkout — its root, or any path inside it. Must be a git checkout; anything else is refused rather than recorded."
+            description: "Absolute path to the checkout, its root or any path inside it. Anything that is not a git checkout is refused rather than recorded."
           }
         },
         required: ["path"]
@@ -17192,7 +17192,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_worktrees",
-      description: "Read the repos this machine knows and the checkouts of each: what was registered, when it was last seen, and which ones exist right now (`live` — git's own worktree list plus the registered directories still on disk). Call it when a doc is writing to a copy you did not expect, or before removing a checkout, to see what else holds the same files. Machine-scoped: no workspaceId, and it answers only from the box.",
+      description: "Read the repos this machine knows and the checkouts of each: what was registered, when each was last seen, and which ones exist right now. Call it when a doc writes to a copy you did not expect, or before removing a checkout. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -17200,7 +17200,7 @@ var TOOL_LIST = {
     },
     {
       name: "unregister_worktree",
-      description: "Retire a checkout before it goes away. Any document with unsaved edits in it is written out FIRST — which is the whole reason to call this rather than deleting the directory and hoping — and the answer says how many were flushed. Nothing is destroyed: the checkout stays with its dates, every doc keeps its id and its comments, and a doc bound to that checkout falls back to another copy of the same file. Call it just before `git worktree remove`. Machine-scoped: no workspaceId.",
+      description: "Retire a checkout before it goes away. Any document with unsaved edits in it is written out FIRST, and the answer says how many were flushed. Nothing is destroyed. Every doc keeps its id and its comments, and a doc bound to that checkout falls back to another copy. Call it just before `git worktree remove`. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17214,13 +17214,13 @@ var TOOL_LIST = {
     },
     {
       name: "mount_folder",
-      description: "Mount a subfolder of a project as the project's attachment storage. Every file under it gets ONE address that keeps working: a new version overwrites the old under the same link and the comments on it stay put, a server restart changes nothing, and moving the file to another mounted folder of the same project is detected — the address and its comments follow it. Mount as many folders as the project wants (mocks, screenshots, analysis outputs, PDFs, transcripts); the files stay where they are and nothing is copied. Idempotent: mounting a folder twice is one mount, and re-mounting one you unmounted revives it with every address intact. Dotfiles, .env*, *.pem, *.key, id_* and every other credential-shaped name are never listed and never served, whatever is mounted. Machine-scoped, like register_worktree: it names host paths, so it takes no workspaceId and only works from the box.",
+      description: "Mount a subfolder of a project as the project's attachment storage. Every file under it gets ONE address that keeps working. A new version overwrites the old under the same link and keeps its comments. A move to another mounted folder of the same project follows the file. Nothing is copied. Credential-shaped names, such as dotfiles, .env*, *.pem, *.key and id_*, are never listed and never served.",
       inputSchema: {
         type: "object",
         properties: {
           path: {
             type: "string",
-            description: "Absolute path to the folder. It must be inside a git checkout — the repo is what gives its files an address that survives a move between checkouts. Dot-directories are refused: every file under one is refused at serve time, so the mount would hold nothing."
+            description: "Absolute path to the folder. It must be inside a git checkout, because the repo is what gives its files an address that survives a move. A dot-directory is refused."
           }
         },
         required: ["path"]
@@ -17228,7 +17228,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_mounts",
-      description: "Read a project's mount table: which folders are mounted, how many files each holds, whether the project is local-only, and where its conventions index lives. Pass `mountId` to page through one mount's files with their addresses instead. Call it before writing an attachment, to see which folder it belongs in. Machine-scoped: no workspaceId, and it answers only from the box.",
+      description: "Read a project's mount table: which folders are mounted, how many files each holds, whether the project is local-only, and where its conventions index lives. Pass `mountId` to page through one mount's files instead. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17253,7 +17253,7 @@ var TOOL_LIST = {
     },
     {
       name: "unmount_folder",
-      description: "Stop serving a mounted folder. Nothing on disk is touched and no address is dropped — retention is the project's, and workspaces deletes nothing it did not create. The mount keeps its dates, and re-mounting the same folder revives it with every file at the address it already had. Machine-scoped: no workspaceId.",
+      description: "Stop serving a mounted folder. Nothing on disk is touched and no address is dropped. Re-mounting the same folder revives it with every file at the address it already had. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17271,7 +17271,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_project_privacy",
-      description: "Set whether this project's mounted files may leave the machine. Set on the PROJECT, over all its mounts at once — the thing a person knows is that a project is sensitive, and a per-folder switch is a place for one folder to be forgotten. `local-only` serves the files to callers on the box alone: not over the tunnel, not over the tailnet, not to a share or collab visitor. `workspace` is the default and means what a board already means — everyone in the workspace sees it. Machine-scoped: no workspaceId.",
+      description: "Set whether this project's mounted files may leave the machine. It applies to the PROJECT, over all its mounts at once. 'local-only' serves the files to callers on the box alone, not over the tunnel, the tailnet, a share or a collab visitor. 'workspace' is the default and means everyone in the workspace sees them. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17282,7 +17282,7 @@ var TOOL_LIST = {
           privacy: {
             type: "string",
             enum: ["workspace", "local-only"],
-            description: "'local-only' for material that must not leave this machine; 'workspace' otherwise."
+            description: "'local-only' for material that must not leave this machine. 'workspace' otherwise."
           }
         },
         required: ["path", "privacy"]
@@ -17290,7 +17290,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_project_conventions",
-      description: "Point the project's conventions index at a file. The index is a short note in the project's own words — put plans here, meeting notes here, make folders as needed — and agents read it before writing a doc. Defaults to WORKSPACES.md at the repo root; set it elsewhere if the project keeps its conventions somewhere else. This records WHERE the index is; write the file itself with your ordinary editing tools. Machine-scoped: no workspaceId.",
+      description: "Point the project's conventions index at a file. The index is a short note, in the project's own words, saying where plans, meeting notes and other docs go. Agents read it before writing a doc. It defaults to WORKSPACES.md at the repo root. This records WHERE the index is. Write the file itself with your ordinary editing tools.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17300,7 +17300,7 @@ var TOOL_LIST = {
           },
           conventionsPath: {
             type: "string",
-            description: 'Path to the index from the repo root, e.g. "docs/workspaces.md". No "..", no dot-directory.'
+            description: 'Path to the index from the repo root, e.g. "docs/workspaces.md". No "..", and no dot-directory.'
           }
         },
         required: ["path", "conventionsPath"]
@@ -17308,7 +17308,7 @@ var TOOL_LIST = {
     },
     {
       name: "read_project_conventions",
-      description: "Read the project's conventions index — where it lives and what it says. Call it BEFORE writing a plan, a meeting note or an attachment into a project, so the file lands where that project keeps such things. `text: null` means no index has been written yet; the answer still names the path, so you can write one there.",
+      description: "Read the project's conventions index, where it lives and what it says. Call it BEFORE writing a plan, a meeting note or an attachment into a project, so the file lands where that project keeps such things. `text: null` means no index has been written yet, and the answer still names the path.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17322,7 +17322,7 @@ var TOOL_LIST = {
     },
     {
       name: "request_plugin_refresh",
-      description: "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces — the update rewrites a version-keyed cache, so nothing running is interrupted and each session picks it up at its next restart. changed: false with matching versions means the cache was already current.",
+      description: "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces: nothing running is interrupted, and each session picks the new bundle up at its next restart. `changed: false` with matching versions means the cache was already current.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -17330,17 +17330,17 @@ var TOOL_LIST = {
     },
     {
       name: "get_unfiled_ask_count",
-      description: "Read your own unfiled-ask count — asks that appeared in your chat with no matching filed review item. Query it at session start or before standing down; above zero is drift to fix by filing review items instead. Not a live measurement: the server cannot see chat, so the number is whatever the daily audit last published. `today: null` means no audit covered today and `latest: null` means none ever covered you — neither is innocence.",
+      description: "Read your own unfiled-ask count, the asks that appeared in your chat with no matching filed review item. Query it at session start or before standing down, and fix anything above zero by filing review items. It is not a live measurement: the number is whatever the daily audit last published. `today: null` and `latest: null` are not innocence.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           agent: {
             type: "string",
-            description: "Display name to read; defaults to this session's own (CW_AGENT_NAME)."
+            description: "Display name to read. Defaults to this session's own (CW_AGENT_NAME)."
           }
         },
         required: ["workspaceId"]
@@ -17348,13 +17348,13 @@ var TOOL_LIST = {
     },
     {
       name: "publish_chat_audit",
-      description: "For the daily chat audit: publish per-agent unfiled-ask counts so each session can read its own back with get_unfiled_ask_count. Both numbers are the same stored row, so reference these counts in the audit report rather than recomputing them. Publishing again for the same agent supersedes — latest wins, history kept. The bare name 'agent' is refused: counts belong to somebody.",
+      description: "For the daily chat audit: publish per-agent unfiled-ask counts, so each session can read its own back with get_unfiled_ask_count. Reference these counts in the audit report rather than recomputing them. Publishing again for the same agent supersedes the old row and keeps the history. The bare name 'agent' is refused.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: {
             type: "string",
-            description: "The BOARD this resource is on — every address is /workspaces/<workspaceId>/…, so a call without it names no resource. The id create_workspace returned; get_workspace lists what you are attached to."
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           day: { type: "string", description: "Audited day, YYYY-MM-DD. Defaults to today." },
           entries: {
@@ -17383,7 +17383,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_agents",
-      description: "List the agents attached to a board workspace with their derived state: active, 'process up, agent unresponsive' (fresh heartbeat, stale tool calls), or 'away — requests queue'. The ambient-awareness read: who is where, and is anyone wedged.",
+      description: "List the agents attached to a board with their derived state: active, 'process up, agent unresponsive' (fresh heartbeat, stale tool calls), or 'away, requests queue'. It answers who is where, and whether anyone is wedged.",
       inputSchema: {
         type: "object",
         properties: {

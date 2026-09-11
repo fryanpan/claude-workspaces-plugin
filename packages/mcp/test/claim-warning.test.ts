@@ -168,12 +168,12 @@ describe('the queue tells an agent who is already on a row', () => {
   // The fields without the instruction are two more keys to skim. What has to
   // reach the reader is what a live claim MEANS.
   it('says not to start a row a live session holds, and to use hive instead', () => {
-    expect(SKILL).toContain('DO NOT START THAT TASK');
+    expect(SKILL).toContain('do not start that task');
     expect(SKILL).toContain('claude-hive');
   });
 
-  it('says the presence read refuses nobody, so it does not read as a gate', () => {
-    expect(SKILL).toContain('Nothing refuses a second taker');
+  it('says presence is a recency read, not an identity or a gate', () => {
+    expect(SKILL).toContain('recency reads, not identity');
   });
 
   // `away` / `unresponsive` are not live claims, and guidance that treated any
