@@ -15156,13 +15156,13 @@ var TASK_REVIEW_ITEM_SCHEMA = {
 };
 var NEW_TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
-  description: "A question about the work this task creates, for when you file the work and the question together. For a question that came up on a task that already exists, use add_review_item instead."
+  description: "A question about the work this task creates, for when you file the work and the question together. For a question that came up on a task that already exists, use add_review_item instead. The task title names the work, and headline names the ask."
 };
 var TOOL_LIST = {
   tools: [
     {
       name: "list_docs",
-      description: "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. Narrow it with workspaceId, kind, query or sourcePrefix.",
+      description: "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15233,7 +15233,7 @@ var TOOL_LIST = {
     },
     {
       name: "post_reply",
-      description: "Reply to a thread. Pass review when the reply asks a person to decide or to look at something. Without it the reply is an ordinary comment and stays off the queue. `held: true` in the result means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
+      description: "Reply to a thread. Pass review when the reply asks a person to decide or to look at something. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16359,14 +16359,14 @@ var TOOL_LIST = {
     },
     {
       name: "create_tasks",
-      description: "File work on a board. Always a list, even for one task. Omit assignee and you own the task. Omit goal and the task lands unplaced at the bottom of Backlog. New tasks land in triage until task_transition moves them out. A bad task comes back in failures by index, never rejecting the batch. `held: true` means the task waits off the reader's queue until revise_review_item closes `heldReason`.",
+      description: "File work on a board. This is the only create verb, and it always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced at the bottom of Backlog. New tasks land in triage until task_transition releases them. A bad task returns in failures by index, never rejecting the batch. `held: true` means it waits off the reader's queue until revise_review_item closes `heldReason`.",
       inputSchema: {
         type: "object",
         properties: {
           workspaceId: { type: "string" },
           tasks: {
             type: "array",
-            description: "The tasks, at most 100. A larger batch is refused whole, and belongs in import_tasks_markdown. `title` is the only required field. `key` labels a task so a later task in the same batch can reference it. Tasks are created in order, so a forward reference is refused.",
+            description: "The tasks, at most 100. A larger batch is refused whole, and belongs in import_tasks_markdown. `title` is the only required field. `key` labels a task so a later task in the same batch can reference it. Tasks are created in order, so a task can only depend on one above it.",
             items: {
               type: "object",
               properties: {
@@ -16437,7 +16437,7 @@ var TOOL_LIST = {
           },
           sourceDoc: {
             type: "object",
-            description: "The doc these tasks were derived from, which gives every task an origin ref back to it. `mode` says what kind of doc it is. 'plan', the default for an ordinary doc, files the tasks as DRAFTS, held in triage until a person approves the plan on the doc page. 'discussion', the default for meeting notes, files them live. A later doc edit flags still-open derived tasks as possibly stale.",
+            description: "The doc these tasks were derived from, which gives every task a structured origin ref back to it. `mode` says what kind of doc it is. 'plan', the default for an ordinary doc, files the tasks as DRAFTS, held in triage until a person approves the plan on the doc page. 'discussion', the default for meeting notes, files them live. A later doc edit flags still-open derived tasks as stale.",
             properties: {
               docId: { type: "string" },
               mode: { type: "string", enum: ["plan", "discussion"] }
@@ -16741,7 +16741,7 @@ var TOOL_LIST = {
               properties: {
                 id: {
                   type: "string",
-                  description: "Omit it to create this band, and the server returns the minted id in `created`. Include it, exactly as get_workspace reports it, to keep a band you already have. An id this board does not hold is refused as `unknown-goal-id`."
+                  description: "Omit it to create this band, and the server returns the minted id in `created`. Goal ids are generated and permanent. Include it, exactly as get_workspace reports it, to keep a band you already have. An id this board does not hold is refused as `unknown-goal-id`."
                 },
                 title: { type: "string" },
                 dueAt: { type: "number" }
@@ -16760,7 +16760,7 @@ var TOOL_LIST = {
     },
     {
       name: "rename_goal",
-      description: "Change a goal's title in place, by id. The id does not move, so no task moves. Use it rather than set_goal_list, which would make you restate every other band. `dueAt` is optional: a number sets it, null clears it, and omitting it leaves it alone.",
+      description: "Change a goal's title in place, by id. The id never moves, so no task moves. Use it rather than set_goal_list, which would make you restate every other band. `dueAt` is optional: a number sets it, null clears it, and omitting it leaves it alone.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16796,7 +16796,7 @@ var TOOL_LIST = {
     },
     {
       name: "add_review_item",
-      description: "Hang a question on a task that already exists, so the ask stays attached to the work that raised it. A task carries several at once. When you file the work and the question together, use `review` on a create_tasks entry instead. Every item passes the board's quality gate: `held: true` means it is on the task but OFF the reader's queue until revise_review_item closes the gap in `heldReason`.",
+      description: "Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use `review` on a create_tasks entry. Every item passes the board's quality gate: `held: true` means it is OFF the reader's queue until revise_review_item closes `heldReason`.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16903,7 +16903,7 @@ var TOOL_LIST = {
     },
     {
       name: "withdraw_review_item",
-      description: "Take back a review item. Any agent on the board can retire a stale one, and the item records who did. The reader stops being asked: the item leaves their queue and reads as withdrawn, with your reason beside it. Your words stay there verbatim. Prefer revise_review_item when the question still stands and only its wording is wrong. Refused on an item somebody already answered. `undo: true` puts it back.",
+      description: "Take back a review item. It leaves the reader's queue and reads as withdrawn, with your reason beside it. Any agent on the board can retire a stale one. Prefer revise_review_item when the question still stands and only its wording is wrong. On a shared thread use this rather than resolve_thread, which retires every item. Refused on an item somebody already answered. `undo: true` puts it back.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17085,7 +17085,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_agent",
-      description: "Register this session on a board without taking the lead seat. The response is your briefing: open gating decisions, the untriaged tasks to shape, and any voice notes that queued. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names, or a raised alarm reaches nobody here.",
+      description: "Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here.",
       inputSchema: {
         type: "object",
         properties: {
