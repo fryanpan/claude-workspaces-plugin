@@ -364,6 +364,15 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(gap).toBeLessThanOrEqual(16);
     });
 
+    it('moves the page again when the panel grows over that element as you type', () => {
+      const height = (b: Box | null) => box(b)[3] - box(b)[1];
+      const l = look(430, 'grown');
+      expect(height(l.card), 'CONTROL: the panel grew').toBeGreaterThan(
+        height(look(430, 'onLow').card),
+      );
+      expect(overlap(box(l.card), l.el.low), 'the panel grew over the element').toBe(0);
+    });
+
     it('goes back to its prompt with a tick after a post, still in the mode', () => {
       const l = look(430, 'posted');
       expect(l.posts).toEqual(['ferry times are wrong']);

@@ -396,10 +396,14 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   // The one exception to holding still: an element the panel would sit on
   // top of cannot be "still on screen", so the page moves by the least that
   // clears it — and not at all if that would push its top off the screen.
+  // Asked again as you type, because the field grows to four lines and the
+  // panel with it, back over the element it had just cleared.
   if (quick && target) {
-    const r = target.getBoundingClientRect();
-    const over = r.bottom - composer.getBoundingClientRect().top + 12;
-    if (over > 0 && r.top - over > 8) window.scrollBy(0, over);
+    (ta.oninput = () => {
+      const r = target.getBoundingClientRect();
+      const over = r.bottom - composer.getBoundingClientRect().top + 12;
+      if (over > 0 && r.top - over > 8) window.scrollBy(0, over);
+    })();
   }
   // Cancel is NOT Done. It throws the draft away and hands you back the mode,
   // so the next element is one tap away; where the mode rests in a composer,

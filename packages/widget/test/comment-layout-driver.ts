@@ -332,6 +332,9 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await look('posted');
     await tap(el('low'));
     await look('onLow');
+    // Enough words that the field grows to its four lines.
+    await type(LONG);
+    await look('grown');
     // While a draft is open the panel offers Cancel where Done was — the two
     // never sit together — so leaving from here is Cancel, then Done.
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
