@@ -186,7 +186,47 @@ export function exitFeedbackMode(el: FeedbackWidgetEl): void {
   el.modeCleanup = null;
 }
 
+/** One node of a press's path: is this the widget's own chrome? */
+function isOwnChromeNode(node: EventTarget | undefined): boolean {
+  const el = node as Element | undefined;
+  if (el?.nodeType !== 1) return false;
+  return el.tagName === TAG.toUpperCase() || el.hasAttribute?.(IGNORE_ATTR) === true;
+}
+
+/**
+ * Did this press land on the widget's own controls?
+ *
+ * Asked of the EVENT, not of the viewport. The press travelled through every
+ * node in `composedPath()` on its way to a listener, shadow boundaries
+ * included, so the path is the only account of what was actually pressed that
+ * no engine and no host page can disagree with.
+ *
+ * It used to be asked of `document.elementFromPoint(clientX, clientY)`, which
+ * is a SECOND hit test against the current layout rather than a record of the
+ * first. That worked only because Chromium retargets shadow content to the
+ * host, so a press on the composer read back as
+ * `<claude-feedback-widget>` and the tag check caught it. Where that second
+ * hit test answers with anything else — an engine that hands back the inner
+ * shadow node instead of the host, a page that has moved or covered the
+ * widget since the press — the widget treats a press on its own Post button
+ * as a press on the page: the click is preventDefaulted away and a fresh
+ * composer opens ON the button, anchored to the button. That is the reported
+ * bug, and it is reproduced in `widget-post-click.test.ts` by giving the page
+ * a hit test that does not retarget.
+ *
+ * The fallback exists for a synthesized event, whose `composedPath()` is
+ * empty: `target` alone still catches our chrome in any engine that
+ * retargets, and the caller's own viewport check is still behind it.
+ */
+function pressIsOurs(ev: Event): boolean {
+  const path = ev.composedPath();
+  if (path.length > 0) return path.some(isOwnChromeNode);
+  return isOwnChromeNode(ev.target ?? undefined);
+}
+
 function hitTest(ev: MouseEvent): HTMLElement | null {
+  // Our own chrome (FAB, banner, composer, dock, pins) answers for itself.
+  if (pressIsOurs(ev)) return null;
   const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
   if (!el) return null;
   // skip widget chrome

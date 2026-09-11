@@ -17114,6 +17114,10 @@ var TOOL_LIST = {
           worktreePath: {
             type: "string",
             description: "Absolute path to the builder's git worktree on this machine."
+          },
+          reason: {
+            type: "string",
+            description: 'Why you are running this row NOW, in one short sentence — "next in the goal band", "unblocked by #863", "Bryan asked for it in the huddle". Recorded on the board as the moment you decided, which is what separates the time a row spent waiting on you or on a gate from the time its builder spent queueing for a free slot. Nothing reads it to make a decision; leaving it out costs only the attribution.'
           }
         },
         required: ["workspaceId", "taskId", "worktreePath"]
@@ -18988,8 +18992,13 @@ async function handleWorkspaceTool(name, a, ctx) {
       }));
     }
     case "register_dispatch": {
-      const { taskId, worktreePath } = a;
-      return ok2(await http("POST", `${board()}/dispatches`, { taskId, worktreePath }));
+      const { taskId, worktreePath, reason } = a;
+      return ok2(await http("POST", `${board()}/dispatches`, {
+        taskId,
+        worktreePath,
+        author: AUTHOR,
+        ...typeof reason === "string" && reason.trim().length > 0 ? { reason: reason.trim() } : {}
+      }));
     }
     case "close_dispatch": {
       const { taskId } = a;
@@ -19416,7 +19425,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.202";
+var PLUGIN_VERSION = "0.1.203";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

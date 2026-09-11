@@ -519,8 +519,25 @@ export async function handleWorkspaceTool(
       );
     }
     case 'register_dispatch': {
-      const { taskId, worktreePath } = a as { taskId: string; worktreePath: string };
-      return ok(await http('POST', `${board()}/dispatches`, { taskId, worktreePath }));
+      const { taskId, worktreePath, reason } = a as {
+        taskId: string;
+        worktreePath: string;
+        reason?: string;
+      };
+      // `author` and `reason` ride along for the timing marker the server
+      // writes off this call (`dispatch.requested`): who asked for the lane,
+      // and why this row now. Neither changes what the dispatch DOES — the
+      // server ignores both when deciding whether a slot is free.
+      return ok(
+        await http('POST', `${board()}/dispatches`, {
+          taskId,
+          worktreePath,
+          author: AUTHOR,
+          ...(typeof reason === 'string' && reason.trim().length > 0
+            ? { reason: reason.trim() }
+            : {}),
+        }),
+      );
     }
     case 'close_dispatch': {
       const { taskId } = a as { taskId: string };

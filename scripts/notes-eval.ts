@@ -66,12 +66,14 @@
  * THE CORPUS is AMI (CC BY 4.0), excerpted into committed fixtures by
  * `notes-eval-fixtures.ts`. Speakers are letters; no fixture names a person.
  */
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { prose } from '../packages/core/src/index.ts';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import type { NoteReference, NotesComposeInput } from '../packages/server/src/meeting-notes.ts';
+import { meetingTranscriptPath } from '../packages/server/src/meetings.ts';
 import {
   findInventedLinks,
   notesLinkSources,
@@ -82,16 +84,20 @@ import {
   decisionsWithoutSpeaker,
   duplicateTopics,
   longFlatRuns,
+  openedEmptyHeadings,
   overlongBullets,
   parseNotesTopics,
   unconfirmedBullets,
   unlinkedReferences,
   verbatimBullets,
 } from '../packages/server/src/notes-quality.ts';
-import { median } from '../packages/server/src/notes-timing.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { type SummaryCredential, authHeader } from '../packages/server/src/summarize.ts';
-import { createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
+import {
+  type NotesTickHarness,
+  type NotesTickHarnessOptions,
+  createNotesTickHarness,
+} from '../packages/server/test/notes-tick-harness.ts';
 import { EVAL_CREDENTIAL_HELP, resolveEvalCredentialFrom } from './eval-credential.ts';
 import { FIXTURE_DIR, type NotesEvalFixture, staleClockWarning } from './notes-eval-fixtures.ts';
 import {
@@ -325,7 +331,7 @@ export class Behaviour {
     // The meeting and the text, without the tick: the same bullet failing on
     // twelve ticks of one meeting is one thing, and the same wording in two
     // different meetings is two.
-    return new Set(this.failures.map((f) => f.replace(/ tick \d+:/, ':'))).size;
+    return new Set(this.failures.map((f) => f.replace(/ ticks? [\d\u2013-]+:/, ':'))).size;
   }
 }
 
@@ -486,7 +492,7 @@ interface JudgedField {
   why: string;
 }
 
-async function judge(
+export async function judge(
   key: SummaryCredential,
   before: string,
   after: string,
@@ -560,6 +566,201 @@ async function judge(
   return out;
 }
 
+/* ===== Which ticks the judge is shown ===== */
+
+/**
+ * How many ticks one judged window may span before it is judged as it stands.
+ *
+ * A bound rather than a principle: the window closes on its own as soon as a
+ * tick leaves no heading at frame one, and almost every one does so on the
+ * second. What this stops is the pathological meeting where the note-taker
+ * opens a heading every tick and never fills one — which is a defect, and a
+ * defect must reach the judge rather than swallow it.
+ */
+export const MAX_JUDGED_WINDOW_TICKS = 3;
+
+/** The speech, and the notes either side of it, that one judge call reads. */
+export interface JudgedWindow {
+  before: string;
+  after: string;
+  transcript: string;
+  where: string;
+}
+
+/** One tick, offered to the window. */
+export interface OfferedTick extends JudgedWindow {
+  /** Was this tick drawn for the judge? A tick that was not can still CLOSE a
+   *  window a previous tick opened — the frame-two writing is the evidence,
+   *  whether or not the sampler picked its tick. */
+  wanted: boolean;
+}
+
+/**
+ * The judge reads a whole ACTION, not one frame of one.
+ *
+ * The note-taker's own instructions make opening a topic a two-tick job:
+ * "open a new '### ' heading as soon as the speech raises a subject the
+ * existing headings do not cover … then add its bullets under its own id on
+ * the next update." Judged a tick at a time, frame one is a heading with
+ * nothing under it — and an empty heading is not a near miss on one bar, it
+ * is a paraphrase that was never written, a point that was never covered and
+ * a topic opened for nothing, all at once. Measured on 2026-09-10 against the
+ * shipped judge: three trials of one scripted tick that opened a heading and
+ * stopped, exactly as instructed, failed `paraphrased` 3/3 and `covers` 3/3,
+ * the judge's own reason reading "Battery life heading added but no content
+ * written at all". It penalises whichever method opens the most headings,
+ * which is the opposite of what the column is for.
+ *
+ * So a tick that opened a heading it left empty is HELD, and judged together
+ * with the tick that fills it: one window, both ticks' speech, the notes as
+ * they stood before the first and after the last. Held again if that tick
+ * opens a heading of its own, up to {@link MAX_JUDGED_WINDOW_TICKS}.
+ *
+ * WHY NOT SIMPLY NOT SCORE AN EMPTY HEADING, which is the other way to stop
+ * the artefact: because it cannot see a heading NOBODY EVER FILLS. Same three
+ * trials, same judge, on a scripted meeting whose heading is opened and then
+ * stranded while the room moves on: judged as a window this fails `covers`
+ * 3/3 and names the stranded heading; with the opening tick simply dropped
+ * and the next tick judged on its own, every behaviour passes 3/3. Dropping
+ * the frame buys the same clean number by making the judge blind to the
+ * defect, and a judge that stops seeing the real failure is not a fix. The
+ * window keeps it: the heading is still empty when the window closes, and the
+ * judge says so.
+ */
+export class JudgeWindow {
+  private held: (JudgedWindow & { ticks: number }) | null = null;
+  /** How many windows have been handed out — one per judge call. */
+  judged = 0;
+  /** How many of those read more than one tick because the note-taker was
+   *  mid-heading. THIS IS THE ARTEFACT'S SIZE on a meeting: without the
+   *  window every one of them was a judge call about a heading with nothing
+   *  under it. Counted here rather than by the caller, because a caller that
+   *  forgets on one of the two paths reports `0 of 0` having judged one. */
+  waited = 0;
+
+  private emit(window: JudgedWindow, ticks: number): JudgedWindow {
+    this.judged++;
+    if (ticks > 1) this.waited++;
+    return window;
+  }
+
+  /**
+   * Offer a tick. Returns the window to judge NOW, or null while the action
+   * it belongs to is still unfinished — or because the tick was not drawn.
+   *
+   * EVERY tick is offered, drawn or not. A window opened by a drawn tick is
+   * closed by whatever tick actually writes the bullets.
+   */
+  offer(tick: OfferedTick): JudgedWindow | null {
+    const held = this.held;
+    if (held) {
+      held.ticks++;
+      held.after = tick.after;
+      held.transcript = `${held.transcript}\n${tick.transcript}`;
+      held.where = spanning(held.where, tick.where);
+      if (
+        held.ticks < MAX_JUDGED_WINDOW_TICKS &&
+        openedEmptyHeadings(tick.before, tick.after).length > 0
+      ) {
+        return null;
+      }
+      this.held = null;
+      const { ticks, ...window } = held;
+      return this.emit(window, ticks);
+    }
+    if (!tick.wanted) return null;
+    const { wanted: _wanted, ...window } = tick;
+    if (openedEmptyHeadings(tick.before, tick.after).length === 0) return this.emit(window, 1);
+    this.held = { ...window, ticks: 1 };
+    return null;
+  }
+
+  /**
+   * The meeting is over. A window still open is judged as it stands — its
+   * heading was never filled, because there is no tick left to fill it, and
+   * that is exactly the failure the judge should report.
+   */
+  flush(): JudgedWindow | null {
+    const held = this.held;
+    if (!held) return null;
+    this.held = null;
+    const { ticks, ...window } = held;
+    return this.emit(window, ticks);
+  }
+}
+
+/**
+ * When the judge is next due, and how many calls are still owed.
+ *
+ * A SLOT BUYS A JUDGE CALL, NOT A TICK. Spread the calls evenly and hold the
+ * list fixed, and a window that spans the tick the next slot named spends two
+ * slots on one call: `method:ledger-opus` on ES2002a, which opens a heading
+ * almost every tick, came back with three judged examples where six were
+ * asked for. So the schedule is re-laid after every call — the calls still
+ * owed, spread over the ticks still to come — which keeps both the count and
+ * the spread that taking them all from the front of the meeting would lose.
+ *
+ * The spread is the point and not a nicety: the first ticks of a meeting are
+ * its easiest, and a judge that only ever saw them would report on a meeting
+ * that had not started.
+ */
+export class JudgeBudget {
+  private owed: number;
+  private dueAt = 0;
+  constructor(
+    calls: number,
+    private readonly ticks: number,
+  ) {
+    this.owed = calls;
+  }
+  /** Is a judge call due at this tick? */
+  due(i: number): boolean {
+    return this.owed > 0 && i >= this.dueAt;
+  }
+  /** A call was made, and it read up to and including this tick. */
+  spent(i: number): void {
+    this.owed--;
+    this.dueAt =
+      this.owed > 0
+        ? i + Math.max(1, Math.floor((this.ticks - i - 1) / this.owed))
+        : Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * Two tick labels as one range: `ES2002a tick 4` and `ES2002a tick 6` become
+ * `ES2002a ticks 4-6`. The meeting has to survive into the label — the
+ * failure lists are read per meeting — and the tick numbers have to stay
+ * legible, because the next thing a reader does with one is open that tick.
+ */
+function spanning(first: string, last: string): string {
+  const from = first.match(/^(.*) ticks? ([\d-]+)$/);
+  const to = last.match(/ tick (\d+)$/);
+  if (!from || !to) return `${first}\u2013${last}`;
+  return `${from[1]} ticks ${from[2]!.split('-')[0]}-${to[1]}`;
+}
+
+/** The judge's five fields, and the behaviour each is filed under. */
+const JUDGED_COLUMNS = [
+  ['paraphrased', 'paraphrase'],
+  ['covers', 'covers'],
+  ['topics', 'topicChange'],
+  ['guesses', 'unconfirmed'],
+  ['together', 'together'],
+] as const;
+
+/**
+ * What `CW_NOTES_EVAL_UNPAIRED=1` adds to a run: the same five columns again,
+ * judged the pre-window way — one tick at a time, mid-action or not.
+ *
+ * A control that lives in the harness rather than in a branch somebody has to
+ * rebuild. The artefact it measures is a difference between two ways of
+ * ASKING about one set of notes, so measuring it as two runs would put the
+ * note-taker's own sampling between the numbers; the shadow columns ride the
+ * same composes and differ in nothing but the question.
+ */
+export const UNPAIRED_SUFFIX = 'Unpaired';
+
 /* ===== The run ===== */
 
 interface Options {
@@ -578,6 +779,108 @@ interface Options {
   /** Where each meeting's final notes are written, so a person can read what
    *  the rate is a rate OVER. Absent, nothing is written. */
   dumpDir?: string;
+  /**
+   * The server data dir this run stands up for itself — a throwaway one, one
+   * per run, holding each meeting's transcript and the tick timings the
+   * pipeline writes beside it.
+   *
+   * NOT OPTIONAL, and that is the point. Every at-stop check that reads
+   * meeting state reads it from here, and the version of this file that
+   * passed no data dir at all did not degrade: `voicesOf` came back with no
+   * labels, so `unknownVoices` reported EVERY genuine speaker tag as a voice
+   * the meeting never had, and the coverage half of the same line read "no
+   * ideas heard" over a meeting that had said plenty. A number that fires on
+   * every run of every method carries no signal, and this one was acted on.
+   */
+  dataDir: string;
+}
+
+/**
+ * The settled turns of the ticks this run will actually play, written as the
+ * relay writes them — one JSON line per turn, in the order they settled.
+ *
+ * ONLY THE TICKS PLAYED. A `--smoke` slice plays three of twelve, and a
+ * transcript holding all twelve would have the at-stop coverage check score
+ * the notes against nine ticks of speech the meeting never reached.
+ *
+ * The turn numbers match the harness's own: it numbers every utterance it
+ * speaks from zero, in order, so the file and the session agree about which
+ * turn is which. Returns the path, so a caller can say where it went.
+ */
+export function writeEvalTranscript(
+  dataDir: string,
+  docId: string,
+  meetingId: string,
+  ticks: readonly { turns: readonly { speaker?: string; text: string }[] }[],
+): string {
+  const path = meetingTranscriptPath(dataDir, docId, meetingId);
+  mkdirSync(dirname(path), { recursive: true });
+  const rows: string[] = [];
+  for (const tick of ticks) {
+    for (const turn of tick.turns) {
+      rows.push(
+        JSON.stringify({
+          turn: rows.length,
+          text: turn.text,
+          ts: 1_000 + rows.length,
+          ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}),
+        }),
+      );
+    }
+  }
+  writeFileSync(path, rows.length > 0 ? `${rows.join('\n')}\n` : '');
+  return path;
+}
+
+/**
+ * The harness one meeting of a run is driven through, with its own words on
+ * disk beside it.
+ *
+ * THE TRANSCRIPT AND THE DATA DIR ARE ONE DECISION, so they are made in one
+ * place. Every at-stop check reads the meeting's state out of the data dir,
+ * and a harness built without one does not report an empty meeting — it
+ * reports every genuine speaker tag as a voice the room never had, and the
+ * coverage half of the same line as "no ideas heard". Separating the write
+ * from the wiring is how that came to be true for a year of runs.
+ *
+ * Exported so a test can drive a whole meeting through this exact wiring with
+ * a scripted composer, and read the line it ends with.
+ */
+export function evalMeetingHarness(
+  fixture: NotesEvalFixture,
+  ticks: NotesEvalFixture['ticks'],
+  dataDir: string,
+  compose: NotesTickHarnessOptions['compose'],
+): NotesTickHarness {
+  // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
+  // ('d-meeting', 'm1'), which was harmless while meetings ran one at a time
+  // and is not once `--jobs` runs four at once: four sessions sharing one doc
+  // id share every log line and every piece of state keyed on it.
+  // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately — the ids
+  // it falls back to ARE the harness's defaults, so the two runs differ in
+  // nothing else. It is the positive control for that finding: without it,
+  // "the collapse stopped happening" is a claim about a run that also changed
+  // something else.
+  const shared = process.env.CW_NOTES_EVAL_SHARED_IDS === '1';
+  const docId = shared ? 'd-meeting' : `d-${fixture.meeting}`;
+  const meetingId = shared ? 'm1' : `m-${fixture.meeting}`;
+  writeEvalTranscript(dataDir, docId, meetingId, ticks);
+  return createNotesTickHarness({
+    docId,
+    meetingId,
+    dataDir,
+    doc: `## Meeting notes\n\n- ${HUMAN_LINE}\n`,
+    docTitle: `${fixture.meeting} (AMI)`,
+    workspaceId: 'w-eval',
+    tasks: fixture.board.map((b) => ({ id: taskIdOf(b.url), title: b.title, status: 'todo' })),
+    // A real compose, and its reply grows with the notes: by the twentieth
+    // tick of a meeting the model is rewriting two pages. The composer's own
+    // timeout is 30s and this has to sit above it, or a tick that WOULD have
+    // landed is recorded as a failure and every tick behind it fails too —
+    // the composes are serialized on one chain.
+    tickTimeoutMs: 60_000,
+    compose,
+  });
 }
 
 function loadFixtures(only: readonly string[], dir: string): NotesEvalFixture[] {
@@ -639,61 +942,61 @@ async function runMeeting(
   // judge that only ever saw them would report on a meeting that had not
   // started.
   const step = Math.max(1, Math.floor(ticks.length / Math.max(1, opts.judgePerMeeting)));
+  /** The ticks the PRE-WINDOW rule judged, and so the ticks the
+   *  `CW_NOTES_EVAL_UNPAIRED` control must judge, unmoved. */
   const judged = new Set(
     Array.from({ length: opts.judgePerMeeting }, (_, i) => i * step).filter(
       (i) => i < ticks.length,
     ),
   );
+  /**
+   * When the judge is next due, and how many calls are still owed.
+   *
+   * A SLOT BUYS A JUDGE CALL, NOT A TICK. A window can span the tick the next
+   * slot named, and a fixed list of indices then spends two slots on one
+   * call: `method:ledger-opus` on ES2002a, which opens a heading almost every
+   * tick, came back with three judged examples where six were asked for. So
+   * the schedule is re-laid after every call — the calls still owed, spread
+   * over the ticks still to come — which keeps both the count and the spread
+   * that taking them from the front of the meeting would lose.
+   */
+  const budget = new JudgeBudget(opts.judgePerMeeting, ticks.length);
 
-  const harness = createNotesTickHarness({
-    // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
-    // ('d-meeting', 'm1'), which was harmless while meetings ran one at a
-    // time and is not once `--jobs` runs four at once: four sessions sharing
-    // one doc id share every log line and every piece of state keyed on it.
-    // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately. It is
-    // the positive control for the finding: without it, "the collapse stopped
-    // happening" is a claim about a run that also changed nothing else.
-    ...(process.env.CW_NOTES_EVAL_SHARED_IDS === '1'
-      ? {}
-      : { docId: `d-${fixture.meeting}`, meetingId: `m-${fixture.meeting}` }),
-    doc: `## Meeting notes\n\n- ${HUMAN_LINE}\n`,
-    docTitle: `${fixture.meeting} (AMI)`,
-    workspaceId: 'w-eval',
-    tasks: fixture.board.map((b) => ({ id: taskIdOf(b.url), title: b.title, status: 'todo' })),
-    // A real compose, and its reply grows with the notes: by the twentieth
-    // tick of a meeting the model is rewriting two pages. The composer's own
-    // timeout is 30s and this has to sit above it, or a tick that WOULD have
-    // landed is recorded as a failure and every tick behind it fails too —
-    // the composes are serialized on one chain.
-    tickTimeoutMs: 60_000,
-    compose: async (input: NotesComposeInput) => {
-      const extra = await hooks.before(input, tickNumber, tickTranscript);
-      const edits = await composer.compose({ ...input, ...extra });
-      // CW_NOTES_EVAL_OPS=1 prints the op mix per tick. A meeting whose notes
-      // end EMPTY after fifty ticks is not a note-taker that wrote nothing —
-      // it is one that wrote and then deleted, and the two look identical in
-      // every other number this run prints.
-      if (process.env.CW_NOTES_EVAL_OPS === '1') {
-        // The ids an edit names, and — for a delete — the words it is about to
-        // remove. A tick that took the notes from forty bullets to none is
-        // only legible if the log says WHAT it deleted, not just that it
-        // deleted something.
-        const byId = new Map(input.outline.map((e) => [e.id, e]));
-        const mix = edits
-          .map((e) => {
-            const id = 'blockId' in e ? e.blockId : 'headingId' in e ? e.headingId : undefined;
-            if (e.op !== 'delete_block') return `${e.op}(${id ?? '-'})`;
-            const gone = byId.get(id as string);
-            return `delete_block(${id}: ${gone?.kind ?? '?'} "${(gone?.text ?? '?').slice(0, 40)}")`;
-          })
-          .join(' ');
-        console.log(
-          `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ` +
-            `heading=${input.notesHeadingId ?? 'none'} :: ${mix || '(none)'}`,
-        );
-      }
-      return edits;
-    },
+  // A doc and a meeting id OF THIS MEETING'S OWN. The harness defaults both
+  // ('d-meeting', 'm1'), which was harmless while meetings ran one at a
+  // time and is not once `--jobs` runs four at once: four sessions sharing
+  // one doc id share every log line and every piece of state keyed on it.
+  // CW_NOTES_EVAL_SHARED_IDS=1 restores the collision deliberately — the ids
+  // below ARE the harness's defaults, so the two runs differ in nothing else.
+  // It is the positive control for that finding: without it, "the collapse
+  // stopped happening" is a claim about a run that also changed nothing else.
+  const harness = evalMeetingHarness(fixture, ticks, opts.dataDir, async (input) => {
+    const extra = await hooks.before(input, tickNumber, tickTranscript);
+    const edits = await composer.compose({ ...input, ...extra });
+    // CW_NOTES_EVAL_OPS=1 prints the op mix per tick. A meeting whose notes
+    // end EMPTY after fifty ticks is not a note-taker that wrote nothing —
+    // it is one that wrote and then deleted, and the two look identical in
+    // every other number this run prints.
+    if (process.env.CW_NOTES_EVAL_OPS === '1') {
+      // The ids an edit names, and — for a delete — the words it is about to
+      // remove. A tick that took the notes from forty bullets to none is
+      // only legible if the log says WHAT it deleted, not just that it
+      // deleted something.
+      const byId = new Map(input.outline.map((e) => [e.id, e]));
+      const mix = edits
+        .map((e) => {
+          const id = 'blockId' in e ? e.blockId : 'headingId' in e ? e.headingId : undefined;
+          if (e.op !== 'delete_block') return `${e.op}(${id ?? '-'})`;
+          const gone = byId.get(id as string);
+          return `delete_block(${id}: ${gone?.kind ?? '?'} "${(gone?.text ?? '?').slice(0, 40)}")`;
+        })
+        .join(' ');
+      console.log(
+        `  [ops] ${fixture.meeting} tick ${tickNumber}: outline=${input.outline.length} ` +
+          `heading=${input.notesHeadingId ?? 'none'} :: ${mix || '(none)'}`,
+      );
+    }
+    return edits;
   });
 
   let before = '';
@@ -707,6 +1010,22 @@ async function runMeeting(
   // as an EXAMPLE, which is why the count is printed next to the totals and
   // the reasons are printed under them.
   let uncomposed = 0;
+  const judgeWindow = new JudgeWindow();
+  /** Ask the judge about one window and file its five verdicts, under the
+   *  given suffix — `''` for the run's own columns, `UNPAIRED_SUFFIX` for the
+   *  control ones. */
+  const judgeInto = async (window: JudgedWindow, suffix = ''): Promise<void> => {
+    const verdict = await judge(opts.key, window.before, window.after, window.transcript);
+    if (!verdict) return;
+    for (const [key, id] of JUDGED_COLUMNS) {
+      // A field the judge did not answer is not an example of anything.
+      // Scoring it as a failure would grade the judge's JSON, not the
+      // note-taker.
+      const field = verdict[key];
+      if (!field) continue;
+      behaviours[`${id}${suffix}`]?.see({ ok: field.ok, detail: field.why }, window.where);
+    }
+  };
   for (let i = 0; i < ticks.length; i++) {
     const tick = ticks[i]!;
     const transcript = tick.turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
@@ -803,26 +1122,36 @@ async function runMeeting(
     );
 
     /* --- the model's half --- */
-    if (judged.has(i) && opts.judgePerMeeting > 0) {
-      const verdict = await judge(opts.key, before, notes, transcript);
-      if (verdict) {
-        for (const [key, id] of [
-          ['paraphrased', 'paraphrase'],
-          ['covers', 'covers'],
-          ['topics', 'topicChange'],
-          ['guesses', 'unconfirmed'],
-          ['together', 'together'],
-        ] as const) {
-          // A field the judge did not answer is not an example of anything.
-          // Scoring it as a failure would grade the judge's JSON, not the
-          // note-taker.
-          const field = verdict[key];
-          if (!field) continue;
-          behaviours[id]!.see({ ok: field.ok, detail: field.why }, where);
-        }
+    if (opts.judgePerMeeting > 0) {
+      // EVERY tick is offered, drawn or not: a window a drawn tick opened is
+      // closed by whichever tick actually writes the bullets.
+      const window = judgeWindow.offer({
+        wanted: budget.due(i),
+        before,
+        after: notes,
+        transcript,
+        where,
+      });
+      if (window) {
+        budget.spent(i);
+        await judgeInto(window);
+      }
+      // The control: the SAME notes, judged the way they were judged before
+      // the window existed — this tick alone, mid-action or not. It is what
+      // makes "the artefact moved these columns by N points" a paired
+      // measurement over one set of composes rather than two runs of a
+      // sampling model.
+      if (judged.has(i) && behaviours[`paraphrase${UNPAIRED_SUFFIX}`]) {
+        await judgeInto({ before, after: notes, transcript, where }, UNPAIRED_SUFFIX);
       }
     }
     before = notes;
+  }
+  // A window still open when the words run out is judged as it stands — its
+  // heading was never filled, and there is no tick left to fill it.
+  if (opts.judgePerMeeting > 0) {
+    const tail = judgeWindow.flush();
+    if (tail) await judgeInto(tail);
   }
   await harness.end();
 
@@ -892,16 +1221,19 @@ async function runMeeting(
   // less. `turnsLost` is the lost-idea rate — settled turns no successful
   // compose ever carried — and the latencies are compose-and-write only,
   // because this harness fires its own ticks (see `NotesTickHarness.timing`).
-  const latencies = harness
-    .timing()
-    .rows()
-    .map((r) => r.settledToWrittenMs)
-    .filter((v): v is number => v !== null);
-  const lost = harness.summary()?.turnsLost ?? 0;
-  if (latencies.length > 0) {
+  //
+  // READ OFF THE SUMMARY, NOT OFF `harness.timing()`. A harness given a data
+  // dir does not use the log it was handed: the notes sinks supply their own,
+  // file-backed one, and the harness's stays empty. So the read that looks
+  // more direct returns nothing at all here, and the line it prints would have
+  // gone silent — the numbers still reach the summary, which is where the
+  // session's own log puts them.
+  const summary = harness.summary();
+  const lost = summary?.turnsLost ?? 0;
+  if (summary?.latencyMedianMs !== undefined && summary.latencyWorstMs !== undefined) {
     console.log(
       `  ${fixture.meeting}: ${lost} turn(s) in no note, compose→written median ` +
-        `${Math.round(median(latencies) ?? 0)}ms, worst ${Math.round(Math.max(...latencies))}ms`,
+        `${Math.round(summary.latencyMedianMs)}ms, worst ${Math.round(summary.latencyWorstMs)}ms`,
     );
   }
   console.log(
@@ -913,6 +1245,10 @@ async function runMeeting(
       // counts the walls still standing when the meeting ended, and a zero
       // is worth printing because it is the number that should be there.
       `${longFlatRuns(harness.notes()).length} topics over ${MAX_FLAT_RUN_BULLETS} flat bullets` +
+      (opts.judgePerMeeting > 0
+        ? `, ${judgeWindow.waited} of ${judgeWindow.judged} judged windows waited for a ` +
+          "heading's bullets"
+        : '') +
       (uncomposed > 0 ? `, ${uncomposed} never composed` : ''),
   );
   // Distinct reasons, not one line per failure: twenty timeouts are one fact
@@ -1026,6 +1362,13 @@ async function main(argv: string[]): Promise<number> {
   const judgeIdeasOnly = judgeAt >= 0 && argv[judgeAt + 1] === 'ideas';
   const variantAt = argv.indexOf('--variant');
   const variant = resolveVariant(variantAt >= 0 ? (argv[variantAt + 1] ?? '') : 'baseline');
+  const perMeetingAt = argv.indexOf('--judge-per-meeting');
+  const judgePerMeeting =
+    perMeetingAt >= 0 ? Math.max(0, Math.floor(Number(argv[perMeetingAt + 1]))) || 0 : 6;
+  if (perMeetingAt >= 0 && judgePerMeeting === 0) {
+    console.error(`--judge-per-meeting wants a count, not "${argv[perMeetingAt + 1]}".`);
+    return 2;
+  }
   const jobsAt = argv.indexOf('--jobs');
   // Meetings are independent — separate harnesses, separate docs, separate
   // ledgers — so they run side by side. Serially a full run is the sum of
@@ -1087,6 +1430,14 @@ async function main(argv: string[]): Promise<number> {
     speakers: new Behaviour('1.4', 'Decisions and questions keep a speaker'),
     unconfirmed: new Behaviour('1.4', 'Uncertain points marked unconfirmed'),
   };
+  // The control columns, only when asked for. Absent, nothing calls the judge
+  // twice and the run costs what it always did.
+  if (process.env.CW_NOTES_EVAL_UNPAIRED === '1') {
+    for (const [, id] of JUDGED_COLUMNS) {
+      const of = behaviours[id]!;
+      behaviours[`${id}${UNPAIRED_SUFFIX}`] = new Behaviour(of.id, `${of.what} — unpaired`);
+    }
+  }
 
   const corpusAt = argv.indexOf('--corpus');
   const corpusDir = corpusAt >= 0 && argv[corpusAt + 1] ? argv[corpusAt + 1]! : FIXTURE_DIR;
@@ -1104,11 +1455,24 @@ async function main(argv: string[]): Promise<number> {
     meetings,
     // The smoke slice judges ONE tick: the CI job is there to prove the
     // harness still runs end to end, not to measure anything.
-    judgePerMeeting: judgeOff || judgeIdeasOnly ? 0 : smoke ? 1 : 6,
+    //
+    // SIX IS A SAMPLE, AND A SMALL ONE: one example either way is seventeen
+    // points, which is wider than most differences between two methods. The
+    // judge is the cheap half of a run — the composes are the bill — so
+    // `--judge-per-meeting N` buys a narrower band for very little, and is
+    // how a comparison that has to resolve a real difference is run.
+    judgePerMeeting: judgeOff || judgeIdeasOnly ? 0 : smoke ? 1 : judgePerMeeting,
     key,
     corpusDir,
     ideas,
     variant,
+    // ONE THROWAWAY DATA DIR FOR THE RUN, shared by every meeting in it, so
+    // `CW_NOTES_EVAL_SHARED_IDS=1` still collides two meetings on one doc id
+    // in the state that is keyed on it. Removed in the `finally` below: it
+    // holds transcripts the fixtures already carry and timings nothing reads
+    // after the run, and a run that left one behind per invocation would fill
+    // a temp dir with copies of the corpus.
+    dataDir: mkdtempSync(join(tmpdir(), 'cw-notes-eval-')),
     ...(dumpDir ? { dumpDir } : {}),
   };
   const ticksWanted = smoke ? 3 : Number.POSITIVE_INFINITY;
@@ -1160,6 +1524,7 @@ async function main(argv: string[]): Promise<number> {
     return 1;
   } finally {
     setIdeaUsageSink(null);
+    rmSync(opts.dataDir, { recursive: true, force: true });
   }
   // Rows come back in whatever order the meetings finished. A table that
   // reorders itself between runs cannot be diffed against another variant's.

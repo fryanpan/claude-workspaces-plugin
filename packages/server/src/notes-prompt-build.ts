@@ -165,6 +165,17 @@ export interface NotesPrompt {
 }
 
 /**
+ * How a tick's speech is introduced.
+ *
+ * A tick carries what was said SINCE the last one, which is what this says.
+ * The at-stop cleanup pass carries the whole meeting instead
+ * (`notes-cleanup-pass.ts`) and overrides it through `transcriptLabel`: a
+ * model told these are the newest words, and handed an hour of them, reads
+ * the opening of the meeting as something just said.
+ */
+const DEFAULT_TRANSCRIPT_LABEL = 'New transcript since the last update';
+
+/**
  * Prompt building is pure and exported: what the transcript is asked to
  * become is behaviour worth pinning without a network in the test.
  *
@@ -289,7 +300,7 @@ export function buildNotesPrompt(
 
   if (input.extraPrompt) parts.push(input.extraPrompt);
   parts.push(
-    `New transcript since the last update:\n${input.tick.turns
+    `${input.transcriptLabel ?? DEFAULT_TRANSCRIPT_LABEL}:\n${input.tick.turns
       .map((t) => `- ${speakerPrefix(t)}${t.text}${turnSuffix(t, input.tick.reason)}`)
       .join('\n')}`,
   );
@@ -338,6 +349,10 @@ export function outlineCacheCuts(
  * "you wrote this and nobody has touched it since", which is exactly the set
  * of blocks an edit may rewrite directly — anything else reaches them as a
  * suggestion, and the instructions say so.
+ *
+ * `input.claimed` overrides that per block, for a caller whose own gate has
+ * decided an unmarked block is nobody's rather than a person's. Only the
+ * cleanup pass sets it; a tick leaves it absent and reads exactly as before.
  */
 /**
  * The doc as the model reads it, cut into the chunks the cache is taken on.
@@ -384,7 +399,10 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
             ? 'sub-bullet'
             : 'bullet'
           : 'para';
-    const whose = entry.author === undefined ? 'theirs' : 'yours';
+    // `claimed` is the caller overriding the doc's marks — see
+    // `NotesComposeInput.claimed`. Nothing sets it on a tick.
+    const whose =
+      entry.author !== undefined || input.claimed?.has(entry.id) === true ? 'yours' : 'theirs';
     const under =
       entry.kind === 'heading' || entry.underHeadingId === undefined
         ? ''

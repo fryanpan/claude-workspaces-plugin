@@ -2378,6 +2378,11 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'string',
             description: "Absolute path to the builder's git worktree on this machine.",
           },
+          reason: {
+            type: 'string',
+            description:
+              'Why you are running this row NOW, in one short sentence — "next in the goal band", "unblocked by #863", "Bryan asked for it in the huddle". Recorded on the board as the moment you decided, which is what separates the time a row spent waiting on you or on a gate from the time its builder spent queueing for a free slot. Nothing reads it to make a decision; leaving it out costs only the attribution.',
+          },
         },
         required: ['workspaceId', 'taskId', 'worktreePath'],
       },
