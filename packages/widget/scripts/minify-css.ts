@@ -13,9 +13,11 @@
  *
  * The transform is deliberately small rather than a full CSS parser. It is
  * safe for this stylesheet because it contains no `url(data:...)`, no quoted
- * `content:` string, and no descendant combinator followed by a pseudo-class
- * (`.a :first-child`), which is the one selector shape where dropping the
- * space around `:` would change meaning. `css-minify.test.ts` pins those.
+ * `content:` string with whitespace touching one of `{}:;,>` (the two it has,
+ * `"on "` and `"✓ "`, end in a space before the quote, which survives), and no
+ * descendant combinator followed by a pseudo-class (`.a :first-child`), which
+ * is the one selector shape where dropping the space around `:` would change
+ * meaning. `css-minify.test.ts` pins those.
  */
 export function minifyCss(css: string): string {
   const holes: string[] = [];

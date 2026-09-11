@@ -96,6 +96,14 @@ async function build(format: 'esm' | 'iife', name: string, entry = 'widget.ts') 
     for (const m of result.logs) console.error(m);
     process.exit(1);
   }
+  // The bundler ends each file with a `//# debugId=` comment, which a map
+  // uploader (sentry-cli) uses to pair the file with its map. Nothing uploads
+  // or serves these maps, and every embed paid ~40 B gz of the budget for it.
+  // The `.map` files are still written, for reading by hand.
+  for (const o of result.outputs) {
+    if (o.kind !== 'entry-point') continue;
+    writeFileSync(o.path, (await o.text()).replace(/\n+\/\/# debugId=\w+\n*$/, '\n'));
+  }
   return result;
 }
 

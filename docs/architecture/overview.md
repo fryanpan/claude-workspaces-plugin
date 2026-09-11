@@ -314,6 +314,16 @@ and adds no fetch of its own. The Home-queue entry for such an item deep-links
 to `/workspaces/<ws>/mockups/<doc>?thread=<id>`, which is why a queue entry now
 carries the doc's `type`.
 
+**The comment card stands where its comment will live.** In comment mode the
+composer is a card fixed to the right edge of the viewport at its element's
+height, joined to the element by a faint line, and on post it becomes the saved
+card with a tick; at phone width it is a compact panel along the bottom.
+`widget-card.ts`, a top-level module of the widget package beside
+`widget-picker.ts`, decides where the card goes — beside the element, or below
+or above it when the element reaches into the margin, never over it — and is
+asked again every frame from the widget's existing rAF loop. It joins no data
+flow: it reads layout and writes only the widget's own shadow DOM.
+
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,
 suggestions, anchors, presence, live notes. Agents hold no replica, so an agent

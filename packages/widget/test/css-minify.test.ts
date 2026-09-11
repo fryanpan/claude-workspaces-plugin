@@ -66,6 +66,12 @@ describe('minifyCss', () => {
     );
   });
 
+  it('keeps the trailing space inside a quoted content string', () => {
+    // The comment card draws "on " before an element's name and "✓ " before
+    // a tick; lose the space and the name runs into the word.
+    expect(minifyCss('.a::before { content: "on "; }')).toBe('.a::before{content:"on "}');
+  });
+
   it('is idempotent', () => {
     const once = minifyCss('/* c */\n.a {\n  color: red;\n}\n.b .c { width: calc(1px + 2px); }');
     expect(minifyCss(once)).toBe(once);
