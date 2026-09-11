@@ -41,6 +41,7 @@ import type {
   ActivityFilter,
   BoardNav,
   BoardPane,
+  ChatAuditView,
   ClientRelease,
   HomePayload,
   LeadSeatView,
@@ -115,6 +116,11 @@ export interface BoardState {
    *  not replace it. Null on any server that publishes no client release
    *  (dev, staging) — those must not report the prod machine's deploy. */
   clientRelease: ClientRelease | null;
+  /** How many asks reached the owner as chat rather than as an answerable
+   *  item, per agent, over the server's window. Null until the first
+   *  attachments read lands, and null for a share visitor (the server does
+   *  not send it) — neither is "none". */
+  chatAudit: ChatAuditView | null;
   detailTaskId: string | null;
   /** Which tab the task panel opens on. `comments` every way in but one: the
    *  Home activity pane's title tap opens on Activity (Bryan, 2026-08-29).

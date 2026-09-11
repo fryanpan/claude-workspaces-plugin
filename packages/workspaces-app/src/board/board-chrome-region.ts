@@ -30,6 +30,7 @@ import {
   initialsOf,
   pluginDriftNotice,
   presenceChips,
+  unfiledAskNotice,
 } from './board-presence-model.ts';
 import { defaultSigninHref, wireMeMenu } from './me-menu.ts';
 import { driftData, presenceData } from './presence-island.tsx';
@@ -115,6 +116,7 @@ export function createBoardChromeRegion(deps: BoardChromeDeps): BoardChromeRegio
     const notices = [
       pluginDriftNotice(state.pluginRelease),
       clientDriftNotice(state.clientRelease, Date.now()),
+      unfiledAskNotice(state.chatAudit),
     ];
     driftData.value = notices;
     renderSettingsAlarm(notices);

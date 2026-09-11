@@ -56,6 +56,7 @@ export function initialBoardState(bootLoc: BoardLocation): BoardState {
     agents: [],
     pluginRelease: null,
     clientRelease: null,
+    chatAudit: null,
     detailTaskId: bootLoc.task,
     detailTab: 'comments',
     detailGoalId: bootLoc.goal,

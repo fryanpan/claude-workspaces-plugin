@@ -22,6 +22,7 @@ import {
 import {
   ACTIVITY_REFRESH_EVENTS,
   type ActivityEvent,
+  type ChatAuditView,
   type ClientRelease,
   type UptimeReport,
   activityRows,
@@ -33,6 +34,7 @@ import {
   presenceHue,
   taskActivity,
   timeAgo,
+  unfiledAskNotice,
   uptimeSummary,
   waitShort,
 } from '../src/board/board-presence-model.ts';
@@ -2090,6 +2092,59 @@ describe('pluginDriftNotice', () => {
     // sentence to write. Positive control: every case above returns a notice.
     expect(pluginDriftNotice(undefined)).toBeNull();
     expect(pluginDriftNotice(null)).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unfiled-ask notice — "N asks reached you as chat"
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('unfiledAskNotice', () => {
+  const view = (agents: ChatAuditView['agents']): ChatAuditView => ({
+    days: 7,
+    from: '2026-09-04',
+    agents,
+    accuracy: { precisionPct: 86, unfiledRecallPct: 15, labelled: 110, corpus: 631 },
+  });
+
+  it('adds the agents up and names the worst offenders', () => {
+    const notice = unfiledAskNotice(
+      view([
+        { agent: 'Riverbend', unfiledAsks: 5, totalAsks: 9, days: 3 },
+        { agent: 'Harborlight', unfiledAsks: 2, totalAsks: 2, days: 1 },
+      ]),
+    );
+    expect(notice?.headline).toBe('7 asks reached you as chat in 7 days');
+    expect(notice?.detail).toContain('Riverbend 5, Harborlight 2');
+    // It is a coverage notice, not an alert: the board renders it quietly,
+    // because a measurement that shouts is a measurement people turn off.
+    expect(notice?.kind).toBe('coverage');
+  });
+
+  it('says what the number cannot see, with the denominator', () => {
+    const detail = unfiledAskNotice(
+      view([{ agent: 'Riverbend', unfiledAsks: 1, totalAsks: 4, days: 1 }]),
+    )?.detail;
+    expect(detail).toContain('110 hand-labelled messages out of 631');
+    expect(detail).toContain('86%');
+    expect(detail).toContain('15%');
+    expect(detail).toContain('a floor');
+  });
+
+  it('says nothing at all when nothing reached the owner as chat', () => {
+    expect(unfiledAskNotice(view([]))).toBeNull();
+    expect(
+      unfiledAskNotice(view([{ agent: 'Riverbend', unfiledAsks: 0, totalAsks: 6, days: 2 }])),
+    ).toBeNull();
+    expect(unfiledAskNotice(null)).toBeNull();
+    expect(unfiledAskNotice(undefined)).toBeNull();
+  });
+
+  it('counts one ask in the singular', () => {
+    const notice = unfiledAskNotice(
+      view([{ agent: 'Riverbend', unfiledAsks: 1, totalAsks: 1, days: 1 }]),
+    );
+    expect(notice?.headline).toBe('1 ask reached you as chat in 7 days');
   });
 });
 

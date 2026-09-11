@@ -487,6 +487,20 @@ export interface PluginRelease {
   checked?: number;
 }
 
+/** How many agents the unfiled-ask line names before it stops. Four, so the
+ *  line stays one sentence at 430px. */
+const UNFILED_ASK_NAMED = 4;
+
+/** The chat-audit window as `GET /workspaces/:id/agents` sends it. */
+export interface ChatAuditView {
+  days: number;
+  from: string;
+  agents: Array<{ agent: string; unfiledAsks: number; totalAsks: number; days: number }>;
+  /** What the detector behind these numbers was measured to do. Not optional:
+   *  the count is unreadable without it. */
+  accuracy: { precisionPct: number; unfiledRecallPct: number; labelled: number; corpus: number };
+}
+
 export interface DriftNotice {
   headline: string;
   detail: string;
@@ -630,6 +644,49 @@ const MAX_ERROR_CHARS = 200;
  * So the age is the headline. "Stale" alone does not say whether the split is
  * minutes or a week, and the gap is the whole reason to care.
  */
+/**
+ * One agent's week of asks that reached the owner as chat, and what the
+ * count is worth.
+ *
+ * Rendered as `coverage` rather than `alert` deliberately. It is a standing
+ * line rather than an event, and a standing line that looks like an alarm
+ * trains people to stop reading the alarms — the same reading the plugin
+ * strip's own coverage line was written under.
+ *
+ * The `detail` carries the accuracy figures the server sends, because this
+ * count CANNOT be read without them: it comes from a regex over end-of-turn
+ * messages that catches a small fraction of unfiled asks and is wrong about
+ * one flagged message in six. A surface showing the number alone would be
+ * read as a census of the protocol's failures, which it is roughly seven
+ * times too small to be.
+ *
+ * Null when the server sent no counters (an older server, or a share
+ * visitor's redacted read) and null when nobody has a count — an empty week
+ * is a real answer, and printing "0 asks" every week is how a line stops
+ * being read at all.
+ */
+export function unfiledAskNotice(audit: ChatAuditView | null | undefined): DriftNotice | null {
+  if (!audit || audit.agents.length === 0) return null;
+  const total = audit.agents.reduce((sum, a) => sum + a.unfiledAsks, 0);
+  if (total === 0) return null;
+  const named = audit.agents
+    .filter((a) => a.unfiledAsks > 0)
+    .slice(0, UNFILED_ASK_NAMED)
+    .map((a) => `${a.agent} ${a.unfiledAsks}`)
+    .join(', ');
+  const { precisionPct, unfiledRecallPct, labelled, corpus } = audit.accuracy;
+  return {
+    headline: `${total} ask${total === 1 ? '' : 's'} reached you as chat in ${audit.days} days`,
+    detail:
+      `${named}. Counted from end-of-turn messages by a phrase match, measured on ` +
+      `${labelled} hand-labelled messages out of ${corpus}: right about ${precisionPct}% of what ` +
+      `it flags, and finding about ${unfiledRecallPct}% of unfiled asks — a floor, not a count ` +
+      'of them all.',
+    fix: 'Each of these was a question in chat with nothing on your queue behind it.',
+    kind: 'coverage',
+  };
+}
+
 export function clientDriftNotice(
   release: ClientRelease | null | undefined,
   now: number,

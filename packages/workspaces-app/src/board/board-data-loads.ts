@@ -29,6 +29,7 @@ import type { BoardState } from './board-actions.ts';
 import { fetchJson } from './board-actions.ts';
 import {
   type ActivityEvent,
+  type ChatAuditView,
   type ClientRelease,
   type LeadSeatView,
   type PluginRelease,
@@ -116,6 +117,7 @@ export function createBoardLoads(deps: BoardLoadDeps): BoardLoads {
       seat?: LeadSeatView;
       pluginRelease?: PluginRelease;
       clientRelease?: ClientRelease;
+      chatAudit?: ChatAuditView;
     }>(`/workspaces/${encodeURIComponent(workspaceId)}/agents`);
     const before = knownAgentIds().join('\n');
     // Which sessions can't run what was merged. Rides the read the board
@@ -130,6 +132,9 @@ export function createBoardLoads(deps: BoardLoadDeps): BoardLoads {
     // only on the supervisor's stderr, so the split widened unread. Guarded
     // the same way: an unreachable server must not read as "no release".
     state.clientRelease = applyRefresh(state.clientRelease, res, (r) => r.clientRelease ?? null);
+    // …and how the fleet is behaving toward the owner. Guarded the same way:
+    // a read that never reached the server must not read as a clean week.
+    state.chatAudit = applyRefresh(state.chatAudit, res, (r) => r.chatAudit ?? null);
     // Guarded like the releases above: a read that never reached the server
     // must not read as a healthy seat. `?? null` keeps an older server's
     // silence as "no claim", which the strip renders as it always did.
