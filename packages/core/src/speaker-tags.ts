@@ -5,13 +5,13 @@
  * PROSE: the composer wrote the words "Speaker B" and a rename found them by
  * searching for that string. Two consequences, both in the architecture
  * summary as known limits — a rename could not tell two voices apart when
- * they had been given the same name ("Alex" in the notes does not say
+ * they had been given the same name ("Alice" in the notes does not say
  * which), and nothing else in the system could ever ask a note who said it,
  * because the answer existed only as English.
  *
  * THE TAG IS A MARKDOWN LINK, and that is the whole trick:
  *
- *     - [@Devi](speaker:B) wants the deploy gate moved before merge.
+ *     - [@Mallory](speaker:B) wants the deploy gate moved before merge.
  *
  * The visible half is the name; the durable half is the LABEL, in the href.
  * Everything follows from that split:
@@ -21,9 +21,9 @@
  *   ordinary Yjs `link` mark, so the attribution goes to disk, comes back
  *   from disk, and is carried through an edit the same way bold is. A mark
  *   invented for this would have been lost on the first flush.
- * - **A rename touches the NAME, never the identity.** Naming "B" as Devi
+ * - **A rename touches the NAME, never the identity.** Naming "B" as Mallory
  *   rewrites the link text at every site whose href is `speaker:B` — no
- *   string search, so two voices called Alex are still two voices and each
+ *   string search, so two voices called Alice are still two voices and each
  *   renames alone. The ambiguity that used to refuse the retroactive rewrite
  *   cannot arise for a tagged mention.
  * - **Reassignment is one attribute.** Moving a turn diarization gave to the
@@ -70,7 +70,7 @@ export const SPEAKER_TAG_SCHEME = 'speaker:';
  *
  * WHY A MENTION NEEDS MORE THAN A LABEL. The engine changes its mind about
  * who spoke: a `SpeakerRevision` arrives at the end of a session naming turns
- * the whole-session pass relabelled. A rename ("B is Devi") is a fact about a
+ * the whole-session pass relabelled. A rename ("B is Mallory") is a fact about a
  * VOICE and the label alone answers it, which is why the label was enough
  * until now. A revision is a fact about a TURN — "turn 12 was not B after
  * all" — and a mention tagged `speaker:B` cannot say whether it came from
@@ -164,7 +164,7 @@ function normalizeTurns(turns: readonly number[] | undefined): number[] {
 /**
  * The character that opens a tag's visible text. Not decoration: it is what
  * tells a reader of the raw markdown — and a reader of the flushed .md file,
- * where nothing renders a chip — that "Devi" here is an attribution and not
+ * where nothing renders a chip — that "Mallory" here is an attribution and not
  * the first word of the sentence.
  */
 export const SPEAKER_TAG_SIGIL = '@';
@@ -241,11 +241,11 @@ export function speakerTagLabel(href: string): string | null {
 }
 
 /**
- * The visible text of a tag for a voice: `"@Devi"`, or `"@Speaker B"`.
+ * The visible text of a tag for a voice: `"@Mallory"`, or `"@Speaker B"`.
  *
  * BRACKETS ARE REMOVED, because a name is free text somebody typed and a tag
- * is a markdown link. "Sam [PM]" written into one produces
- * `[@Sam [PM]](speaker:C)`, which is not a tag any more: the finder cannot
+ * is a markdown link. "Dave [PM]" written into one produces
+ * `[@Dave [PM]](speaker:C)`, which is not a tag any more: the finder cannot
  * see it, normalization skips it, and every later rename silently updates
  * nothing — the attribution stuck on that spelling for good.
  *
@@ -271,8 +271,8 @@ function tagSafeName(name: string): string {
     .trim();
 }
 
-/** A whole tag as markdown: `[@Devi](speaker:B)`, or with the turns it was
- *  composed from, `[@Devi](speaker:B?t=10,12)`. */
+/** A whole tag as markdown: `[@Mallory](speaker:B)`, or with the turns it was
+ *  composed from, `[@Mallory](speaker:B?t=10,12)`. */
 export function renderSpeakerTag(
   label: string,
   names: Readonly<Record<string, string>>,

@@ -28,7 +28,7 @@ const base = (): TaskReviewItem => ({
 });
 const question = (ts: number, threadId: string) => ({
   text: 'Twice per what?',
-  by: 'Jordan',
+  by: 'Carol',
   ts,
   threadId,
   range: { text: 'once' },
@@ -109,7 +109,7 @@ describe('reviewItemState', () => {
         ...base(),
         infoRequests: [question(4_000, 'th-2')],
         revisions: [revision(3_000, 'th-1')],
-        answer: { text: 'Keep it', by: 'Jordan', ts: 5_000 },
+        answer: { text: 'Keep it', by: 'Carol', ts: 5_000 },
       }),
     ).toBe('answered');
   });

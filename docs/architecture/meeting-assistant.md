@@ -506,13 +506,13 @@ one.
 
 **Names, not labels.** The pipeline's `speaker` is an opaque LABEL that
 `speakerDisplayName` renders as "Speaker A" until a person names it. Putting
-"Rowan Pike" in that field directly would render "Speaker Rowan Pike"
+"Trent Seagrass" in that field directly would render "Speaker Trent Seagrass"
 everywhere. So a bot meeting synthesises a label per participant (`p7`) and
 NAMES it immediately with the platform's name — which means the record's name
 map, the composer's display logic and the retroactive-rename machinery all
 work unchanged, and a person can still correct a name the platform got wrong.
 Two participants with the same display name are disambiguated at that seam
-("Alex Yun (2)"), because composed notes carry no per-mention attribution and
+("Alice Lighthouse (2)"), because composed notes carry no per-mention attribution and
 the notes session correctly REFUSES to rewrite a name that means two voices.
 
 **Turn numbers are invented here.** AssemblyAI's own stream carries
@@ -660,7 +660,7 @@ and REPLACES the turn on read, keeping the position it first settled in —
 that is how the bot path's double final, rough then punctuated, lands as one
 turn reading the punctuated way),
 plus a `meetings.jsonl` index whose start/stop lines fold into one record
-per meeting — and whose `{meetingId, speakers: {A: "Jordan"}}` lines fold
+per meeting — and whose `{meetingId, speakers: {A: "Carol"}}` lines fold
 into the record's name map, last word wins. Nothing deletes; ids sanitized
 `[^A-Za-z0-9._-] → _`.
 
@@ -1341,12 +1341,12 @@ times and assert all three survive.
 
 Renaming an already-given name works the same way, because the rewrite reads
 the OLD DISPLAY NAME (what the composer actually wrote), not the raw label —
-"Devi" → "Devi Raman" replaces "Devi".
+"Mallory" → "Mallory Saltmarsh" replaces "Mallory".
 
 **Two voices with the same name narrow the rewrite, they no longer refuse
 it.** Display text used to be the only handle the notes gave, so if both A
-and B were called "Alex", "Alex" in the notes did not say which and
-correcting A to "Sam" would have silently reattributed B's words; the session
+and B were called "Alice", "Alice" in the notes did not say which and
+correcting A to "Dave" would have silently reattributed B's words; the session
 detected that and skipped the retroactive part entirely. Tagged mentions have
 their own handle — the label in the href — so the tag rewrite runs
 unconditionally and only the UNTAGGED text sweep is skipped when the display
@@ -1405,7 +1405,7 @@ screen reads as saved.
 ### Speaker tags: attribution the notes can carry
 
 A tag is a markdown link whose href names the voice —
-`[@Devi](speaker:B)` — so the visible half is the name and the durable half
+`[@Mallory](speaker:B)` — so the visible half is the name and the durable half
 is the LABEL (`packages/core/src/speaker-tags.ts`). The shape was chosen
 because a meeting doc is a live Yjs doc that flushes to a `.md` on disk: a
 link is ordinary markdown and an ordinary Yjs `link` mark, so attribution
@@ -1424,20 +1424,20 @@ invented for this would have been lost on the first flush.
 - **A rename is keyed on the label, never the spelling.**
   `retagSpeakerInNotes` walks the `Y.XmlText` nodes of the blocks the
   note-taker owns and rewrites every run whose link href is `speaker:<label>`,
-  in place, marks preserved — which is what makes two voices called Alex
+  in place, marks preserved — which is what makes two voices called Alice
   separable where the display-text sweep could not tell them apart. It runs
   AFTER the untagged sweep, and that order is load-bearing: an extension
-  rename ("Devi" → "Devi Raman") leaves the old name inside the new one, so a
-  sweep running second would find "Devi" inside the "@Devi Raman" the retag
-  had just written and make it "@Devi Raman Raman". Sweeping first, the retag
+  rename ("Mallory" → "Mallory Saltmarsh") leaves the old name inside the new one, so a
+  sweep running second would find "Mallory" inside the "@Mallory Saltmarsh" the retag
+  had just written and make it "@Mallory Saltmarsh Raman". Sweeping first, the retag
   that follows canonicalises every tag for the voice and finds most of them
   already right. Contiguous delta ops sharing the tag's href are coalesced
   into one run before replacement, because a tag with an inner mark — half
   its name bolded — reaches Yjs as several ops and would otherwise be
   rewritten once per op.
 - **A name loses its brackets on the way into a tag.** A display name is free
-  text somebody typed, and a tag is a link: "Sam [PM]" written between the
-  brackets produces `[@Sam [PM]](speaker:C)`, which no longer parses as a tag
+  text somebody typed, and a tag is a link: "Dave [PM]" written between the
+  brackets produces `[@Dave [PM]](speaker:C)`, which no longer parses as a tag
   at all — the finder cannot see it, so every later rename silently reaches
   nothing and the attribution is frozen on that spelling. `speakerTagText`
   removes `[`, `]` and `\` for the tag only; the roster and the strip still
@@ -1447,7 +1447,7 @@ invented for this would have been lost on the first flush.
   none of it — a pre-existing bug worth fixing on its own, but not one this
   feature should depend on. A name that cannot break the syntax is safe
   whichever path writes it. Found in the browser, reassigning a mention to a
-  seeded "Sam [PM]"; the unit tests had only ever used plain names.
+  seeded "Dave [PM]"; the unit tests had only ever used plain names.
 - **A suggestion may not re-attribute a person's note.** `canSuggestOn`
   refuses a rewrite that introduces a speaker label the target did not
   already carry, so the composer cannot attach a line someone typed to a
@@ -1483,12 +1483,12 @@ composed kept the voice they were composed with, so a meeting could end with
 its transcript and its notes disagreeing.
 
 **A rename and a revision are different facts, and only one of them is about
-a voice.** "B is Devi" is true of every mention of B, which is why the label
+a voice.** "B is Mallory" is true of every mention of B, which is why the label
 in the href was enough for it. "Turn 12 was not B after all" is true of one
 turn, and `speaker:B` cannot say which of B's sentences a mention came from.
 
 **So the href also carries the turns behind the mention** —
-`[@Devi](speaker:B?t=10,12)`. Stamped by the deterministic pass, never by the
+`[@Mallory](speaker:B?t=10,12)`. Stamped by the deterministic pass, never by the
 composer: the model's job is to say which voice, and everything a later
 correction has to trust is supplied by code. A tag arriving WITHOUT
 provenance is stamped with the tick's turns for that voice; one that already
@@ -1891,7 +1891,7 @@ touched since*, which the doc keeps true for it.
   about is the one the assistant wrote from the mishearing.
 
 **A site inside a speaker tag is refused outright.** Rewriting the text of
-`[@Devi](speaker:B)` while its href still names voice B would leave the tag
+`[@Mallory](speaker:B)` while its href still names voice B would leave the tag
 claiming B is called something B is not. Attribution moves by the reassign
 gesture, never by a correction of the words around it — the same law
 `attributesToNewVoice` holds the composer to from the other side. The words
@@ -2479,7 +2479,7 @@ readout, the CSV).
   the compose runs on the session's promise chain, so a name given right
   after the quiet timer fires still reaches that tick. Carried (failed)
   turns keep the raw label and are re-mapped on retry; mapping a display
-  name twice would wrap it ("Speaker Jordan").
+  name twice would wrap it ("Speaker Carol").
 - **A pseudo-element tap target is eaten by a clip on ANY ancestor —
   including its own element.** Two review rounds were lost to this: the
   caption's `overflow: hidden` ate it, then the button's own `overflow`,
@@ -2655,7 +2655,7 @@ before the failure leaves the function.
 - **Speaker labels.** Both engines hand out "A". `namespacedSpeaker` puts the
   group in front — `room:A`, `remote:A` — so the two are voices a person can
   name separately. `speakerDisplayName` renders an unnamed one as "Room
-  Speaker A" and a named one as "Dana (Remote)": where somebody is sitting is
+  Speaker A" and a named one as "Eve (Remote)": where somebody is sitting is
   the fact the streams were separated to preserve, so it stays on the name
   after the name is given. A bare label (every meeting recorded before this)
   reads exactly as it always did. The colon is safe inside a

@@ -23,7 +23,7 @@ import type { TextRangeAnchor } from '../src/types.ts';
 
 const threadById = (doc: Y.Doc, id: string) => listThreads(doc).find((t) => t.id === id);
 
-const AUTHOR = { id: 'known-jordan', name: 'Jordan', kind: 'known' as const, color: '#4488cc' };
+const AUTHOR = { id: 'known-carol', name: 'Carol', kind: 'known' as const, color: '#4488cc' };
 
 const textAnchor = (): TextRangeAnchor => ({
   kind: 'text-range',

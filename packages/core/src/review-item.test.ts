@@ -580,14 +580,14 @@ describe('readReviewPayload — loose on the way out, so nothing already stored 
     // The record's face: "Answered by you: Move below" has to survive a
     // reload, so the words and the name live on the declaration itself.
     const p = readReviewPayload(
-      decision({ answeredAt: 1_700_000_000_000, answeredBy: 'Jordan', answerText: 'Move below' }),
+      decision({ answeredAt: 1_700_000_000_000, answeredBy: 'Carol', answerText: 'Move below' }),
     );
-    expect(p?.answeredBy).toBe('Jordan');
+    expect(p?.answeredBy).toBe('Carol');
     expect(p?.answerText).toBe('Move below');
   });
 
   it('drops an answeredBy or answerText that is not a string', () => {
-    for (const junk of [7, null, {}, ['Jordan']]) {
+    for (const junk of [7, null, {}, ['Carol']]) {
       const p = readReviewPayload(
         decision({ answeredBy: junk as never, answerText: junk as never }),
       );
@@ -599,11 +599,11 @@ describe('readReviewPayload — loose on the way out, so nothing already stored 
   it('round-trips answerHistory, dropping malformed entries instead of throwing', () => {
     const kept = {
       answeredAt: 1_700_000_000_000,
-      answeredBy: 'Jordan',
+      answeredBy: 'Carol',
       answerText: 'Move below',
       answeredWith: 'dim',
       undoneAt: 1_700_000_100_000,
-      undoneBy: 'Jordan',
+      undoneBy: 'Carol',
     };
     const p = readReviewPayload(
       decision({
@@ -612,7 +612,7 @@ describe('readReviewPayload — loose on the way out, so nothing already stored 
           'not an object',
           // No undoneAt: a history row IS an undo record; without the stamp
           // there is nothing it records.
-          { answeredAt: 1, undoneBy: 'Jordan' },
+          { answeredAt: 1, undoneBy: 'Carol' },
           // undoneBy arrived as a number — a peer can sync anything here.
           { answeredAt: 1, undoneAt: 2, undoneBy: 7 },
         ] as never,
@@ -623,9 +623,9 @@ describe('readReviewPayload — loose on the way out, so nothing already stored 
 
   it('keeps a minimal history entry — the optional fields degrade, the record stays', () => {
     const p = readReviewPayload(
-      decision({ answerHistory: [{ answeredAt: 1, undoneAt: 2, undoneBy: 'Jordan' }] as never }),
+      decision({ answerHistory: [{ answeredAt: 1, undoneAt: 2, undoneBy: 'Carol' }] as never }),
     );
-    expect(p?.answerHistory).toEqual([{ answeredAt: 1, undoneAt: 2, undoneBy: 'Jordan' }]);
+    expect(p?.answerHistory).toEqual([{ answeredAt: 1, undoneAt: 2, undoneBy: 'Carol' }]);
   });
 
   it('drops the answerHistory key entirely when none survive', () => {
@@ -1278,7 +1278,7 @@ describe('the quality gate’s verdict on a review item', () => {
     const read = readTaskReviewItem(
       item({
         judge: { at: 1, verdict: 'held', reason: 'r' },
-        answer: { text: 'Keep it', by: 'Jordan', ts: 2 },
+        answer: { text: 'Keep it', by: 'Carol', ts: 2 },
       }),
     );
     expect(read ? isReviewItemHeld(read) : null).toBe(false);
@@ -1359,7 +1359,7 @@ describe('the gate, on an item that lives on a COMMENT', () => {
     shape: 'decision',
     headline: 'Which index?',
     ...(judge ? { judge } : {}),
-    ...(answered ? { answeredAt: 9, answeredBy: 'Jordan', answerText: 'Keep it' } : {}),
+    ...(answered ? { answeredAt: 9, answeredBy: 'Carol', answerText: 'Keep it' } : {}),
   });
   const at = (verdict: ReviewJudgeVerdictKind): ReviewItemJudgement => ({
     at: 2,

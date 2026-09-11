@@ -57,16 +57,16 @@ describe('resolveUser', () => {
 
   it('uses the stored name when one exists', () => {
     const s = mockStorage();
-    storeUserName(s, 'Casey');
+    storeUserName(s, 'Carol');
     const u = resolveUser(null, s);
     expect(u.kind).toBe('known');
-    expect(u.name).toBe('Casey');
+    expect(u.name).toBe('Carol');
   });
 
   it('keeps the stable anon id when a name is stored (identity continuity)', () => {
     const s = mockStorage();
     const before = resolveUser(null, s);
-    storeUserName(s, 'Casey');
+    storeUserName(s, 'Carol');
     const after = resolveUser(null, s);
     expect(after.id).toBe(before.id);
   });
@@ -74,8 +74,8 @@ describe('resolveUser', () => {
   it('derives the named color from the name, not the id (cross-device match)', () => {
     const s1 = mockStorage();
     const s2 = mockStorage();
-    storeUserName(s1, 'Casey');
-    storeUserName(s2, 'Casey');
+    storeUserName(s1, 'Carol');
+    storeUserName(s2, 'Carol');
     expect(resolveUser(null, s1).color).toBe(resolveUser(null, s2).color);
   });
 
@@ -97,11 +97,11 @@ describe('resolveUser', () => {
 
   it('?as= does NOT overwrite an already-stored name (shared URLs must not rebrand the reviewer)', () => {
     const s = mockStorage();
-    storeUserName(s, 'Casey');
+    storeUserName(s, 'Carol');
     const withParam = resolveUser('bryan', s);
     expect(withParam.name).toBe('Bryan'); // param wins for THIS load only
     const after = resolveUser(null, s);
-    expect(after.name).toBe('Casey');
+    expect(after.name).toBe('Carol');
   });
 
   it('caps stored names at 40 chars (UI maxlength is advisory only)', () => {
@@ -147,8 +147,8 @@ describe('guest names', () => {
   it('a guest who then names themselves drops the animal', () => {
     const s = mockStorage();
     expect(resolveUser(null, s).name).toMatch(/^Anonymous /);
-    storeUserName(s, 'Casey');
-    expect(resolveUser(null, s).name).toBe('Casey');
+    storeUserName(s, 'Carol');
+    expect(resolveUser(null, s).name).toBe('Carol');
   });
 
   it('handles an empty id without throwing', () => {
@@ -167,7 +167,7 @@ describe('needsNamePrompt', () => {
 
   it('false once a name is stored', () => {
     const s = mockStorage();
-    storeUserName(s, 'Casey');
+    storeUserName(s, 'Carol');
     expect(needsNamePrompt(null, s)).toBe(false);
   });
 

@@ -355,7 +355,7 @@ means the wiring is. The model half also runs in milliseconds without binding
 a port.
 
 **Both halves keep their own copy of the three title fixtures** — the target,
-the near-twin that makes "akash review" ambiguous, and the one-word decoy.
+the near-twin that makes "cairn review" ambiguous, and the one-word decoy.
 That is fixture SHAPE rather than a contract between the halves: the route
 file binds them as real documents, the model file ranks them as bare strings,
 and neither would notice the other changing a word. Each file's comment now

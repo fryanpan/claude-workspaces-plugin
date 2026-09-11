@@ -95,7 +95,7 @@ describe('the wrapper shapes drive the state the queue reads', () => {
     review: { shape: 'review', headline: 'Cache size', detail: 'A pass reads the index once.' },
     createdAt: 1_000,
     createdBy: 'Index Keeper',
-    infoRequests: [{ text: 'Once per what?', by: 'Jordan', ts: 1_500, threadId: 't-1' }],
+    infoRequests: [{ text: 'Once per what?', by: 'Carol', ts: 1_500, threadId: 't-1' }],
     judge: { at: 1_100, verdict: 'ok', reason: 'Reads clearly.' },
   };
 

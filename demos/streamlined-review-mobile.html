@@ -198,47 +198,47 @@ Each card is four lines, hard-capped: every line clips with an ellipsis rather t
 /* Every card in every view is built by card() from this one array, so state is shared:
    resolve something in the sheet and the inline card is resolved too. */
 const THREADS = [
-  { id:'t1', file:'md', author:'Alex', color:'#2e7dd7', status:'open', hue:'',
+  { id:'t1', file:'md', author:'Alice', color:'#2e7dd7', status:'open', hue:'',
     topic:'Error handling in the retry helper',
     state:'Debating whether to keep the fallback path', when:'2h ago',
     comments:[
-      {who:'Alex',c:'#2e7dd7',when:'2h',text:'The retry loop swallows the underlying error, so a caller only ever sees the final timeout. We should rethrow on the last attempt.'},
-      {who:'Sam',c:'#e36f1e',when:'2h',text:'Agreed. Do we keep the fallback path at all, or drop it?'},
-      {who:'Jordan',c:'#8957e5',when:'1h',text:'Keep it — two callers still depend on the degraded response.'}]},
-  { id:'t2', file:'md', author:'Sam', color:'#e36f1e', status:'open', hue:'two',
+      {who:'Alice',c:'#2e7dd7',when:'2h',text:'The retry loop swallows the underlying error, so a caller only ever sees the final timeout. We should rethrow on the last attempt.'},
+      {who:'Dave',c:'#e36f1e',when:'2h',text:'Agreed. Do we keep the fallback path at all, or drop it?'},
+      {who:'Carol',c:'#8957e5',when:'1h',text:'Keep it — two callers still depend on the degraded response.'}]},
+  { id:'t2', file:'md', author:'Dave', color:'#e36f1e', status:'open', hue:'two',
     topic:'Timeout applied per attempt, not overall',
     state:'Agreed to move it into the client wrapper', when:'25m ago',
     comments:[
-      {who:'Sam',c:'#e36f1e',when:'40m',text:'Is the timeout applied across the whole operation or per attempt?'},
-      {who:'Alex',c:'#2e7dd7',when:'32m',text:'Per attempt. Three retries can take 3× the budget.'},
-      {who:'Sam',c:'#e36f1e',when:'28m',text:'That explains the p99. Move it into the client wrapper?'},
-      {who:'Alex',c:'#2e7dd7',when:'25m',text:'Yes — wrapping is the smaller change.'}]},
+      {who:'Dave',c:'#e36f1e',when:'40m',text:'Is the timeout applied across the whole operation or per attempt?'},
+      {who:'Alice',c:'#2e7dd7',when:'32m',text:'Per attempt. Three retries can take 3× the budget.'},
+      {who:'Dave',c:'#e36f1e',when:'28m',text:'That explains the p99. Move it into the client wrapper?'},
+      {who:'Alice',c:'#2e7dd7',when:'25m',text:'Yes — wrapping is the smaller change.'}]},
   // No replies yet: a topic line, and no thread line to write.
-  { id:'t3', file:'md', author:'Jordan', color:'#2da44e', status:'open', hue:'three',
+  { id:'t3', file:'md', author:'Carol', color:'#2da44e', status:'open', hue:'three',
     topic:'Jitter missing from the backoff', state:'', when:'8m ago',
-    comments:[{who:'Jordan',c:'#2da44e',when:'8m',text:'No jitter here, so simultaneous failures retry in lockstep and hit the service as one wave.'}]},
+    comments:[{who:'Carol',c:'#2da44e',when:'8m',text:'No jitter here, so simultaneous failures retry in lockstep and hit the service as one wave.'}]},
   // Orphan and resolved have no line to sit beside — the sheet is the only place they appear.
-  { id:'t4', file:'md', author:'Alex', color:'#8957e5', status:'orphan',
+  { id:'t4', file:'md', author:'Alice', color:'#8957e5', status:'orphan',
     topic:'Retry budget shared across both call sites',
     state:'Unresolved — the anchored line was deleted', when:'yesterday',
     comments:[
-      {who:'Alex',c:'#8957e5',when:'1d',text:'Both call sites share one budget, so a noisy caller starves the other.'},
-      {who:'Jordan',c:'#2da44e',when:'1d',text:'Worth splitting per call site.'}]},
-  { id:'t5', file:'md', author:'Alex', color:'#2e7dd7', status:'resolved',
+      {who:'Alice',c:'#8957e5',when:'1d',text:'Both call sites share one budget, so a noisy caller starves the other.'},
+      {who:'Carol',c:'#2da44e',when:'1d',text:'Worth splitting per call site.'}]},
+  { id:'t5', file:'md', author:'Alice', color:'#2e7dd7', status:'resolved',
     topic:'Log line leaked the request body',
     state:'Fixed — body redacted before logging', when:'3h ago',
     comments:[
-      {who:'Alex',c:'#2e7dd7',when:'3h',text:'This log line prints the whole request body, including auth headers.'},
-      {who:'Sam',c:'#e36f1e',when:'3h',text:'Redacted before logging now.'}]},
-  { id:'t6', file:'code', author:'Alex', color:'#2e7dd7', status:'open', hue:'',
+      {who:'Alice',c:'#2e7dd7',when:'3h',text:'This log line prints the whole request body, including auth headers.'},
+      {who:'Dave',c:'#e36f1e',when:'3h',text:'Redacted before logging now.'}]},
+  { id:'t6', file:'code', author:'Alice', color:'#2e7dd7', status:'open', hue:'',
     topic:'Empty catch hides every failure',
     state:'Settled on rethrowing the last error', when:'2h ago',
     comments:[
-      {who:'Alex',c:'#2e7dd7',when:'2h',text:'This catch swallows the error — rethrow on the last attempt.'},
-      {who:'Sam',c:'#e36f1e',when:'1h',text:'Agreed, and keep the original stack.'}]},
-  { id:'t7', file:'code', author:'Sam', color:'#e36f1e', status:'open', hue:'two',
+      {who:'Alice',c:'#2e7dd7',when:'2h',text:'This catch swallows the error — rethrow on the last attempt.'},
+      {who:'Dave',c:'#e36f1e',when:'1h',text:'Agreed, and keep the original stack.'}]},
+  { id:'t7', file:'code', author:'Dave', color:'#e36f1e', status:'open', hue:'two',
     topic:'Fixed attempt count, not configurable', state:'', when:'12m ago',
-    comments:[{who:'Sam',c:'#e36f1e',when:'12m',text:'Three is hard-coded. Callers with a tighter budget cannot lower it.'}]},
+    comments:[{who:'Dave',c:'#e36f1e',when:'12m',text:'Three is hard-coded. Callers with a tighter budget cannot lower it.'}]},
 ];
 
 let file = 'md', sheetOpen = false, filter = 'open', navIdx = -1, flashId = null;
@@ -598,7 +598,7 @@ addEventListener('resize', () => sizeSlots());
 document.fonts?.ready.then(() => sizeSlots());
 </script>
 
-<claude-feedback-widget doc-id="streamlined-review-mobile" user="bryan"></claude-feedback-widget>
+<claude-feedback-widget doc-id="streamlined-review-mobile" user="reviewer"></claude-feedback-widget>
 <script src="/widget.iife.js"></script>
 </body>
 </html>

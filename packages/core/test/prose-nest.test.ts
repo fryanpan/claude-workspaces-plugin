@@ -110,16 +110,16 @@ describe('nest_blocks', () => {
 
   it('a moved bullet keeps its inline links', () => {
     const doc = notesDoc(
-      ['- Where the remote goes', '- [@Dana](speaker:B) loses it weekly'].join('\n'),
+      ['- Where the remote goes', '- [@Eve](speaker:B) loses it weekly'].join('\n'),
     );
     apply(doc, [
       {
         op: 'nest_blocks',
         leadBlockId: idOf(doc, 'Where the remote goes'),
-        blockIds: [idOf(doc, '[@Dana](speaker:B) loses it weekly')],
+        blockIds: [idOf(doc, '[@Eve](speaker:B) loses it weekly')],
       },
     ]);
-    expect(md(doc)).toContain('  - [@Dana](speaker:B) loses it weekly');
+    expect(md(doc)).toContain('  - [@Eve](speaker:B) loses it weekly');
   });
 
   it('the sub-bullets read as nested in the outline the model is shown', () => {

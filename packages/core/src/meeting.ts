@@ -269,7 +269,7 @@ export type MeetingClientMessage =
    */
   | { type: 'timing_ping'; id: number; clientMs: number }
   /**
-   * "Speaker A is Jordan." The engine labels voices within one session; the
+   * "Speaker A is Carol." The engine labels voices within one session; the
    * person names a label once and every turn with it — on the strip, in the
    * record, in the notes — reads as the name from then on. Per meeting: the
    * same letter is a different person next time.

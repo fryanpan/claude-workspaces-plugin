@@ -88,8 +88,8 @@ describe('what the drop must not touch', () => {
   const known = new Set(['B']);
 
   it('a real voice keeps its tag, its name and its provenance', () => {
-    const md = '- [@Devi](speaker:B?t=4): the gate moves before merge';
-    expect(normalizeSpeakerTags(md, { names: { B: 'Devi' }, known }).markdown).toBe(md);
+    const md = '- [@Mallory](speaker:B?t=4): the gate moves before merge';
+    expect(normalizeSpeakerTags(md, { names: { B: 'Mallory' }, known }).markdown).toBe(md);
   });
 
   it("a person's own line is left byte for byte alone, phantom and all", () => {
@@ -113,11 +113,11 @@ describe('what the drop must not touch', () => {
 
   it('a mention the revision moved keeps its name — only the withdrawn one loses it', () => {
     const out = reattributeSpeakerTags(
-      '- [@Devi](speaker:B?t=10) asked\n- [@Devi](speaker:B?t=11) answered',
-      { revisions: new Map([[10, 'C']]), names: { B: 'Devi', C: 'Wren' } },
+      '- [@Mallory](speaker:B?t=10) asked\n- [@Mallory](speaker:B?t=11) answered',
+      { revisions: new Map([[10, 'C']]), names: { B: 'Mallory', C: 'Bob' } },
     );
-    expect(out.markdown.split('\n')[0]).toBe('- [@Wren](speaker:C?t=10) asked');
-    expect(out.markdown.split('\n')[1]).toBe('- [@Devi](speaker:B?t=11) answered');
+    expect(out.markdown.split('\n')[0]).toBe('- [@Bob](speaker:C?t=10) asked');
+    expect(out.markdown.split('\n')[1]).toBe('- [@Mallory](speaker:B?t=11) answered');
     expect(out.moved).toBe(1);
     expect(out.unwrapped).toBe(0);
   });

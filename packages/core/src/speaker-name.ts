@@ -69,7 +69,7 @@ export function normalizeSpeakerName(raw: string | undefined): string | undefine
  * the notes never disagree about it.
  *
  * A NAMED VOICE READS AS THE NAME ALONE. It used to keep the group on the
- * end — "Dana (Remote)" — so that a transcript line said which room somebody
+ * end — "Eve (Remote)" — so that a transcript line said which room somebody
  * was in. Bryan, testing a two-stream meeting on 2026-09-09, asked for it
  * gone: the suffix is noise once a voice has a name, and it was also the
  * thing the rename prompt kept feeding back into the saved name. Where a

@@ -130,7 +130,7 @@ export function notesMethodUsesLedger(method: NotesMethod): boolean {
 /**
  * The one line a method change writes into the notes.
  *
- * "10:38 Note-taker Ledger · Opus — Maya". It is the whole of what the doc
+ * "10:38 Note-taker Ledger · Opus — Mallory". It is the whole of what the doc
  * says about methods: the approved design shows nothing method-related in the
  * notes at rest, so a reader only ever sees the moments somebody changed it,
  * in the order they happened.

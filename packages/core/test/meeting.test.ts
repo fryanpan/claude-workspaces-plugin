@@ -54,9 +54,9 @@ describe('parseMeetingClientMessage', () => {
   it('accepts a speaker name, trimmed, and refuses an empty or oversized one', () => {
     expect(
       parseMeetingClientMessage(
-        JSON.stringify({ type: 'name_speaker', speaker: 'A', name: '  Jordan  ' }),
+        JSON.stringify({ type: 'name_speaker', speaker: 'A', name: '  Carol  ' }),
       ),
-    ).toEqual({ type: 'name_speaker', speaker: 'A', name: 'Jordan' });
+    ).toEqual({ type: 'name_speaker', speaker: 'A', name: 'Carol' });
     expect(
       parseMeetingClientMessage(JSON.stringify({ type: 'name_speaker', speaker: 'A', name: '  ' })),
     ).toBeNull();
@@ -90,8 +90,8 @@ describe('capture mode', () => {
 describe('speakerDisplayName', () => {
   it('is the given name, or "Speaker <label>" until one is given', () => {
     expect(speakerDisplayName('A', {})).toBe('Speaker A');
-    expect(speakerDisplayName('A', { A: 'Jordan' })).toBe('Jordan');
-    expect(speakerDisplayName('B', { A: 'Jordan' })).toBe('Speaker B');
+    expect(speakerDisplayName('A', { A: 'Carol' })).toBe('Carol');
+    expect(speakerDisplayName('B', { A: 'Carol' })).toBe('Speaker B');
   });
 });
 
@@ -235,9 +235,9 @@ describe('the announcement frame is gone from the wire', () => {
     expect(parseMeetingClientMessage(JSON.stringify({ type: 'stop' }))).toEqual({ type: 'stop' });
     expect(
       parseMeetingClientMessage(
-        JSON.stringify({ type: 'name_speaker', speaker: 'A', name: 'Jordan' }),
+        JSON.stringify({ type: 'name_speaker', speaker: 'A', name: 'Carol' }),
       ),
-    ).toEqual({ type: 'name_speaker', speaker: 'A', name: 'Jordan' });
+    ).toEqual({ type: 'name_speaker', speaker: 'A', name: 'Carol' });
   });
 
   it('never let the start frame carry one either, and still does not', () => {
@@ -265,7 +265,7 @@ describe('parseMeetingTranscriptEvent — the bot path’s live turn on the doc 
       text: 'So the sync.',
       final: true,
       speaker: 'p7',
-      speakerName: 'Rowan Pike',
+      speakerName: 'Trent Seagrass',
     });
     expect(parseMeetingTranscriptEvent(raw)).toEqual({
       event: 'meeting.transcript',
@@ -275,7 +275,7 @@ describe('parseMeetingTranscriptEvent — the bot path’s live turn on the doc 
       text: 'So the sync.',
       final: true,
       speaker: 'p7',
-      speakerName: 'Rowan Pike',
+      speakerName: 'Trent Seagrass',
     });
   });
 
@@ -306,7 +306,9 @@ describe('the participant on the start frame', () => {
     );
 
   it('carries the signed-in name, trimmed and bounded, and drops an empty one', () => {
-    expect(start({ participant: '  Devi Raman ' })).toMatchObject({ participant: 'Devi Raman' });
+    expect(start({ participant: '  Mallory Saltmarsh ' })).toMatchObject({
+      participant: 'Mallory Saltmarsh',
+    });
     expect(start({ participant: '   ' })).not.toHaveProperty('participant');
     expect(start({ participant: 42 })).not.toHaveProperty('participant');
     expect(start({})).not.toHaveProperty('participant');

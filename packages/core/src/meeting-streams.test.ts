@@ -81,16 +81,16 @@ describe('speaker namespacing', () => {
   it('reads a named voice as the name alone, with no group suffix', () => {
     const remote = namespacedSpeaker('system', 'A');
     const room = namespacedSpeaker('mic', 'B');
-    expect(speakerDisplayName(remote, { [remote]: 'Dana' })).toBe('Dana');
-    expect(speakerDisplayName(room, { [room]: 'Rowan Pike' })).toBe('Rowan Pike');
+    expect(speakerDisplayName(remote, { [remote]: 'Eve' })).toBe('Eve');
+    expect(speakerDisplayName(room, { [room]: 'Trent Seagrass' })).toBe('Trent Seagrass');
   });
 
   it('renders a name already saved with the old group suffix clean', () => {
     const room = namespacedSpeaker('mic', 'A');
-    expect(speakerDisplayName(room, { [room]: 'Rowan (Room)' })).toBe('Rowan');
+    expect(speakerDisplayName(room, { [room]: 'Trent (Room)' })).toBe('Trent');
     // The shape Bryan's doc actually carried: display appended a suffix to a
     // saved name that already had one.
-    expect(speakerDisplayName(room, { [room]: 'Rowan (Room) (Room)' })).toBe('Rowan');
+    expect(speakerDisplayName(room, { [room]: 'Trent (Room) (Room)' })).toBe('Trent');
   });
 
   it('treats a saved name that is only a placeholder as no name at all', () => {
@@ -104,9 +104,9 @@ describe('speaker namespacing', () => {
 
   it('hands back the bare saved name a rename prompt should start from', () => {
     const room = namespacedSpeaker('mic', 'A');
-    expect(speakerGivenName(room, { [room]: 'Rowan (Room)' })).toBe('Rowan');
+    expect(speakerGivenName(room, { [room]: 'Trent (Room)' })).toBe('Trent');
     expect(speakerGivenName(room, {})).toBeUndefined();
-    expect(normalizeSpeakerName('  Rowan  ')).toBe('Rowan');
+    expect(normalizeSpeakerName('  Trent  ')).toBe('Trent');
     expect(normalizeSpeakerName('(Remote)')).toBeUndefined();
     // A name that merely CONTAINS the word is a name: only a whole
     // placeholder is a non-answer.
@@ -120,7 +120,7 @@ describe('speaker namespacing', () => {
 
   it('survives the speaker-tag href a composed note carries', () => {
     const label = namespacedSpeaker('system', 'A');
-    const tag = renderSpeakerTag(label, { [label]: 'Dana' });
+    const tag = renderSpeakerTag(label, { [label]: 'Eve' });
     const href = /\]\(([^)]+)\)/.exec(tag)?.[1] ?? '';
     expect(parseSpeakerTagHref(href)?.label).toBe(label);
   });
@@ -130,10 +130,10 @@ describe('speaker namespacing', () => {
       JSON.stringify({
         type: 'name_speaker',
         speaker: namespacedSpeaker('system', 'A'),
-        name: 'Dana',
+        name: 'Eve',
       }),
     );
-    expect(frame).toEqual({ type: 'name_speaker', speaker: 'remote:A', name: 'Dana' });
+    expect(frame).toEqual({ type: 'name_speaker', speaker: 'remote:A', name: 'Eve' });
   });
 });
 

@@ -201,7 +201,7 @@ sequenceDiagram
 ```mermaid
 flowchart TB
   X["grant_workspace_access(ws, grantee)"] --> GT{"grantee kind"}
-  GT --> E1["jordan@partner.example"]
+  GT --> E1["carol@partner.example"]
   GT --> E2["@partner.example (domain)"]
   GT --> E3["* (open link, expiresAt REQUIRED)"]
   E1 & E2 & E3 --> L["Join link /join/:slug"]
@@ -356,7 +356,7 @@ interface Task {
 
 interface WorkspaceGrant {
   workspaceId: string;
-  grantee: string;                  // lowercased; "jordan@partner.example" | "@partner.example" | "*"
+  grantee: string;                  // lowercased; "carol@partner.example" | "@partner.example" | "*"
   scope: { kind: 'workspace' | 'doc'; id: string };
   role: 'collaborator';             // v1 has one role
   expiresAt?: number;               // REQUIRED for "*" grants (self-revoking open links)
@@ -750,7 +750,7 @@ Cloud and multi-agent direction lives in §4 (attachment model), not here.
 - **Projection test:** change something via REST, then assert the **ydoc ****`tasks`**** map** carries the change — not the store. Checking the store would pass even if the board never updated.
 - **Triage test:** create a task with no goal/assignee and assert both are populated and `triagedAgainst` matches the current goal; change the goal and assert open tasks re-triage while done tasks don't move.
 - **Delivery timings configurable**, or the suite burns real seconds.
-- Importer golden-file test against a realistic hand-maintained tracker shape — synthetic content ONLY (ultrareview, 2026-08-13): invented project names and goals in the jordan@partner.example register. Never derive a fixture from a real workspace's tracker, events.jsonl, or task titles — the repo is public, and "realistic" otherwise invites exactly the leak the pre-push scanners exist to backstop. The same rule covers every fixture and seed file in PR 1.
+- Importer golden-file test against a realistic hand-maintained tracker shape — synthetic content ONLY (ultrareview, 2026-08-13): invented project names and goals in the carol@partner.example register. Never derive a fixture from a real workspace's tracker, events.jsonl, or task titles — the repo is public, and "realistic" otherwise invites exactly the leak the pre-push scanners exist to backstop. The same rule covers every fixture and seed file in PR 1.
 
 - **Projection integrity test:** connect a real Yjs client to the ws room, write into the tasks map, assert the server reverts the write and no task.* event fires. Anchor a thread into a task body, force a projection refresh and a server restart, assert the anchor still resolves.
   - **Token telemetry:** a done task with `usage` reported renders the number on its chip, and the workspace running total matches the sum of its tasks.

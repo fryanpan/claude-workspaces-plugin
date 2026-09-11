@@ -25,7 +25,7 @@ A collapsed card today renders four things — author swatch, author name, the t
 Every thread renders the same shape, whatever its state. Four rows:
 
 ```
-● Alex                                          ›
+● Alice                                          ›
  │ Error handling in the retry helper
  ▪▪ +2 others
  ↳ Debating whether to keep the fallback path
@@ -35,9 +35,9 @@ Every thread renders the same shape, whatever its state. Four rows:
 Exactly one replier is worth naming rather than counting to one:
 
 ```
-● Sam                                           ›
+● Dave                                           ›
  │ Timeout applied per attempt, not overall
- ▪ Alex replied
+ ▪ Alice replied
  ↳ Agreed to move it into the client wrapper
 1 reply · 25m ago                     [ ✓ Resolve ]
 ```
@@ -45,7 +45,7 @@ Exactly one replier is worth naming rather than counting to one:
 **A thread with no replies keeps both lines.** The discussion line says so, in muted italic, instead of a topic line standing alone or the card changing shape:
 
 ```
-● Jordan                                        ›
+● Carol                                        ›
  │ Jitter missing from the backoff
  No replies yet
 8m ago                                [ ✓ Resolve ]
@@ -53,7 +53,7 @@ Exactly one replier is worth naming rather than counting to one:
 
 There is no participants row when nobody has replied — there is nobody to list. That is the *only* row that comes and goes; topic and discussion are always present, because the same shape everywhere is what makes a column of cards scannable, and because both lines are halves of the morph (below) and a missing half has nothing to become.
 
-The mobile sheet adds status to the header row, because there it varies: `● Alex · orphan`.
+The mobile sheet adds status to the header row, because there it varies: `● Alice · orphan`.
 
 Lines truncate with an ellipsis rather than wrapping, so a card cannot exceed its five rows at any width.
 
@@ -79,7 +79,7 @@ The header row is the attribution for the **opening message**, and nothing else.
 
   first appearance, **excluding the thread's author**.
 - A colour swatch per person, then the label.
-- **Exactly one** replier is named: `Alex replied`. Counting to one is worse
+- **Exactly one** replier is named: `Alice replied`. Counting to one is worse
 
   than saying who.
 - **Two or more** is a count: `+2 others`.

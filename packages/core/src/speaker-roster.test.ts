@@ -12,8 +12,8 @@ describe('speakerRoster — who the reassign popover can offer', () => {
   ];
 
   it('names every voice that spoke, with the last thing it said', () => {
-    expect(speakerRoster(turns, { A: 'Devi' })).toEqual([
-      { label: 'A', name: 'Devi', given: 'Devi', lastSaid: 'Then Monday.' },
+    expect(speakerRoster(turns, { A: 'Mallory' })).toEqual([
+      { label: 'A', name: 'Mallory', given: 'Mallory', lastSaid: 'Then Monday.' },
       { label: 'B', name: 'Speaker B', lastSaid: 'Not before Friday.' },
     ]);
   });
@@ -22,9 +22,9 @@ describe('speakerRoster — who the reassign popover can offer', () => {
     // Naming happens on the strip and can land before that voice's first
     // settled turn. A roster that waited for speech would leave the person
     // unable to reassign to somebody they had just named.
-    const roster = speakerRoster(turns, { C: 'Marisol' });
+    const roster = speakerRoster(turns, { C: 'Bob' });
     expect(roster.map((v) => v.label)).toEqual(['A', 'B', 'C']);
-    expect(roster[2]).toEqual({ label: 'C', name: 'Marisol', given: 'Marisol', lastSaid: '' });
+    expect(roster[2]).toEqual({ label: 'C', name: 'Bob', given: 'Bob', lastSaid: '' });
   });
 
   it('ignores turns nobody was labelled for — a solo capture offers nothing', () => {
@@ -51,12 +51,12 @@ describe('speakerRoster — who the reassign popover can offer', () => {
     // An unnamed voice offers no seed at all, so its prompt opens empty
     // rather than pre-filled with the placeholder somebody would press OK on.
     const roster = speakerRoster([{ text: 'hi', speaker: 'room:A' }], {
-      'room:A': 'Rowan (Room)',
+      'room:A': 'Trent (Room)',
       'room:B': 'Room Speaker B',
     });
     expect(roster.find((v) => v.label === 'room:A')).toMatchObject({
-      name: 'Rowan',
-      given: 'Rowan',
+      name: 'Trent',
+      given: 'Trent',
     });
     const anonymous = roster.find((v) => v.label === 'room:B');
     expect(anonymous?.name).toBe('Room Speaker B');
