@@ -1,6 +1,6 @@
 /**
- * The supervisor installs dependencies before anything boots, and a failed
- * install boots nothing.
+ * The supervisor installs dependencies before anything boots; a failed
+ * install boots nothing, and a relaunch does not re-run it.
  *
  * The manual deploy fallback — `git pull` plus `launchctl kickstart`, for when
  * the server is down — restarts `scripts/serve.ts --no-watch` without ever
@@ -8,14 +8,12 @@
  * `bun install`. A pull that added a package would boot into a missing-import
  * crash.
  *
- * Two layers. The runner is driven for real against a throwaway project whose
- * one dependency is a local `file:` package and whose registry is a dead
- * address, so it proves bun's own behaviour without touching the network. The
- * supervisor is then booted for real with a stand-in `bun` first on its PATH:
+ * The supervisor is booted for real with a stand-in `bun` first on its PATH:
  * every child it spawns — the install, both client builds, the server — is
  * that stand-in, which records its argv and exits. So the order the log shows
  * is the order serve.ts ran them, and nothing heavier than one Bun process
- * starts.
+ * starts. The gate's arithmetic is `dependency-install.test.ts`; this is the
+ * wiring, end to end.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
@@ -30,7 +28,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { installBeforeBoot, spawnBunInstall } from '../src/dependency-install.ts';
+import { installLedgerPath } from '../src/dependency-install.ts';
 import { STAMP_PATTERN } from '../src/log-stamp.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -45,108 +43,11 @@ function tempDir(prefix: string): string {
 }
 
 type Supervisor = ReturnType<typeof Bun.spawn<'ignore', 'ignore', 'pipe'>>;
-let supervisor: Supervisor | null = null;
+const running: Supervisor[] = [];
 
 afterEach(() => {
-  supervisor?.kill('SIGKILL');
-  supervisor = null;
+  for (const p of running.splice(0)) p.kill('SIGKILL');
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
-
-describe('installBeforeBoot', () => {
-  it('lets the server boot when the install succeeds, and says nothing', () => {
-    const lines: string[] = [];
-    expect(
-      installBeforeBoot(
-        () => ({ ok: true }),
-        (l) => lines.push(l),
-      ),
-    ).toBe(true);
-    expect(lines).toEqual([]);
-  });
-
-  it('refuses the boot on a failed install and names what bun said', () => {
-    const lines: string[] = [];
-    const ok = installBeforeBoot(
-      () => ({ ok: false, detail: 'error: lockfile had changes, but lockfile is frozen' }),
-      (l) => lines.push(l),
-    );
-    expect(ok).toBe(false);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('bun install --frozen-lockfile FAILED');
-    expect(lines[0]).toContain('refusing to boot');
-    expect(lines[0]).toContain('error: lockfile had changes, but lockfile is frozen');
-  });
-
-  it('keeps a multi-line reason on the one line the supervisor stamps', () => {
-    const lines: string[] = [];
-    installBeforeBoot(
-      () => ({ ok: false, detail: 'Resolving dependencies\nerror: frozen\nnote: re-run' }),
-      (l) => lines.push(l),
-    );
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).not.toContain('\n');
-    expect(lines[0]).toContain('Resolving dependencies | error: frozen | note: re-run');
-  });
-});
-
-/**
- * A project bun can install with no network: one `file:` dependency, and a
- * bunfig pointing the registry at a port nothing listens on, so an attempt
- * to reach it would fail rather than quietly succeed.
- */
-function offlineProject(): string {
-  const dir = tempDir('dep-install-');
-  for (const name of ['alpha-pkg', 'beta-pkg']) {
-    mkdirSync(join(dir, name));
-    writeFileSync(join(dir, name, 'package.json'), JSON.stringify({ name, version: '1.0.0' }));
-  }
-  writeFileSync(
-    join(dir, 'bunfig.toml'),
-    `[install]\nregistry = "http://127.0.0.1:9/"\n[install.cache]\ndir = "${join(dir, '.cache')}"\n`,
-  );
-  writeFileSync(
-    join(dir, 'package.json'),
-    JSON.stringify({
-      name: 'app',
-      private: true,
-      dependencies: { 'alpha-pkg': 'file:./alpha-pkg' },
-    }),
-  );
-  // Write the lockfile the way a merge would carry it, then drop what it
-  // installed: node_modules is now behind bun.lock.
-  const locked = Bun.spawnSync(['bun', 'install'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
-  if (locked.exitCode !== 0) throw new Error(`fixture install failed: ${locked.stderr.toString()}`);
-  rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
-  return dir;
-}
-
-describe('spawnBunInstall', () => {
-  it('brings node_modules up to bun.lock', () => {
-    const dir = offlineProject();
-    expect(existsSync(join(dir, 'node_modules', 'alpha-pkg', 'package.json'))).toBe(false);
-
-    expect(spawnBunInstall(dir)()).toEqual({ ok: true });
-    expect(existsSync(join(dir, 'node_modules', 'alpha-pkg', 'package.json'))).toBe(true);
-  });
-
-  it('refuses a bun.lock that no longer matches package.json, and leaves it alone', () => {
-    const dir = offlineProject();
-    const lockBefore = readFileSync(join(dir, 'bun.lock'), 'utf8');
-    writeFileSync(
-      join(dir, 'package.json'),
-      JSON.stringify({
-        name: 'app',
-        private: true,
-        dependencies: { 'alpha-pkg': 'file:./alpha-pkg', 'beta-pkg': 'file:./beta-pkg' },
-      }),
-    );
-
-    const result = spawnBunInstall(dir)();
-    expect(result.ok).toBe(false);
-    expect(result.detail).toContain('lockfile is frozen');
-    expect(readFileSync(join(dir, 'bun.lock'), 'utf8')).toBe(lockBefore);
-  });
 });
 
 /**
@@ -163,62 +64,33 @@ fi
 exit 0
 `;
 
-interface Booted {
-  proc: Supervisor;
-  calls: () => { cwd: string; argv: string }[];
-  stderr: () => string;
-  /** Resolves once the supervisor's stderr has been read to its end. */
-  stderrClosed: Promise<void>;
-  home: string;
-  clientRoot: string;
-}
-
-function bootSupervisor(opts: { installFails: boolean }): Booted {
+/** One machine's worth of supervisor state: the stand-in, its call log, and
+ *  the data dir, home and client root every boot on it shares. */
+function machine(installFails: boolean) {
   const dir = tempDir('supervisor-install-');
   const shimDir = join(dir, 'bin');
   mkdirSync(shimDir);
   writeFileSync(join(shimDir, 'bun'), SHIM);
   chmodSync(join(shimDir, 'bun'), 0o755);
+  mkdirSync(join(dir, 'home'));
   const log = join(dir, 'calls.log');
-  const home = join(dir, 'home');
-  const clientRoot = join(dir, 'client');
-  mkdirSync(home);
-
-  const proc = Bun.spawn([process.execPath, SERVE, '--no-watch', '--port', '0'], {
+  return {
+    dataDir: join(dir, 'data'),
+    home: join(dir, 'home'),
+    clientRoot: join(dir, 'client'),
     env: {
       ...process.env,
       PATH: `${shimDir}${delimiter}${process.env.PATH ?? ''}`,
       SHIM_LOG: log,
-      ...(opts.installFails ? { SHIM_INSTALL_FAILS: '1' } : {}),
+      ...(installFails ? { SHIM_INSTALL_FAILS: '1' } : {}),
       // Everything the supervisor writes lands in this test's directory: the
       // discovery file under HOME, the corpus, and the client releases.
-      HOME: home,
+      HOME: join(dir, 'home'),
       CW_DATA_DIR: join(dir, 'data'),
-      CW_CLIENT_ROOT: clientRoot,
+      CW_CLIENT_ROOT: join(dir, 'client'),
       CW_PLUGIN_REFRESH_MINUTES: '0',
     },
-    stdin: 'ignore',
-    stdout: 'ignore',
-    stderr: 'pipe',
-  });
-  supervisor = proc;
-  let err = '';
-  const stderrClosed = (async () => {
-    const reader = proc.stderr.getReader();
-    const decoder = new TextDecoder();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      err += decoder.decode(value, { stream: true });
-    }
-  })();
-  return {
-    proc,
-    home,
-    clientRoot,
-    stderrClosed,
-    stderr: () => err,
-    calls: () =>
+    calls: (): { cwd: string; argv: string }[] =>
       existsSync(log)
         ? readFileSync(log, 'utf8')
             .split('\n')
@@ -231,18 +103,46 @@ function bootSupervisor(opts: { installFails: boolean }): Booted {
   };
 }
 
+/** Boot `scripts/serve.ts --no-watch` on `m`, reading its stderr as it comes. */
+function boot(m: ReturnType<typeof machine>) {
+  const proc = Bun.spawn([process.execPath, SERVE, '--no-watch', '--port', '0'], {
+    env: m.env,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
+  running.push(proc);
+  let err = '';
+  void (async () => {
+    const reader = proc.stderr.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      err += decoder.decode(value, { stream: true });
+    }
+  })();
+  const line = (needle: string) =>
+    waitFor(() => err.split('\n').find((l) => l.includes(needle)), {
+      timeout: 20_000,
+      describe: `a supervisor line containing "${needle}"`,
+    }).catch((e: Error) => {
+      throw new Error(`${e.message}; stderr: ${err.slice(-1000)}`);
+    });
+  return { proc, line };
+}
+
 describe('scripts/serve.ts --no-watch', () => {
   it('installs in the deploy source before either build or the server starts', async () => {
-    const s = bootSupervisor({ installFails: false });
+    const m = machine(false);
+    boot(m);
 
-    await waitFor(() => s.calls().some((c) => c.argv.includes('bin.ts')), {
+    await waitFor(() => m.calls().some((c) => c.argv.includes('bin.ts')), {
       timeout: 20_000,
       describe: 'the supervisor to spawn its server',
-    }).catch((e: Error) => {
-      throw new Error(`${e.message}; stderr: ${s.stderr().slice(-1000)}`);
     });
 
-    const calls = s.calls();
+    const calls = m.calls();
     const at = (match: (argv: string) => boolean) => calls.findIndex((c) => match(c.argv));
     const install = at((a) => a === 'install --frozen-lockfile');
     const firstBuild = at((a) => a.includes('build.ts'));
@@ -257,27 +157,31 @@ describe('scripts/serve.ts --no-watch', () => {
     expect(calls.filter((c) => c.argv.startsWith('install')).length).toBe(1);
   }, 30_000);
 
-  it('boots nothing when the install fails, exits non-zero, and says why in its log', async () => {
-    const s = bootSupervisor({ installFails: true });
+  it('boots nothing over a failed install, and a relaunch does not re-run it', async () => {
+    const m = machine(true);
 
-    const code = await s.proc.exited;
-    await s.stderrClosed;
-    expect(code).toBe(1);
-
-    // The install ran and nothing after it did.
-    expect(s.calls().map((c) => c.argv)).toEqual(['install --frozen-lockfile']);
-
-    const refusal = s
-      .stderr()
-      .split('\n')
-      .find((l) => l.includes('bun install --frozen-lockfile FAILED'));
-    expect(refusal).toBeDefined();
+    const first = boot(m);
+    const refusal = await first.line('bun install --frozen-lockfile FAILED');
     // Dated like every supervisor diagnostic, and carrying bun's own reason.
     expect(refusal).toMatch(STAMP_PATTERN);
     expect(refusal).toContain('lockfile had changes, but lockfile is frozen');
+    expect(existsSync(installLedgerPath(m.dataDir))).toBe(true);
+    // Still running — holding on its backoff, not exiting into a relaunch.
+    expect(first.proc.exitCode).toBeNull();
 
-    // No server was advertised and no client was published over it.
-    expect(existsSync(join(s.home, '.claude', 'claude-workspaces', 'server.json'))).toBe(false);
-    expect(existsSync(s.clientRoot)).toBe(false);
+    // What launchd or a second `kickstart -k` does next: a fresh supervisor
+    // over the same checkout and the same data dir.
+    first.proc.kill('SIGKILL');
+    await first.proc.exited;
+    const second = boot(m);
+    const holding = await second.line('not re-running bun install yet');
+    expect(holding).toMatch(STAMP_PATTERN);
+    expect(holding).toContain('failed 1 time(s) against this exact bun.lock');
+
+    // One install across both boots, and nothing after it: no build, no
+    // server, no advertised port, no published client.
+    expect(m.calls().map((c) => c.argv)).toEqual(['install --frozen-lockfile']);
+    expect(existsSync(join(m.home, '.claude', 'claude-workspaces', 'server.json'))).toBe(false);
+    expect(existsSync(m.clientRoot)).toBe(false);
   }, 30_000);
 });

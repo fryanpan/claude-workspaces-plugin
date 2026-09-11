@@ -40,7 +40,10 @@ import {
   prepareClientRelease,
 } from '../packages/server/src/client-release.ts';
 import { resolveDataDir } from '../packages/server/src/data-dir.ts';
-import { installBeforeBoot, spawnBunInstall } from '../packages/server/src/dependency-install.ts';
+import {
+  installBeforeBoot,
+  supervisorInstallGate,
+} from '../packages/server/src/dependency-install.ts';
 import { readDeploySource } from '../packages/server/src/deploy-source.ts';
 import { stamped } from '../packages/server/src/log-stamp.ts';
 import {
@@ -174,11 +177,12 @@ const port = await resolvePort();
 // A failed build keeps the previous release live (stale beats down), loudly.
 //
 // Dependencies come first, because both builds and the server import them. A
-// failed install is the one step that does NOT fall back: see
-// `installBeforeBoot` for why nothing boots over it.
+// failed install is the one step that does NOT fall back: this waits, on a
+// backoff, until one succeeds — see `installBeforeBoot` for why it neither
+// boots over the failure nor exits into a launchd respawn loop.
 const clientArgs: string[] = [];
 if (noWatch) {
-  if (!installBeforeBoot(spawnBunInstall(repoRoot), note)) process.exit(1);
+  await installBeforeBoot(supervisorInstallGate(repoRoot, dataDir, note));
   const failures: string[] = [];
   for (const pkg of ['widget', 'workspaces-app']) {
     const r = spawnSync('bun', ['run', join(repoRoot, 'packages', pkg, 'scripts', 'build.ts')], {
