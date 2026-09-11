@@ -441,6 +441,25 @@ def check_identity_redaction() -> None:
                f"got {got!r}, wanted {expected!r}")
 
 
+def check_remote_owner() -> None:
+    """Origin's owner is an account, never a directory a local remote sits in."""
+    cases = [
+        ("git@example.invalid:harborlight/riverbend.git", "harborlight", "scp-like ssh"),
+        ("example.invalid:harborlight/riverbend", "harborlight", "scp-like, no user"),
+        ("https://example.invalid/harborlight/riverbend.git", "harborlight", "https"),
+        ("ssh://git@example.invalid:22/harborlight/riverbend.git/", "harborlight",
+         "ssh URL with a port and a trailing slash"),
+        ("/srv/harborlight/riverbend.git", "", "a local path names a folder, not an account"),
+        ("file:///srv/harborlight/riverbend.git", "", "so does a file:// URL"),
+        ("https://example.invalid/riverbend.git", "", "a URL with no owner segment"),
+        ("", "", "no origin at all"),
+    ]
+    for url, want, label in cases:
+        got = scrub_git.remote_owner(url)
+        expect(f"remote_owner: {label}", 0 if got == want else 1, 0,
+               f"got {got!r}, wanted {want!r}")
+
+
 def check_maintainer_names(tmp: str) -> None:
     """The maintainer exemption stays narrow: this committer, already published here.
 
@@ -456,6 +475,10 @@ def check_maintainer_names(tmp: str) -> None:
     not this committer earns nothing, and a `user.name` this repository has
     never published earns nothing either. Set `user.name` to a colleague and
     the exemption still does not appear.
+
+    The first name and origin's owner widen it once more, and only behind the
+    same gate: they are added when the full name qualifies and never on their
+    own, so every case that earned nothing before still earns nothing.
     """
     root = os.path.join(tmp, "maintainer-repo")
     bare = os.path.join(tmp, "maintainer-remote.git")
@@ -501,18 +524,28 @@ def check_maintainer_names(tmp: str) -> None:
         g("config", "user.name", "Scrub Selftest")
         names = scrub_git.maintainer_names()
         expect("maintainer: this committer, already published, is exempt",
-               0 if names == {"Scrub Selftest"} else 1, 0, f"got {sorted(names)!r}")
+               0 if names == {"Scrub Selftest", "Scrub"} else 1, 0, f"got {sorted(names)!r}")
         expect("maintainer: a published author who is NOT this committer is not exempt",
-               0 if "Wren Halloway" not in names else 1, 0, f"got {sorted(names)!r}")
+               0 if not names & {"Wren Halloway", "Wren"} else 1, 0, f"got {sorted(names)!r}")
+
+        # The remote-tracking refs outlive a URL change, so the same published
+        # authors stand behind a hosted-looking origin. `harborlight` is an
+        # invented account.
+        g("remote", "set-url", "origin", "git@example.invalid:harborlight/riverbend.git")
+        hosted = scrub_git.maintainer_names()
+        expect("maintainer: the first name and origin's owner ride on a qualifying full name",
+               0 if hosted == {"Scrub Selftest", "Scrub", "harborlight"} else 1, 0,
+               f"got {sorted(hosted)!r}")
 
         g("config", "user.name", "Wren Halloway")
         borrowed = scrub_git.maintainer_names()
         expect("maintainer: naming yourself after another published author exempts only them-as-you",
-               0 if borrowed == {"Wren Halloway"} else 1, 0, f"got {sorted(borrowed)!r}")
+               0 if borrowed == {"Wren Halloway", "Wren", "harborlight"} else 1, 0,
+               f"got {sorted(borrowed)!r}")
 
         g("config", "user.name", "Never Committed Here")
         stranger = scrub_git.maintainer_names()
-        expect("maintainer: a user.name this repo never published earns nothing",
+        expect("maintainer: a user.name this repo never published earns no name, first name or handle",
                0 if stranger == set() else 1, 0, f"got {sorted(stranger)!r}")
 
         # Unsetting it locally does not mean git has no answer — it falls
@@ -523,6 +556,17 @@ def check_maintainer_names(tmp: str) -> None:
         fallback = scrub_git.maintainer_names()
         expect("maintainer: a global user.name this repo never published is not exempt",
                0 if fallback == set() else 1, 0, f"got {sorted(fallback)!r}")
+
+        # And no user.name anywhere — what CI and a fresh clone have: the
+        # global and system files swapped for nothing, so git has no answer to
+        # fall back to. The first expect is the control that it really has none.
+        os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+        os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+        expect("maintainer: the fixture really has no user.name to fall back to",
+               0 if scrub_git._git(["git", "config", "user.name"]).strip() == "" else 1, 0)
+        nobody = scrub_git.maintainer_names()
+        expect("maintainer: no user.name at all earns no name, first name or handle",
+               0 if nobody == set() else 1, 0, f"got {sorted(nobody)!r}")
     finally:
         os.chdir(saved_cwd)
         os.environ.clear()
@@ -1462,6 +1506,7 @@ def main() -> int:
     check_decision_table()
     check_push_rev_args()
     check_identity_redaction()
+    check_remote_owner()
     with tempfile.TemporaryDirectory() as tmp:
         check_maintainer_names(tmp)
     check_haiku_unavailable()

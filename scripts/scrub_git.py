@@ -168,6 +168,28 @@ def published_author_names(remote_glob: Optional[str] = None) -> set:
     }
 
 
+def remote_owner(url: str) -> str:
+    """The account segment of a hosted remote URL, or "" when it has none.
+
+    `git@host:owner/repo.git` and `https://host/owner/repo` both give
+    `owner`. A local path or a `file://` URL names a directory, not an
+    account, so it gives nothing rather than exempting a folder name.
+    """
+    url = url.strip()
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        if scheme.lower() == "file" or "/" not in rest:
+            return ""
+        path = rest.split("/", 1)[1]
+    elif re.match(r"^[^/:]+:", url):
+        # git's scp-like form, `[user@]host:path` — a colon before any slash.
+        path = url.split(":", 1)[1]
+    else:
+        return ""
+    parts = [p for p in path.split("/") if p]
+    return parts[-2] if len(parts) >= 2 else ""
+
+
 def maintainer_names(remote_glob: Optional[str] = None) -> set:
     """Names the Haiku layer must not read as a leak in THIS repository.
 
@@ -189,13 +211,27 @@ def maintainer_names(remote_glob: Optional[str] = None) -> set:
       `user.name` to a colleague's name buys no exemption — they would have
       to be a published author here already.
 
+    Once the full name qualifies, the exemption covers the person pushing in
+    the forms they are actually written: the full name, its first word, and
+    the account that owns `origin` (their handle, in a personal repository).
+    A decision record quotes a maintainer by first name far more often than
+    by full name, and the full name alone left the scanner blocking those: a
+    window audit counted 21 flagged commits whose only names were the
+    maintainer's. Neither short form is checked on its own — both hang off
+    the same qualifying full name, so a checkout that earns nothing still
+    earns nothing.
+
     Empty set means no exemption and the scanner behaves exactly as before,
     which is what CI and any fresh clone get.
     """
     local = _git(["git", "config", "user.name"]).strip()
-    if not local:
+    if not local or local not in published_author_names(remote_glob):
         return set()
-    return {local} & published_author_names(remote_glob)
+    names = {local, local.split()[0]}
+    handle = remote_owner(_git(["git", "remote", "get-url", "origin"]))
+    if handle:
+        names.add(handle)
+    return names
 
 
 def redact_public_identities(patch: str, identities: Iterable[str]) -> str:
