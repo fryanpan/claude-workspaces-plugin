@@ -2588,104 +2588,119 @@ button.lz-speaker:hover .lz-speaker-pill {
 }
 
 /* ========== the tidy-up offer (meeting-cleanup-offer.ts) ==========
-   A modal, raised once when a recording stops, over the notes it is about.
-   It is not part of the page: `offer()` shows it and nothing else does, so a
-   doc that has never recorded paints none of this.
-   THE `[hidden]` PAIR IS LOAD-BEARING. `display: flex` on the scrim outranks
-   the UA's `[hidden]` rule — author origin beats user-agent origin — so
-   without the second rule below the dialog stands open on every doc, over
-   the prose, with no meeting to tidy. That is exactly how it shipped, and it
-   is the same pair `.meeting-strip[hidden]` and `.plan-float[hidden]` carry.
-   AFFORDANCE, NOT CAPTION. A question, two answers, and one line that
-   reports while the pass runs or says why it did not. No sentence explaining
-   what a tidy-up is: that was text about the button rather than the button
-   (Bryan, 2026-09-03/04). */
+   Shown when a recording ends, at the end of the prose where the live zone
+   was — the notes it is about are the lines directly above it.
+   AFFORDANCE, NOT CAPTION. One button saying what pressing it does, and a
+   way to send it away. No sentence explaining what a tidy-up is and no chip
+   naming the meeting: both were text about the button rather than the button
+   (Bryan, 2026-09-03/04). Nothing here starts on its own — the press is the
+   approval — so the control has to read as a control at rest, which on the
+   iPad means a border rather than a hover. */
 .cleanup-offer {
-  position: fixed;
-  inset: 0;
-  /* ABOVE THE WHOLE MODAL STACK — the thread view (1100), the thread modal
-     and its scrim (1190/1200), the topmost sheet (1201). A recording ending
-     is the newest thing on screen and arrives on its own clock, so it can
-     land while any of those is open; under them it would be an invisible
-     dialog holding the focus, and its Escape would close the layer the
-     person can actually see. The keydown handler takes the same position in
-     the capture phase for the same reason. */
-  z-index: 1300;
   display: flex;
   align-items: center;
-  justify-content: center;
-  /* The scarce axis on the iPad is HEIGHT, so the card is padded off the
-     edges rather than centred in a box of its own. */
-  padding: 16px;
-  background: rgba(27, 31, 35, 0.45);
+  /* Stated, not inherited from the initial value: the phone rule below turns
+     it on, and a base that says nothing makes that rule unreadable. */
+  flex-wrap: nowrap;
+  gap: 8px;
+  /* The prose's own top gap, so the offer sits one line under the last note
+     rather than against it. The live zone's own margin rules do not apply:
+     it is hidden by the time this shows. */
+  margin: 14px auto 0;
+  max-width: min(100%, 1200px);
   font-family: var(--sans);
 }
+/* THE PAIR IS LOAD-BEARING, AND ITS ABSENCE IS THE BUG THIS SECTION SHIPPED
+   WITH. `display: flex` above outranks the UA's `[hidden]` rule — author
+   origin beats user-agent origin, whatever the specificity — so a hidden
+   offer laid out anyway, and the row stood at the end of EVERY doc, over the
+   prose, on docs that had never held a recording. Pressing it did nothing,
+   because no meeting had named itself to tidy. Every logic test passed
+   throughout: they read the `hidden` PROPERTY, which was set correctly the
+   whole time. Only the cascade knew. `.meeting-strip[hidden]` and
+   `.plan-float[hidden]` carry the same pair for the same reason. */
 .cleanup-offer[hidden] {
   display: none;
 }
-.cleanup-offer-card {
-  width: min(380px, 100%);
-  padding: 20px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lg);
+body.is-reading-width #editor > .cleanup-offer {
+  max-width: 36rem;
 }
-.cleanup-offer-title {
-  margin: 0;
-  font-size: 17px;
-  line-height: 1.3;
-  color: var(--fg);
+/* The offer hugs the last note, for the same reason the live zone does: the
+   editor's 60vh click-to-type floor would otherwise strand it a full screen
+   below the notes it is asking about, which is where it landed in the first
+   headless render at 430. Only while it is showing — an ordinary doc keeps
+   its clickable runway. `auto`, never `0`: in the balloon-margin grid an
+   explicit min-height becomes the prose ROW's size. */
+#editor:has(> .cleanup-offer:not([hidden])) > .ProseMirror {
+  min-height: auto;
 }
-/* The working line and the refusal, in the same place. A pass that worked is
-   reported by the notes changing, so nothing is written here for it. */
-.cleanup-offer-note {
-  margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--fg-muted);
+/* And in the balloon-margin grid it auto-places into a row under the prose
+   column, where grid's default `align-content: stretch` would park it a
+   screen down all over again. */
+#editor.redline-layout:has(> .cleanup-offer:not([hidden])) {
+  align-content: start;
 }
-.cleanup-offer-actions {
-  display: flex;
-  justify-content: flex-end;
-  /* The two answers wrap rather than shrink below a finger's width on a
-     phone; the primary stays last, so it is nearest the thumb. */
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+#editor.redline-layout > .cleanup-offer {
+  grid-column: 1;
+  width: 100%;
 }
-.cleanup-offer-go,
-.cleanup-offer-dismiss {
+.cleanup-offer-go {
   font: inherit;
   font-size: 15px;
   line-height: 1.3;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   /* A target for a finger on an iPad, and one that grows rather than
      centring a fixed box when the label wraps on a phone. */
   padding: 9px 14px;
-  border-radius: var(--radius);
   cursor: pointer;
 }
-/* Nothing here starts on its own — the press is the approval — so the answer
-   that starts it reads as the primary one at rest, which on a touch screen
-   means colour rather than a hover. */
-.cleanup-offer-go {
-  color: #fff;
-  background: var(--accent);
-  border: 1px solid var(--accent);
+.cleanup-offer-go:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+.cleanup-offer-go:disabled {
+  color: var(--fg-muted);
+  cursor: default;
 }
 .cleanup-offer-dismiss {
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
   color: var(--fg-muted);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  cursor: pointer;
 }
 .cleanup-offer-dismiss:hover:not(:disabled) {
   color: var(--fg);
   background: var(--bg-hover);
 }
-.cleanup-offer-go:disabled,
+/* Refused together, for as long as the writes are coming. */
 .cleanup-offer-dismiss:disabled {
-  opacity: 0.6;
+  color: var(--fg-muted);
   cursor: default;
+}
+/* The working line and the refusal, in the same place. A pass that worked
+   needs no line — the notes above it are the receipt, and the wash says
+   which ones. */
+.cleanup-offer-note {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+@media (max-width: 1100px) {
+  /* The message goes under the controls rather than squeezing them. */
+  .cleanup-offer {
+    flex-wrap: wrap;
+  }
+  .cleanup-offer-note {
+    flex-basis: 100%;
+  }
 }
 
 /* ========== Over-doc bottom sheet on mobile ==========
