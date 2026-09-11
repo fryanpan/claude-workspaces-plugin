@@ -36,7 +36,7 @@
  * column's 100ms debounce, beside the wrong lines or on screen for text that
  * had left it. `clamped` and `landed` are those two.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -120,27 +120,61 @@ function buildPage(): string {
   return html;
 }
 
-/** Drive one meeting at one of the two verified widths. */
-function measure(html: string, preset: 'ipad' | 'phone'): Probe {
+/**
+ * Drive one meeting at one of the two verified widths.
+ *
+ * AWAITED, NOT WAITED FOR. A launch is half a minute of another process, and a
+ * worker that BLOCKS on it stops answering vitest's own RPC: two launches in
+ * one file is past the minute birpc allows, and the run dies with
+ * `Timeout calling "onTaskUpdate"` while every case in it passes — a red gate
+ * with nothing failing in it. So the child is spawned and awaited, which
+ * leaves the worker's loop free to answer while the browser works.
+ */
+async function measure(html: string, preset: 'ipad' | 'phone'): Promise<Probe> {
   const dir = mkdtempSync(join(tmpdir(), 'cw-comments-in-view-probe-'));
   dirs.push(dir);
   const file = join(dir, 'probe.js');
   writeFileSync(file, '(async () => await window.commentsInViewProbe())()');
   const runId = `civ${process.pid}${owned.length}`;
   owned.push(runId);
-  const r = spawnSync(
-    'bun',
-    [SHOT, '--url', `file://${html}`, '--preset', preset, '--settle', '400', '--eval-file', file],
-    { encoding: 'utf8', timeout: SPAWN_MS, env: { ...process.env, [RUN_ID_ENV]: runId } },
+  const r = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+    (resolve, reject) => {
+      const child = spawn(
+        'bun',
+        [
+          SHOT,
+          '--url',
+          `file://${html}`,
+          '--preset',
+          preset,
+          '--settle',
+          '400',
+          '--eval-file',
+          file,
+        ],
+        { timeout: SPAWN_MS, env: { ...process.env, [RUN_ID_ENV]: runId } },
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', (d: string) => {
+        stdout += d;
+      });
+      child.stderr.setEncoding('utf8').on('data', (d: string) => {
+        stderr += d;
+      });
+      child.on('error', reject);
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+    },
   );
-  expect(r.status, r.stderr).toBe(0);
+  expect(r.code, r.stderr).toBe(0);
   return JSON.parse((JSON.parse(r.stdout) as { result: string }).result) as Probe;
 }
 
 /** One launch per width, shared by every case below: the probe runs all its
- *  arms in one page, and a second launch would pay for all of them again. */
-const probes = new Map<'ipad' | 'phone', Probe>();
-function probeFor(preset: 'ipad' | 'phone'): Probe {
+ *  arms in one page, and a second launch would pay for all of them again. The
+ *  PROMISE is what is kept, so two cases asking at once still launch once. */
+const probes = new Map<'ipad' | 'phone', Promise<Probe>>();
+function probeFor(preset: 'ipad' | 'phone'): Promise<Probe> {
   const hit = probes.get(preset);
   if (hit) return hit;
   const got = measure(buildPage(), preset);
@@ -164,8 +198,8 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
     const width = preset === 'ipad' ? '1180x820' : '430';
     it(
       `keeps every card with its own sentence through a meeting at ${width}`,
-      () => {
-        const { watching, afterScrollBack, held, jumped, untouched } = probeFor(preset);
+      async () => {
+        const { watching, afterScrollBack, held, jumped, untouched } = await probeFor(preset);
 
         // THE CONTROLS. The reader really was down at the transcript, the
         // column really had cards to draw, and not one comment's sentence was
@@ -240,9 +274,9 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
     const width = preset === 'ipad' ? '1180x820' : '430';
     it(
       `keeps the reader's line on its pixel through a tick at ${width}`,
-      () => {
+      async () => {
         const { bottomStill, aboveStill, grownStill, rewrapStill, replaceStill } =
-          probeFor(preset);
+          await probeFor(preset);
 
         // PARKED AT THE VERY FOOT, with the browser's own scroll anchoring
         // left switched on. The controls: a real paragraph was on screen, the
@@ -343,8 +377,8 @@ describe.skipIf(CHROME === null)('a rewriting tick keeps the cards it does not t
     const width = preset === 'ipad' ? '1180x820' : '430';
     it(
       `keeps every card in the document through a grouping tick at ${width}`,
-      () => {
-        const { cardsKept } = probeFor(preset);
+      async () => {
+        const { cardsKept } = await probeFor(preset);
         // THE CONTROLS: the tick really rewrote blocks, and there really were
         // cards to lose.
         expect(cardsKept.editsApplied).toBe(2);
@@ -377,8 +411,8 @@ describe.skipIf(CHROME === null)('a rewriting tick keeps the cards it does not t
 describe.skipIf(CHROME === null)('a margin comment shows only beside text on screen', () => {
   it(
     'at 1180x820 an open card whose text is just off the top paints nothing',
-    () => {
-      const { clamped } = probeFor('ipad');
+    async () => {
+      const { clamped } = await probeFor('ipad');
       // THE CONTROLS. The margin is the surface here, the card's text really
       // is off screen, and the card is taller than the scroll offset — so
       // there is no room for it between the document's top and the fold,
@@ -403,8 +437,8 @@ describe.skipIf(CHROME === null)('a margin comment shows only beside text on scr
 
   it(
     'at 1180x820 notes landing above the comments take the cards with the text on the next frame',
-    () => {
-      const { landed } = probeFor('ipad');
+    async () => {
+      const { landed } = await probeFor('ipad');
       // THE CONTROLS. Every comment's text and card began on screen; after
       // six notes the text had moved but was still on screen; after sixteen
       // more only the title's comment was — and every card still existed.
@@ -426,10 +460,10 @@ describe.skipIf(CHROME === null)('a margin comment shows only beside text on scr
 
   it(
     'at 430 there is no margin, so neither arm paints a balloon',
-    () => {
+    async () => {
       // The cards sit in the flow under their text at this width; the margin
       // rule has nothing to apply to, and the reading says so.
-      const { clamped, landed } = probeFor('phone');
+      const { clamped, landed } = await probeFor('phone');
       expect(clamped.placement).toBe('inline');
       expect(clamped.balloonsPainted).toBe(0);
       expect(landed.placement).toBe('inline');
