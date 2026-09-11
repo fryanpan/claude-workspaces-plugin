@@ -142,6 +142,15 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     setHighlight(el, t);
     openComposerForElement(el, t);
   };
+  // A finger's press is followed, AFTER its pointerup, by the compatibility
+  // mousedown — whose default moves focus to what was pressed. That took the
+  // focus straight back off the field the tap had just opened, so typing went
+  // nowhere; a mouse's mousedown comes first and was harmless. Cancelling the
+  // press on the page stops the compatibility events; our own chrome is left
+  // alone, or its fields could not be focused at all.
+  const onDown = (ev: PointerEvent) => {
+    if (hitTest(ev)) ev.preventDefault();
+  };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key !== 'Escape') return;
     // First Escape backs out of the comment being written; the next one
@@ -158,6 +167,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     exitFeedbackMode(el);
   });
   window.addEventListener('pointermove', onMove, true);
+  window.addEventListener('pointerdown', onDown, true);
   window.addEventListener('pointerup', onTap, true);
   window.addEventListener('keydown', onKey, true);
 
@@ -173,6 +183,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     fab?.setAttribute('aria-pressed', 'false');
     fab?.classList.remove('open');
     window.removeEventListener('pointermove', onMove, true);
+    window.removeEventListener('pointerdown', onDown, true);
     window.removeEventListener('pointerup', onTap, true);
     window.removeEventListener('keydown', onKey, true);
   };
