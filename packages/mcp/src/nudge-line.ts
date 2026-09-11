@@ -136,6 +136,19 @@ export interface HeldRowPayload {
   revise?: string;
 }
 
+/** A review item a person asked a question on that its filer has not
+ *  revised, as `stall-nudge.ts` puts it on the wire. `id` is the ticket's. */
+export interface AskedBackRowPayload {
+  id?: string;
+  title?: string;
+  reviewItemId?: string;
+  headline?: string;
+  askedBy?: string;
+  askedMs?: number;
+  /** The paste-ready `revise_review_item(…)` call that puts it back. */
+  revise?: string;
+}
+
 /** A row an agent filed that reads as UI work and is being built with no
  *  answered review item on it — the UI gate's breach (`ui-review-gate.ts`
  *  on the server). `keyword` is the word that made it read as UI work, so
@@ -146,7 +159,7 @@ export interface UngatedUiRowPayload {
   keyword?: string;
 }
 
-/** What `workspace.stalled` carries. Five lists, because the lead's next act
+/** What `workspace.stalled` carries. Six lists, because the lead's next act
  *  differs for each — see `stalledLine`. */
 export interface StallPayload {
   taskId?: string;
@@ -158,6 +171,8 @@ export interface StallPayload {
   undetermined?: { count?: number; reasons?: string[] };
   /** `heldItems`, not `held` — ready_idle spends that name on its counts. */
   heldItems?: HeldRowPayload[];
+  /** Items a person asked back on, unrevised — off that person's queue. */
+  askedBack?: AskedBackRowPayload[];
   /** Rows built past the UI gate. A frame carrying only this is a real
    *  wake: the row is MOVING, so no other list here would ever name it. */
   ungatedUi?: UngatedUiRowPayload[];
@@ -170,6 +185,7 @@ export interface StallPayload {
     rows?: StalledRowPayload[];
     undetermined?: string[];
     heldItems?: HeldRowPayload[];
+    askedBack?: AskedBackRowPayload[];
     ungatedUi?: UngatedUiRowPayload[];
     escalated?: boolean;
   };
@@ -390,6 +406,8 @@ function changedClause(changed: StallPayload['changed']): string {
   if (unread.length > 0) bits.push(`${unread.join(', ')} became unreadable`);
   const held = changed.heldItems ?? [];
   if (held.length > 0) bits.push(`${held.length} review item(s) newly held`);
+  const asked = changed.askedBack ?? [];
+  if (asked.length > 0) bits.push(`${asked.length} review item(s) newly asked back`);
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0) bits.push(`${ungated.length} task built past the UI gate`);
   if (changed.escalated === true)
@@ -466,6 +484,19 @@ export function stalledLine(p: StallPayload): string {
         `${heldRowsClause(held)}. Get each filer to revise_review_item; nobody can answer a held ask.`,
     );
   }
+  // Said in so many words, because the filer's natural move — answering on
+  // the thread — changes nothing: two items sat off the queue 38 hours on
+  // 2026-09-09 behind a line that said only how long the ticket was quiet.
+  const asked = p.askedBack ?? [];
+  if (asked.length > 0) {
+    const noun = asked.length === 1 ? 'review item has' : 'review items have';
+    parts.push(
+      `${asked.length} ${noun} an unrevised question from a person and ${
+        asked.length === 1 ? 'is' : 'are'
+      } OFF their queue until revised — ${askedBackRowsClause(asked)}. ` +
+        'A reply on the thread does not put an item back; only revise_review_item does, with the answer in its words.',
+    );
+  }
   const ungated = p.ungatedUi ?? [];
   if (ungated.length > 0) {
     const noun = ungated.length === 1 ? 'UI task is' : 'UI tasks are';
@@ -475,7 +506,7 @@ export function stalledLine(p: StallPayload): string {
         'Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.',
     );
   }
-  // Never empty: the server does not send this frame with all five lists
+  // Never empty: the server does not send this frame with all six lists
   // empty, and a line that could render to a bare slug would be the
   // no-subject wake the whole file exists to prevent.
   // Ahead of the lists, so a repeat says what moved before it says what to
@@ -541,6 +572,24 @@ function heldRowClause(row: HeldRowPayload): string {
 
 function heldRowsClause(rows: readonly HeldRowPayload[]): string {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(heldRowClause);
+  const rest = rows.length - shown.length;
+  return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
+}
+
+/** One asked-back item: the ask, the ticket, who asked and how long ago, and
+ *  the call that puts it back on the queue. */
+function askedBackRowClause(row: AskedBackRowPayload): string {
+  const ask = row.headline ? `"${truncate(row.headline, 50)}"` : (row.reviewItemId ?? 'an item');
+  const on = row.title ? ` on "${truncate(row.title, 40)}"` : '';
+  const id = row.id ? ` (${row.id})` : '';
+  const who = row.askedBy ?? 'a person';
+  const age = row.askedMs === undefined ? '' : ` ${humanDuration(row.askedMs)} ago`;
+  const how = row.revise ? `, revise with ${row.revise}` : '';
+  return `${ask}${on}${id}: ${who} asked${age}, off ${who}'s queue since${how}`;
+}
+
+function askedBackRowsClause(rows: readonly AskedBackRowPayload[]): string {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(askedBackRowClause);
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
 }

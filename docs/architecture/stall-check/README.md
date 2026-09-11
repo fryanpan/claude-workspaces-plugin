@@ -31,6 +31,7 @@ check that serves none of them is weight.
 | A task is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
 | A task waits on a person and nothing is filed on that person's queue | The lead | Same frame, `unfiled` |
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
+| A person asked a question on a review item and its filer has not revised it past the window — it is off their queue, and a reply on the thread does not bring it back | The lead | Same frame, `askedBack`, with the question's age and the `revise_review_item` call |
 | An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
 | No session on the board is alive | Team Lead, then the owner | The last resort — the board files an item past the lead |
 

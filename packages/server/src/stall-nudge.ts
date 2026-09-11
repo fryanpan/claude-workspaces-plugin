@@ -83,6 +83,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { ParallelismCapSummary } from './ready-nudge.ts';
 import {
+  type AskedBackRow,
   type HeldItemRow,
   STALL_QUIET_DEFAULT_MS,
   type StallUndeterminedRow,
@@ -157,6 +158,10 @@ export interface StallSnapshot {
    *  exist on a ticket and on nobody's queue. Absent on a snapshot from a
    *  caller that does not read them, which is the same as none. */
   held?: readonly HeldItemRow[];
+  /** Review items a person asked a question on that the filer has not
+   *  revised past the quiet window — off the reader's queue until revised
+   *  (`stall-gate.ts` `AskedBackRow`). Absent when none. */
+  askedBack?: readonly AskedBackRow[];
   /**
    * Rows an agent filed that read as UI work and are being built with no
    * answered review item on them — the UI gate's breaches
@@ -291,6 +296,14 @@ export interface StallNudgeFrame {
    */
   heldItems?: readonly HeldItemRow[];
   /**
+   * Review items a person asked back on, unrevised past the window, oldest
+   * first. Absent when none. A frame carrying only this is a real wake: the
+   * reader's question is off their queue, and the filer's reply on the thread
+   * does not bring it back — only `revise` does, which is why each row
+   * carries that call.
+   */
+  askedBack?: readonly AskedBackRow[];
+  /**
    * Rows built past the UI gate, each with the word that made it read as UI
    * work. Absent when none. A frame carrying only this is a real wake: the
    * row is moving, so nothing else here would ever mention it, and the whole
@@ -318,6 +331,8 @@ export interface StallNudgeFrame {
     undetermined?: readonly string[];
     /** Holds placed since the last wake. */
     heldItems?: readonly HeldItemRow[];
+    /** Questions asked back since the last wake. */
+    askedBack?: readonly AskedBackRow[];
     /** Rows that went past the UI gate since the last wake. */
     ungatedUi?: readonly UngatedUiRow[];
     /** The board's worst row crossed another repeat window. Present only when
@@ -633,6 +648,9 @@ export class StallNudger {
     // outlived the window is — the same window the verdict counts it under,
     // so nothing below this line can name a hold the measurement omits.
     const held = heldAll.filter((item) => item.heldMs > this.leadHeldMs);
+    // Already the lead's subset: the wiring hands over only questions older
+    // than the quiet window, and there is no filer tap to come first.
+    const askedBack = board.retired ? [] : (board.askedBack ?? []);
     // Nobody to tell. Drop the arming so a board that becomes woken again
     // starts from a clean slate rather than from a stamp recorded under
     // different conditions.
@@ -659,6 +677,7 @@ export class StallNudger {
       board.unfiled.length === 0 &&
       board.undetermined.length === 0 &&
       held.length === 0 &&
+      askedBack.length === 0 &&
       ungatedUi.length === 0
     ) {
       this.armed.delete(key);
@@ -666,7 +685,7 @@ export class StallNudger {
       this.reported.delete(key);
       return;
     }
-    const stamp = this.stampFor(board, held, ungatedUi);
+    const stamp = this.stampFor(board, held, askedBack, ungatedUi);
     // Named before both the wake decision and the reachability check below,
     // and that ordering is the point: the commonest reason a wake is not
     // delivered is a lead holding no stream, which is exactly when an
@@ -680,6 +699,7 @@ export class StallNudger {
       board,
       memory.before,
       held,
+      askedBack,
       ungatedUi,
     );
     if (!change) {
@@ -698,7 +718,7 @@ export class StallNudger {
     // has ANYBODY on it is the escalation's question, and it answers it from
     // the store's liveness reads rather than from a failed delivery here.
     if (to === undefined) return;
-    const top = board.stalled[0] ?? board.unfiled[0] ?? held[0] ?? ungatedUi[0];
+    const top = board.stalled[0] ?? board.unfiled[0] ?? held[0] ?? askedBack[0] ?? ungatedUi[0];
     this.emit(key, to.agentId, {
       event: STALL_EVENT,
       workspaceId: key,
@@ -716,6 +736,7 @@ export class StallNudger {
       // `heldItems`, not `held`: the ready_idle frame already spends `held` on
       // its withheld-row counts, and the plugin reads both frames into one type.
       ...(held.length > 0 ? { heldItems: held } : {}),
+      ...(askedBack.length > 0 ? { askedBack } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
       ...(board.undetermined.length > 0
         ? {
@@ -744,7 +765,9 @@ export class StallNudger {
     // wake. That was the stamp's job when held ids lived in it beside the
     // row ids; it is this memory's now, and it must not be dropped in the
     // move.
-    for (const item of held) {
+    // An asked-back item's ticket likewise: its later silence is the same
+    // unrevised question the lead was just told about.
+    for (const item of [...held, ...askedBack]) {
       if (!memory.rows.has(item.id))
         memory.rows.set(item.id, { bucket: UNKNOWN_BUCKET, seenAt: now });
     }
@@ -847,6 +870,7 @@ export class StallNudger {
       ...board.stalled.map((r) => r.id),
       ...board.unfiled.map((r) => r.id),
       ...(board.held ?? []).map((r) => r.id),
+      ...(board.askedBack ?? []).map((r) => r.id),
     ]) {
       const seen = rows.get(id);
       if (seen) seen.seenAt = now;
@@ -966,6 +990,7 @@ export class StallNudger {
   private stampFor(
     board: StallSnapshot,
     held: readonly HeldItemRow[],
+    askedBack: readonly AskedBackRow[],
     ungatedUi: readonly UngatedUiRow[],
   ): string {
     const rows = [...board.stalled, ...board.unfiled];
@@ -993,6 +1018,10 @@ export class StallNudger {
         ...rows.map((row) => row.id),
         ...held.map((row) => row.id),
         ...held.map((row) => `held:${row.reviewItemId}@${row.heldAt}`),
+        // The same two keys as a hold, for the same reasons: the ticket, and
+        // this question on this item — so a new question is news.
+        ...askedBack.map((row) => row.id),
+        ...askedBack.map((row) => `ask:${row.reviewItemId}@${row.askedAt}`),
         // Under its OWN key, not the row id: a row can be stalled AND built
         // past the gate, and folding the two together would let a wake about
         // the silence stand in for the one about the rule.
@@ -1070,6 +1099,7 @@ export class StallNudger {
     board: StallSnapshot,
     told: Map<string, ToldRow>,
     held: readonly HeldItemRow[],
+    askedBack: readonly AskedBackRow[],
     ungatedUi: readonly UngatedUiRow[],
   ): StallNudgeFrame['changed'] | undefined {
     const before = prior === undefined ? undefined : parseStamp(prior);
@@ -1092,6 +1122,9 @@ export class StallNudger {
     const heldItems = held.filter(
       (item) => before === undefined || !before.ids.has(`held:${item.reviewItemId}@${item.heldAt}`),
     );
+    const asked = askedBack.filter(
+      (item) => before === undefined || !before.ids.has(`ask:${item.reviewItemId}@${item.askedAt}`),
+    );
     // Keyed on the token the stamp writes, so a row already reported stays
     // silent while the same row reported again after a wake it was absent
     // from is news — the same rule every other finding here follows.
@@ -1103,6 +1136,7 @@ export class StallNudger {
       rows.length === 0 &&
       undetermined.length === 0 &&
       heldItems.length === 0 &&
+      asked.length === 0 &&
       ungated.length === 0
     )
       return undefined;
@@ -1110,6 +1144,7 @@ export class StallNudger {
       ...(rows.length > 0 ? { rows } : {}),
       ...(undetermined.length > 0 ? { undetermined } : {}),
       ...(heldItems.length > 0 ? { heldItems } : {}),
+      ...(asked.length > 0 ? { askedBack: asked } : {}),
       ...(ungated.length > 0 ? { ungatedUi: ungated } : {}),
       ...(escalated ? { escalated: true as const } : {}),
     };
@@ -1319,7 +1354,8 @@ export class StallNudger {
           // those two are different people.
           (frame.escalatedFrom !== undefined ? `to=${agentId} ` : '') +
           `stalled=${frame.stalledCount} unfiled=${frame.unfiled?.length ?? 0} ` +
-          `undetermined=${frame.undetermined?.count ?? 0} held=${frame.heldItems?.length ?? 0}`,
+          `undetermined=${frame.undetermined?.count ?? 0} held=${frame.heldItems?.length ?? 0} ` +
+          `askedBack=${frame.askedBack?.length ?? 0}`,
       );
     } catch {
       // A reporter that throws must not undo a wake that was already

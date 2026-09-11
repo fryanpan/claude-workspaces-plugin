@@ -461,3 +461,39 @@ export function overdueHeldItems(
   }
   return out.sort((a, b) => b.heldMs - a.heldMs);
 }
+
+/**
+ * A review item a person asked a question on, still unrevised: OFF the
+ * reader's queue (`pendingQuestionOf`) until its filer calls
+ * `revise_review_item` — a reply on the question's thread does not put it
+ * back. Measured 2026-09-09: two such items sat off the queue 38 hours behind
+ * a wake that said only "quiet 1h 46m".
+ */
+export interface AskedBackRow {
+  /** The TICKET's id — the row the lead drives. */
+  id: string;
+  title: string;
+  reviewItemId: string;
+  headline: string;
+  /** Who asked, by display name. */
+  askedBy: string;
+  /** When THIS question was asked; a later question is a new finding. */
+  askedAt: number;
+  /** How long the question has stood unrevised. */
+  askedMs: number;
+  /** The paste-ready call that puts the item back, from `reviseCallFor`. */
+  revise: string;
+}
+
+/** The asked-back items the LEAD is told about: a question standing longer
+ *  than the quiet window, oldest first — the window a held item waits out. */
+export function overdueAskedBack(
+  items: readonly Omit<AskedBackRow, 'askedMs'>[],
+  now: number,
+  windowMs: number = STALL_QUIET_DEFAULT_MS,
+): AskedBackRow[] {
+  return items
+    .map((item) => ({ ...item, askedMs: now - item.askedAt }))
+    .filter((item) => item.askedMs > windowMs)
+    .sort((a, b) => b.askedMs - a.askedMs);
+}

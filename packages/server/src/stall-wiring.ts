@@ -55,14 +55,17 @@ import {
   isBoardActivity,
 } from './ready-nudge.ts';
 import type { ReviewGateAddress } from './review-gate.ts';
-import { isReviewItemOnQueue } from './review-items/queries.ts';
+import { isReviewItemOnQueue, pendingQuestionOf } from './review-items/queries.ts';
 import type { SseBus } from './sse.ts';
 import { STALL_ESCALATION_ACTOR, StallEscalations } from './stall-escalation.ts';
 import {
+  type AskedBackRow,
   HELD_ITEM_DEFAULT_MS,
   type HeldItemInput,
+  STALL_QUIET_DEFAULT_MS,
   type StallVerdict,
   evaluateStalls,
+  overdueAskedBack,
   overdueHeldItems,
 } from './stall-gate.ts';
 import { STALL_NUDGE_STAMP_FILENAME, StallNudger, type StallSnapshot } from './stall-nudge.ts';
@@ -842,6 +845,36 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       Date.now(),
       heldReviewItemMs,
     );
+    // Items a person asked a question on and the filer has not revised: off
+    // the reader's queue, so they excuse their ticket nothing and it reads as
+    // plain quiet. Named in the wake so the lead is told what the silence is
+    // and which call ends it — a reply on the thread does not.
+    const askedBack: Array<Omit<AskedBackRow, 'askedMs'>> = [];
+    for (const task of taskStore.listTasks(workspace.id)) {
+      if (task.status === 'done') continue;
+      for (const item of taskStore.listReviewItems(task.id)) {
+        const question = pendingQuestionOf(item);
+        if (!question || item.createdBy === STALL_ESCALATION_ACTOR.name) continue;
+        askedBack.push({
+          id: task.id,
+          title: task.title,
+          reviewItemId: item.id,
+          headline: item.review.headline,
+          askedBy: question.by,
+          askedAt: question.ts,
+          revise: reviseCallFor(
+            item.id === LEGACY_REVIEW_ITEM_ID
+              ? { kind: 'decision', taskId: task.id }
+              : { kind: 'task', taskId: task.id, reviewItemId: item.id },
+          ),
+        });
+      }
+    }
+    const askedBackRows = overdueAskedBack(
+      askedBack,
+      Date.now(),
+      ctx.stallNudgeQuietMs ?? STALL_QUIET_DEFAULT_MS,
+    );
     // The board's PULSE: when a session last reported here. Notes are written
     // by sessions and by nothing else — the Stop hook posts one per turn — so
     // the newest note across the board is the cheapest honest answer to "is
@@ -887,6 +920,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(verdict.beyondCapacity > 0 ? { beyondCapacity: verdict.beyondCapacity } : {}),
       ...(capRead ? { parallelismCap: capSummary(capRead) } : {}),
       ...(held.length > 0 ? { held } : {}),
+      ...(askedBackRows.length > 0 ? { askedBack: askedBackRows } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
     };
   };
