@@ -324,6 +324,20 @@ or above it when the element reaches into the margin, never over it — and is
 asked again every frame from the widget's existing rAF loop. It joins no data
 flow: it reads layout and writes only the widget's own shadow DOM.
 
+**The widget's mic belongs to the host that has one.** The board's own widget
+is bound to the Workspaces feedback doc, not to the board's project, so its
+buttons are about the app: the thread list steps up a slot and a microphone
+takes its place. `widget-mic.ts` is a top-level module of the widget package
+beside `widget-card.ts`, but it is a SECOND ENTRY
+(`@claude-workspaces/widget/mic`) that `widget.ts` never imports — it makes
+only the button, the readout and their rules, and the host wires its own
+capture to them. That keeps every byte of it out of `widget.iife.js`, which
+mock pages load against a hard size budget, and keeps voice capture in one
+place: `board/board-feedback-mic.ts` in `workspaces-app` mounts the mic and
+hands it `createVoiceCapture` (Space left to the board's dock), whose
+transcript is posted as a subject thread through the widget. No new data flow —
+it is the thread POST the typed composer already makes.
+
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,
 suggestions, anchors, presence, live notes. Agents hold no replica, so an agent

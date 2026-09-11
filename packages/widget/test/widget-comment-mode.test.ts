@@ -9,9 +9,11 @@ import type { FeedbackWidgetEl } from '../src/widget.ts';
  *    CANCEL, which throws the draft away and leaves you IN the mode. Leaving
  *    the mode is a separate control that never sits next to Post.
  * 2. The mode survives a post, at every width.
- * 3. Entering the mode focuses the text input — at tablet width it opens into
- *    a focused composer; at phone width it opens as a prompt and the field
- *    arrives, focused, on the tap.
+ * 3. Entering the mode opens NOTHING to type into, at either width: the field
+ *    arrives, focused, on the tap that picks an element. Round 3 rested the
+ *    tablet face in a composer about the whole page, and the owner's verdict
+ *    (2026-09-11) was "a comment input appears before I've even selected
+ *    anything. That's wrong."
  * 4. Enter submits. Shift+Enter makes a newline.
  *
  * Each has its negative control beside it, because three of the four are
@@ -75,8 +77,8 @@ const field = (el: FeedbackWidgetEl): HTMLTextAreaElement | null =>
   el.shadow.querySelector('.composer textarea') as HTMLTextAreaElement | null;
 
 /** Tap the page the way the armed picker sees a tap. */
-function tapPage(el: FeedbackWidgetEl): void {
-  const target = document.getElementById('hello') as HTMLElement;
+function tapPage(el: FeedbackWidgetEl, id = 'hello'): void {
+  const target = document.getElementById(id) as HTMLElement;
   (
     document as unknown as { elementFromPoint: (x: number, y: number) => Element }
   ).elementFromPoint = () => target;
@@ -97,7 +99,8 @@ async function settle(): Promise<void> {
 
 describe('comment mode', () => {
   beforeEach(() => {
-    document.body.innerHTML = '<main><button id="hello">Hello</button></main>';
+    document.body.innerHTML =
+      '<main><button id="hello">Hello</button><button id="other">Goodbye</button></main>';
   });
   afterEach(() => {
     document.querySelectorAll('claude-feedback-widget').forEach((el) => el.remove());
@@ -105,28 +108,19 @@ describe('comment mode', () => {
   });
 
   describe('3. entering the mode gives you somewhere to type', () => {
-    it('at tablet width, opens into a composer whose field already has focus', async () => {
-      const { el } = await mount(TABLET);
-      expect(composer(el), 'nothing is composing before the mode is entered').toBeNull();
-      enterFeedbackMode(el);
-      const ta = field(el);
-      expect(ta, 'the mode should rest in a composer').toBeTruthy();
-      expect(el.shadow.activeElement).toBe(ta);
-    });
-
-    it('at phone width, opens as a prompt and the field arrives focused on the tap', async () => {
-      // A 300px composer over a 430px page covers the thing being commented
-      // on, so the mode rests in the banner instead — and the tap that picks
-      // an element is what opens the field.
-      const { el } = await mount(PHONE);
-      enterFeedbackMode(el);
-      expect(composer(el), 'a phone-width mode must not open a composer over the page').toBeNull();
-      expect(el.shadow.querySelector('.picker-banner')).toBeTruthy();
-      tapPage(el);
-      const ta = field(el);
-      expect(ta, 'the tap should open the field').toBeTruthy();
-      expect(el.shadow.activeElement).toBe(ta);
-    });
+    for (const width of [TABLET, PHONE]) {
+      it(`at ${width}px, opens as a prompt and the field arrives focused on the tap`, async () => {
+        const { el } = await mount(width);
+        expect(composer(el), 'nothing is composing before the mode is entered').toBeNull();
+        enterFeedbackMode(el);
+        expect(composer(el), 'the mode must open no box before anything is picked').toBeNull();
+        expect(el.shadow.querySelector('.picker-banner')).toBeTruthy();
+        tapPage(el);
+        const ta = field(el);
+        expect(ta, 'the tap should open the field').toBeTruthy();
+        expect(el.shadow.activeElement).toBe(ta);
+      });
+    }
 
     it('tapping an element RE-ANCHORS the open draft rather than losing it', async () => {
       // The composer the mode rests in is about the page; pointing at
@@ -135,12 +129,13 @@ describe('comment mode', () => {
       // resting composer worse than no composer.
       const { el } = await mount(TABLET);
       enterFeedbackMode(el);
-      const ta = field(el) as HTMLTextAreaElement;
-      expect(el.shadow.querySelector('.composer-snippet')?.textContent).toBe('About this page');
-      ta.value = 'this is the bit I mean';
       tapPage(el);
-      expect(field(el)?.value).toBe('this is the bit I mean');
+      const ta = field(el) as HTMLTextAreaElement;
       expect(el.shadow.querySelector('.composer-snippet')?.textContent).toContain('Hello');
+      ta.value = 'this is the bit I mean';
+      tapPage(el, 'other');
+      expect(field(el)?.value).toBe('this is the bit I mean');
+      expect(el.shadow.querySelector('.composer-snippet')?.textContent).toContain('Goodbye');
     });
   });
 
@@ -148,6 +143,7 @@ describe('comment mode', () => {
     it('the composer offers Cancel and Post, and no way out of the mode', async () => {
       const { el } = await mount(TABLET);
       enterFeedbackMode(el);
+      tapPage(el);
       const actions = Array.from(
         composer(el)?.querySelectorAll('.composer-actions button') ?? [],
       ).map((b) => (b.textContent ?? '').trim());
@@ -163,6 +159,7 @@ describe('comment mode', () => {
     it('Cancel throws the draft away and leaves you IN the mode', async () => {
       const { el } = await mount(TABLET);
       enterFeedbackMode(el);
+      tapPage(el);
       const ta = field(el) as HTMLTextAreaElement;
       ta.value = 'the sign is hard to read from the sidewalk';
       (composer(el)?.querySelector('.cancel') as HTMLButtonElement).click();
@@ -192,7 +189,7 @@ describe('comment mode', () => {
       it(`at ${width}px`, async () => {
         const { el, posts } = await mount(width);
         enterFeedbackMode(el);
-        if (width === PHONE) tapPage(el);
+        tapPage(el);
         const ta = field(el) as HTMLTextAreaElement;
         ta.value = 'the price is bigger than the lemon';
         (composer(el)?.querySelector('.submit') as HTMLButtonElement).click();
@@ -200,19 +197,15 @@ describe('comment mode', () => {
         expect(posts.map((p) => p.text)).toEqual(['the price is bigger than the lemon']);
         expect(el.feedbackMode, 'posting must not drop you out of the mode').toBe(true);
         // "Still in the mode" is asserted through what the mode DOES, not
-        // through the flag alone: at tablet width it rests in a fresh empty
-        // composer, and at phone width the banner is still up and the next
-        // tap still opens a field. Round 3 lost exactly this at tablet — the
-        // next element was untappable until the FAB had been pressed twice.
-        if (width === TABLET) {
-          expect(field(el)?.value).toBe('');
-        } else {
-          expect(el.shadow.querySelector('.picker-banner')).toBeTruthy();
-          expect(composer(el), 'no composer over a 430px page').toBeNull();
-          tapPage(el);
-          expect(field(el), 'the next tap still opens a field').toBeTruthy();
-          expect(field(el)?.value).toBe('');
-        }
+        // through the flag alone: the banner is still up and the next tap
+        // still opens an empty field, at either width. Round 3 lost exactly
+        // this at tablet — the next element was untappable until the FAB had
+        // been pressed twice.
+        expect(el.shadow.querySelector('.picker-banner')).toBeTruthy();
+        expect(composer(el), 'a posted comment leaves no box open').toBeNull();
+        tapPage(el, 'other');
+        expect(field(el), 'the next tap still opens a field').toBeTruthy();
+        expect(field(el)?.value).toBe('');
         exitFeedbackMode(el);
       });
     }
@@ -224,6 +217,7 @@ describe('comment mode', () => {
       (globalThis as unknown as { fetch: unknown }).fetch = (async () =>
         new Response('{}', { status: 500 })) as unknown as typeof fetch;
       enterFeedbackMode(el);
+      tapPage(el);
       const ta = field(el) as HTMLTextAreaElement;
       ta.value = 'the price is bigger than the lemon';
       (composer(el)?.querySelector('.submit') as HTMLButtonElement).click();
@@ -248,6 +242,7 @@ describe('comment mode', () => {
     it('Enter posts what is typed', async () => {
       const { el, posts } = await mount(TABLET);
       enterFeedbackMode(el);
+      tapPage(el);
       const ta = field(el) as HTMLTextAreaElement;
       ta.value = 'move the jug off the sign';
       const notCancelled = enter(ta, false);
@@ -261,6 +256,7 @@ describe('comment mode', () => {
     it('CONTROL: Shift+Enter posts NOTHING and leaves the draft intact', async () => {
       const { el, posts } = await mount(TABLET);
       enterFeedbackMode(el);
+      tapPage(el);
       const ta = field(el) as HTMLTextAreaElement;
       ta.value = 'move the jug off the sign';
       const notCancelled = enter(ta, true);
@@ -291,6 +287,7 @@ describe('comment mode', () => {
         });
       }) as unknown as typeof fetch;
       enterFeedbackMode(el);
+      tapPage(el);
       const ta = field(el) as HTMLTextAreaElement;
       ta.value = 'one cup, one comment';
       enter(ta, false);
@@ -322,6 +319,7 @@ describe('comment mode', () => {
             });
       }) as unknown as typeof fetch;
       enterFeedbackMode(el);
+      tapPage(el);
       const ta = field(el) as HTMLTextAreaElement;
       ta.value = 'one cup, one comment';
       enter(ta, false);
@@ -333,17 +331,20 @@ describe('comment mode', () => {
       expect(posts).toHaveLength(2);
       // The retry was accepted, so the refused draft is gone and the mode is
       // back at rest — not still holding the words it could not send.
+      expect(composer(el), 'an accepted post closes the box it was typed in').toBeNull();
+      tapPage(el, 'other');
       expect(field(el)?.value).toBe('');
-      expect(composer(el)?.textContent).not.toContain('try again');
     });
 
     it('several comments in a row cost one entry into the mode', async () => {
       const { el, posts } = await mount(TABLET);
       enterFeedbackMode(el);
+      tapPage(el);
       const first = field(el) as HTMLTextAreaElement;
       first.value = 'one cup, one comment';
       enter(first, false);
       await settle();
+      tapPage(el, 'other');
       const second = field(el) as HTMLTextAreaElement;
       second.value = 'and the sign, separately';
       enter(second, false);
@@ -357,6 +358,7 @@ describe('comment mode', () => {
     it('CONTROL: an IME Enter picks a candidate and posts nothing', async () => {
       const { el, posts } = await mount(TABLET);
       enterFeedbackMode(el);
+      tapPage(el);
       const ta = field(el) as HTMLTextAreaElement;
       ta.value = 'nihongo';
       ta.dispatchEvent(

@@ -33,5 +33,5 @@ void bootBoard({
   localStorage: browserStorage,
   window,
   connect,
-  loadWidget: () => import('@claude-workspaces/widget'),
+  loadWidget: () => import('./board-feedback-mic.ts').then((m) => m.mountFeedbackWidget(document)),
 });

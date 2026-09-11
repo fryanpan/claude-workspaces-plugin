@@ -159,7 +159,10 @@ describe('widget', () => {
     window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 10 }));
     const composer = root.querySelector('.composer') as HTMLElement;
     expect(composer).toBeTruthy();
-    expect(composer.querySelector('.composer-snippet')?.textContent).toContain('Hello');
+    // This width is the phone face, which names no element in the panel —
+    // the outline on the element does that. What the tap must open is a field.
+    expect(composer.querySelector('textarea')).toBeTruthy();
+    expect(target.style.outline, 'the tapped element is the one outlined').toContain('solid');
     // Cancel the comment — the mode stays armed for the next click.
     (composer.querySelector('.cancel') as HTMLButtonElement).click();
     expect(root.querySelector('.composer')).toBeNull();

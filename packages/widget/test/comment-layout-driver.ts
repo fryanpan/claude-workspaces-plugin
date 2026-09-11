@@ -68,9 +68,13 @@ export interface Look {
   draft: string | null;
   /** The field's font size in px: under 16, iOS zooms the page on focus. */
   fieldPx: number | null;
-  /** The phone panel's Done, and its Post, when painted. */
+  /** The phone panel's Done — gone, and asserted gone — and its Post. */
   done: Box | null;
   post: Box | null;
+  /** The composer's Cancel, which is a glyph at phone width. */
+  cancel: Box | null;
+  /** The thread list button, which steps aside in comment mode. */
+  list: Box | null;
   /** The id of the element wearing the picker's outline, if any. */
   outlined: string | null;
   scrollY: number;
@@ -90,8 +94,8 @@ export interface Reading {
 /** Elements a comment goes on: one that stops short of the right margin, one
  *  that reaches into it, one low enough that the phone's panel would sit on
  *  it, and one taller than the screen. `#title` is the page heading the phone
- *  banner used to cover, and `#acct` a link in the top-right corner, where the
- *  resting card stands. `#fare`, on the phone only, is a link just above the
+ *  banner used to cover, and `#acct` a link in the top-right corner, which a tap
+ *  in the mode comments on rather than follows. `#fare`, on the phone only, is a link just above the
  *  banner, where the panel a tap opens will be standing when its click comes. */
 function pageHtml(bundle: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
@@ -199,6 +203,8 @@ const LOOK = `(() => {
     fieldPx: c ? parseFloat(getComputedStyle(c.querySelector('textarea')).fontSize) : null,
     done: box(sr.querySelector('.composer .done')),
     post: box(sr.querySelector('.composer .submit')),
+    cancel: box(sr.querySelector('.composer .cancel')),
+    list: box(sr.querySelector('.fab-list')),
     outlined,
     scrollY: Math.round(scrollY),
     hash: location.hash,
@@ -287,13 +293,12 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   const done = `${SHADOW}.querySelector('.picker-cancel')`;
   const el = (id: string) => `document.getElementById('${id}')`;
 
+  await look('idle');
   await tap(fab);
   await look('entered');
   if (width > 1100) {
-    // The resting card stands over the page's account link. Cancel puts it
-    // away, and the link can be tapped — to comment on it, not to follow it.
-    await tap(`${SHADOW}.querySelector('.composer .cancel')`);
-    await look('restCancelled');
+    // The account link in the corner: tapped in the mode it is commented on,
+    // not followed.
     await tap(el('acct'));
     await look('onAcct');
     await click(el('acct'));
@@ -312,7 +317,9 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await type(LONG);
     await enter();
     await look('posted2');
-    // A finger on the saved card, while the resting card's field has focus.
+    // A finger on a saved card, while another element's field has focus.
+    await tap(el('narrow'));
+    await look('reopenedNarrow');
     await tap(`${SHADOW}.querySelector('.saved')`);
     await look('savedTapped');
     // Zoomed in and scrolled down and right inside the zoom: the visual
@@ -342,7 +349,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await turn(width, height);
     await look('landscape');
     // A low element, whose card level with it would reach the FAB and list button.
-    await cdp.evaluate(`scrollTo(0, document.getElementById('low').offsetTop - ${height} + 90)`);
+    await cdp.evaluate(`scrollTo(0, document.getElementById('low').offsetTop - ${height} + 55)`);
     await settle();
     await tap(el('low'));
     await look('onLowDesk');
@@ -357,12 +364,6 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     // Enough words that the field grows to its four lines.
     await type(LONG);
     await look('grown');
-    // The panel's Done steps away from the draft and keeps it on the element.
-    await tap(`${SHADOW}.querySelector('.composer .done')`);
-    await look('phoneAway');
-    await tap(fab);
-    await tap(el('low'));
-    await look('phoneBack');
     // Cancel throws it away and hands back the prompt, whose Done ends the mode.
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await look('cancelled');
@@ -424,22 +425,11 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await look('switched');
     await tap(el('narrow'));
     await look('switchedBack');
-    // The same from the card the mode rests in, whose words are the page's.
-    await escape();
-    await tap(done);
-    await tap(fab);
-    await type('About the day');
-    await tap(el('wide'));
-    await look('fromRest');
-    await escape();
-    await tap(done);
-    await tap(fab);
-    await look('restBack');
     // Two quick posts on an element low on the screen: the second card and
     // the first one's saved card stack, and so do the two saved cards.
-    await tap(`${SHADOW}.querySelector('.composer .cancel')`);
+    await escape();
     await cdp.evaluate('window.__hold = false');
-    await cdp.evaluate(`scrollTo(0, document.getElementById('low').offsetTop - ${height} + 90)`);
+    await cdp.evaluate(`scrollTo(0, document.getElementById('low').offsetTop - ${height} + 55)`);
     await settle();
     await tap(el('low'));
     await type('Lot A');
