@@ -1,5 +1,6 @@
 import type { DocType, User } from '@claude-workspaces/core';
 import type { AgentWatches } from '../agent-watches.ts';
+import type { ChatAudit } from '../chat-audit.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
@@ -44,6 +45,9 @@ export interface WorkspaceRoutesContext {
   /** The published client's root, or null when this server publishes none.
    *  Only the attachments read touches it, to say which release is live. */
   clientReleaseRootDir: string | null;
+  /** The unfiled-ask counters, read for the presence strip's per-agent
+   *  number. Owner-only on the wire — see `handleWorkspaceAttachments`. */
+  chatAudit: ChatAudit;
 
   /**
    * The two `ServerOptions` fields the routes below read, and no more.

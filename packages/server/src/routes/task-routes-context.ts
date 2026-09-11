@@ -1,5 +1,6 @@
 import type { DocMeta, TaskReviewItem, User } from '@claude-workspaces/core';
 import type { AgentNoteRing } from '../agent-notes.ts';
+import type { ChatAudit } from '../chat-audit.ts';
 import type { DispatchRegistry } from '../dispatch-registry.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -47,6 +48,9 @@ export interface TaskRoutesContext {
   dispatches: DispatchRegistry;
   /** The per-agent ring of turn / denial / status notes. */
   agentNotes: AgentNoteRing;
+  /** The unfiled-ask counters. The hook route is the only writer of the live
+   *  rows; the chat-audit routes read them and take the daily audit's. */
+  chatAudit: ChatAudit;
   /** Wakes the lead when a row it owns becomes ready. */
   readyNudger: ReadyWorkNudger;
 

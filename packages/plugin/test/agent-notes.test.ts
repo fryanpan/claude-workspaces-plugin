@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_BASE_URL,
   POST_TIMEOUT_MS,
+  blockDecision,
   decideDenialNote,
   decideTurnNote,
   payloadKeys,
@@ -119,10 +120,17 @@ describe('decideTurnNote — the Stop hook', () => {
     });
     expect(decideTurnNote({ ...STOP }, ctx)).toEqual({ skip: 'empty message' });
   });
-  it('is a no-op while a stop hook is already active', () => {
-    expect(
-      decideTurnNote({ ...STOP, stop_hook_active: true, last_assistant_message: 'hi' }, ctx),
-    ).toEqual({ skip: 'stop hook active' });
+  it('still posts the continuation of a blocked turn', () => {
+    // The Stop hook blocks a turn that asked the owner something with nothing
+    // filed. The message that turn then writes is the one a reader most wants
+    // in the Activity tab, so skipping it would have made the nudge cost the
+    // owner the answer. Only the second NUDGE is suppressed, in runHook.
+    const decision = decideTurnNote(
+      { ...STOP, stop_hook_active: true, last_assistant_message: 'hi' },
+      ctx,
+    );
+    expect(decision.skip).toBeUndefined();
+    expect(decision.post?.text).toBe('hi');
   });
   it('is a no-op on a malformed payload', () => {
     expect(decideTurnNote(null, ctx)).toEqual({ skip: 'malformed payload' });
@@ -215,7 +223,9 @@ describe('postNote — fail-open transport', () => {
   const note = { agent: 'Cartographer', kind: 'turn' as const, text: 'hi', at: NOW };
   it("POSTs JSON to the agent's notes route on the board, with a timeout signal", async () => {
     const calls: Call[] = [];
-    expect(await postNote('http://localhost:1', 'w-board', note, fakeFetch(calls))).toBe(true);
+    expect(await postNote('http://localhost:1', 'w-board', note, fakeFetch(calls))).toEqual({
+      ok: true,
+    });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('http://localhost:1/workspaces/w-board/agents/Cartographer/notes');
     expect(calls[0].init.method).toBe('POST');
@@ -226,22 +236,89 @@ describe('postNote — fail-open transport', () => {
     expect(sentBody(calls[0])).toEqual(note);
     expect(POST_TIMEOUT_MS).toBe(1500);
   });
-  it('resolves false — never throws — when fetch throws or the server refuses', async () => {
+  it('resolves not-ok — never throws — when fetch throws or the server refuses', async () => {
     const throwing = fakeFetch([], () => Promise.reject(new Error('ECONNREFUSED')));
-    await expect(postNote('http://localhost:1', 'w-board', note, throwing)).resolves.toBe(false);
     const refusing = fakeFetch([], () =>
       Promise.resolve(new Response('{"error":"bad-kind"}', { status: 400 })),
     );
-    await expect(postNote('http://localhost:1', 'w-board', note, refusing)).resolves.toBe(false);
     const syncThrow = (() => {
       throw new TypeError('not a function');
     }) as unknown as typeof fetch;
-    await expect(postNote('http://localhost:1', 'w-board', note, syncThrow)).resolves.toBe(false);
+    for (const f of [throwing, refusing, syncThrow]) {
+      expect((await postNote('http://localhost:1', 'w-board', note, f)).ok).toBe(false);
+    }
+  });
+  it("reads the server's nudge out of the 202 body", async () => {
+    const nudging = fakeFetch([], () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true, unfiledAsk: 'You asked and filed nothing.' }), {
+          status: 202,
+        }),
+      ),
+    );
+    expect(await postNote('http://localhost:1', 'w-board', note, nudging)).toEqual({
+      ok: true,
+      unfiledAsk: 'You asked and filed nothing.',
+    });
+  });
+  it('treats a 202 that is not JSON as a delivered note with no nudge', async () => {
+    // An older server answers `Accepted` in plain text. That is a delivery,
+    // not a failure: a plugin that read it as one would log an error on every
+    // turn against a board that is working perfectly.
+    const terse = fakeFetch([], () => Promise.resolve(new Response('Accepted', { status: 202 })));
+    expect(await postNote('http://localhost:1', 'w-board', note, terse)).toEqual({ ok: true });
+  });
+});
+
+const NUDGE = 'You asked and filed nothing.';
+const nudgingFetch = (calls: Call[]): typeof fetch =>
+  fakeFetch(calls, () =>
+    Promise.resolve(new Response(JSON.stringify({ ok: true, unfiledAsk: NUDGE }), { status: 202 })),
+  );
+
+describe('the nudge, from the 202 back to the agent', () => {
+  it("hands the server's nudge back so the turn can be blocked", async () => {
+    const calls: Call[] = [];
+    const nudge = await runHook(
+      'turn',
+      JSON.stringify({ ...STOP, last_assistant_message: 'Want me to ship it?' }),
+      { env: ENV, fetch: nudgingFetch(calls), now: () => NOW },
+    );
+    expect(nudge).toBe(NUDGE);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('posts the continuation of a blocked turn but does not nudge it again', async () => {
+    // Without this the block would loop: the nudge reopens the turn, the
+    // reopened turn ends with the same words, and the hook fires again.
+    const calls: Call[] = [];
+    const nudge = await runHook(
+      'turn',
+      JSON.stringify({ ...STOP, stop_hook_active: true, last_assistant_message: 'Want me to?' }),
+      { env: ENV, fetch: nudgingFetch(calls), now: () => NOW },
+    );
+    expect(nudge).toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('never nudges a denial note', async () => {
+    const calls: Call[] = [];
+    const stdin = JSON.stringify({ ...DENIED, tool_name: 'Bash', tool_input: { command: 'ls' } });
+    expect(
+      await runHook('denial', stdin, { env: ENV, fetch: nudgingFetch(calls), now: () => NOW }),
+    ).toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('emits the block only when there is something to say', () => {
+    expect(blockDecision(NUDGE)).toBe(JSON.stringify({ decision: 'block', reason: NUDGE }));
+    expect(blockDecision(undefined)).toBeUndefined();
+    expect(blockDecision('   ')).toBeUndefined();
   });
 });
 
 describe('runHook — the thin main, end to end', () => {
-  it('posts the full turn note and exits 0', async () => {
+  it('posts the full turn note and returns no nudge', async () => {
     const calls: Call[] = [];
     const code = await runHook(
       'turn',
@@ -252,7 +329,7 @@ describe('runHook — the thin main, end to end', () => {
         now: () => NOW,
       },
     );
-    expect(code).toBe(0);
+    expect(code).toBeUndefined();
     expect(calls).toHaveLength(1);
     expect(sentBody(calls[0])).toEqual({
       agent: 'Cartographer',
@@ -263,7 +340,7 @@ describe('runHook — the thin main, end to end', () => {
       at: NOW,
     });
   });
-  it('exits 0 with no fetch for every no-op condition', async () => {
+  it('posts nothing for every no-op condition', async () => {
     const cases: Array<[string, Record<string, string | undefined>, string]> = [
       [
         'no agent',
@@ -276,22 +353,17 @@ describe('runHook — the thin main, end to end', () => {
         JSON.stringify({ ...STOP, last_assistant_message: 'x' }),
       ],
       ['empty message', ENV, JSON.stringify({ ...STOP, last_assistant_message: '' })],
-      [
-        'stop hook active',
-        ENV,
-        JSON.stringify({ ...STOP, stop_hook_active: true, last_assistant_message: 'x' }),
-      ],
       ['bad json', ENV, '{not json'],
       ['empty stdin', ENV, ''],
     ];
     for (const [label, env, stdin] of cases) {
       const calls: Call[] = [];
       const code = await runHook('turn', stdin, { env, fetch: fakeFetch(calls), now: () => NOW });
-      expect(code, label).toBe(0);
+      expect(code, label).toBeUndefined();
       expect(calls, label).toHaveLength(0);
     }
   });
-  it('exits 0 with no fetch when no base URL resolves', async () => {
+  it('posts nothing when no base URL resolves', async () => {
     const calls: Call[] = [];
     const code = await runHook('turn', JSON.stringify({ ...STOP, last_assistant_message: 'x' }), {
       env: { CW_AGENT_NAME: 'Cartographer', CW_WORKSPACE_ID: 'w-board' },
@@ -299,7 +371,7 @@ describe('runHook — the thin main, end to end', () => {
       now: () => NOW,
       baseUrl: () => undefined,
     });
-    expect(code).toBe(0);
+    expect(code).toBeUndefined();
     expect(calls).toHaveLength(0);
   });
   it('exits 0 when fetch throws', async () => {
@@ -310,7 +382,7 @@ describe('runHook — the thin main, end to end', () => {
         fetch: throwing,
         now: () => NOW,
       }),
-    ).resolves.toBe(0);
+    ).resolves.toBeUndefined();
   });
   it('posts a denial note with the shape, and logs key names once', async () => {
     const calls: Call[] = [];
@@ -332,8 +404,8 @@ describe('runHook — the thin main, end to end', () => {
       tool_name: 'Bash',
       tool_input: { command: 'rm -rf /work/repo/node_modules' },
     });
-    expect(await runHook('denial', stdin, deps)).toBe(0);
-    expect(await runHook('denial', stdin, deps)).toBe(0);
+    expect(await runHook('denial', stdin, deps)).toBeUndefined();
+    expect(await runHook('denial', stdin, deps)).toBeUndefined();
     expect(calls).toHaveLength(2);
     expect(sentBody(calls[0])).toEqual(expect.objectContaining({ kind: 'denial', text: 'rm -rf' }));
     expect(logged).toHaveLength(1);

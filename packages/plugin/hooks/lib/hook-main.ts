@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { type NoteKind, runHook } from './agent-notes.ts';
+import { type NoteKind, blockDecision, runHook } from './agent-notes.ts';
 
 /** The server publishes its live port here at boot; the MCP child reads
  *  the same file (newest name first). Spelled here because the installed
@@ -39,14 +39,28 @@ function shapeSeen(kind: NoteKind): boolean {
   }
 }
 
+/**
+ * Run the hook, and relay a nudge if one came back.
+ *
+ * A Stop hook reaches its own agent exactly one way: `decision: "block"` on
+ * stdout, whose `reason` lands in the model's context and keeps the turn
+ * open. That is what "told within the turn" means here. Everything else still
+ * exits 0 silently — a hook that prints on an ordinary turn would put a line
+ * in front of the owner on every single stop.
+ *
+ * Exit code stays 0 either way: the block is carried by the JSON, and a
+ * non-zero exit from a Stop hook means something else entirely.
+ */
 export async function hookMain(kind: NoteKind): Promise<never> {
   try {
-    await runHook(kind, await Bun.stdin.text(), {
+    const nudge = await runHook(kind, await Bun.stdin.text(), {
       env: process.env,
       discoveryPort,
       shapeSeen,
       log: (line) => process.stderr.write(`${line}\n`),
     });
+    const decision = blockDecision(nudge);
+    if (decision !== undefined) process.stdout.write(`${decision}\n`);
   } catch {
     // fail open
   }
