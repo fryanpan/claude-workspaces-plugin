@@ -72,6 +72,8 @@ export interface Look {
   /** The id of the element wearing the picker's outline, if any. */
   outlined: string | null;
   scrollY: number;
+  /** `location.hash`: a link the page followed changes it. */
+  hash: string;
   /** Where the page elements the case taps are, right now. */
   el: Record<string, Box>;
   posts: string[];
@@ -87,7 +89,8 @@ export interface Reading {
  *  that reaches into it, one low enough that the phone's panel would sit on
  *  it, and one taller than the screen. `#title` is the page heading the phone
  *  banner used to cover, and `#acct` a link in the top-right corner, where the
- *  resting card stands. */
+ *  resting card stands. `#fare`, on the phone only, is a link just above the
+ *  banner, where the panel a tap opens will be standing when its click comes. */
 function pageHtml(bundle: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -104,10 +107,12 @@ function pageHtml(bundle: string): string {
  #tall{height:1200px;margin-top:40px;background:#eef5ea}
  #tail{height:900px}
  #acct{position:absolute;right:48px;top:110px}
+ #fare{display:none;position:absolute;right:24px;top:830px}@media (max-width:1100px){#fare{display:block}}
 </style></head>
 <body>
 <header><h1 id="title">Harborlight open day</h1></header>
 <a id="acct" href="#away">Account</a>
+<a id="fare" href="#fares">Fares</a>
 <main>
  <div id="narrow">Ferry times<br>Six sailings</div>
  <div id="wide">The full timetable, across the page</div>
@@ -160,7 +165,7 @@ const LOOK = `(() => {
     p.getAttribute('points').split(/[ ,]/).map((n) => Math.round(Number(n))));
   const ae = sr.activeElement;
   const el = {};
-  for (const id of ['title', 'narrow', 'wide', 'low', 'acct', 'tall']) el[id] = box(document.getElementById(id));
+  for (const id of ['title', 'narrow', 'wide', 'low', 'acct', 'tall', 'fare']) el[id] = box(document.getElementById(id));
   const outlined = ['narrow', 'wide', 'low'].find((id) =>
     /solid/.test(document.getElementById(id).style.outline)) ?? null;
   return {
@@ -193,6 +198,7 @@ const LOOK = `(() => {
     post: box(sr.querySelector('.composer .submit')),
     outlined,
     scrollY: Math.round(scrollY),
+    hash: location.hash,
     el,
     posts: window.__posts,
   };
@@ -241,6 +247,13 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await settle();
   };
+  /** A mouse: press and release — the browser makes the click. */
+  const click = async (expr: string): Promise<void> => {
+    const p = { ...(await centre(expr)), button: 'left', clickCount: 1 };
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...p });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...p });
+    await settle();
+  };
   const hover = async (expr: string): Promise<void> => {
     const p = await centre(expr);
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...p, pointerType: 'mouse' });
@@ -275,11 +288,14 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   await look('entered');
   if (width > 1100) {
     // The resting card stands over the corner where the page keeps its
-    // account link. Cancel puts it away, and the link can be tapped.
+    // account link. Cancel puts it away, and the link can be tapped — to
+    // comment on it, not to follow it.
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await look('restCancelled');
     await tap(el('acct'));
     await look('onAcct');
+    await click(el('acct'));
+    await look('clickedAcct');
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await hover(el('narrow'));
     await look('hovered');
@@ -350,6 +366,14 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     // mode below.
     await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await look('cancelled');
+    // A link where the panel its tap opens stands by the time its click comes.
+    await cdp.evaluate('scrollTo(0, 0)');
+    await settle();
+    await tap(el('fare'));
+    await look('onFare');
+    // From script: if that click closed the panel, no Cancel is left to tap.
+    await cdp.evaluate(`${SHADOW}.querySelector('.composer .cancel')?.click()`);
+    await settle();
   }
   await tap(done);
   await look('done');

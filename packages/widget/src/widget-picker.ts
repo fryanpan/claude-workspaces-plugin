@@ -141,14 +141,16 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     setHighlight(el, t);
     openComposerForElement(el, t);
   };
-  // A finger's press is followed, AFTER its pointerup, by the compatibility
-  // mousedown — whose default moves focus to what was pressed. That took the
-  // focus straight back off the field the tap had just opened, so typing went
-  // nowhere; a mouse's mousedown comes first and was harmless. Cancelling the
-  // press on the page stops the compatibility events; our own chrome is left
-  // alone, or its fields could not be focused at all.
-  const onDown = (ev: PointerEvent) => {
-    if (hitTest(ev) || (ev.composedPath()[0] as Element).closest?.('.saved')) ev.preventDefault();
+  // A finger's press is followed, AFTER its pointerup, by a compatibility
+  // mousedown whose default took focus back off the field the tap had just
+  // opened (a mouse's comes first, harmlessly), then by a click: on a link it
+  // follows the href off the page, drafts and all, and it is hit-tested where
+  // the finger was, by then the phone panel's Cancel. So a press on the page
+  // is cancelled at each step; its touchend is what stops a finger's click.
+  // Our own chrome is left alone, or its fields could not be focused at all.
+  const onDown = (ev: Event) => {
+    if (!pressIsOurs(ev) || (ev.composedPath()[0] as Element).closest?.('.saved'))
+      ev.preventDefault();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key !== 'Escape') return;
@@ -184,6 +186,8 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   const on = [
     ['pointermove', onMove],
     ['pointerdown', onDown],
+    ['touchend', onDown],
+    ['click', onDown],
     ['pointerup', onTap],
     ['keydown', onKey],
     ['resize', onResize],
@@ -403,7 +407,7 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
     (ta.oninput = () => {
       const r = target.getBoundingClientRect();
       const over = r.bottom - composer.getBoundingClientRect().top + 12;
-      if (over > 0 && r.top - over > 8) window.scrollBy(0, over);
+      if (over > 0 && r.top - over > 8) scrollBy(0, over);
     })();
   }
   // Cancel is NOT Done. It throws the draft away and hands you back the mode,
@@ -413,10 +417,9 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   // live, and a finger has no Esc to reach them with. Leaving the mode is the
   // banner's Done, and it never sits beside Post.
   //
-  // At phone width the panel stands in for the banner while it is up, so it
-  // carries its own Done, a row above Post and a column off it. Done keeps a
-  // draft, as it does on the banner — the one way a finger can step away from
-  // the words without Cancel throwing them out.
+  // At phone width the panel hides the banner while it is up, so it carries
+  // its own Done, a row above Post and a column off it. Done keeps a draft, as
+  // on the banner: a finger's one way to step away and keep the words.
   composer.querySelector('.done')?.addEventListener('click', () => exitFeedbackMode(el));
   composer.querySelector('.cancel')?.addEventListener('click', () => {
     closeComposer(el, composer);

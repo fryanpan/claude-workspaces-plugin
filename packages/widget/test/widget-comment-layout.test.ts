@@ -97,6 +97,16 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(look(1180, 'onAcct').snippet).toBe('Account');
     });
 
+    it('comments on a link rather than following it', () => {
+      // Following it would leave the page, and the mode and its drafts with it.
+      for (const name of ['onAcct', 'clickedAcct']) {
+        const l = look(1180, name);
+        expect(l.snippet, `CONTROL: the ${name} press reached the link`).toBe('Account');
+        expect(l.mode).toBe(true);
+        expect(l.hash, name).toBe('');
+      }
+    });
+
     it('stands level with an element that stops short of the margin, covering none of it', () => {
       const l = look(1180, 'onNarrow');
       const card = box(l.card);
@@ -392,6 +402,28 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       const back = look(430, 'phoneBack');
       expect(back.snippet, 'CONTROL: the panel opened on the same element').toBe('Parking');
       expect(back.draft).toBe(typed);
+    });
+
+    it('keeps the panel a tap opens, though the click after it lands where it stands', () => {
+      // The panel opens on the pointerup, and a finger's click follows it,
+      // hit-tested where the finger was: on the panel's Cancel, which closed
+      // the panel as it opened. On a link, the link is not followed either.
+      const l = look(430, 'onFare');
+      expect(l.scrollY, 'CONTROL: the tap opened a panel, which nudged the page').toBeGreaterThan(
+        0,
+      );
+      expect(l.card, "the tap's own click closed the panel").not.toBeNull();
+      expect(l.snippet).toBe('Fares');
+      const a = box(l.el.fare);
+      // Where the finger was: the link's middle before the nudge scrolled it.
+      const [x, y] = [(a[0] + a[2]) / 2, (a[1] + a[3]) / 2 + l.scrollY];
+      const c = box(l.card);
+      expect(
+        c[0] <= x && x <= c[2] && c[1] <= y && y <= c[3],
+        'CONTROL: the panel stands where the finger was',
+      ).toBe(true);
+      expect(l.mode).toBe(true);
+      expect(l.hash).toBe('');
     });
 
     it('goes back to its prompt with a tick after a post, still in the mode', () => {

@@ -58,7 +58,7 @@ export function placeCards(w: FeedbackWidgetEl): void {
   // inside a pinch-zoom, on both axes. The window's size knows about neither.
   const vv = window.visualViewport;
   let top = (vv?.offsetTop ?? 0) + 8;
-  let bot = (vv ? vv.offsetTop + vv.height : window.innerHeight) - 8;
+  let bot = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
   const x = (vv ? vv.offsetLeft + vv.width : window.innerWidth) - 16 - CARD_W;
   // The mode's own buttons in the card's column — Done, the FAB's X, the list
   // — stay uncovered: the card's room ends where they start.
@@ -93,7 +93,7 @@ export function placeCards(w: FeedbackWidgetEl): void {
           ? r.bottom + GAP
           : r.top - GAP - h;
     y = Math.max(top, Math.min(y, bot - h));
-    const up = y + h / 2 > (top + bot) / 2;
+    const up = 2 * y + h > top + bot;
     for (let moved = true; moved; ) {
       moved = false;
       for (const [a, b] of taken) {
