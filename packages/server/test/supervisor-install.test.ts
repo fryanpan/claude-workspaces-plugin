@@ -18,6 +18,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -104,8 +105,8 @@ function machine(installFails: boolean) {
 }
 
 /** Boot `scripts/serve.ts --no-watch` on `m`, reading its stderr as it comes. */
-function boot(m: ReturnType<typeof machine>) {
-  const proc = Bun.spawn([process.execPath, SERVE, '--no-watch', '--port', '0'], {
+function boot(m: ReturnType<typeof machine>, serve = SERVE) {
+  const proc = Bun.spawn([process.execPath, serve, '--no-watch', '--port', '0'], {
     env: m.env,
     stdin: 'ignore',
     stdout: 'ignore',
@@ -183,5 +184,27 @@ describe('scripts/serve.ts --no-watch', () => {
     expect(m.calls().map((c) => c.argv)).toEqual(['install --frozen-lockfile']);
     expect(existsSync(join(m.home, '.claude', 'claude-workspaces', 'server.json'))).toBe(false);
     expect(existsSync(m.clientRoot)).toBe(false);
+  }, 30_000);
+
+  it('reaches the install from a checkout whose node_modules holds nothing', async () => {
+    // The crash this prevents is an import of a package a pull added and
+    // nobody installed. If the supervisor itself imported through
+    // node_modules before installing, a new package anywhere in that graph
+    // would be the same crash one step earlier, with no install ever run. So
+    // boot a copy of the code whose node_modules is empty: it must still get
+    // as far as the install.
+    const copy = tempDir('supervisor-bare-');
+    for (const rel of ['scripts', 'packages/core/src', 'packages/server/src', 'package.json']) {
+      cpSync(join(repoRoot, rel), join(copy, rel), { recursive: true });
+    }
+    // Empty rather than absent: with none at all, Bun would auto-install.
+    mkdirSync(join(copy, 'node_modules'));
+    const m = machine(true);
+
+    const refusal = await boot(m, join(copy, 'scripts', 'serve.ts')).line(
+      'bun install --frozen-lockfile FAILED',
+    );
+    expect(refusal).toContain('lockfile had changes, but lockfile is frozen');
+    expect(m.calls()).toEqual([{ cwd: copy, argv: 'install --frozen-lockfile' }]);
   }, 30_000);
 });
