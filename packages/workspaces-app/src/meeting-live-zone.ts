@@ -437,8 +437,11 @@ export function createMeetingLiveZone(opts: {
     // slot keeps the height it promised and `.lz-slot`'s `overflow: clip`
     // (doc.css) stops the extra line being painted over the chunk below.
     // Measured before the clip, at 430 over a thirty-write meeting: 818px² of
-    // one opaque run drawn over another.
+    // one opaque run drawn over another. The class is what turns that clip on,
+    // so it goes on with the height it is there to hold: a slot that has made
+    // no promise keeps its chunk's full hit area.
     c.slot.style.height = `${c.slot.getBoundingClientRect().height}px`;
+    c.slot.classList.add('is-pinned');
     const reduced = reducedMotion();
     step(c, NOTE_LAND_MS, () => {
       c.body.classList.add('is-fading');

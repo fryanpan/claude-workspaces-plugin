@@ -633,8 +633,75 @@ async function rewrapControl(): Promise<string> {
   return JSON.stringify(reading);
 }
 
+export interface TapReading {
+  /** The speaker button really rendered, and really hangs past its line. */
+  overhang: number;
+  /** Does a tap in that overhang reach the button while the slot is unpinned
+   *  — the whole of the compose, which is the part of a chunk's life somebody
+   *  reads and taps a name in? */
+  unpinned: boolean;
+  /** And once `settle` has pinned the slot and the clip is on. Documented
+   *  rather than demanded: from here the chunk is fading out. */
+  pinned: boolean;
+}
+
+/**
+ * WHAT THE CLIP COSTS, AND WHERE IT IS NOT ALLOWED TO COST IT.
+ *
+ * `overflow: clip` clips hit-testing as well as paint, and `.lz-speaker` is a
+ * tap target built out of 8px of padding above and below its line, cancelled
+ * by negative margins so the line never grows for it. Inside a slot that is
+ * the part of the target that hangs outside the box.
+ *
+ * So the clip is on `.is-pinned` and not on `.lz-slot`: a chunk is unpinned
+ * for the whole of its compose — the long, readable part of its life — and
+ * pinned only for the fade and the collapse that take it away. This drives a
+ * real tap at the top of that overhang and reports which of the two states
+ * answers it. `overhang` is the control: zero would mean no button rendered
+ * and both readings below would be about nothing.
+ */
+async function tapControl(): Promise<string> {
+  scaleClock(1);
+  const editor = document.getElementById('editor') as HTMLElement;
+  const prose = document.querySelector('.ProseMirror') as HTMLElement;
+  const zone = createMeetingLiveZone({
+    parent: editor,
+    prose,
+    reducedMotion: () => false,
+    // Only a zone that can record a name renders the button; a span would have
+    // no tap target to lose.
+    nameSpeaker: () => {},
+  });
+  zone.begin(Date.now());
+  // Two voices, or the zone draws no pill at all.
+  zone.onTurn({ turn: 0, text: speechFrom(0, 4), final: true, speaker: 'A' });
+  zone.onTurn({ turn: 1, text: speechFrom(8, 4), final: true, speaker: 'B' });
+  zone.onProgress({ tick: 0, phase: 'composing', turns: [0, 1] });
+  await new Promise((r) => requestAnimationFrame(r));
+  const slot = document.querySelector('.lz-slot') as HTMLElement;
+  const button = slot.querySelector('.lz-speaker') as HTMLElement;
+  const b = button.getBoundingClientRect();
+  const overhang = slot.getBoundingClientRect().top - b.top;
+  // A real tap, in the overhang, on the button's own column.
+  const x = b.left + Math.min(6, b.width / 2);
+  const y = b.top + 1;
+  const hits = (): boolean => {
+    const el = document.elementFromPoint(x, y);
+    return el !== null && (el === button || button.contains(el));
+  };
+  const unpinned = hits();
+  // What `settle` does, without waiting out its beats.
+  slot.style.height = `${slot.getBoundingClientRect().height}px`;
+  slot.classList.add('is-pinned');
+  await new Promise((r) => requestAnimationFrame(r));
+  const reading: TapReading = { overhang, unpinned, pinned: hits() };
+  zone.destroy();
+  return JSON.stringify(reading);
+}
+
 declare global {
   interface Window {
+    liveZoneTap: () => Promise<string>;
     liveZoneDrive: (o: DriveOptions) => Promise<string>;
     liveZoneRewrap: () => Promise<string>;
     liveZoneControl: () => Promise<string>;
@@ -642,6 +709,7 @@ declare global {
   }
 }
 window.liveZoneDrive = drive;
+window.liveZoneTap = tapControl;
 window.liveZoneRewrap = rewrapControl;
 window.liveZoneControl = control;
 window.liveZoneClipControl = clipControl;

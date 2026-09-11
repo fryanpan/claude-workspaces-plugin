@@ -34,6 +34,7 @@ import type {
   DriveResult,
   Overlap,
   RewrapReading,
+  TapReading,
 } from './meeting-live-overdraw-driver.ts';
 
 /** Is there a browser to launch — asked the way `ui-shot.ts` itself asks, so
@@ -131,6 +132,7 @@ interface Reading {
   control: { worst: Overlap; line: number };
   clip: ClipReading;
   rewrap: RewrapReading;
+  tap: TapReading;
   meeting: DriveResult;
   unhurried: DriveResult;
   voices: DriveResult;
@@ -146,6 +148,7 @@ function measure(html: string, preset: 'ipad' | 'phone', runs: readonly DriveOpt
     control: JSON.parse(await window.liveZoneControl()),
     clip: JSON.parse(await window.liveZoneClipControl()),
     rewrap: JSON.parse(await window.liveZoneRewrap()),
+    tap: JSON.parse(await window.liveZoneTap()),
     meeting: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[0])})),
     unhurried: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[1])})),
     voices: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[2])})),
@@ -228,6 +231,7 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
           control: c,
           clip,
           rewrap,
+          tap,
           meeting,
           unhurried,
           voices,
@@ -258,6 +262,18 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         expect(rewrap.words).toBeGreaterThan(0);
         expect(rewrap.chunkH).toBeGreaterThan(rewrap.slotH + 1);
         expect(rewrap.worst.area).toBeLessThan(SMEAR_PX2);
+
+        // And what that clip costs, which is why it is on the pin rather than
+        // on every slot. A clip clips hit-testing too, and `.lz-speaker` is a
+        // tap target made of padding that hangs past its line. `unpinned` is
+        // the promise: through the whole compose — the long, readable part of
+        // a chunk's life, and the part somebody taps a name in — a tap in that
+        // overhang still reaches the button. `pinned` is the measured cost and
+        // the control in one: a page where no clip ever landed would read true
+        // twice and prove nothing.
+        expect(tap.overhang).toBeGreaterThan(0);
+        expect(tap.unpinned).toBe(true);
+        expect(tap.pinned).toBe(false);
 
         // The meeting really ran: thirty writes, sampled every frame, with
         // ticks that composed nothing leaving words stranded in the stream —

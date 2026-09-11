@@ -150,17 +150,19 @@ describe('the transcript starts on the next line down from the doc', () => {
       '0',
     );
 
-    // Every slot clips, collapsing or not — a pinned slot's chunk can re-wrap
-    // taller than the height it promised once the collapse slides it up beside
-    // the floated label, and the extra line used to paint over the chunk
-    // below. `clip`, never `hidden`: `hidden` would make the slot a block
+    // A PINNED slot clips and an unpinned one does not. The pin is a promise
+    // about height that goes stale when the collapse slides the chunk up
+    // beside the floated label and its words re-wrap; the clip is what keeps
+    // the extra line off the chunk below. Unpinned it stays off, because a
+    // clip clips hit-testing and `.lz-speaker`'s tap target hangs 8px past its
+    // line. `clip`, never `hidden`: `hidden` would make the slot a block
     // formatting context, which refuses to sit beside that float and would
     // move the chunk's words on the split frame. What the two declarations do
     // differently in a real browser is measured in
-    // meeting-live-overdraw.test.ts; this is the pair the cascade must carry.
-    const slot = styleOf(attach('lz-slot', { parent: zone }));
-    expect(slot.overflow).toBe('clip');
-    const collapsing = styleOf(attach('lz-slot is-collapsing', { parent: zone }));
+    // meeting-live-overdraw.test.ts; this is what the cascade must carry.
+    expect(styleOf(attach('lz-slot', { parent: zone })).overflow).toBe('');
+    expect(styleOf(attach('lz-slot is-pinned', { parent: zone })).overflow).toBe('clip');
+    const collapsing = styleOf(attach('lz-slot is-pinned is-collapsing', { parent: zone }));
     expect(collapsing.overflow).toBe('clip');
     expect(collapsing.transition).toContain('height');
     expect(collapsing.transition).toContain(`${COLLAPSE_MS}ms`);
