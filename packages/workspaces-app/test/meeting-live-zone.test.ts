@@ -614,4 +614,41 @@ describe('words the note-taker is finished with leave the live transcript', () =
     vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS + COLLAPSE_MS);
     expect(turns()).toEqual(['carried words.']);
   });
+
+  it('an empty tick does not cut short the beat a written one’s words are waiting out', () => {
+    // Every in-place settle over one run is ONE batch on one clock, so a
+    // frame arriving mid-beat joins whatever is already leaving. An empty
+    // frame asks for no beat at all, and the words already in the batch are
+    // waiting out the pause that lets the note they went into land. The
+    // shorter ask must not win: those words would blink out from under a
+    // reader mid-sentence.
+    const advance = (ms: number): void => {
+      clock += ms;
+      vi.advanceTimersByTime(ms);
+    };
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    // A carried turn ahead of the composing one, so the words cannot be
+    // lifted into a chunk and their note settles in place.
+    zone.onTurn({ turn: 0, text: 'the carried phrase.', final: true });
+    zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
+    zone.onProgress({ tick: 1, phase: 'failed', turns: [0] });
+    zone.onTurn({ turn: 1, text: 'the phrase a note carried.', final: true });
+    zone.onProgress({ tick: 2, phase: 'composing', turns: [1] });
+    zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
+
+    advance(Math.floor(NOTE_LAND_MS / 2));
+    zone.onTurn({ turn: 2, text: 'nothing worth noting.', final: true });
+    zone.onProgress({ tick: 3, phase: 'composing', turns: [2] });
+    zone.onProgress({ tick: 3, phase: 'empty', turns: [2] });
+
+    // Past a whole fade measured from the join: a batch whose beat had been
+    // cut to zero would be off the page by now.
+    advance(FADE_MS + 1);
+    expect(stream()).toContain('the phrase a note carried.');
+
+    // It still leaves, on the clock it started with.
+    advance(NOTE_LAND_MS + FADE_MS);
+    expect(turns()).toEqual(['the carried phrase.']);
+  });
 });

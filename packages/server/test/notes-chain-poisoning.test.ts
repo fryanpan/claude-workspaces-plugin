@@ -101,4 +101,30 @@ describe('a throwing step does not stop the meeting', () => {
     // down: nobody would know the rename never reached the notes.
     expect(h.errors.some((e) => e.includes('the rename sink threw'))).toBe(true);
   });
+
+  it('a throwing error sink does not stop the meeting either', async () => {
+    // The recovery callback runs a function the CALLER supplied. A throw out
+    // of it rejects the chain exactly as the original step did, which would
+    // rebuild this whole bug one layer down and leave the recovery looking
+    // like the fix.
+    const h = createNotesTickHarness({
+      tickTimeoutMs: TICK_TIMEOUT_MS,
+      errorSinkThrows: true,
+      onRelabel: () => {
+        throw new Error('the rename sink threw');
+      },
+      compose: (input, tick) => addNotes(input, `- note ${tick}`),
+    });
+
+    await h.speak('The first thing.');
+    expect(h.notes()).toContain('note 1');
+
+    h.nameSpeaker('A', 'the second voice');
+
+    await h.speak('The second thing.');
+    await h.end();
+
+    expect(h.notes()).toContain('note 2');
+    expect(h.summary()).not.toBeNull();
+  });
 });

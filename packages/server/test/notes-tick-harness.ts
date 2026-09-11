@@ -153,6 +153,12 @@ export interface NotesTickHarnessOptions {
    * compose chain does to the ticks behind it.
    */
   onRelabel?: (relabel: NotesRelabel) => void;
+  /**
+   * Make the error sink itself throw, after recording. `onError` is a
+   * caller's own function, so a test needs to be able to ask what happens
+   * when the reporting step is the one that fails.
+   */
+  errorSinkThrows?: boolean;
   /** A doc a second harness is already driving, so two meetings can run over
    *  one `Y.Doc`. */
   ydoc?: Y.Doc;
@@ -314,7 +320,10 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
       cadenceMs: Number.POSITIVE_INFINITY,
       schedule,
       openTiming: () => timing,
-      onError: (message) => errors.push(message),
+      onError: (message) => {
+        errors.push(message);
+        if (opts.errorSinkThrows) throw new Error('the error sink threw');
+      },
       onMeetingSummary: (s) => {
         summary = s;
       },

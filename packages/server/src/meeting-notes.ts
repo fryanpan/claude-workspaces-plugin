@@ -1166,14 +1166,24 @@ export function beginNotesSession(
    * saying so. Reported through `onError` for the same reason every other
    * pipeline failure is: `meeting-notes-doc.ts` prints those, so the line
    * lands in the log beside the tick it belongs to.
+   *
+   * The report itself is wrapped, because `onError` is a caller's own
+   * function and a throw out of the recovery callback rejects the chain —
+   * which is the whole failure this exists to prevent, rebuilt one layer
+   * down. A sink that cannot be told is the one thing there is nowhere left
+   * to report.
    */
   const onChain = (step: () => void | Promise<void>): void => {
     chain = chain.then(step).catch((err) => {
-      deps.onError?.(
-        `${ids.docId} meeting ${ids.meetingId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
+      try {
+        deps.onError?.(
+          `${ids.docId} meeting ${ids.meetingId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      } catch {
+        // Nowhere to say so: reporting is what just failed.
+      }
     });
   };
 
