@@ -241,7 +241,7 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
     it(
       `keeps the reader's line on its pixel through a tick at ${width}`,
       () => {
-        const { bottomStill, aboveStill, grownStill } = probeFor(preset);
+        const { bottomStill, aboveStill, grownStill, rewrapStill } = probeFor(preset);
 
         // PARKED AT THE VERY FOOT, with the browser's own scroll anchoring
         // left switched on. The controls: a real paragraph was on screen, the
@@ -298,6 +298,19 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
         expect(grownStill.worstDrift).toBeLessThanOrEqual(2);
         expect(Math.abs(grownStill.eyeTop1 - grownStill.eyeTop0)).toBeLessThanOrEqual(2);
         expect(grownStill.scrollTop1).toBeGreaterThan(grownStill.scrollTop0);
+
+        // AND WHEN THE CHANGE IS INSIDE THE BLOCK THE PANE'S TOP CUTS THROUGH:
+        // a long paragraph running up past the fold rewraps above it, so the
+        // element grows downward while its own top stays put. The controls:
+        // such a block really was there, and the reader's line really moved
+        // down the document.
+        expect(rewrapStill.straddledTop).toBe(true);
+        expect(rewrapStill.eyeOnScreen).toBe(true);
+        expect(rewrapStill.eyeContentY1).toBeGreaterThan(rewrapStill.eyeContentY0 + 10);
+        expect(rewrapStill.frames).toBeGreaterThan(3);
+        expect(rewrapStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(rewrapStill.eyeTop1 - rewrapStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(rewrapStill.scrollTop1).toBeGreaterThan(rewrapStill.scrollTop0);
       },
       BROWSER_CASE_MS,
     );

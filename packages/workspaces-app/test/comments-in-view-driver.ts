@@ -107,6 +107,10 @@ export interface Probe {
   /** The reader parked mid-doc while a block above them grows with no DOM
    *  mutation at all — an image finishing its load. */
   grownStill: StillReading;
+  /** The reader parked mid-doc while the paragraph running up past the top of
+   *  the pane rewraps above the fold — its box grows, its own top does not
+   *  move. */
+  rewrapStill: StillReading;
   /** A block-rewriting tick arriving as a remote update: do the cards stay? */
   cardsKept: CardsKeptReading;
 }
@@ -483,6 +487,7 @@ async function probe(): Promise<string> {
   const bottomStill = await stillArm({ where: 'bottom', suppressAnchoring: false });
   const aboveStill = await stillArm({ where: 'mid', suppressAnchoring: true });
   const grownStill = await stillArm({ where: 'mid', suppressAnchoring: true, change: 'grow' });
+  const rewrapStill = await stillArm({ where: 'mid', suppressAnchoring: true, change: 'rewrap' });
   const cardsKept = await cardsKeptArm();
   const out: Probe = {
     watching,
@@ -496,6 +501,7 @@ async function probe(): Promise<string> {
     bottomStill,
     aboveStill,
     grownStill,
+    rewrapStill,
     cardsKept,
   };
   return JSON.stringify(out);
@@ -789,7 +795,7 @@ export interface StillReading {
   /** What changed above the reader's line: notes written into the prose, or a
    *  block above it growing with the DOM untouched — an image or an embed
    *  finishing its load, which no mutation reports. */
-  change: 'notes' | 'grow';
+  change: 'notes' | 'grow' | 'rewrap';
   anchoringSuppressed: boolean;
   /** What this browser would do on its own, unsuppressed. */
   supportsAnchoring: boolean;
@@ -819,6 +825,9 @@ export interface StillReading {
   scrollHeight1: number;
   /** The control for `bottom`: the pane really was at the end of its travel. */
   atBottom0: boolean;
+  /** The control for `rewrap`: a block really did run up past the top of the
+   *  pane, so there really was a box whose own top could not move. */
+  straddledTop: boolean;
 }
 
 /**
@@ -874,7 +883,7 @@ function suppressNativeAnchoring(on: boolean): void {
 async function stillArm(o: {
   where: 'bottom' | 'mid';
   suppressAnchoring: boolean;
-  change?: 'notes' | 'grow';
+  change?: 'notes' | 'grow' | 'rewrap';
 }): Promise<StillReading> {
   const change = o.change ?? 'notes';
   const m = mount({ paragraphs: 40, threads: 4 });
@@ -907,7 +916,15 @@ async function stillArm(o: {
   const eye =
     Array.from(tiptap.view.dom.children).find((el) => {
       const r = el.getBoundingClientRect();
-      return r.height > 0 && r.bottom > top0 + 1 && r.top < top0 + m.editorEl.clientHeight;
+      // The first paragraph that BEGINS on screen — the line the reader's eye
+      // is on, and the one the hold holds. A paragraph running up past the
+      // top of the pane is not it: its box starts off screen.
+      return (
+        r.height > 0 &&
+        r.top >= top0 - 1 &&
+        r.bottom > top0 + 1 &&
+        r.top < top0 + m.editorEl.clientHeight
+      );
     }) ?? null;
   const topOfEye = (): number => (eye ? eye.getBoundingClientRect().top - paneTop() : Number.NaN);
   const eyeTop0 = topOfEye();
@@ -920,6 +937,7 @@ async function stillArm(o: {
   // Every frame from here to the end of the tick, so a one-frame jump — the
   // shape a repair that runs after layout leaves behind — cannot hide inside
   // a before/after pair.
+  let straddledTop = false;
   let worstDrift = 0;
   let frames = 0;
   let sampling = true;
@@ -941,7 +959,7 @@ async function stillArm(o: {
       { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
     ]);
     utter(m, 9);
-  } else {
+  } else if (change === 'grow') {
     // A block above the reader growing with NO mutation inside the pane: the
     // shape an image, an embed or a font swap leaves behind. The rule is
     // added to the document's head, which the hold's MutationObserver does
@@ -950,6 +968,30 @@ async function stillArm(o: {
     const grow = document.createElement('style');
     grow.textContent = '#editor .ProseMirror > :first-child{min-height:240px}';
     document.head.append(grow);
+  } else {
+    // A REWRAP INSIDE THE BLOCK THAT STRADDLES THE TOP OF THE PANE. An edit
+    // earlier in a long paragraph re-lays its lines above the fold: the
+    // element grows downward while its own `top` stays exactly where it was,
+    // so a hold reading that box's top sees nothing to correct while the
+    // words on screen slide down. Grown here by padding the block's own top,
+    // which is the same shape a line added above the fold has: the box grows
+    // downward from a top that does not move. The rule goes in the document's
+    // head, which the hold does not watch, so the pane sees no mutation.
+    const paneTopNow = paneTop();
+    const kids = Array.from(tiptap.view.dom.children);
+    const at = kids.findIndex((el) => {
+      const r = el.getBoundingClientRect();
+      return r.height > 0 && r.top < paneTopNow - 1 && r.bottom > paneTopNow + 1;
+    });
+    straddledTop = at >= 0;
+    if (at >= 0) {
+      // Through the document's head, not the element's own style attribute:
+      // the editor redraws its nodes on the next transaction and takes an
+      // inline style with it, and a rule in the head survives that.
+      const rule = document.createElement('style');
+      rule.textContent = `#editor .ProseMirror > :nth-child(${at + 1}){padding-top:120px}`;
+      document.head.append(rule);
+    }
   }
   await settle(m);
   sampling = false;
@@ -973,6 +1015,7 @@ async function stillArm(o: {
     scrollHeight0,
     scrollHeight1: m.editorEl.scrollHeight,
     atBottom0,
+    straddledTop,
   };
   suppressNativeAnchoring(false);
   teardown(m);

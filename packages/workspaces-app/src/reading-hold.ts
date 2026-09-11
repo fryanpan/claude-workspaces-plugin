@@ -93,17 +93,32 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
     ref = null;
     refY = 0;
     refScrollTop = scroller.scrollTop;
+    // The block the reader's eye is on is the first one that BEGINS on screen,
+    // not merely the first one still showing. The difference is a long
+    // paragraph or list item running up past the top of the pane: its own box
+    // starts above the fold, so a rewrap of the lines up there — an edit
+    // earlier in the same element — grows it downward while its `top` stays
+    // exactly where it was. Holding that box would read a correction of zero
+    // while the words on screen slid down it. The block after it moves by the
+    // full growth, so holding THAT holds the straddler's visible tail too.
+    let straddler: Element | null = null;
     for (const block of blocks()) {
       const r = block.getBoundingClientRect();
       if (r.height <= 0) continue;
-      // The first block whose foot is still on screen IS the topmost one the
-      // reader can see — the list is in document order, so there is no
-      // earlier candidate to prefer.
       if (r.bottom <= top + 1) continue;
+      if (r.top < top - 1) {
+        straddler ??= block;
+        continue;
+      }
       ref = block;
       refY = r.top - top;
       return;
     }
+    // Nothing begins on screen — one block taller than the pane fills it. Its
+    // box is all there is to hold.
+    if (!straddler) return;
+    ref = straddler;
+    refY = straddler.getBoundingClientRect().top - top;
   }
 
   /**
@@ -161,7 +176,10 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
    */
   const sizes = new ResizeObserver(hold);
   function watchBlocks(): void {
-    for (const block of blocks()) sizes.observe(block);
+    // `border-box`: what displaces the flow is the block's outer height, and
+    // the content box misses a change that is all padding — the shape a line
+    // added above the fold leaves when the browser lays it out as box spacing.
+    for (const block of blocks()) sizes.observe(block, { box: 'border-box' });
   }
   scope.onCleanup(() => sizes.disconnect());
 
