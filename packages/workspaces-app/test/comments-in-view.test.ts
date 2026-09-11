@@ -141,7 +141,7 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
     it(
       `keeps every card with its own sentence through a meeting at ${width}`,
       () => {
-        const { following, afterScrollBack, held } = measure(buildPage(), preset);
+        const { following, afterScrollBack, held, jumped } = measure(buildPage(), preset);
 
         // THE CONTROLS. The meeting really ran the pane down to the foot, the
         // column really had cards to draw, and not one comment's sentence was
@@ -178,6 +178,16 @@ describe.skipIf(CHROME === null)('a comment stays with the text it marks', () =>
         expect(held.anchorTop1).toBeCloseTo(held.anchorTop0, 0);
         expect(held.cardTop1).toBeCloseTo(held.cardTop0, 0);
         expect(held.beside1).toBe(true);
+
+        // And the way BACK to a comment while the transcript is still growing
+        // is the strip. The first two readings are the control: the pane was
+        // at the foot and no comment's sentence was on screen, so the jump had
+        // somewhere to travel from.
+        expect(jumped.followingBefore).toBe(true);
+        expect(jumped.anchorsOnScreenBefore).toBe(0);
+        expect(jumped.anchorOnScreen).toBe(true);
+        expect(jumped.cardOnScreen).toBe(true);
+        expect(Math.abs(jumped.offsetFromAnchor)).toBeLessThan(400);
       },
       BROWSER_CASE_MS,
     );

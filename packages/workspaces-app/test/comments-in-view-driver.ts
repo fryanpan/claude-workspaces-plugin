@@ -88,8 +88,25 @@ export interface Probe {
   afterScrollBack: Reading;
   /** The thread the reader scrolled to in `afterScrollBack`. */
   target: string;
+  /** The jump the "N above" pill makes, taken while the meeting runs. */
+  jumped: JumpReading;
   /** The reader parked on a comment MID-doc while the meeting runs on. */
   held: HeldReading;
+}
+
+/** Reaching a comment from the strip, with the transcript still growing. */
+export interface JumpReading {
+  /** The pane was at the foot, following the transcript, before the jump. */
+  followingBefore: boolean;
+  /** …and not one comment's text was on screen then. */
+  anchorsOnScreenBefore: number;
+  /** `revealThreadBalloon` found a card to reveal. */
+  revealed: boolean;
+  /** After the jump: is the jumped thread's own text on screen? */
+  anchorOnScreen: boolean;
+  /** …and its card, beside it? */
+  cardOnScreen: boolean;
+  offsetFromAnchor: number;
 }
 
 /** Does the reader's line stay put while the meeting writes under it? */
@@ -150,6 +167,10 @@ interface Mounted {
   zone: ReturnType<typeof createMeetingLiveZone>;
   refreshHints: () => void;
   insets: () => { top: number; bottom: number };
+  /** What a tap on the "N above" pill does — `doc-margin.ts`'s `jumpToThread`
+   *  sequence: scroll the sentence a third of the way down, then ask the
+   *  column for its card. */
+  jumpTo: (id: string) => boolean;
 }
 
 /** The review editor exactly as `doc-margin.ts` wires it, plus a meeting. */
@@ -256,6 +277,15 @@ function mount(
       margin.relayout();
     },
     insets: () => hints.insets(),
+    jumpTo: (id) => {
+      const span = spanFor(id);
+      if (span) {
+        const r = span.getBoundingClientRect();
+        const sRect = editorEl.getBoundingClientRect();
+        editorEl.scrollTop += r.top - sRect.top - sRect.height * 0.35;
+      }
+      return margin.revealThreadBalloon(id);
+    },
   };
 }
 
@@ -380,7 +410,8 @@ async function probe(): Promise<string> {
   teardown(m);
 
   const held = await heldArm();
-  const out: Probe = { following, afterScrollBack, target, held };
+  const jumped = await jumpArm();
+  const out: Probe = { following, afterScrollBack, target, held, jumped };
   return JSON.stringify(out);
 }
 
@@ -470,6 +501,42 @@ async function heldArm(): Promise<HeldReading> {
     scrollHeight1: m.editorEl.scrollHeight,
     beside0: beside(a0, c0),
     beside1: beside(a1, c1),
+  };
+  teardown(m);
+  return out;
+}
+
+/**
+ * The reader is watching the transcript and taps the "N above" pill.
+ *
+ * This is what "reachable" has to mean while a meeting is running: the column
+ * draws nothing for text the reader cannot see, so the strip is the way back
+ * to a comment — and the card has to be beside its sentence the moment the
+ * jump lands, not a debounce later.
+ */
+async function jumpArm(): Promise<JumpReading> {
+  const m = mount({ paragraphs: 60, threads: 4 });
+  await frame();
+  for (let i = 0; i < 14; i++) {
+    utter(m, 9);
+    await sleep(20);
+  }
+  await settle(m);
+  const before = read(m);
+
+  const id = m.threadIds[1] as string;
+  const revealed = m.jumpTo(id);
+  await frame();
+  const after = read(m);
+  const p = after.per.find((x) => x.id === id);
+
+  const out: JumpReading = {
+    followingBefore: before.zoneOnScreen,
+    anchorsOnScreenBefore: before.per.filter((x) => x.anchorOnScreen).length,
+    revealed,
+    anchorOnScreen: p?.anchorOnScreen ?? false,
+    cardOnScreen: p?.cardOnScreen ?? false,
+    offsetFromAnchor: p?.offsetFromAnchor ?? Number.NaN,
   };
   teardown(m);
   return out;
