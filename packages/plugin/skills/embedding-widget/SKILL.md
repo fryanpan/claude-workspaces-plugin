@@ -226,6 +226,18 @@ enter the repo, so this needs no widget markup at all — and the bind captures
 the content, so cleaning up your scratch directory does not take the mock
 down with it.
 
+Two rules about what you write there, both learned the same day a reviewer
+sent a strip of seven captioned scenes straight back (2026-09-11):
+
+- **A change to a surface that already exists is mocked ON that surface.**
+  Run the app, copy the rendered markup and the stylesheets it loads into your
+  single file, and add the change in place. Invented chrome makes the reviewer
+  judge your drawing instead of the change. A fresh design is only for a
+  surface nobody can open yet.
+- **The mock is interactive.** Every state is reachable by acting on the page —
+  tapping a control, typing a value, moving a thing. A caption explaining what
+  the reader would have seen is the thing the mock exists to replace.
+
 ### Multi-page demo in a scratch directory
 Each file ends with the hand embed, one shared `docId`. Nothing else needed.
 
