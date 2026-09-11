@@ -458,6 +458,16 @@ def check_remote_owner() -> None:
         got = scrub_git.remote_owner(url)
         expect(f"remote_owner: {label}", 0 if got == want else 1, 0,
                f"got {got!r}, wanted {want!r}")
+    accounts = [
+        ("Scrub Selftest <harborlight@example.invalid>", "harborlight", "a plain address"),
+        ("Scrub Selftest <12345+Harborlight@users.noreply.github.com>", "harborlight",
+         "GitHub's noreply form, casefolded"),
+        ("Scrub Selftest", "", "no email at all"),
+    ]
+    for identity, want, label in accounts:
+        got = scrub_git.email_account(identity)
+        expect(f"email_account: {label}", 0 if got == want else 1, 0,
+               f"got {got!r}, wanted {want!r}")
 
 
 def check_maintainer_names(tmp: str) -> None:
@@ -478,7 +488,10 @@ def check_maintainer_names(tmp: str) -> None:
 
     The first name and origin's owner widen it once more, and only behind the
     same gate: they are added when the full name qualifies and never on their
-    own, so every case that earned nothing before still earns nothing.
+    own, so every case that earned nothing before still earns nothing. The
+    owner needs one thing more — an email published under that same name that
+    names the same account — because an organisation's remote says nothing
+    about who is pushing to it.
     """
     root = os.path.join(tmp, "maintainer-repo")
     bare = os.path.join(tmp, "maintainer-remote.git")
@@ -502,6 +515,9 @@ def check_maintainer_names(tmp: str) -> None:
     g("init", "-q")
     commit_as("Scrub Selftest", "selftest@example.invalid", "seed\n")
     commit_as("Wren Halloway", "wren@example.invalid", "seed\nand more\n")
+    # The same person under their account's address: what ties the invented
+    # `harborlight` account to "Scrub Selftest" and to nobody else.
+    commit_as("Scrub Selftest", "harborlight@example.invalid", "seed\nand more\nand again\n")
     g("remote", "add", "origin", bare)
     g("push", "-q", "origin", "HEAD:refs/heads/main")
     g("fetch", "-q", "origin")
@@ -529,18 +545,25 @@ def check_maintainer_names(tmp: str) -> None:
                0 if not names & {"Wren Halloway", "Wren"} else 1, 0, f"got {sorted(names)!r}")
 
         # The remote-tracking refs outlive a URL change, so the same published
-        # authors stand behind a hosted-looking origin. `harborlight` is an
-        # invented account.
+        # authors stand behind a hosted-looking origin. Both accounts are
+        # invented: `harborlight` is this committer's, `tidewater` an
+        # organisation nobody here has committed as.
         g("remote", "set-url", "origin", "git@example.invalid:harborlight/riverbend.git")
         hosted = scrub_git.maintainer_names()
         expect("maintainer: the first name and origin's owner ride on a qualifying full name",
                0 if hosted == {"Scrub Selftest", "Scrub", "harborlight"} else 1, 0,
                f"got {sorted(hosted)!r}")
 
+        g("remote", "set-url", "origin", "git@example.invalid:tidewater/riverbend.git")
+        org = scrub_git.maintainer_names()
+        expect("maintainer: an origin owner no published email of theirs names is not exempt",
+               0 if org == {"Scrub Selftest", "Scrub"} else 1, 0, f"got {sorted(org)!r}")
+        g("remote", "set-url", "origin", "git@example.invalid:harborlight/riverbend.git")
+
         g("config", "user.name", "Wren Halloway")
         borrowed = scrub_git.maintainer_names()
         expect("maintainer: naming yourself after another published author exempts only them-as-you",
-               0 if borrowed == {"Wren Halloway", "Wren", "harborlight"} else 1, 0,
+               0 if borrowed == {"Wren Halloway", "Wren"} else 1, 0,
                f"got {sorted(borrowed)!r}")
 
         g("config", "user.name", "Never Committed Here")
