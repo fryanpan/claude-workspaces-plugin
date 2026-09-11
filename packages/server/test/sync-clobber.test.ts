@@ -252,6 +252,16 @@ describe('sync-clobber regressions', () => {
         docStore.findAndReplace('d1', { find: 'Intro paragraph.', replace: 'Flushed edit.' }).ok,
       ).toBe(true);
       await waitForFile(path, (t) => t.includes('Flushed edit.'));
+      // The bytes on disk are not the end of the write-back. The pool's rename
+      // lands first; the callback that clears `pendingFileWrite` from the
+      // index row runs after the pool's stat comes back. Crash in that gap and
+      // the row still says a write was owed, so the restart below reasserts
+      // "Flushed edit." over the downtime edit and the wait can never succeed
+      // — CI's `un-flushed file write at shutdown; reasserting` line, printed
+      // by the second store, just before the timeout.
+      await waitFor(() => docStore.pendingFileWrites().length === 0, {
+        describe: 'the write-back to finish, not merely to land on disk',
+      });
 
       // "Server goes down" — and it has to ACTUALLY go down, because this
       // store is the one whose absence the test is about. Left running it
