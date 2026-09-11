@@ -53,8 +53,10 @@ export interface DispatchRequestInput {
    * it is written even though the dispatch did not happen.
    */
   outcome: 'registered' | 'cap-reached' | 'refused';
-  /** Why the lead is running this row now, in the lead's own words. */
-  reason?: string;
+  /** Why the lead is running this row now, in the lead's own words. Typed
+   *  `unknown` because it arrives off a request body and is validated here,
+   *  not at the route — one definition of what a usable reason is. */
+  reason?: unknown;
   /** The builder being put on the lane, when the caller named one. */
   agentName?: string;
   /** Who asked. Absent when the request carried no author at all. */
