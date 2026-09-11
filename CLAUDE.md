@@ -26,7 +26,10 @@ transcription + notes on a pause-or-cadence clock),
 [goal-projection](docs/architecture/goal-projection.md) (the goal bar, the
 remainder, and when a goal lands),
 [scheduled-tasks](docs/architecture/scheduled-tasks.md) (a row's rule for when
-its work starts, and the loop that files each occurrence) and
+its work starts, and the loop that files each occurrence),
+[unfiled-ask](docs/architecture/unfiled-ask.md) (whether a closing message
+asked Bryan something with nothing filed, and the measured rates at which that
+judgement is wrong) and
 [security](docs/architecture/security.md) (trust boundaries, the gates that
 enforce them, where secrets live, the deploy and webhook surfaces). Read the
 relevant one before touching its subsystem.
