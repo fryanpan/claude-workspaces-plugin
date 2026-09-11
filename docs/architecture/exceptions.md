@@ -236,7 +236,7 @@ plumbing at 241.
 
 ## Test files
 
-95 test files exceed 500 lines. Two hold two unrelated harnesses; the other 93
+96 test files exceed 500 lines. Two hold two unrelated harnesses; the other 94
 are exceptions, listed after them. The recurring shape across the exceptions is
 one feature tested at two or three *layers* — pure predicate, then store, then
 real HTTP route — sharing the same fixture builders. That is one harness.
@@ -245,11 +245,12 @@ real HTTP route — sharing the same fixture builders. That is one harness.
 |---|---|---|---|
 | `packages/workspaces-app/test/board-render.test.ts` | 3882 | Exception | Twelve describes over one harness: the module-scope `task()` factory and the `root` beforeEach, asserting rendered DOM. The six that `readFileSync` `styles.css` and board source and assert on text moved to `board-source-contract.test.ts` in B1 — they were the second harness this row named. |
 
-The remaining 93 are exceptions. Each row names the one harness its cases share.
+The remaining 94 are exceptions. Each row names the one harness its cases share.
 
 | File | Lines | Reason |
 |---|---|---|
 | `packages/workspaces-app/test/board-model.test.ts` | 2331 | All describes are pure model functions fed by the one module-scope `task()` factory. |
+| `packages/workspaces-app/test/comments-in-view-driver.ts` | 543 | Not a suite — ONE browser page, for the same reason as `meeting-live-overdraw-driver.ts` below. Its four arms (the meeting that runs the pane to the foot, the reader scrolling back, the reader parked mid-doc while notes land, and the jump from the "N above" strip) each mount the real editor, chrome, balloon column, off-screen hints and live zone through one `mount()`, read geometry through one `read()`, and are bundled into the page as one module by `comments-in-view.test.ts`. They share the `WORDS` cursor, the fixture markdown and the `settle()` that waits out the column's debounces. Splitting it would buy a bundle and a `window.*` entry point per arm, paid on every launch, to separate functions that exist only to be driven from the one probe. |
 | `packages/workspaces-app/test/meeting-live-overdraw-driver.ts` | 715 | Not a suite — ONE browser page, and everything in it shares the page. The meeting driver, the sampler that asks every frame what is painted over what, and the three built controls (the pre-fix hold offsets, `clip` against `hidden` beside the float, the re-wrap that makes the slot's pinned height go stale, and the tap target that clip is scoped to spare) all run against the same mounted zone, the same `WORDS` cursor and the same scaled clock, and are bundled into the page as one module by `meeting-live-overdraw.test.ts`. Splitting it would buy a second bundle and a second `window.*` entry point per control, paid for on every launch, to separate functions that exist only to be driven from the one probe. |
 | `packages/workspaces-app/test/meeting-live-zone.test.ts` | 516 | Three describes over one harness: the module-scope `parent` / `clock` beforeEach and the `zoneEl` / `turns` / `chunkEl` / `slotEl` readers. The settle describe adds fake timers and the follow describe adds `fakeLayout`; both still drive the zone the first one builds. |
 | `packages/workspaces-app/test/meeting-strip.test.ts` | 2102 | The four parser describes are the strip's own helpers; the other 18 go through `mount()` with `FakeSocket` / `FakeBot`. |
