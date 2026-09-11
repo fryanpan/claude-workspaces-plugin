@@ -70,15 +70,22 @@ detector's own verdict and sampled blind within each stratum:
 | Stratum | Size | Labelled |
 | --- | --- | --- |
 | Detector said ask | 48 | 40 |
-| Detector said nothing | 583 | 70 |
-| **Total** | **631** | **110** |
+| Detector said nothing | 586 | 70 |
+| **Distinct messages** | **631** | **110** |
 
-Each stratum's counts are weighted back to its size, so the population figures
-below are estimates with a sampling error that a 110-message hand-label cannot
-make small. They are reported to one decimal because that is what the
-arithmetic produced, not because the third digit is real.
+The two strata overlap by 3 messages (48 + 586 = 634 against a union of 631),
+so the weighting double-counts three of them. That is a 0.5% error, named here
+rather than hidden, and far inside the sampling error of a 110-message
+hand-label. The figures below are estimates, and the second digit of each is
+not real.
+
+Each stratum's counts are weighted back to its size.
 
 ## The result
+
+Raw, before weighting: on the positive stratum 29 true positives, 7 false
+positives, 4 missed asks; on the negative stratum 2 true positives, 0 false
+positives, 11 missed asks. Weighted to the population:
 
 | Figure | Value |
 | --- | --- |
