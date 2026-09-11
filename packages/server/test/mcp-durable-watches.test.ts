@@ -684,16 +684,27 @@ async function waitForPortRefused(port: number, timeoutMs = 5_000): Promise<bool
  * `restored` and deliver a real event on the re-wired watch. Both halves are
  * load-bearing — without the second, a build that never retries passes.
  *
- * Timing: the first failure backs off `min(30s, 1s * 2**1)` = 2s, so the
- * recovery half waits just past that rather than the 30s cap. Fixtures are
+ * Timing: the first failure backs off a JITTERED draw from a 2s window
+ * (`watch-restore.ts`, `reconnectDelayMs`) — anywhere from 0 to 2s. The
+ * respawn pins that draw to the top of the window, as the unit tests in
+ * `packages/mcp/test/watch-restore.test.ts` do: left to `Math.random`, a
+ * draw under the few milliseconds between the two calls below let the
+ * "immediate" call retry, and CI went red on `attempts` 2 in a run that took
+ * 923ms end to end. The recovery half polls rather than sleeping past the
+ * window, so it pays only the backoff it actually drew. Fixtures are
  * synthetic. The repo is public.
  */
 describe('a restore that could not reach the server fails loudly, then recovers', () => {
   const NAME = 'Restore Failure Tester';
   const AGENT_ID = 'agent-restore-failure-tester';
   const DOC_ID = 'rf-doc';
-  /** min(30_000, 1_000 * 2 ** 1) — the wait after the FIRST failed attempt. */
-  const FIRST_BACKOFF_MS = 2_000;
+  /**
+   * Pins the respawned child's `Math.random` — the only draw the restore's
+   * backoff takes — at the top of the window: `floor(0.999 * 2_000)` = 1998ms
+   * of hold after the first failure. The child is the shipped bundle run by
+   * `node`, so the pin goes in through `NODE_OPTIONS`, not a code change.
+   */
+  let jitterPin: string;
   let handle: ServerHandle | undefined;
   let dataDir: string;
   let port: number;
@@ -735,6 +746,8 @@ describe('a restore that could not reach the server fails loudly, then recovers'
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'mcp-restore-failure-'));
+    jitterPin = join(dataDir, 'pin-jitter.cjs');
+    writeFileSync(jitterPin, 'Math.random = () => 0.999;\n');
     // Bind on 0 to be handed a free port, then keep that NUMBER: the second
     // half needs the same origin to come back, because the child reads
     // FEEDBACK_BASE_URL once at spawn and a re-spawn is not what is being
@@ -790,8 +803,12 @@ describe('a restore that could not reach the server fails loudly, then recovers'
 
     // The respawn, against a dead port. `oninitialized` drives the first
     // attempt, so the failure is already recorded by the time a tool runs.
-    const second = await spawnChild({ CW_AGENT_NAME: NAME });
-    const failedAt = Date.now();
+    const second = await spawnChild({
+      CW_AGENT_NAME: NAME,
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require=${JSON.stringify(jitterPin)}`]
+        .filter(Boolean)
+        .join(' '),
+    });
     const failed = (await second.tool('list_watched_docs')) as {
       watching: string[];
       coverage?: unknown;
@@ -840,14 +857,25 @@ describe('a restore that could not reach the server fails loudly, then recovers'
       mintedId,
     ]);
 
-    // Past the backoff window, then any ordinary tool call.
-    const remaining = failedAt + FIRST_BACKOFF_MS + 200 - Date.now();
-    if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
-
-    const recovered = (await second.tool('list_watched_docs')) as {
-      watching: string[];
-      restore: { status: string; from: string; restored: string[]; attempts: number; at?: string };
-    };
+    // Any ordinary tool call, once the backoff has lapsed. Polled: every call
+    // inside the hold is refused by the gate and spends nothing, so however
+    // many land before it the `attempts` count below still has to read 2.
+    const recovered = await waitFor(
+      async () => {
+        const r = (await second.tool('list_watched_docs')) as {
+          watching: string[];
+          restore: {
+            status: string;
+            from: string;
+            restored: string[];
+            attempts: number;
+            at?: string;
+          };
+        };
+        return r.restore.status === 'failed' ? false : r;
+      },
+      { timeout: 10_000, interval: 100, describe: 'a tool call past the backoff to restore' },
+    );
     expect(recovered.restore.status).toBe('restored');
     expect(recovered.restore.from).toBe('server');
     // Exactly one more attempt than the failure — the gate let the retry
