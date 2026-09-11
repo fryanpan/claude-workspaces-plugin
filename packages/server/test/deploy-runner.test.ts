@@ -756,7 +756,7 @@ describe('Deployer', () => {
       const stored = { status: 'deployed', ok: true, after: 'bbbbbbb' } as DeployResult;
       writeDeployLog(file, stored);
       // Shape before behaviour: the file really holds what we think.
-      expect(JSON.parse(readFileSync(file, 'utf8')).after).toBe('bbbbbbb');
+      expect(JSON.parse(readFileSync(file, 'utf8')).entries.at(-1).after).toBe('bbbbbbb');
 
       const fresh = new Deployer({
         run: async () => ({ status: 'up-to-date' }) as DeployResult,

@@ -1,6 +1,6 @@
 /**
  * Where the durable record lives — the `.ydoc` corpus, `activity.jsonl`,
- * `deploy-log.json`, and the sidecars beside them.
+ * `deploy-log.json`, `server-starts.json`, and the sidecars beside them.
  *
  * ## Why this is not simply `join(repoRoot, 'data')`
  *

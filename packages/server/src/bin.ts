@@ -10,6 +10,7 @@ import { reservedPortError } from './reserved-ports.ts';
 import { captureServerError, flushServerSentry, initServerSentry } from './sentry.ts';
 import { resolveServerConfig } from './server-config.ts';
 import { createServerDeps } from './server-deps.ts';
+import { markServerServing, recordThisServerStart, serverStartsPath } from './server-starts.ts';
 import { createServer } from './server.ts';
 
 // Before anything else, because it only governs opens that come after it and
@@ -76,6 +77,11 @@ const {
   stallEscalateMs,
   keepMovingCadenceMs,
 } = cfg;
+
+// Every start leaves a record, so the daily health check can count the ones
+// no deploy, watchdog or reboot explains. Written now rather than once
+// serving: a boot that crashes before the port is exactly the one to count.
+const thisStart = recordThisServerStart(dataDir);
 
 if (sentryServerDsn) {
   await initServerSentry({
@@ -298,12 +304,15 @@ port = handle.port;
 // hydrated, about to serve. A boot that never reaches this line leaves the
 // record pending, and the detached watchdog the deploy spawned expires it
 // into `boot-failed` (deploy.ts, "Dependencies are part of the delivery").
-if (deployer) {
-  const confirmed = confirmDeployBoot(deployLogPath(dataDir));
-  if (confirmed) {
-    console.log(`[deploy] boot confirmed healthy for the deploy recorded at ${confirmed.ranAt}`);
-  }
+const confirmed = deployer ? confirmDeployBoot(deployLogPath(dataDir)) : null;
+if (confirmed) {
+  console.log(`[deploy] boot confirmed healthy for the deploy recorded at ${confirmed.ranAt}`);
 }
+// The confirmation is what ties this start to a deploy in the start record.
+markServerServing(serverStartsPath(dataDir), thisStart, {
+  servingAt: Date.now(),
+  ...(confirmed ? { deployRanAt: confirmed.ranAt } : {}),
+});
 
 const ts = tailscaleHost();
 const lan = lanHostnames();
