@@ -53,7 +53,7 @@ import { statStampSync } from './file-stamp.ts';
 import { showFile } from './git-diff.ts';
 import { gitConflictHint } from './git-provenance.ts';
 import { isWithinRoot } from './safe-path.ts';
-import { boundFiles } from './slow-fs.ts';
+import { boundFiles, isDataless } from './slow-fs.ts';
 
 /**
  * Per-doc binding to a markdown file on disk. Maintained by
@@ -145,6 +145,30 @@ interface FileBinding {
    * poll exists to avoid.
    */
   lastSize?: number;
+  /**
+   * Set when the attach could not read its file because the file is not on
+   * disk — a cloud-sync file left online-only, which `open` refuses with
+   * EDEADLK (`isDataless`). The doc came up on its `.ydoc` content without the
+   * attach-time reconcile, so two things hold until a read lands:
+   *
+   *   - The poll retries the read on EVERY visit, not only on a stat change.
+   *     Downloading a file moves neither its mtime nor its size, so a poll
+   *     that waited for one would never read it, and whatever it holds — an
+   *     edit made on another machine, or the write the server owed it — would
+   *     never meet the doc.
+   *   - The write-back holds. Writing now would put the `.ydoc` over bytes
+   *     nobody has read, which is the one outcome the hydrate guard parks docs
+   *     to avoid. The held write is marked failed, so a restart still owes it.
+   *
+   * The first read that lands re-runs the attach with those bytes
+   * (`retryUnreadAttach`). `liveWins` is the verdict the attach reached
+   * without them — the caller's claim, else the mtime comparison, which a
+   * `stat` can still make on a file that will not open. It is decided THEN
+   * because it cannot be decided later: any `.ydoc` save in between (a comment
+   * is enough) moves the doc's stamp past the file's, and the edit that was
+   * newer at boot would lose to a doc that never saw it.
+   */
+  unreadAtAttach?: { liveWins: boolean };
   /** An mtime spotted by the stat whose reconcile read has not landed yet. */
   pendingMtimeMs?: number;
   /** The size spotted alongside `pendingMtimeMs`. */
@@ -214,6 +238,17 @@ export function decideReconcile(args: {
   // disk diverges from BOTH our last write and the live doc.
   if (currentSerialized !== lastWritten) return 'conflict';
   return 'apply';
+}
+
+/**
+ * The one log line for an attach whose file is not on disk (`isDataless`):
+ * the doc, the errno and what happens next. No stack, because nothing here is
+ * a fault to debug, and no path, because a path under a cloud-sync folder can
+ * name a private project.
+ */
+function notDownloadedLine(docId: string, err: unknown, outcome: string): string {
+  const code = (err as NodeJS.ErrnoException).code ?? 'EDEADLK';
+  return `[doc-store] ${docId}: bound file is not downloaded (${code}); ${outcome}`;
 }
 
 /** Yjs origin for the private-meta guard's own deletes, so it never
@@ -533,7 +568,9 @@ export class FileBindings {
           seeded = true;
         }
       } catch (err) {
-        console.error(`[doc-store] read failed for ${abs}:`, err);
+        if (isDataless(err))
+          console.warn(notDownloadedLine(docId, err, 'nothing to seed from, left unbound'));
+        else console.error(`[doc-store] read failed for ${abs}:`, err);
         return { ok: false, error: 'read-failed' };
       }
     }
@@ -562,6 +599,7 @@ export class FileBindings {
     // attach_markdown): honor the sync contract's "the file is the source
     // of truth at rest". Without this, an edit made while the server was down
     // was never picked up — and the next flush overwrote it on disk.
+    let unread = false;
     if (!seeded && fileExists()) {
       try {
         const md = readFile();
@@ -631,7 +669,15 @@ export class FileBindings {
           }
         }
       } catch (err) {
-        console.error(`[doc-store] attach-time reconcile failed for ${abs}:`, err);
+        // Not on disk, which is not a fault in anything this server did: one
+        // line, and the poll takes it from here (see `unreadAtAttach`). It
+        // used to be a stack trace per doc per boot, naming the path.
+        unread = isDataless(err);
+        if (unread)
+          console.warn(
+            notDownloadedLine(docId, err, 'serving the .ydoc until the poll can read it'),
+          );
+        else console.error(`[doc-store] attach-time reconcile failed for ${abs}:`, err);
       }
     }
 
@@ -653,6 +699,18 @@ export class FileBindings {
 
     // disk → doc: poll for external edits (see armFileWatcher).
     this.armFileWatcher(doc, binding, pre);
+    if (unread) {
+      const liveWins = opts.liveWins === true || !this.diskNewerThanState(docId, abs, pre?.mtimeMs);
+      binding.unreadAtAttach = { liveWins };
+      // Said to the owner on `get_doc` as well, because a held write-back is
+      // otherwise indistinguishable from one that landed.
+      binding.lastSyncError = {
+        message:
+          'the bound file is not downloaded (EDEADLK); content is served from the .ydoc and ' +
+          'writes to the file are held until it can be read',
+        at: Date.now(),
+      };
+    }
 
     return { ok: true, seeded, resolvedPath: abs };
   }
@@ -1185,7 +1243,10 @@ export class FileBindings {
     // BOTH halves, and the mtime at nanosecond precision, or an edit that
     // lands in the same granule as the stamp we recorded is invisible for
     // good — see `lastSize`.
-    if (mtimeMs === binding.lastMtimeMs && size === binding.lastSize) return;
+    const changed = mtimeMs !== binding.lastMtimeMs || size !== binding.lastSize;
+    // A file the attach could not read is read again whatever the stat says:
+    // downloading it changes neither half (see `unreadAtAttach`).
+    if (!changed && !binding.unreadAtAttach) return;
     // A reconcile for this exact stamp is already on the debounce; re-arming
     // it on every tick would push the read further away the longer the file
     // sits changed.
@@ -1199,7 +1260,11 @@ export class FileBindings {
     // tick rather than one rotation, and let it decay like any other access.
     // `this.p.now()`, not `Date.now()`: residency runs on ONE clock, or an
     // externally edited doc ages against an epoch the policy never sees.
-    this.p.noteTouched(docId, this.p.now());
+    //
+    // A retry of an unread file is NOT an access — nobody wrote anything —
+    // and counting it as one would hold that doc resident for as long as its
+    // file stays in the cloud.
+    if (changed) this.p.noteTouched(docId, this.p.now());
     // Debounce so we don't read a half-written file mid-save.
     if (binding.readTimer) clearTimeout(binding.readTimer);
     binding.readTimer = setTimeout(() => {
@@ -1212,7 +1277,10 @@ export class FileBindings {
       // The read the reconcile needs also goes through the pool. This is the
       // syscall the outage actually wedged on (`openat`, not `stat`), so a
       // guarded stat above with a blocking read here would guard nothing.
-      void boundFiles.read(binding.path).then((res) => {
+      // Quiet while retrying an unread file: the attach logged it once, and a
+      // line per visit is the noise this binding state exists to replace.
+      const quiet = binding.unreadAtAttach !== undefined;
+      void boundFiles.read(binding.path, { quiet }).then((res) => {
         if (this.bindings.get(docId) !== binding) return;
         if (res.status !== 'ok') {
           // The read was refused or never answered. Forget that we spotted
@@ -1221,6 +1289,12 @@ export class FileBindings {
           // edit for as long as nobody touched the file a second time.
           binding.pendingMtimeMs = undefined;
           binding.pendingSize = undefined;
+          return;
+        }
+        if (binding.unreadAtAttach && res.exists) {
+          binding.pendingMtimeMs = undefined;
+          binding.pendingSize = undefined;
+          this.retryUnreadAttach(doc, binding, res);
           return;
         }
         // Commit the stamp of the bytes we actually got, not the one the stat
@@ -1233,6 +1307,44 @@ export class FileBindings {
         this.reconcileFromDisk(doc, binding, res);
       });
     }, READ_DEBOUNCE_MS);
+  }
+
+  /**
+   * The read an attach could not make, landing at last: run the attach again
+   * with those bytes in hand, so the doc and the file are arbitrated as they
+   * would have been had the file been on disk at boot.
+   *
+   * Re-running `attachFile` rather than reconciling here, for the reason
+   * `DocStore.bindAfterRead` re-runs its hydrate: the attach is where that
+   * decision lives. The poll's reconcile would get it wrong — it calls a clean
+   * live doc the older side, so a write the server owed the file would be
+   * reverted by the stale copy it was meant to replace.
+   *
+   * The verdict is the one the attach reached (see `unreadAtAttach`), plus
+   * one claim of our own: an edit made while the file was unreadable is what
+   * `bindAfterRead` calls an edit in its gap — the live doc holds content
+   * disk has never held — so it wins too. Whichever side wins, the loser is
+   * backed up first, as the attach's own two branches do.
+   */
+  private retryUnreadAttach(doc: LiveDoc, binding: FileBinding, pre: PrereadFile): void {
+    const live = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
+    const liveWins = binding.unreadAtAttach?.liveWins === true || live !== binding.lastWritten;
+    const disk = pre.text ?? '';
+    if (liveWins) {
+      // No bookkeeping: the re-run takes the fresh-attach branch, backs the
+      // file up and reasserts the doc.
+      binding.lastWritten = undefined;
+    } else if (disk !== live && prose.normalizeMarkdown(disk) !== live) {
+      // Bookkeeping kept, and equal to the doc, so the re-run APPLIES the file
+      // whatever the two stamps say now. That branch backs nothing up when
+      // bookkeeping exists, so the doc's copy is kept here instead.
+      this.backupExternalVersion(doc.docId, live, 'live');
+    }
+    const res = this.attachFile(doc.docId, binding.path, {
+      preread: pre,
+      ...(liveWins ? { liveWins } : {}),
+    });
+    if (res.ok) console.log(`[doc-store] ${doc.docId}: bound file is readable again; reconciled`);
   }
 
   /**
@@ -1651,6 +1763,14 @@ export class FileBindings {
       // export) or re-armed one on the new binding; parked means the bytes
       // stay in the live doc.
       if (this.originRepoGuard(doc, binding) !== 'ok') return;
+      // Held while the file has not been read since the attach — see
+      // `unreadAtAttach`. Marked failed rather than dropped: the `.ydoc` keeps
+      // the edit, the index row says a write is owed, and the re-attach that
+      // finally reads the file carries it out.
+      if (binding.unreadAtAttach) {
+        this.failedWrites.add(doc.docId);
+        return;
+      }
       // Guard (RC2a): the poll has already SEEN an external change and is
       // holding it behind the read debounce. It advanced `lastMtimeMs` the
       // instant it saw the change, so the mtime guard below now compares disk
