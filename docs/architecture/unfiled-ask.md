@@ -119,6 +119,15 @@ is known to be lower than it is.
 its note to the Activity tab (that message is the one a reader most wants) and
 is never nudged again.
 
+## The count is about the person, not the board
+
+A live row records the board it was seen on. The window does not filter by it,
+on purpose: the question is how many asks reached the OWNER as chat, and the
+owner is one person across every board he keeps. A per-board window would also
+read zero for every row the daily audit has ever published, because a
+transcript miner knows no board. The field is recorded so that a later surface
+which genuinely is about one board can filter without a migration.
+
 ## Re-measuring
 
 The two rates are constants in `routes/workspace-attachments.ts`

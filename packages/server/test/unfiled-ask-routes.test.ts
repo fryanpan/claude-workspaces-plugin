@@ -111,6 +111,11 @@ describe('the unfiled-ask nudge on the note route', () => {
 
     // And the count behind the board's number moved by exactly one ask.
     expect(counted().agents).toMatchObject([{ unfiledAsks: 1, totalAsks: 1, days: 1 }]);
+    // The row names the board it was seen on, so a later per-board surface
+    // has something to filter. The window above deliberately does not filter:
+    // the count is about the person, who keeps more than one board.
+    const today = localDay(Date.now());
+    expect(handle.chatAudit.readFor('Cartographer', today).latest?.workspaceId).toBe(wsId);
   });
 
   it('nudges the same way when the hook names the task itself', async () => {

@@ -53,6 +53,7 @@ function judgeAndRecord(
       agent: note.agent,
       unfiled: verdict.nudge !== undefined,
       note: verdict.signals.map((sig) => sig.phrase).join(', '),
+      workspaceId,
       ...(note.sessionId !== undefined ? { sessionId: note.sessionId } : {}),
     });
     return verdict.nudge;

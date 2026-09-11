@@ -55,6 +55,17 @@ export interface ChatAuditEntryInput {
   sessionId?: string;
   /** Evidence pointer in the auditor's words (thread URL, timestamps). */
   note?: string;
+  /** The board the ask was seen on, for a live row. Absent on a daily-audit
+   *  row, which mines a session's whole transcript and knows no board.
+   *
+   *  Recorded, and deliberately NOT filtered on by `window`. The question the
+   *  count answers is "how many asks reached the OWNER as chat", and the
+   *  owner is one person across every board he keeps; a per-board window
+   *  would also read zero for every row the daily audit ever published,
+   *  because those carry no board at all. The field is here so a later
+   *  surface that genuinely is about one board can filter, without a
+   *  migration. */
+  workspaceId?: string;
 }
 
 export interface ChatAuditRow extends ChatAuditEntryInput {
@@ -240,6 +251,7 @@ export class ChatAudit {
     unfiled: boolean;
     note?: string;
     sessionId?: string;
+    workspaceId?: string;
   }): ChatAuditRow | null {
     const agent = input.agent.trim();
     if (!agent || isSharedAgentName(agent)) return null;
@@ -257,6 +269,7 @@ export class ChatAudit {
       unfiledAsks: (prior?.unfiledAsks ?? 0) + (input.unfiled ? 1 : 0),
       totalAsks: (prior?.totalAsks ?? 0) + 1,
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
       ...(input.note ? { note: input.note.slice(0, NOTE_MAX) } : {}),
     };
     const dir = join(this.path, '..');
