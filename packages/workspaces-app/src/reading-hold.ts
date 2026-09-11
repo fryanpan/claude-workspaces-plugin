@@ -60,9 +60,22 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
     scroller.style.overflowAnchor = priorAnchor;
   });
 
-  /** The line being held, and where on the screen it sat. */
-  let ref: Element | null = null;
-  let refY = 0;
+  /**
+   * The line being held and where on the screen it sat — followed by the few
+   * lines under it, as understudies.
+   *
+   * A tick does not only move blocks, it REPLACES them: ProseMirror rebuilds
+   * the nodes a remote edit rewrote, so the very block the reader is on can
+   * leave the document in the same mutation that grows something above it. A
+   * hold that knew only that one block would have nothing left to measure
+   * against, accept the new layout as the truth, and let the line jump by
+   * whatever landed above — the fault this module exists to fix, in the case
+   * where it is most likely to happen. So the reading takes the first few
+   * blocks that begin on screen, and the correction rides the first of them
+   * still in the document.
+   */
+  const held: Array<{ el: Element; y: number }> = [];
+  const UNDERSTUDIES = 4;
   /** The offset the pane was at when that reading was taken. */
   let refScrollTop = 0;
 
@@ -90,8 +103,7 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
 
   function repick(): void {
     const top = paneTop();
-    ref = null;
-    refY = 0;
+    held.length = 0;
     refScrollTop = scroller.scrollTop;
     // The block the reader's eye is on is the first one that BEGINS on screen,
     // not merely the first one still showing. The difference is a long
@@ -110,15 +122,14 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
         straddler ??= block;
         continue;
       }
-      ref = block;
-      refY = r.top - top;
-      return;
+      held.push({ el: block, y: r.top - top });
+      if (held.length >= UNDERSTUDIES) return;
     }
+    if (held.length > 0) return;
     // Nothing begins on screen — one block taller than the pane fills it. Its
     // box is all there is to hold.
     if (!straddler) return;
-    ref = straddler;
-    refY = straddler.getBoundingClientRect().top - top;
+    held.push({ el: straddler, y: straddler.getBoundingClientRect().top - top });
   }
 
   /**
@@ -144,23 +155,33 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
       repick();
       return;
     }
-    if (!ref || !ref.isConnected) {
+    // The reader's own line where it survived the tick, and the line under it
+    // where it did not. A block the tick replaced is gone from the document
+    // by the time this runs, and its understudy moved by the same growth.
+    const live = held.find((h) => h.el.isConnected && h.el.getBoundingClientRect().height > 0);
+    if (!live) {
       repick();
       return;
     }
-    const r = ref.getBoundingClientRect();
-    if (r.height <= 0) {
-      repick();
-      return;
-    }
-    const dy = r.top - paneTop() - refY;
+    const dy = live.el.getBoundingClientRect().top - paneTop() - live.y;
     if (Math.abs(dy) < EPSILON_PX) return;
     scroller.scrollTop += dy;
     refScrollTop = scroller.scrollTop;
     // What we actually got, not what we asked for: at either end of the
     // travel the scroller clamps, and remembering the asked-for offset would
-    // make the next correction chase a position that cannot exist.
-    refY = ref.getBoundingClientRect().top - paneTop();
+    // make the next correction chase a position that cannot exist. Every
+    // understudy is re-read, not just the one that rode: a second tick before
+    // the scroll listener re-picks would otherwise measure one of them
+    // against a reading from before this correction.
+    const top = paneTop();
+    for (let i = held.length - 1; i >= 0; i--) {
+      const h = held[i] as { el: Element; y: number };
+      if (!h.el.isConnected) {
+        held.splice(i, 1);
+        continue;
+      }
+      h.y = h.el.getBoundingClientRect().top - top;
+    }
   }
 
   /**
@@ -231,5 +252,5 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
 
   repick();
   watchBlocks();
-  return { heldBlock: () => ref, repick };
+  return { heldBlock: () => held[0]?.el ?? null, repick };
 }

@@ -111,6 +111,9 @@ export interface Probe {
    *  the pane rewraps above the fold — its box grows, its own top does not
    *  move. */
   rewrapStill: StillReading;
+  /** The reader parked mid-doc while the tick REBUILDS the block they are on
+   *  and lands notes above it. */
+  replaceStill: StillReading;
   /** A block-rewriting tick arriving as a remote update: do the cards stay? */
   cardsKept: CardsKeptReading;
 }
@@ -488,6 +491,7 @@ async function probe(): Promise<string> {
   const aboveStill = await stillArm({ where: 'mid', suppressAnchoring: true });
   const grownStill = await stillArm({ where: 'mid', suppressAnchoring: true, change: 'grow' });
   const rewrapStill = await stillArm({ where: 'mid', suppressAnchoring: true, change: 'rewrap' });
+  const replaceStill = await stillArm({ where: 'mid', suppressAnchoring: true, change: 'replace' });
   const cardsKept = await cardsKeptArm();
   const out: Probe = {
     watching,
@@ -502,6 +506,7 @@ async function probe(): Promise<string> {
     aboveStill,
     grownStill,
     rewrapStill,
+    replaceStill,
     cardsKept,
   };
   return JSON.stringify(out);
@@ -795,7 +800,7 @@ export interface StillReading {
   /** What changed above the reader's line: notes written into the prose, or a
    *  block above it growing with the DOM untouched — an image or an embed
    *  finishing its load, which no mutation reports. */
-  change: 'notes' | 'grow' | 'rewrap';
+  change: 'notes' | 'grow' | 'rewrap' | 'replace';
   anchoringSuppressed: boolean;
   /** What this browser would do on its own, unsuppressed. */
   supportsAnchoring: boolean;
@@ -828,6 +833,13 @@ export interface StillReading {
   /** The control for `rewrap`: a block really did run up past the top of the
    *  pane, so there really was a box whose own top could not move. */
   straddledTop: boolean;
+  /** The control for `replace`: the element the reading started on really did
+   *  leave the document, so the hold had nothing of the reader's own line
+   *  left to measure against. */
+  replaced: boolean;
+  /** Frames in which the reader's line was not in the document at all — the
+   *  window between taking the block out and writing it back. */
+  framesWithoutLine: number;
 }
 
 /**
@@ -883,7 +895,7 @@ function suppressNativeAnchoring(on: boolean): void {
 async function stillArm(o: {
   where: 'bottom' | 'mid';
   suppressAnchoring: boolean;
-  change?: 'notes' | 'grow' | 'rewrap';
+  change?: 'notes' | 'grow' | 'rewrap' | 'replace';
 }): Promise<StillReading> {
   const change = o.change ?? 'notes';
   const m = mount({ paragraphs: 40, threads: 4 });
@@ -926,7 +938,24 @@ async function stillArm(o: {
         r.top < top0 + m.editorEl.clientHeight
       );
     }) ?? null;
-  const topOfEye = (): number => (eye ? eye.getBoundingClientRect().top - paneTop() : Number.NaN);
+  // THE READER'S LINE, NOT THE ELEMENT. A tick can rebuild the very node the
+  // reading started on, and the words are still on screen afterwards — so the
+  // measurement follows the TEXT: the element while it lives, and whatever
+  // block carries the same opening words once it does not.
+  const eyeKey = (eye?.textContent ?? '').slice(0, 40);
+  const eyeNow = (): Element | null => {
+    if (eye?.isConnected) return eye;
+    if (eyeKey === '') return null;
+    return (
+      Array.from(tiptap.view.dom.children).find((el) =>
+        (el.textContent ?? '').startsWith(eyeKey),
+      ) ?? null
+    );
+  };
+  const topOfEye = (): number => {
+    const el = eyeNow();
+    return el ? el.getBoundingClientRect().top - paneTop() : Number.NaN;
+  };
   const eyeTop0 = topOfEye();
   const contentYOfEye = (): number => topOfEye() + m.editorEl.scrollTop;
   const eyeContentY0 = contentYOfEye();
@@ -940,11 +969,18 @@ async function stillArm(o: {
   let straddledTop = false;
   let worstDrift = 0;
   let frames = 0;
+  let framesWithoutLine = 0;
   let sampling = true;
   const sample = (): void => {
     if (!sampling) return;
     frames++;
-    worstDrift = Math.max(worstDrift, Math.abs(topOfEye() - eyeTop0));
+    const drift = Math.abs(topOfEye() - eyeTop0);
+    // The `replace` arm takes the reader's line out of the document and
+    // writes it back, so for a frame or two there is no line to measure.
+    // Counted rather than folded into the worst reading, which a NaN would
+    // swallow whole.
+    if (Number.isNaN(drift)) framesWithoutLine++;
+    else worstDrift = Math.max(worstDrift, drift);
     requestAnimationFrame(sample);
   };
   requestAnimationFrame(sample);
@@ -953,6 +989,34 @@ async function stillArm(o: {
   // which is what the layout has to be corrected for — and words into the
   // transcript at the foot.
   if (change === 'notes') {
+    const underTitle = tiptap.state.doc.firstChild?.nodeSize ?? 0;
+    tiptap.commands.insertContentAt(underTitle, [
+      { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
+      { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
+    ]);
+    utter(m, 9);
+  } else if (change === 'replace') {
+    // THE BLOCK THE READER IS ON, REBUILT. Grouping a topic in place rewrites
+    // the blocks it groups, and ProseMirror replaces their DOM nodes — so the
+    // element the hold took its reading from is gone from the document by the
+    // time the correction runs, in the same tick as notes landing above it.
+    // Held on its own the reading would have nothing left to measure, and the
+    // reader's line would take the whole growth.
+    if (eye) {
+      const at = tiptap.view.posAtDOM(eye, 0);
+      const $at = tiptap.state.doc.resolve(at);
+      const text = eye.textContent ?? '';
+      // Taken out and written back, rather than edited in place: an edit
+      // inside a paragraph is patched into the element ProseMirror already
+      // has, and it is the REBUILD this arm is about. The block comes back
+      // with the same text in the same shape, so what the reader sees at the
+      // end is the line they started on — at whatever pixel the hold left it.
+      tiptap.commands.deleteRange({ from: $at.before(1), to: $at.after(1) });
+      tiptap.commands.insertContentAt($at.before(1), {
+        type: 'paragraph',
+        content: [{ type: 'text', text }],
+      });
+    }
     const underTitle = tiptap.state.doc.firstChild?.nodeSize ?? 0;
     tiptap.commands.insertContentAt(underTitle, [
       { type: 'paragraph', content: [{ type: 'text', text: `Note: ${speech(18)}` }] },
@@ -1016,6 +1080,8 @@ async function stillArm(o: {
     scrollHeight1: m.editorEl.scrollHeight,
     atBottom0,
     straddledTop,
+    replaced: eye !== null && !eye.isConnected,
+    framesWithoutLine,
   };
   suppressNativeAnchoring(false);
   teardown(m);

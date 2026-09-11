@@ -241,7 +241,8 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
     it(
       `keeps the reader's line on its pixel through a tick at ${width}`,
       () => {
-        const { bottomStill, aboveStill, grownStill, rewrapStill } = probeFor(preset);
+        const { bottomStill, aboveStill, grownStill, rewrapStill, replaceStill } =
+          probeFor(preset);
 
         // PARKED AT THE VERY FOOT, with the browser's own scroll anchoring
         // left switched on. The controls: a real paragraph was on screen, the
@@ -316,6 +317,21 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
         expect(rewrapStill.worstDrift).toBeLessThanOrEqual(2);
         expect(Math.abs(rewrapStill.eyeTop1 - rewrapStill.eyeTop0)).toBeLessThanOrEqual(2);
         expect(rewrapStill.scrollTop1).toBeGreaterThan(rewrapStill.scrollTop0);
+
+        // AND WHEN THE TICK REBUILDS THE BLOCK THE READER IS ON. Grouping a
+        // topic in place rewrites the blocks it groups, so the element the
+        // reading started on leaves the document in the same tick that lands
+        // notes above it. The controls: it really did leave, and the reader's
+        // line really moved down the document — so a hold that knew only that
+        // one element would have had nothing left to measure against and
+        // would have taken the whole growth.
+        expect(replaceStill.replaced).toBe(true);
+        expect(replaceStill.eyeOnScreen).toBe(true);
+        expect(replaceStill.eyeContentY1).toBeGreaterThan(replaceStill.eyeContentY0 + 10);
+        expect(replaceStill.frames).toBeGreaterThan(3);
+        expect(replaceStill.worstDrift).toBeLessThanOrEqual(2);
+        expect(Math.abs(replaceStill.eyeTop1 - replaceStill.eyeTop0)).toBeLessThanOrEqual(2);
+        expect(replaceStill.scrollTop1).toBeGreaterThan(replaceStill.scrollTop0);
       },
       BROWSER_CASE_MS,
     );
