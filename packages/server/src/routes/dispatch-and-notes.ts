@@ -1,4 +1,4 @@
-import { parseAgentNote, resolveNoteTarget } from '../agent-notes.ts';
+import { type AgentNoteInput, parseAgentNote, resolveNoteTarget } from '../agent-notes.ts';
 import { SHARED_IDENTITY_ERROR, SHARED_IDENTITY_MESSAGE } from '../agent-watches.ts';
 import { isSharedAgentName } from '../chat-audit.ts';
 import { isValidDispatchTaskId } from '../dispatch-registry.ts';
@@ -10,7 +10,58 @@ import { recordDispatchRequested } from '../dispatch-request-event.ts';
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
+import { filingStateFor } from '../unfiled-ask-filing.ts';
+import { judgeTurnNote } from '../unfiled-ask.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
+
+/**
+ * The window a turn note's "filed nothing this turn" is measured over when
+ * the ring has no previous turn note for this agent — a restarted server, or
+ * a session's first turn. Long enough to cover a slow turn, short enough that
+ * yesterday's filing does not excuse today's ask.
+ */
+const FIRST_TURN_WINDOW_MS = 2 * 60 * 60_000;
+
+/**
+ * Judge a turn note as it arrives, and record the verdict.
+ *
+ * Runs for `kind: 'turn'` only — a denial or an explicit status is not a
+ * message to the owner. The nudge it returns rides back on the 202 the hook
+ * already reads; NOTHING is filed on the board, by the owner's instruction
+ * (2026-09-10: build the count and the wake first, hold the filing until the
+ * false-positive rate is known). The rate is in `docs/architecture/unfiled-ask.md`.
+ *
+ * It cannot fail the POST it runs inside. This whole judgement is an addition
+ * to a route that worked without it — a full disk, a read-only data volume or
+ * a board shape it has never seen must cost the caller its nudge and nothing
+ * else. The note is already appended by the time this returns; losing the
+ * activity note to a counter's write error would be a bad trade.
+ */
+function judgeAndRecord(
+  ctx: TaskRoutesContext,
+  workspaceId: string,
+  note: AgentNoteInput,
+): string | undefined {
+  if (note.kind !== 'turn') return undefined;
+  try {
+    const since =
+      ctx.agentNotes.lastTurnAt(note.agent, workspaceId) ?? note.at - FIRST_TURN_WINDOW_MS;
+    const filing = filingStateFor(ctx.taskStore, workspaceId, note.agent, since);
+    const verdict = judgeTurnNote(note.text, filing, filing.owners);
+    if (!verdict.ask) return undefined;
+    ctx.chatAudit.recordLive({
+      agent: note.agent,
+      unfiled: verdict.nudge !== undefined,
+      note: verdict.signals.map((sig) => sig.phrase).join(', '),
+      workspaceId,
+      ...(note.sessionId !== undefined ? { sessionId: note.sessionId } : {}),
+    });
+    return verdict.nudge;
+  } catch (err) {
+    console.error(`[unfiled-ask] judging a turn note failed: ${String(err)}`);
+    return undefined;
+  }
+}
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
 export async function handleDispatchAndNoteRoutes(
@@ -228,8 +279,16 @@ export async function handleDispatchAndNoteRoutes(
       });
       if (!res.ok) return j(404, { error: res.error });
       proposeAllowRule(res.task, note);
+      // Judged BEFORE the ring records this note, so `lastTurnAt` still
+      // answers with the PREVIOUS turn rather than with this one.
+      const nudge = judgeAndRecord(ctx, boardId, note);
       agentNotes.record({ ...note, taskId: res.task.id, workspaceId: res.task.workspaceId });
-      return j(202, { ok: true, taskId: res.task.id, workspaceId: res.task.workspaceId });
+      return j(202, {
+        ok: true,
+        taskId: res.task.id,
+        workspaceId: res.task.workspaceId,
+        ...(nudge ? { unfiledAsk: nudge } : {}),
+      });
     }
     const target = resolveNoteTarget(taskStore, note.agent, boardId);
     const task = target.task;
@@ -244,6 +303,7 @@ export async function handleDispatchAndNoteRoutes(
       if (!res.ok) return j(500, { error: res.error });
       proposeAllowRule(res.task, note);
     }
+    const nudge = judgeAndRecord(ctx, boardId, note);
     agentNotes.record({
       ...note,
       workspaceId: boardId,
@@ -255,6 +315,7 @@ export async function handleDispatchAndNoteRoutes(
       workspaceId: boardId,
       ...(task ? { taskId: task.id } : {}),
       ...(target.ambiguous ? { needsFiling: true } : {}),
+      ...(nudge ? { unfiledAsk: nudge } : {}),
     });
   }
   return undefined;

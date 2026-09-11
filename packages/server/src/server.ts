@@ -230,6 +230,11 @@ export interface ServerHandle {
   /** Per-agent durable watch sets (agent-watches.ts). Exposed so tests can
    *  read the store the route wrote, not only the route's answer. */
   agentWatches: AgentWatches;
+  /** The chat-audit log — the daily audit's published counts AND the rows the
+   *  Stop-hook note route writes live. Exposed for the same reason
+   *  `agentWatches` is: the count a board shows is a store read, and a test
+   *  that re-implemented the window would not be testing the window. */
+  chatAudit: ChatAudit;
   /** The fleet address book (identities.ts) — people and agents. Exposed
    *  for the same reason `agentWatches` is. */
   identities: Identities;
@@ -1948,6 +1953,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore,
     dispatches,
     agentNotes,
+    chatAudit,
     readyNudger,
     j,
     safeJson,
@@ -1983,6 +1989,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     captureServerError(new Error(message), extra),
   );
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    chatAudit,
     taskStore,
     taskProjection,
     docStore,
@@ -2881,6 +2888,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     tasks: taskStore,
     projection: taskProjection,
     agentWatches,
+    chatAudit,
     identities,
     dispatches,
     shares,

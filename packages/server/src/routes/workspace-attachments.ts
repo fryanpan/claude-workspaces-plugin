@@ -22,6 +22,7 @@
  * same problem.
  */
 import { attachNotes } from '../attach-notes.ts';
+import { localDay } from '../chat-audit.ts';
 import { clientReleaseStatus } from '../client-release.ts';
 import {
   agentsBehind,
@@ -33,12 +34,44 @@ import { isAttachmentRuntime } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
+/** How far back the presence strip's unfiled-ask number looks. A week, so a
+ *  quiet day does not read as a fixed problem and a bad Tuesday does not
+ *  vanish by Wednesday. */
+const CHAT_AUDIT_WINDOW_DAYS = 7;
+
+/**
+ * What the detector behind that number was measured to do, so the surface can
+ * say it — and the denominator, because a rate without one is not an answer.
+ * The four figures are the 2026-09-10 labelling run: 110 closing messages
+ * hand-labelled out of a 631-message evaluation set none of the tuning had
+ * read. Method and strata are in `docs/architecture/unfiled-ask.md`.
+ *
+ * Constants rather than a computed value, because nothing in the running
+ * server measures them: a person labelled a sample, and the next person to
+ * re-label one changes these numbers in the same commit.
+ */
+const ASK_ACCURACY = {
+  precisionPct: 86,
+  unfiledRecallPct: 15,
+  labelled: 110,
+  corpus: 631,
+} as const;
+
 /** Answers the routes below, or `undefined` when the path is none of them. */
 export async function handleWorkspaceAttachments(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
-  const { taskStore, sse, agentWatches, clientReleaseRootDir, j, safeJson, watchKeyExists } = ctx;
+  const {
+    taskStore,
+    sse,
+    agentWatches,
+    chatAudit,
+    clientReleaseRootDir,
+    j,
+    safeJson,
+    watchKeyExists,
+  } = ctx;
   const { req, pathname, visitor } = rq;
   // --- REST: agent attachments (§4) ---
   // AgentAttachment records live OUTSIDE every ydoc; this REST surface
@@ -85,9 +118,27 @@ export async function handleWorkspaceAttachments(
     // `endpoint` redaction draws.
     const clientRelease =
       clientReleaseRootDir && !visitor ? clientReleaseStatus(clientReleaseRootDir) : null;
+    // How many asks reached the owner as CHAT rather than as an answerable
+    // item, per agent, over the last week — the number the presence strip
+    // shows so the protocol's one measurable failure is visible where the
+    // sessions are. Owner-only for the same reason `clientRelease` is: it is
+    // a fact about how the fleet is behaving, not workspace content.
+    //
+    // `accuracy` ships WITH the number and is not decoration. The count comes
+    // from a regex over closing messages with the precision and recall in
+    // `ASK_ACCURACY` above (docs/architecture/unfiled-ask.md) — a floor, not
+    // a census. A surface that showed the
+    // count alone would be read as a census within a week.
+    const chat = visitor
+      ? null
+      : {
+          ...chatAudit.window(CHAT_AUDIT_WINDOW_DAYS, localDay(Date.now())),
+          accuracy: ASK_ACCURACY,
+        };
     return j(200, {
       workspaceId,
       attachments,
+      ...(chat ? { chatAudit: chat } : {}),
       // Who owns this board's asks, and whether they are there. It rides
       // this read rather than the projected workspace info because seat
       // health CHANGES WITH TIME and nothing else: a lead that stops

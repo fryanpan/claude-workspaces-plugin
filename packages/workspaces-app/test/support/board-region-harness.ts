@@ -21,6 +21,7 @@ import { buildShell } from '../../src/board/board-shell.ts';
 export function boardState(over: Partial<BoardState> = {}): BoardState {
   return {
     seat: null,
+    chatAudit: null,
     info: null,
     tasks: new Map(),
     taskDetail: new Map(),

@@ -240,6 +240,28 @@ export class AgentNoteRing {
     return this.rings.size;
   }
 
+  /**
+   * When this agent's PREVIOUS turn note landed ON THIS BOARD — the boundary
+   * the unfiled-ask check measures "filed nothing this turn" from.
+   * `undefined` when the ring has none, which is what a restarted server
+   * sees; the caller falls back to a bounded window rather than treating it
+   * as "filed nothing ever".
+   *
+   * The ring is keyed by agent alone, and one agent can hold seats on two
+   * boards. Without the workspace filter a turn on board A would move board
+   * B's boundary past an item filed during B's actual turn, and B would be
+   * nudged for an ask it had filed.
+   */
+  lastTurnAt(agent: string, workspaceId: string): number | undefined {
+    const ring = this.rings.get(normalizeAgent(agent));
+    if (!ring) return undefined;
+    for (let i = ring.length - 1; i >= 0; i--) {
+      const note = ring[i];
+      if (note && note.kind === 'turn' && note.workspaceId === workspaceId) return note.at;
+    }
+    return undefined;
+  }
+
   /** Newest first. Unknown agent → empty, not an error. */
   list(agent: string): AgentRingNote[] {
     return [...(this.rings.get(normalizeAgent(agent)) ?? [])].reverse();

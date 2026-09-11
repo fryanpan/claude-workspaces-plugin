@@ -87,6 +87,40 @@ describe('AgentNoteRing — bounded per agent AND across agents', () => {
   });
 });
 
+describe('lastTurnAt — the boundary the unfiled-ask check measures a turn from', () => {
+  const turn = (agent: string, workspaceId: string, at: number) => ({
+    agent,
+    kind: 'turn' as const,
+    text: 'closing message',
+    at,
+    workspaceId,
+  });
+
+  it('answers with the previous turn on THAT board, not the newest anywhere', () => {
+    // One agent, two boards. Without the workspace filter, a turn on board A
+    // would move board B's boundary past an item filed during B's own turn,
+    // and B would be nudged for an ask it had already filed.
+    const ring = new AgentNoteRing();
+    ring.record(turn('Nomad', 'w-alpha', NOW + 10));
+    ring.record(turn('Nomad', 'w-beta', NOW + 20));
+    ring.record(turn('Nomad', 'w-alpha', NOW + 30));
+    expect(ring.lastTurnAt('Nomad', 'w-alpha')).toBe(NOW + 30);
+    expect(ring.lastTurnAt('Nomad', 'w-beta')).toBe(NOW + 20);
+  });
+
+  it('answers undefined for an unknown agent, board or note kind', () => {
+    const ring = new AgentNoteRing();
+    expect(ring.lastTurnAt('Nomad', 'w-alpha')).toBeUndefined();
+    ring.record(turn('Nomad', 'w-alpha', NOW + 10));
+    expect(ring.lastTurnAt('Nomad', 'w-gamma')).toBeUndefined();
+    expect(ring.lastTurnAt('Somebody Else', 'w-alpha')).toBeUndefined();
+    // A denial note is not a turn: it must not move the boundary.
+    const ring2 = new AgentNoteRing();
+    ring2.record({ agent: 'Nomad', kind: 'denial', text: 'refused', at: NOW, workspaceId: 'w-a' });
+    expect(ring2.lastTurnAt('Nomad', 'w-a')).toBeUndefined();
+  });
+});
+
 describe('parseAgentNote — an explicit status is a third kind, and the ceiling fits a full turn', () => {
   it('accepts kind "status" alongside turn and denial', () => {
     const r = parseAgentNote(body({ kind: 'status', text: 'PR open, waiting on CI' }), NOW);
