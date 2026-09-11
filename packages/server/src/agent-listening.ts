@@ -140,16 +140,27 @@ export class ListeningAnnouncer {
       this.emit(agentListeningFrame(workspaceId, agentId, true));
       return;
     }
-    // Never announce a departure for somebody the board was never told about.
+    // Never announce a departure for somebody the board was never told
+    // about — and a key that is absent is exactly that somebody.
     if (this.announced.get(key) !== true) return;
     this.pending.set(
       key,
       this.timers.schedule(() => {
         this.pending.delete(key);
-        this.announced.set(key, false);
+        // Deleted, not set to false: absence already MEANS not announced, so
+        // a `false` entry is a second spelling of the same fact that nothing
+        // ever removes. Keeping them would grow the map by one entry for
+        // every agent-board pairing the process ever saw.
+        this.announced.delete(key);
         this.emit(agentListeningFrame(workspaceId, agentId, false));
       }, this.graceMs),
     );
+  }
+
+  /** How many agent-board pairings this holds state for — so a test can
+   *  assert the map is bounded by who is here rather than by who ever was. */
+  trackedCount(): number {
+    return this.announced.size + this.pending.size;
   }
 
   /** Drop every held departure — for shutdown, so no timer outlives the bus. */

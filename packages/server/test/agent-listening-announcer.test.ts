@@ -150,6 +150,26 @@ describe('a listening change is announced once, and only when it is one', () => 
     expect(sent).toEqual([]);
   });
 
+  test('a departed agent leaves no entry behind, so the map cannot only grow', () => {
+    const { a, sent, clock } = announcer();
+    // Churn a hundred distinct agents through arrive-and-leave. Nothing they
+    // leave behind may accumulate: absence already means not-announced, so a
+    // remembered `false` would be a second spelling of the same fact that
+    // nothing ever removes — one entry per agent-board pairing the process
+    // ever saw, for the life of the process.
+    for (let i = 0; i < 100; i++) {
+      a.observe('w1', `agent-${i}`, true);
+      a.observe('w1', `agent-${i}`, false);
+    }
+    clock.advance(LISTENING_DEPARTURE_GRACE_MS);
+    expect(sent).toHaveLength(200); // every arrival and every departure said
+    expect(a.trackedCount()).toBe(0);
+
+    // And one still here is still tracked — the count is not just always 0.
+    a.observe('w1', 'agent-stays', true);
+    expect(a.trackedCount()).toBe(1);
+  });
+
   test('the window is longer than the client’s first reconnect draw', async () => {
     // The MCP client draws its first retry from [0, RECONNECT_BASE_MS) with
     // full jitter. A grace shorter than that whole window would announce
