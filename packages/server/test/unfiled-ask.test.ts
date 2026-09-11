@@ -105,6 +105,12 @@ describe('proseOf', () => {
     expect(out).not.toContain('?');
     expect(out).not.toContain('ls -l');
     expect(out).toContain('Nothing is pending.');
+    // A fence that never closes — a clipped message — swallows the rest,
+    // rather than leaking every `?` in the output back into the prose.
+    const unclosed = proseOf('Ran it:\n\n```sh\nis this your branch?\nwant me to push?\n');
+    expect(unclosed).not.toContain('?');
+    expect(asks('Ran it:\n\n```sh\nis this your branch?\n')).toBe(false);
+
     // And the fence does not turn the code into an ask.
     expect(asks('Ran it:\n\n```sh\nis this your branch?\n```\n\nNothing is pending.')).toBe(false);
   });

@@ -116,8 +116,16 @@ const OFFERED = /\b(?:want|shall|should|can|could|may|do)\s+(?:i|we|me|us)\b|\bw
 const NEGATED = /\b(?:nothing|nobody|none of|not asking)\b/i;
 const REPORTED = /\b(?:I|we)(?:'ve| have)?\s+(?:told|reminded|asked|answered|relayed|reported)\b/i;
 
-/** A fenced block, opening fence to closing fence (or to end of text). */
-const FENCE_BLOCK = /^(```|~~~)[^\n]*\n[\s\S]*?(?:^\1[^\n]*$|\z)/gm;
+/**
+ * A fenced block, opening fence to closing fence — or to the end of the text
+ * when the fence never closes, which is what a clipped message looks like.
+ *
+ * The unclosed case is a second alternative rather than an end-of-input
+ * anchor because JavaScript has no `\z`: written that way it matches a
+ * literal "z", the block survives into the prose, and every question mark in
+ * the command output inside it becomes an ask.
+ */
+const FENCE_BLOCK = /^(```|~~~)[^\n]*\n(?:[\s\S]*?^\1[^\n]*$|[\s\S]*)/gm;
 /** An inline code span. `?` inside one is a ternary, a shell `$?`, a query
  *  string or a nullish `??` — never a question. */
 const CODE_SPAN = /`[^`\n]*`/g;
