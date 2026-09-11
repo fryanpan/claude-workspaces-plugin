@@ -120,7 +120,7 @@ A reader can select a phrase in your review item and ask about it. The question 
 
 - Every resource (task, workspace, document, mockup, folder diff) has its own URL.
 - In a workspace, links are relative and inline with link text, never a raw URL: `[this link](/workspaces/<workspaceId>/docs/<docId>?thread=<threadId>)`. 
-- A task's page is `[this task](/workspaces/<workspaceId>/tasks/<taskId>)`.
+- A task's page is `[this task](/workspaces/<workspaceId>?task=<taskId>)`.
 - In terminal chat, send the absolute URL bare on its own line with no markdown around it.
 - Link the thing under review, not the workspace: hand over the `reviewUrl` / `entryUrl` the tool returned. Link the workspace only when the workspace itself is the subject.
 - A workspace URL is not a durable address. Durable artifacts (committed docs, exports) cite repo paths or GitHub URLs.
