@@ -179,7 +179,9 @@ const port = await resolvePort();
 // Dependencies come first, because both builds and the server import them. A
 // failed install is the one step that does NOT fall back: this waits, on a
 // backoff, until one succeeds — see `installBeforeBoot` for why it neither
-// boots over the failure nor exits into a launchd respawn loop.
+// boots over the failure nor exits into a launchd respawn loop. The health
+// watchdog below is armed only after this returns; above it, it would find
+// nothing listening and exit into that same loop.
 const clientArgs: string[] = [];
 if (noWatch) {
   await installBeforeBoot(supervisorInstallGate(repoRoot, dataDir, note));
