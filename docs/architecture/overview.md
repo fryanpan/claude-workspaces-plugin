@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts"]
+    ops["Ops<br/>deploy*.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -486,6 +486,12 @@ note, as opposed to whether it reached the composer.
 | **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-quota-notice.ts`, `dispatch-request-event.ts`, `agent-listening.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
+
+`supervisor-health.ts` joins Ops and moves no boundary. It is the health
+check `scripts/serve.ts` runs against the server it supervises — one HTTP
+request to a route that already exists, a verdict, and a restart ledger that
+outlives the supervisor — so the server imports only its probe-marker
+constant, and only so `sentry.ts` can leave the probe out of tracing.
 
 `model-quota.ts` and `notes-quota-notice.ts` join the DOMAIN row and move no
 boundary. The first answers one question about a refused model call — is the

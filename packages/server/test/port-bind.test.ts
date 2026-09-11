@@ -15,7 +15,6 @@ import {
   BIND_RETRY_CAP_MS,
   type BindErrorKind,
   acquirePort,
-  bindHealthStep,
   bindRetryDelayMs,
   classifyBindError,
   classifyConnectError,
@@ -264,34 +263,5 @@ describe('a connect failure that is about the HOST is not evidence about the ser
     // launchd without it.
     expect(classifyConnectError(errWithCode('EWHATEVER'))).toBe('not-listening');
     expect(classifyConnectError(new Error('no code at all'))).toBe('not-listening');
-  });
-});
-
-describe('the bind-health watchdog counts only what it can read', () => {
-  it('restarts after MAX_FAILS readable failures', () => {
-    let fails = 0;
-    const first = bindHealthStep(fails, 'not-listening', 2);
-    expect(first).toEqual({ fails: 1, action: 'wait' });
-    fails = first.fails;
-    expect(bindHealthStep(fails, 'not-listening', 2)).toEqual({ fails: 2, action: 'restart' });
-  });
-
-  it('never restarts on an inconclusive probe, however many arrive', () => {
-    // The whole point: a socket shortage can persist for minutes, and every
-    // probe inside it says nothing about whether the server is bound.
-    let fails = 1;
-    for (let i = 0; i < 20; i++) {
-      const step = bindHealthStep(fails, 'inconclusive', 2);
-      expect(step.action).toBe('wait');
-      fails = step.fails;
-    }
-    // Held, not reset: a genuinely unbound server masked by the shortage is
-    // still caught by the next readable probe.
-    expect(fails).toBe(1);
-    expect(bindHealthStep(fails, 'not-listening', 2)).toEqual({ fails: 2, action: 'restart' });
-  });
-
-  it('clears the count the moment the port answers', () => {
-    expect(bindHealthStep(1, 'listening', 2)).toEqual({ fails: 0, action: 'ok' });
   });
 });
