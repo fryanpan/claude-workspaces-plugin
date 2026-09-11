@@ -82,9 +82,9 @@ export const NOTES_OUTLINE_DROP_STEP = 40;
  * tick of the meeting — so twelve of them cost about 470 tokens a tick. They
  * were worth it while a revision inside the cached half rewrote the WHOLE
  * prefix; with the chunk ladder a revision that deep rewrites one chunk, so
- * the insurance stopped being worth its premium. Measured over the 306 ticks
- * of EN2001a, twelve cost $0.90 against four's $0.79, and the plateau around
- * four is flat: three and six are within a cent.
+ * the insurance stopped being worth its premium. Priced offline over EN2001a's
+ * 306 recorded ticks, twelve cost $0.90 against four's $0.79, and the plateau
+ * around four is flat: three and six are within a cent.
  *
  * It changes nothing the model READS. The rows either side of the cut are the
  * same rows in the same order; the cut decides only which content block
@@ -114,10 +114,18 @@ export const MAX_CACHE_BREAKPOINTS = 4;
  * thousand tokens. One tick in four writes sixteen rows, one in sixteen
  * writes sixty-four, and one in sixty-four writes the lot.
  *
- * 64/16/4, measured. The sweep over EN2001a's 306 recorded ticks is flat
- * between 64/12/4 and 64/24/8 (all within a cent of $0.79) and falls off
- * either side: 128/16/4 costs $1.04 because the coarse anchor is so rarely
- * reached, and one step alone costs $1.33.
+ * 64/16/4, priced offline and then billed for real. The sweep over EN2001a's
+ * 306 recorded ticks is flat between 64/12/4 and 64/24/8 (all within a cent
+ * of $0.79) and falls off either side: 128/16/4 costs $1.04 because the
+ * coarse anchor is so rarely reached, and one step alone costs $1.33.
+ *
+ * What it then BILLED, driving the real model through the same three
+ * meeting-hours on 2026-09-10: $1.03 / $1.01 / $0.92 against $1.76 / $1.81 /
+ * $2.49, the read-to-write ratio going from 1.15, 0.73 and 0.79 to 4.35,
+ * 3.86 and 20.80. Above the offline price because a live run revises deeper
+ * than the recorded one did, and because NOTHING caches until the prompt
+ * clears the model's 4096-token minimum — about the first forty ticks of a
+ * meeting. Past that point the median tick writes 66 tokens and reads 6,664.
  */
 export const NOTES_OUTLINE_CACHE_STEPS: readonly number[] = [64, 16, 4];
 

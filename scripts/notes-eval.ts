@@ -202,9 +202,16 @@ export const CACHE_BREAK_EVEN_RATIO: number =
  * more than one that cached nothing, because every one of those reads was
  * paid for by a write at 1.25x. The ratio is the verdict, and it has a fixed
  * number to beat.
+ *
+ * A run that wrote nothing is not a run that paid nothing. Its reads still
+ * bill at 0.1x — it is only that this run bought none of the entries it read
+ * from, because they were written before the window it measured. Saying
+ * "free" there would understate the bill of exactly the run whose cache is
+ * working best.
  */
 export function cacheVerdict(cacheRead: number, cacheWrite: number): string {
-  if (cacheWrite === 0) return 'nothing written — every read was free';
+  if (cacheWrite === 0)
+    return `nothing written this run — its ${cacheRead} read token(s) still bill at ${CACHE_READ_MULTIPLIER}x`;
   const ratio = cacheRead / cacheWrite;
   const verdict = ratio > CACHE_BREAK_EVEN_RATIO ? 'paying' : 'LOSING MONEY';
   return `read/write ${ratio.toFixed(2)} against ${CACHE_BREAK_EVEN_RATIO.toFixed(2)} break-even — ${verdict}`;

@@ -128,6 +128,15 @@ describe('whether the cache is paying for itself', () => {
   it('a run that wrote nothing is not a division by zero', () => {
     expect(cacheVerdict(5_000, 0)).toContain('nothing written');
   });
+
+  it('does not call a write-free run free — its reads are discounted, not waived', () => {
+    // A run whose entries were all written before the window it measured has
+    // the healthiest cache there is, and calling its reads free understates
+    // exactly that run's bill. The number it must agree with is `costOf`.
+    const said = cacheVerdict(5_000, 0);
+    expect(said).not.toMatch(/free/i);
+    expect(costOf({ cheap: { input: 0, output: 0, cacheRead: 5_000 } }, prices)).toBeGreaterThan(0);
+  });
 });
 
 describe('whether the run may keep going', () => {
