@@ -294,7 +294,10 @@ export class DocEditOps {
       startRel: thread.anchor.startRel,
       endRel: thread.anchor.endRel,
       replacement: opts.replacement,
-      parseInlineMarks: opts.parseInlineMarks === true,
+      // Passed through, never coerced: core defaults a proposal's offered
+      // text to PARSED, and `=== true` would have quietly re-imposed the
+      // literal-characters behaviour on every caller that omits the field.
+      parseInlineMarks: opts.parseInlineMarks,
       author: opts.author,
       ts: opts.ts,
     });

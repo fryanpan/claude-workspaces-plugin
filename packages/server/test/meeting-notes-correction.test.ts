@@ -381,6 +381,21 @@ describe('correctNotesSection — a person’s note', () => {
     expect(pending.size).toBe(1);
   });
 
+  it('offers the corrected words as characters — a transcript is not markdown', () => {
+    // A proposal's offered text parses markdown by default (`suggest-ops.ts`),
+    // which is right for an agent writing a link and wrong for words somebody
+    // said: an asterisk in a transcript would italicise the rest of the note.
+    // `reviseInPlace` already said so for the agent's own notes; the proposal
+    // path holds the same line.
+    const ydoc = personNote('- My own line: the grid is 5 by 6 by 7.\n');
+    const res = correctNotesSection(ydoc, {
+      wrong: '5 by 6 by 7',
+      right: '5*6*7',
+    });
+    expect(res).toEqual({ applied: 'suggested' });
+    expect(plainTextOf(ydoc)).toContain('5*6*7');
+  });
+
   it('proposes on a note the AGENT wrote and the person then edited', () => {
     // The doc clears `cwAuthor` the moment a person edits the block, so a
     // bullet they have rewritten is theirs from then on. The correction
