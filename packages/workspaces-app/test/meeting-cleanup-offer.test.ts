@@ -7,6 +7,13 @@
  * twice must not — the whole feature is a rewrite of notes people have been
  * reading, so the button is the only thing that may start one.
  *
+ * And the question the first case asks is whether anything is on screen
+ * without a recording having ended, because that is how this shipped: the
+ * dialog stood open on every doc, over the prose, with no meeting to tidy, so
+ * pressing it did nothing. Its visibility is CSS, not this module's logic, so
+ * the computed value is read in `cleanup-offer-css.test.ts`; what is read
+ * here is that the dialog is never RAISED except by `offer()`.
+ *
  * Fictional names throughout; the repo is public.
  */
 
@@ -34,6 +41,19 @@ const goEl = (): HTMLButtonElement => {
   const el = offerEl().querySelector<HTMLButtonElement>('.cleanup-offer-go');
   if (!el) throw new Error('no button');
   return el;
+};
+const dismissEl = (): HTMLButtonElement => {
+  const el = offerEl().querySelector<HTMLButtonElement>('.cleanup-offer-dismiss');
+  if (!el) throw new Error('no dismiss button');
+  return el;
+};
+const noteEl = (): HTMLElement => {
+  const el = offerEl().querySelector<HTMLElement>('.cleanup-offer-note');
+  if (!el) throw new Error('no note');
+  return el;
+};
+const escape = (): void => {
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 };
 
 /** A fetch that records its calls and answers with `reply`. */
@@ -125,8 +145,61 @@ describe('the tidy-up offer', () => {
     const offer = mount(f);
     offer.offer('m-1');
     expect(offerEl().hidden).toBe(false);
-    expect(goEl().textContent).toBe('Tidy up these notes');
+    // A question with two answers, and nothing said until one is pressed.
+    expect(goEl().textContent).toBe('Tidy up');
+    expect(dismissEl().textContent).toBe('Not now');
+    expect(noteEl().hidden).toBe(true);
     // The whole point: an offer on screen has asked the server for nothing.
+    expect(f.calls).toEqual([]);
+  });
+
+  it('is a dialog, addressed to the question it asks', () => {
+    const f = stubFetch();
+    mount(f).offer('m-1');
+    const card = offerEl().querySelector('.cleanup-offer-card');
+    expect(card?.getAttribute('role')).toBe('dialog');
+    expect(card?.getAttribute('aria-modal')).toBe('true');
+    const labelledBy = card?.getAttribute('aria-labelledby') ?? '';
+    expect(offerEl().querySelector(`#${labelledBy}`)?.textContent).toBe('Tidy up these notes?');
+  });
+
+  it('says it is working while the pass is on the wire, and refuses both answers', async () => {
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
+    // The dialog stays up and reports, rather than vanishing on the press.
+    expect(offerEl().hidden).toBe(false);
+    expect(noteEl().hidden).toBe(false);
+    expect(noteEl().textContent).toBe('Tidying up these notes…');
+    expect(goEl().disabled).toBe(true);
+    expect(dismissEl().disabled).toBe(true);
+    // …and nothing closes over writes that are already coming: not the
+    // disabled answers, not Escape, not the scrim.
+    dismissEl().click();
+    escape();
+    offerEl().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(offerEl().hidden).toBe(false);
+    // Then it comes back: the notes behind it are the receipt.
+    f.settle(0, { ok: true, touched: 2 });
+    await vi.waitFor(() => expect(offerEl().hidden).toBe(true));
+  });
+
+  it('closes on Escape and on the scrim, without running anything', () => {
+    const f = stubFetch();
+    const offer = mount(f);
+    offer.offer('m-1');
+    escape();
+    expect(offerEl().hidden).toBe(true);
+    offer.offer('m-2');
+    // A press on the scrim itself, not one inside the card.
+    offerEl()
+      .querySelector('.cleanup-offer-card')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(offerEl().hidden).toBe(false);
+    offerEl().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(offerEl().hidden).toBe(true);
     expect(f.calls).toEqual([]);
   });
 
@@ -153,12 +226,11 @@ describe('the tidy-up offer', () => {
     const offer = mount(f);
     offer.offer('m-1');
     goEl().click();
-    await vi.waitFor(() =>
-      expect(offerEl().querySelector('.cleanup-offer-note')?.textContent).toBe('no transcript'),
-    );
-    // Still pressable: a refusal is not a dead end.
+    await vi.waitFor(() => expect(noteEl().textContent).toBe('no transcript'));
+    // Still pressable, and still refusable: a refusal is not a dead end.
     expect(offerEl().hidden).toBe(false);
     expect(goEl().disabled).toBe(false);
+    expect(dismissEl().disabled).toBe(false);
   });
 
   it('withdraws when the next recording starts, and dismisses on request', () => {
@@ -168,7 +240,7 @@ describe('the tidy-up offer', () => {
     offer.withdraw();
     expect(offerEl().hidden).toBe(true);
     offer.offer('m-2');
-    offerEl().querySelector<HTMLButtonElement>('.cleanup-offer-dismiss')?.click();
+    dismissEl().click();
     expect(offerEl().hidden).toBe(true);
     expect(f.calls).toEqual([]);
   });
@@ -225,7 +297,7 @@ describe('the tidy-up offer', () => {
     f.reject(0);
     await vi.waitFor(() => expect(f.read(0)).toBe(true));
     expect(offerEl().hidden).toBe(false);
-    expect(offerEl().querySelector<HTMLElement>('.cleanup-offer-note')?.hidden).toBe(true);
+    expect(noteEl().hidden).toBe(true);
   });
 
   it('does not run twice on a double press', async () => {

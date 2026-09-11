@@ -7,12 +7,27 @@
  * the button — the press IS the approval, and there is no setting that turns
  * it into a default.
  *
- * WHAT IT SAYS. One button and a way to dismiss it. No caption explaining what
- * a tidy-up is, no chip naming the meeting: the notes are on screen above it
- * and the button says what pressing it does. It appears when a recording ends,
- * sits at the end of the prose where the notes are, and leaves on the first of
- * three things — the pass finishing, a dismissal, or the next recording
- * starting.
+ * WHY IT IS A MODAL. It used to be a row at the end of the prose, and that
+ * shape is what let it fail in the field: a row in the flow has to be hidden
+ * by CSS, `.cleanup-offer { display: flex }` outranked the UA's `[hidden]`
+ * rule, and so the offer stood at the end of EVERY doc — on docs that had
+ * never held a recording — overlapping the notes and doing nothing when it
+ * was pressed, because no meeting had named itself to tidy. A modal asks its
+ * question once, at the moment a recording stops, and there is no state in
+ * which it is part of the page. It is raised by `offer()` and by nothing
+ * else; a doc that mounts this and never records shows a scrim-free page.
+ *
+ * WHAT IT SAYS. A question, two answers, and one line that reports. No
+ * caption explaining what a tidy-up is: the notes are on screen behind it and
+ * "Tidy up" says what pressing it does. It leaves on the first of four
+ * things — the pass finishing, "Not now", Escape or the scrim, or the next
+ * recording starting.
+ *
+ * WHILE IT RUNS. The dialog stays up and the report line says so, because the
+ * pass is a request over a whole transcript and a dialog that vanished on the
+ * press would leave nothing on screen saying anything was happening. Both
+ * answers are refused while it is on the wire — this is the one moment where
+ * "Not now" would be a lie, since the writes are already coming.
  *
  * THE TINT. Notes the pass writes arrive over the doc stream like any other
  * remote edit, and `settle-wash.ts` decides whether to tint one by asking the
@@ -47,6 +62,11 @@ interface CleanupReply {
  */
 export const CLEANUP_WASH_HOLD_MS = 90_000;
 
+/** The line under the question, while the pass is on the wire. */
+const WORKING_NOTE = 'Tidying up these notes…';
+/** What a failure says when the server sends no sentence of its own. */
+const FAILED_NOTE = 'The tidy-up could not run. The notes are unchanged.';
+
 export interface MeetingCleanupOffer {
   /** A recording just ended: offer a pass over this meeting. */
   offer(meetingId: string): void;
@@ -57,8 +77,13 @@ export interface MeetingCleanupOffer {
 
 export function mountMeetingCleanupOffer(opts: {
   docId: string;
-  /** Rendered as `parent`'s last child, after the editor's content. */
-  parent: HTMLElement;
+  /**
+   * Where the dialog is appended. The default is the document body, which is
+   * what every caller wants: the scrim is `position: fixed`, and a transform
+   * or a filter anywhere up the editor's ancestry would make it fixed to that
+   * ancestor's box instead of the viewport.
+   */
+  parent?: HTMLElement;
   liveZone?: MeetingLiveZone;
   fetchImpl?: typeof fetch;
 }): MeetingCleanupOffer {
@@ -68,26 +93,44 @@ export function mountMeetingCleanupOffer(opts: {
   root.className = 'cleanup-offer';
   root.hidden = true;
 
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'cleanup-offer-go';
-  button.textContent = 'Tidy up these notes';
+  const card = document.createElement('div');
+  card.className = 'cleanup-offer-card';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-modal', 'true');
+  card.setAttribute('aria-labelledby', 'cleanup-offer-title');
+
+  const title = document.createElement('h2');
+  title.id = 'cleanup-offer-title';
+  title.className = 'cleanup-offer-title';
+  title.textContent = 'Tidy up these notes?';
+
+  // One line, doing both jobs a person needs from it: saying the pass is
+  // running, and saying why it did not. A success needs no line — the notes
+  // behind the dialog are the receipt, and the wash above says which ones.
+  const note = document.createElement('p');
+  note.className = 'cleanup-offer-note';
+  note.hidden = true;
+  // Read out when it changes: the working line and the refusal both appear
+  // without the focus moving, so nothing else would announce them.
+  note.setAttribute('role', 'status');
+
+  const actions = document.createElement('div');
+  actions.className = 'cleanup-offer-actions';
 
   const dismiss = document.createElement('button');
   dismiss.type = 'button';
   dismiss.className = 'cleanup-offer-dismiss';
-  dismiss.setAttribute('aria-label', 'Dismiss');
-  dismiss.textContent = '×';
+  dismiss.textContent = 'Not now';
 
-  // Failures only. A pass that worked says so by the notes changing, and the
-  // wash above says which ones — a line reporting "3 blocks touched" is a
-  // readout of a thing the reader can already see.
-  const note = document.createElement('div');
-  note.className = 'cleanup-offer-note';
-  note.hidden = true;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'cleanup-offer-go';
+  button.textContent = 'Tidy up';
 
-  root.append(button, dismiss, note);
-  opts.parent.append(root);
+  actions.append(dismiss, button);
+  card.append(title, note, actions);
+  root.append(card);
+  (opts.parent ?? document.body).append(root);
 
   let meetingId: string | null = null;
   // Keyed on the MEETING rather than a bare flag. It is what stops a second
@@ -96,32 +139,46 @@ export function mountMeetingCleanupOffer(opts: {
   // would leave the new offer's button live-looking and inert until the old
   // request finally answered.
   const inFlight = new Set<string>();
+  /** Whose focus to give back when the dialog closes. */
+  let returnFocus: HTMLElement | null = null;
 
-  const show = (visible: boolean): void => {
-    root.hidden = !visible;
+  const running = (): boolean => meetingId !== null && inFlight.has(meetingId);
+
+  const close = (): void => {
+    meetingId = null;
+    root.hidden = true;
+    const back = returnFocus;
+    returnFocus = null;
+    back?.focus?.();
+  };
+
+  const say = (message: string | null): void => {
+    note.textContent = message ?? '';
+    note.hidden = message === null;
   };
 
   const fail = (message: string): void => {
-    note.textContent = message;
-    note.hidden = false;
+    say(message);
     button.disabled = false;
-    button.textContent = 'Tidy up these notes';
+    dismiss.disabled = false;
   };
 
   async function run(): Promise<void> {
     const id = meetingId;
     if (id === null || inFlight.has(id)) return;
     // SUPERSEDED WHILE THE REQUEST WAS ON THE WIRE. A new recording starting
-    // withdraws this offer, and Dismiss retires it, and either can happen
+    // withdraws this offer, and Not now retires it, and either can happen
     // while the POST is still in flight. This offer is about the meeting it
-    // was pressed for: answering for it afterwards would put a button back on
+    // was pressed for: answering for it afterwards would put a dialog back on
     // screen that, pressed, tidies the PREVIOUS meeting in the middle of the
     // one now recording.
     const superseded = (): boolean => meetingId !== id;
     inFlight.add(id);
-    note.hidden = true;
+    say(WORKING_NOTE);
     button.disabled = true;
-    button.textContent = 'Tidying up…';
+    // Refused for as long as the writes are coming: "Not now" after the pass
+    // has started would close over notes that are about to change anyway.
+    dismiss.disabled = true;
     // Held BEFORE the request, not after it: the first note can land while
     // the response is still on the wire.
     opts.liveZone?.holdWash(CLEANUP_WASH_HOLD_MS);
@@ -135,42 +192,58 @@ export function mountMeetingCleanupOffer(opts: {
       const body = (await res.json().catch(() => ({}))) as CleanupReply;
       if (superseded()) return;
       if (!res.ok || body.ok !== true) {
-        fail(body.error ?? 'The tidy-up could not run. The notes are unchanged.');
+        fail(body.error ?? FAILED_NOTE);
         return;
       }
-      // Done: the notes themselves are the receipt.
-      meetingId = null;
-      show(false);
+      // Done: the notes themselves are the receipt, so the dialog gets out of
+      // the way of the thing the person asked to see.
+      close();
     } catch {
-      if (!superseded()) fail('The tidy-up could not run. The notes are unchanged.');
+      if (!superseded()) fail(FAILED_NOTE);
     } finally {
       inFlight.delete(id);
     }
   }
 
   button.addEventListener('click', () => void run());
-  dismiss.addEventListener('click', () => {
-    meetingId = null;
-    show(false);
+  // No `running()` guard here, and that is deliberate: the button is
+  // `disabled` for exactly that window, and a disabled button dispatches no
+  // click. A guard nothing can reach reads as a promise somebody will later
+  // rely on. The scrim and Escape below are a different case — both are live
+  // while the pass runs, so both are guarded, and both are tested.
+  dismiss.addEventListener('click', () => close());
+  // A scrim press is "Not now" — but only a press on the scrim itself, never
+  // one that started inside the card and happened to end on it.
+  root.addEventListener('click', (ev) => {
+    if (ev.target === root && !running()) close();
   });
+  const onKeydown = (ev: KeyboardEvent): void => {
+    if (root.hidden || ev.key !== 'Escape' || running()) return;
+    ev.preventDefault();
+    close();
+  };
+  document.addEventListener('keydown', onKeydown);
 
   return {
     offer(id) {
       meetingId = id;
-      note.hidden = true;
+      say(null);
       button.disabled = false;
-      button.textContent = 'Tidy up these notes';
-      show(true);
+      dismiss.disabled = false;
+      const active = document.activeElement;
+      returnFocus = active instanceof HTMLElement ? active : null;
+      root.hidden = false;
+      button.focus?.();
     },
     withdraw() {
       // Taken even while a request is in flight. The offer belongs to the
       // meeting that ended; once the next one starts it is gone from the
       // screen at once, and `run` sees itself superseded rather than putting
       // it back.
-      meetingId = null;
-      show(false);
+      close();
     },
     destroy() {
+      document.removeEventListener('keydown', onKeydown);
       root.remove();
     },
   };

@@ -128,15 +128,12 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
   });
   const zone = liveZone;
   scope.onCleanup(() => zone.destroy());
-  // The offer to read the notes once more, when a recording ends. It sits
-  // where the live zone sat — the end of the prose, next to the notes it is
-  // about — and it holds the settle wash open across its request, so the
-  // notes a tidy-up writes highlight like every other note of the meeting.
-  const cleanupOffer = mountMeetingCleanupOffer({
-    docId,
-    parent: editorMount,
-    liveZone: zone,
-  });
+  // The offer to read the notes once more, when a recording ends. A modal
+  // over the notes it is about — never a row in the prose, which is the shape
+  // that left it standing open on docs that had never recorded — and it holds
+  // the settle wash open across its request, so the notes a tidy-up writes
+  // highlight like every other note of the meeting.
+  const cleanupOffer = mountMeetingCleanupOffer({ docId, liveZone: zone });
   scope.onCleanup(() => cleanupOffer.destroy());
   // Nothing here counts the tinted notes any more: the new-content
   // indicator does, off the same editor transaction the margin already
