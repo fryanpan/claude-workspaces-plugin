@@ -217,9 +217,59 @@ export function mountMeetingCleanupOffer(opts: {
   root.addEventListener('click', (ev) => {
     if (ev.target === root && !running()) close();
   });
+  /**
+   * Keep Tab inside the dialog.
+   *
+   * `aria-modal="true"` is a promise to assistive tech and nothing more — it
+   * moves no focus on its own, and `thread-modal.ts` carries the same trap for
+   * the same reason. The window that matters most here is the one while the
+   * pass runs: BOTH answers are disabled then, so there is nothing in the card
+   * to hold the focus and a Tab would land on the prose under the scrim, where
+   * every control is unreachable to the eye and unclosable to the keyboard.
+   *
+   * Bound to `document`, not to the card, so the branch that matters still
+   * fires: focus already outside gets pulled back, which a listener scoped to
+   * the dialog could never see.
+   */
+  const trapTab = (ev: KeyboardEvent): void => {
+    const stops = [dismiss, button].filter((b) => !b.disabled);
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    if (first === undefined || last === undefined) {
+      // Nothing to hold it: the request is on the wire and both answers are
+      // refused. Tab stays where it is rather than leaving.
+      ev.preventDefault();
+      return;
+    }
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !root.contains(active)) {
+      ev.preventDefault();
+      (ev.shiftKey ? last : first).focus();
+      return;
+    }
+    // Anywhere but the two ends the browser's own order is right; only the
+    // edges need turning back.
+    if (ev.shiftKey && active === first) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && active === last) {
+      ev.preventDefault();
+      first.focus();
+    }
+  };
   const onKeydown = (ev: KeyboardEvent): void => {
-    if (root.hidden || ev.key !== 'Escape' || running()) return;
+    if (root.hidden) return;
+    if (ev.key === 'Tab') {
+      trapTab(ev);
+      return;
+    }
+    if (ev.key !== 'Escape' || running()) return;
     ev.preventDefault();
+    // Not `stopPropagation`: the doc chrome's own Escape handler is bound to
+    // `document` too, and stopping propagation does nothing to another
+    // listener on the SAME node. One press must close this and nothing under
+    // it.
+    ev.stopImmediatePropagation();
     close();
   };
   document.addEventListener('keydown', onKeydown);

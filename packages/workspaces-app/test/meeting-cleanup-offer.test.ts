@@ -21,6 +21,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLEANUP_WASH_HOLD_MS, mountMeetingCleanupOffer } from '../src/meeting-cleanup-offer.ts';
 
 let parent: HTMLElement;
+/**
+ * Every mount this file makes, destroyed when the case ends.
+ *
+ * Not hygiene for its own sake: the dialog's Tab trap and its Escape handler
+ * are bound to `document`, so a mount left alive keeps judging keystrokes in
+ * every case that follows — emptying the body detaches its element and leaves
+ * its listeners. A leaked mount made three later cases read the previous
+ * case's dialog.
+ */
+const mounted: { destroy: () => void }[] = [];
 
 beforeEach(() => {
   document.body.innerHTML = '';
@@ -29,6 +39,7 @@ beforeEach(() => {
   history.replaceState(null, '', '/workspaces/w-riverbend/docs/d-ferry');
 });
 afterEach(() => {
+  for (const m of mounted.splice(0)) m.destroy();
   vi.restoreAllMocks();
 });
 
@@ -52,6 +63,17 @@ const noteEl = (): HTMLElement => {
   if (!el) throw new Error('no note');
   return el;
 };
+const tab = (shiftKey = false): KeyboardEvent => {
+  const ev = new KeyboardEvent('keydown', {
+    key: 'Tab',
+    shiftKey,
+    bubbles: true,
+    cancelable: true,
+  });
+  document.dispatchEvent(ev);
+  return ev;
+};
+const shiftTab = (): KeyboardEvent => tab(true);
 const escape = (): void => {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 };
@@ -123,14 +145,17 @@ function deferredFetch(): {
   };
 }
 
-const mount = (fetchImpl: typeof fetch, liveZone?: { holdWash: (ms: number) => void }) =>
-  mountMeetingCleanupOffer({
+const mount = (fetchImpl: typeof fetch, liveZone?: { holdWash: (ms: number) => void }) => {
+  const offer = mountMeetingCleanupOffer({
     docId: 'd-ferry',
     parent,
     fetchImpl,
     // The zone's other members are never reached from here.
     ...(liveZone ? { liveZone: liveZone as never } : {}),
   });
+  mounted.push(offer);
+  return offer;
+};
 
 describe('the tidy-up offer', () => {
   it('shows nothing until a recording has ended', () => {
@@ -184,6 +209,43 @@ describe('the tidy-up offer', () => {
     // Then it comes back: the notes behind it are the receipt.
     f.settle(0, { ok: true, touched: 2 });
     await vi.waitFor(() => expect(offerEl().hidden).toBe(true));
+  });
+
+  it('keeps Tab inside the dialog, including while both answers are refused', async () => {
+    // `aria-modal` moves no focus on its own. Without the trap, Tab lands on
+    // the prose under the scrim — and while the pass runs there is nothing in
+    // the card to hold it at all, because both answers are disabled.
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    expect(document.activeElement).toBe(goEl());
+    // At the last stop, Tab wraps to the first rather than leaving.
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(dismissEl());
+    expect(shiftTab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(goEl());
+    // Focus already outside is pulled back — the branch a card-scoped
+    // listener could never see.
+    outside.focus();
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(dismissEl());
+    // And with the request on the wire, nothing in the card can take it.
+    goEl().click();
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1));
+    outside.focus();
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it('leaves Tab alone once the dialog is closed', () => {
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    mount(stubFetch());
+    outside.focus();
+    expect(tab().defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(outside);
   });
 
   it('closes on Escape and on the scrim, without running anything', () => {
