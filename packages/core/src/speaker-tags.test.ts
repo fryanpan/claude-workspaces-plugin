@@ -88,9 +88,9 @@ describe('a name with markdown in it', () => {
 
   it('renames such a voice, where a raw-bracket tag renamed nothing at all', () => {
     const line = `- ${renderSpeakerTag('B', named)} asked.`;
-    const out = renameSpeakerTags(line, 'B', { B: 'Dave Stillwater' });
+    const out = renameSpeakerTags(line, 'B', { B: 'Dave Proofreader' });
     expect(out.replaced).toBe(1);
-    expect(out.markdown).toBe('- [@Dave Stillwater](speaker:B) asked.');
+    expect(out.markdown).toBe('- [@Dave Proofreader](speaker:B) asked.');
   });
 
   it('leaves an already-canonical escaped tag exactly alone', () => {
@@ -198,10 +198,10 @@ describe('renameSpeakerTags', () => {
     // notes does not say which Alice, so renaming one would have moved the
     // other's words too. The label does say.
     const md = '- [@Alice](speaker:A) proposed it.\n- [@Alice](speaker:B) objected.';
-    const out = renameSpeakerTags(md, 'A', { A: 'Alice Kelpbed', B: 'Alice' });
+    const out = renameSpeakerTags(md, 'A', { A: 'Alice Dispatcher', B: 'Alice' });
     expect(out.replaced).toBe(1);
     expect(out.markdown).toBe(
-      '- [@Alice Kelpbed](speaker:A) proposed it.\n- [@Alice](speaker:B) objected.',
+      '- [@Alice Dispatcher](speaker:A) proposed it.\n- [@Alice](speaker:B) objected.',
     );
   });
 
@@ -458,10 +458,10 @@ describe('reattributeSpeakerTags — the engine changes its mind late', () => {
     expect(out.moved).toBe(1);
     // And the two are still separable afterwards: renaming B alone finds
     // both mentions of B and leaves A's untouched.
-    const renamed = renameSpeakerTags(out.markdown, 'B', { A: 'Alice', B: 'Alice Lighthouse' });
+    const renamed = renameSpeakerTags(out.markdown, 'B', { A: 'Alice', B: 'Alice Timekeeper' });
     expect(renamed.replaced).toBe(2);
     expect(renamed.markdown).toBe(
-      '- [@Alice Lighthouse](speaker:B?t=10) proposed it.\n- [@Alice Lighthouse](speaker:B?t=11) objected.',
+      '- [@Alice Timekeeper](speaker:B?t=10) proposed it.\n- [@Alice Timekeeper](speaker:B?t=11) objected.',
     );
   });
 

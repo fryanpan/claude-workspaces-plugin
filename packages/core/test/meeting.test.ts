@@ -265,7 +265,7 @@ describe('parseMeetingTranscriptEvent — the bot path’s live turn on the doc 
       text: 'So the sync.',
       final: true,
       speaker: 'p7',
-      speakerName: 'Trent Seagrass',
+      speakerName: 'Trent Archivist',
     });
     expect(parseMeetingTranscriptEvent(raw)).toEqual({
       event: 'meeting.transcript',
@@ -275,7 +275,7 @@ describe('parseMeetingTranscriptEvent — the bot path’s live turn on the doc 
       text: 'So the sync.',
       final: true,
       speaker: 'p7',
-      speakerName: 'Trent Seagrass',
+      speakerName: 'Trent Archivist',
     });
   });
 
@@ -306,8 +306,8 @@ describe('the participant on the start frame', () => {
     );
 
   it('carries the signed-in name, trimmed and bounded, and drops an empty one', () => {
-    expect(start({ participant: '  Mallory Saltmarsh ' })).toMatchObject({
-      participant: 'Mallory Saltmarsh',
+    expect(start({ participant: '  Mallory Cartographer ' })).toMatchObject({
+      participant: 'Mallory Cartographer',
     });
     expect(start({ participant: '   ' })).not.toHaveProperty('participant');
     expect(start({ participant: 42 })).not.toHaveProperty('participant');

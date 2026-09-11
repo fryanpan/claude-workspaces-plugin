@@ -82,7 +82,7 @@ describe('speaker namespacing', () => {
     const remote = namespacedSpeaker('system', 'A');
     const room = namespacedSpeaker('mic', 'B');
     expect(speakerDisplayName(remote, { [remote]: 'Eve' })).toBe('Eve');
-    expect(speakerDisplayName(room, { [room]: 'Trent Seagrass' })).toBe('Trent Seagrass');
+    expect(speakerDisplayName(room, { [room]: 'Trent Archivist' })).toBe('Trent Archivist');
   });
 
   it('renders a name already saved with the old group suffix clean', () => {

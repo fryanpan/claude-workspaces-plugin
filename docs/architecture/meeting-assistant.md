@@ -506,13 +506,13 @@ one.
 
 **Names, not labels.** The pipeline's `speaker` is an opaque LABEL that
 `speakerDisplayName` renders as "Speaker A" until a person names it. Putting
-"Trent Seagrass" in that field directly would render "Speaker Trent Seagrass"
+"Trent Archivist" in that field directly would render "Speaker Trent Archivist"
 everywhere. So a bot meeting synthesises a label per participant (`p7`) and
 NAMES it immediately with the platform's name — which means the record's name
 map, the composer's display logic and the retroactive-rename machinery all
 work unchanged, and a person can still correct a name the platform got wrong.
 Two participants with the same display name are disambiguated at that seam
-("Alice Lighthouse (2)"), because composed notes carry no per-mention attribution and
+("Alice Timekeeper (2)"), because composed notes carry no per-mention attribution and
 the notes session correctly REFUSES to rewrite a name that means two voices.
 
 **Turn numbers are invented here.** AssemblyAI's own stream carries
@@ -1341,7 +1341,7 @@ times and assert all three survive.
 
 Renaming an already-given name works the same way, because the rewrite reads
 the OLD DISPLAY NAME (what the composer actually wrote), not the raw label —
-"Mallory" → "Mallory Saltmarsh" replaces "Mallory".
+"Mallory" → "Mallory Cartographer" replaces "Mallory".
 
 **Two voices with the same name narrow the rewrite, they no longer refuse
 it.** Display text used to be the only handle the notes gave, so if both A
@@ -1427,9 +1427,9 @@ invented for this would have been lost on the first flush.
   in place, marks preserved — which is what makes two voices called Alice
   separable where the display-text sweep could not tell them apart. It runs
   AFTER the untagged sweep, and that order is load-bearing: an extension
-  rename ("Mallory" → "Mallory Saltmarsh") leaves the old name inside the new one, so a
-  sweep running second would find "Mallory" inside the "@Mallory Saltmarsh" the retag
-  had just written and make it "@Mallory Saltmarsh Raman". Sweeping first, the retag
+  rename ("Mallory" → "Mallory Cartographer") leaves the old name inside the new one, so a
+  sweep running second would find "Mallory" inside the "@Mallory Cartographer" the retag
+  had just written and make it "@Mallory Cartographer Raman". Sweeping first, the retag
   that follows canonicalises every tag for the voice and finds most of them
   already right. Contiguous delta ops sharing the tag's href are coalesced
   into one run before replacement, because a tag with an inner mark — half
