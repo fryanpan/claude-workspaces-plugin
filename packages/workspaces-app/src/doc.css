@@ -1180,6 +1180,23 @@ body.has-set .doc-switcher-caret {
   }
 }
 
+/* Record and its chevron, as one rigid box on the top bar.
+
+   It sits BESIDE `.toolbar`, not inside it, and that is the whole point:
+   below 1100px the toolbar is a horizontal scroll container (see the phone
+   block in styles.css), so a Record button parked at its end scrolled out of
+   the viewport — measured at 430px the chevron's right edge landed at 434
+   against a 430px window, with nothing on screen to say the bar scrolled.
+   As a sibling the pair is rigid (`flex: 0 0 auto`) and the toolbar is the
+   side that yields, which is what that block already asks of it. */
+.meeting-record-dock {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  /* The gap between the pill and its chevron — they read as one control, so
+     it is tighter than anything the bar puts between separate ones. */
+  gap: 2px;
+}
 .meeting-record {
   flex: none;
   display: inline-flex;
@@ -1188,7 +1205,6 @@ body.has-set .doc-switcher-caret {
   /* design-mobile.md tap-target floor; it is a real control on a phone. */
   min-height: 36px;
   padding: 0 11px;
-  margin-left: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--bg);
@@ -1245,6 +1261,17 @@ body.has-set .doc-switcher-caret {
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
+}
+/* `display: inline-flex` above out-specifies the UA's `[hidden]` rule, so the
+   chevron the strip hides while a meeting runs went on being DRAWN — and
+   tapped: at 430px it sat at the right edge of the bar through a live
+   recording and opened the start chooser, whose one verb is Start Recording.
+   That is the "the menu offers Start, not Stop" the phone report found. The
+   strip already hides it (`options.hidden = popForNow() !== 'chooser'`); this
+   is what makes hiding it mean anything. Same rule, same reason, as
+   `.meeting-strip[hidden]` below. */
+.meeting-record-options[hidden] {
+  display: none;
 }
 .meeting-record-options svg {
   width: 14px;
@@ -2223,17 +2250,22 @@ body.has-set .doc-switcher-caret {
      toolbar, and the crumb beside it paid for it (see the topbar phone block).
      The red dot and red border still say "recording", and the strip that
      opens under the bar says it in words. */
+  /* Both of these used to shave width to buy the toolbar room, because they
+     were INSIDE it: the pill dropped to a 34px box and the chevron to 28.
+     The dock sits outside that scroll container now, so both can keep the
+     36px design-mobile.md asks of a control a thumb has to hit. */
   .meeting-record {
+    min-width: 36px;
+    justify-content: center;
     padding: 0 9px;
     font-size: 12px;
-    margin-left: 2px;
     gap: 0;
   }
   .meeting-record-label {
     display: none;
   }
   .meeting-record-options {
-    min-width: 28px;
+    min-width: 36px;
     padding: 0 4px;
   }
   .meeting-strip {
