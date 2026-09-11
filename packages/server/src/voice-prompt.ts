@@ -398,7 +398,7 @@ export function buildVoicePrompt(
     tasks: Array<{ id: string; title: string; status: string; needs?: string }>;
     docIds: string[];
     /** Doc labels by id. A model that can only see ids cannot match "the
-     *  Akash review doc" to anything; with titles it can. */
+     *  Cairn review doc" to anything; with titles it can. */
     docTitles?: Record<string, string>;
   },
   transcript: string,
