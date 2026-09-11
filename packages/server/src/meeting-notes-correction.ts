@@ -446,6 +446,11 @@ function proposeOnHumanNote(
       Y.createRelativePositionFromTypeIndex(site.node, site.offset + wrongLength),
     ),
     replacement: right,
+    // Plain text, not markdown — the same reason `reviseInPlace` gives:
+    // `right` is words somebody said, and an asterisk in a transcript must
+    // not italicise half a note. A proposal parses by default, so this one
+    // opts out.
+    parseInlineMarks: false,
     author: NOTES_SUGGESTION_AUTHOR,
   });
   return res.ok ? { applied: 'suggested' } : { applied: 'none', reason: 'unsuggestable' };
