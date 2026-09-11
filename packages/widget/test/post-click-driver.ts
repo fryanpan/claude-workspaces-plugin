@@ -194,13 +194,28 @@ async function drive(cdp: Cdp, dir: string, bundle: string, c: Case): Promise<Re
     await sleep(180);
   };
 
-  const snippet = (): Promise<string | null> =>
-    cdp.evaluate(`${SHADOW}.querySelector('.composer-snippet')?.textContent ?? null`) as Promise<
-      string | null
-    >;
+  /**
+   * What the open composer is about, or null when none is open.
+   *
+   * The card in the margin quotes it; the phone panel does not (one row, by
+   * the owner's call of 2026-09-11), so the picker's own outline is what names
+   * the subject there — and it is read from the widget's chrome as well as the
+   * page, because "the composer opened about the Post button" is exactly the
+   * fingerprint these cases exist to catch.
+   */
+  const SUBJECT = `(() => {
+      const sr = ${SHADOW};
+      if (!sr.querySelector('.composer')) return null;
+      const quote = sr.querySelector('.composer-snippet');
+      if (quote) return quote.textContent;
+      const lit = (root) => [...root.querySelectorAll('*')].find((e) => /solid/.test(e.style.outline));
+      const o = lit(document) ?? lit(sr);
+      return o ? (o.textContent ?? '').trim().slice(0, 40) : null;
+    })()`;
+  const snippet = (): Promise<string | null> => cdp.evaluate(SUBJECT) as Promise<string | null>;
   const reading = (): Promise<PressReading> =>
     cdp.evaluate(`({
-      snippet: ${SHADOW}.querySelector('.composer-snippet')?.textContent ?? null,
+      snippet: ${SUBJECT},
       left: ${SHADOW}.querySelector('.composer')?.style.left ?? null,
       top: ${SHADOW}.querySelector('.composer')?.style.top ?? null,
       posts: window.__posts,

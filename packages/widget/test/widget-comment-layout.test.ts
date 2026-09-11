@@ -12,10 +12,9 @@
  *   sat over the page's title. It is a compact panel along the bottom, and
  *   the page behind holds still.
  * - With a finger, focus dropped back to the page after a tap on a plain
- *   element, so typing went nowhere. A mouse kept it, and the happy-dom suite
- *   fires a bare `pointerup`, which is why nothing caught it.
- * - Done left an empty composer on screen with the mode off.
- * - A mouse hovering in the mode showed no outline.
+ *   element, so typing went nowhere — a bare `pointerup` cannot see it.
+ * - Done left an empty composer on screen with the mode off, and a mouse
+ *   hovering in the mode showed no outline.
  *
  * Every one of those is about layout or about the browser's own event
  * sequence, which happy-dom does not have. `comment-layout-driver.ts` loads
@@ -83,18 +82,23 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
   }, SUITE_MS);
 
   describe('at 1180, the composer is a card in the right margin', () => {
-    it('puts the resting card away on Cancel, so the corner it stood over can be tapped', () => {
-      // A finger has no Esc. Cancel used to open the same card again where it
-      // stood, so a link under it could not be reached at all.
+    it('opens no box until something is picked', () => {
+      // Round 3 rested the mode in a composer about the whole page. The
+      // owner's verdict (2026-09-11): "a comment input appears before I've
+      // even selected anything. That's wrong."
       const e = look(1180, 'entered');
-      expect(
-        overlap(box(e.card), box(e.el.acct)),
-        'CONTROL: the resting card stands over the link',
-      ).toBeGreaterThan(0);
-      const l = look(1180, 'restCancelled');
-      expect(l.mode, 'Cancel must not leave the mode').toBe(true);
-      expect(l.card).toBeNull();
-      expect(look(1180, 'onAcct').snippet).toBe('Account');
+      expect(e.banner, 'CONTROL: the mode is on and says so').not.toBeNull();
+      expect(e.card, 'nothing to type into before an element is picked').toBeNull();
+      expect(look(1180, 'onAcct').snippet, 'and the tap is what opens one').toBe('Account');
+    });
+
+    it('takes the thread list out of the way while the mode is on', () => {
+      // "Hide the feedback history … when I've entered comment mode"
+      // (owner, 2026-09-11).
+      expect(look(1180, 'idle').list, 'CONTROL: the list is there before').not.toBeNull();
+      expect(look(1180, 'entered').list, 'the list steps aside in the mode').toBeNull();
+      expect(look(1180, 'done').list, 'and comes back when the mode ends').not.toBeNull();
+      expect(look(430, 'entered').list, 'at either width').toBeNull();
     });
 
     it('comments on a link rather than following it', () => {
@@ -110,7 +114,7 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
     it('sizes its field at 16px, so iPad Safari does not zoom the page when it takes focus', () => {
       // A zoom on focus moves the visual viewport the card is placed in.
       for (const [width, name] of [
-        [1180, 'entered'],
+        [1180, 'onAcct'],
         [1180, 'onNarrow'],
         [430, 'onLow'],
       ] as const) {
@@ -171,12 +175,10 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(saved.box[0]).toBe(box(before.card)[0]);
       expect(overlap(saved.box, box(l.el.narrow))).toBe(0);
       expect(l.lines.some(([, , x2]) => x2 === saved.box[0])).toBe(true);
-      // And the mode rests again in an empty, focused card that the saved one
-      // does not sit on.
-      expect(l.snippet).toBe('About this page');
-      expect(l.draft).toBe('');
-      expect(l.focus).toBe('TEXTAREA');
-      expect(overlap(saved.box, l.card)).toBe(0);
+      // And nothing is left open over the page: the mode is still on, with no
+      // box until the next element is picked.
+      expect(l.mode).toBe(true);
+      expect(l.card).toBeNull();
     });
 
     it('stacks a second saved card below the first rather than over it', () => {
@@ -184,7 +186,7 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(l.posts).toHaveLength(2);
       expect(l.posts[1]).toMatch(/^the timetable is missing Sunday/);
       expect(l.saves, 'CONTROL: both saved cards are still up').toHaveLength(2);
-      const cards = [...l.saves, box(l.card)];
+      const cards = [...l.saves];
       for (const [i, a] of cards.entries()) {
         for (const b of cards.slice(i + 1)) expect(overlap(a, b), 'two cards overlap').toBe(0);
       }
@@ -200,7 +202,9 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
 
     it('leaves focus in the field when a finger lands on a saved card', () => {
       const l = look(1180, 'savedTapped');
-      expect(look(1180, 'posted2').focus, 'CONTROL: the field had focus before').toBe('TEXTAREA');
+      expect(look(1180, 'reopenedNarrow').focus, 'CONTROL: the field had focus before').toBe(
+        'TEXTAREA',
+      );
       expect(l.saves.length, 'CONTROL: a saved card was there to tap').toBeGreaterThan(0);
       expect(l.focus).toBe('TEXTAREA');
     });
@@ -276,7 +280,7 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       // screen, and was clamped back on top of it.
       for (const [name, count] of [
         ['lowOpen', 2],
-        ['lowTwice', 3],
+        ['lowTwice', 2],
       ] as const) {
         const l = look(1180, name);
         expect(box(l.el.low)[1], `CONTROL: ${name}'s element is low on the screen`).toBeGreaterThan(
@@ -297,7 +301,7 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
 
     it('keeps a typed draft through Done, Esc and X, and gives it back on that element', () => {
       expect(look(1180, 'done').card, 'CONTROL: Done took the card off screen').toBeNull();
-      expect(look(1180, 'reentered').draft, 'the resting card is about the page').toBe('');
+      expect(look(1180, 'reentered').card, 'the mode opens with nothing to type into').toBeNull();
       expect(look(1180, 'reopened').draft).toBe('Riverbend stop shelter');
       expect(look(1180, 'escaped').card, 'CONTROL: Esc closed the card').toBeNull();
       expect(look(1180, 'reopenedEsc').draft).toBe('Riverbend stop shelter');
@@ -330,21 +334,14 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(back.draft).toBe('Ferry note');
     });
 
-    it('keeps the words typed in the resting card when a tap opens an element with its own', () => {
-      const l = look(1180, 'fromRest');
-      expect(l.snippet, 'CONTROL: the card moved').toBe('The full timetable, across the page');
-      expect(l.draft).toBe('Timetable note');
-      const back = look(1180, 'restBack');
-      expect(back.snippet, 'CONTROL: the resting card is about the page').toBe('About this page');
-      expect(back.draft).toBe('About the day');
-    });
-
     it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {
       const p = look(1180, 'portrait');
       expect(p.mode).toBe(true);
       expect([box(p.card)[0], box(p.card)[2], box(p.card)[3]]).toEqual([0, 820, 1180]);
       expect(p.draft).toBe('Riverbend stop shelter');
-      expect(p.snippet).toBe('The full timetable, across the page');
+      // The phone face names no element in the panel; the outline on the
+      // element is what says which one the words are about.
+      expect(p.snippet).toBeNull();
       expect(p.outlined).toBe('wide');
       const l = look(1180, 'landscape');
       expect(box(l.card)[2]).toBe(1180 - 16);
@@ -413,47 +410,51 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(overlap(box(l.card), l.el.low), 'the panel grew over the element').toBe(0);
     });
 
-    it('offers Done on the panel, which steps away and keeps the draft for that element', () => {
-      // The prompt's Done and the FAB fold away while the panel is up, and
-      // Cancel throws the words out: there was no way to leave and keep them.
+    it('is one row — no "on <element>" line, no Done, and a Cancel smaller than Post', () => {
+      // The owner counted the rows a phone comment cost (2026-09-11): the "on
+      // <element>" line and Done are "unnecessary context", and "the Cancel
+      // button can also be smaller".
       const l = look(430, 'onLow');
-      const done = box(l.done);
       const post = box(l.post);
-      // A row above Post and a column off it — never beside it, where the two
-      // read as one button and Done would take the comment with it.
-      expect(done[3]).toBeLessThanOrEqual(post[1]);
-      expect(done[2]).toBeLessThanOrEqual(post[0]);
-      const away = look(430, 'phoneAway');
-      expect(away.mode).toBe(false);
-      expect(away.card).toBeNull();
-      expect(away.fab, 'the way back into the mode').toBe(true);
-      const typed = look(430, 'grown').draft ?? '';
-      expect(typed.length, 'CONTROL: there were words to keep').toBeGreaterThan(0);
-      const back = look(430, 'phoneBack');
-      expect(back.snippet, 'CONTROL: the panel opened on the same element').toBe('Parking');
-      expect(back.draft).toBe(typed);
+      const cancel = box(l.cancel);
+      expect(l.card, 'CONTROL: the panel is up').not.toBeNull();
+      expect(l.snippet, 'no "on <element>" line').toBeNull();
+      expect(l.done, 'no Done beside Post').toBeNull();
+      // Smaller means icon-sized: narrower than the margin card's labelled
+      // pill, and a sliver of the row rather than a second wide button —
+      // while keeping the 44px tap floor. Not Cancel against Post: the two
+      // glyphs size within a couple of pixels and which wins is the runner's
+      // fonts, not the design (CI read 46 against 44).
+      const w = (b: Box): number => b[2] - b[0];
+      expect(w(cancel), 'narrower than the margin card one').toBeLessThan(
+        w(box(look(1180, 'onNarrow').cancel)),
+      );
+      expect(w(cancel), 'and a sliver of the row').toBeLessThan(w(box(l.card)) / 4);
+      expect(cancel[3] - cancel[1], 'and still a 44px target').toBeGreaterThanOrEqual(44);
+      expect(cancel[1]).toBeLessThan(post[3]);
+      expect(post[1]).toBeLessThan(cancel[3]);
+      expect(cancel[2]).toBeLessThanOrEqual(post[0]);
     });
 
-    it('keeps the panel a tap opens, though the click after it lands where it stands', () => {
-      // The panel opens on the pointerup, and a finger's click follows it,
-      // hit-tested where the finger was: on the panel's Cancel, which closed
-      // the panel as it opened. On a link, the link is not followed either.
-      const l = look(430, 'onFare');
-      expect(l.scrollY, 'CONTROL: the tap opened a panel, which nudged the page').toBeGreaterThan(
-        0,
-      );
-      expect(l.card, "the tap's own click closed the panel").not.toBeNull();
-      expect(l.snippet).toBe('Fares');
-      const a = box(l.el.fare);
-      // Where the finger was: the link's middle before the nudge scrolled it.
-      const [x, y] = [(a[0] + a[2]) / 2, (a[1] + a[3]) / 2 + l.scrollY];
-      const c = box(l.card);
-      expect(
-        c[0] <= x && x <= c[2] && c[1] <= y && y <= c[3],
-        'CONTROL: the panel stands where the finger was',
-      ).toBe(true);
+    it('Cancel keeps the mode, and the prompt comes back', () => {
+      const l = look(430, 'cancelled');
+      const words = look(430, 'grown').draft?.length ?? 0;
+      expect(words, 'CONTROL: there were words to throw away').toBeGreaterThan(0);
       expect(l.mode).toBe(true);
-      expect(l.hash).toBe('');
+      expect(l.card).toBeNull();
+      expect(l.banner, 'the prompt is back').not.toBeNull();
+    });
+
+    it('keeps the panel a tap on a link opens, and does not follow the link', () => {
+      // The panel opens on the pointerup, and a finger's click follows it,
+      // hit-tested where the finger was — which used to close the panel as it
+      // opened, and on a link used to leave the page with the drafts on it.
+      const l = look(430, 'onFare');
+      expect(l.el.fare, 'CONTROL: the link the finger landed on is on screen').not.toBeNull();
+      expect(l.card, "the tap's own click closed the panel").not.toBeNull();
+      expect(l.draft, 'CONTROL: an empty field, so the panel is the one just opened').toBe('');
+      expect(l.mode).toBe(true);
+      expect(l.hash, 'the link was followed, taking the mode with it').toBe('');
     });
 
     it('goes back to its prompt with a tick after a post, still in the mode', () => {

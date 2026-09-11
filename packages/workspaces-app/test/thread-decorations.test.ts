@@ -1,6 +1,9 @@
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { describe, expect, it } from 'vitest';
+import { Awareness } from 'y-protocols/awareness';
+import * as Y from 'yjs';
+import { createEditor } from '../src/editor.ts';
 import {
   ThreadDecorations,
   setThreadDecorations,
@@ -208,6 +211,78 @@ describe('inline comment cards', () => {
     expect(cls('q')).toBe('thread-range question is-new');
     expect(cls('a')).toBe('thread-range answered');
     expect(cls('c')).toBe('thread-range');
+    editor.destroy();
+  });
+});
+
+/**
+ * The words a comment is being WRITTEN about, before there is a thread.
+ *
+ * On a doc the composer takes the caret, and with it the editor's selection —
+ * on iOS the moment the box opens. The owner, 2026-09-11: "the area we're
+ * commenting on does get scrolled up into view properly, but it's no longer
+ * highlighted, so I can't tell what I had selected for commenting."
+ */
+describe('the pending comment range', () => {
+  const CONTENT = '<p>Hello brave world</p>';
+  const pending = (editor: Editor): string => {
+    const found = threadDecorationsKey
+      .getState(editor.state)
+      ?.deco.find()
+      .find(
+        (d) =>
+          (d as unknown as { type?: { attrs?: Record<string, string> } }).type?.attrs?.class ===
+          'comment-pending',
+      );
+    return found ? editor.state.doc.textBetween(found.from, found.to) : '';
+  };
+
+  it('marks the range while the comment is open, and clears on null', () => {
+    const editor = mount(CONTENT);
+    expect(pending(editor), 'CONTROL: nothing is marked before a comment is started').toBe('');
+    setThreadDecorations(editor.view, { pending: { from: 7, to: 12 } });
+    expect(pending(editor)).toBe('brave');
+    setThreadDecorations(editor.view, { pending: null });
+    expect(pending(editor)).toBe('');
+    editor.destroy();
+  });
+
+  it('stays on its words while the doc is edited around it', () => {
+    // The composer is open for as long as it takes to type a comment, and a
+    // collaborator can be editing the whole time.
+    const editor = mount(CONTENT);
+    setThreadDecorations(editor.view, { pending: { from: 7, to: 12 } });
+    editor.chain().focus().insertContentAt(1, 'Oh! ').run();
+    expect(pending(editor)).toBe('brave');
+    editor.destroy();
+  });
+
+  it('is what the markdown surface marks when the doc asks it to', () => {
+    // The plugin above is driven by `setThreadDecorations`; what the composer
+    // actually calls is `markPending` on the surface. Without this the two
+    // halves could pass separately while the doc editor marked nothing.
+    const ydoc = new Y.Doc();
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const handle = createEditor({ parent, ydoc, awareness: new Awareness(ydoc) });
+    handle.setMarkdown('Hello brave world');
+    expect(pending(handle.editor), 'CONTROL: nothing marked yet').toBe('');
+    handle.markPending({ from: 7, to: 12 });
+    expect(pending(handle.editor)).toBe('brave');
+    handle.markPending(null);
+    expect(pending(handle.editor)).toBe('');
+    handle.destroy();
+    parent.remove();
+  });
+
+  it('survives an unrelated decoration update', () => {
+    // Threads repaint constantly — every Yjs update lands a fresh `ranges`.
+    const editor = mount(CONTENT);
+    setThreadDecorations(editor.view, { pending: { from: 7, to: 12 } });
+    setThreadDecorations(editor.view, {
+      ranges: [{ id: 't1', from: 1, to: 6, status: 'open' }],
+    });
+    expect(pending(editor)).toBe('brave');
     editor.destroy();
   });
 });
