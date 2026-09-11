@@ -466,15 +466,22 @@ export class MeetingStore {
     // This recording's ordinal on the doc: the `## Segment N` it will be
     // written under and the number its audio files carry. Counted before
     // this meeting's own index line lands.
-    const segment = listMeetings(dataDir, docId).length + 1;
+    const held = listMeetings(dataDir, docId);
+    const segment = held.length + 1;
     // Two meetings on one doc cannot overlap, but they CAN be a millisecond
     // apart — stop, then start again — and the id is derived from that
     // millisecond. Without this the second meeting APPENDS to the first
     // one's transcript, which reads as one long meeting and is not something
     // an append-only file can be talked out of afterwards.
+    //
+    // The INDEX is asked as well as the transcript file, because a project
+    // that keeps no transcripts writes no file for the second meeting to
+    // collide with — and two index lines under one id fold into one meeting,
+    // which loses the earlier one entirely.
+    const taken = new Set(held.map((m) => m.meetingId));
     let meetingId = meetingIdFor(docId, startedAt);
     let transcriptPath = meetingTranscriptPath(dataDir, docId, meetingId);
-    for (let n = 2; existsSync(transcriptPath); n++) {
+    for (let n = 2; taken.has(meetingId) || existsSync(transcriptPath); n++) {
       meetingId = `${meetingIdFor(docId, startedAt)}-${n}`;
       transcriptPath = meetingTranscriptPath(dataDir, docId, meetingId);
     }

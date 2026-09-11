@@ -27,6 +27,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { maybeCompress, maybeNotModified } from './compress.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
+import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { taskDeepLink } from './home-brief.ts';
@@ -35,6 +36,7 @@ import { spokenReviewComment } from './huddle.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
+import { meetingFilingFor } from './meeting-home.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
@@ -379,6 +381,29 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const path = docStore.boundPathOf(docId);
       const title = docStore.peekMeta(docId)?.title;
       return { ...(path ? { path } : {}), ...(title ? { title } : {}) };
+    },
+    /**
+     * What the doc's project keeps, asked once as each meeting starts.
+     *
+     * The PROJECT's answer, found two ways because a meeting reaches its
+     * project by two roads: the filing record names it for a meeting this
+     * server opened, and the doc's own identity key names it for a recording
+     * made over an ordinary bound project file. Neither, and the meeting
+     * keeps everything — the default a project that has never been asked has
+     * always had.
+     *
+     * The project's CURRENT choice rather than the one stamped on the filing:
+     * a project that turned transcripts off means the meeting starting now,
+     * and a snapshot taken the day the doc was created would keep writing
+     * words it has since said it does not want.
+     */
+    retention: (docId) => {
+      const filed = meetingFilingFor(dataDir, docId)?.repoKey;
+      const own = docStore.repos.primaryKeyFor(docId);
+      const repoKey = filed ?? (own ? parseDocKey(own)?.repoKey : undefined);
+      return (
+        (repoKey ? mountStore.meetingsOf(repoKey)?.retention : undefined) ?? 'transcripts-and-audio'
+      );
     },
   });
   const meetingRelay = new MeetingRelay({

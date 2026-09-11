@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import {
   MEETING_RETENTIONS,
@@ -316,6 +317,15 @@ export async function handleMountRoutes(
     // folder, and a folder nobody mounted gives its files no address, so the
     // Library would list a meeting it could not open.
     const folderAbs = join(at.checkoutRoot, relPath);
+    // Created here rather than at the first meeting: mounting refuses a path
+    // that is not a directory, so a folder that does not exist yet would be
+    // recorded with no address and the Library would list meetings it could
+    // not open — the one failure this route exists to prevent.
+    try {
+      mkdirSync(folderAbs, { recursive: true });
+    } catch (err) {
+      return j(400, { error: 'meetings folder could not be created', detail: String(err) });
+    }
     const mounted = mounts.mount(folderAbs);
     const gitignoreResult = applyMeetingGitignore(folderAbs, gitignore);
     return j(200, {
