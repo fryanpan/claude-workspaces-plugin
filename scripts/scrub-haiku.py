@@ -399,11 +399,17 @@ def call_haiku(diff_content: str) -> "int | Unavailable":
             "Transient. Try the push again.",
         )
 
-    if not isinstance(data, dict):
-        return Unavailable(UNREACHABLE, "The API returned JSON that is not an object.")
-    content = data.get("content") or []
-    if not content:
-        return Unavailable(UNREACHABLE, "The API returned a reply with no content.")
+    # Every step of the shape is checked before it is indexed. Valid JSON in
+    # the wrong shape — `{"content": "..."}` from a gateway, `{"content":
+    # [null]}` — would otherwise raise out of here as a traceback, which is
+    # neither of the two answers this tool is allowed to give and says nothing
+    # a person can act on.
+    content = data.get("content") if isinstance(data, dict) else None
+    if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+        return Unavailable(
+            UNREACHABLE,
+            "The API's reply was not in a shape this tool can read.",
+        )
 
     text = str(content[0].get("text", "")).strip()
 

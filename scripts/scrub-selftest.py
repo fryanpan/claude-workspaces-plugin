@@ -607,6 +607,9 @@ HAIKU_STUB_REPLIES = {
     # A 200 that is not JSON at all — a captive portal or a proxy page. The
     # old code called this a setup error and let the push through.
     "/garbage": (200, "<html>a proxy answered instead</html>"),
+    # And valid JSON in the wrong shape, which is the harder half: it parses,
+    # so it reaches the code that indexes it.
+    "/wrong-shape": (200, json.dumps({"content": "a gateway wrote a string"})),
 }
 
 
@@ -743,6 +746,15 @@ def check_haiku_unavailable() -> None:
         expect("haiku: a reply that will not parse is unreachable, not clean",
                0 if r.returncode == 1 and "could not run — unreachable" in r.stderr else 1,
                0, f"exit {r.returncode}\n{r.stderr}")
+
+        # Valid JSON in a shape this tool cannot read has to reach the same
+        # answer as unparseable bytes, not raise out as a traceback.
+        r = run_haiku(f"{stub}/wrong-shape", "block-all")
+        expect("haiku: a reply that parses but has the wrong shape is unreachable",
+               0 if r.returncode == 1 and "could not run — unreachable" in r.stderr else 1,
+               0, f"exit {r.returncode}\n{r.stderr}")
+        expect("haiku: ...and says so rather than raising",
+               0 if "Traceback" not in r.stderr else 1, 0, r.stderr)
 
         # End to end for the OTHER way a key can be absent: present, sent, and
         # refused. It has to reach the same case as having no key at all.
