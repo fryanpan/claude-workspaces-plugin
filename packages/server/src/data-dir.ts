@@ -39,3 +39,17 @@ export function resolveDataDir(env: Record<string, string | undefined>, repoRoot
   if (explicit) return explicit;
   return join(repoRoot, 'data');
 }
+
+/**
+ * The data dir a server started with `argv` will use: `--data-dir` beats the
+ * resolver. One copy, because `bin.ts` needs it before the rest of the
+ * config resolves — to record its own start first — and a second spelling
+ * of this precedence is how two readers end up in different directories.
+ */
+export function dataDirFromArgs(
+  env: Record<string, string | undefined>,
+  repoRoot: string,
+  arg: (name: string) => string | undefined,
+): string {
+  return arg('data-dir') ?? resolveDataDir(env, repoRoot);
+}

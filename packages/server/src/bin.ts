@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
 import { installLogSquelch } from './log-squelch.ts';
@@ -31,6 +32,12 @@ function arg(name: string, fallback?: string): string | undefined {
   if (eq) return eq.slice(`--${name}=`.length);
   return fallback;
 }
+
+// Every start leaves a record, so the daily health check can count the ones
+// no deploy, watchdog or reboot explains. Written first — before the config
+// resolves, before the port — because a boot that dies early is exactly the
+// one to count.
+const thisStart = recordThisServerStart(dataDirFromArgs(process.env, repoRoot, arg));
 
 const cfg = resolveServerConfig({ env: process.env, repoRoot, arg });
 const {
@@ -77,11 +84,6 @@ const {
   stallEscalateMs,
   keepMovingCadenceMs,
 } = cfg;
-
-// Every start leaves a record, so the daily health check can count the ones
-// no deploy, watchdog or reboot explains. Written now rather than once
-// serving: a boot that crashes before the port is exactly the one to count.
-const thisStart = recordThisServerStart(dataDir);
 
 if (sentryServerDsn) {
   await initServerSentry({
