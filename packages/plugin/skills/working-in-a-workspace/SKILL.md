@@ -217,6 +217,7 @@ the item already answers.
 - Each resource (task, workspace, document, mockup, folder diff) has a unique identifier and URL.
 - When you share links in a workspace, use relative URLs and make them inline using appropriate link text instead of the Raw URL
   - e.g. `[this link](/workspaces/<workspaceId>/docs/board-skill-one-row-per-pass?thread=nsk4yl4m6sqn)`
+- A task's page is `[this task](/workspaces/<workspaceId>?task=<taskId>)`. The `/tasks/<taskId>` path form is an API address, not a page — the server redirects it to the page form, so a link written that way still opens, but write the query form.
 - In terminal chat, send the absolute URL bare on its own line, with no markdown around it — autolinkers mangle a wrapped URL.
 - Link the thing under review, not the workspace: hand over the `reviewUrl` / `entryUrl` the tool returned, rewriting only the host to the Tailscale name. Link the workspace only when the workspace itself is the subject.
 - A workspace URL is not a durable address — the embedded workspace id dies when the workspace is recreated. Durable artifacts (committed docs, exports, anything sent onward) cite repo paths or GitHub URLs; live chat, thread replies, and hand-offs use the URL, because it is being clicked now.

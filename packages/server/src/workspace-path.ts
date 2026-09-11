@@ -127,7 +127,22 @@ export const BOARD_PAGE_RESOURCE_PATH = new RegExp(
 );
 
 /**
- * Is this request asking for one of the board's HTML pages?
+ * The collections whose `<collection>/<id>` address is a BROWSER's without
+ * being a page the shell renders: a bare `tasks/<taskId>` is answered with a
+ * redirect to `/workspaces/<ws>?task=<taskId>`, by `routes/task-page.ts`.
+ *
+ * A list of its own rather than a sixth entry in `BOARD_PAGE_RESOURCES`,
+ * because the two lists are read for different things: that one is what
+ * `routes/shell-static.ts` serves a shell for, and serving a shell at
+ * `tasks/<id>` would paint an empty page. What both share is the question the
+ * predicate below answers — is a person on the other end of this GET — and so
+ * both belong to it.
+ */
+const BOARD_REDIRECT_RESOURCES: readonly string[] = ['tasks'];
+
+/**
+ * Is this request a BROWSER's — one of the board's HTML pages, or the task
+ * address that redirects to one?
  *
  * ONE list, read by both the thing that serves those pages
  * (`routes/shell-static.ts`, through the two exported matchers above) and
@@ -151,7 +166,12 @@ export function isBoardPageRequest(method: string, rest: string, url: URL): bool
   if (cut === -1) return false;
   const kind = rest.slice(0, cut);
   const id = rest.slice(cut + 1);
-  return !id.includes('/') && id !== '' && BOARD_PAGE_RESOURCES.includes(kind);
+  if (id.includes('/') || id === '') return false;
+  // A page the shell renders, or the one address that redirects to a page.
+  // Both are a person asking, which is the whole of what this answers: the
+  // scope middleware passes them over, and a refusal is rendered rather than
+  // serialised.
+  return BOARD_PAGE_RESOURCES.includes(kind) || BOARD_REDIRECT_RESOURCES.includes(kind);
 }
 
 /**

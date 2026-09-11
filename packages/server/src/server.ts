@@ -108,6 +108,7 @@ import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
 import { createShellStatic } from './routes/shell-static.ts';
 import { handleStaleClient } from './routes/stale-client.ts';
+import { handleTaskPageRoutes } from './routes/task-page.ts';
 import {
   type TaskRoutesContext,
   handleDispatchAndNoteRoutes,
@@ -166,8 +167,9 @@ import {
   HTML_SHELL_HEADERS,
   appCacheControl,
   readAppAssetManifest,
+  renderBoardMemberNotFound,
+  renderBoardNotFound,
   renderBoardShell,
-  renderReviewNotFound,
   renderSigninShell,
   serveStaticUnder,
 } from './shells.ts';
@@ -2303,13 +2305,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
             workspaceRecord: (id: string) => taskStore.getWorkspace(id),
             workspacesOfMember,
             j,
-            // A browser asked for a page; answer it with one. The same
-            // shell the review route renders when a review has no members.
-            notFoundPage: () =>
-              new Response(renderReviewNotFound(pathname), {
-                status: 404,
-                headers: { 'content-type': 'text/html; charset=utf-8' },
-              }),
+            // A browser asked for a page; answer it with one — naming the
+            // board it can go back to, which is the whole difference between
+            // a dead end and a wrong turn. Unless the BOARD is what is
+            // missing, in which case there is nowhere on it to go and the
+            // board's own not-found page is the honest answer: offering to
+            // open a board that does not exist is a second dead end.
+            notFoundPage: (address) =>
+              new Response(
+                address.boardExists
+                  ? renderBoardMemberNotFound(address.workspaceId, address.rest)
+                  : renderBoardNotFound(address.workspaceId),
+                { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } },
+              ),
           },
           { pathname, method: req.method, url },
         );
@@ -2635,6 +2643,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // the run did in place, and it lands on the 404 below.
       const shell = serveShellRoutes({ req, url, pathname, visitor });
       if (shell) return shell;
+
+      // ── The task address ── see routes/task-page.ts. Below the shell
+      // because it answers no page of its own, and below every task route so
+      // it shadows none of them: what reaches here is the BARE
+      // `/workspaces/<ws>/tasks/<taskId>`, which is the API prefix rather
+      // than an address, and it redirects to the board with that task open.
+      const taskPage = handleTaskPageRoutes({ method: req.method, pathname, url });
+      if (taskPage) return taskPage;
 
       // ── Stale-client 410 ── see routes/stale-client.ts. Above the
       // wrong-prefix hint and below everything that exists: an address the
