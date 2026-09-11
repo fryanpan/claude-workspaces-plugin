@@ -37,7 +37,7 @@ import {
 import { parseMarkdownBlocks } from './prose-markdown.ts';
 import { type NestBlocksError, nestBlocksOutcome } from './prose-nest.ts';
 import { addressableBlocks, claimSubtree, findBlockById, newBlockId } from './prose-outline.ts';
-import { markBlockProposal, offerWhole, unproposedText } from './suggest-blocks.ts';
+import { blockText, markBlockProposal, offerWhole } from './suggest-blocks.ts';
 import type { SuggestionAuthor } from './suggest-ops.ts';
 
 /** One edit, addressed by block id. */
@@ -67,6 +67,8 @@ export interface BlockEditOutcome {
   error?: BlockEditError;
   /** The suggestion this edit became, when it became one. */
   suggestionId?: string;
+  /** What to change before retrying, when the error code alone cannot say. */
+  reason?: string;
 }
 
 export interface ApplyBlockEditsResult {
@@ -295,6 +297,11 @@ function writeReplacement(
   return insertParsed(parent, at, blocks);
 }
 
+const ALREADY_PROPOSED =
+  'the block already carries a pending suggestion; accept or reject it first';
+const TEXTLESS_BLOCK =
+  'the replacement holds a block with no text (a rule or an image), which a suggestion cannot carry';
+
 /**
  * Turn a replace or delete of a block the caller does not own into a pending
  * proposal (`suggest-blocks.ts`): the block's words struck, the replacement
@@ -307,14 +314,15 @@ function proposeEdit(
   el: Y.XmlElement,
   replacement: string | null,
   opts: Pick<ApplyBlockEditsOptions, 'author' | 'suggestionAuthor'>,
-): { suggestionId: string } | { error: BlockEditError } {
-  const struck = unproposedText(el);
+): { suggestionId: string } | { error: BlockEditError; reason?: string } {
+  const struck = blockText(el);
+  if (struck === null) return { error: 'suggest-failed', reason: ALREADY_PROPOSED };
   if (struck.length === 0) return { error: 'no-range' };
   let offered: Y.XmlElement[] = [];
   if (replacement !== null) {
     const written = writeReplacement(fragment, el, replacement, 'after');
     if (typeof written === 'string') return { error: written };
-    if (!offerWhole(written)) return { error: 'suggest-failed' };
+    if (!offerWhole(written)) return { error: 'suggest-failed', reason: TEXTLESS_BLOCK };
     offered = written;
     for (const made of offered) claimSubtree(made, opts.author);
   }
@@ -423,7 +431,7 @@ export function applyBlockEdits(
             outcomes.push(
               'suggestionId' in res
                 ? { op: edit.op, status: 'suggested', suggestionId: res.suggestionId }
-                : { op: edit.op, status: 'failed', error: res.error },
+                : { op: edit.op, status: 'failed', error: res.error, reason: res.reason },
             );
             break;
           }

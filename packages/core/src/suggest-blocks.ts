@@ -17,15 +17,17 @@
  * removes those blocks the same way. It is the shape that machinery already
  * resolves, written over more than one block.
  *
- * Text already carrying another proposal's mark is left alone: re-marking it
- * would take that proposal's range away from it, and accepting this one must
- * not decide the other.
+ * A block any of whose text is already somebody's proposal is refused, not
+ * proposed around. Striking only its unmarked words would report a
+ * whole-block replacement while accepting it left the other proposal's words
+ * standing beside the replacement; re-marking them would take them away from
+ * that proposal, so answering this one would quietly answer the other.
  */
 import * as Y from 'yjs';
 import { type SuggestionAuthor, newSid } from './suggest-ops.ts';
 import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK, type SuggestionAttrs } from './suggest.ts';
 
-/** One stretch of a text node that no proposal has claimed yet. */
+/** One stretch of a text node, to be struck. */
 export interface TextRun {
   node: Y.XmlText;
   offset: number;
@@ -43,11 +45,11 @@ function textNodes(el: Y.XmlElement): Y.XmlText[] {
 }
 
 /**
- * The text under `el` that a new proposal may mark: every run that carries
- * neither suggestion mark. Empty for a block with no text (a rule, an image)
- * and for one whose words are all already somebody's proposal.
+ * Every run of text under `el`, for a proposal to strike — or `null` when any
+ * of it already carries a suggestion mark (see the header). Empty for a block
+ * with no text (a rule, an image).
  */
-export function unproposedText(el: Y.XmlElement): TextRun[] {
+export function blockText(el: Y.XmlElement): TextRun[] | null {
   const runs: TextRun[] = [];
   for (const node of textNodes(el)) {
     let offset = 0;
@@ -58,13 +60,26 @@ export function unproposedText(el: Y.XmlElement): TextRun[] {
       if (typeof op.insert !== 'string') continue;
       const length = op.insert.length;
       const attrs = op.attributes ?? {};
-      if (attrs[SUGGEST_INSERT_MARK] == null && attrs[SUGGEST_DELETE_MARK] == null && length > 0) {
-        runs.push({ node, offset, length });
-      }
+      if (attrs[SUGGEST_INSERT_MARK] != null || attrs[SUGGEST_DELETE_MARK] != null) return null;
+      if (length > 0) runs.push({ node, offset, length });
       offset += length;
     }
   }
   return runs;
+}
+
+/**
+ * Whether every block in `el`, at every depth, holds text a mark can sit on.
+ * A blockquote with words in it can still hold a rule, and that rule is what
+ * would reach the file unasked; so a block passes only when it has text of
+ * its own or child blocks, and every child block passes too.
+ */
+function markableThroughout(el: Y.XmlElement): boolean {
+  const kids = el.toArray();
+  const blocks = kids.filter((k): k is Y.XmlElement => k instanceof Y.XmlElement);
+  const hasText = kids.some((k) => k instanceof Y.XmlText && k.length > 0);
+  if (!hasText && blocks.length === 0) return false;
+  return blocks.every(markableThroughout);
 }
 
 /**
@@ -78,7 +93,7 @@ export function unproposedText(el: Y.XmlElement): TextRun[] {
  * would then write part of what the caller asked for and call it done.
  */
 export function offerWhole(offered: readonly Y.XmlElement[]): boolean {
-  if (offered.every((el) => textNodes(el).some((t) => t.length > 0))) return true;
+  if (offered.every(markableThroughout)) return true;
   for (const el of offered) {
     const parent = el.parent as Y.XmlFragment | Y.XmlElement | null;
     const idx = parent ? (parent.toArray() as unknown[]).indexOf(el) : -1;

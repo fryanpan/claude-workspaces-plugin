@@ -199,17 +199,22 @@ describe('a replace of a block the caller does not own', () => {
     expect(listSuggestions(doc)).toEqual([]);
   });
 
-  for (const [name, markdown] of [
-    ['a replacement with no words in it', '---'],
-    ['a replacement with words AND a rule', 'Above the line.\n\n---\n\nBelow the line.'],
-  ] as Array<[string, string]>) {
+  for (const [name, needle, markdown] of [
+    ['a replacement with no words in it', 'step 000', '---'],
+    ['a replacement with words AND a rule', 'step 000', 'Above.\n\n---\n\nBelow.'],
+    // The offered bullet has words, so a check of top-level blocks passes it;
+    // the rule built INSIDE the item is what would reach the file while the
+    // proposal is still pending.
+    ['a bullet holding words AND a rule', 'A bullet a person wrote', '- Proposed\n\n  ---'],
+  ] as Array<[string, string, string]>) {
     it(`${name} fails whole, and leaves nothing behind`, () => {
       // A rule can carry no mark, so it would have reached disk unasked; and
       // proposing only the words would make accepting write half the edit.
       const doc = docOf(FIXTURE);
       const before = { md: md(doc), text: liveText(doc), blocks: blockCount(doc) };
-      const res = apply(doc, [{ op: 'replace_block', blockId: idOf(doc, 'step 000'), markdown }]);
+      const res = apply(doc, [{ op: 'replace_block', blockId: idOf(doc, needle), markdown }]);
       expect(res.outcomes[0]).toMatchObject({ status: 'failed', error: 'suggest-failed' });
+      expect(res.outcomes[0]?.reason).toContain('no text');
       expect(md(doc)).toBe(before.md);
       expect(liveText(doc)).toBe(before.text);
       expect(blockCount(doc)).toBe(before.blocks);
@@ -246,30 +251,36 @@ describe('a delete of a block the caller does not own', () => {
 });
 
 describe('a block that already carries somebody else’s proposal', () => {
-  it('leaves that proposal’s words to that proposal', () => {
-    // Re-marking them would move them under the new sid, and answering the
-    // new proposal would then quietly answer the old one too.
-    const doc = docOf(FIXTURE);
-    const before = md(doc);
-    const first = suggestReplace(doc, {
-      find: 'a person wrote.',
-      replace: 'somebody typed.',
-      author: { id: 'person:reviewer', name: 'Reviewer', color: '#aa5500' },
-    });
-    expect(first.ok).toBe(true);
-    const res = apply(doc, [
-      { op: 'replace_block', blockId: idOf(doc, 'A paragraph a'), markdown: 'Agent words.' },
-    ]);
-    expect(res.suggested).toBe(1);
-    expect(listSuggestions(doc)).toHaveLength(2);
+  // Proposing around the marked words would report a whole-block change while
+  // accepting it left them beside the replacement; re-marking them would take
+  // them from the first proposal. So the edit is refused, and says why.
+  const edits: Array<[string, (id: string) => BlockEdit]> = [
+    ['a replace', (blockId) => ({ op: 'replace_block', blockId, markdown: 'Agent words.' })],
+    ['a delete', (blockId) => ({ op: 'delete_block', blockId })],
+  ];
+  for (const [name, edit] of edits) {
+    it(`refuses ${name}, and leaves the first proposal whole`, () => {
+      const doc = docOf(FIXTURE);
+      const first = suggestReplace(doc, {
+        find: 'a person wrote.',
+        replace: 'somebody typed.',
+        author: { id: 'person:doc-owner', name: 'Doc owner', color: '#aa5500' },
+      });
+      expect(first.ok).toBe(true);
+      const before = { md: md(doc), text: liveText(doc), blocks: blockCount(doc) };
 
-    rejectSuggestion(doc, res.outcomes[0]?.suggestionId as string);
-    const survivor = listSuggestions(doc);
-    expect(survivor).toHaveLength(1);
-    expect(survivor[0]?.deletedText).toBe('a person wrote.');
-    expect(survivor[0]?.insertedText).toBe('somebody typed.');
-    expect(md(doc)).toBe(before);
-  });
+      const res = apply(doc, [edit(idOf(doc, 'A paragraph a'))]);
+      expect(res.outcomes[0]).toMatchObject({ status: 'failed', error: 'suggest-failed' });
+      expect(res.outcomes[0]?.reason).toContain('pending suggestion');
+      expect(md(doc)).toBe(before.md);
+      expect(liveText(doc)).toBe(before.text);
+      expect(blockCount(doc)).toBe(before.blocks);
+      const listed = listSuggestions(doc);
+      expect(listed).toHaveLength(1);
+      expect(listed[0]?.deletedText).toBe('a person wrote.');
+      expect(listed[0]?.insertedText).toBe('somebody typed.');
+    });
+  }
 });
 
 describe('a batch of proposals', () => {
