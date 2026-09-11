@@ -121,7 +121,7 @@ describe('access-only browser hosts', () => {
 
   /** A request naming the LAN alias, arriving directly (no proxy hop). */
   const onLan = (h: ServerHandle, path: string) =>
-    fetch(`http://localhost:${h.port}${path}`, { headers: { host: LAN_ALIAS } });
+    fetch(`http://127.0.0.1:${h.port}${path}`, { headers: { host: LAN_ALIAS } });
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'access-only-'));
@@ -163,6 +163,9 @@ describe('access-only browser hosts', () => {
       // VERIFIED identity outranks the claimed body whichever way this flag
       // is set.
       requireSignInToWrite: false,
+      // Every interface, as prod binds: a probe below dials this machine's
+      // non-loopback address. See loopback-bind.preload.ts.
+      hostname: '::',
     };
     handle = createServer({ port: 0, dataDir, ...opts });
     // Same declarations, rule off. Nothing else differs, which is what makes
@@ -173,12 +176,12 @@ describe('access-only browser hosts', () => {
       ...opts,
       accessOnlyBrowserHosts: false,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     // `legacy` is a whole second server on its own data dir. A board seeded
     // on `handle` does not exist there, and the controls below address it by
     // path — so it gets its own.
-    LEGACY_WS = await seedBoard(`http://localhost:${legacy.port}`);
+    LEGACY_WS = await seedBoard(`http://127.0.0.1:${legacy.port}`);
     jwt = await signJwt(OPERATOR_AUD);
 
     const board = await local('/workspaces', {
@@ -367,7 +370,7 @@ describe('access-only browser hosts', () => {
     it('POSITIVE CONTROL: with the rule off, the same build serves them', async () => {
       // Without this, the 404s above would be indistinguishable from a
       // sign-in page that had simply stopped being built.
-      const legacyBase = `http://localhost:${legacy.port}`;
+      const legacyBase = `http://127.0.0.1:${legacy.port}`;
       const page = await fetch(`${legacyBase}/signin`, {
         headers: { host: `localhost:${legacy.port}` },
       });

@@ -817,7 +817,44 @@ function waitBudget(): Check {
   };
 }
 
-const checks = [fixedSleeps(), sourceShape(), wallClock(), waitBudget()];
+// 5. Connects to "localhost" from the server suite. Not a testing standard
+//    but a machine one: Bun races `::1` against `127.0.0.1` for the name and
+//    abandons the loser, and on macOS every loser abandoned in SYN_SENT
+//    strands a kernel TCP control block that only a reboot frees — about one
+//    new connection in eight. One full suite run leaked ~480 of them; the Mac
+//    loses networking near 162k. Connecting by IP-literal leaked 2.
+//
+//    What it matches is an address AIMED AT A LIVE PORT: a URL whose port is
+//    interpolated (`http://localhost:${port}`, `ws://…`) or a socket option
+//    `hostname: 'localhost'`. A literal port (`http://localhost:5173`) is an
+//    Origin or a stored URL — data, not a connect — and so is a `Host:
+//    localhost:${port}` header, which is how a test that is ABOUT that host
+//    keeps its meaning: connect to 127.0.0.1, send the Host it is testing.
+//
+//    What it cannot see: a URL assembled from a variable holding 'localhost'
+//    (`http://${host}:${port}`), a connect made in a support module outside
+//    packages/server/test, and a client whose DEFAULT host is localhost.
+const LOCALHOST_CONNECT = /\b(?:https?|wss?):\/\/localhost:\$\{|\bhostname:\s*['"`]localhost['"`]/;
+
+function localhostConnects(): Check {
+  const sites: Site[] = [];
+  for (const file of gitFiles('packages/server/test/*.ts')) {
+    read(file).forEach((text, i) => {
+      if (COMMENT_LINE.test(text)) return;
+      if (LOCALHOST_CONNECT.test(text)) sites.push({ file, line: i + 1, text: text.trim() });
+    });
+  }
+  return {
+    id: 'localhostConnects',
+    count: sites.length,
+    title: 'connects to "localhost" (server suite)',
+    pattern:
+      "`<scheme>://localhost:${…}` or `hostname: 'localhost'` in packages/server/test — connect to 127.0.0.1 instead (a Host header may still say localhost)",
+    sites,
+  };
+}
+
+const checks = [fixedSleeps(), sourceShape(), wallClock(), waitBudget(), localhostConnects()];
 const counts = Object.fromEntries(checks.map((c) => [c.id, c.count]));
 
 if (process.argv.includes('--write')) {

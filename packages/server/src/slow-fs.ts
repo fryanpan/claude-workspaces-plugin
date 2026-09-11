@@ -149,7 +149,7 @@ function errnoOf(err: unknown): string | undefined {
  * minute-long quarantine here would keep a doc parked long after the file
  * came back.
  */
-function isDataless(err: unknown): boolean {
+export function isDataless(err: unknown): boolean {
   return (err as NodeJS.ErrnoException | undefined)?.code === 'EDEADLK';
 }
 
@@ -213,15 +213,15 @@ class BoundFileReader {
   /**
    * Read a bound file off the main thread, or report why we did not.
    *
-   * `keep: false` reads without leaving the bytes for a later hydrate to
-   * pick up. The held-bytes map is the prewarm-to-hydrate handoff and nothing
-   * else: a caller that already HAS the bytes it asked for must not also
-   * leave them lying in a cache keyed only by path, because the next hydrate
-   * of that path would take them as its own. A bind doing exactly that made
-   * a doc re-bind to bytes read seconds earlier, from a file that had since
-   * been replaced.
+   * `keep: false` leaves no bytes for a later hydrate, whose handoff the held
+   * map is: a bind that left its bytes there re-bound a doc to a file since
+   * replaced. `quiet: true` skips the dataless note, for a caller retrying a
+   * file it has already reported (`unreadAtAttach` in file-binding.ts).
    */
-  async read(path: string, opts: { keep?: boolean } = {}): Promise<BoundReadResult> {
+  async read(
+    path: string,
+    opts: { keep?: boolean; quiet?: boolean } = {},
+  ): Promise<BoundReadResult> {
     const keep = opts.keep !== false;
     const blocked = this.gate(path);
     if (blocked) return blocked;
@@ -237,7 +237,7 @@ class BoundFileReader {
         return gone;
       }
       if (isDataless(raced.err)) {
-        this.noteUnusable(path, raced.err, 'read');
+        if (!opts.quiet) this.noteUnusable(path, raced.err, 'read');
         return { status: 'unavailable', reason: 'error' };
       }
       // EINTR / EIO from a sick file provider land here. They are the same

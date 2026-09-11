@@ -87,7 +87,7 @@ describe('a report comes back with the link to hand over', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'report-link-'));
     handle = createServer({ port: 0, dataDir, publicBaseUrl: PUBLIC_BASE });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const ws = await post('/workspaces', {
@@ -257,7 +257,7 @@ describe('the handoff link is owner-only', () => {
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const ws = await post('/workspaces', { name: 'shared-board', goal: 'Ship it.' });

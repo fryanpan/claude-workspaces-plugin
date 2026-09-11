@@ -114,7 +114,7 @@ describe('dispatch.requested', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'dispatch-requested-'));
     worktrees = [];
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const { workspace } = await jj<{ workspace: { id: string } }>(
       await post('/workspaces', { name: 'timing board', author: LEAD, leadAgentId: LEAD.id }),
     );

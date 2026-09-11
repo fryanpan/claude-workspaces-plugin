@@ -15,13 +15,23 @@
  * Paths and contents are invented.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DOC_STORE_TIMINGS } from '../src/doc-store-timings.ts';
 import { DocStore } from '../src/doc-store.ts';
 import { type BoundStatResult, boundFiles } from '../src/slow-fs.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
+import { armFifoValve, makeFifo, releaseFifosIn } from './fifo.ts';
 import { waitFor } from './wait-for.ts';
 
 type PoolWrite = (path: string, text: string) => Promise<BoundStatResult>;
@@ -34,11 +44,15 @@ type PoolWrite = (path: string, text: string) => Promise<BoundStatResult>;
  */
 const patchable = boundFiles as unknown as { write?: PoolWrite };
 
+/** Well past the read deadline — see `armFifoValve`. */
+const VALVE_MS = DOC_STORE_TIMINGS.boundReadDeadlineMs * 6;
+
 describe('the bound-file write lane', () => {
   let dataDir: string;
   let path: string;
   let docStore: DocStore;
   const original: PoolWrite = boundFiles.write.bind(boundFiles);
+  const disarm: Array<() => void> = [];
 
   beforeEach(() => {
     boundFiles.reset();
@@ -55,11 +69,14 @@ describe('the bound-file write lane', () => {
     expect(docStore.attachFlatFile('n1', path, { writeBack: true }).ok).toBe(true);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     // Belt and braces: a leaked patch would break every later test file, since
     // the whole server suite shares one process and one `boundFiles`.
     patchable.write = original;
+    for (const off of disarm.splice(0)) off();
     docStore.stop();
+    // A write stuck on a planted pipe owns a pool thread until it is let go.
+    await releaseFifosIn(dataDir);
     boundFiles.reset();
     rmSync(dataDir, { recursive: true, force: true });
   });
@@ -103,53 +120,50 @@ describe('the bound-file write lane', () => {
     }
   });
 
-  it('leaves one complete version and no temp file when both lanes write', async () => {
-    // A GUARD, not a regression test, and it is worth saying which: it passes
-    // against the shared-temp-name code too. The corruption a shared name
-    // allows needs one writer's `writeFile` to be interrupted by the other's,
-    // and the only place a test can hold a write is on either side of the
-    // whole operation — never between the write and the rename inside it.
-    // Reaching in there would mean a seam in production code that exists for
-    // this test alone.
+  it('flushes through a temp file of its own while a pool write is stuck inside its own', async () => {
+    // A REGRESSION test for the two lanes' temp names. Both writers can be
+    // live at once — SIGTERM while a write-back sits on the pool is the case
+    // the sync flush exists for — and when they shared one temp path, the
+    // flush wrote into the file the pool writer was still filling, and the
+    // rename published whatever the two had made of it.
     //
-    // What it does pin is cheap and real: after both lanes have run, the file
-    // holds one COMPLETE version rather than a mixture, and neither lane has
-    // left its temp file behind.
+    // Holding a writer INSIDE its write is what that needs, and a pipe does
+    // it with no seam in production code: plant one where the pool writer's
+    // temp file goes, and its `writeFile` blocks in `open` — mid-write, temp
+    // path claimed, rename not yet run. A flush sharing that path would open
+    // the same pipe and publish it over the document (the valve ends that
+    // open a moment late, so a regression fails here rather than hanging).
+    const poolTemp = `${path}.cw-pool-write~`;
+    makeFifo(poolTemp);
+    disarm.push(armFifoValve(poolTemp, VALVE_MS, 'read'));
     let started = 0;
-    let open!: () => void;
-    let landed: Promise<BoundStatResult> | undefined;
-    const held = new Promise<void>((resolve) => {
-      open = resolve;
-    });
+    let settled = false;
     patchable.write = (p, text) => {
       started++;
-      landed = held.then(() => original(p, text));
-      return landed;
+      const landing = original(p, text);
+      void landing.finally(() => {
+        settled = true;
+      });
+      return landing;
     };
 
     const doc = docStore.get('n1')?.ydoc.getText('content');
-    try {
-      doc?.insert(0, 'version one\n');
-      await waitFor(() => started === 1, { describe: 'the first write to reach the pool' });
-      // A second edit while the first is still out. Its write-back re-arms
-      // rather than racing, so the flush below is what carries it out.
-      doc?.insert(0, 'version two\n');
-      docStore.flush();
-    } finally {
-      open();
-    }
+    doc?.insert(0, 'version one\n');
+    await waitFor(() => started === 1, { describe: 'the first write to reach the pool' });
+    // A second edit while the first is stuck, and the flush that carries it
+    // out. It has to run inside the read deadline: past it the stuck write
+    // quarantines the path, and the flush rightly skips a quarantined file.
+    doc?.insert(0, 'version two\n');
+    docStore.flush();
 
-    // Let the held write land ON TOP of what the flush already wrote — the
-    // two renames have to actually overlap, so the test must not tear the
-    // directory down before the second one runs.
-    await landed;
-    patchable.write = original;
-    const onDisk = readFileSync(path, 'utf8');
-    const pool = 'version one\nfirst line\n';
-    const flushed = 'version two\nversion one\nfirst line\n';
-    expect([pool, flushed]).toContain(onDisk);
-    // And no temp file survives either lane.
-    expect(readdirSync(dataDir).filter((f) => f.includes('~'))).toEqual([]);
+    // The document is a FILE holding the flushed version — asked of `stat`
+    // first, because reading a pipe that took its place would block.
+    expect(statSync(path).isFile()).toBe(true);
+    expect(readFileSync(path, 'utf8')).toBe('version two\nversion one\nfirst line\n');
+    // The flush's own temp file was renamed away, and the pool write is still
+    // stuck in the other one: the two lanes really were live together.
+    expect(readdirSync(dataDir).filter((f) => f.endsWith('.cw-flush~'))).toEqual([]);
+    expect(settled).toBe(false);
   });
 
   it('does not quarantine a readable path because a write to it failed', async () => {

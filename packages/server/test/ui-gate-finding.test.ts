@@ -44,7 +44,7 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     // No judge: every item this suite files is admitted, so a hold can never
     // stand in for the finding under test.
     handle = createServer({ port: 0, dataDir, keepMovingCadenceMs: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

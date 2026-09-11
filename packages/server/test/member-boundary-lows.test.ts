@@ -189,7 +189,7 @@ describe('the member boundary, on the surfaces a path check cannot see', () => {
       // cookie — and the server's own emailed-code sign-in is off by default.
       emailCodeSignIn: true,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     jwt = await signJwt(COLLAB_AUD, MEMBER_EMAIL);
 
     board = await createBoard('Shared work');

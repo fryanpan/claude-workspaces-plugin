@@ -93,7 +93,7 @@ describe('a share visitor’s /grouped leaks no hostname and no other board', ()
       dataDir,
       ...access.serverOptions,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     boardId = (

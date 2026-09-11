@@ -196,7 +196,7 @@ describe('the live branch is durable too', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'voice-live-durable-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

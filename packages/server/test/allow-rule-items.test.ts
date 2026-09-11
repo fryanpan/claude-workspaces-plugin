@@ -100,7 +100,7 @@ describe('allow-rule review items', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'allow-rule-items-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -327,7 +327,7 @@ describe('allow-rule review items', () => {
     tally?.denials.unshift({ ts: stale, taskId: newer }, { ts: stale, taskId: newer });
     await Bun.write(sidecarPath, JSON.stringify(sidecar));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     await seedBoard(base);
     // The denials are addressed under the lead's board now, not the seed
     // board: a note route names its board, and the row is on this one.
@@ -372,7 +372,7 @@ describe('allow-rule review items', () => {
 
     await handle.stop();
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     await deny('git push');
     await settle();

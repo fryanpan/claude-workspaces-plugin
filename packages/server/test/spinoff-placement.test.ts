@@ -239,7 +239,7 @@ describe('POST /workspaces/:id/tasks with spinoff: true', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'spinoff-route-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
   afterAll(async () => {
     await handle.stop();
@@ -382,7 +382,7 @@ describe('a pill-made row is titled by its words and points at its doc', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'spinoff-title-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     ws = (await jj<{ workspace: { id: string } }>(await post('/workspaces', { name: 'Titles' })))
       .workspace.id;
   });

@@ -43,7 +43,7 @@ beforeAll(() => {
   // that every browser-facing hostname sits behind Cloudflare Access. These tests
   // are about that flow, so they ask for it explicitly.
   handle = createServer({ port: 0, dataDir, emailCodeSignIn: true });
-  base = `http://localhost:${handle.port}`;
+  base = `http://127.0.0.1:${handle.port}`;
 });
 
 afterAll(async () => {

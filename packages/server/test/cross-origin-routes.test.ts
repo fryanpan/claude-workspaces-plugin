@@ -61,7 +61,7 @@ describe('cross-origin access to the trusted host', () => {
       // gate an allowed origin's write meets.
       requireSignInToWrite: false,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     host = `localhost:${handle.port}`;
     await req(`/workspaces/${WS}/docs`, null, {
@@ -232,7 +232,7 @@ describe('cross-origin access to the trusted host', () => {
       until?: (text: string) => boolean,
     ): Promise<{ opened: boolean; text: string; closeCode: number | null }> => {
       const ydoc = new Y.Doc();
-      const ws = new WebSocket(`ws://localhost:${handle.port}/workspaces/${WS}/docs/doc-1/y`, {
+      const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/doc-1/y`, {
         headers: { host, ...(origin ? { origin } : {}) },
       } as unknown as string[]);
       ws.binaryType = 'arraybuffer';
@@ -330,7 +330,7 @@ describe('the public share host is same-origin only', () => {
       ...access.serverOptions,
       requireSignInToWrite: false,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const local = (p: string, i: RequestInit = {}) =>
       fetch(`${base}${p}`, {
@@ -444,7 +444,7 @@ describe('the public share host is same-origin only', () => {
    * socket handed us inside the window. Empty means nothing ever synced.
    */
   const syncedProse = async (headers: Record<string, string>): Promise<string> => {
-    const ws = new WebSocket(`ws://localhost:${handle.port}/workspaces/${WS}/docs/shared/y`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/shared/y`, {
       headers,
     } as unknown as string[]);
     const ydoc = new Y.Doc();

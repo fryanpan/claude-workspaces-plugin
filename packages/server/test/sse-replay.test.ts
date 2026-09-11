@@ -132,7 +132,7 @@ describe('SSE Last-Event-ID replay', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'sse-replay-'));
     srcDir = mkdtempSync(join(tmpdir(), 'sse-replay-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const path = join(srcDir, 'doc-replay.md');
     writeFileSync(path, '# doc-replay\n\nBody.\n');
@@ -791,7 +791,7 @@ describe('a restart is silent when nothing was missed', () => {
   // then be refused for the wrong reason.
   const boot = async () => {
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     if (!WS) WS = await seedBoard(base);
   };
 

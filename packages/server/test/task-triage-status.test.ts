@@ -344,7 +344,7 @@ describe('over the route a goal is already moved through', () => {
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'triage-http-'));
     handle = createServer({ dataDir: dir, port: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

@@ -139,7 +139,7 @@ describe('the owning session over the real routes', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-owner-session-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

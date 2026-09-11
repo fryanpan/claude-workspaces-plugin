@@ -60,7 +60,7 @@ describe('over HTTP', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'wrong-prefix-'));
     access = await accessHarness();
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     boardId = await seedBoard(base, { name: 'Harbour plan' });
     share = await mintAccessShare(base, access, boardId);
   });

@@ -40,6 +40,7 @@
     "ui:shot": "bun run scripts/ui-shot.ts",
     "ui:nightly": "bun run scripts/ui-nightly.ts",
     "staging": "bun run scripts/staging.ts",
+    "starts:report": "bun run scripts/server-starts.ts",
     "share": "bun run scripts/share.ts",
     "activity:backfill": "bun run packages/server/src/activity-backfill.ts",
     "reading-time:backfill": "bun run packages/server/src/reading-time-backfill.ts",

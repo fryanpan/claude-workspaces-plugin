@@ -600,9 +600,9 @@ describe('DocStore.bindDiff', () => {
     const { createServer } = await import('../src/server.ts');
     const httpDataDir = mkdtempSync(join(tmpdir(), 'bd-http-'));
     const handle = createServer({ port: 0, dataDir: httpDataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     try {
-      const res = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/attachments`, {
+      const res = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -615,14 +615,14 @@ describe('DocStore.bindDiff', () => {
       expect(res.ok).toBe(true);
       const grouped = (await (
         await fetch(
-          `http://localhost:${handle.port}/workspaces/${WS}/attachments/http-groups/grouped`,
+          `http://127.0.0.1:${handle.port}/workspaces/${WS}/attachments/http-groups/grouped`,
         )
       ).json()) as { groups: Array<{ title: string; details?: string }> };
       expect(grouped.groups.map((g) => g.title)).toEqual(['Via HTTP']);
 
       // Per-group details must survive the route too (same class of bug as
       // the dropped-groups param — the route casts body.groups).
-      const dRes = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/attachments`, {
+      const dRes = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -635,14 +635,14 @@ describe('DocStore.bindDiff', () => {
       expect(dRes.ok).toBe(true);
       const withDetails = (await (
         await fetch(
-          `http://localhost:${handle.port}/workspaces/${WS}/attachments/http-details/grouped`,
+          `http://127.0.0.1:${handle.port}/workspaces/${WS}/attachments/http-details/grouped`,
         )
       ).json()) as { groups: Array<{ title: string; details?: string }> };
       expect(withDetails.groups[0]?.details).toBe('Chapter one.');
 
       // Over-long details are rejected at the route with 400 (caller's fault),
       // not silently truncated.
-      const tooLong = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/attachments`, {
+      const tooLong = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/attachments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -680,7 +680,7 @@ describe('DocStore.bindDiff', () => {
     const { createServer } = await import('../src/server.ts');
     const httpDataDir = mkdtempSync(join(tmpdir(), 'bd-ws-sse-'));
     const handle = createServer({ port: 0, dataDir: httpDataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     try {
       const bound = await handle.docStore.bindDiff({
         repoPath: fixture.repo,
@@ -691,7 +691,7 @@ describe('DocStore.bindDiff', () => {
       if (!bound.ok) return;
       const docId = bound.files.find((f) => f.relPath === 'src/kept.ts')?.docId ?? '';
 
-      const res = await fetch(`http://localhost:${handle.port}/workspaces/sse-ws/events:stream`);
+      const res = await fetch(`http://127.0.0.1:${handle.port}/workspaces/sse-ws/events:stream`);
       expect(res.ok).toBe(true);
       const reader = res.body?.getReader();
       if (!reader) throw new Error('no sse body');

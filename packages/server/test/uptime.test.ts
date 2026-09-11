@@ -168,7 +168,7 @@ describe('GET /workspaces/:id/events — uptime rendered into the activity paylo
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-uptime-route-'));
     handle = createServer({ port: 0, dataDir, uptimeTickMs: 25 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -234,7 +234,7 @@ describe('GET /workspaces/:id/events — uptime rendered into the activity paylo
     const dir2 = mkdtempSync(join(tmpdir(), 'cw-uptime-route2-'));
     const handle2 = createServer({ port: 0, dataDir: dir2 });
     try {
-      const base2 = `http://localhost:${handle2.port}`;
+      const base2 = `http://127.0.0.1:${handle2.port}`;
       const createRes = await fetch(`${base2}/workspaces`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

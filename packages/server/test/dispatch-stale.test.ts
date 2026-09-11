@@ -177,7 +177,7 @@ describe('the cap through the server never counts finished work', () => {
       dataDir,
       dispatchWatchFactory: () => ({ close: () => {} }),
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   };
 
   beforeEach(async () => {

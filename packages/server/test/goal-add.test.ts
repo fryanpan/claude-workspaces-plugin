@@ -252,7 +252,7 @@ describe('POST /workspaces/:id/goals/add', () => {
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'goal-add-http-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

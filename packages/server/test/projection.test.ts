@@ -198,9 +198,9 @@ describe('ydoc projection + workspace doc', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'projection-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -585,9 +585,9 @@ describe('ydoc projection + workspace doc', () => {
     await settle(600); // let the debounced .ydoc + sidecar writes land
     await handle.stop();
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
     expect(resolves(handle)).toBe(true);
     const doc = handle.docStore.get(docId);
     if (!doc) throw new Error('body doc missing after restart');
@@ -616,9 +616,9 @@ describe('ydoc projection + workspace doc', () => {
     expect((check.getMap('tasks').get(taskId) as ProjectedTask).status).toBe('done');
 
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
     const doc = handle.docStore.get(workspaceDocId(wsId));
     if (!doc) throw new Error('ws doc missing after restart');
     const projected = doc.ydoc.getMap('tasks').get(taskId) as ProjectedTask;

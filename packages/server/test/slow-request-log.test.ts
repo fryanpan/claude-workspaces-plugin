@@ -41,10 +41,10 @@ let WS = '';
 describe('slow request log', () => {
   it('logs method, path, duration, status and bytes at or over the threshold', async () => {
     handle = createServer({ port: 0, dataDir, slowRequestMs: 0 });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     const err = spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const res = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/docs`);
+      const res = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/docs`);
       expect(res.status).toBe(200);
       const lines = timingLines(err.mock.calls);
       expect(lines.length).toBe(1);
@@ -58,10 +58,10 @@ describe('slow request log', () => {
 
   it('stays silent under the threshold (default 500 ms)', async () => {
     handle = createServer({ port: 0, dataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
     const err = spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const res = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/docs`);
+      const res = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/docs`);
       expect(res.status).toBe(200);
       expect(timingLines(err.mock.calls)).toEqual([]);
     } finally {

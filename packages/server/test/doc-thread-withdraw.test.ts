@@ -68,7 +68,7 @@ describe('withdrawing a review item raised on a doc thread', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-withdraw-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const file = join(dataDir, 'mockup-notes.md');
     writeFileSync(file, '# Mockup notes\n\nThe phone layout holds together.\n');

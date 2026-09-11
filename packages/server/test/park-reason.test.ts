@@ -50,7 +50,7 @@ describe('a doc parked because its file would not answer', () => {
     access = await accessHarness();
 
     const first = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${first.port}`;
+    const base = `http://127.0.0.1:${first.port}`;
     const post = (path: string, body: unknown) =>
       fetch(`${base}${path}`, {
         method: 'POST',
@@ -92,7 +92,7 @@ describe('a doc parked because its file would not answer', () => {
 
   it('reports the reason to its owner on doc_status, and clears it when the file comes back', async () => {
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
 
     const res = await fetch(`${base}/workspaces/${WS}/docs/${DOC_ID}/status`);
     expect(res.status).toBe(200);
@@ -111,12 +111,10 @@ describe('a doc parked because its file would not answer', () => {
     // stale one is worse than none, because it says a healthy doc is not
     // being written.
     //
-    // A resident-but-unbound doc does not re-hydrate on its own: `resolveRoom`
-    // finds it in memory and returns it, and the deferred bind that parked it
-    // has already had its one retry. The recovery is an explicit re-bind,
-    // which is what an owner does (`attach_markdown` on the same path), so
-    // that is what this drives. `boundFiles.reset()` stands in for the
-    // quarantine backoff expiring.
+    // A parked doc re-binds on its own once the quarantine expires
+    // (`park-retry.test.ts`). This drives the other recovery, an explicit
+    // re-bind — what an owner does with `attach_markdown` on the same path —
+    // with `boundFiles.reset()` standing in for the backoff expiring.
     unlinkSync(boundPath);
     writeFileSync(boundPath, '# Design\n\nBack from the dead.\n');
     boundFiles.reset();
@@ -139,7 +137,7 @@ describe('a doc parked because its file would not answer', () => {
 
   it('does not hand the reason to a share visitor — it names a host path', async () => {
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     const share = await mintAccessShare(base, access, workspaceId);
 
     // The owner sees it...

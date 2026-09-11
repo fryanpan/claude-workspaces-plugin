@@ -112,7 +112,7 @@ describe('park_task moves a row to triage and comments', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'park-triage-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -414,7 +414,7 @@ describe('rows still carrying the removed parked state', () => {
       { id: 't-plain', status: 'todo' },
     ]);
     const handle = createServer({ port: 0, dataDir });
-    const at = `http://localhost:${handle.port}`;
+    const at = `http://127.0.0.1:${handle.port}`;
     try {
       const res = await handle.parkMigration;
       expect(res.skipped).toEqual([]);
@@ -459,7 +459,7 @@ describe('rows still carrying the removed parked state', () => {
       // every note on the board at every restart.
       const { threads } = (await (
         await fetch(
-          `http://localhost:${handle.port}/workspaces/w-legacy/docs/${encodeURIComponent('task:t-dated')}/threads`,
+          `http://127.0.0.1:${handle.port}/workspaces/w-legacy/docs/${encodeURIComponent('task:t-dated')}/threads`,
         )
       ).json()) as { threads: Thread[] };
       expect(threads.flatMap((t) => t.comments).length).toBe(1);

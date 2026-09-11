@@ -96,7 +96,7 @@ describe('a scan does not activate the docs it enumerates', () => {
 
     beforeEach(async () => {
       handle = createServer({ port: 0, dataDir });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
     });
     afterEach(async () => {

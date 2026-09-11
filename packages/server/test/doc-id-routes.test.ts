@@ -58,7 +58,7 @@ describe('a doc answers to its readable alias everywhere it answers at all', () 
     folder = mkdtempSync(join(tmpdir(), 'docid-routes-src-'));
     writeFileSync(join(folder, 'plan.md'), '# Plan\n\nA paragraph to anchor a thread on.\n');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const created = (await (
       await post(`/workspaces/${WS}/docs`, {

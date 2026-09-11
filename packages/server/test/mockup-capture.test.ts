@@ -33,7 +33,7 @@ describe('mockup durability', () => {
     // the agent scratch folder whose cleanup is the whole incident.
     scratch = mkdtempSync(join(tmpdir(), 'agent-scratch-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -121,7 +121,7 @@ describe('mockup durability', () => {
       rmSync(src);
       await handle.stop();
       handle = createServer({ port: 0, dataDir });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
       // The restart is a new board, and a doc's board link is a fact about
       // the board — so the fresh one has to claim the hydrated mockup before

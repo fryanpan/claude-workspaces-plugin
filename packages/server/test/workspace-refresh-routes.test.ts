@@ -95,7 +95,7 @@ describe('workspace refresh routes', () => {
       dataDir,
       share: { config: { publicHostname: PUBLIC_HOST } },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const bind = await post('/workspaces', { folderPath: folder, hubWorkspaceId: WS });

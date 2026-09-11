@@ -121,36 +121,85 @@ export interface DeployResult {
 // The durable trace
 // ---------------------------------------------------------------------------
 
-/** Where the last deploy result is kept. */
+/** Where the deploy history is kept. */
 export function deployLogPath(dataDir: string): string {
   return join(dataDir, 'deploy-log.json');
 }
 
+/** How long a deploy stays in the history — the uptime report's horizon. */
+export const DEPLOY_LOG_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+/** A ceiling under the age bound, for a deploy loop nobody is watching. */
+export const DEPLOY_LOG_MAX_ENTRIES = 500;
+
+interface DeployLogFile {
+  entries: DeployResult[];
+}
+
+function isDeployResult(v: unknown): v is DeployResult {
+  return typeof (v as DeployResult | null)?.status === 'string';
+}
+
 /**
- * A deploy ends by killing the process that performed it, so an in-memory
- * `last()` is empty in exactly the situation someone asks the question. The
- * write happens as soon as `runDeploy` resolves, which is inside the restart
- * delay — the restart is scheduled, not immediate, precisely so the result
- * and the response both get out first.
+ * Every recorded deploy, oldest first. The file held ONE record until the
+ * daily health check needed to account for a day of restarts; a file still in
+ * that shape — written by the server that performed the deploy which shipped
+ * this reader — is read as a history of one, so the restarted server can
+ * still confirm it.
  */
-export function writeDeployLog(file: string, result: DeployResult): void {
+export function readDeployLogEntries(file: string): DeployResult[] {
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    const tmp = `${file}.tmp~`;
-    writeFileSync(tmp, `${JSON.stringify(result, null, 2)}\n`);
-    renameSync(tmp, file);
-  } catch (err) {
-    console.error('[deploy] could not record the deploy result:', err);
+    if (!existsSync(file)) return [];
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (isDeployResult(parsed)) return [parsed];
+    const entries = (parsed as DeployLogFile | null)?.entries;
+    return Array.isArray(entries) ? entries.filter(isDeployResult) : [];
+  } catch {
+    return [];
   }
 }
 
+/** The latest deploy — what `GET /api/deploy` and the boot verification read. */
 export function readDeployLog(file: string): DeployResult | null {
+  return readDeployLogEntries(file).at(-1) ?? null;
+}
+
+/**
+ * Age first, then count, measured from the newest entry rather than the wall
+ * clock so the result depends only on the file. The newest entry always
+ * survives — it is the one `GET /api/deploy` answers with — including one
+ * whose `ranAt` is missing, which the age comparison alone would drop.
+ */
+export function pruneDeployLog(entries: DeployResult[]): DeployResult[] {
+  const newest = entries.at(-1);
+  if (!newest) return [];
+  const floor = newest.ranAt - DEPLOY_LOG_MAX_AGE_MS;
+  const kept = entries.filter((e) => e === newest || e.ranAt >= floor);
+  return kept.slice(-DEPLOY_LOG_MAX_ENTRIES);
+}
+
+/**
+ * Record a deploy. A deploy ends by killing the process that performed it, so
+ * an in-memory `last()` is empty in exactly the situation someone asks the
+ * question. The write happens as soon as `runDeploy` resolves, which is
+ * inside the restart delay — the restart is scheduled, not immediate,
+ * precisely so the result and the response both get out first.
+ *
+ * A result with the latest entry's `ranAt` REPLACES it: that is the same
+ * deploy's verification being settled by a later writer. Anything else is
+ * appended, so the next deploy no longer erases the last one's verdict.
+ */
+export function writeDeployLog(file: string, result: DeployResult): void {
   try {
-    if (!existsSync(file)) return null;
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as DeployResult;
-    return typeof parsed?.status === 'string' ? parsed : null;
-  } catch {
-    return null;
+    const entries = readDeployLogEntries(file);
+    if (entries.at(-1)?.ranAt === result.ranAt) entries.pop();
+    entries.push(result);
+    const body: DeployLogFile = { entries: pruneDeployLog(entries) };
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.tmp~`;
+    writeFileSync(tmp, `${JSON.stringify(body, null, 2)}\n`);
+    renameSync(tmp, file);
+  } catch (err) {
+    console.error('[deploy] could not record the deploy result:', err);
   }
 }
 

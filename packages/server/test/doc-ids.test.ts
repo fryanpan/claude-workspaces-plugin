@@ -49,7 +49,7 @@ describe('doc ids', () => {
     writeFileSync(join(folder, 'README.md'), '# Entry\n\nRead me.\n');
     writeFileSync(join(folder, 'notes.md'), '# Notes\n\nSome notes.\n');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -297,7 +297,7 @@ describe('doc ids', () => {
       await handle.stop();
       writeLegacyYdoc(dataDir, 'taken-name', join(folder, 'README.md'));
       handle = createServer({ port: 0, dataDir });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
       // The hydrated doc is filed nowhere until a board claims it — see the
       // migration block below for why that is the doc's whole address now.
@@ -332,7 +332,7 @@ describe('doc ids', () => {
       await handle.stop();
       writeLegacyYdoc(dataDir, 'legacy-plan', join(folder, 'notes.md'));
       handle = createServer({ port: 0, dataDir });
-      base = `http://localhost:${handle.port}`;
+      base = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(base);
       // A hydrated `.ydoc` is filed nowhere — the board link lives in the
       // board's own record, not in the doc — so the board has to claim it

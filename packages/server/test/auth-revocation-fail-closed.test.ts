@@ -87,7 +87,7 @@ describe('an unreadable revoked-sessions file self-heals by ending every session
     // that every browser-facing hostname sits behind Cloudflare Access. These tests
     // are about that flow, so they ask for it explicitly.
     const first = createServer({ port: 0, dataDir, emailCodeSignIn: true });
-    const base1 = `http://localhost:${first.port}`;
+    const base1 = `http://127.0.0.1:${first.port}`;
     const oldCookie = await login(base1, 'healed@example.com');
     expect(await authenticated(base1, oldCookie)).toBe(true);
     expect(existsSync(join(dataDir, 'revoked-sessions.json'))).toBe(true);
@@ -97,7 +97,7 @@ describe('an unreadable revoked-sessions file self-heals by ending every session
     writeFileSync(join(dataDir, 'revoked-sessions.json'), 'not json{{{');
 
     const second = createServer({ port: 0, dataDir, emailCodeSignIn: true });
-    const base2 = `http://localhost:${second.port}`;
+    const base2 = `http://127.0.0.1:${second.port}`;
     try {
       // The old cookie still verifies cryptographically (same key file),
       // but the boot-time watermark bump ended it: a revoked id could be
@@ -117,7 +117,7 @@ describe('an unreadable revoked-sessions file self-heals by ending every session
   it('a denylist deleted at runtime refuses sessions outright', async () => {
     const dataDir = freshDir();
     const handle = createServer({ port: 0, dataDir, emailCodeSignIn: true });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     try {
       const cookie = await login(base, 'runtime-delete@example.com');
       expect(await authenticated(base, cookie)).toBe(true);

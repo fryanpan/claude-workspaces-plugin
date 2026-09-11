@@ -212,7 +212,7 @@ describe('voice actions (§3.8): status and assignee, on the speaker’s authori
         return completeImpl();
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', {
       name: 'search-revamp',

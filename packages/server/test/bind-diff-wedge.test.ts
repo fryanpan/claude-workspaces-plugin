@@ -101,7 +101,7 @@ describe('binding a diff over a tree that has stopped answering', () => {
 
   it('parks the file that will not answer and leaves the server answering', async () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     // Warm the route first. The very first request to a fresh server pays for
     // module loading and route compilation, and a budget this tight would
@@ -148,7 +148,7 @@ describe('binding a diff over a tree that has stopped answering', () => {
     writeFileSync(wedged, '# Meeting notes\n\nThe committed version.\nA new line.\n');
 
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const res = await fetch(`${base}/workspaces/${WS}/attachments`, {

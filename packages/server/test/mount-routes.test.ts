@@ -61,7 +61,7 @@ describe('mount routes', () => {
     git(repo, 'add', '.');
     git(repo, 'commit', '-m', 'init');
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

@@ -170,7 +170,7 @@ describe('voice navigation (route)', () => {
         return completeImpl();
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', { name: 'QB', goal: 'Ship onboarding.' });
     expect(ws.status).toBe(200);

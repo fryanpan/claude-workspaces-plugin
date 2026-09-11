@@ -80,7 +80,7 @@ describe('link mode is retired', () => {
 
     access = await accessHarness();
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const board = await local('/workspaces', {
       method: 'POST',
@@ -113,7 +113,7 @@ describe('link mode is retired', () => {
       JSON.stringify([legacyRecord(), ...existing], null, 2),
     );
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     // No re-seed: the restart is on the same data dir, so `boardId` — the
     // board the doc is filed on and every share below is scoped to — comes
     // back with it.

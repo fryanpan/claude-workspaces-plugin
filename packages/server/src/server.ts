@@ -284,7 +284,9 @@ export interface ServerHandle {
 
 export function createServer(opts: ServerOptions = {}): ServerHandle {
   const port = opts.port ?? DEFAULT_PORT;
-  const hostname = opts.hostname;
+  // `CW_TEST_BIND_HOST` is set by `test/loopback-bind.preload.ts` for every
+  // `bun test` run and by nothing else; see `ServerOptions.hostname`.
+  const hostname = opts.hostname ?? process.env.CW_TEST_BIND_HOST;
   const dataDir = opts.dataDir ?? join(process.cwd(), 'data');
   // The words every prompt on this server runs on. `bin.ts` hands its own
   // store down so one instance serves the routes, the notes composer and the
@@ -1233,7 +1235,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           })),
       };
     },
-    // A doc's LABEL, for matching "the Akash review doc" against what the
+    // A doc's LABEL, for matching "the Cairn review doc" against what the
     // board calls it. Title, else the file's basename — never the path, for
     // the reason given twice above.
     docTitle: (_workspaceId, docId) => {

@@ -30,7 +30,7 @@ function serverWith(codeSender: CodeSender): { base: string; handle: ServerHandl
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
   });
-  return { base: `http://localhost:${handle.port}`, handle };
+  return { base: `http://127.0.0.1:${handle.port}`, handle };
 }
 
 async function start(base: string, email: string): Promise<Response> {
@@ -116,7 +116,7 @@ describe('the log sender', () => {
       await handle.stop();
       rmSync(dataDir, { recursive: true, force: true });
     });
-    const res = await start(`http://localhost:${handle.port}`, 'default@example.com');
+    const res = await start(`http://127.0.0.1:${handle.port}`, 'default@example.com');
     expect(res.status).toBe(200);
   });
 });

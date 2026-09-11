@@ -337,7 +337,7 @@ describe('a comment posted while the subscriber is disconnected is delivered aft
     dataDir = mkdtempSync(join(tmpdir(), 'comment-durable-live-'));
     srcDir = mkdtempSync(join(tmpdir(), 'comment-durable-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

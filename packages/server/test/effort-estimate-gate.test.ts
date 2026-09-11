@@ -75,7 +75,7 @@ describe('effort-estimate scoring', () => {
       },
       stallNudgeQuietMs: 60 * 60_000,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {
@@ -281,7 +281,7 @@ describe('effort-estimate scoring', () => {
   it('no estimator wired at all leaves the row untouched — never scored, not a failure', async () => {
     const unscored = createServer({ port: 0, dataDir: mkdtempSync(join(tmpdir(), 'no-scorer-')) });
     try {
-      const b2 = `http://localhost:${unscored.port}`;
+      const b2 = `http://127.0.0.1:${unscored.port}`;
       const { workspace } = await jj<{ workspace: { id: string } }>(
         await fetch(`${b2}/workspaces`, {
           method: 'POST',

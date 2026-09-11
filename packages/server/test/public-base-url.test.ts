@@ -97,8 +97,8 @@ describe('the override reaches the links the route table hands out', () => {
     const docPath = join(dataDir, 'notes.md');
     writeFileSync(docPath, '# Notes\n\nBody.\n');
     handle = createServer({ port: 0, dataDir, publicBaseUrl: PUBLIC });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
-    const created = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/docs`, {
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
+    const created = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/docs`, {
       method: 'POST',
       headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
       body: JSON.stringify({ docId: 'doc-1', type: 'markdown', sourceUrl: docPath }),
@@ -115,7 +115,7 @@ describe('the override reaches the links the route table hands out', () => {
     // Fetched through the READABLE ALIAS the caller asked for — the address is
     // the minted id, but `doc-1` still resolves to it.
     const res = await fetch(
-      `http://localhost:${handle.port}/workspaces/${WS}/docs/doc-1?format=json`,
+      `http://127.0.0.1:${handle.port}/workspaces/${WS}/docs/doc-1?format=json`,
       {
         headers: { host: `localhost:${handle.port}` },
       },
@@ -165,8 +165,8 @@ describe('without an override the server still describes itself', () => {
     const docPath = join(dataDir, 'notes.md');
     writeFileSync(docPath, '# Notes\n\nBody.\n');
     handle = createServer({ port: 0, dataDir });
-    WS = await seedBoard(`http://localhost:${handle.port}`);
-    const created = await fetch(`http://localhost:${handle.port}/workspaces/${WS}/docs`, {
+    WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
+    const created = await fetch(`http://127.0.0.1:${handle.port}/workspaces/${WS}/docs`, {
       method: 'POST',
       headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
       body: JSON.stringify({ docId: 'doc-1', type: 'markdown', sourceUrl: docPath }),
@@ -181,7 +181,7 @@ describe('without an override the server still describes itself', () => {
 
   it('falls back to a plain-http URL carrying the listening port', async () => {
     const res = await fetch(
-      `http://localhost:${handle.port}/workspaces/${WS}/docs/doc-1?format=json`,
+      `http://127.0.0.1:${handle.port}/workspaces/${WS}/docs/doc-1?format=json`,
       {
         headers: { host: `localhost:${handle.port}` },
       },

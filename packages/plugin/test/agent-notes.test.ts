@@ -77,7 +77,7 @@ describe('env resolution', () => {
     expect(resolveBaseUrl({ CW_BASE_URL: 'http://a:1', FEEDBACK_BASE_URL: 'http://b:2' })).toBe(
       'http://a:1',
     );
-    expect(resolveBaseUrl({}, () => 4321)).toBe('http://localhost:4321');
+    expect(resolveBaseUrl({}, () => 4321)).toBe('http://127.0.0.1:4321');
     expect(resolveBaseUrl({}, () => undefined)).toBe(DEFAULT_BASE_URL);
     expect(resolveBaseUrl({})).toBe(DEFAULT_BASE_URL);
     expect(

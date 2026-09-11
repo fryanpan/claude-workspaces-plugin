@@ -90,7 +90,7 @@ describe('refs backfill (route + settle scan)', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'refs-backfill-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', { name: 'refs-backfill-ws', goal: 'Mine the links.' });
     wsId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
@@ -253,7 +253,7 @@ describe('refs backfill (route + settle scan)', () => {
     // hydrate, or every backfill would silently undo itself at the next boot.
     await handle.stop();
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     // No re-seed: same data dir, so `WS` — the board every fixture above is
     // filed on and every prose link names — comes back with it.
     expect(docRefsOf(handle.tasks.getGoalRow(goalId)?.links)).toEqual([docAId]);
@@ -332,7 +332,7 @@ describe('refs backfill is scoped to the board that asks', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'refs-backfill-scope-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const a = await seedBoardWithLinkedDoc('board-a');
     const b = await seedBoardWithLinkedDoc('board-b');
     aWs = a.ws;

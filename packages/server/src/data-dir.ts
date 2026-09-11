@@ -1,6 +1,6 @@
 /**
  * Where the durable record lives — the `.ydoc` corpus, `activity.jsonl`,
- * `deploy-log.json`, and the sidecars beside them.
+ * `deploy-log.json`, `server-starts.json`, and the sidecars beside them.
  *
  * ## Why this is not simply `join(repoRoot, 'data')`
  *
@@ -38,4 +38,18 @@ export function resolveDataDir(env: Record<string, string | undefined>, repoRoot
   const explicit = env[DATA_DIR_ENV]?.trim();
   if (explicit) return explicit;
   return join(repoRoot, 'data');
+}
+
+/**
+ * The data dir a server started with `argv` will use: `--data-dir` beats the
+ * resolver. One copy, because `bin.ts` needs it before the rest of the
+ * config resolves — to record its own start first — and a second spelling
+ * of this precedence is how two readers end up in different directories.
+ */
+export function dataDirFromArgs(
+  env: Record<string, string | undefined>,
+  repoRoot: string,
+  arg: (name: string) => string | undefined,
+): string {
+  return arg('data-dir') ?? resolveDataDir(env, repoRoot);
 }

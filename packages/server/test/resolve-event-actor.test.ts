@@ -80,7 +80,7 @@ describe('resolve/reopen broadcast actor', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'resolve-actor-'));
     srcDir = mkdtempSync(join(tmpdir(), 'resolve-actor-src-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

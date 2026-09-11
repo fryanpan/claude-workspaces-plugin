@@ -17,7 +17,8 @@
  * Modes:
  *   default     — DEV: server runs under `bun --watch` (hot-reload on any
  *                 imported change) + a workspaces-app bundler in --watch mode.
- *   --no-watch  — PROD: rebuilds the browser bundles once, publishes them as
+ *   --no-watch  — PROD: installs dependencies from bun.lock, rebuilds the
+ *                 browser bundles once, publishes them as
  *                 an immutable client release outside this checkout, and runs
  *                 the server as a plain long-lived process against it. No
  *                 bundler, no hot-reload: deploys are deliberate (git pull +
@@ -27,30 +28,23 @@
  *
  * Stops cleanly on Ctrl+C.
  */
+// Static imports are resolved before a line of this file runs, so the ones
+// here must never reach node_modules: they are what runs BEFORE the install,
+// and a package a pull just added cannot be imported until it has run. The
+// rest are loaded with `await import` once `installBeforeBoot` returns.
+// supervisor-install.test.ts boots this from a copy with no node_modules.
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { connect as netConnect } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { publishDiscovery, releaseDiscovery } from '../packages/core/src/discovery-file.ts';
-import { readRenamedEnv } from '../packages/core/src/env-names.ts';
-import {
-  type PreparedClient,
-  clientReleaseRoot,
-  prepareClientRelease,
-} from '../packages/server/src/client-release.ts';
+import type { PreparedClient } from '../packages/server/src/client-release.ts';
 import { resolveDataDir } from '../packages/server/src/data-dir.ts';
-import { readDeploySource } from '../packages/server/src/deploy-source.ts';
-import { stamped } from '../packages/server/src/log-stamp.ts';
 import {
-  type BindErrorKind,
-  type ListenProbeVerdict,
-  acquirePort,
-  bindHealthStep,
-  classifyConnectError,
-  probeLocalPort,
-  shouldWalkPorts,
-} from '../packages/server/src/port-bind.ts';
+  installBeforeBoot,
+  supervisorInstallGate,
+} from '../packages/server/src/dependency-install.ts';
+import { stamped } from '../packages/server/src/log-stamp.ts';
+import type { BindErrorKind } from '../packages/server/src/port-bind.ts';
 
 /**
  * A supervisor diagnostic, with the clock the log file does not provide.
@@ -91,6 +85,30 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 const dataDir = resolveDataDir(process.env, repoRoot);
 
+// PROD: dependencies first — the builds, the server and the rest of this
+// supervisor import them. A failed install is the one deploy step that does
+// NOT fall back: this waits, on a backoff, until one succeeds; see
+// `installBeforeBoot` for why it neither boots over the failure nor exits
+// into a launchd respawn loop. The health watchdog below is armed only after
+// this returns; before it, it would find nothing listening and exit into
+// that same loop.
+if (noWatch) await installBeforeBoot(supervisorInstallGate(repoRoot, dataDir, note));
+
+const { publishDiscovery, releaseDiscovery } = await import(
+  '../packages/core/src/discovery-file.ts'
+);
+const { readRenamedEnv } = await import('../packages/core/src/env-names.ts');
+const { clientReleaseRoot, prepareClientRelease } = await import(
+  '../packages/server/src/client-release.ts'
+);
+const { readDeploySource } = await import('../packages/server/src/deploy-source.ts');
+const { acquirePort, probeLocalPort, shouldWalkPorts } = await import(
+  '../packages/server/src/port-bind.ts'
+);
+const { createHealthWatchdog, fileRestartLedger, probeHealth, restartLedgerPath } = await import(
+  '../packages/server/src/supervisor-health.ts'
+);
+
 /**
  * DEV only. Walk to the next port when this one is occupied, so two agents on
  * one machine do not fight over 8787. Only `in-use` justifies a step: a host
@@ -110,37 +128,6 @@ async function pickFreePort(start: number): Promise<number> {
       ? `no free port near ${start}`
       : `cannot open a socket on :${start} — this host is out of network resources, not out of ports`,
   );
-}
-
-/**
- * Can we open a TCP connection to the port? This answers "is the server
- * actually LISTENING", which is different from "is the process alive" — the
- * exact gap that let an unbound-but-alive server escape launchd's KeepAlive.
- *
- * THREE answers, not two. A connect that fails because this host has no
- * socket to give (ENOBUFS and its neighbours) says nothing about the server,
- * and on 2026-09-04 reading it as `false` is what turned a socket-memory
- * shortage into twenty restarts: the fleet's SSE connections exhausted the
- * kernel's buffers, this probe could not connect, the watchdog declared a
- * healthy bound server unbound, and every client then reconnected at once and
- * made the shortage worse. A refusal and a timeout are still evidence about
- * the server and still count. See `classifyConnectError`.
- */
-function probePortListening(port: number, host = '127.0.0.1'): Promise<ListenProbeVerdict> {
-  return new Promise((resolve) => {
-    const socket = netConnect({ port, host });
-    let settled = false;
-    const done = (verdict: ListenProbeVerdict) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve(verdict);
-    };
-    socket.setTimeout(2000);
-    socket.once('connect', () => done('listening'));
-    socket.once('timeout', () => done('not-listening'));
-    socket.once('error', (err) => done(classifyConnectError(err)));
-  });
 }
 
 // What this deploy source is parked on, stamped into the release so the served
@@ -199,6 +186,7 @@ const port = await resolvePort();
 //      being served.
 //
 // A failed build keeps the previous release live (stale beats down), loudly.
+// Dependencies were installed above, before this file's imports.
 const clientArgs: string[] = [];
 if (noWatch) {
   const failures: string[] = [];
@@ -363,7 +351,7 @@ console.log('');
 console.log('[supervisor] markdown review: .../review/<docId>?as=bryan');
 console.log('[supervisor] demo mockup:    .../demos/mockup');
 console.log('[supervisor] mobile preview: append  &mobile=iphone16pm  to a review URL');
-if (noWatch) console.log('[supervisor] mode: prod (no hot-reload; bind-health watchdog on)');
+if (noWatch) console.log('[supervisor] mode: prod (no hot-reload; health watchdog on)');
 // Named on every start because "which corpus is this serving" was previously
 // answerable only by deriving it from the checkout's location, and a server
 // that booted against the wrong one looked identical to a healthy one.
@@ -473,12 +461,15 @@ mdApp?.on('exit', () => cleanup(1));
 // Intentional stop → exit 0, no respawn.
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () => cleanup(0));
 
-// Bind-health watchdog (prod only). The failure that took prod down was the
+// Health watchdog (prod only). The failure that took prod down was the
 // server process staying ALIVE but no longer LISTENING (a --watch reload
-// wedge). launchd's KeepAlive can't see that — the process is up. So poll the
-// port; if it's unreachable across MAX_FAILS consecutive checks while we
-// haven't been asked to stop, exit non-zero so launchd respawns a bound
-// server. Dropping --watch removes the known trigger; this catches the class.
+// wedge), and the one after it was a server still listening whose main thread
+// had stopped running. launchd's KeepAlive sees neither — the process is up.
+// So ask the server a question every CHECK_MS and read the answer (see
+// supervisor-health.ts for why a TCP connect is not an answer); after
+// MAX_FAILS unanswered probes in a row, exit non-zero so launchd respawns it —
+// at most WATCHDOG_RESTART_POLICY often, a limit kept in a file because each
+// restart ends this process.
 //
 // This polls the port we ASKED for, which is only the same as the port the
 // child BOUND because prod forbids walking on both sides (`shouldWalkPorts`
@@ -490,32 +481,21 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () =
 if (noWatch) {
   const GRACE_MS = 15_000; // let the server bind before the first check
   const CHECK_MS = 30_000;
-  const MAX_FAILS = 2; // ~60s unbound before we act (avoids blips)
-  let fails = 0;
+  const MAX_FAILS = 2; // ~60s unanswered before we act (avoids blips)
+  const watchdog = createHealthWatchdog({
+    probe: () => probeHealth(port),
+    maxFails: MAX_FAILS,
+    ledger: fileRestartLedger(restartLedgerPath(dataDir)),
+    log: note,
+    label: `:${port}`,
+    restart: () => cleanup(1),
+  });
   setTimeout(() => {
-    const timer = setInterval(async () => {
+    const timer = setInterval(() => {
       if (cleaningUp) return;
-      const verdict = await probePortListening(port);
-      const step = bindHealthStep(fails, verdict, MAX_FAILS);
-      fails = step.fails;
-      if (step.action === 'ok') return;
-      if (verdict === 'inconclusive') {
-        // Say it out loud. This branch is the one that used to be silently
-        // counted as an unbound server, and the log line is how the next
-        // socket shortage gets diagnosed as a socket shortage.
-        note(
-          `[supervisor] health: cannot open a socket to probe :${port} — this host is out of ` +
-            'network resources, which says nothing about the server; not counting it ' +
-            `(${fails}/${MAX_FAILS})`,
-        );
-        return;
-      }
-      note(`[supervisor] health: :${port} not listening (${fails}/${MAX_FAILS})`);
-      if (step.action === 'restart') {
-        clearInterval(timer);
-        note('[supervisor] server alive-but-unbound — restarting via launchd');
-        cleanup(1);
-      }
+      void watchdog.tick().then((outcome) => {
+        if (outcome === 'restart') clearInterval(timer);
+      });
     }, CHECK_MS);
     timer.unref?.();
   }, GRACE_MS);

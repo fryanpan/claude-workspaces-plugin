@@ -38,7 +38,7 @@ describe('POST /api/plugin/refresh', () => {
       dataDir,
       ...(pluginRefresher ? { pluginRefresher } : {}),
     });
-    return `http://localhost:${handle.port}`;
+    return `http://127.0.0.1:${handle.port}`;
   };
 
   const fake = (runs: { n: number }, result: RefreshResult = RESULT) =>

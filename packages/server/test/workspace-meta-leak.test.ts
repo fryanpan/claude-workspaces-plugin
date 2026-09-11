@@ -73,7 +73,7 @@ describe('workspace share does not leak host details', () => {
       // Make the tailnet name appear in reviewUrl the way it does in prod.
       trustedHosts: [TAILNET],
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     // A board is the unit of sharing; the bind is filed on one. What this
     // test measures — which meta fields a share visitor may see — is reached
     // through the grouping either way.

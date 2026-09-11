@@ -407,7 +407,7 @@ describe('flat write-back through bindDiff', () => {
   it(`POST /workspaces/${WS}/attachments/:id/editable-file routes the whole flow (route-layer test per learnings)`, async () => {
     const handle: ServerHandle = createServer({ port: 0, dataDir });
     try {
-      const httpBase = `http://localhost:${handle.port}`;
+      const httpBase = `http://127.0.0.1:${handle.port}`;
       WS = await seedBoard(httpBase);
       const bind = await fetch(`${httpBase}/workspaces/${WS}/attachments`, {
         method: 'POST',

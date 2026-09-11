@@ -25,6 +25,7 @@ import {
   scrubEventForPrivacy,
   scrubTelemetryItem,
 } from '@claude-workspaces/core/trace-privacy';
+import { SUPERVISOR_PROBE_HEADER } from './supervisor-health.ts';
 
 /**
  * The privacy floor is shared with the browser build, so it lives in
@@ -252,10 +253,14 @@ export async function flushServerSentry(timeoutMs = 2000): Promise<boolean> {
  * browser tracing integration adds those to same-origin relative-URL
  * fetches, which is how this app talks to itself) so one page load reads as
  * one trace end to end. A no-op passthrough when Sentry isn't configured.
+ *
+ * Also a passthrough for the supervisor's health probe: at full sample rate
+ * that is a transaction every 30s — 2,880 a day of one route answering, which
+ * spends quota and buries the requests a person made.
  */
 export function withRouteSpan<T>(req: Request, pathname: string, fn: () => Promise<T>): Promise<T> {
   const Sentry = sentryModule;
-  if (!Sentry) return fn();
+  if (!Sentry || req.headers.has(SUPERVISOR_PROBE_HEADER)) return fn();
   const name = `${req.method} ${routePatternForSpan(pathname)}`;
   return Sentry.continueTrace(
     {

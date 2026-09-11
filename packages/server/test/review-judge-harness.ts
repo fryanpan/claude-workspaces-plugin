@@ -153,6 +153,6 @@ export function startJudgeHarness(): JudgeHarness {
     heldReviewItemMs: 0,
     stallNudgeQuietMs: 60 * 60_000,
   });
-  h.base = `http://localhost:${h.handle.port}`;
+  h.base = `http://127.0.0.1:${h.handle.port}`;
   return h;
 }

@@ -127,7 +127,7 @@ describe('/api/agents/:agentId/watches', () => {
   const start = async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'agent-watches-route-'));
     handle = createServer({ port: 0, dataDir });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     // Each server is its own store, so the board a doc is filed on has to be
     // this server's — a board id left over from the previous one 404s.
     WS = await seedBoard(base);
@@ -307,7 +307,7 @@ describe('POST /api/agents/:id/merge re-keys watches so delivery follows the new
   it('a comment posted after the merge reaches the new id, and the old id holds nothing', async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'agent-merge-'));
     handle = createServer({ port: 0, dataDir });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const post = async (path: string, body: unknown) => {
       const res = await fetch(`${base}${path}`, {
@@ -413,7 +413,7 @@ describe('POST /api/agents/:id/merge re-keys watches so delivery follows the new
   it('refuses to merge INTO the shared identity, and refuses a self-merge', async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'agent-merge-refuse-'));
     handle = createServer({ port: 0, dataDir });
-    const base = `http://localhost:${handle.port}`;
+    const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     const merge = async (from: string, body: unknown) => {
       const res = await fetch(`${base}/api/agents/${from}/merge`, {
@@ -452,7 +452,7 @@ describe('POST /api/agents/:id/merge — review findings', () => {
 
   const req = async (path: string, init: { method?: string; body?: unknown } = {}) => {
     const port = handle?.port ?? 0;
-    const res = await fetch(`http://localhost:${port}${path}`, {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
       headers: { host: `localhost:${port}`, 'content-type': 'application/json' },
       ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
@@ -587,7 +587,9 @@ describe('POST /api/agents/:id/merge — review findings', () => {
     // The subject is the MERGE route's own loopback rule. The access-only
     // browser gate would refuse this LAN probe a layer earlier, which would
     // make the assertion below about the wrong gate.
-    handle = createServer({ port: 0, dataDir, accessOnlyBrowserHosts: false });
+    // Every interface, as prod binds: a probe below dials this machine's
+    // non-loopback address. See loopback-bind.preload.ts.
+    handle = createServer({ port: 0, hostname: '::', dataDir, accessOnlyBrowserHosts: false });
     const wsId = await seed();
     const addrs = nonLoopbackIPv4();
     if (addrs.length === 0) {
@@ -639,7 +641,7 @@ describe('POST /api/agents/:id/merge — merging back reverses an earlier merge'
 
   const req = async (path: string, init: { method?: string; body?: unknown } = {}) => {
     const port = handle?.port ?? 0;
-    const res = await fetch(`http://localhost:${port}${path}`, {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
       headers: { host: `localhost:${port}`, 'content-type': 'application/json' },
       ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),

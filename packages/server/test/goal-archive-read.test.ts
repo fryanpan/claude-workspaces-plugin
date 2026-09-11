@@ -126,7 +126,7 @@ describe('over HTTP — what get_workspace and reorder_goals actually return', (
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'goal-archive-read-http-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     const { workspace } = (await (
       await post('/workspaces', { name: 'Harbour Lights', goal: 'Keep the lamps lit.' })
     ).json()) as { workspace: { id: string } };

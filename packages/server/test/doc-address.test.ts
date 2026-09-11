@@ -28,7 +28,7 @@ let base: string;
 
 function boot(): void {
   handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: 60 * 60_000 });
-  base = `http://localhost:${handle.port}`;
+  base = `http://127.0.0.1:${handle.port}`;
 }
 
 /** The invariant, read off the live store the way the boot pass reads it. */

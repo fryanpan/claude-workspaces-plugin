@@ -75,7 +75,7 @@ async function signBody(body: string, id: string): Promise<Record<string, string
 /** Deliver on the LOCAL surface — the host class the callback gate never
  *  sees, and the one this refusal is about. */
 const deliver = (handle: ServerHandle, headers: Record<string, string> = {}) =>
-  fetch(`http://localhost:${handle.port}/recall/status`, {
+  fetch(`http://127.0.0.1:${handle.port}/recall/status`, {
     method: 'POST',
     headers: {
       host: `localhost:${handle.port}`,

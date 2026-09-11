@@ -149,12 +149,12 @@ async function makeServer(engine: TranscriptionEngine): Promise<{
 }> {
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-timing-'));
   const handle = createServer({ port: 0, dataDir, transcription: engine });
-  const base = `http://localhost:${handle.port}`;
+  const base = `http://127.0.0.1:${handle.port}`;
   WS = await seedBoard(base);
   return {
     handle,
     dataDir,
-    wsBase: `ws://localhost:${handle.port}`,
+    wsBase: `ws://127.0.0.1:${handle.port}`,
     createDoc: async (docId) => {
       const path = join(dataDir, `${docId}.md`);
       writeFileSync(path, `# ${docId}\n\nNotes go here.\n`);
@@ -235,7 +235,7 @@ describe('the spoken clock is not the opt-in', () => {
         },
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
   afterAll(async () => {
@@ -258,7 +258,7 @@ describe('the spoken clock is not the opt-in', () => {
     expect(created.status, await created.clone().text()).toBe(200);
     const { docId } = (await created.json()) as { docId: string };
 
-    const client = await AudioClient.open(`ws://localhost:${handle.port}`, docId);
+    const client = await AudioClient.open(`ws://127.0.0.1:${handle.port}`, docId);
     client.start(false);
     await client.waitFor('ready');
     client.speak(3);

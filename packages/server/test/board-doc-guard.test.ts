@@ -121,8 +121,8 @@ describe('board docs defend everything the server owns', () => {
     await settle(600); // let the debounced .ydoc + sidecar writes land
     await handle.stop();
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
-    wsBase = `ws://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   };
 
   async function makeWorkspace(name: string): Promise<string> {
@@ -142,8 +142,8 @@ describe('board docs defend everything the server owns', () => {
     secretPath = join(dataDir, 'private-notes.md');
     writeFileSync(secretPath, CANARY);
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
-    wsBase = `ws://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

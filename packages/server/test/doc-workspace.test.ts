@@ -63,7 +63,7 @@ describe('a doc always lands in a workspace', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-workspace-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -263,9 +263,9 @@ describe('a doc always lands in a workspace', () => {
     try {
       const docId = 'doc-widget-ws';
       const ws = new WebSocket(
-        `ws://localhost:${open.port}/workspaces/${WS}/docs/${docId}/y?type=mockup`,
+        `ws://127.0.0.1:${open.port}/workspaces/${WS}/docs/${docId}/y?type=mockup`,
         // The socket is refused without an allowed browser Origin.
-        { headers: { origin: `http://localhost:${open.port}` } } as unknown as string[],
+        { headers: { origin: `http://127.0.0.1:${open.port}` } } as unknown as string[],
       );
       await new Promise<void>((resolve, reject) => {
         ws.addEventListener('open', () => resolve());
@@ -292,7 +292,7 @@ describe('a doc that predates the rule has no address', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-legacy-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     // The gate lives in the route, so going straight at DocStore produces the
     // shape a doc persisted before this rule has: meta with no workspaceId.

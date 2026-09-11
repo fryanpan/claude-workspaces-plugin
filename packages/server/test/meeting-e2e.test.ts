@@ -183,9 +183,9 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
         },
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
     const path = join(dataDir, 'plan-review.md');
     writeFileSync(path, '# Plan review\n\nThe agenda paragraph.\n');
     const res = await fetch(`${base}/workspaces/${WS}/docs`, {

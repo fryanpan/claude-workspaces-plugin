@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STAMP_PATTERN, stamped } from '../src/log-stamp.ts';
+import { createHealthWatchdog } from '../src/supervisor-health.ts';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const SERVE = join(repoRoot, 'scripts', 'serve.ts');
@@ -47,15 +48,35 @@ describe('the supervisor log', () => {
     expect(bare.map(({ n, line }) => `${n}: ${line.trim()}`)).toEqual([]);
   });
 
-  it('stamps the line the restart criterion is counted from', () => {
+  it('stamps the line the restart criterion is counted from', async () => {
     // Named explicitly because this is the line the 24h measurement reads,
     // and a refactor that stamped everything EXCEPT this one would still
-    // leave the criterion unanswerable.
-    const alive = source
+    // leave the criterion unanswerable. The restart line is written by the
+    // health watchdog (supervisor-health.ts) through the `log` it is handed,
+    // so two things have to hold: the watchdog emits its restart line through
+    // that `log` and nowhere else, and the supervisor hands it `note`.
+    const lines: string[] = [];
+    const dog = createHealthWatchdog({
+      probe: async () => ({ verdict: 'not-listening' }),
+      maxFails: 1,
+      ledger: { load: () => [], save: () => {} },
+      log: (line) => lines.push(line),
+      restart: () => {},
+      label: ':8873',
+    });
+    expect(await dog.tick()).toBe('restart');
+    expect(lines.filter((l) => l.includes('— restarting via launchd'))).toEqual([
+      '[supervisor] server alive-but-unbound — restarting via launchd',
+    ]);
+
+    // Every `log:` the supervisor hands a helper is `note`; the watchdog's
+    // is the bare reference.
+    const wirings = source
       .split('\n')
-      .find((line) => line.includes('alive-but-unbound') && !line.trimStart().startsWith('*'));
-    expect(alive).toBeDefined();
-    expect(alive).toContain('note(');
+      .filter((line) => /^\s*log:/.test(line))
+      .map((line) => line.trim());
+    expect(wirings).toContain('log: note,');
+    expect(wirings.filter((w) => !w.includes('note'))).toEqual([]);
   });
 
   it('produces a line an ISO-8601 reader can date and order', () => {

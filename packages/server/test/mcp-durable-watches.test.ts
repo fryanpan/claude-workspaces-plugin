@@ -207,7 +207,7 @@ describe('watches survive an MCP child respawn (through the real bundle)', () =>
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'mcp-durable-watches-'));
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
     // Created under readable names; every assertion below speaks the ids the
     // server minted back.
@@ -532,7 +532,7 @@ describe('a declared lead comes back live after a respawn', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'mcp-declared-lead-'));
     handle = createServer({ port: 0, dataDir, heartbeatFreshMs: 1_000 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 
@@ -741,7 +741,7 @@ describe('a restore that could not reach the server fails loudly, then recovers'
     // measured here.
     handle = createServer({ port: 0, dataDir });
     port = handle.port;
-    base = `http://localhost:${port}`;
+    base = `http://127.0.0.1:${port}`;
     WS = await seedBoard(base);
     freshBase = `http://127.0.0.1:${port}`;
     WS = await seedBoard(freshBase);

@@ -82,7 +82,7 @@ describe('workspace notes home + doc origin repo routes', () => {
     wt = join(tmp, 'wt-notes');
     git(repo, 'worktree', 'add', wt, '-b', 'notes');
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
 

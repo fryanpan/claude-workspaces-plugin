@@ -27,7 +27,7 @@ async function boot(): Promise<ServerHandle> {
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-stop-sockets-'));
   dataDirs.push(dataDir);
   const handle = createServer({ port: 0, dataDir });
-  WS = await seedBoard(`http://localhost:${handle.port}`);
+  WS = await seedBoard(`http://127.0.0.1:${handle.port}`);
   return handle;
 }
 
@@ -88,7 +88,7 @@ describe('stopping the server closes its open connections', () => {
     // Mockup docs are the one type a socket may create, which is why this
     // reaches an open doc without an API call first.
     const ws = new WebSocket(
-      `ws://localhost:${handle.port}/workspaces/${WS}/docs/stop-sockets-mock/y?type=mockup`,
+      `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/stop-sockets-mock/y?type=mockup`,
     );
     let closed = false;
     ws.addEventListener('close', () => {
@@ -121,7 +121,7 @@ describe('stopping the server closes its open connections', () => {
     const handle = await boot();
     const docId = 'stop-sockets-handler-mock';
     const ws = new WebSocket(
-      `ws://localhost:${handle.port}/workspaces/${WS}/docs/${docId}/y?type=mockup`,
+      `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/${docId}/y?type=mockup`,
     );
     await new Promise<void>((resolve, reject) => {
       ws.addEventListener('open', () => resolve());

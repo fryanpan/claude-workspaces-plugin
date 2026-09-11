@@ -2,7 +2,7 @@
  * Voice requests that work SMOOTHLY (Bryan, 2026-08-29):
  *
  *  - "Asking to go to an item with only vaguely relevant words has never
- *    worked (eg 'I want to go to the Akash review doc in QB')." A navigation
+ *    worked (eg 'I want to go to the Cairn review doc in QB')." A navigation
  *    ask resolves by TITLE SIMILARITY before any model sees it, and when the
  *    best two are too close to call the ack asks which one instead of
  *    guessing — wrong-but-confident navigation is worse than asking.
@@ -40,11 +40,11 @@ import { seedBoard } from './workspace-seed.ts';
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
 const AGENT = { id: 'agent-search-revamp', name: 'Search Revamp', kind: 'known', color: '#888888' };
 
-/** Three real documents: a target, a near-twin that makes "akash review"
+/** Three real documents: a target, a near-twin that makes "cairn review"
  *  ambiguous, and a decoy sharing exactly one word with it. The model half
  *  ranks the same three titles as bare values. */
-const AKASH = 'Review: Akash — onboarding flow';
-const AKASH_TWIN = 'Review: Akash — billing flow';
+const CAIRN = 'Review: Cairn — onboarding flow';
+const CAIRN_TWIN = 'Review: Cairn — billing flow';
 const DECOY = 'Review: billing export';
 
 // ── Route: through the real server ─────────────────────────────────────────
@@ -57,9 +57,9 @@ describe('voice, smoothly (route)', () => {
   let dataDir: string;
   let base: string;
   let boardId: string;
-  let akashDocId: string;
+  let cairnDocId: string;
   let decoyDocId: string;
-  /** Attached mid-suite: the near-twin that makes the Akash ask ambiguous. */
+  /** Attached mid-suite: the near-twin that makes the Cairn ask ambiguous. */
   let twinDocId = '';
   let progressTaskId: string;
   /** Docs carrying one open review item each — a decision (options) or a
@@ -175,7 +175,7 @@ describe('voice, smoothly (route)', () => {
         return completeImpl();
       },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
 
     const ws = await post('/workspaces', { name: 'QB', goal: 'Ship onboarding.' });
@@ -183,7 +183,7 @@ describe('voice, smoothly (route)', () => {
     boardId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
     WS = boardId;
 
-    akashDocId = await newDoc('akash-onboarding', AKASH);
+    cairnDocId = await newDoc('cairn-onboarding', CAIRN);
     decoyDocId = await newDoc('billing-export', DECOY);
 
     progressTaskId = await newTask({ title: 'Wire the onboarding checklist', assignee: 'Jordan' });
@@ -239,12 +239,12 @@ describe('voice, smoothly (route)', () => {
 
   // ── 1. vague names ───────────────────────────────────────────────────────
 
-  it('Bryan’s phrase opens the Akash review doc, and no model was asked', async () => {
+  it('Bryan’s phrase opens the Cairn review doc, and no model was asked', async () => {
     calls.n = 0;
-    const body = await say("I want to go to the 'Akash review doc' in QB", { surface: 'board' });
+    const body = await say("I want to go to the 'Cairn review doc' in QB", { surface: 'board' });
     expect(body.route).toBe('fast-path');
-    expect(body.navigate).toBe(`/workspaces/${WS}/docs/${encodeURIComponent(akashDocId)}`);
-    expect(body.ack).toContain(AKASH);
+    expect(body.navigate).toBe(`/workspaces/${WS}/docs/${encodeURIComponent(cairnDocId)}`);
+    expect(body.ack).toContain(CAIRN);
     expect(body.navigate).not.toContain(decoyDocId);
     expect(calls.n).toBe(0);
   });
@@ -258,37 +258,37 @@ describe('voice, smoothly (route)', () => {
   });
 
   it('two close titles: the ack ASKS which, and "the second one" then opens it', async () => {
-    twinDocId = await newDoc('akash-billing', AKASH_TWIN);
+    twinDocId = await newDoc('cairn-billing', CAIRN_TWIN);
     const twinId = twinDocId;
     calls.n = 0;
-    const asked = await say("I want to go to the 'Akash review doc' in QB", { surface: 'board' });
+    const asked = await say("I want to go to the 'Cairn review doc' in QB", { surface: 'board' });
     expect(asked.route).toBe('fast-path');
     expect(asked.navigate).toBeUndefined();
-    expect(asked.ack).toContain(AKASH);
-    expect(asked.ack).toContain(AKASH_TWIN);
+    expect(asked.ack).toContain(CAIRN);
+    expect(asked.ack).toContain(CAIRN_TWIN);
     expect(asked.ack.toLowerCase()).toContain('first');
     expect(calls.n).toBe(0);
     // Which title the ack offered SECOND is the one "the second one" means.
-    const secondIsTwin = asked.ack.indexOf(AKASH_TWIN) > asked.ack.indexOf(AKASH);
+    const secondIsTwin = asked.ack.indexOf(CAIRN_TWIN) > asked.ack.indexOf(CAIRN);
     const picked = await say('the second one', { surface: 'board' });
     expect(picked.route).toBe('fast-path');
     expect(picked.navigate).toBe(
-      `/workspaces/${WS}/docs/${encodeURIComponent(secondIsTwin ? twinId : akashDocId)}`,
+      `/workspaces/${WS}/docs/${encodeURIComponent(secondIsTwin ? twinId : cairnDocId)}`,
     );
     expect(calls.n).toBe(0);
   });
 
   it('a choice can also be made by NAME after the ask', async () => {
-    const asked = await say('open the akash review', { surface: 'board' });
+    const asked = await say('open the cairn review', { surface: 'board' });
     expect(asked.navigate).toBeUndefined();
     const picked = await say('the billing one', { surface: 'board' });
     expect(picked.route).toBe('fast-path');
     expect(picked.navigate).toBe(`/workspaces/${WS}/docs/${encodeURIComponent(twinDocId)}`);
-    expect(picked.ack).toContain(AKASH_TWIN);
+    expect(picked.ack).toContain(CAIRN_TWIN);
   });
 
   it('a pending "which one?" does not swallow an unrelated next utterance', async () => {
-    const asked = await say('open the akash review', { surface: 'board' });
+    const asked = await say('open the cairn review', { surface: 'board' });
     expect(asked.navigate).toBeUndefined();
     // Not an answer to the question — handled on its own terms (a status read).
     const next = await say('brief status', { surface: 'board' });
@@ -303,7 +303,7 @@ describe('voice, smoothly (route)', () => {
   it('a "which one?" asked on the board is DROPPED once the speaker moves into a doc', async () => {
     // Ask on the board, tap into a decision doc, say "pick the second one":
     // that is an answer to the decision, not to the stale question.
-    const asked = await say('open the akash review', { surface: 'board' });
+    const asked = await say('open the cairn review', { surface: 'board' });
     expect(asked.navigate).toBeUndefined();
     calls.n = 0;
     const picked = await say('pick the second one', { surface: 'doc', docId: decisionDocId3 });
@@ -322,13 +322,13 @@ describe('voice, smoothly (route)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'voice-choice-ttl-'));
     const store = new TaskStore({ dataDir: dir, debounceMs: 1 });
     const ws = store.createWorkspace('ttl');
-    expect(store.createTask(ws.id, { title: AKASH }).ok).toBe(true);
-    expect(store.createTask(ws.id, { title: AKASH_TWIN }).ok).toBe(true);
+    expect(store.createTask(ws.id, { title: CAIRN }).ok).toBe(true);
+    expect(store.createTask(ws.id, { title: CAIRN_TWIN }).ok).toBe(true);
     let now = 1_700_000_000_000;
     const router = new VoiceRouter({ tasks: store, now: () => now });
     const actor = { id: 'known-jordan', name: 'Jordan' };
     const asked = await router.handle(ws.id, {
-      transcript: 'open the akash review',
+      transcript: 'open the cairn review',
       actor,
       context: { surface: 'board' },
     });

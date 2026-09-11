@@ -107,7 +107,7 @@ describe('a board nobody is on files past its lead', () => {
       keepMovingCadenceMs: 0,
       spawnerAgentId: TEAM_LEAD,
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {

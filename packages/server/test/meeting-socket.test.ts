@@ -150,9 +150,9 @@ describe('meeting audio socket', () => {
       dataDir,
       transcription: createMockTranscriptionEngine(),
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -444,9 +444,9 @@ describe('meeting audio socket with no engine configured', () => {
     // No `transcription`: the default state of every server in this suite,
     // and the reason none of them can open a billed streaming session.
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -580,9 +580,9 @@ describe('meeting audio socket with two voices', () => {
         { words: ['sure'], settled: 'Sure.', speaker: 'B' },
       ]),
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
     const path = join(dataDir, 'pairing.md');
     writeFileSync(path, '# pairing\n');
     const res = await fetch(`${base}/workspaces/${WS}/docs`, {
@@ -671,9 +671,9 @@ describe('the announcement frame no longer reaches the record', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-no-consent-'));
     handle = createServer({ port: 0, dataDir, transcription: createMockTranscriptionEngine() });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -733,9 +733,9 @@ describe('meeting engine choice', () => {
         { ...createMockTranscriptionEngine(), name: 'assemblyai-pro' },
       ],
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -803,9 +803,9 @@ describe('meeting engine choice on a server without that engine', () => {
       dataDir,
       transcription: { ...createMockTranscriptionEngine(), name: 'assemblyai' },
     });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {

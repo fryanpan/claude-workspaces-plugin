@@ -71,7 +71,7 @@ describe('an agent feed is readable only by that agent', () => {
 
   const start = (opts: { requireAgentToken?: boolean } = {}): void => {
     handle = createServer({ port: 0, dataDir, ...opts });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   };
 
   beforeEach(() => {

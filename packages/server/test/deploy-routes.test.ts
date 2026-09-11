@@ -40,7 +40,7 @@ describe('/api/deploy', () => {
   const start = (deployer?: Deployer) => {
     dataDir = mkdtempSync(join(tmpdir(), 'deploy-route-'));
     handle = createServer({ port: 0, dataDir, ...(deployer ? { deployer } : {}) });
-    return `http://localhost:${handle.port}`;
+    return `http://127.0.0.1:${handle.port}`;
   };
 
   const fake = (seen: DeployRequest[], result: DeployResult = DEPLOYED) =>

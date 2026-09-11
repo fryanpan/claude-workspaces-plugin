@@ -81,7 +81,7 @@ async function startWith(
     ...(access ? access.serverOptions : {}),
   });
   handle = server;
-  const base = `http://localhost:${server.port}`;
+  const base = `http://127.0.0.1:${server.port}`;
   const res = await fetch(`${base}/workspaces`, {
     method: 'POST',
     headers: { host: `localhost:${server.port}`, 'content-type': 'application/json' },

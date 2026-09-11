@@ -3,7 +3,7 @@
  * about an utterance WITHOUT a model.
  *
  * Bryan, 2026-08-29: *"Asking to go to an item with only vaguely relevant
- * words has never worked (eg 'I want to go to the Akash review doc in
+ * words has never worked (eg 'I want to go to the Cairn review doc in
  * QB')."* The fast path handed the whole index to Haiku and accepted only an
  * EXACT id back, so a vague name either matched nothing or matched whatever
  * the model felt like. Title similarity is a thing this process can compute
@@ -18,10 +18,10 @@
 
 /**
  * Words that carry no identity. Verbs of navigation and the words that name
- * a KIND of thing ("the akash review DOC") are stripped along with articles:
+ * a KIND of thing ("the cairn review DOC") are stripped along with articles:
  * they tell us what the speaker wants to do, not which thing they mean.
  * `review` is deliberately NOT here — it is a real word in real titles
- * ("Review: Akash — …").
+ * ("Review: Cairn — …").
  */
 const STOP_WORDS = new Set([
   'a',
@@ -102,7 +102,7 @@ const PREFIX_MIN = 5;
  * "placeholders"), or close enough in trigrams that a transcription slip in
  * a LONG word would explain it ("onbording" / "onboarding"). Short words get
  * no slip tolerance: at four or five letters, one changed letter is a
- * different word ("akash" / "akesh"), and the trigram test says so.
+ * different word ("cairn" / "caern"), and the trigram test says so.
  */
 export function wordsMatch(a: string, b: string): boolean {
   if (a === b) return true;
@@ -113,7 +113,7 @@ export function wordsMatch(a: string, b: string): boolean {
 
 /** The KIND of thing the speaker named, when they said so: "the mobile DOC"
  *  is a doc even when a task is called Mobile. `review` and `page` are not
- *  kind words — both are real words in real titles ("Review: Akash — …",
+ *  kind words — both are real words in real titles ("Review: Cairn — …",
  *  "Wire the results page"), and treating "page" as one once narrowed
  *  "open the results page" to the docs and found nothing. */
 /** The words that name each kind. `task` and `doc` are stop words as well;
@@ -168,7 +168,7 @@ export const TITLE_MARGIN = 0.15;
  *
  * Score = 0.6 × (how much of the QUERY the title accounts for) + 0.4 × (how
  * much of the TITLE the query accounts for). Query words are weighted by
- * rarity across the index, so "akash" (one title) outweighs "review" (many).
+ * rarity across the index, so "cairn" (one title) outweighs "review" (many).
  * The title-coverage term prefers the title with the least left over — for
  * "results page", "Wire the results page" (0.8) over "Fold the plan into the
  * results page" (0.7) — but that gap is INSIDE `TITLE_MARGIN`, so the

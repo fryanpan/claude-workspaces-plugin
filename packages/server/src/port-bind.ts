@@ -205,21 +205,17 @@ export async function acquirePort(opts: AcquirePortOptions): Promise<AcquirePort
 // and restarted it — twenty times, each restart triggering a fleet-wide
 // reconnect that made the shortage worse.
 //
-// So a connect failure now has three answers, not two.
+// So a connect failure has two answers, not one. The probe itself, and what
+// a verdict does to the watchdog, live in `supervisor-health.ts`.
 // ---------------------------------------------------------------------------
 
 /**
- * - `listening`: the connect succeeded. The server is bound.
- * - `not-listening`: the connect was REFUSED or timed out. Evidence about the
- *   server.
+ * What a failed connect() means.
+ *
+ * - `not-listening`: the connect was REFUSED. Evidence about the server.
  * - `inconclusive`: this host could not give the probe a socket at all. That
  *   is evidence about the machine and none whatsoever about the server, so it
  *   must not count toward a restart.
- */
-export type ListenProbeVerdict = 'listening' | 'not-listening' | 'inconclusive';
-
-/**
- * What a failed connect() means.
  *
  * An UNRECOGNISED code counts as `not-listening`, deliberately. Every error
  * counted before this change, so treating the unknown as inconclusive would
@@ -231,33 +227,4 @@ export type ListenProbeVerdict = 'listening' | 'not-listening' | 'inconclusive';
  */
 export function classifyConnectError(err: unknown): 'not-listening' | 'inconclusive' {
   return classifyBindError(err) === 'unavailable' ? 'inconclusive' : 'not-listening';
-}
-
-/** What the watchdog does with one probe result. */
-export interface BindHealthStep {
-  /** The consecutive-failure count after this probe. */
-  fails: number;
-  /** `restart` exits non-zero so launchd respawns a bound server. */
-  action: 'ok' | 'wait' | 'restart';
-}
-
-/**
- * Fold one probe verdict into the watchdog's state.
- *
- * Pure, so the branch that must NOT restart can be asserted without
- * exhausting a machine's socket buffers to produce it.
- */
-export function bindHealthStep(
-  fails: number,
-  verdict: ListenProbeVerdict,
-  maxFails: number,
-): BindHealthStep {
-  if (verdict === 'listening') return { fails: 0, action: 'ok' };
-  // Inconclusive: hold the count exactly where it is. Not reset — a genuinely
-  // unbound server that a socket shortage happens to mask should still be
-  // caught by the next readable probe — and not incremented, because this
-  // probe said nothing about the server.
-  if (verdict === 'inconclusive') return { fails, action: 'wait' };
-  const next = fails + 1;
-  return { fails: next, action: next >= maxFails ? 'restart' : 'wait' };
 }

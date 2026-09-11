@@ -132,9 +132,9 @@ describe(`stale-write guard on POST /workspaces/${WS}/docs/:id/content`, () => {
     path = join(dataDir, 'doc.md');
     writeFileSync(path, DOC);
     handle = createServer({ port: 0, dataDir });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    wsBase = `ws://localhost:${handle.port}`;
+    wsBase = `ws://127.0.0.1:${handle.port}`;
     const create = await fetch(`${base}/workspaces/${WS}/docs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

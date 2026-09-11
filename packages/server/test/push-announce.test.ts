@@ -73,7 +73,7 @@ async function start() {
     },
   });
   handle = server;
-  return { base: `http://localhost:${server.port}`, sent };
+  return { base: `http://127.0.0.1:${server.port}`, sent };
 }
 
 /** The send is fire-and-forget by design — the route answers before the push
@@ -192,7 +192,7 @@ describe('filing a review item announces it', () => {
       },
     });
     handle = server;
-    const base = `http://localhost:${server.port}`;
+    const base = `http://127.0.0.1:${server.port}`;
     const post = (path: string, body: unknown) =>
       fetch(`${base}${path}`, {
         method: 'POST',

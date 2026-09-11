@@ -48,10 +48,10 @@ function boot(requireSignInToWrite: boolean): ServerHandle {
  * DOM lib types that slot as subprotocols, hence the cast.
  */
 async function connectAsBrowser(handle: ServerHandle, docId: string): Promise<boolean> {
-  const origin = `http://localhost:${handle.port}`;
+  const origin = `http://127.0.0.1:${handle.port}`;
   WS = await seedBoard(origin);
   const ws = new WebSocket(
-    `ws://localhost:${handle.port}/workspaces/${WS}/docs/${docId}/y?type=mockup`,
+    `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/${docId}/y?type=mockup`,
     {
       headers: { origin },
     } as unknown as string[],

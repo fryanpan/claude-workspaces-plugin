@@ -344,8 +344,14 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   // itself news. A reconnect is a close and an open with no change between
   // them, and announcing both is what was costing attached peers a turn per
   // blip per board.
+  //
+  // And to the board's pages only. The announcer made a non-event quiet, but
+  // a real arrival or departure — and every session reconnecting after a
+  // deploy — still reached every attached agent's stream, and an agent can do
+  // nothing with another session's circle. The streams an agent opens carry
+  // its agentId and a tab's do not (agent-listening.ts), so that is the cut.
   const listeningAnnouncer = new ListeningAnnouncer((frame) =>
-    sse.broadcastTransient(`ws~${frame.workspaceId}`, frame),
+    sse.broadcastTransient(`ws~${frame.workspaceId}`, frame, { skipAgentStreams: true }),
   );
   sse.onAgentStreams = (channel, agentId) => {
     if (!channel.startsWith('ws~')) return;

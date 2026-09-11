@@ -124,7 +124,7 @@ describe('the board wakes its lead over the wire', () => {
     // the arming rules — which are what actually keep this quiet — are
     // unaffected by the window's size.
     handle = createServer({ port: 0, dataDir, readyNudgeIdleMs: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterEach(async () => {
@@ -874,7 +874,7 @@ describe('the board wakes its lead over the wire', () => {
     // A deploy: same data dir, new process.
     await handle.stop();
     handle = createServer({ port: 0, dataDir, readyNudgeIdleMs: 0 });
-    base = `http://localhost:${handle.port}`;
+    base = `http://127.0.0.1:${handle.port}`;
     await jj(
       await post(`/workspaces/${workspaceId}/agents`, {
         agentId: LEAD.id,

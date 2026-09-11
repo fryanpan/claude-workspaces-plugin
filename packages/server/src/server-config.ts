@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
-import { resolveDataDir } from './data-dir.ts';
+import { dataDirFromArgs } from './data-dir.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -38,7 +38,7 @@ export function resolveServerConfig(opts: {
   // Always a path: the flag wins, else the resolver's answer. It used to be
   // `string | undefined`, which every later reader repeated the resolver call
   // to work around.
-  const dataDir = arg('data-dir') ?? resolveDataDir(env, repoRoot);
+  const dataDir = dataDirFromArgs(env, repoRoot, arg);
 
   // The bind address. Deliberately `undefined` unless a caller passes
   // `--host` — Bun's own default (the wildcard, every interface) is what
