@@ -32,11 +32,11 @@
  *
  * THE RESERVE. Letting the indent go can change how the stream WRAPS. At
  * 430px the words after a 323px indent run two lines; back at the margin
- * they fit on one, so the release takes a line out of the stream's box. The
- * pane is scrolled to its foot while a meeting runs, and a pane at its foot
- * cannot keep its scroll offset when its content shrinks: the browser clamps
- * it, and everything on screen steps DOWN by what was lost below the line
- * the reader is watching. Measured before this existed: 21px, one phone
+ * they fit on one, so the release takes a line out of the stream's box. A
+ * reader watching the words has scrolled the pane to its foot, and a pane
+ * at its foot cannot keep its scroll offset when its content shrinks: the
+ * browser clamps it, and everything on screen steps DOWN by what was lost
+ * below the line the reader is watching. Measured before this existed: 21px, one phone
  * line, at every note timing, while 1180x820 — where the words fit on one
  * line either way — showed 0.56px. So the release keeps the box as tall as
  * it was: a `min-height` the stream grows out of on its own (`trim`), so the
