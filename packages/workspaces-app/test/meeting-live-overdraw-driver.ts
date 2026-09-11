@@ -234,6 +234,14 @@ function speech(n: number): string {
   return out.join(' ');
 }
 
+/** `n` words from a FIXED point in the run — the same text however far the
+ *  meeting's own cursor has walked, which is what a built scenario needs. */
+function speechFrom(at: number, n: number): string {
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) out.push(WORDS[(at + i) % WORDS.length] as string);
+  return out.join(' ');
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -452,11 +460,188 @@ async function control(): Promise<string> {
   return JSON.stringify({ worst, line });
 }
 
+/** One chunk's box, beside the floated label, under one `overflow` value. */
+export interface ClipBox {
+  width: number;
+  height: number;
+  top: number;
+}
+
+export interface ClipReading {
+  /** The rule as it ships: `.lz-slot { overflow: clip }`. */
+  clip: ClipBox;
+  /** The same slot forced back to `visible` — no clip at all. */
+  visible: ClipBox;
+  /** The same slot as `hidden`, which is what `clip` is here instead of. */
+  hidden: ClipBox;
+}
+
+/**
+ * WHY THE SLOT SAYS `clip` AND NOT `hidden`, measured rather than asserted.
+ *
+ * Both stop the paint. Only `hidden` makes the slot a block formatting
+ * context, and a BFC refuses to sit beside `.lz-head`'s float: the box is
+ * narrowed to clear the label, so the chunk's words re-wrap and MOVE on the
+ * one frame the split promises nothing moves on. `clip` is not a scroll
+ * container, establishes no BFC, and changes no layout at all.
+ *
+ * So this reads one chunk's box beside the float under all three values. The
+ * test's job is that `clip` matches `visible` to the pixel while `hidden`
+ * does not — the second half being the control: without it, a reading in
+ * which the float had no effect at all would pass the first half vacuously.
+ */
+async function clipControl(): Promise<string> {
+  scaleClock(1);
+  const editor = document.getElementById('editor') as HTMLElement;
+  const prose = document.querySelector('.ProseMirror') as HTMLElement;
+  const zone = createMeetingLiveZone({ parent: editor, prose, reducedMotion: () => false });
+  zone.begin(Date.now());
+  // Enough words that a line short by the label's width has to break again.
+  zone.onTurn({ turn: 0, text: speech(12), final: true, speaker: 'A' });
+  zone.onProgress({ tick: 0, phase: 'composing', turns: [0] });
+  const slot = document.querySelector('.lz-slot') as HTMLElement;
+  const chunk = document.querySelector('.lz-chunk') as HTMLElement;
+  const boxOf = async (overflow: string): Promise<ClipBox> => {
+    slot.style.overflow = overflow;
+    await new Promise((r) => requestAnimationFrame(r));
+    const b = chunk.getBoundingClientRect();
+    return { width: b.width, height: b.height, top: b.top };
+  };
+  const reading: ClipReading = {
+    // '' first is not a saving: each reading sets the property it needs.
+    clip: await boxOf('clip'),
+    visible: await boxOf('visible'),
+    hidden: await boxOf('hidden'),
+  };
+  slot.style.removeProperty('overflow');
+  zone.destroy();
+  return JSON.stringify(reading);
+}
+
+export interface RewrapReading {
+  /** The label's width — what the top line of the zone is short by. */
+  label: number;
+  /** Words chosen so they fill one full-width line and overflow a short one. */
+  words: number;
+  /** The settling chunk's own height once it has ridden up beside the label. */
+  chunkH: number;
+  /** The height its slot was pinned to, back when it sat below the label. */
+  slotH: number;
+  /** What is painted on top of what, with the chunk in that state. */
+  worst: Overlap;
+}
+
+/**
+ * THE SMEAR'S OWN MECHANISM, BUILT ON PURPOSE.
+ *
+ * The meeting arms above reach this state by luck: whether a chunk's last
+ * line ends within a label's width of the right edge depends on which words
+ * the transcript happened to be up to, so the same scenario smeared on CI's
+ * fonts and measured a flat zero on a Mac. That is not a test of anything.
+ *
+ * So this builds it. A chunk is settled BELOW the label, where its words fit
+ * one line and its slot is pinned to hold exactly that; the chunk above it is
+ * then collapsed to nothing, which is what slides it up into the corner where
+ * `.lz-head`'s float shortens its top line and the same words need two. Its
+ * slot still promises one — growing it would step every word below it down a
+ * line mid-collapse — so the second line is outside the box that holds it,
+ * and `.lz-slot { overflow: clip }` is the whole of what stops it being drawn
+ * over the chunk below. Remove that declaration and this reads a full line of
+ * one opaque run over another.
+ *
+ * `chunkH` against `slotH` is the control: it says the overflow was really
+ * built. Without it a run in which the words happened not to re-wrap would
+ * report the same clean zero as a run in which the clip did its job.
+ */
+async function rewrapControl(): Promise<string> {
+  scaleClock(1);
+  const editor = document.getElementById('editor') as HTMLElement;
+  const prose = document.querySelector('.ProseMirror') as HTMLElement;
+  const zone = createMeetingLiveZone({ parent: editor, prose, reducedMotion: () => false });
+  zone.begin(Date.now());
+  const root = document.querySelector('.live-zone') as HTMLElement;
+  // The zone hides itself while it holds nothing, and a hidden box measures
+  // zero — so the words it is about to carry go in before anything is read.
+  zone.onTurn({ turn: 0, text: speech(6), final: true, speaker: 'A' });
+  zone.onTurn({ turn: 2, text: speech(8), final: true, speaker: 'A' });
+  const label = (document.querySelector('.lz-head') as HTMLElement).getBoundingClientRect().width;
+
+  // How many words fill one line at full width but not at a line short by the
+  // label — measured on a scratch block of the stream's own type, because the
+  // answer is a font metric and differs on every platform this runs on.
+  const scratch = document.createElement('div');
+  scratch.className = 'lz-chunk-lines';
+  root.append(scratch);
+  const linesOf = (n: number, width: number): number => {
+    scratch.style.width = `${width}px`;
+    scratch.textContent = speechFrom(0, n);
+    const r = document.createRange();
+    r.selectNodeContents(scratch);
+    return r.getClientRects().length;
+  };
+  const full = root.getBoundingClientRect().width;
+  let words = 0;
+  for (let n = 2; n < 60; n++) {
+    if (linesOf(n, full) === 1 && linesOf(n, full - label) > 1) {
+      words = n;
+      break;
+    }
+  }
+  scratch.remove();
+  if (words === 0) {
+    return JSON.stringify({
+      label,
+      words,
+      chunkH: 0,
+      slotH: 0,
+      worst: { area: 0, width: 0, height: 0 },
+    });
+  }
+
+  // Three chunks and no live stream: the smear is one settling chunk drawn
+  // over the next, and a stream left in the zone would bring the hold with it
+  // — a second mechanism, with its own bug, measured by the arms above.
+  // Turn 0's chunk is the one that collapses, turn 1's is the one that rides
+  // up into its place, turn 2's is what its extra line would be drawn over.
+  zone.onTurn({ turn: 1, text: speechFrom(0, words), final: true, speaker: 'A' });
+  for (const id of [0, 1, 2]) {
+    zone.onProgress({ tick: id, phase: 'composing', turns: [id] });
+    // Turn 1's pin is taken here, below the label, at the one line it needs
+    // there.
+    zone.onProgress({ tick: id, phase: 'written', turns: [id] });
+  }
+  await new Promise((r) => requestAnimationFrame(r));
+
+  // Where the collapse of the chunk above ENDS: `discard` takes its slot out
+  // of the zone. The end state and not the travel, so this arm waits on no
+  // animation — and so the only thing left that could paint outside a slot is
+  // the re-wrap it is about.
+  const slots = document.querySelectorAll('.lz-slot');
+  (slots[0] as HTMLElement).remove();
+  await new Promise((r) => requestAnimationFrame(r));
+
+  const slot = slots[1] as HTMLElement;
+  const chunk = slot.firstElementChild as HTMLElement;
+  const reading: RewrapReading = {
+    label,
+    words,
+    chunkH: chunk.getBoundingClientRect().height,
+    slotH: slot.getBoundingClientRect().height,
+    worst: worstOverlap(),
+  };
+  zone.destroy();
+  return JSON.stringify(reading);
+}
+
 declare global {
   interface Window {
     liveZoneDrive: (o: DriveOptions) => Promise<string>;
+    liveZoneRewrap: () => Promise<string>;
     liveZoneControl: () => Promise<string>;
+    liveZoneClipControl: () => Promise<string>;
   }
 }
 window.liveZoneDrive = drive;
+window.liveZoneRewrap = rewrapControl;
 window.liveZoneControl = control;
+window.liveZoneClipControl = clipControl;

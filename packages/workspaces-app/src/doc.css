@@ -2484,16 +2484,27 @@ button.lz-speaker:hover .lz-speaker-pill {
 .lz-slot {
   margin: 0;
   padding: 0;
+  /* NOTHING A SLOT HOLDS IS EVER PAINTED OUTSIDE IT. `clip`, not `hidden`:
+     `hidden` makes the slot a block formatting context, which would refuse to
+     sit beside the floated corner label and move the chunk's words the moment
+     they were split off — the reason overflow used to be withheld until the
+     collapse. `clip` is not a scroll container, establishes no BFC and changes
+     no layout at all; it only stops the paint.
+     What it stops: the collapse slides a settling chunk UP into the label's
+     corner, where `.lz-head`'s float shortens the top line and the same words
+     may need one more line than the slot was pinned to hold. `pinSlot` in
+     meeting-live-zone.ts grows the slot to fit, but it runs after the layout
+     that re-wrapped — this is what makes the extra line impossible to draw
+     over the chunk below rather than merely short-lived. Measured at 430 over
+     a thirty-write meeting: 818px² of one opaque run over another. */
+  overflow: clip;
 }
-/* overflow is withheld until the collapse: as a block formatting context the
-   slot would refuse to sit beside the floated corner label, and the chunk's
-   words would jump the moment they were split off. By the time this lands the
-   chunk is at opacity 0 and its height is already pinned.
+/* The collapse itself is only the height travel; the clip above already holds
+   for every slot, collapsing or not.
    Under reduced motion meeting-live-zone.ts sets --lz-collapse-ms to 0 on the
    slot, so the travel goes and the fade above stays — less movement, not none
    (owner, 2026-09-05: the instant swap "was too sudden"). */
 .lz-slot.is-collapsing {
-  overflow: hidden;
   transition: height var(--lz-collapse-ms) var(--lz-ease-settle);
 }
 /* The stream is held over the break the split just made in its line —

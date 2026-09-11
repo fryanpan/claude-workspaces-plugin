@@ -28,7 +28,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { RUN_ID_ENV, profilesOfRun, resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
-import type { DriveOptions, DriveResult, Overlap } from './meeting-live-overdraw-driver.ts';
+import type {
+  ClipReading,
+  DriveOptions,
+  DriveResult,
+  Overlap,
+  RewrapReading,
+} from './meeting-live-overdraw-driver.ts';
 
 /** Is there a browser to launch — asked the way `ui-shot.ts` itself asks, so
  *  the case runs on a CI runner that names no path. It throws when nothing
@@ -123,6 +129,8 @@ function inBrowser(html: string, preset: 'ipad' | 'phone', probe: string): strin
 
 interface Reading {
   control: { worst: Overlap; line: number };
+  clip: ClipReading;
+  rewrap: RewrapReading;
   meeting: DriveResult;
   unhurried: DriveResult;
   voices: DriveResult;
@@ -136,6 +144,8 @@ interface Reading {
 function measure(html: string, preset: 'ipad' | 'phone', runs: readonly DriveOptions[]): Reading {
   const probe = `(async () => JSON.stringify({
     control: JSON.parse(await window.liveZoneControl()),
+    clip: JSON.parse(await window.liveZoneClipControl()),
+    rewrap: JSON.parse(await window.liveZoneRewrap()),
     meeting: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[0])})),
     unhurried: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[1])})),
     voices: JSON.parse(await window.liveZoneDrive(${JSON.stringify(runs[2])})),
@@ -216,6 +226,8 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
       () => {
         const {
           control: c,
+          clip,
+          rewrap,
           meeting,
           unhurried,
           voices,
@@ -226,6 +238,26 @@ describe.skipIf(CHROME === null)('the live transcript never draws over itself', 
         expect(c.line).toBeGreaterThan(10);
         expect(c.worst.area).toBeGreaterThan(SMEAR_PX2 * 10);
         expect(c.worst.height).toBeGreaterThan(c.line * 0.8);
+
+        // The clip the smear below is stopped by costs no layout. `hidden`
+        // would: it makes the slot a block formatting context, which cannot
+        // sit beside the floated label, and the chunk's words move on the one
+        // frame the split promises nothing moves on. That second reading is
+        // also the control — where the float has no bite, every value agrees
+        // and the first assertion passes having measured nothing.
+        expect(clip.clip.width).toBe(clip.visible.width);
+        expect(clip.clip.height).toBe(clip.visible.height);
+        expect(clip.hidden.width).toBeLessThan(clip.visible.width);
+
+        // The smear's own mechanism, built rather than waited for: a chunk
+        // settled below the label, pinned to the one line it needed there,
+        // then slid up into the corner where the float makes it need two.
+        // The first two readings are the control — they say the overflow was
+        // really built, without which the zero below means only that the
+        // words happened not to re-wrap.
+        expect(rewrap.words).toBeGreaterThan(0);
+        expect(rewrap.chunkH).toBeGreaterThan(rewrap.slotH + 1);
+        expect(rewrap.worst.area).toBeLessThan(SMEAR_PX2);
 
         // The meeting really ran: thirty writes, sampled every frame, with
         // ticks that composed nothing leaving words stranded in the stream —

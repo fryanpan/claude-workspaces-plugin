@@ -425,6 +425,19 @@ export function createMeetingLiveZone(opts: {
     settling.add(c);
     // Pin the height BEFORE anything animates: from here nothing this chunk
     // does can move a word below it, for the whole of the fade.
+    //
+    // THE PIN CAN GO STALE, AND IS ALLOWED TO. A chunk's line count is not a
+    // property of its words: `.lz-head` is floated into the zone's top-right
+    // corner, so the line at the top of the zone is short by the label's
+    // width. A chunk is mounted at the FOOT of the stack, below the label,
+    // where its words fit one line — and the collapse of the chunks above
+    // then slides it UP into that corner, where the same words can need two.
+    // Growing the slot to match would step every word below it down by a line
+    // mid-collapse, which is the one thing this pin exists to prevent, so the
+    // slot keeps the height it promised and `.lz-slot`'s `overflow: clip`
+    // (doc.css) stops the extra line being painted over the chunk below.
+    // Measured before the clip, at 430 over a thirty-write meeting: 818px² of
+    // one opaque run drawn over another.
     c.slot.style.height = `${c.slot.getBoundingClientRect().height}px`;
     const reduced = reducedMotion();
     step(c, NOTE_LAND_MS, () => {
