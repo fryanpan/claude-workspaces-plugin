@@ -5,7 +5,7 @@ import {
   escapeHtml as escape,
 } from '@claude-workspaces/core';
 import { composerNote, composerSignIn } from './widget-auth.ts';
-import { cardTarget, isPhoneFace, placeCards } from './widget-card.ts';
+import { cardTarget, drafts, isPhoneFace, keepDraft, placeCards } from './widget-card.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
 const { hasContext } = anchors;
@@ -210,18 +210,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   };
 }
 
-/** Words typed and not posted, by the element they are about (the widget
- *  itself for a comment on the page), kept when the mode closes over them. */
-const drafts = new WeakMap<object, string>();
-function keepDraft(el: FeedbackWidgetEl): void {
-  const c = el.shadow.querySelector('.composer');
-  const v = c?.querySelector('textarea')?.value;
-  if (c && v) drafts.set(cardTarget.get(c) ?? el, v);
-}
-
-/** Leaving the mode takes its composer with it, draft and all, as the mock's
- *  Done does: Cancel is the way to drop a draft and stay, Done the way to
- *  stop. */
+/** Leaving the mode takes its cards with it, as the mock's Done does. */
 export function exitFeedbackMode(el: FeedbackWidgetEl): void {
   if (!el.feedbackMode) return;
   el.feedbackMode = false;

@@ -22,6 +22,15 @@ import type { FeedbackWidgetEl } from './widget.ts';
  *  bookkeeping, so nothing is written onto the host page's elements. */
 export const cardTarget = new WeakMap<Element, HTMLElement>();
 
+/** Words typed and not posted, by the element they are about (the widget
+ *  itself for a comment on the page), kept when the mode closes over them. */
+export const drafts = new WeakMap<object, string>();
+export function keepDraft(el: FeedbackWidgetEl): void {
+  const c = el.shadow.querySelector('.composer');
+  const v = c?.querySelector('textarea')?.value;
+  if (c && v) drafts.set(cardTarget.get(c) ?? el, v);
+}
+
 /**
  * The width at or below which the mode opens as a PROMPT on a bottom panel
  * rather than as a card.
