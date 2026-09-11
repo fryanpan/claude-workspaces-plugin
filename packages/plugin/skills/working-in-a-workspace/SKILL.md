@@ -11,124 +11,57 @@ A workspace helps a team of humans and agents work together to deliver on goals.
 
 The purpose of a workspace is to provide a significantly better agent and human interface than chatting in Claude Code.
 
-1. The workspace is your plan, task list, and decision repository.
-   1. If you are in a workspace, stop using harness' tools. Do not use `TaskCreate` / `TaskUpdate` / `TaskList` (formerly `TodoWrite`) and `EnterPlanMode` / `ExitPlanMode`. A task or plan in harness becomes invisible and confusing to workspace users.
-2. The workspace is where you ask for human help (status is item 3).
-   1. DO NOT use regular chat messages to share progress or ask for a decision
-   2. DO NOT use `AskUserQuestion`, create a review item instead
-   3. Ask for human help
-      1. Ways to ask for review
-         1. `add_review_item(taskId, review)` adds a review item to a task as the last comment
-         2. Use the `review` payload on `create_thread` or `post_reply`
-         3. A task filed with `create_tasks` that is itself the decision (`needs: "decision"`) is the ask, so it is judged as one — revise it with `revise_review_item(taskId)`, no item id
-         4. Every one of these is judged by the board's quality gate, whichever verb filed it. `held: true` in the result means the item is off the reviewer's queue until you close the gap the reason names — the result and the `workspace.review_item_held` wake both carry the exact `revise_review_item(…)` call for that item, and every revision is judged again.
-         5. The gate holds a question the reader has already answered on that task. A retest after you shipped a fix is NOT that — but only if the item says what shipped since their answer (the PR or deploy) and asks them to try again on it. A retest that names nothing shipped is held as a repeat; a plain reply is not a filed ask. The same goes for the NEXT step of a flow on one task — they approved building the fixes, now you ask to push; a new review round; a different set of options: name the earlier answer and the step it did not cover, in the headline. Never downgrade a held ask to a plain comment — the second hold's message says the next revision reaches the reader either way.
-      2. Payload Types
-         1. `review_type: "decision"` offers 2–6 options to pick between
-         2. `review_type: "question"` asks for a look and an answer in their own words
-      3. Where the ask goes
-         1. A question that arose mid-work belongs on the task that raised it — `add_review_item(taskId, review)`
-         2. A question ABOUT A DOC goes on the sentence it is about — one `create_thread(docId, { find: "<that sentence>", review })` per question, so the reader meets each one where it applies and answers it there. Never a list of questions in one comment: a plan request that came back as one comment holding twelve questions left the reader answering four, losing the thread, and never finding the other eight (Bryan, 2026-09-01). Twelve questions are twelve anchored threads, each carrying its own `review` payload.
-         3. A decision that stands alone as a unit of work may be its own task
-         4. Either way the ask carries the context of the work it came from. Ten decisions filed as ten fresh tasks, each severed from the work behind it, read as a quiz instead of a plan
-      4. Writing the ask
-         1. The option label is the contract — the reviewer answers the label, not the reasoning under it. Plain words, phone-readable.
-         2. The item has to be actionable on its own. The Home card renders the payload and nothing around it, so every link the reviewer needs goes in the payload's `detail` as an inline markdown link (`[the diff](/workspaces/w-xxxx/docs/d-xxxx)`) — a link that lives only in the surrounding comment text never reaches the card, and the reviewer is left scrolling the comments for it.
-      5. Anything the reviewer still owes an answer to is a filed review item BEFORE your turn ends — answerable where they read, with chat carrying at most a pointer to it. A "still waiting on you" list in chat is the failure mode this rule exists for: audited sessions filed 18 chat-only asks in a day, and 13 died unanswered.
-3. The workspace is where you share status: on the task's Activity tab, never in its comments. Your end-of-turn message reaches the tab by itself — the Stop hook posts it in full — and `post_status(text, taskId?)` adds a milestone worth naming: started, blocked on what, PR open, done. Comments are for asks (review items, decisions), replies to a person, and anything a person must read and answer.
+### Plan, Manage Tasks & Make Decisions
 
-### What a chat message is
+The workspace is your plan, task list, and decision repository.
 
-Chat is a pointer surface, not a report surface. **A chat message is 50 words
-or less** — unless the person just asked you a question, in which case answer
-it properly.
+If you are in a workspace, stop using harness' tools. 
 
-Pick the rung that fits what you have:
+Do not use `TaskCreate` / `TaskUpdate` / `TaskList` (formerly `TodoWrite`) and `EnterPlanMode` / `ExitPlanMode`. A task or plan in harness becomes invisible and confusing to workspace users.
 
-| What you have | Where it goes |
-|---|---|
-| An outcome, a link, a one-line blocker | Chat, 50 words or less |
-| Something that needs explaining, or a call you need them to make | A review item on the task it came from |
-| Something you and they will both work on, back and forth | A doc — create it, then point to it in 50 words |
+### Use the Workspace, Do Not Use Chat
 
-The cap is on the chat you produce, not on each message: five short narration
-messages spend the same attention as one long one. Tool-by-tool progress does
-not belong on any rung. Assume the person reading you is steering several
-agents at once, so every line you send competes with the others — and no
-other agent needs your progress either.
+DO NOT use regular chat messages in Claude Code to share progress or ask for help from a human
+
+1. Your end of turn messages are automatically added to Workspace activity on the right task
+2. Use `post_status` tool to share progress when you reach a significant milestone (done building, done testing, deployed)
+
+### Asking for Help from Humans
+
+- DO NOT use `AskUserQuestion`. Create a review item instead.
+- DO NOT ask for help in chat.  Create a review item instead.The only exception to this rule is if the human is using chat, then it's okay to reply in chat
+- DO NOT share status updates in chat.End of turn updates are automatically shared to the workspace with a Stop hook.And for any significant milestones (e.g. done build, test, deploy) use `post_status(text, taskId?)`
+- Review item types
+  - `review_type: "decision"` offers 2–6 named options to pick between. The option label is what they answer.
+  - `review_type: "question"` asks them to look at something and answer in their own words.
+- To create a review item
+  - Use `add_review_item(taskId, review)` to attach a review item to a task
+  - Add `review` payload in `create_thread` or `post_reply` to add a review item to a doc or mockup
+- Each review item is judged against the board's quality gate.
+  - If it does not meet quality standards, you'll receive a `workspace.review_item_held` wake with a reason
+  - Use the `revise_review_item` call to update the review itemYou must say what changed and address the reason
+- How to write a good review item
+  - The option label is the contract — the reviewer answers the label, not the reasoning under it. Plain words, phone-readable.
+  - The item has to be actionable on its own. 
+    - The review item details should briefly present all information that's essential for making the decision
+    - Every link the reviewer needs to see should be in the payload `detail` as an inline markdown link 
 
 ## Picking Up Work
 
 `next_tasks(workspaceId)` is the queue, already filtered to what you can do.
 
-**Take the whole ready set, not just the first task.** Start every ready task that does
-not collide with another; holding one task while the rest of the queue waits is
-the slowest way to work a board. Each task carries its full description, and
-whether two tasks touch the same code is a judgment you make from that text —
-there is no field for it. Call it again whenever a line of work finishes,
-because priorities move while you work.
-
-**Read `bodyWrittenAt` and `premise` before trusting a description.** A body is
-a measurement taken on the day it was filed and rendered ever after in the
-present tense, on a codebase that moves several times a day. `premise` appears
-when a description has stood still for over a day while people kept commenting,
-and carries those comments verbatim in `notes` — a previous reader may already
-have reproduced the thing for you, and what they found routinely changes the
-size of the work. It says nothing about whether the task is done. Clear it by
-rewriting the body once you know what is true, dating and attributing the
-correction and keeping what the task originally claimed.
-
-**Check who is already on a task.** Two fields carry it: `ownerSession`, the
-session behind the task's owner, and `claimedBy`, the session that last moved it
-to in-progress. `claimedBy` is the one that exists on a task nobody assigned,
-since a transition never touches `assignee` — read the owner instead and you
-learn who FILED the ticket, not who is working it.
-
-`state: "active"` on a session that is not you means DO NOT START THAT TASK.
-Message that session over claude-hive, agree which of you has it, and take
-something else if they do — starting it anyway is how two sessions each build a
-complete answer to one task and neither finds out until a PR.
-Nothing refuses a second taker, because two agents on one task is occasionally
-right; it just has to be a decision rather than a collision neither side can
-see. `away` is an
-owner in name only and `unresponsive` is a wedged session somebody probably
-should take over from. These are recency reads, never identity: a session that
-thinks for an hour produces nothing and still holds its task.
-
-**Triage tasks never appear here.** That is the answer to "I filed a task and my
-queue does not show it": an agent filed it and nobody has vetted it, so it is
-not yet agreed to be work — and it is also where a deliberately-deferred task
-sits, since parking a task moves it there. Read those with
-`list_tasks(status: "triage")`, and read the task's comments before picking one
-up: that is where a park says why it was deferred and when to come back.
-
-**A UI change an agent filed waits for an answer before you build it.** If the
-task you are about to start changes what somebody sees on screen — a button, a
-screen, a layout, a mockup, a badge, a banner, anything they will look at —
-and an agent filed it rather than a person, file a review item with
-`add_review_item(taskId, review)` naming the options and what each costs, and
-stop there. The answer is the thing you build against, so there is nothing to
-build before it arrives. Not "start now and ask in parallel". Not "build it
-and show them the result". Not "this one is obviously right". Not "it is small
-enough to redo". A task a person filed already carries their answer; a task an
-agent filed carries nobody's. Post the item, take another task, come back when
-it is answered.
-
-File a batch of tasks in ONE `create_tasks` call rather than one call per task.
-A bad task comes back in `failures` by index instead of rejecting the batch.
-
-Your session needs an agent name before it can do anything on the board: a
-create whose owner resolves to the bare word `agent`, a comment or reply
-signed by the shared "agent" identity, and a lead-seat claim from it are all
-refused with `author-required`, and that refusal means the session was
-launched without `CW_AGENT_NAME` (set it, restart the session). The same
-launch environment names the board your end-of-turn notes land on:
-`CW_WORKSPACE_ID`. Without it the Stop hook posts nothing and the Activity
-tab stays empty for your turns, and `post_status` without a `taskId` needs
-`workspaceId` passed by hand. Old comments
-that were signed that way stay and show as "Unnamed agent". When you hand a task to somebody
-else by name, pass `assigneeKind` — nothing can tell a person from an agent of
-the same name, and an unclassified owner shows as "not recorded".
+- **Take every ready task that does not collide with another.** Each task carries its full description; whether two touch the same code is your judgment from that text. Call `next_tasks` again whenever a line of work finishes, because priorities move while you work.
+- **Read** `bodyWrittenAt` **and update it**
+  - When you start (or restart) work on a task, the task may have changed over time
+  - Review comments and activity on the task and modify the `description` if the task has changed
+- **Check who is already on a task.** 
+  - `claimedBy` is the session that last moved it to in-progress. 
+  - `ownerSession` says who filed it, not who is working it.
+- `state: "active"` on a session that is not you means do not start that task: message that session over claude-hive and agree who has it. `away` is an owner in name only; `unresponsive` is a wedged session somebody should take over from. Both are recency reads, not identity.
+- **Triage tasks never appear in the queue.** A task an agent filed sits in triage until somebody vets it; so does a parked task. Read them with `list_tasks(status: "triage")`, and read the comments before picking one up.
+- **A UI change an agent filed waits for an answer before you build it.** If the task changes what somebody sees on screen and an agent filed it, file a review item naming the options and what each costs, take another task, and build only against the answer. A task a person filed already carries their answer.
+- File a batch of tasks in one `create_tasks` call; a bad task comes back in `failures` by index instead of rejecting the batch.
+- Your session needs `CW_AGENT_NAME` before it can write to the board (an `author-required` refusal means it is missing) and `CW_WORKSPACE_ID` to name the board your end-of-turn notes land on. When you hand a task to somebody by name, pass `assigneeKind`: the board cannot tell a person from an agent of the same name.
 
 ## Writing Clear Tasks
 
@@ -141,83 +74,53 @@ Someone who was not in the conversation should be able to see a task, know why i
 - **Task Description**
   - Keep the whole description under 250 words
   - Use the clearest presentation in markdown, tables, diagrams
-  - Start with a **Problem Statement** that describes outcome and why it's valuable
-  - Then have **Acceptance Criteria** in a numbered list (good for workflow steps) or bullet points. The criteria should be specific and falsifiable.
+  - Start with a **Problem** section that describes outcome and why it's valuable
+  - Then have **Done When** in a numbered list (good for workflow steps) or bullet points. The criteria should be specific and falsifiable.
   - The problem should tie to the top level goal the task is assigned to
 - **Ask Questions**
   - If you can't write a clear task, write what you can and then ask the primary user questions using `add_review_item(taskId, review)`
 
 ## Keep the Lead and Primary User Up to Date
 
-- Update task status as you work
+- Update task status as you work.
   - `in-progress` when you **start**, not when you report.
-  - `done` means **merged AND deployed** (Bryan, 2026-09-01, fleet-wide): the PR is in `main` and the production deploy that carries it reports a healthy verification. Every acceptance criterion is met on the deployed build. Nothing else is done — not "CI green", not "merged, deploy pending", not "verified on staging".
-  - Work sitting in an unmerged PR stays `in-progress`. So does a merged PR until its deploy verification reads healthy; if the deploy is batched or blocked, the task waits with it and the `note` says so.
-  - Name the deploy verdict in the `done` transition note: the merge commit and the deploy that carried it. A `done` without that note is a claim nobody can check.
-  - Work that is waiting on ANOTHER TICKET is `block_task(taskId, blockedBy)` — name what has to close first. The task reads as Blocked from that moment, leaves `next_tasks` and the stall check, and returns to `todo` by itself when the last blocker closes, with a note on its Activity tab saying what cleared it. The edge is the state: there is no status to set and no un-block to remember. **A task waiting on a person is not blocked.** Waiting on the primary user's answer, test, or sign-off is work in flight: leave it `in-progress` and file the ask with `add_review_item` so it sits on their queue. And a task you have simply not started is not blocked either — `triage` is for tasks nobody has vetted yet, and inventing an edge to quiet the ready-work nudge makes the board say something untrue.
-  - Say what you did in the transition `note` — the PR, what you verified and what you couldn't. The note is the whole of what the trail keeps, so a move with an empty note is a move nobody can read back.
-- Share progress on a task with `post_status` at each milestone — these are
-  handover notes, shaped below. A status is movement to the stall clock; a
-  comment is a question the person has to read.
-- **Your final message is a pointer, not the report.** Post the full report with `post_status` FIRST — the harness drops final messages routinely, so the note on the task's Activity tab is the copy that survives — then point at the task. Three parts, 50 words or less all together:
+  - `done` means **merged AND deployed**: the PR is in `main`, the production deploy that carries it reports a healthy verification, and every acceptance criterion is met on the deployed build. Not "CI green", not "merged, deploy pending", not "verified on staging".
+  - Work in an unmerged PR stays `in-progress`, and so does a merged PR until its deploy reads healthy.
+  - Every transition `note` says what you did: the PR, what you verified, what you could not. A `done` note names the merge commit and the deploy that carried it. The note is all the trail keeps.
+- Waiting on **another task** is `block_task(taskId, blockedBy)`. The task reads as Blocked, leaves the queue and the stall check, and returns to `todo` by itself when the last blocker closes.
+  - **Waiting on a person is not blocked.** Leave the task `in-progress` and file the ask as a review item so it sits on their queue.
+  - A task you have not started is not blocked either. Do not invent an edge to quiet the ready-work nudge.
+- Share progress with `post_status` at each milestone, shaped as handover notes (below). A status moves the stall clock; a comment is something a person has to read.
+- **Your final message is a pointer, not the report.** Post the report with `post_status` first, because the harness drops final messages, then point at the task in 50 words or less:
   1. The outcome, in one line.
-  2. The task's link (`?task=<taskId>` on the board URL), formatted for wherever the message lands (below).
+  2. The task's link (`?task=<taskId>` on the board URL).
   3. Any blocker, in one line.
 
 ### Handover notes
 
-Builders die mid-task — some at spawn — and a replacement that restarts from
-scratch re-reads everything and can redo finished work. The task's Activity
-tab is the handover. At each milestone — worktree created, first commit, tests
-green, PR open — and whenever you stop or are blocked, `post_status` three
-parts, under 70 words:
+Builders die mid-task, and a replacement that restarts from scratch redoes finished work. The task's Activity tab is the handover. At each milestone (worktree created, first commit, tests green, PR open) and whenever you stop, `post_status` a note under 70 words in four parts:
 
-1. DONE — what is finished and verified.
-2. TRIED — approaches abandoned, and why, so nobody retries them.
-3. WHERE — branch name, last commit hash, worktree path.
+1. STATE — the first sentence, and the only one Home shows: where the work stands and what it waits on, true on its own, 25 words or fewer. "Merged and deployed, but not closing yet: one check still needs your iPad." In flight is not done, and merged is not closed while the task stays open.
+2. DONE — what is finished and verified.
+3. TRIED — approaches abandoned, and why, so nobody retries them.
+4. WHERE — branch name, last commit hash, worktree path.
 
-Picking up a task that already has notes? Read its Activity tab (`notes` on
-the task) FIRST and resume from the newest handover instead of restarting.
+Picking up a task that already has notes? Read its Activity tab first and resume from the newest handover.
 
 ## When You Are Blocked
 
-A blockage is recorded on the board, never held in your head:
-
-- Blocked on another task → an `after` edge (`set_task_dependencies`), so the
-  queue stops offering the task and offers it again the moment the edge
-  clears.
-- Blocked on a decision or an answer → a review item on the task it blocks,
-  naming exactly what is needed (see "ask for human help" above).
-
-When nothing is ready and every blockage is filed, **end the turn and wait
-to be woken**. Every resume source pushes — replies, new tasks, cleared
-edges — so never poll for work: a timed board re-read reloads your whole
-context to learn nothing changed. "Never go dark" does not forbid being
-idle; it forbids standing down with asks that exist only in chat, which the
-filed items prevent.
+- When you have done everything that you can on a task, and you need to wait on another taskUse `block_task` tool to indicate this happened.
+- Every time a task is unblocked, you will receive an event and be woken up to continue working
 
 ## When Someone Comments on Your Review Item
 
-A reader can select a phrase in one of your review items and ask about it,
-as on a doc. The question arrives as a thread on the task — the channel
-frame's `review_item_id` names the item — and the item leaves their queue
-until you act, so an answer in chat leaves it stuck. Rewrite the item in
-place with `revise_review_item(taskId, reviewItemId, headline?, detail?,
-options?, reply?)`, passing only what changes; `reply` is your answer on
-the thread, posted by the same call — do not also `post_reply` it, or the
-thread carries your answer twice. Write the revision to stand alone: plain
-English, no past context needed, why it matters, what each option costs.
-The item returns to their queue marked Revised, their question quoted and
-the changed span highlighted; the old words stay as history. Use
-`post_reply` on its own only when the words need no change — a question
-the item already answers.
+A reader can select a phrase in your review item and ask about it. The question arrives as a thread on the task (the channel frame's `review_item_id` names the item), and the item leaves their queue until you act, so an answer in chat leaves it stuck. Rewrite the item in place with `revise_review_item(taskId, reviewItemId, headline?, detail?, options?, reply?)`, passing only what changes; `reply` posts your answer on the thread, so do not also `post_reply` it. Write the revision to stand alone: plain English, why it matters, what each option costs. The item returns to their queue marked Revised, with the old words kept as history. Use `post_reply` alone only when the item already answers the question.
 
 ## Use Links Effectively
 
-- Each resource (task, workspace, document, mockup, folder diff) has a unique identifier and URL.
-- When you share links in a workspace, use relative URLs and make them inline using appropriate link text instead of the Raw URL
-  - e.g. `[this link](/workspaces/<workspaceId>/docs/board-skill-one-row-per-pass?thread=nsk4yl4m6sqn)`
-- A task's page is `[this task](/workspaces/<workspaceId>?task=<taskId>)`. The `/tasks/<taskId>` path form is an API address, not a page — the server redirects it to the page form, so a link written that way still opens, but write the query form.
-- In terminal chat, send the absolute URL bare on its own line, with no markdown around it — autolinkers mangle a wrapped URL.
-- Link the thing under review, not the workspace: hand over the `reviewUrl` / `entryUrl` the tool returned, rewriting only the host to the Tailscale name. Link the workspace only when the workspace itself is the subject.
-- A workspace URL is not a durable address — the embedded workspace id dies when the workspace is recreated. Durable artifacts (committed docs, exports, anything sent onward) cite repo paths or GitHub URLs; live chat, thread replies, and hand-offs use the URL, because it is being clicked now.
+- Every resource (task, workspace, document, mockup, folder diff) has its own URL.
+- In a workspace, links are relative and inline with link text, never a raw URL: `[this link](/workspaces/<workspaceId>/docs/<docId>?thread=<threadId>)`. 
+- A task's page is `[this task](/workspaces/<workspaceId>/tasks/<taskId>)`.
+- In terminal chat, send the absolute URL bare on its own line with no markdown around it.
+- Link the thing under review, not the workspace: hand over the `reviewUrl` / `entryUrl` the tool returned. Link the workspace only when the workspace itself is the subject.
+- A workspace URL is not a durable address. Durable artifacts (committed docs, exports) cite repo paths or GitHub URLs.
