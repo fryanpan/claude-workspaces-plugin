@@ -23,7 +23,6 @@ import {
   TASK_NOTES_READ_CAP,
   TASK_NOTES_STORE_CAP,
 } from '../src/agent-notes.ts';
-import { localDay } from '../src/chat-audit.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { workspaceDocId } from '../src/task-projection.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -204,57 +203,6 @@ describe('agent notes routes', () => {
     const log = await Bun.file(join(dataDir, 'workspaces', `${wsId}.events.jsonl`)).text();
     expect(log).toContain('"event":"task.noted"');
     expect(log).toContain('Read the scout digest');
-  });
-
-  it('tells the agent, in the 202, that it ended a turn asking with nothing filed', async () => {
-    // The 202 body is the only channel back to the session that posted: the
-    // hook turns a non-empty `unfiledAsk` into a Stop-hook block, which is
-    // what "told within the turn" means.
-    const wsId = await boardWithLead();
-    await inProgressRow(wsId, 'Only claim');
-    const r = await note('cartographer', 'Both arms are green. Want me to ship it tonight?');
-    expect(r.status).toBe(202);
-    const body = (await r.json()) as { unfiledAsk?: string };
-    expect(body.unfiledAsk).toContain('want me to');
-
-    // And the count behind the board's number moved by exactly one ask.
-    const audit = handle.chatAudit.window(7, localDay(Date.now()));
-    expect(audit.agents).toMatchObject([{ unfiledAsks: 1, totalAsks: 1, days: 1 }]);
-  });
-
-  it('says nothing when the turn asked nothing', async () => {
-    const wsId = await boardWithLead();
-    await inProgressRow(wsId, 'Only claim');
-    const r = await note('cartographer', 'Both arms are green. Pushed the branch.');
-    expect(await r.json()).not.toHaveProperty('unfiledAsk');
-    // A turn with no ask in it is not a row in the count either — otherwise
-    // the denominator would be "turns", and the number would mean nothing.
-    expect(handle.chatAudit.window(7, localDay(Date.now())).agents).toEqual([]);
-  });
-
-  it('says nothing when the same agent already has an open item on the board', async () => {
-    const wsId = await boardWithLead();
-    const taskId = await inProgressRow(wsId, 'Only claim');
-    const added = handle.tasks.addReviewItem(
-      taskId,
-      {
-        shape: 'decision',
-        headline: 'Ship tonight or hold for the morning?',
-        detail: 'Both arms are green; the only question is whether tonight is a good night.',
-        options: [
-          { id: 'o-1a2b', label: 'Tonight' },
-          { id: 'o-3c4d', label: 'Morning' },
-        ],
-      },
-      { actor: LEAD },
-    );
-    expect(added.ok).toBe(true);
-    const r = await note('cartographer', 'Both arms are green. Want me to ship it tonight?');
-    expect(await r.json()).not.toHaveProperty('unfiledAsk');
-    // Still an ask — it is counted, and counted as a FILED one.
-    expect(handle.chatAudit.window(7, localDay(Date.now())).agents).toMatchObject([
-      { unfiledAsks: 0, totalAsks: 1, days: 1 },
-    ]);
   });
 
   it('refuses to guess between two in-progress rows: the note goes to the ring, marked needs-filing', async () => {

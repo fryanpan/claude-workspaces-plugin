@@ -71,9 +71,9 @@ describe('detectAsk — what must stay silent', () => {
   });
 
   it('ignores an ask reported as made of somebody else', () => {
-    expect(asks('I told the builder that the headline is your call, so it should not pre-cut.')).toBe(
-      false,
-    );
+    expect(
+      asks('I told the builder that the headline is your call, so it should not pre-cut.'),
+    ).toBe(false);
   });
 });
 
@@ -131,6 +131,8 @@ describe('nudgeLine', () => {
   });
 
   it('admits its own error rate, because it will be wrong', () => {
-    expect(nudgeLine([{ kind: 'question', phrase: '?' }])).toMatch(/wrong about one message in six/);
+    expect(nudgeLine([{ kind: 'question', phrase: '?' }])).toMatch(
+      /wrong about one message in six/,
+    );
   });
 });

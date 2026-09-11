@@ -129,8 +129,7 @@ describe('decideTurnNote — the Stop hook', () => {
       { ...STOP, stop_hook_active: true, last_assistant_message: 'hi' },
       ctx,
     );
-    expect(decision.skip).toBeUndefined();
-    expect(decision.post?.text).toBe('hi');
+    expect(decision).toMatchObject({ post: { text: 'hi', kind: 'turn' } });
   });
   it('is a no-op on a malformed payload', () => {
     expect(decideTurnNote(null, ctx)).toEqual({ skip: 'malformed payload' });
