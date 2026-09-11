@@ -240,6 +240,17 @@ describe('the tidy-up offer', () => {
     outside.focus();
     expect(tab().defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(outside);
+    // An Escape refused because the pass is running is still consumed: it
+    // must not reach a layer underneath and close that instead.
+    const underneath = vi.fn();
+    document.addEventListener('keydown', underneath);
+    try {
+      escape();
+      expect(offerEl().hidden).toBe(false);
+      expect(underneath).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', underneath);
+    }
   });
 
   it('leaves Tab alone once the dialog is closed', () => {
@@ -267,6 +278,11 @@ describe('the tidy-up offer', () => {
       offer.offer('m-1');
       escape();
       expect(offerEl().hidden).toBe(true);
+      expect(underneath).toHaveBeenCalledTimes(1);
+      // A Tab it has placed is its own too: left to bubble, the layer's own
+      // trap would move the focus on again, back under the scrim.
+      offer.offer('m-2');
+      tab();
       expect(underneath).toHaveBeenCalledTimes(1);
     } finally {
       document.removeEventListener('keydown', underneath);

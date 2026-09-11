@@ -259,17 +259,26 @@ export function mountMeetingCleanupOffer(opts: {
   };
   const onKeydown = (ev: KeyboardEvent): void => {
     if (root.hidden) return;
+    if (ev.key !== 'Tab' && ev.key !== 'Escape') return;
+    // WHILE IT IS UP, THIS DIALOG OWNS BOTH KEYS — every press, including the
+    // ones it refuses. Anything less leaks into the layer underneath: a Tab
+    // this trap has already placed would be moved on again by the thread
+    // modal's own trap, back under the scrim, and an Escape refused here
+    // because the pass is running would close that modal invisibly instead.
+    // `stopImmediatePropagation`, not `stopPropagation`: those handlers sit on
+    // `document` as this one does, and stopping propagation does nothing to
+    // another listener on the SAME node.
+    ev.stopImmediatePropagation();
     if (ev.key === 'Tab') {
       trapTab(ev);
       return;
     }
-    if (ev.key !== 'Escape' || running()) return;
+    // Refused while the writes are coming — and still consumed.
+    if (running()) {
+      ev.preventDefault();
+      return;
+    }
     ev.preventDefault();
-    // Not `stopPropagation`: the doc chrome's own Escape handler is bound to
-    // `document` too, and stopping propagation does nothing to another
-    // listener on the SAME node. One press must close this and nothing under
-    // it.
-    ev.stopImmediatePropagation();
     close();
   };
   // CAPTURE, and that is the whole answer to "which modal does this Escape
