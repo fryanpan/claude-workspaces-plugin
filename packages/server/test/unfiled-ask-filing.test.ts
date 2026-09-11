@@ -109,6 +109,18 @@ describe('filingStateFor', () => {
     expect(filingStateFor(store, ws, 'Riverbend', 0).owners).toEqual(['Quill']);
   });
 
+  it('still names a person whose tasks are all finished', () => {
+    // The filing check stops at open tasks — a done task's item is on nobody's
+    // queue. Who the PEOPLE are does not stop there: somebody whose last
+    // transition closed a ticket is still the person a wait names.
+    const { taskId } = filed(RIVERBEND);
+    store.transition(taskId, 'in-progress', { actor: OWNER });
+    store.transition(taskId, 'done', { actor: OWNER });
+    const state = filingStateFor(store, ws, 'Riverbend', 0);
+    expect(state.openItem).toBe(false);
+    expect(state.owners).toEqual(['Quill']);
+  });
+
   it('names each person once however many tasks they touched', () => {
     for (let i = 0; i < 3; i++) {
       const { taskId } = filed(RIVERBEND);

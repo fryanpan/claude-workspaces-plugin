@@ -28,6 +28,11 @@ import type { FilingState } from './unfiled-ask.ts';
  *  item is not on anybody's queue, and archived tasks are off the board. */
 const OPEN_STATUSES: ReadonlyArray<TaskStatus> = ['triage', 'todo', 'in-progress'];
 
+/** Tasks that can tell you who the PEOPLE are. Wider than the list above, and
+ *  open first: a person whose tasks are all finished is still a person, but
+ *  when the cap below bites it should drop them rather than somebody active. */
+const NAMING_STATUSES: ReadonlyArray<TaskStatus> = [...OPEN_STATUSES, 'done'];
+
 /** How many people's names the third-person wait check knows. */
 const OWNER_NAMES_CAP = 8;
 
@@ -49,13 +54,15 @@ export function filingStateFor(
   const owners = new Map<string, string>();
   let openItem = false;
   let filedSince = false;
-  for (const status of OPEN_STATUSES) {
+  for (const status of NAMING_STATUSES) {
+    const open = OPEN_STATUSES.includes(status);
     for (const task of store.listTasks(workspaceId, { status })) {
       for (const t of task.transitions) {
         if (t.by.kind === 'person' && t.by.name.trim() !== '') {
           owners.set(normalizeAgent(t.by.name), t.by.name.trim());
         }
       }
+      if (!open) continue;
       for (const item of store.listReviewItems(task.id)) {
         if (normalizeAgent(item.createdBy) !== who) continue;
         if (item.createdAt >= since) filedSince = true;
