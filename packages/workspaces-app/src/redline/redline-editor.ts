@@ -278,6 +278,10 @@ export function createRedlineEditor(opts: CreateRedlineEditorOpts): RedlineSurfa
       setThreadDecorations(editor.view, { ranges, activeId });
     },
 
+    markPending(range) {
+      setThreadDecorations(editor.view, { pending: range });
+    },
+
     setInlineCards(cards) {
       setThreadDecorations(editor.view, {
         inlineCards: cards.map((c) => ({ id: c.id, el: c.el })),

@@ -56,7 +56,7 @@ export interface ComposerOptions {
    *  off with `on`; the timers below have to be cancelled by hand, and a
    *  timer that fires after teardown reaches a document that is gone. */
   onCleanup?: (fn: () => void) => void;
-  surface: Pick<ReviewSurface, 'scrollToPos' | 'pulseRange'>;
+  surface: Pick<ReviewSurface, 'scrollToPos' | 'pulseRange' | 'resolveRel' | 'markPending'>;
   threadsPanel: Pick<ThreadPanel, 'setActive'>;
   collectThreads: () => Thread[];
   resolveThreadRange: (id: string) => { from: number; to: number } | null;
@@ -172,6 +172,9 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     }
     composerSelection = use;
     composerRequestId = null;
+    // The words stay marked while the comment on them is written: the
+    // editor's selection does not survive the caret moving into the box.
+    surface.markPending?.(surface.resolveRel(use.start, use.end));
     // Muted quote of the anchored text so the user doesn't lose sight of
     // what they're commenting on once iOS lifts the keyboard.
     el<HTMLElement>('composer-quote').textContent = use.snippet;
@@ -239,6 +242,7 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     composer.classList.add('hidden');
     composerScrim.classList.add('hidden');
     document.body.classList.remove('composer-open');
+    surface.markPending?.(null);
     // A hidden `#composer` keeps `display: block` (only its opacity is
     // zeroed), so a box left in the margin shape still reports a
     // margin-sized rect mid-screen to anything that measures it. Every open

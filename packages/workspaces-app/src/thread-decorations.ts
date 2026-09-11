@@ -49,6 +49,22 @@ interface Meta {
   activeId?: string | null;
   pulseId?: string | null;
   inlineCards?: InlineCardSpec[];
+  pending?: PendingRange | null;
+}
+
+/**
+ * The text a comment is being written about, before it is a thread.
+ *
+ * The editor's own selection is what showed it, and that selection is gone the
+ * moment the composer takes the caret — on iOS at once, so the words scrolled
+ * back into view with nothing on them (owner, 2026-09-11: "it's no longer
+ * highlighted, so I can't tell what I had selected for commenting"). A
+ * decoration does not belong to focus, so it stays until the composer posts or
+ * closes.
+ */
+export interface PendingRange {
+  from: number;
+  to: number;
 }
 
 export const threadDecorationsKey = new PluginKey<State>('thread-decorations');
@@ -58,6 +74,7 @@ interface State {
   activeId: string | null;
   pulseId: string | null;
   inlineCards: InlineCardSpec[];
+  pending: PendingRange | null;
   deco: DecorationSet;
 }
 
@@ -96,9 +113,15 @@ function buildDecos(
   activeId: string | null,
   pulseId: string | null,
   inlineCards: InlineCardSpec[],
+  pending: PendingRange | null,
 ): DecorationSet {
   const decos: Decoration[] = [];
   const docSize = doc.content.size;
+  if (pending) {
+    const from = Math.max(0, Math.min(pending.from, docSize));
+    const to = Math.max(0, Math.min(pending.to, docSize));
+    if (from < to) decos.push(Decoration.inline(from, to, { class: 'comment-pending' }));
+  }
   const cardFor = new Map(inlineCards.map((c) => [c.id, c.el]));
   for (const r of ranges) {
     const from = Math.max(0, Math.min(r.from, docSize));
@@ -139,7 +162,8 @@ export const ThreadDecorations = Extension.create({
             activeId: null,
             pulseId: null,
             inlineCards: [],
-            deco: buildDecos(pmState.doc, [], null, null, []),
+            pending: null,
+            deco: buildDecos(pmState.doc, [], null, null, [], null),
           }),
           apply: (tr, prev) => {
             const meta = tr.getMeta(META_KEY) as Meta | undefined;
@@ -147,6 +171,7 @@ export const ThreadDecorations = Extension.create({
             let activeId = prev.activeId;
             let pulseId = prev.pulseId;
             let inlineCards = prev.inlineCards;
+            let pending = prev.pending;
             // Map stored positions through the change BEFORE rebuilding.
             // `ranges` are absolute positions captured when they were last
             // computed from thread anchors; the anchors themselves are Yjs
@@ -167,11 +192,18 @@ export const ThreadDecorations = Extension.create({
                 to: tr.mapping.map(r.to, -1),
               }));
             }
+            if (tr.docChanged && pending) {
+              pending = {
+                from: tr.mapping.map(pending.from, 1),
+                to: tr.mapping.map(pending.to, -1),
+              };
+            }
             if (meta) {
               if (meta.ranges) ranges = meta.ranges;
               if ('activeId' in meta) activeId = meta.activeId ?? null;
               if ('pulseId' in meta) pulseId = meta.pulseId ?? null;
               if (meta.inlineCards) inlineCards = meta.inlineCards;
+              if ('pending' in meta) pending = meta.pending ?? null;
             }
             // rebuild when doc changed or state changed
             if (meta || tr.docChanged) {
@@ -180,7 +212,8 @@ export const ThreadDecorations = Extension.create({
                 activeId,
                 pulseId,
                 inlineCards,
-                deco: buildDecos(tr.doc, ranges, activeId, pulseId, inlineCards),
+                pending,
+                deco: buildDecos(tr.doc, ranges, activeId, pulseId, inlineCards, pending),
               };
             }
             return prev;
