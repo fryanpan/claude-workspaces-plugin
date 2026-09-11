@@ -251,6 +251,31 @@ describe('installBeforeBoot', () => {
     expect(h.installs).toEqual([0, INSTALL_BACKOFF.pollMs]);
   });
 
+  it('retries at once when a person deletes the ledger, as the log says they may', async () => {
+    const ledger = memoryLedger();
+    const h = harness({
+      ledger,
+      outcome: (t) => (t === 0 ? frozen : { ok: true }),
+      sleep: async (ms) => {
+        h.clock.t += ms;
+        ledger.entry = null; // `rm supervisor-install-failure.json` during the first wait
+      },
+    });
+    await installBeforeBoot(h.deps);
+    expect(h.installs).toEqual([0, INSTALL_BACKOFF.pollMs]);
+    expect(h.lines.some((l) => l.includes('was deleted — retrying bun install now'))).toBe(true);
+  });
+
+  it('still waits out the backoff when the ledger cannot be written at all', async () => {
+    // Reads as deleted on every poll; that must not become an install per poll.
+    const h = harness({
+      ledger: { load: () => null, save: () => {} },
+      outcome: (t) => (t === 0 ? frozen : { ok: true }),
+    });
+    await installBeforeBoot(h.deps);
+    expect(h.installs).toEqual([0, INSTALL_BACKOFF.baseMs]);
+  });
+
   it('clears the recorded failure once an install succeeds', async () => {
     const ledger = memoryLedger();
     ledger.entry = { fingerprint: 'lock-old', failures: 3, lastAttemptAt: 0, detail: 'x' };

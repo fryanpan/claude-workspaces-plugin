@@ -227,7 +227,10 @@ export async function installBeforeBoot(deps: InstallGateDeps): Promise<void> {
               `package.json changes; delete ${deps.ledgerPath} to retry now.`,
           );
         }
-        await waitUntil(due, fingerprint, deps, backoff.pollMs);
+        if ((await waitUntil(due, fingerprint, deps, backoff.pollMs)) === 'cleared') {
+          deps.log(`[supervisor] ${deps.ledgerPath} was deleted — retrying bun install now.`);
+          last = null;
+        }
         justFailed = false;
         continue;
       }
@@ -252,17 +255,26 @@ export async function installBeforeBoot(deps: InstallGateDeps): Promise<void> {
   }
 }
 
-/** Sleep until `due`, returning early when the install's inputs change. */
+/**
+ * Sleep until `due`, returning early when the install's inputs change or a
+ * person deletes the ledger, as the log tells them they may. Deletion counts
+ * only if the ledger was readable when the wait began: one that could never
+ * be written reads as deleted on every poll, and must not become an install
+ * every `pollMs`.
+ */
 async function waitUntil(
   due: number,
   fingerprint: string,
   deps: InstallGateDeps,
   pollMs: number,
-): Promise<void> {
+): Promise<'due' | 'changed' | 'cleared'> {
+  const recorded = deps.ledger.load() !== null;
   while (deps.now() < due) {
     await deps.sleep(Math.min(pollMs, due - deps.now()));
-    if (deps.fingerprint() !== fingerprint) return;
+    if (deps.fingerprint() !== fingerprint) return 'changed';
+    if (recorded && deps.ledger.load() === null) return 'cleared';
   }
+  return 'due';
 }
 
 /** One line: the caller stamps it with a time, and bun's multi-line reason
