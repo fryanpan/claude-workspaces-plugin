@@ -451,6 +451,9 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
       else composerNote(composer, 'Couldn’t post — try again.');
       return;
     }
+    // Posted, so nothing is waiting any more: a copy kept when the mode closed
+    // mid-post would otherwise come back to be posted twice.
+    drafts.delete(key);
     clearHighlight(el);
     el.hoverEl = null;
     if (quick) {

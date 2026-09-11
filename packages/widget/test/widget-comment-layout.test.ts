@@ -208,6 +208,13 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(look(1180, 'reopenedX').draft).toBe('Riverbend stop shelter');
     });
 
+    it('keeps a draft whose post failed after the mode closed', () => {
+      const l = look(1180, 'afterFailed');
+      expect(l.posts.at(-1), 'CONTROL: the held post was sent').toBe('Riverbend stop shelter');
+      expect(l.snippet).toBe('Parking');
+      expect(l.draft).toBe('Riverbend stop shelter');
+    });
+
     it('does not keep a draft that was already posting when the mode closed', () => {
       const l = look(1180, 'afterPending');
       expect(l.posts.at(-1), 'CONTROL: the held post landed').toBe('Riverbend stop shelter');

@@ -114,7 +114,7 @@ window.__posts = [];
 document.querySelector('${TAG}').postNewThread = async (_a, text) => {
   window.__posts.push(text);
   // Held open while the test says so, as a slow server would.
-  if (window.__hold) await new Promise((r) => { window.__release = r; });
+  if (window.__hold) return new Promise((r) => { window.__release = r; });
   return true;
 };
 </script>
@@ -338,12 +338,19 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await tap(fab);
     await tap(el('low'));
     await look('reopenedX');
-    // Done while that draft is posting: once the post lands, the element
-    // opens empty rather than holding a copy to post a second time.
+    // Done while that draft is posting. A post that fails leaves the words
+    // waiting on the element; one that lands leaves nothing to post twice.
     await cdp.evaluate('window.__hold = true');
     await enter();
     await tap(done);
-    await cdp.evaluate('window.__release()');
+    await cdp.evaluate('window.__release(false)');
+    await settle();
+    await tap(fab);
+    await tap(el('low'));
+    await look('afterFailed');
+    await enter();
+    await tap(done);
+    await cdp.evaluate('window.__release(true)');
     await settle();
     await tap(fab);
     await tap(el('low'));
