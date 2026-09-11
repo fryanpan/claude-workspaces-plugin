@@ -213,7 +213,11 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       render();
       const next = await deps.fetchJson<LibraryPayload>(`${base}/items`);
       failed = next === null;
-      if (next) payload = next;
+      // The last list is DROPPED on a failure rather than left up. Rows here
+      // are an invitation to tap, and a list the server can no longer vouch
+      // for offers meetings and files that may not be there any more; saying
+      // so is the honest page.
+      payload = next;
       render();
     },
   };

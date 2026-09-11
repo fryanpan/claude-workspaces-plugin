@@ -42,7 +42,7 @@ interface Driven {
 
 function drive(
   opts: {
-    payload?: LibraryPayload | null;
+    payload?: LibraryPayload | null | (LibraryPayload | null)[];
     openAnswer?: { ok: boolean; status: number; data: Record<string, unknown> | null };
   } = {},
 ): Driven {
@@ -55,7 +55,11 @@ function drive(
     root,
     workspaceId: WS,
     boardName: () => 'Kitchen rebuild',
-    fetchJson: async <T>() => (opts.payload === undefined ? PAYLOAD : opts.payload) as T | null,
+    fetchJson: async <T>() => {
+      if (opts.payload === undefined) return PAYLOAD as T;
+      if (Array.isArray(opts.payload)) return (opts.payload.shift() ?? null) as T | null;
+      return opts.payload as T | null;
+    },
     send: async (path, method, body) => {
       sent.push({ path, method, body });
       return (
@@ -180,6 +184,15 @@ describe('the Library front page', () => {
     box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(box.value).toBe('');
     expect(root.querySelectorAll('.library-tbl')).toHaveLength(2);
+  });
+
+  it('drops the list it can no longer vouch for when a reload fails', async () => {
+    const { page, root } = drive({ payload: [PAYLOAD, null] });
+    await page.open();
+    expect(root.querySelectorAll('.library-row').length).toBeGreaterThan(0);
+    await page.open();
+    expect(root.querySelectorAll('.library-row')).toHaveLength(0);
+    expect(root.querySelector('.library-empty')?.textContent).toBe('The library could not load.');
   });
 
   it('names the board and says so when the list cannot load', async () => {
