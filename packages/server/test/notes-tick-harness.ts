@@ -26,6 +26,7 @@ import {
   type NotesComposeInput,
   type NotesMeetingSummary,
   type NotesRelabel,
+  type NotesTickLifecycle,
   type TickScheduler,
   beginNotesSession,
 } from '../src/meeting-notes.ts';
@@ -153,6 +154,13 @@ export interface NotesTickHarnessOptions {
    * compose chain does to the ticks behind it.
    */
   onRelabel?: (relabel: NotesRelabel) => void;
+  /**
+   * A caller's own lifecycle sink, run after the harness's own bookkeeping —
+   * the seam a browser's `notes_progress` frames come off. It is here so a
+   * test can ask what a throw from an observer does to the tick that was
+   * telling it, `written` included.
+   */
+  onLifecycle?: (event: NotesTickLifecycle) => void;
   /**
    * Make the error sink itself throw, after recording. `onError` is a
    * caller's own function, so a test needs to be able to ask what happens
@@ -333,6 +341,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
         // waits on, and a tick that composed nothing is as finished as one
         // that wrote a bullet. Leaving it out hangs the wait.
         if (event.phase !== 'composing') done.add(event.tick);
+        opts.onLifecycle?.(event);
       },
     },
     {

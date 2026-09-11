@@ -127,4 +127,30 @@ describe('a throwing step does not stop the meeting', () => {
     expect(h.notes()).toContain('note 2');
     expect(h.summary()).not.toBeNull();
   });
+
+  it('a throwing progress sink does not write the same words up twice', async () => {
+    // The `written` frame is announced from INSIDE the compose's own
+    // try/catch, after the doc has taken the edits. A throw out of the sink
+    // landed in the handler for a compose that FAILED, which puts a tick's
+    // turns back in the carry — so the next tick composed words that were
+    // already in the notes and wrote them a second time.
+    const seen: number[][] = [];
+    const h = createNotesTickHarness({
+      tickTimeoutMs: TICK_TIMEOUT_MS,
+      onLifecycle: (event) => {
+        if (event.phase === 'written') throw new Error('the progress sink threw');
+      },
+      compose: (input, tick) => {
+        seen.push(input.tick.turns.map((t) => t.turn));
+        return addNotes(input, `- note ${tick}`);
+      },
+    });
+
+    await h.speak('The first thing.');
+    await h.speak('The second thing.');
+
+    // The second tick's compose saw the second turn and only that one.
+    expect(seen).toEqual([[0], [1]]);
+    expect(h.errors.some((e) => e.includes('the progress sink threw'))).toBe(true);
+  });
 });

@@ -1153,8 +1153,42 @@ export function beginNotesSession(
    */
   const ideas = createIdeaLedger();
 
-  const lifecycle = (phase: NotesTickLifecycle['phase'], tick: number, turns: number[]) =>
-    deps.onTickLifecycle?.({ docId: ids.docId, meetingId: ids.meetingId, tick, phase, turns });
+  /**
+   * Report through the caller's error sink without letting it fail whatever
+   * was reporting. `onError` is a caller's own function, and the two places
+   * below are recovery paths: a throw out of the sink there re-raises inside
+   * the handler for the failure it was reporting, which is the failure the
+   * handler exists to contain.
+   */
+  const safeError = (message: string): void => {
+    try {
+      deps.onError?.(message);
+    } catch {
+      // Nowhere left to say so: reporting is what just failed.
+    }
+  };
+
+  /**
+   * Tell whoever is watching what a tick did. Never fail a tick.
+   *
+   * This is a caller's own function, and the `written` call sits INSIDE the
+   * compose's try/catch, after the doc has already taken the edits. A throw
+   * out of it lands in the catch that exists for a compose that failed,
+   * which puts turns back into `carry` — so words already written up would
+   * be composed again on the next tick and written a second time. The
+   * observer is not allowed to rewrite what happened.
+   */
+  const lifecycle = (phase: NotesTickLifecycle['phase'], tick: number, turns: number[]): void => {
+    try {
+      deps.onTickLifecycle?.({ docId: ids.docId, meetingId: ids.meetingId, tick, phase, turns });
+    } catch (err) {
+      safeError(
+        `${ids.docId} meeting ${ids.meetingId} tick ${tick}: ${
+          err instanceof Error ? err.message : 'notes tick lifecycle sink failed'
+        }`,
+      );
+    }
+  };
 
   /**
    * Append a step to `chain` that cannot poison it.
@@ -1167,23 +1201,17 @@ export function beginNotesSession(
    * pipeline failure is: `meeting-notes-doc.ts` prints those, so the line
    * lands in the log beside the tick it belongs to.
    *
-   * The report itself is wrapped, because `onError` is a caller's own
-   * function and a throw out of the recovery callback rejects the chain —
-   * which is the whole failure this exists to prevent, rebuilt one layer
-   * down. A sink that cannot be told is the one thing there is nowhere left
-   * to report.
+   * Through `safeError`, not `deps.onError` directly: a throw out of the
+   * recovery callback rejects the chain, which is the whole failure this
+   * exists to prevent, rebuilt one layer down.
    */
   const onChain = (step: () => void | Promise<void>): void => {
     chain = chain.then(step).catch((err) => {
-      try {
-        deps.onError?.(
-          `${ids.docId} meeting ${ids.meetingId}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      } catch {
-        // Nowhere to say so: reporting is what just failed.
-      }
+      safeError(
+        `${ids.docId} meeting ${ids.meetingId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     });
   };
 
