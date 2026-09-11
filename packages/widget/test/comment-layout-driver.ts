@@ -42,6 +42,8 @@ export interface Look {
   snippet: string | null;
   /** The saved card still showing its tick, or null. */
   saved: { box: Box; text: string } | null;
+  /** Every saved card on screen. */
+  saves: Box[];
   /** Each leader line's two ends. */
   lines: Array<[number, number, number, number]>;
   /** The banner when it is painted, else null. */
@@ -144,6 +146,7 @@ const LOOK = `(() => {
     card: box(c),
     snippet: sr.querySelector('.composer-snippet')?.textContent ?? null,
     saved: s ? { box: box(s), text: s.textContent } : null,
+    saves: [...sr.querySelectorAll('.saved')].map(box),
     lines,
     banner: box(b),
     tick: !!t && !t.hidden,
@@ -182,6 +185,16 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     return p;
   };
   const settle = () => sleep(250);
+  /** Turn the device: the same page at another viewport. */
+  const turn = async (w: number, h: number): Promise<void> => {
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: w,
+      height: h,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await settle();
+  };
   /** A finger: touchStart, touchEnd — the browser makes the rest. */
   const tap = async (expr: string): Promise<void> => {
     const p = await centre(expr);
@@ -225,6 +238,17 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await look('posted');
     await tap(el('wide'));
     await look('onWide');
+    // A second post while the first one's saved card still shows.
+    await type('the timetable is missing Sunday');
+    await enter();
+    await look('posted2');
+    // An iPad turned to portrait mid-comment, and back.
+    await tap(el('wide'));
+    await type('Riverbend stop');
+    await turn(820, 1180);
+    await look('portrait');
+    await turn(width, height);
+    await look('landscape');
   } else {
     await tap(el('narrow'));
     await type('ferry times are wrong');

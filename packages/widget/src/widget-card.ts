@@ -49,8 +49,9 @@ export function placeCards(w: FeedbackWidgetEl): void {
   const x = window.innerWidth - 16 - CARD_W;
   let lines = '';
   // The composer is placed first and keeps its spot; a saved card still
-  // showing its tick steps below it rather than over it.
-  let taken: [number, number] | null = null;
+  // showing its tick steps below every card already placed rather than over
+  // one — two posts in quick succession stack.
+  const taken: Array<[number, number]> = [];
   const cards = [
     ...w.shadow.querySelectorAll<HTMLElement>('.composer:not(.quick)'),
     ...w.shadow.querySelectorAll<HTMLElement>('.saved'),
@@ -68,8 +69,16 @@ export function placeCards(w: FeedbackWidgetEl): void {
           ? r.bottom + GAP
           : r.top - GAP - h;
     y = Math.max(8, Math.min(y, vh - h - 8));
-    if (taken && y < taken[1] && y + h > taken[0]) y = taken[1];
-    taken ??= [y, y + h + 10];
+    for (let moved = true; moved; ) {
+      moved = false;
+      for (const [a, b] of taken) {
+        if (y < b && y + h > a) {
+          y = b;
+          moved = true;
+        }
+      }
+    }
+    taken.push([y, y + h + 10]);
     c.style.left = `${x}px`;
     c.style.top = `${y}px`;
     if (!r) continue;

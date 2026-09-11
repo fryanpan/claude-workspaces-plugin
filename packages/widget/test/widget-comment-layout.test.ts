@@ -142,6 +142,30 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(l.focus).toBe('TEXTAREA');
       expect(overlap(saved.box, l.card)).toBe(0);
     });
+
+    it('stacks a second saved card below the first rather than over it', () => {
+      const l = look(1180, 'posted2');
+      expect(l.posts).toEqual(['ferry times are wrong', 'the timetable is missing Sunday']);
+      expect(l.saves, 'CONTROL: both saved cards are still up').toHaveLength(2);
+      const cards = [...l.saves, box(l.card)];
+      for (const [i, a] of cards.entries()) {
+        for (const b of cards.slice(i + 1)) expect(overlap(a, b), 'two cards overlap').toBe(0);
+      }
+    });
+
+    it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {
+      const p = look(1180, 'portrait');
+      expect(p.mode).toBe(true);
+      expect([box(p.card)[0], box(p.card)[2], box(p.card)[3]]).toEqual([0, 820, 1180]);
+      expect(p.draft).toBe('Riverbend stop');
+      expect(p.snippet).toBe('The full timetable, across the page');
+      expect(p.outlined).toBe('wide');
+      const l = look(1180, 'landscape');
+      expect(box(l.card)[2]).toBe(1180 - 16);
+      expect(l.draft).toBe('Riverbend stop');
+      expect(l.snippet).toBe('The full timetable, across the page');
+      expect(overlap(box(l.card), l.el.wide)).toBe(0);
+    });
   });
 
   describe('a finger keeps the focus the tap gave the field', () => {

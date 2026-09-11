@@ -170,6 +170,25 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   window.addEventListener('pointerdown', onDown, true);
   window.addEventListener('pointerup', onTap, true);
   window.addEventListener('keydown', onKey, true);
+  // The face is chosen for the width the mode opened at. Turning an iPad to
+  // portrait crosses that line, so the mode is opened again on the other
+  // face, carrying the draft and the element it is about.
+  const onResize = () => {
+    if (isPhoneFace() === phone) return;
+    const c = el.shadow.querySelector('.composer');
+    const t = c ? cardTarget.get(c) : undefined;
+    const draft = c?.querySelector('textarea')?.value ?? '';
+    exitFeedbackMode(el);
+    enterFeedbackMode(el);
+    if (t) {
+      el.hoverEl = t;
+      setHighlight(el, t);
+      openComposerForElement(el, t);
+    } else if (draft) openDefaultComposer(el);
+    const ta = el.shadow.querySelector('.composer textarea') as HTMLTextAreaElement | null;
+    if (ta) ta.value = draft;
+  };
+  window.addEventListener('resize', onResize);
 
   el.modeCleanup = () => {
     document.body.classList.remove('cfw-feedback-mode');
@@ -186,6 +205,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     window.removeEventListener('pointerdown', onDown, true);
     window.removeEventListener('pointerup', onTap, true);
     window.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('resize', onResize);
   };
 }
 
