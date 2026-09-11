@@ -178,13 +178,21 @@ export interface MeetingStripOpts {
   /** The shell element the strip renders into — `#meeting-strip`. */
   root: HTMLElement;
   /**
-   * Where the Record Audio button docks — `#topbar .toolbar`. The strip
-   * grows out of this button, which is why the button belongs to this mount
-   * rather than to the static shell: they are one control in two boxes, and
-   * they come and go together. Falls back to `root` where the shell has no
-   * toolbar (a stripped embed, a test).
+   * Where the Record Audio button docks — `#topbar` ITSELF, not the
+   * `.toolbar` inside it. The strip grows out of this button, which is why
+   * the button belongs to this mount rather than to the static shell: they
+   * are one control in two boxes, and they come and go together.
+   *
+   * It is the bar and not the toolbar because the toolbar is a horizontal
+   * SCROLL container below 1100px — the escape valve the shell grew so a
+   * future button could not push the crumb off-screen. A Record button
+   * inside it is a button that scrolls away: measured at 430px the options
+   * chevron's right edge sat at 434 against a 430px viewport. Docked beside
+   * the toolbar instead, the pair is a rigid flex child of the bar and the
+   * toolbar is what yields. Falls back to `root` where the shell has no top
+   * bar (a stripped embed, a test).
    */
-  toolbar?: HTMLElement | null;
+  dock?: HTMLElement | null;
   /**
    * The doc's meeting-bot lifecycle, when the caller mounted one. Its verbs
    * (invite, leave) are behind the chooser and the menu; its state renders in
@@ -544,14 +552,22 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   root.replaceChildren(
     ...(timing ? [blinker, elapsed, feed, timing.element] : [blinker, elapsed, feed]),
   );
+  // Record and its chevron travel as ONE box. They are one control drawn in
+  // two, and the bar they dock into sizes its children independently — a
+  // pair of loose flex children is a pair that can be split by whatever the
+  // bar decides to shrink. The wrapper also owns the gap between them, which
+  // is why neither carries a margin of its own any more.
+  const recordDock = document.createElement('div');
+  recordDock.className = 'meeting-record-dock';
+  recordDock.append(record, options);
   // The scrim and the popovers dock beside the Record button, NOT inside
   // `root`: `root` is the strip itself, which is `hidden` (⇒ `display: none`,
   // taking its whole subtree with it) for exactly the idle state the start
   // chooser has to open FROM. Both are `position: fixed`, so nesting them
-  // under the toolbar instead costs nothing visually. After the strip
-  // children are set: the no-toolbar fallback docks everything in `root`
-  // itself, where the `replaceChildren` above would eat it.
-  (opts.toolbar ?? root).append(record, options, scrim, pop);
+  // under the bar instead costs nothing visually. After the strip children
+  // are set: the no-dock fallback puts everything in `root` itself, where
+  // the `replaceChildren` above would eat it.
+  (opts.dock ?? root).append(recordDock, scrim, pop);
 
   let state: StripState = { kind: 'idle' };
   let view: PopView = 'none';
@@ -1939,7 +1955,14 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       closePop();
       return;
     }
-    openPop('chooser');
+    // `popForNow()`, never a hard-coded 'chooser'. The chevron is the door to
+    // a START, and the strip hides it once there is nothing to start — but
+    // "hidden" is a rendering promise, and a keyboard, a screen reader or one
+    // stale specificity accident in the stylesheet can still land a click
+    // here mid-meeting. Reading the same state the button's own visibility is
+    // computed from means the worst that tap can do is open the menu that
+    // holds Stop, instead of offering a second Start over a live recording.
+    openPop(popForNow());
   };
   options.addEventListener('click', onOptionsClick);
   const onScrim = (): void => closePop();
@@ -2086,8 +2109,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       stopClock = null;
       transcript.clearTurnSpans();
       closePop();
-      record.remove();
-      options.remove();
+      // The dock takes Record and its chevron with it.
+      recordDock.remove();
       scrim.remove();
       pop.remove();
       root.classList.remove('is-live', 'is-bot');
