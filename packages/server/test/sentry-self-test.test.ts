@@ -31,6 +31,7 @@ function startCaptureServer(): { dsn: string; hits: () => Hit[]; stop: () => voi
   const hits: Hit[] = [];
   const server = Bun.serve({
     port: 0,
+    hostname: '127.0.0.1',
     async fetch(req) {
       const bytes = new Uint8Array(await req.arrayBuffer());
       const isGzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;

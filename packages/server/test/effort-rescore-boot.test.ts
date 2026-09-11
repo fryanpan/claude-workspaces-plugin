@@ -213,7 +213,11 @@ describe('a prompt bump re-scores the open rows on boot', () => {
     // held, the abandoned one still calling the API. So the pass starts after
     // the port is bound, and this is what holds that line.
     await seedOldGenerationBoard();
-    const squatter = Bun.serve({ port: 0, fetch: () => new Response('busy') });
+    const squatter = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch: () => new Response('busy'),
+    });
     try {
       expect(() =>
         createServer({

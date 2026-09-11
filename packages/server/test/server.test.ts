@@ -576,6 +576,7 @@ describe('server REST', () => {
     // spin up a tiny sink
     const sink = Bun.serve({
       port: 0,
+      hostname: '127.0.0.1',
       async fetch(req) {
         hits.push(await req.json());
         return new Response('ok');

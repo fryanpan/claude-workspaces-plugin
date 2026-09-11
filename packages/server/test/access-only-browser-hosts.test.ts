@@ -163,6 +163,9 @@ describe('access-only browser hosts', () => {
       // VERIFIED identity outranks the claimed body whichever way this flag
       // is set.
       requireSignInToWrite: false,
+      // Every interface, as prod binds: a probe below dials this machine's
+      // non-loopback address. See loopback-bind.preload.ts.
+      hostname: '::',
     };
     handle = createServer({ port: 0, dataDir, ...opts });
     // Same declarations, rule off. Nothing else differs, which is what makes

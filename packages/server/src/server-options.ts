@@ -51,6 +51,11 @@ export interface ServerOptions {
    * Tailscale and the LAN. Only `scripts/staging.ts` passes a value, and it
    * defaults that value to loopback: see `reserved-ports.ts` for the outage
    * a wildcard-bound dev/staging server caused.
+   *
+   * Under `bun test` an unset value falls back to `CW_TEST_BIND_HOST`, which
+   * the suite's preload sets to 127.0.0.1 — see
+   * `packages/server/test/loopback-bind.preload.ts` for why a test server
+   * must not take the wildcard.
    */
   hostname?: string;
   dataDir?: string;

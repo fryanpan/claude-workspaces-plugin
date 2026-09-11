@@ -26,6 +26,9 @@ beforeAll(() => {
   // their own file (auth-start-ceilings.test.ts). Lift them out of the way.
   handle = createServer({
     port: 0,
+    // Every interface, as prod binds: a probe below dials this machine's
+    // non-loopback address. See loopback-bind.preload.ts.
+    hostname: '::',
     dataDir,
     authCeilings: { globalStartsPerHour: 10_000, peerStartsPerHour: 10_000 },
     // The forged-header case needs a peer that is neither loopback nor

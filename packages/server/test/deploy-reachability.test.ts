@@ -127,6 +127,9 @@ describe('POST /api/deploy over a real socket', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'deploy-reach-'));
     handle = createServer({
       port: 0,
+      // Every interface, as prod binds: a probe below dials this machine's
+      // non-loopback address. See loopback-bind.preload.ts.
+      hostname: '::',
       dataDir,
       // Whatever address the probe connects FROM is a trusted local host as
       // far as the Host guard is concerned — that is the point. Without this

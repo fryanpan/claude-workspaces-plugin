@@ -262,6 +262,7 @@ describe('suggested edits — HTTP routes', () => {
   it('fires suggestion.created / suggestion.accepted / suggestion.rejected webhooks — watchers hear the verdict', async () => {
     const sink = Bun.serve({
       port: 0,
+      hostname: '127.0.0.1',
       async fetch(req) {
         hits.push(await req.json());
         return new Response('ok');
