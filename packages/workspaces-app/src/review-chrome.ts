@@ -15,6 +15,7 @@ import type { ChromeSelection } from './doc/anchor-body.ts';
 import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
 import type { ComposerSlot } from './doc/composer-slot.ts';
+import { wireDocRename } from './doc/doc-rename.ts';
 import {
   onShowResolvedChange,
   showResolved,
@@ -726,6 +727,31 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     setTabTitle(document, tabName(full));
   }
   on(window.matchMedia('(max-width: 720px)'), 'change', () => renderDocLabel());
+  /**
+   * The crumb is the rename affordance (`doc/doc-rename.ts`).
+   *
+   * Wired here because this is the one place all three surfaces resolve the
+   * doc's label, so the editor starts from the FULL title rather than from
+   * the abbreviation the crumb may be showing. `renderDocLabel` re-runs on
+   * the meta change the write produces, which is what puts the new name in
+   * the tab and the tooltip without this knowing about either.
+   */
+  wireDocRename({
+    titleEl: docTitleEl,
+    docId: opts.docId,
+    canWrite: opts.canWrite,
+    currentTitle: () =>
+      docLabel({
+        type: readDocMeta(ydoc).type,
+        relPath: readDocMeta(ydoc).relPath,
+        title: readDocMeta(ydoc).title,
+        docId: readDocMeta(ydoc).docId,
+        labelHint: opts.labelHint,
+        huddle: readDocMeta(ydoc).huddle,
+      }),
+    onRenamed: () => renderDocLabel(),
+    listen: (target, type, handler) => on(target, type, handler),
+  });
 
   // --- live wiring -------------------------------------------------------------
   // Bound to this document's ydoc, which is destroyed when its client closes on

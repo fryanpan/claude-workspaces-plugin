@@ -248,6 +248,32 @@ button {
   color: var(--fg);
   font-weight: 600;
 }
+/* The title IS the rename control: click it, type, Enter. No pencil and no
+   menu — the word a person wants to change is the one they are looking at.
+   Nothing renders for a reader who cannot write; the class is only added
+   when the server said they can. */
+.doc-title-editable {
+  cursor: text;
+  border-radius: var(--radius-sm);
+  padding: 0 3px;
+  margin: 0 -3px;
+}
+.doc-title-editable:hover,
+.doc-title-editable:focus-visible {
+  background: var(--bg-subtle, color-mix(in srgb, var(--fg) 7%, transparent));
+}
+/* Sized off the crumb it replaces, so the topbar does not reflow the moment
+   the field appears — a row that jumps as you click it reads as a misfire. */
+.doc-title-input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
 .back-link {
   flex: 0 0 auto;
   color: var(--fg-muted);
