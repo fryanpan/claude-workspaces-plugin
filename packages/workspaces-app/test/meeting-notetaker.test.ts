@@ -10,6 +10,7 @@ import {
   DEFAULT_NOTES_METHOD,
   NOTES_METHODS,
   OFFERED_NOTES_METHODS,
+  notesMethodDetail,
   notesMethodInfo,
 } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +24,7 @@ import {
   notetakerMountAnswer,
   notetakerPicked,
   notetakerReconciled,
+  readPerHour,
 } from '../src/meeting-notetaker.ts';
 
 afterEach(() => {
@@ -65,6 +67,96 @@ describe('the fold when it is shut', () => {
   });
 });
 
+describe('the price on a row says whether it was measured or guessed', () => {
+  const detailsOf = (el: HTMLElement): string[] =>
+    [...el.querySelectorAll('.meeting-choice-detail')].map((d) => d.textContent ?? '');
+
+  it('marks the eval figure as an estimate when the server has measured nothing', () => {
+    const el = mount({ method: 'original', open: true, ...ALL, ...noop });
+    for (const text of detailsOf(el)) expect(text).toMatch(/\$\d+\.\d\d\/hr est\.$/);
+  });
+
+  it('states a measured figure plainly, with no estimate mark', () => {
+    const el = mount({
+      method: 'original',
+      open: true,
+      perHour: { original: 2.4449 },
+      ...ALL,
+      ...noop,
+    });
+    const [first] = detailsOf(el);
+    expect(first).toContain('$2.44/hr');
+    expect(first).not.toContain('est.');
+    // And it is the MEASURED number, not the eval's — the bug this replaces
+    // was a row that said $0.60/hr for a meeting that billed several times
+    // that.
+    expect(first).not.toContain('$0.60');
+  });
+
+  it('marks only the methods that have no measurement, row by row', () => {
+    const el = mount({
+      method: 'original',
+      open: true,
+      perHour: { 'ledger-opus': 7.25 },
+      ...ALL,
+      ...noop,
+    });
+    const details = detailsOf(el);
+    const opus = details.find((t) => t.includes('7.25'));
+    expect(opus).toBeDefined();
+    expect(opus).not.toContain('est.');
+    expect(details.filter((t) => t.includes('est.'))).toHaveLength(NOTES_METHODS.length - 1);
+  });
+
+  it('"since" still hangs off the measured row, and off no other', () => {
+    const el = mount({
+      method: 'original',
+      open: true,
+      since: '10:38',
+      perHour: { original: 2.4 },
+      ...ALL,
+      ...noop,
+    });
+    const withSince = detailsOf(el).filter((t) => t.includes('since 10:38'));
+    expect(withSince).toHaveLength(1);
+    expect(withSince[0]).toContain('$2.40/hr · since 10:38');
+  });
+
+  it('MUTATION CONTROL: a figure the server did not send leaves the row estimated', () => {
+    const el = mount({ method: 'original', open: true, perHour: {}, ...ALL, ...noop });
+    for (const text of detailsOf(el)) expect(text).toContain('est.');
+  });
+});
+
+describe('reading the figures off the wire', () => {
+  it('keeps positive finite numbers for methods this build knows', () => {
+    expect(readPerHour({ original: 2.4, 'ledger-opus': 7 })).toEqual({
+      original: 2.4,
+      'ledger-opus': 7,
+    });
+  });
+
+  it('drops anything that would print as $NaN/hr', () => {
+    expect(
+      readPerHour({ original: null, 'ledger-haiku': 'cheap', 'ledger-opus': Number.NaN }),
+    ).toEqual({});
+  });
+
+  it('drops a zero or negative rate rather than claiming a meeting is free', () => {
+    expect(readPerHour({ original: 0, 'ledger-opus': -3 })).toEqual({});
+  });
+
+  it('ignores a method id this build has never heard of', () => {
+    expect(readPerHour({ 'ledger-telepathy': 9 })).toEqual({});
+  });
+
+  it('a server that sends nothing reads as nothing measured', () => {
+    expect(readPerHour(undefined)).toEqual({});
+    expect(readPerHour(null)).toEqual({});
+    expect(readPerHour('nope')).toEqual({});
+  });
+});
+
 describe('the fold when it is open', () => {
   it('offers every note-taker, each with its price, and marks the one that is on', () => {
     const el = mount({ method: 'ledger-haiku', open: true, ...ALL, ...noop });
@@ -90,7 +182,7 @@ describe('the fold when it is open', () => {
       d.textContent?.includes('since 10:38'),
     );
     expect(withSince).toHaveLength(1);
-    expect(withSince[0]?.textContent).toContain(notesMethodInfo('ledger-opus').detail);
+    expect(withSince[0]?.textContent).toContain(notesMethodDetail('ledger-opus'));
   });
 
   it('MUTATION CONTROL: with nothing to date, no row claims a time', () => {

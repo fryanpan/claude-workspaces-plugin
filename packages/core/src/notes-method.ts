@@ -14,11 +14,22 @@
  * table, so a rename cannot make the strip say a different thing from the
  * record.
  *
- * THE COPY IS PART OF THE CONTRACT. `detail` is what a person reads while
- * deciding, and it says the two things they can act on — how complete the
- * notes are, and what an hour costs. Both come from the measured table, not
- * from an estimate; when the eval moves them, this moves with it.
+ * THE COPY IS PART OF THE CONTRACT. The detail line is what a person reads
+ * while deciding, and it says the two things they can act on — how complete
+ * the notes are, and what an hour costs.
+ *
+ * AND THE PRICE HALF IS NO LONGER A CONSTANT. It used to be three strings
+ * typed out of one old eval run, and the live pipeline had moved past them:
+ * the row said sixty cents an hour for a meeting whose compose alone billed
+ * about two dollars and whose task-capture call was not counted at all. So
+ * the row now carries the eval's figure as an ESTIMATE and the server hands
+ * down a per-hour figure measured on real finished meetings; `notesMethodDetail`
+ * picks the measured one where there is one and marks the guess `est.` where
+ * there is not, because a person choosing between two rows needs to know
+ * which of the numbers was billed and which was predicted.
  */
+
+import { formatPerHour } from './model-cost.ts';
 
 /**
  * The methods, in the order the chooser offers them: cheapest and least
@@ -72,17 +83,38 @@ export interface NotesMethodInfo {
   id: NotesMethod;
   /** The name shown on the row and written into the notes' trace line. */
   label: string;
-  /** The one line under the name: completeness first, then price. */
-  detail: string;
+  /** The first half of the line under the name: how complete the notes are. */
+  completeness: string;
+  /**
+   * What an hour was expected to cost, from `scripts/notes-eval-variants.ts`.
+   *
+   * A PREDICTION, and it is labelled as one wherever it is shown. It covers
+   * the compose call alone, on a corpus of AMI meetings, at one moment in the
+   * prompt's life — none of which is the bill a person gets. It is here
+   * because a method nobody has run yet still has to say something, and a
+   * blank row is a worse answer than a marked guess.
+   */
+  estimatedPerHourUsd: number;
 }
 
 export const NOTES_METHOD_INFO: readonly NotesMethodInfo[] = [
-  { id: 'original', label: 'Original', detail: 'Least complete, shorter text · $0.60/hr' },
-  { id: 'ledger-haiku', label: 'Ledger · Haiku', detail: 'In between · $0.95/hr' },
+  {
+    id: 'original',
+    label: 'Original',
+    completeness: 'Least complete, shorter text',
+    estimatedPerHourUsd: 0.6,
+  },
+  {
+    id: 'ledger-haiku',
+    label: 'Ledger · Haiku',
+    completeness: 'In between',
+    estimatedPerHourUsd: 0.95,
+  },
   {
     id: 'ledger-opus',
     label: 'Ledger · Opus',
-    detail: 'Most complete, longer text · $5.55/hr',
+    completeness: 'Most complete, longer text',
+    estimatedPerHourUsd: 5.55,
   },
 ];
 
@@ -97,6 +129,25 @@ export function notesMethodInfo(method: NotesMethod): NotesMethodInfo {
   // name beside a method that IS running.
   if (!row) throw new Error(`no chooser row for notes method ${method}`);
   return row;
+}
+
+/**
+ * The line under a method's name, given whatever the server has measured.
+ *
+ * `measuredPerHourUsd` is a rate computed from the token counts of finished
+ * meetings that ran on this method. With one, the row states it plainly.
+ * Without one, the row states the eval's prediction and appends `est.` — one
+ * word, because the row is a control a person reads in a glance and a
+ * sentence of hedging there is a sentence nobody reads.
+ */
+export function notesMethodDetail(method: NotesMethod, measuredPerHourUsd?: number): string {
+  const info = notesMethodInfo(method);
+  const measured =
+    measuredPerHourUsd !== undefined &&
+    Number.isFinite(measuredPerHourUsd) &&
+    measuredPerHourUsd > 0;
+  const rate = measured ? (measuredPerHourUsd as number) : info.estimatedPerHourUsd;
+  return `${info.completeness} · ${formatPerHour(rate)}${measured ? '' : ' est.'}`;
 }
 
 /** What the trace line and the fold's summary call this method. */

@@ -812,9 +812,14 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   // The doc's note-taker, asked for once at mount. Unanswered — an old
   // server, a share visitor, a failed fetch — the fold keeps the default,
   // which is what such a server composes with anyway.
-  void fetchNotesMethod(docId).then((method) => {
+  void fetchNotesMethod(docId).then((answer) => {
     if (disposed) return;
-    showMethod(notetakerMountAnswer(methodChoice, method ?? null));
+    // The measured per-hour figures land even when the method itself is not
+    // news: the row's price is a fact about the SERVER's meetings, not about
+    // this doc's choice, so a person who picked before the read landed still
+    // gets the measured number on the rows they are looking at.
+    if (answer && Object.keys(answer.perHour).length > 0) choose.methodPerHour = answer.perHour;
+    showMethod(notetakerMountAnswer(methodChoice, answer?.method ?? null));
   });
 
   /** The strand number a read is already queued for, or 0 — see below. */
@@ -850,7 +855,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     const upTo = strandedUpTo;
     reconcileQueued = upTo;
     const read = (): Promise<void> =>
-      fetchNotesMethod(docId).then((answer) => {
+      fetchNotesMethod(docId).then((read) => {
+        const answer = read?.method;
         if (reconcileQueued === upTo) reconcileQueued = 0;
         // Nothing learned — an old server, a share visitor, or the outage
         // that took the socket. The picks stay stranded and the next open

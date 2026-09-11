@@ -27,8 +27,10 @@
  */
 
 import {
+  NOTES_METHODS,
   type NotesMethod,
   OFFERED_NOTES_METHODS,
+  notesMethodDetail,
   notesMethodInfo,
   parseNotesMethod,
 } from '@claude-workspaces/core';
@@ -61,7 +63,21 @@ export interface NotetakerFoldOpts {
    * added would be the first day anybody found out the rows still render.
    */
   offered?: readonly NotesMethod[];
+  /**
+   * What an hour has actually cost, per method, as the server measured it
+   * over finished meetings.
+   *
+   * A method missing from this map has not been run and priced here, and its
+   * row falls back to the eval's prediction marked `est.` — which is the
+   * honest state for every method on a fresh install, and was the silent
+   * state for every method everywhere before this existed.
+   */
+  perHour?: NotesPerHour;
 }
+
+/** Measured dollars-per-hour by method, as the server hands it down. Partial
+ *  by nature: a method nobody has run has no figure. */
+export type NotesPerHour = Partial<Record<NotesMethod, number>>;
 
 /** The fold, ready to append to the chooser. */
 export function buildNotetakerFold(opts: NotetakerFoldOpts): HTMLElement {
@@ -112,8 +128,8 @@ export function buildNotetakerFold(opts: NotetakerFoldOpts): HTMLElement {
     detail.className = 'meeting-choice-detail';
     // The price is part of the choice, so it rides the row rather than a
     // footnote; "since" only ever hangs off the row that is already on.
-    detail.textContent =
-      current && opts.since ? `${info.detail} · since ${opts.since}` : info.detail;
+    const line = notesMethodDetail(id, opts.perHour?.[id]);
+    detail.textContent = current && opts.since ? `${line} · since ${opts.since}` : line;
     cardBody.append(name, detail);
     label.append(input, cardBody);
     // On the input's `change`, not the label's click — the same binding the
@@ -133,6 +149,9 @@ export interface NotetakerFoldState {
   chooseMethod: NotesMethod;
   methodOpen: boolean;
   methodSince: string;
+  /** What the server has measured, once the mount read has answered. Undefined
+   *  until then, and on a server too old to say. */
+  methodPerHour?: NotesPerHour;
 }
 
 /**
@@ -157,6 +176,7 @@ export function appendNotetakerFold(
       offered,
       method: state.chooseMethod,
       open: state.methodOpen,
+      ...(state.methodPerHour ? { perHour: state.methodPerHour } : {}),
       ...(state.methodSince ? { since: state.methodSince } : {}),
       onToggleOpen: () => {
         state.methodOpen = !state.methodOpen;
@@ -389,20 +409,58 @@ function methodUrl(docId: string): string {
   return `/workspaces/${currentWorkspaceId() ?? ''}/docs/${encodeURIComponent(docId)}/notes-method`;
 }
 
+/** What the doc's note-taker route answers, as this module reads it. */
+export interface NotesMethodAnswer {
+  /** The method the server holds, or undefined if it named none this client
+   *  knows. */
+  method: NotesMethod | undefined;
+  /** Measured dollars per hour by method. Empty from a server that does not
+   *  send it, which is the same as having measured nothing. */
+  perHour: NotesPerHour;
+}
+
 /**
- * The doc's note-taker as the server holds it, or `undefined` where it could
- * not be asked — an old server with no such route, or a share visitor. The
- * caller keeps the default it started with rather than showing a guess.
+ * Read the doc's note-taker, and what the server has measured a meeting-hour
+ * to cost on each method.
+ *
+ * `undefined` where the server could not be asked — an old server with no
+ * such route, or a share visitor. The caller keeps the default it started
+ * with rather than showing a guess.
+ *
+ * THE FIGURES RIDE THIS READ rather than a route of their own. The chooser
+ * already makes exactly one call at mount and this is it; a second round trip
+ * for a line of copy would be a second thing to fail while the sheet is
+ * opening.
  */
-export async function fetchNotesMethod(docId: string): Promise<NotesMethod | undefined> {
+export async function fetchNotesMethod(docId: string): Promise<NotesMethodAnswer | undefined> {
   try {
     const res = await fetch(methodUrl(docId));
     if (!res.ok) return undefined;
-    const body = (await res.json()) as { method?: unknown };
-    return parseNotesMethod(body.method);
+    const body = (await res.json()) as { method?: unknown; perHour?: unknown };
+    return { method: parseNotesMethod(body.method), perHour: readPerHour(body.perHour) };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The measured figures off the wire, keeping only what is a method this
+ * client knows and a positive finite number.
+ *
+ * Guarded rather than cast because the row this feeds is a price: a `null`, a
+ * string or a NaN reaching `toFixed` prints `$NaN/hr`, and a method id this
+ * build has never heard of would be a key nothing ever reads. Dropping either
+ * falls the row back to the marked estimate, which is a correct answer.
+ */
+export function readPerHour(raw: unknown): NotesPerHour {
+  const out: NotesPerHour = {};
+  if (typeof raw !== 'object' || raw === null) return out;
+  const record = raw as Record<string, unknown>;
+  for (const id of NOTES_METHODS) {
+    const value = record[id];
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) out[id] = value;
+  }
+  return out;
 }
 
 /** Write it, answering whether it landed. A refusal is the caller's cue to
