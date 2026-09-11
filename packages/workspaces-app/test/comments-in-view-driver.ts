@@ -17,7 +17,7 @@
  * The fixture's names are invented (Riverbend, Harborlight); nothing here
  * quotes a real meeting.
  */
-import { createThread, prose } from '@claude-workspaces/core';
+import { type User, createThread, prose } from '@claude-workspaces/core';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { balloonMarginVisible, cardPlacement } from '../src/card-placement.ts';
@@ -139,6 +139,8 @@ function fixtureMarkdown(paragraphs: number): string {
   return out.join('\n\n');
 }
 
+const USER: User = { id: 'u1', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+
 interface Mounted {
   scope: MountScope;
   editorEl: HTMLElement;
@@ -163,7 +165,7 @@ function mount(
   const scope = new MountScope();
   const chrome = mountReviewChrome({
     docId: 'd1',
-    user: { id: 'u1', name: 'Alice', kind: 'known', color: '#2e7dd7' },
+    user: USER,
     ydoc,
     surface: editor,
     whenSynced: (cb) => cb(),
@@ -187,8 +189,13 @@ function mount(
     const id = `t-${i}`;
     createThread(ydoc, {
       threadId: id,
-      anchor: { kind: 'text-range', startRel: sel.start, endRel: sel.end, snippet: sel.snippet },
-      createdBy: 'Alice',
+      anchor: {
+        kind: 'text-range',
+        startRel: sel.start,
+        endRel: sel.end,
+        snippet: { text: sel.snippet },
+      },
+      createdBy: USER,
       firstComment: { id: `c-${i}`, text: `Comment ${i}` },
     });
     threadIds.push(id);
