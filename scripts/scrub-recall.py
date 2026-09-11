@@ -52,6 +52,7 @@ import random
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import zlib
 from concurrent.futures import ThreadPoolExecutor
@@ -209,14 +210,31 @@ def sweep(cases: List[Case], runs: int, jobs: int, on_run: Callable[[Run], None]
     that through would print the very name this measurement exists to keep
     out of everything, ten times per case, into whatever captured the run.
     The verdict is the measurement; the prose is not.
+
+    `jobs` bounds API REQUESTS, not runs. A case past one piece runs its own
+    pool of `CHUNK_JOBS` inside each run, so bounding runs alone let six runs
+    of a big case put thirty-six requests in flight — enough to be throttled,
+    and a throttled run is `unavailable`, which every rate leaves out. So the
+    one limit sits on the request itself.
     """
     work = [c for c in cases for _ in range(runs)]
     out: List[Run] = []
-    with contextlib.redirect_stderr(io.StringIO()):
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            for run in pool.map(scan, work):
-                out.append(run)
-                on_run(run)
+    requests = threading.BoundedSemaphore(jobs)
+    real_scan = haiku._scan_piece
+
+    def bounded(piece: str) -> "int | haiku.Unavailable":
+        with requests:
+            return real_scan(piece)
+
+    haiku._scan_piece = bounded
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                for run in pool.map(scan, work):
+                    out.append(run)
+                    on_run(run)
+    finally:
+        haiku._scan_piece = real_scan
     return out
 
 
