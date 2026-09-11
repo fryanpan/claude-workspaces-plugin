@@ -19,9 +19,18 @@
  *  - A SAVE RE-READS rather than trusting what it sent. The server decides
  *    whether these words are now an override, and a restore has to come back
  *    with the default's own text to put in the box.
+ *
+ * Every prompt is markdown with `###` sections, so each box here is the
+ * app's markdown composer (`md-composer.ts`) — the editor a comment is
+ * written in — rather than a plain textarea. The textarea stays underneath
+ * as the value, which is why none of the three rules above changed: `.value`
+ * is still what Save sends and `.disabled` still disables. The read-only
+ * words and the default use the same editor, disabled, so all three read
+ * alike.
  */
 
 import { escapeHtml } from '@claude-workspaces/core';
+import { attachMarkdownComposer, refreshMarkdownComposer } from '../md-composer.ts';
 import type { PromptDetail, PromptsApi } from './prompts-api.ts';
 
 /**
@@ -60,29 +69,52 @@ function editedMark(detail: PromptDetail): string {
   return detail.isDefault ? '' : '<span class="prompt-edited">Edited</span>';
 }
 
+/**
+ * Said beside "Edited" when the words in force were saved before the shipped
+ * prompts became markdown: they are somebody's own words, kept as written,
+ * and they read unlike the default because they predate it. Gone once they
+ * are saved over.
+ */
+export const BEFORE_MARKDOWN_LABEL = 'Written before markdown';
+
+function beforeMarkdownMark(detail: PromptDetail): string {
+  return detail.writtenBeforeMarkdown && !detail.isDefault
+    ? `<span class="prompt-before-md">${BEFORE_MARKDOWN_LABEL}</span>`
+    : '';
+}
+
+/** A box for markdown. `disabled` makes it a read-only view of the words. */
+function markdownBox(id: string, label: string, opts: { disabled?: boolean } = {}): string {
+  return (
+    `<textarea class="prompt-box" id="${id}" rows="12" spellcheck="false"` +
+    ` aria-label="${escapeHtml(label)}"${opts.disabled ? ' disabled' : ''}></textarea>`
+  );
+}
+
 function editorMarkup(detail: PromptDetail): string {
   const head =
     `<div class="prompt-editor-head">` +
     `<h2>${escapeHtml(detail.name)}</h2>` +
     editedMark(detail) +
+    beforeMarkdownMark(detail) +
     `<span class="prompt-purpose">${escapeHtml(detail.purpose)}</span>` +
     '</div>';
   // A prompt this page does not edit shows its words and no box to type in.
   // The thread summary is the one: it is versioned, and an edit marks every
   // stored summary stale, so the next backfill re-pays for all of them.
   const body = detail.editable
-    ? `<textarea class="prompt-box" id="prompt-box" spellcheck="false" aria-label="${escapeHtml(detail.name)}"></textarea>` +
+    ? markdownBox('prompt-box', detail.name) +
       `<div class="prompt-actions">` +
       `<button type="button" class="prompt-btn prompt-btn-primary" id="prompt-save">${escapeHtml(SAVE_LABEL)}</button>` +
       `<button type="button" class="prompt-btn" id="prompt-restore">Restore default</button>` +
       '</div>'
-    : `<pre class="prompt-readonly" id="prompt-readonly"></pre>`;
+    : `<div class="prompt-readonly">${markdownBox('prompt-readonly', detail.name, { disabled: true })}</div>`;
   // A prompt nobody can edit has no override, so its default is the text
   // already on the screen. The disclosure would open onto the same words.
   const shipped = detail.editable
     ? `<details class="prompt-default-view">` +
       '<summary>Show the default</summary>' +
-      `<pre id="prompt-default"></pre>` +
+      markdownBox('prompt-default', `${detail.name}, default`, { disabled: true }) +
       '</details>'
     : '';
   return `<div class="prompt-editor">${head}${body}${shipped}</div>`;
@@ -96,26 +128,38 @@ export function mountPromptEditor(deps: PromptEditorDeps): PromptEditorHandle {
    *  reader's cursor where it is. */
   let painted: PromptDetail | null = null;
 
+  /** Put words in a markdown box and show them in its editor. A box already
+   *  holding these words is left alone, so a save that agrees with what was
+   *  typed leaves the caret where it is. */
+  function fill(id: string, words: string): void {
+    const box = host.querySelector(`#${id}`) as HTMLTextAreaElement | null;
+    if (!box || box.value === words) return;
+    box.value = words;
+    refreshMarkdownComposer(box);
+  }
+
   function paint(detail: PromptDetail): void {
     const first = painted === null || painted.editable !== detail.editable;
     if (first) host.innerHTML = editorMarkup(detail);
     painted = detail;
-    const mark = host.querySelector('.prompt-editor-head .prompt-edited');
-    if (detail.isDefault) mark?.remove();
-    else if (!mark) {
-      const h2 = host.querySelector('.prompt-editor-head h2');
-      h2?.insertAdjacentHTML('afterend', '<span class="prompt-edited">Edited</span>');
-    }
+    const head = host.querySelector('.prompt-editor-head');
+    head?.querySelector('.prompt-edited')?.remove();
+    head?.querySelector('.prompt-before-md')?.remove();
+    head
+      ?.querySelector('h2')
+      ?.insertAdjacentHTML('afterend', editedMark(detail) + beforeMarkdownMark(detail));
     const box = host.querySelector('#prompt-box') as HTMLTextAreaElement | null;
-    if (box) {
-      box.disabled = false;
-      box.value = detail.value;
+    if (box) box.disabled = false;
+    fill('prompt-box', detail.value);
+    fill('prompt-readonly', detail.value);
+    fill('prompt-default', detail.default);
+    if (first) {
+      // After the words are in, so each editor mounts already holding them.
+      for (const ta of host.querySelectorAll<HTMLTextAreaElement>('textarea.prompt-box')) {
+        attachMarkdownComposer(ta);
+      }
+      wire();
     }
-    const readOnly = host.querySelector('#prompt-readonly');
-    if (readOnly) readOnly.textContent = detail.value;
-    const shipped = host.querySelector('#prompt-default');
-    if (shipped) shipped.textContent = detail.default;
-    if (first) wire();
   }
 
   function disable(message: string): void {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SAVE_LABEL } from '../src/settings/prompt-editor.ts';
+import { BEFORE_MARKDOWN_LABEL, SAVE_LABEL } from '../src/settings/prompt-editor.ts';
 import type { PromptDetail, PromptRow, PromptsApi } from '../src/settings/prompts-api.ts';
 import { mountPromptsPage, parsePromptsRoute } from '../src/settings/prompts-page.ts';
 import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
@@ -196,7 +196,10 @@ describe('one prompt, open', () => {
     const disclosure = root.querySelector('details.prompt-default-view') as HTMLDetailsElement;
     expect(disclosure.open).toBe(false);
     expect(disclosure.querySelector('summary')?.textContent).toBe('Show the default');
-    expect(disclosure.querySelector('pre')?.textContent).toBe(
+    expect((disclosure.querySelector('#prompt-default') as HTMLTextAreaElement).value).toBe(
+      'The shipped notetaking instructions.',
+    );
+    expect(disclosure.querySelector('.ProseMirror')?.textContent).toBe(
       'The shipped notetaking instructions.',
     );
     // The Save button carries the promise; there is no caption under it.
@@ -258,10 +261,75 @@ describe('one prompt, open', () => {
     // summaries stale and the next backfill re-pays for all of them.
     expect(root.querySelector('#prompt-box')).toBeNull();
     expect(root.querySelector('#prompt-save')).toBeNull();
-    expect(root.querySelector('#prompt-readonly')?.textContent).toBe('The shipped summary prompt.');
+    expect(root.querySelector('.prompt-readonly .ProseMirror')?.textContent).toBe(
+      'The shipped summary prompt.',
+    );
+    // Shown in the markdown editor like the others, but not one to type in.
+    expect(
+      root.querySelector('.prompt-readonly .ProseMirror')?.getAttribute('contenteditable'),
+    ).toBe('false');
     // No disclosure either: with no override possible the default is the text
     // already on screen, so "Show the default" would open onto a copy of it.
     expect(root.querySelector('.prompt-default-view')).toBeNull();
+  });
+
+  it('edits in the markdown editor, so a `###` section reads as a heading', async () => {
+    const { api } = stubApi({
+      detail: async () => ({
+        ...NOTES,
+        value: '### Notes\n\n- Write one point in each note.',
+      }),
+    });
+    const { pageEnv } = env('/settings/prompts/meeting-notes', api);
+    await mountPromptsPage(root, pageEnv).render();
+    const box = root.querySelector('#prompt-box') as HTMLTextAreaElement;
+    // The textarea stays as the value Save sends; the words are on screen in
+    // the editor beside it.
+    expect(box.parentElement?.classList.contains('md-composer-live')).toBe(true);
+    const editor = box.parentElement?.querySelector('.ProseMirror');
+    expect(editor?.getAttribute('contenteditable')).toBe('true');
+    expect(editor?.querySelector('h3')?.textContent).toBe('Notes');
+    expect(editor?.querySelector('li')?.textContent).toBe('Write one point in each note.');
+    // Seeding the editor does not rewrite the words it was given.
+    expect(box.value).toBe('### Notes\n\n- Write one point in each note.');
+  });
+
+  it('says when the words in force were written before markdown, until they are saved over', async () => {
+    const details: Record<string, PromptDetail> = {
+      'meeting-notes': { ...NOTES, writtenBeforeMarkdown: true },
+    };
+    const { api } = stubApi({
+      detail: async (id) => details[id] ?? null,
+      save: async (id, value) => {
+        const d = details[id];
+        if (d) {
+          d.value = value ?? d.default;
+          d.isDefault = value === null;
+          d.writtenBeforeMarkdown = false;
+        }
+        return { ok: true };
+      },
+    });
+    const { pageEnv } = env('/settings/prompts/meeting-notes', api);
+    await mountPromptsPage(root, pageEnv).render();
+    const mark = () => root.querySelector('.prompt-editor-head .prompt-before-md');
+    expect(mark()?.textContent).toBe(BEFORE_MARKDOWN_LABEL);
+    const box = root.querySelector('#prompt-box') as HTMLTextAreaElement;
+    box.value = '### Notes\n\n- One point.';
+    (root.querySelector('#prompt-save') as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mark()).toBeNull();
+    // Still edited — the new words are an override too.
+    expect(root.querySelector('.prompt-editor-head .prompt-edited')).not.toBeNull();
+  });
+
+  it('never says "written before markdown" over the default', async () => {
+    const { api } = stubApi({
+      detail: async () => ({ ...NOTES, isDefault: true, writtenBeforeMarkdown: true }),
+    });
+    const { pageEnv } = env('/settings/prompts/meeting-notes', api);
+    await mountPromptsPage(root, pageEnv).render();
+    expect(root.querySelector('.prompt-before-md')).toBeNull();
   });
 
   it('disables rather than empties the box when the read fails', async () => {
@@ -320,10 +388,15 @@ describe('the page at both sizes', () => {
     // The rail and the section nav are the two things a phone cannot pay for.
     expect(styleOf(root.querySelector('.settings-rail') as HTMLElement).display).toBe('none');
     expect(styleOf(root.querySelector('.settings-subnav') as HTMLElement).display).toBe('none');
-    // The box grows into what is left rather than sitting at a fixed height.
-    const box = styleOf(root.querySelector('#prompt-box') as HTMLElement);
+    // The editor grows into what is left rather than sitting at a fixed
+    // height, and at 16px, below which iOS Safari zooms the page on focus.
+    const surface = root
+      .querySelector('#prompt-box')
+      ?.parentElement?.querySelector('.md-composer-surface') as HTMLElement;
+    const box = styleOf(surface);
     expect(box.flexGrow).toBe('1');
     expect(box.minHeight).toBe('220px');
+    expect(box.fontSize).toBe('16px');
     // The way back is a tap target on the phone, where the rail is gone.
     expect(styleOf(root.querySelector('#settings-back') as HTMLElement).display).toBe('flex');
     const save = styleOf(root.querySelector('#prompt-save') as HTMLElement);
