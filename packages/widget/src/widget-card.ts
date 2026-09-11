@@ -28,7 +28,9 @@ export const drafts = new WeakMap<object, string>();
 export function keepDraft(el: FeedbackWidgetEl): void {
   const c = el.shadow.querySelector('.composer');
   const v = c?.querySelector('textarea')?.value;
-  if (c && v) drafts.set(cardTarget.get(c) ?? el, v);
+  // Not while Post is held down for the reply: those words are already on
+  // their way, and handing them back would post them twice.
+  if (c && v && !c.querySelector(':disabled')) drafts.set(cardTarget.get(c) ?? el, v);
 }
 
 /**

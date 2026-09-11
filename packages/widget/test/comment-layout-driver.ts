@@ -113,6 +113,8 @@ function pageHtml(bundle: string): string {
 window.__posts = [];
 document.querySelector('${TAG}').postNewThread = async (_a, text) => {
   window.__posts.push(text);
+  // Held open while the test says so, as a slow server would.
+  if (window.__hold) await new Promise((r) => { window.__release = r; });
   return true;
 };
 </script>
@@ -336,6 +338,16 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     await tap(fab);
     await tap(el('low'));
     await look('reopenedX');
+    // Done while that draft is posting: once the post lands, the element
+    // opens empty rather than holding a copy to post a second time.
+    await cdp.evaluate('window.__hold = true');
+    await enter();
+    await tap(done);
+    await cdp.evaluate('window.__release()');
+    await settle();
+    await tap(fab);
+    await tap(el('low'));
+    await look('afterPending');
     await tap(done);
   }
   return { width, height, looks };

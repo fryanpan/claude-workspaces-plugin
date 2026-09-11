@@ -208,6 +208,14 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
       expect(look(1180, 'reopenedX').draft).toBe('Riverbend stop shelter');
     });
 
+    it('does not keep a draft that was already posting when the mode closed', () => {
+      const l = look(1180, 'afterPending');
+      expect(l.posts.at(-1), 'CONTROL: the held post landed').toBe('Riverbend stop shelter');
+      expect(l.mode, 'CONTROL: the element opened again').toBe(true);
+      expect(l.snippet).toBe('Parking');
+      expect(l.draft).toBe('');
+    });
+
     it('moves a draft onto the bottom panel when the iPad turns to portrait, and back', () => {
       const p = look(1180, 'portrait');
       expect(p.mode).toBe(true);
