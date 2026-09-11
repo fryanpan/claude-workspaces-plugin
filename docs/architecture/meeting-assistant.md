@@ -2091,8 +2091,17 @@ raise the offer too, because each leaves a transcript on disk and each leaves
 live notes with a gap in them — which is the case a tidy-up helps most. A
 start that never became a meeting raises nothing, because it named none. `POST
 /workspaces/:ws/docs/:docId/meetings/:meetingId/notes-cleanup` refuses a
-share visitor, refuses a meeting that is still recording, and 404s a meeting
-the doc never held.
+share visitor, refuses a doc that is recording — ANY meeting on it, not just
+the one addressed — and 404s a meeting the doc never held.
+
+**And it asks again after the compose**, because a recording can start while
+the model is thinking, and that one moment changes the document in two ways at
+once: a live note-taker is composing into the same section, and
+`releaseNotesAuthorship` has just dropped every mark on the doc, which is the
+state `claimable` reads as nobody's and the loosest the gate ever gets. So a
+person's line would be rewritten by a gate that was right when it was asked.
+The route's own check is there to save the price of a compose; `recordingNow`
+on `NotesCleanupDeps` is the one that holds, and its refusal is `recording`.
 
 **The offer belongs to the meeting that ended**, and a new recording takes it
 off the screen at once — even with the last one's request still on the wire.

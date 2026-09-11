@@ -332,10 +332,17 @@ export async function handleMeetingCalendarRoutes(
     const meetingId = decodeURIComponent(cleanupMatch[2] ?? '');
     if (!isValidDocId(addressed)) return j(400, { error: 'bad docId' });
     const docId = docStore.get(addressed)?.docId ?? addressed;
-    // A LIVE meeting is refused, for the reason a live rename is: the session
-    // on the socket is still composing against this section, and a second
-    // writer working from a transcript that is still growing would race it.
-    if (meetingStore.active(docId)?.meetingId === meetingId) {
+    // ANY live meeting on this doc is refused, not just this one, for the
+    // reason a live rename is: the session on the socket is composing against
+    // this very section, and a second writer working from a transcript that
+    // is still growing would race it. A DIFFERENT meeting recording is if
+    // anything worse — starting it released every authorship mark on the doc,
+    // which is the loosest `claimable` ever is.
+    //
+    // This check is here to save the price of a compose. The one that HOLDS
+    // is `recordingNow` below, because a recording can start while the model
+    // is thinking and only a late check sees that.
+    if (meetingStore.active(docId) !== undefined) {
       return j(409, { error: 'meeting is still recording — stop it first' });
     }
     if (!listMeetings(dataDir, docId).some((m) => m.meetingId === meetingId)) {
@@ -348,6 +355,7 @@ export async function handleMeetingCalendarRoutes(
         dataDir,
         headingIdOf: (doc, meeting) =>
           createNotesHeadingFileStore(dataDir).read({ docId: doc, meetingId: meeting }),
+        recordingNow: (doc) => meetingStore.active(doc) !== undefined,
       },
       { docId, meetingId },
     );

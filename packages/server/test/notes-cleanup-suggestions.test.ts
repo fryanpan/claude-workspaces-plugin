@@ -235,6 +235,86 @@ describe('a block that changes hands while the compose is in flight', () => {
 });
 
 /**
+ * A RECORDING THAT STARTS WHILE THE MODEL IS THINKING.
+ *
+ * It takes the document out from under the answer in two ways at once: a live
+ * note-taker is now composing into the same section, and starting a meeting
+ * releases every authorship mark on the doc — which is the state `claimable`
+ * reads as "nobody's", and the loosest the gate ever gets. So a person's line
+ * in that section would be rewritten by a gate that was right when it was
+ * asked and is wrong by the time it is used.
+ */
+describe('a meeting that starts while the pass is composing', () => {
+  it('writes nothing at all, and says which of the two it is', async () => {
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    const before = markdownNow();
+    let recording = false;
+    const deps = {
+      ...depsFor(
+        store,
+        {
+          name: 'starts-a-meeting',
+          compose: () => {
+            // What `releaseNotesAuthorship` does when the next recording
+            // starts: every mark on the doc goes, and unmarked then reads as
+            // nobody's rather than as a person's.
+            recording = true;
+            prose.releaseAuthorship(ydoc, 'meeting-notes');
+            return Promise.resolve([
+              {
+                op: 'replace_block' as const,
+                blockId: idOf(store, 'Kestrel Lane'),
+                markdown: '- Kestrel Lane keeps the winter crew until April',
+              },
+            ]);
+          },
+        },
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      recordingNow: () => recording,
+    };
+    const result = await runNotesCleanupPass(deps, { docId: DOC, meetingId: MEETING });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('recording');
+    expect(markdownNow()).toBe(before);
+    expect(suggestOps.listSuggestions(ydoc)).toHaveLength(0);
+  });
+
+  it('runs normally when nothing started — the control', async () => {
+    // The same composer, the same released marks, the same edit. Only the
+    // recording differs, which is what makes the refusal above the meeting
+    // and not the release.
+    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    const result = await runNotesCleanupPass(
+      {
+        ...depsFor(
+          store,
+          stubComposer([
+            {
+              op: 'replace_block',
+              blockId: idOf(store, 'Kestrel Lane'),
+              markdown: '- Kestrel Lane keeps the winter crew until April',
+            },
+          ]),
+          dataDir,
+          idOf(store, 'Meeting notes'),
+        ),
+        recordingNow: () => false,
+      },
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.suggested).toBe(1);
+    expect(markdownNow()).toContain('Kestrel Lane keeps the winter crew');
+  });
+});
+
+/**
  * AND A BLOCK ANOTHER AGENT STILL HOLDS, on a doc whose marks are gone.
  *
  * A release names ONE author, so a second agent's mark outlives the

@@ -146,6 +146,7 @@ export const CLEANUP_OUTLINE_BLOCKS = 400;
 /** Why a pass did nothing. Each is a settled state, never an error. */
 export type NotesCleanupRefusal =
   | 'no-composer'
+  | 'recording'
   | 'no-doc'
   | 'no-section'
   | 'no-transcript'
@@ -190,6 +191,22 @@ export interface NotesCleanupDeps {
   dataDir?: string;
   /** The block id of the heading this meeting wrote under. */
   headingIdOf: (docId: string, meetingId: string) => string | undefined;
+  /**
+   * Is ANY meeting recording this doc right now?
+   *
+   * Asked again after the compose, because a recording that starts while the
+   * model is thinking changes the answer underneath this pass in two ways at
+   * once: a live note-taker is composing into the same section, and
+   * `releaseNotesAuthorship` has just dropped every mark on the doc — which
+   * is the state `claimable` reads as "nobody's", and the loosest the gate
+   * ever gets. Writing a pre-compose answer into that document is how a
+   * person's line gets rewritten by a gate that was right when it was asked.
+   *
+   * The route refuses a recording doc before it pays for a compose; this is
+   * the check that actually holds, because only it runs late enough. Absent
+   * — a test driving the pass alone — reads as nothing recording.
+   */
+  recordingNow?: (docId: string) => boolean;
 }
 
 /** The meeting's transcript as the composer reads turns: the name a person
@@ -383,6 +400,12 @@ export async function runNotesCleanupPass(
     );
   }
 
+  // A meeting that STARTED while the model was thinking takes the document
+  // out from under this answer entirely — see `recordingNow`. Nothing is
+  // written; the notes are what the live note-taker is now composing into.
+  if (deps.recordingNow?.(docId) === true) {
+    return refusal('recording', 'notes cleanup: a meeting is recording this doc — stop it first');
+  }
   // THE WHOLE GATE IS READ AFTER THE COMPOSE, NOT BEFORE. A model call takes
   // seconds and the doc is live: somebody can leave a comment, type into a
   // bullet, or move one out of the section while it runs, and a person typing
