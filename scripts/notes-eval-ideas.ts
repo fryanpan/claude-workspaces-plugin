@@ -260,24 +260,25 @@ export async function judgeCarried(
 /* ===== The rate ===== */
 
 /**
- * The bar the row asked for: under five per cent. Today's note-taker loses
- * four ideas in ten, so this is where the ratchet is heading, not the gate.
- */
-export const TARGET_LOST_IDEA_RATE = 0.05;
-
-/**
  * The gate ratchets. `scripts/notes-eval.baseline.json` holds the highest
  * rate a gated run may reach; it was set to the measured rate on the day the
  * eval landed (Bryan, 2026-09-08: ship the prompt fixes, ratchet from there)
  * and `--ratchet` lowers it to a better run's rate. It never rises: a bar
  * that can be raised to fit the run is not a bar.
+ *
+ * And it has no floor (Bryan, 2026-09-10: ratchet from today). The five per
+ * cent this file used to clamp at was a destination nobody had measured a
+ * route to, printed under every green run as a promise. A bar that only ever
+ * falls to where a run actually reached says the same thing about direction
+ * without naming a number the corpus has never seen. The cost is the
+ * degenerate case: a run that loses nothing writes a zero bar, and the next
+ * run must lose nothing either. That is the ratchet's contract, held to.
  */
 export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'notes-eval.baseline.json');
 
 interface LostIdeaBaseline {
   maxLostIdeaRate: number;
   measured: string;
-  target: number;
 }
 
 export function readLostIdeaBar(path = BASELINE_PATH): number {
@@ -300,7 +301,7 @@ export function ratchetLostIdeaBar(
 ): number {
   const current = JSON.parse(readFileSync(path, 'utf8')) as LostIdeaBaseline;
   if (overall >= current.maxLostIdeaRate) return current.maxLostIdeaRate;
-  const next = Math.max(TARGET_LOST_IDEA_RATE, Math.ceil(overall * 1000) / 1000);
+  const next = Math.ceil(overall * 1000) / 1000;
   if (next >= current.maxLostIdeaRate) return current.maxLostIdeaRate;
   const written: LostIdeaBaseline = { ...current, maxLostIdeaRate: next, measured };
   writeFileSync(path, `${JSON.stringify(written, null, 2)}\n`);
@@ -411,12 +412,9 @@ export function reportIdeaRates(
     );
     return 1;
   }
-  if (bar > TARGET_LOST_IDEA_RATE) {
-    console.log(
-      `\nUnder the ${(bar * 100).toFixed(1)}% bar; the target is ` +
-        `${(TARGET_LOST_IDEA_RATE * 100).toFixed(0)}%. Pass --ratchet to lower the bar to this run.`,
-    );
-  }
+  console.log(
+    `\nUnder the ${(bar * 100).toFixed(1)}% bar. Pass --ratchet to lower the bar to this run.`,
+  );
   return 0;
 }
 

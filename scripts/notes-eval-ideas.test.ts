@@ -16,7 +16,6 @@ import { type NotesEvalFixture } from './notes-eval-fixtures.ts';
 import {
   MIN_GATED_IDEAS,
   type MeetingIdeaRate,
-  TARGET_LOST_IDEA_RATE,
   buildMeetingTruth,
   judgeCarried,
   ratchetLostIdeaBar,
@@ -34,27 +33,32 @@ const row = (meeting: string, ideas: number, lost: number): MeetingIdeaRate => (
 });
 
 /**
+ * The bar these runs gate on, injected rather than read. The shipped baseline
+ * only ever falls, so a run that took its number from the file would change
+ * verdict on the day somebody ratchets it.
+ */
+const INJECTED_BAR = 0.05;
+
+/**
  * Run the report with its console silenced, and give back the exit code.
- * The bar is the row's target, injected, so these runs read the same on the
- * day the ratchet reaches it as they do today.
  */
 function verdict(rows: MeetingIdeaRate[], gate: boolean): number {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {
-    return reportIdeaRates(rows, gate, true, TARGET_LOST_IDEA_RATE);
+    return reportIdeaRates(rows, gate, true, INJECTED_BAR);
   } finally {
     log.mockRestore();
   }
 }
 
 /** Every line the report printed, for the runs that are about what it says. */
-function printed(rows: MeetingIdeaRate[], quote: boolean): string {
+function printed(rows: MeetingIdeaRate[], quote: boolean, gate = false): string {
   const lines: string[] = [];
   const log = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
     lines.push(a.join(' '));
   });
   try {
-    reportIdeaRates(rows, false, quote);
+    reportIdeaRates(rows, gate, quote, INJECTED_BAR);
   } finally {
     log.mockRestore();
   }
@@ -75,6 +79,17 @@ describe('what the report is allowed to print', () => {
     expect(out).not.toContain(secret);
     expect(out).toContain('m-private-1');
     expect(out).toContain('1 idea(s) reached no note');
+  });
+
+  it('names the bar a passing run cleared, and no destination beyond it', () => {
+    // This line used to read "the target is 5%" under every green run — a
+    // number no measured run had ever reached, printed as a promise. The bar
+    // is a fact about this corpus; the target was not (Bryan, 2026-09-10:
+    // ratchet from today).
+    const out = printed([row('a', 200, 8)], true, true);
+    expect(out).toContain('Under the 5.0% bar.');
+    expect(out).toContain('--ratchet');
+    expect(out).not.toMatch(/target/i);
   });
 
   it('still prints the examples for the corpus that is in this repo', () => {
@@ -120,10 +135,9 @@ describe('the lost-idea rate', () => {
     expect(verdict([row('a', 10, 10)], false)).toBe(0);
   });
 
-  it('states the bar the row asked for, and gates on the ratcheted one', () => {
-    expect(TARGET_LOST_IDEA_RATE).toBe(0.05);
+  it('gates on the bar the shipped baseline holds', () => {
     const bar = readLostIdeaBar();
-    expect(bar).toBeGreaterThanOrEqual(TARGET_LOST_IDEA_RATE);
+    expect(bar).toBeGreaterThan(0);
     expect(bar).toBeLessThanOrEqual(0.41);
   });
 });
@@ -132,7 +146,7 @@ describe('the ratchet', () => {
   const baseline = (rate: number): string => {
     const dir = mkdtempSync(join(tmpdir(), 'notes-eval-bar-'));
     const path = join(dir, 'baseline.json');
-    writeFileSync(path, JSON.stringify({ maxLostIdeaRate: rate, measured: 'test', target: 0.05 }));
+    writeFileSync(path, JSON.stringify({ maxLostIdeaRate: rate, measured: 'test' }));
     return path;
   };
   const stored = (path: string): number =>
@@ -160,10 +174,19 @@ describe('the ratchet', () => {
     expect(stored(path)).toBe(0.3);
   });
 
-  it('stops at the target and goes no lower', () => {
+  // The floor this file used to hold was five per cent, so a run at one per
+  // cent left the bar four points above where it had just been. Bryan,
+  // 2026-09-10: ratchet from today. These two are the whole of that change.
+  it('goes below five per cent, which used to be the floor', () => {
     const path = baseline(0.1);
-    expect(ratchetLostIdeaBar(0.01, 'great', path)).toBe(TARGET_LOST_IDEA_RATE);
-    expect(stored(path)).toBe(TARGET_LOST_IDEA_RATE);
+    expect(ratchetLostIdeaBar(0.01, 'great', path)).toBe(0.01);
+    expect(stored(path)).toBe(0.01);
+  });
+
+  it('writes a zero bar for a run that lost nothing', () => {
+    const path = baseline(0.1);
+    expect(ratchetLostIdeaBar(0, 'perfect', path)).toBe(0);
+    expect(stored(path)).toBe(0);
   });
 
   it('gates on the injected bar', () => {
