@@ -403,11 +403,13 @@ function showComposer(el: FeedbackWidgetEl, anchor: Anchor, target: HTMLElement 
   }
   // Cancel is NOT Done. It throws the draft away and hands you back the mode,
   // so the next element is one tap away; where the mode rests in a composer,
-  // that is a fresh empty one. Leaving the mode is the banner's Done, and it
-  // never sits beside Post.
+  // that is a fresh empty one. Cancel on that resting card puts it away: it
+  // stands over the page's top-right corner, where nav and account links
+  // live, and a finger has no Esc to reach them with. Leaving the mode is the
+  // banner's Done, and it never sits beside Post.
   composer.querySelector('.cancel')?.addEventListener('click', () => {
     closeComposer(el, composer);
-    if (el.feedbackMode && !quick) openDefaultComposer(el);
+    if (el.feedbackMode && !quick && target) openDefaultComposer(el);
   });
   const submit = composer.querySelector('.submit') as HTMLButtonElement;
   // Say it before the first attempt when the widget already knows.

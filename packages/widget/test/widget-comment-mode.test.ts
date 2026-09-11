@@ -167,8 +167,12 @@ describe('comment mode', () => {
       ta.value = 'the sign is hard to read from the sidewalk';
       (composer(el)?.querySelector('.cancel') as HTMLButtonElement).click();
       expect(el.feedbackMode, 'Cancel must NOT leave comment mode').toBe(true);
-      // Still resting in a composer, and the discarded sentence is gone from
-      // it — a Cancel that carried the draft forward would be a no-op.
+      // The resting card goes away rather than reopening where it stood, over
+      // the page's top-right corner, which a finger must be able to reach.
+      expect(composer(el)).toBeNull();
+      // And the discarded sentence is gone: the next tap opens an empty field.
+      // A Cancel that carried the draft forward would be a no-op.
+      tapPage(el);
       expect(field(el)?.value).toBe('');
     });
 

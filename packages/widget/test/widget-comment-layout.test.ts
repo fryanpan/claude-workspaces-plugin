@@ -83,6 +83,20 @@ describe.skipIf(CHROME === null)('where comment mode puts things', () => {
   }, SUITE_MS);
 
   describe('at 1180, the composer is a card in the right margin', () => {
+    it('puts the resting card away on Cancel, so the corner it stood over can be tapped', () => {
+      // A finger has no Esc. Cancel used to open the same card again where it
+      // stood, so a link under it could not be reached at all.
+      const e = look(1180, 'entered');
+      expect(
+        overlap(box(e.card), box(e.el.acct)),
+        'CONTROL: the resting card stands over the link',
+      ).toBeGreaterThan(0);
+      const l = look(1180, 'restCancelled');
+      expect(l.mode, 'Cancel must not leave the mode').toBe(true);
+      expect(l.card).toBeNull();
+      expect(look(1180, 'onAcct').snippet).toBe('Account');
+    });
+
     it('stands level with an element that stops short of the margin, covering none of it', () => {
       const l = look(1180, 'onNarrow');
       const card = box(l.card);

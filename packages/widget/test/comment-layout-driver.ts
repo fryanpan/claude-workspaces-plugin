@@ -82,7 +82,8 @@ export interface Reading {
 
 /** Elements a comment goes on: one that stops short of the right margin, one
  *  that reaches into it, and one low enough that the phone's panel would sit
- *  on it. `#title` is the page heading the phone banner used to cover. */
+ *  on it. `#title` is the page heading the phone banner used to cover, and
+ *  `#acct` a link in the top-right corner, where the resting card stands. */
 function pageHtml(bundle: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -97,9 +98,11 @@ function pageHtml(bundle: string): string {
  #spacer{height:560px}
  #low{height:60px;background:#eef5ea}
  #tail{height:900px}
+ #acct{position:absolute;right:48px;top:110px}
 </style></head>
 <body>
 <header><h1 id="title">Harborlight open day</h1></header>
+<a id="acct" href="#away">Account</a>
 <main>
  <div id="narrow">Ferry times<br>Six sailings</div>
  <div id="wide">The full timetable, across the page</div>
@@ -151,7 +154,7 @@ const LOOK = `(() => {
     p.getAttribute('points').split(/[ ,]/).map((n) => Math.round(Number(n))));
   const ae = sr.activeElement;
   const el = {};
-  for (const id of ['title', 'narrow', 'wide', 'low']) el[id] = box(document.getElementById(id));
+  for (const id of ['title', 'narrow', 'wide', 'low', 'acct']) el[id] = box(document.getElementById(id));
   const outlined = ['narrow', 'wide', 'low'].find((id) =>
     /solid/.test(document.getElementById(id).style.outline)) ?? null;
   return {
@@ -263,6 +266,13 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   await tap(fab);
   await look('entered');
   if (width > 1100) {
+    // The resting card stands over the corner where the page keeps its
+    // account link. Cancel puts it away, and the link can be tapped.
+    await tap(`${SHADOW}.querySelector('.composer .cancel')`);
+    await look('restCancelled');
+    await tap(el('acct'));
+    await look('onAcct');
+    await tap(`${SHADOW}.querySelector('.composer .cancel')`);
     await hover(el('narrow'));
     await look('hovered');
     await tap(el('narrow'));
