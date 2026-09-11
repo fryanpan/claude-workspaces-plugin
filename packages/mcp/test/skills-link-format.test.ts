@@ -88,7 +88,7 @@ describe('the general skill owns the rule, and states both halves', () => {
     // has to be deliberate — today's whole round of fixes came from agents
     // growing this file's prose.
     expect(linkSection()).toContain(
-      'when you share links in a workspace, use relative urls and make them inline using appropriate link text instead of the raw url',
+      'in a workspace, links are relative and inline with link text, never a raw url',
     );
   });
 

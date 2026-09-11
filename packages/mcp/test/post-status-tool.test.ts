@@ -215,7 +215,7 @@ describe('post_status — where the work stands, as a note', () => {
     expect(notePosts().length).toBe(before + 1);
   });
 
-  it('is advertised to an agent as an Activity-tab verb with taskId optional', async () => {
+  it('is advertised to an agent as an activity-feed verb with taskId optional', async () => {
     const reply = (await rpc('tools/list', {})) as unknown as {
       result: {
         tools: Array<{
@@ -227,8 +227,11 @@ describe('post_status — where the work stands, as a note', () => {
     };
     const tool = reply.result.tools.find((t) => t.name === 'post_status');
     expect(tool, 'post_status is not in tools/list').toBeTruthy();
-    expect(tool?.description).toMatch(/Activity tab/);
-    expect(tool?.description).toMatch(/never as a comment/);
+    // The wording here is the owner's own, so this asserts the two facts it
+    // carries rather than a phrase: the note lands on an activity feed, and
+    // Home shows only the first sentence.
+    expect(tool?.description).toMatch(/activity feed/i);
+    expect(tool?.description).toMatch(/first sentence/i);
     expect(tool?.inputSchema.required).toEqual(['text']);
     // `workspaceId` is a property but NOT required: the note is addressed
     // under a board only when it names a row, and the no-taskId form goes to

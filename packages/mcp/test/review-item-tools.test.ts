@@ -600,7 +600,7 @@ describe('what the tool schemas tell an agent', () => {
     };
     const review = rows?.items?.properties?.review;
     expect(review, 'no `review` on a create_tasks row').toBeTruthy();
-    expect(review?.description?.toLowerCase()).toContain('the ticket title names the work');
+    expect(review?.description?.toLowerCase()).toContain('the task title names the work');
     // And where the ask goes when the work already exists — the half nothing
     // used to say, which is how an ask arrived severed from its work.
     expect(review?.description?.toLowerCase()).toContain('add_review_item');
@@ -704,7 +704,7 @@ describe('the shipped guidance describes the entity, not the old model', () => {
 
   it('add_review_item teaches the 0..n cardinality in its own description', () => {
     expect(byName('add_review_item').description).toContain(
-      'A ticket carries several at once, each answered on its own',
+      'A task carries several at once, each answered on its own',
     );
   });
 
@@ -713,7 +713,7 @@ describe('the shipped guidance describes the entity, not the old model', () => {
       description?: string;
     };
     expect(`${byName('answer_review_item').description} ${rid?.description ?? ''}`).toContain(
-      'Naming reviewItemId is what keeps several open questions on one ticket independently answerable',
+      'reviewItemId keeps several open questions on one task independently answerable',
     );
   });
 

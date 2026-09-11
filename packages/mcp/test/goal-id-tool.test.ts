@@ -69,7 +69,7 @@ describe('set_goal_list declares the generated-id contract', () => {
   it('says how to create, how to keep, and what happens to an id the board lacks', () => {
     const decl = declText('set_goal_list');
     expect(decl).toContain('Goal ids are generated and permanent');
-    expect(decl).toContain('no id to add a band');
+    expect(decl).toContain('no id adds a band');
     expect(decl).toContain('unknown-goal-id');
     expect(decl).toContain('created');
   });

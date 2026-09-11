@@ -51,7 +51,7 @@ describe('the general skill sends status to the Activity tab', () => {
     // "not comments" leaves the agent with no way to ask.
     expect(GENERAL).toContain('add_review_item(taskId, review)');
     expect(GENERAL).toContain('post_reply');
-    expect(flatten(GENERAL)).toMatch(/comments? (is|are) for/);
+    expect(flatten(GENERAL)).toMatch(/a comment is something a person has to read/);
   });
 
   it('the final-message rule points at the task, not at a comment threadUrl', () => {
