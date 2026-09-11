@@ -293,30 +293,39 @@ describe('a gap that crossed the reconnect', () => {
  * The block above drives `formatRawSegment` with the gaps handed to it ready
  * made, which proves the WORDS and nothing about who chose them. Choosing is
  * the part that was wrong: which of a meeting's outages belong to the leg
- * being appended, which recovery the block before the restart could not know
- * about, and whether the index gets the gap when the leg settled no turns at
- * all. Those three answers live in `flushRawSegments`, and all three could be
- * deleted with the whole server suite still green. These drive a real resume
- * and read both files back.
+ * being appended, which recovery the block before the restart could not have
+ * known about, and whether the index gets the gap when the leg settled no
+ * turns at all. Those three answers live in `flushRawSegments`, and all three
+ * could be deleted with the whole server suite, 519 files, still green. These
+ * drive a real resume and read both files back.
  *
- * The timestamps are chosen rather than clocked. `recordGap` reads `Date.now()`
- * with no way in, and every case here is about which SIDE of the restart a gap
- * fell on — so the gap lines go onto the append-only index directly, in the
- * shape `recordGap` writes, at times this test picked. `start` and `resume`
- * take the same clock, so the whole fixture is one arithmetic.
+ * THE TIMESTAMPS ARE THE FIXTURE, not an incidental: every case here is about
+ * which SIDE of the restart a gap fell on. `recordGap` reads `Date.now()` with
+ * no way in, so the gap lines go onto the append-only index directly, in the
+ * shape `recordGap` writes, at times this test picked; `start` and `resume`
+ * take the same clock. `stop()` is the one that cannot, and it stamps the
+ * real now — which would leave the first leg ending five minutes AFTER the
+ * resume that follows it, a meeting no reconnect could produce. The index is
+ * append-only and last-write-wins, so the correction is one more line.
  */
 describe('the outages a resumed leg has to work out for itself', () => {
-  /** Anchored in the past so a real `stop()` always lands after the fixture. */
-  const STARTED = Date.now() - 600_000;
-  const RESUMED = STARTED + 300_000;
+  // One arithmetic, entirely in the past, so that the real `stop()` closing
+  // the SECOND leg lands after every event the fixture places.
+  const T0 = Date.now();
+  const STARTED = T0 - 600_000;
+  const ENDED_ONE = T0 - 250_000;
+  const RESUMED = T0 - 200_000;
 
-  /** A gap line exactly as `recordGap` appends one, at a time we chose. */
-  function writeGapLine(dir: string, meetingId: string, row: Record<string, unknown>): void {
+  /** A line on the meeting index, in the shape the server appends them. */
+  function writeIndexLine(dir: string, meetingId: string, row: Record<string, unknown>): void {
     appendFileSync(meetingIndexPath(dir, 'd1'), `${JSON.stringify({ meetingId, ...row })}\n`);
   }
 
-  /** The leg before the socket dropped: one turn, so there is a file to resume onto. */
-  function legOne(dir: string) {
+  /**
+   * The leg before the socket dropped: one turn, so there is a transcript file
+   * to resume onto, and whatever outages it is meant to have carried.
+   */
+  function firstLeg(dir: string, outages: Array<Record<string, unknown>> = []) {
     const store = new MeetingStore(dir, { docInfo: () => ({ title: 'Weekly sync' }) });
     const meeting = store.start({
       docId: 'd1',
@@ -327,11 +336,21 @@ describe('the outages a resumed leg has to work out for itself', () => {
     });
     if (!meeting) throw new Error('the doc was already recording');
     meeting.recordTurn(0, 'Before the socket dropped.');
-    return { store, meeting, meetingId: meeting.meetingId };
+    const meetingId = meeting.meetingId;
+    for (const row of outages) writeIndexLine(dir, meetingId, row);
+    meeting.stop();
+    writeIndexLine(dir, meetingId, { endedAt: ENDED_ONE });
+    // The fixture's own premise, checked rather than trusted: the correction
+    // above only works because the index is read in order and last-write-wins,
+    // and every case below is meaningless if the first leg still ends after
+    // the resume that follows it.
+    const ended = listMeetings(dir, 'd1').find((m) => m.meetingId === meetingId)?.endedAt;
+    if (ended !== ENDED_ONE) throw new Error(`the first leg ended at ${ended}, not ${ENDED_ONE}`);
+    return { store, meetingId };
   }
 
-  /** Pick the meeting up again on the chosen clock. */
-  function legTwo(store: MeetingStore, meetingId: string) {
+  /** Pick the meeting up again, on the same clock. */
+  function secondLeg(store: MeetingStore, meetingId: string) {
     const again = store.resume({
       docId: 'd1',
       meetingId,
@@ -352,14 +371,13 @@ describe('the outages a resumed leg has to work out for itself', () => {
     // leg, which is WHY there are no turns. The index update used to sit past
     // the early return that the turn count alone decided.
     const dir = dataDir();
-    const { store, meeting, meetingId } = legOne(dir);
-    meeting.stop();
-    writeGapLine(dir, meetingId, {
+    const { store, meetingId } = firstLeg(dir);
+    writeIndexLine(dir, meetingId, {
       gapStream: 'mic',
       gapFrom: RESUMED + 1_000,
       gapReason: 'ended',
     });
-    legTwo(store, meetingId).stop();
+    secondLeg(store, meetingId).stop();
 
     const seg = readMeetingJson(dir, 'd1')?.segments.find((s) => s.meetingId === meetingId);
     expect(seg?.gaps?.map((g) => g.stream)).toEqual(['mic']);
@@ -368,14 +386,13 @@ describe('the outages a resumed leg has to work out for itself', () => {
 
   it('appends a continuation block for a leg whose only news is the outage', () => {
     const dir = dataDir();
-    const { store, meeting, meetingId } = legOne(dir);
-    meeting.stop();
-    writeGapLine(dir, meetingId, {
+    const { store, meetingId } = firstLeg(dir);
+    writeIndexLine(dir, meetingId, {
       gapStream: 'mic',
       gapFrom: RESUMED + 1_000,
       gapReason: 'ended',
     });
-    legTwo(store, meetingId).stop();
+    secondLeg(store, meetingId).stop();
 
     expect(transcript(dir)).toContain('the microphone stopped here and did not come back');
   });
@@ -384,15 +401,11 @@ describe('the outages a resumed leg has to work out for itself', () => {
     // That block reported the loss as still open, because it was, and an
     // append-only file cannot go back and add the ending.
     const dir = dataDir();
-    const { store, meeting, meetingId } = legOne(dir);
-    writeGapLine(dir, meetingId, {
-      gapStream: 'system',
-      gapFrom: RESUMED - 120_000,
-      gapReason: 'ended',
-    });
-    meeting.stop();
-    const again = legTwo(store, meetingId);
-    writeGapLine(dir, meetingId, { gapStream: 'system', gapTo: RESUMED + 30_000 });
+    const { store, meetingId } = firstLeg(dir, [
+      { gapStream: 'system', gapFrom: STARTED + 10_000, gapReason: 'ended' },
+    ]);
+    const again = secondLeg(store, meetingId);
+    writeIndexLine(dir, meetingId, { gapStream: 'system', gapTo: RESUMED + 30_000 });
     again.recordTurn(1, 'Are we back?');
     again.stop();
 
@@ -401,24 +414,47 @@ describe('the outages a resumed leg has to work out for itself', () => {
     );
   });
 
-  it('does not reprint an outage the block before the restart already closed', () => {
-    // Printed twice, one outage reads as two — and the second one is a loss
-    // the meeting never had.
+  it('reports an outage wholly inside the resumed leg as its own loss, once', () => {
+    // Both halves of this one happened after the reconnect, so the block above
+    // knows nothing about it. Counted as carried it would ALSO be printed as
+    // the ending of a loss that block reports as still open — a sentence about
+    // a claim nobody made.
     const dir = dataDir();
-    const { store, meeting, meetingId } = legOne(dir);
-    writeGapLine(dir, meetingId, {
+    const { store, meetingId } = firstLeg(dir);
+    const again = secondLeg(store, meetingId);
+    writeIndexLine(dir, meetingId, {
       gapStream: 'system',
-      gapFrom: RESUMED - 120_000,
+      gapFrom: RESUMED + 10_000,
       gapReason: 'ended',
     });
-    writeGapLine(dir, meetingId, { gapStream: 'system', gapTo: RESUMED - 60_000 });
-    meeting.stop();
-    const again = legTwo(store, meetingId);
+    writeIndexLine(dir, meetingId, { gapStream: 'system', gapTo: RESUMED + 40_000 });
+    again.recordTurn(1, 'Back in the room.');
+    again.stop();
+
+    const text = transcript(dir);
+    expect(text).toContain('nothing from it was recorded');
+    expect(text).not.toContain('the loss it ends is the one the block above reports as still open');
+  });
+
+  it('does not reprint an outage the block before the restart already closed', () => {
+    // Printed twice, one outage reads as two — and the second is a loss the
+    // meeting never had.
+    const dir = dataDir();
+    const { store, meetingId } = firstLeg(dir, [
+      { gapStream: 'system', gapFrom: STARTED + 10_000, gapReason: 'ended' },
+      { gapStream: 'system', gapTo: STARTED + 70_000 },
+    ]);
+    const again = secondLeg(store, meetingId);
     again.recordTurn(1, 'Carrying on.');
     again.stop();
 
     const text = transcript(dir);
     expect(text.split('nothing from it was recorded').length - 1).toBe(1);
+    // And it is not restated as a RECOVERY either. An outage that both opened
+    // and closed before the restart is wholly the business of the block above;
+    // carried into the continuation it becomes a second ending for a loss that
+    // already had one.
+    expect(text).not.toContain('came back after');
   });
 });
 
