@@ -17,6 +17,7 @@ import {
   reviewWithdrawn,
 } from '@claude-workspaces/core';
 import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-judge-prompt';
+import { endBoardPromptBeforeMarkdown } from '../prompt-markdown-migration.ts';
 import { isArchived } from '../task-fields.ts';
 import { legacyDecisionItem } from './derive.ts';
 import type { ReviewItemPersistence } from './persistence.ts';
@@ -245,6 +246,7 @@ export class ReviewItemQueries {
     const next = criteria?.trim();
     if (next === undefined || next === '') workspace.reviewItemCriteria = undefined;
     else workspace.reviewItemCriteria = next;
+    endBoardPromptBeforeMarkdown(workspace, 'reviewItemCriteria');
     this.p.save(workspaceId);
     const read = this.reviewItemCriteria(workspaceId);
     return {
