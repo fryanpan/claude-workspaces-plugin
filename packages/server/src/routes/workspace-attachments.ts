@@ -125,9 +125,9 @@ export async function handleWorkspaceAttachments(
     // a fact about how the fleet is behaving, not workspace content.
     //
     // `accuracy` ships WITH the number and is not decoration. The count comes
-    // from a regex over closing messages whose measured precision is 83% and
-    // whose recall on genuinely-unfiled asks is 15% (docs/architecture/
-    // unfiled-ask.md) — a floor, not a census. A surface that showed the
+    // from a regex over closing messages with the precision and recall in
+    // `ASK_ACCURACY` above (docs/architecture/unfiled-ask.md) — a floor, not
+    // a census. A surface that showed the
     // count alone would be read as a census within a week.
     const chat = visitor
       ? null
