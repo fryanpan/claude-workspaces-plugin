@@ -42,7 +42,8 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from typing import NamedTuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scrub_git  # noqa: E402
@@ -54,13 +55,48 @@ MODEL = "claude-haiku-4-5-20251001"
 API_URL = os.environ.get("SCRUB_HAIKU_API_URL") or "https://api.anthropic.com/v1/messages"
 API_TIMEOUT_SEC = 30
 # Approx chars-to-tokens (Anthropic English ~3.5 chars/token; be conservative at 4).
-# 80K tokens of diff caps out a Haiku call comfortably.
+#
+# This used to be "what fits in one call", and since the push is now read in
+# pieces that is no longer what it is. It is a COST CEILING, and a known hole:
+# a push past it has its tail truncated, and truncated content is not scanned
+# by anything. The measured case is close enough to matter — a four-commit
+# branch in scrub-recall-cases.json runs 325KB and loses its last 5KB — so
+# whether this rises, or becomes a refusal to scan rather than a silent trim,
+# is a decision for whoever owns the spend. It is stated on stderr when it
+# fires; nothing turns it into a verdict.
 MAX_DIFF_CHARS = 80_000 * 4
+# The reply now enumerates the names it found before it gives a verdict, and
+# the verdict is the last line. 1024 was enough for a bare verdict and is not
+# enough for a sweep over a large diff: a reply cut off before its last line
+# carries no verdict at all, which the caller reads as "could not run" and the
+# shipped policy turns into a blocked push. The list is capped at 25 entries in
+# the prompt; this is that cap with several times its worth of room.
+MAX_OUTPUT_TOKENS = 4096
+# How much diff goes into ONE call.
+#
+# Recall falls off with the size of the thing being read, and it falls off
+# hard. Measured by scripts/scrub-recall.py over ten runs a case: one planted
+# name blocked 10/10 inside an 11KB push and 0/10 inside the same push grown
+# to 109KB, with the prompt identical and the name identical. The real commit
+# that put a person's name on this repository's public main is a 200KB push
+# carrying the name twice, and it read CLEAN ten times out of ten. Read in
+# pieces, with the prompt below, it blocked 10/10 — and a sample of those
+# runs was checked for WHAT it blocked on: the name, every time.
+#
+# So the push is read in pieces of this size and the verdicts are combined.
+# A piece costs one extra copy of the system prompt (~2K tokens) and nothing
+# else: the diff itself is read exactly once either way, and the pieces go out
+# in parallel, so the wall clock is roughly one call's.
+CHUNK_CHARS = 30_000
+CHUNK_JOBS = 6
 
 SYSTEM_PROMPT = """You are a sensitive-content scanner. You will be shown a git diff that's about to be pushed to a public GitHub repository. Your job is to spot anything that would leak private information once that push lands.
 
+**A big diff does not lower the bar.** One name in ten thousand lines is the case this scan exists for — a push that carries a single person's name among a thousand ordinary ones is the likeliest shape a real leak takes, not an unlikely one. Read a long diff to the end. Do not sample it, do not decide from the commit messages what the rest probably contains, and do not let the volume of obviously-fine code persuade you that nothing in it is a name. The work below is the same work whether the diff is thirty lines or thirty thousand.
+
 **What counts as a leak (flag it):**
 - Real personal names, except any listed under "This repository's maintainers" below
+- **A personal name used as sample data is still a personal name.** A test fixture, a mock payload, a doc example, a sample transcript, a seeded database row, a screenshot caption: a plausible first-and-last name in any of them is the single commonest way a real person reaches a public repository, because whoever wrote it was thinking about the code and not about the name. Judge the name, not the file it sits in. The conventional placeholders under "does NOT count" are the exception, and they are a short closed list, not a category you can reason your way into
 - Email addresses, phone numbers, postal addresses, SSNs, financial account numbers
 - Specific dollar amounts in personal context (taxes, donations, balances, salaries)
 - Tax-document names tied to a specific person (Form 8606, Schedule D, kiddie tax, IRA backdoor, capital loss carryover, etc.)
@@ -80,7 +116,8 @@ SYSTEM_PROMPT = """You are a sensitive-content scanner. You will be shown a git 
   verified is on the remote and redacted before you saw the diff
 - Public technical references (Anthropic, Claude, GitHub URLs to known public repos, well-known libraries)
 - Generic placeholders: <user>, <your-tailnet>, your-username/example, my-project, the user
-- Function/variable/class names, programming jargon, code comments about the code itself
+- The conventional placeholder people, used as sample data: Alice, Bob, Carol, Dave, Eve, Mallory, Trent, John Doe, Jane Doe, Jane Roe, Foo, Bar, Baz, Qux — and long-dead figures used as stock examples, such as Ada Lovelace, Grace Hopper, Alan Turing. Every test suite in the world names these, and a scanner that flags them is a scanner the next person turns off. This is the whole list: a name that is not on it is not a placeholder merely because it appears in a test
+- Function/variable/class names, programming jargon, code comments about the code itself — **but a quoted string is not an identifier.** Text between quotes is content: it is what the program shows somebody, or what a test says the program shows. A name inside a string literal is a name, and a file full of `expect(...).toContain("...")` is a file full of content. "This is test code" is a statement about the file, not about the strings in it, and it is not a reason to stop reading them
 - Standard package descriptions ("a Python module that does X")
 - **Anything on a line that is not being ADDED.** A line being removed by this
   push is not a leak: a commit that deletes one is the fix, not the leak, and
@@ -96,12 +133,64 @@ SYSTEM_PROMPT = """You are a sensitive-content scanner. You will be shown a git 
   a conflict was resolved by keeping one side, which renders the discarded
   side as removals. That content is not going anywhere new.
 
-**Output format — respond in EXACTLY this shape:**
+**How to answer — the name sweep comes first, always.**
 
-If clean:
+Before you decide anything, sweep the ADDED lines for every run of words shaped
+like a person's name — a capitalised given name, with or without a surname —
+wherever it sits: prose, a string literal, a comment, a JSON value, a commit
+message, a test assertion. List what you find. Then judge each one, and only
+then give a verdict. Deciding first and looking afterwards is how a name in
+line 4,000 of a large diff gets missed, and that is the failure this format
+exists to prevent.
+
+Three ways this sweep has actually been failed, all of them by stopping early:
+
+- **Reading the code but not the strings in it.** A diff of test files gets
+  summarised as "test code, mock implementations, variable names and technical
+  comments" and waved through, while a person's name sits in the quoted text of
+  a dozen assertions. Read the quoted text. It is the likeliest place in a
+  source file for a name to be.
+- **Stopping at the first name.** Finding one and resolving it — a maintainer,
+  say — does not end the sweep. Keep going to the last added line.
+- **Dismissing a short surname.** A two- or three-letter family name is one of
+  the commonest surname forms there is. `Given Xx` is a full name, not a typo,
+  not an abbreviation and not a variable; treat it exactly as you would a long
+  one.
+
+Cross a name off for one of exactly three reasons: it is on the maintainer
+list below, it is on the closed placeholder list above, or it is not a person
+at all (a library, a product, a city, a weekday, an identifier that happens to
+be capitalised). Anything else stays.
+
+Check the maintainer list FIRST, and let it be final. A name on it is crossed
+off wherever it appears and whatever it appears in — a comment, a quoted
+sentence, an example of copy the product should not write, a line that is
+itself about naming people. Marking it `maintainer` in the sweep and then
+listing it under LEAKS anyway blocks a push over the one name that cannot be
+a leak here.
+
+**"Is this a real person?" is not the question, and you cannot answer it.**
+You have no way to know whether the name in a test fixture belongs to someone
+or was invented on the spot, and reasoning about which it is more likely to be
+is how every miss happens: the invented-sounding ones get waved through, and
+about half of them turn out to be somebody. The question you can answer is
+whether an unfamiliar personal name is about to be published, and for anything
+not on those two lists the answer is yes. Keep it. A kept name costs one
+person one look; a missed one is on a public branch forever.
+
+List at most 25 distinct names. If you reach 25, stop listing and go straight
+to the verdict — the verdict is what gets read, and it must not be crowded out.
+
+**Respond in EXACTLY this shape:**
+
+NAMES:
+- <name> — <where> — <keep | maintainer | placeholder | not-a-person>
+(or `NAMES: none` when the added lines carry no name-shaped words at all)
+
+If nothing survived the sweep and nothing else below was found:
 VERDICT: CLEAN
 
-If leaks found:
+If anything survived, or any other leak was found:
 VERDICT: LEAKS_FOUND
 LEAKS:
 - <file>:<line> — <one-line description of leak>
@@ -350,7 +439,151 @@ def read_keychain(service: str) -> str | None:
     return proc.stdout.strip() or None
 
 
+# A combined diff (`--cc`, which the push patch uses for merges) opens a file
+# with `diff --cc`, not `diff --git`.
+_FILE_STARTS = ("diff --git ", "diff --cc ", "diff --combined ")
+# What ends a file's header block: its first hunk, or — for a binary change,
+# which has no hunk — the line that stands in for one. `push_patch` does not
+# pass `--binary` today, so only the one-line `Binary files` form arrives; a
+# `GIT binary patch` payload would otherwise be header all the way down, and
+# a header block is never split.
+_HEADER_ENDS = ("@@", "GIT binary patch", "Binary files ")
+
+# Characters two neighbouring slices of one long line share, so a name that
+# straddles a cut is read whole by one of them.
+_SLICE_OVERLAP = 200
+
+
+def _slice_line(line: str, width: int, columns: int = 1) -> List[str]:
+    """One diff line as lines of at most `width` characters.
+
+    A single added line can be far longer than a piece — minified JSON, a data
+    URL, a generated bundle — and without this it became one piece of whatever
+    size it was, which is the large-input blind spot the pieces exist to
+    close. Each slice keeps the line's diff sign, so the scanner still reads it
+    as added text, and neighbours overlap by `_SLICE_OVERLAP`. A combined
+    (`--cc`) diff signs a line with one column per parent — ` +` is added
+    against the second parent — so the sign is `columns` characters wide;
+    keeping only the first would hand every later slice to the scanner as
+    context.
+    """
+    if len(line) <= width:
+        return [line]
+    head = line[:columns]
+    if len(head) == columns and all(c in "+- " for c in head):
+        sign, body = head, line[columns:]
+    else:
+        sign, body = "", line
+    span = width - len(sign)
+    step = span - _SLICE_OVERLAP
+    out = []
+    start = 0
+    while True:
+        out.append(sign + body[start : start + span])
+        if start + span >= len(body):
+            return out
+        start += step
+
+
+def split_patch(patch: str, limit: int | None = None) -> List[str]:
+    """The patch in line-aligned pieces of at most `limit` characters.
+
+    Each piece after the first is seeded with the `diff --git` header block its
+    first line sits under, and with a hunk marker when it begins inside one.
+    Without that, a piece beginning mid-file shows added lines belonging to no
+    named path, and the scanner cannot say WHERE a finding is — which is the
+    half of a finding that decides the remedy.
+
+    **A hunk is split too, and that is the point.** The first version broke
+    only at `diff --git` and `@@` boundaries, which reads as the careful
+    choice and does not hold the limit: a commit that ADDS a file writes it
+    as one hunk, so a new 34KB test file was one indivisible piece whatever
+    the limit said, and the real leaked commit split into pieces of up to 38KB
+    against a 30KB target. Line numbers in a finding from a continuation piece
+    are numbered from that piece rather than the file; the path is right, and
+    the path is what the reader needs.
+    """
+    limit = limit or CHUNK_CHARS
+    if len(patch) <= limit:
+        return [patch]
+    width = limit // 2
+    # (line, is_header). A line is a file header only between a file's
+    # `diff` line and its first `@@`: an added line whose text starts `++ `
+    # reads `+++ ` too, and taking it for a header let a 100KB line through
+    # unsliced and unbreakable.
+    lines: List[tuple] = []
+    in_header = False
+    columns = 1
+    for line in patch.split("\n"):
+        if line.startswith(_FILE_STARTS):
+            in_header = True
+        elif line.startswith(_HEADER_ENDS):
+            in_header = False
+        if line.startswith("@@"):
+            # `@@` is one parent, `@@@` two: the sign is one column per parent.
+            columns = max(1, len(line) - len(line.lstrip("@")) - 1)
+        if in_header or line.startswith("@@"):
+            lines.append((line, in_header))
+        else:
+            lines.extend((part, False) for part in _slice_line(line, width, columns))
+    pieces: List[str] = []
+    current: List[str] = []
+    size = 0
+    header: List[str] = []
+    hunk = ""
+    for line, is_header in lines:
+        opens_file = is_header and line.startswith(_FILE_STARTS)
+        if opens_file:
+            header = [line]
+            hunk = ""
+        elif is_header:
+            header.append(line)
+        elif line.startswith("@@"):
+            hunk = line
+        if size + len(line) > limit and current:
+            # Never break between a file's header lines and its first hunk:
+            # a piece that opened there would name a path and show nothing.
+            if not (is_header and not opens_file):
+                pieces.append("\n".join(current))
+                current = [] if opens_file else list(header)
+                if hunk and not opens_file and not line.startswith("@@"):
+                    current.append(hunk)
+                size = sum(len(x) + 1 for x in current)
+        current.append(line)
+        size += len(line) + 1
+    if current:
+        pieces.append("\n".join(current))
+    return pieces
+
+
 def call_haiku(diff_content: str) -> "int | Unavailable":
+    """Every piece of the push, one verdict.
+
+    Any piece finding a leak blocks: a leak is a property of a line, not of
+    the push as a whole, so the pieces are OR-ed and not voted on. Otherwise,
+    any piece that could not run makes the whole scan unavailable, for the
+    reason the policy block below records — a push half of which nobody read
+    is a push nobody read.
+
+    The order is the point. A found leak is checked FIRST, because
+    "unavailable" is handed to a policy that may be set to warn, and a leak one
+    piece actually found must not be softened into a banner by a different
+    piece that timed out.
+    """
+    pieces = split_patch(diff_content)
+    if len(pieces) == 1:
+        return _scan_piece(pieces[0])
+    with ThreadPoolExecutor(max_workers=CHUNK_JOBS) as pool:
+        results = list(pool.map(_scan_piece, pieces))
+    if any(r == 1 for r in results):
+        return 1
+    for r in results:
+        if isinstance(r, Unavailable):
+            return r
+    return 0
+
+
+def _scan_piece(diff_content: str) -> "int | Unavailable":
     """0 clean, 1 leaks found, or an `Unavailable` saying which way it failed."""
     # Keychain first, then the env vars. SCRUB_HAIKU_API_KEY is preferred over
     # ANTHROPIC_API_KEY so this layer can use a key separate from
@@ -370,7 +603,7 @@ def call_haiku(diff_content: str) -> "int | Unavailable":
 
     body = json.dumps({
         "model": MODEL,
-        "max_tokens": 1024,
+        "max_tokens": MAX_OUTPUT_TOKENS,
         "system": system_prompt(scrub_git.maintainer_names()),
         "messages": [{
             "role": "user",

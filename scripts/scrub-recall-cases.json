@@ -1,0 +1,271 @@
+{
+  "_README": [
+    "The labelled corpus scripts/scrub-recall.py measures the name-aware leak",
+    "scanner against. It is a DEFINITION, not a corpus: every byte of real",
+    "content is fetched from git by sha at run time, so nothing sensitive is",
+    "stored here and the file stays readable.",
+    "",
+    "Two labels, and both are load-bearing. A `positive` must block: the push",
+    "carries a personal name that is not a maintainer's. A `negative` must NOT",
+    "block: it is ordinary work, and a scanner that blocks it is a scanner",
+    "people switch off. Recall alone is not a score \u2014 a gate that blocks",
+    "everything scores 100% on the positives.",
+    "",
+    "Case kinds:",
+    "  commit    the patch of one or more real commits, exactly as push_patch",
+    "            would build it for a push publishing them.",
+    "  planted   the same, with a fragment appended that plants a FABRICATED",
+    "            name in a realistic position. The fragment names below are",
+    "            invented; none of them is a person. Planting into a real host",
+    "            commit is what makes the case a needle in a real haystack",
+    "            rather than a three-line toy.",
+    "",
+    "A fragment's `{name}` slots are filled at run time with a full name",
+    "scrub-recall.py builds from parts, one per fragment. No name is written",
+    "down here: a name-shaped string is exactly what the scanner this file",
+    "measures blocks, and any encoding of one is still one.",
+    "",
+    "The one real positive is named by sha alone. Its content is read from git",
+    "history at run time and never written down anywhere in this repository \u2014",
+    "that is the whole reason the gate this file measures exists."
+  ],
+  "fragments": {
+    "test-fixture": {
+      "path": "packages/workspaces-app/test/roster-strip.test.ts",
+      "lines": [
+        "  it(\"names the speaker whose audio dropped\", () => {",
+        "    const h = mountStrip({ speakers: [\"{name}\"] });",
+        "    h.dropStream(\"{name}\");",
+        "    expect(h.alarm()).toContain(\"{name}'s audio stopped\");",
+        "  });"
+      ],
+      "why": "the shape the real leak took: a person's name frozen into assertion strings"
+    },
+    "doc-prose": {
+      "path": "docs/architecture/roster.md",
+      "lines": [
+        "The strip names who dropped rather than saying a stream was lost.",
+        "{name} asked for this after a call where three people were",
+        "muted for ten minutes and nobody could tell which of them it was."
+      ],
+      "why": "an unfamiliar person quoted in prose, in the register the repo's docs use"
+    },
+    "mock-payload": {
+      "path": "packages/server/test/fixtures/transcript-sample.json",
+      "lines": [
+        "{",
+        "  \"segments\": [",
+        "    { \"speaker\": \"{name}\", \"text\": \"can everyone hear me now\" },",
+        "    { \"speaker\": \"{name}\", \"text\": \"ok, starting the recording\" }",
+        "  ]",
+        "}"
+      ],
+      "why": "sample data, where a real name is easiest to mistake for an invented one"
+    },
+    "code-comment": {
+      "path": "packages/server/src/meeting/stream-health.ts",
+      "lines": [
+        "// {name} hit this on the Thursday call: the alarm fired while",
+        "// his mic was still live, so the copy has to distinguish the two.",
+        "const ALARM_GRACE_MS = 4_000;"
+      ],
+      "why": "an incident attributed to a named person in a code comment"
+    },
+    "attribution": {
+      "path": "CHANGELOG.md",
+      "lines": [
+        "- Roster strip now names the dropped speaker.",
+        "  Reported by {name}, who sat through the whole silent call."
+      ],
+      "why": "a thanks line \u2014 the register where a real name looks most harmless"
+    },
+    "task-quote": {
+      "path": "docs/process/learnings.md",
+      "lines": [
+        "{name}, 2026-08-19: \"I could not tell whether my own audio",
+        "was the one that dropped, and I waited four minutes before asking.\"",
+        "That is the sentence the alarm copy now answers."
+      ],
+      "why": "a dated quoted decision \u2014 identical in shape to the maintainer quotes the prompt must keep exempting"
+    },
+    "placeholders": {
+      "path": "packages/workspaces-app/test/roster-strip.test.ts",
+      "lines": [
+        "  it(\"names the speaker whose audio dropped\", () => {",
+        "    const h = mountStrip({ speakers: [\"Alice\", \"Bob\"] });",
+        "    h.dropStream(\"Alice\");",
+        "    expect(h.alarm()).toContain(\"Alice's audio stopped\");",
+        "    expect(labelFor(\"ada\")).toBe(\"Ada Lovelace\");",
+        "  });"
+      ],
+      "why": "conventional placeholders and a historical figure used as sample data. No address: an address is a leak by a different rule, and a case that carries one cannot say whether the NAME was what blocked it."
+    }
+  },
+  "positives": [
+    {
+      "id": "known-alone",
+      "kind": "commit",
+      "shas": ["75fe345b926dfe6cfa6432b1fbe85ba8fa841eb3"],
+      "why": "the real commit that put a person's name on this public repo's main. Read from git by sha; the name is nowhere in this file."
+    },
+    {
+      "id": "known-with-neighbours",
+      "kind": "commit",
+      "shas": [
+        "5f4badace9622360521941feb9cdfa192c4ff03a",
+        "7b5462002e37bf6db01dffebafef0342b8f5f1d3",
+        "14892e5a1d591e2bda159a088ec2b3df54227290",
+        "75fe345b926dfe6cfa6432b1fbe85ba8fa841eb3"
+      ],
+      "why": "the same content pushed as a four-commit branch. The verdict must not depend on what it travels with."
+    },
+    {
+      "id": "known-with-unrelated",
+      "kind": "commit",
+      "shas": [
+        "cdd105ae376e120139caae94b8d8ef1644af55a7",
+        "fa9a0323769ab31f82a2f8adb19d0ba8af81b2e6",
+        "9bc929afca0de87a9174fea3868cc1499ccdc481",
+        "75fe345b926dfe6cfa6432b1fbe85ba8fa841eb3"
+      ],
+      "why": "the same content beside three commits it has nothing to do with"
+    },
+    {
+      "id": "planted-test-fixture",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "test-fixture"
+    },
+    {
+      "id": "planted-doc-prose",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "doc-prose"
+    },
+    {
+      "id": "planted-mock-payload",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "mock-payload"
+    },
+    {
+      "id": "planted-code-comment",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "code-comment"
+    },
+    {
+      "id": "planted-attribution",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "attribution"
+    },
+    {
+      "id": "planted-task-quote",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "task-quote"
+    },
+    {
+      "id": "planted-in-large-push",
+      "kind": "planted",
+      "shas": [
+        "5f4badace9622360521941feb9cdfa192c4ff03a",
+        "7b5462002e37bf6db01dffebafef0342b8f5f1d3"
+      ],
+      "fragment": "test-fixture",
+      "why": "the same fragment inside a ~110KB push \u2014 the needle-in-a-haystack half of recall, measured separately from name sensitivity"
+    }
+  ],
+  "negatives": [
+    {
+      "id": "neighbours-only",
+      "kind": "commit",
+      "shas": [
+        "5f4badace9622360521941feb9cdfa192c4ff03a",
+        "7b5462002e37bf6db01dffebafef0342b8f5f1d3",
+        "14892e5a1d591e2bda159a088ec2b3df54227290"
+      ],
+      "why": "the control for known-with-neighbours. Blocking here means the company caused the verdict, not the name."
+    },
+    {
+      "id": "host-alone",
+      "kind": "commit",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "why": "the host every planted case is built on, scanned with nothing planted. Without it a planted case that blocks proves nothing \u2014 the host might have been what blocked."
+    },
+    {
+      "id": "ordinary-1",
+      "kind": "commit",
+      "shas": ["cdd105ae376e120139caae94b8d8ef1644af55a7"]
+    },
+    {
+      "id": "ordinary-2",
+      "kind": "commit",
+      "shas": ["14892e5a1d591e2bda159a088ec2b3df54227290"]
+    },
+    {
+      "id": "ordinary-3",
+      "kind": "commit",
+      "shas": ["fa9a0323769ab31f82a2f8adb19d0ba8af81b2e6"]
+    },
+    {
+      "id": "ordinary-4",
+      "kind": "commit",
+      "shas": ["8daf0e32eccfeb4950240fba19a489825c783208"]
+    },
+    {
+      "id": "ordinary-5",
+      "kind": "commit",
+      "shas": ["9bc929afca0de87a9174fea3868cc1499ccdc481"]
+    },
+    {
+      "id": "ordinary-6",
+      "kind": "commit",
+      "shas": ["2e6c6880ef31db2a9770ca97b27789849bb1f5c2"]
+    },
+    {
+      "id": "maintainer-quoted",
+      "kind": "commit",
+      "shas": ["510e95fe6d88e585ab718e660ab6b94fddd528ae"],
+      "why": "a dated decision quoted by name. The maintainer exemption exists for exactly this, and a recall fix must not eat it."
+    },
+    {
+      "id": "maintainer-quoted-2",
+      "kind": "commit",
+      "shas": ["1923a3a0901476d3b8f0e8b9f4720a0ae07fea18"],
+      "why": "the same shape again \u2014 one instance is not evidence that an exemption survived"
+    },
+    {
+      "id": "maintainer-decision",
+      "kind": "commit",
+      "shas": ["cdd654381cca05d9bfe2430032c38495f4941b69"],
+      "why": "the maintainer named repeatedly in prose about his own preferences"
+    },
+    {
+      "id": "maintainer-metadata",
+      "kind": "commit",
+      "shas": ["aa925ea0594d94e764d539aa291fbf1e2d22a128"],
+      "why": "the maintainer's name in package metadata"
+    },
+    {
+      "id": "placeholder-names",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "placeholders",
+      "why": "the fixture names a scanner must keep letting through, or every test file in the repo becomes a leak"
+    },
+    {
+      "id": "ordinary-large",
+      "kind": "commit",
+      "shas": [
+        "14892e5a1d591e2bda159a088ec2b3df54227290",
+        "fa9a0323769ab31f82a2f8adb19d0ba8af81b2e6",
+        "8daf0e32eccfeb4950240fba19a489825c783208",
+        "9bc929afca0de87a9174fea3868cc1499ccdc481",
+        "2e6c6880ef31db2a9770ca97b27789849bb1f5c2"
+      ],
+      "why": "five clean commits pushed together. A fix that reads a big push in pieces gets more chances to cry wolf, and this is where that shows up."
+    }
+  ]
+}
