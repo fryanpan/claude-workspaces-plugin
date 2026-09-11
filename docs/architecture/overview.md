@@ -673,7 +673,12 @@ two attributes a block can carry — its stable id, and the agent that wrote it.
 and text, and installs the observer that drops the authorship attribute the
 moment a person edits the block. `prose-batch.ts` applies a list of scoped
 edits in one transaction, refusing to rewrite what the agent no longer owns and
-raising a suggestion instead. `prose-nest.ts` is one of those edits given a
+raising a suggestion instead. That suggestion is written by `suggest-blocks.ts`,
+which proposes whole blocks rather than a run of text: the target's words
+struck, the replacement offered as real blocks beside it under the same sid,
+so `suggest-ops.ts` resolves it with no new code and a replacement that is
+itself a heading, a list or a fence is accepted as one rather than as
+characters. `prose-nest.ts` is one of those edits given a
 module of its own: `nest_blocks` MOVES existing list items under a lead bullet
 rather than restating them, which is what lets a note-taker regroup a topic
 without retyping a point or orphaning the comment threads anchored to it. Server-side they are reached through

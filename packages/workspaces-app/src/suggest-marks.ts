@@ -67,6 +67,19 @@ function suggestionAttributes() {
   };
 }
 
+/**
+ * The marks a code block admits: these two, and nothing else.
+ *
+ * Tiptap's code block allows no marks at all, and y-prosemirror answers a
+ * node the schema refuses by DELETING it from the shared doc. So the first
+ * browser to open a doc whose code block carried a proposal erased the whole
+ * block — the person's code and the proposal with it — and the next
+ * write-back put the loss on disk. Every suggestion verb can land marks in a
+ * code block (a find inside a fence, a replace of the block itself), so the
+ * schema is where this has to hold. Bold inside a fence is still not a thing.
+ */
+export const CODE_BLOCK_MARKS = `${SUGGEST_INSERT_MARK} ${SUGGEST_DELETE_MARK}`;
+
 /** Proposed NEW text — visible in the live doc, excluded from disk until
  *  accepted (the serializer rule in @claude-workspaces/core prose.ts). */
 export const SuggestInsert = Mark.create({

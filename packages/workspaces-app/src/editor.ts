@@ -32,7 +32,7 @@ import { PlanPlaceholder } from './plan-placeholder.ts';
 import type { InlineThreadCard } from './review-surface.ts';
 import { SettleWash, type SettleWashOptions } from './settle-wash.ts';
 import { SuggestInput } from './suggest-input.ts';
-import { SuggestDelete, SuggestInsert } from './suggest-marks.ts';
+import { CODE_BLOCK_MARKS, SuggestDelete, SuggestInsert } from './suggest-marks.ts';
 import { SuggestionChips } from './suggestions/suggestion-chips.ts';
 import { TaskLinkChips } from './task-link-chips.ts';
 import { ThreadDecorations, type ThreadRange, setThreadDecorations } from './thread-decorations.ts';
@@ -135,7 +135,9 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       // writes; deleting it silently un-does the server-side identity work
       // (packages/core/src/prose-outline.ts).
       BlockIdentity,
-      MermaidCodeBlock,
+      // A code block must admit the suggestion marks, or y-prosemirror deletes
+      // any code block a proposal touches — see CODE_BLOCK_MARKS.
+      MermaidCodeBlock.extend({ marks: CODE_BLOCK_MARKS }),
       // Block-level images. The server-side markdown round-trip (packages/core
       // prose.ts) emits/consumes `image` nodes for `![alt](src)` lines; without
       // this extension the schema has no `image` node and sync would drop them.

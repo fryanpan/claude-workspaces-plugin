@@ -16,9 +16,10 @@
  *   deletes a block still marked as the caller's own applies directly.
  *   Anything else — a block a person wrote, or one of the caller's that a
  *   person has since touched, which is the same thing after
- *   `clearAuthorshipOnPersonEdit` has run — becomes a suggestion through
- *   the existing suggest mode. Nothing this file does can destroy words the
- *   caller did not write.
+ *   `clearAuthorshipOnPersonEdit` has run — becomes a block proposal
+ *   (`suggest-blocks.ts`): the words struck, the replacement offered as
+ *   blocks beside them. Nothing this file does can destroy words the caller
+ *   did not write.
  * - **A list is grown, never twinned.** Inserting bullets where the target
  *   already ends in a list of the same type puts the new items INTO that
  *   list. Splicing a second list in beside it is what made the browser's
@@ -26,7 +27,7 @@
  *   bullets are bullets the agent can no longer find.
  */
 import * as Y from 'yjs';
-import { getProseFragment, headingLevelOf, precedingBlock, walkProse } from './prose-fragment.ts';
+import { getProseFragment, headingLevelOf, precedingBlock } from './prose-fragment.ts';
 import {
   BLOCK_AUTHOR_ATTR,
   BLOCK_ID_ATTR,
@@ -35,14 +36,9 @@ import {
 } from './prose-identity.ts';
 import { parseMarkdownBlocks } from './prose-markdown.ts';
 import { type NestBlocksError, nestBlocksOutcome } from './prose-nest.ts';
-import {
-  addressableBlocks,
-  claimSubtree,
-  findBlockById,
-  newBlockId,
-  parentOf,
-} from './prose-outline.ts';
-import { type SuggestionAuthor, suggestRewriteRange } from './suggest-ops.ts';
+import { addressableBlocks, claimSubtree, findBlockById, newBlockId } from './prose-outline.ts';
+import { blockText, markBlockProposal, offerWhole } from './suggest-blocks.ts';
+import type { SuggestionAuthor } from './suggest-ops.ts';
 
 /** One edit, addressed by block id. */
 export type BlockEdit =
@@ -71,6 +67,8 @@ export interface BlockEditOutcome {
   error?: BlockEditError;
   /** The suggestion this edit became, when it became one. */
   suggestionId?: string;
+  /** What to change before retrying, when the error code alone cannot say. */
+  reason?: string;
 }
 
 export interface ApplyBlockEditsResult {
@@ -223,6 +221,19 @@ function insertBlocksMerging(
   return created;
 }
 
+/** Insert parsed `blocks` into `parent` at `at`; return the elements written. */
+function insertParsed(
+  parent: Y.XmlFragment | Y.XmlElement,
+  at: number,
+  blocks: Y.XmlElement[],
+): Y.XmlElement[] {
+  parent.insert(at, blocks);
+  // Reading the freshly inserted elements is safe — they are integrated now.
+  return (parent.toArray() as (Y.XmlElement | Y.XmlText)[])
+    .slice(at, at + blocks.length)
+    .filter((el): el is Y.XmlElement => el instanceof Y.XmlElement);
+}
+
 /**
  * Put `markdown` immediately after the list `holder` — the home for the tail
  * a multi-item `replace_block` left over. A no-op when `holder` is not a list
@@ -233,21 +244,89 @@ function insertAfterList(
   fragment: Y.XmlFragment,
   holder: Y.XmlFragment | Y.XmlElement,
   markdown: string,
-  author: string,
-): void {
-  if (!(holder instanceof Y.XmlElement) || !isList(holder)) return;
+): Y.XmlElement[] {
+  if (!(holder instanceof Y.XmlElement) || !isList(holder)) return [];
   const grand = (holder.parent as Y.XmlFragment | Y.XmlElement | null) ?? fragment;
   const at = (grand.toArray() as unknown[]).indexOf(holder) + 1;
-  if (at <= 0) return;
+  if (at <= 0) return [];
   const blocks = parseMarkdownBlocks(markdown);
-  if (blocks.length === 0) return;
-  grand.insert(at, blocks);
-  for (const made of (grand.toArray() as (Y.XmlElement | Y.XmlText)[]).slice(
-    at,
-    at + blocks.length,
-  )) {
-    if (made instanceof Y.XmlElement) claimSubtree(made, author);
+  return blocks.length === 0 ? [] : insertParsed(grand, at, blocks);
+}
+
+/**
+ * Build `markdown` into the doc at `el`: in its place (`'replace'`, a direct
+ * edit) or straight after it (`'after'`, where a proposal offers it, so the
+ * struck words read first). Returns every element written.
+ *
+ * ONE BULLET MAY BECOME SEVERAL. The prompt lets a `replace_block` carry
+ * multi-line markdown — regrouping a topic replaces one flat bullet with a
+ * lead bullet and its sub-points — so the marker stripping has to be a
+ * per-line read, not a single-line regex. `LIST_LINE` has no `m` flag, so it
+ * matched nothing on a multi-line string and the `- ` markers survived into
+ * the item's text: an empty bullet with the whole replacement nested under
+ * it, reported as `applied`.
+ */
+function writeReplacement(
+  fragment: Y.XmlFragment,
+  el: Y.XmlElement,
+  markdown: string,
+  mode: 'replace' | 'after',
+): Y.XmlElement[] | 'unknown-block' | 'parse-failed' {
+  const parent = (el.parent as Y.XmlFragment | Y.XmlElement | null) ?? fragment;
+  const idx = (parent.toArray() as unknown[]).indexOf(el);
+  if (idx < 0) return 'unknown-block';
+  const at = mode === 'replace' ? idx : idx + 1;
+  if (el.nodeName === 'listItem') {
+    const split = splitLeadingListItems(markdown);
+    const items = (split ? split.items : [markdown.replace(LIST_LINE, '$3')])
+      .map(buildListItem)
+      .filter((made): made is Y.XmlElement => made !== null);
+    if (items.length === 0) return 'parse-failed';
+    if (mode === 'replace') parent.delete(idx, 1);
+    const created = insertParsed(parent, at, items);
+    // Whatever followed the run of items is still the caller's words, and a
+    // paragraph cannot live between two list items — it goes after the list.
+    if (split && split.rest.trim().length > 0) {
+      created.push(...insertAfterList(fragment, parent, split.rest));
+    }
+    return created;
   }
+  const blocks = parseMarkdownBlocks(markdown);
+  if (blocks.length === 0) return 'parse-failed';
+  if (mode === 'replace') parent.delete(idx, 1);
+  return insertParsed(parent, at, blocks);
+}
+
+const ALREADY_PROPOSED =
+  'the block already carries a pending suggestion; accept or reject it first';
+const TEXTLESS_BLOCK =
+  'the replacement holds a block with no text (a rule or an image), which a suggestion cannot carry';
+
+/**
+ * Turn a replace or delete of a block the caller does not own into a pending
+ * proposal (`suggest-blocks.ts`): the block's words struck, the replacement
+ * offered as blocks beside it. Writes nothing when it cannot propose — an
+ * outcome of `failed` means the doc is exactly as it was. The offered blocks
+ * are the caller's, as a direct replacement would be: accepting keeps them.
+ */
+function proposeEdit(
+  fragment: Y.XmlFragment,
+  el: Y.XmlElement,
+  replacement: string | null,
+  opts: Pick<ApplyBlockEditsOptions, 'author' | 'suggestionAuthor'>,
+): { suggestionId: string } | { error: BlockEditError; reason?: string } {
+  const struck = blockText(el);
+  if (struck === null) return { error: 'suggest-failed', reason: ALREADY_PROPOSED };
+  if (struck.length === 0) return { error: 'no-range' };
+  let offered: Y.XmlElement[] = [];
+  if (replacement !== null) {
+    const written = writeReplacement(fragment, el, replacement, 'after');
+    if (typeof written === 'string') return { error: written };
+    if (!offerWhole(written)) return { error: 'suggest-failed', reason: TEXTLESS_BLOCK };
+    offered = written;
+    for (const made of offered) claimSubtree(made, opts.author);
+  }
+  return { suggestionId: markBlockProposal(struck, offered, opts.suggestionAuthor) };
 }
 
 /** The end of a heading's section: the index of the next heading at the same
@@ -264,38 +343,6 @@ function sectionEndIndex(fragment: Y.XmlFragment, heading: Y.XmlElement): number
     }
   }
   return tops.length;
-}
-
-/** Encoded relative positions spanning a block's own text, or nothing when
- *  the block holds no text to propose against. */
-function blockTextRange(
-  doc: Y.Doc,
-  el: Y.XmlElement,
-): { startRel: Uint8Array; endRel: Uint8Array } | null {
-  const { segments } = walkProse(getProseFragment(doc));
-  const inside = segments.filter((s) => {
-    let node: unknown = s.node;
-    while (node != null) {
-      if (node === el) return true;
-      node = parentOf(node);
-    }
-    return false;
-  });
-  const first = inside[0];
-  const last = inside[inside.length - 1];
-  if (!first || !last) return null;
-  // A cross-block span cannot be proposed (suggest mode refuses it), so a
-  // multi-block target proposes against its FIRST text block — the words a
-  // reader would see the redline on.
-  const block = first.block;
-  const sameBlock = inside.filter((s) => s.block === block);
-  const end = sameBlock[sameBlock.length - 1] ?? first;
-  return {
-    startRel: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(first.node, 0)),
-    endRel: Y.encodeRelativePosition(
-      Y.createRelativePositionFromTypeIndex(end.node, end.node.length),
-    ),
-  };
 }
 
 /** Remove `el` from whatever holds it. */
@@ -325,12 +372,10 @@ export function applyBlockEdits(
   opts: ApplyBlockEditsOptions,
 ): ApplyBlockEditsResult {
   const outcomes: BlockEditOutcome[] = [];
-  const proposals: Array<{ index: number; el: Y.XmlElement; replacement: string }> = [];
   const fragment = getProseFragment(doc);
 
   doc.transact(() => {
     for (const edit of edits) {
-      const index = outcomes.length;
       switch (edit.op) {
         case 'insert_at_end':
         case 'insert_under_heading': {
@@ -371,16 +416,26 @@ export function applyBlockEdits(
             outcomes.push({ op: edit.op, status: 'failed', error: 'unknown-block' });
             break;
           }
-          const replacement = edit.op === 'replace_block' ? edit.markdown : '';
-          if (readBlockAuthor(el) !== opts.author) {
-            // Not ours (or no longer ours). Queue a proposal — created after
-            // this transaction so its own marks are not folded into a
-            // transaction that also deletes and inserts blocks around them.
-            proposals.push({ index, el, replacement });
-            outcomes.push({ op: edit.op, status: 'suggested' });
+          const replacement = edit.op === 'replace_block' ? edit.markdown : null;
+          // Emptying a block is `delete_block`, said out loud — for a proposal
+          // as much as a direct edit. A model returning "" must not become a
+          // redline striking a person's paragraph.
+          if (replacement !== null && replacement.trim().length === 0) {
+            outcomes.push({ op: edit.op, status: 'failed', error: 'empty' });
             break;
           }
-          if (edit.op === 'delete_block') {
+          if (readBlockAuthor(el) !== opts.author) {
+            // Not ours (or no longer ours): propose it, in this transaction,
+            // so a reader sees the batch land whole or not at all.
+            const res = proposeEdit(fragment, el, replacement, opts);
+            outcomes.push(
+              'suggestionId' in res
+                ? { op: edit.op, status: 'suggested', suggestionId: res.suggestionId }
+                : { op: edit.op, status: 'failed', error: res.error, reason: res.reason },
+            );
+            break;
+          }
+          if (replacement === null) {
             const gone = deleteElement(fragment, el);
             outcomes.push(
               gone
@@ -389,58 +444,12 @@ export function applyBlockEdits(
             );
             break;
           }
-          if (replacement.trim().length === 0) {
-            outcomes.push({ op: edit.op, status: 'failed', error: 'empty' });
+          const written = writeReplacement(fragment, el, replacement, 'replace');
+          if (typeof written === 'string') {
+            outcomes.push({ op: edit.op, status: 'failed', error: written });
             break;
           }
-          const parent = (el.parent as Y.XmlFragment | Y.XmlElement | null) ?? fragment;
-          const idx = (parent.toArray() as unknown[]).indexOf(el);
-          if (idx < 0) {
-            outcomes.push({ op: edit.op, status: 'failed', error: 'unknown-block' });
-            break;
-          }
-          if (el.nodeName === 'listItem') {
-            // ONE BULLET MAY BECOME SEVERAL. The prompt lets a `replace_block`
-            // carry multi-line markdown — regrouping a topic replaces one flat
-            // bullet with a lead bullet and its sub-points — so the marker
-            // stripping has to be a per-line read, not a single-line regex.
-            // `LIST_LINE` has no `m` flag, so it matched nothing on a
-            // multi-line string and the `- ` markers survived into the item's
-            // text: an empty bullet with the whole replacement nested under
-            // it, reported as `applied`.
-            const split = splitLeadingListItems(replacement);
-            const items = (split ? split.items : [replacement.replace(LIST_LINE, '$3')])
-              .map(buildListItem)
-              .filter((made): made is Y.XmlElement => made !== null);
-            if (items.length === 0) {
-              outcomes.push({ op: edit.op, status: 'failed', error: 'parse-failed' });
-              break;
-            }
-            parent.delete(idx, 1);
-            parent.insert(idx, items);
-            for (const made of items) claimSubtree(made, opts.author);
-            // Whatever followed the run of items is still the caller's words,
-            // and a paragraph cannot live between two list items — it goes
-            // after the list that holds them.
-            if (split && split.rest.trim().length > 0) {
-              insertAfterList(fragment, parent, split.rest, opts.author);
-            }
-            outcomes.push({ op: edit.op, status: 'applied' });
-            break;
-          }
-          const blocks = parseMarkdownBlocks(replacement);
-          if (blocks.length === 0) {
-            outcomes.push({ op: edit.op, status: 'failed', error: 'parse-failed' });
-            break;
-          }
-          parent.delete(idx, 1);
-          parent.insert(idx, blocks);
-          for (const made of (parent.toArray() as (Y.XmlElement | Y.XmlText)[]).slice(
-            idx,
-            idx + blocks.length,
-          )) {
-            if (made instanceof Y.XmlElement) claimSubtree(made, opts.author);
-          }
+          for (const made of written) claimSubtree(made, opts.author);
           outcomes.push({ op: edit.op, status: 'applied' });
           break;
         }
@@ -450,29 +459,6 @@ export function applyBlockEdits(
     // watching the doc must never see a block that has no address yet.
     mintMissingIds(fragment);
   }, opts.transactionOrigin ?? 'agent');
-
-  for (const proposal of proposals) {
-    const range = blockTextRange(doc, proposal.el);
-    const outcome = outcomes[proposal.index];
-    if (!outcome) continue;
-    if (!range) {
-      outcome.status = 'failed';
-      outcome.error = 'no-range';
-      continue;
-    }
-    const res = suggestRewriteRange(doc, {
-      startRel: range.startRel,
-      endRel: range.endRel,
-      replacement: proposal.replacement.replace(LIST_LINE, '$3').trim(),
-      author: opts.suggestionAuthor,
-      transactionOrigin: opts.transactionOrigin ?? 'agent',
-    });
-    if (res.ok) outcome.suggestionId = res.sid;
-    else {
-      outcome.status = 'failed';
-      outcome.error = 'suggest-failed';
-    }
-  }
 
   return {
     applied: outcomes.filter((o) => o.status === 'applied').length,
