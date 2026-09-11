@@ -48,7 +48,10 @@ describe('injectWidget', () => {
     const commented =
       '<html><body><!-- the claude-feedback-widget is added by the server --><h1>Mock</h1></body></html>';
     const prose = '<html><body><p>Comments go through claude-feedback-widget.</p></body></html>';
-    for (const page of [copiedChrome, commented, prose]) {
+    // An attribute on an unrelated script names the widget and mounts nothing.
+    const scriptAttr =
+      '<html><body><script data-component="claude-feedback-widget">window.x = 1;</script></body></html>';
+    for (const page of [copiedChrome, commented, prose, scriptAttr]) {
       expect(embeds(injectWidget(page, 'doc-1', 'w-1'))).toBe(1);
     }
   });

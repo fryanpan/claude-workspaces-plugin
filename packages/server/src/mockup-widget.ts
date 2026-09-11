@@ -46,11 +46,14 @@ const OPAQUE =
   /<!--[\s\S]*?-->|<style(?=[\s/>])[^>]*>[\s\S]*?<\/style\s*>|<script(?=[\s/>])([^>]*)>([\s\S]*?)<\/script\s*>/gi;
 const EMBED_IN_MARKUP = /<claude-feedback-widget\b|<script\b[^>]*widget\.iife\.js/i;
 const EMBED_IN_SCRIPT = /claude-feedback-widget|widget\.iife\.js|FeedbackWidget\s*\.\s*init/i;
+/** A script tag's attributes embed only through `src`; a `data-*` naming the widget mounts nothing. */
+const BUNDLE_SRC = /\bsrc\s*=\s*["']?[^"'\s>]*widget\.iife\.js/i;
 
 function alreadyEmbedded(html: string): boolean {
   let byScript = false;
   const markup = html.replace(OPAQUE, (_span, attrs?: string, body?: string) => {
-    if (attrs !== undefined && EMBED_IN_SCRIPT.test(`${attrs}${body ?? ''}`)) byScript = true;
+    if (attrs !== undefined && (BUNDLE_SRC.test(attrs) || EMBED_IN_SCRIPT.test(body ?? '')))
+      byScript = true;
     return ' ';
   });
   return byScript || EMBED_IN_MARKUP.test(markup);
