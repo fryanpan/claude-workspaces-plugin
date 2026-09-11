@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { DATA_DIR_ENV, resolveDataDir } from '../src/data-dir.ts';
+import { DATA_DIR_ENV, dataDirFromArgs, resolveDataDir } from '../src/data-dir.ts';
 
 describe('resolveDataDir', () => {
   it('defaults to <repoRoot>/data, which is what dev and staging already had', () => {
@@ -30,5 +30,17 @@ describe('resolveDataDir', () => {
     expect(resolveDataDir({ [DATA_DIR_ENV]: '  /var/cw/data  ' }, '/srv/checkout')).toBe(
       '/var/cw/data',
     );
+  });
+});
+
+describe('dataDirFromArgs — the one precedence bin.ts and the config share', () => {
+  const env = { [DATA_DIR_ENV]: '/var/cw/data' };
+  it('lets --data-dir win over the environment', () => {
+    const arg = (name: string) => (name === 'data-dir' ? '/tmp/scratch' : undefined);
+    expect(dataDirFromArgs(env, '/srv/checkout', arg)).toBe('/tmp/scratch');
+  });
+
+  it('falls back to the resolver without the flag', () => {
+    expect(dataDirFromArgs(env, '/srv/checkout', () => undefined)).toBe('/var/cw/data');
   });
 });
