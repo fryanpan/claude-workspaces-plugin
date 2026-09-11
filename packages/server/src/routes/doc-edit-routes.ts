@@ -251,7 +251,8 @@ export async function handleDocEditRoutes(
         occurrence,
         // Omitted means "core decides" — a proposal's offered text parses by
         // default. Only an explicit false asks for literal characters.
-        parseInlineMarks: typeof body?.parseInlineMarks === 'boolean' ? body.parseInlineMarks : undefined,
+        parseInlineMarks:
+          typeof body?.parseInlineMarks === 'boolean' ? body.parseInlineMarks : undefined,
         author,
       });
       return res.ok ? j(200, res) : j(409, res);

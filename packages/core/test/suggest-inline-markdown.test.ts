@@ -59,7 +59,10 @@ function offered(doc: Y.Doc): Array<{ text: string; marks: Record<string, unknow
 }
 
 /** Everything a reader would see in the live doc, proposals included. */
-const liveText = (doc: Y.Doc): string => runs(doc).map((r) => r.text).join('');
+const liveText = (doc: Y.Doc): string =>
+  runs(doc)
+    .map((r) => r.text)
+    .join('');
 
 function blockText(doc: Y.Doc, blockIndex: number): Y.XmlText {
   const el = getProseFragment(doc).get(blockIndex) as Y.XmlElement;
