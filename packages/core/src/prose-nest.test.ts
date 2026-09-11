@@ -167,6 +167,49 @@ describe('what stops the reach', () => {
     expect(md(doc)).toBe(before);
   });
 
+  it('a mixed list — a person is writing in it, so none of it is gathered from', () => {
+    // The list past the paragraph holds one of ours AND one of theirs, and
+    // the paragraph between is the note-taker's own, so the reach really does
+    // arrive at that list rather than stopping short of it. A list is judged
+    // whole: a person writing in it puts the whole list out of reach, so OUR
+    // bullet in it stays where it is too. Gathering the list and only then
+    // asking whether it was crossable moved ours out of a list somebody else
+    // is still editing.
+    const doc = notesDoc(
+      '## Meeting notes\n\n- one\n- two\n\nA paragraph note.\n\n- ours\n- theirs\n',
+    );
+    const fragment = getProseFragment(doc);
+    findBlockById(fragment, idOf(doc, 'theirs'))?.removeAttribute('cwAuthor');
+    const before = md(doc);
+    const res = apply(doc, [
+      { op: 'nest_blocks', leadBlockId: idOf(doc, 'one'), blockIds: [idOf(doc, 'ours')] },
+    ]);
+    expect(res.outcomes).toEqual([
+      { op: 'nest_blocks', status: 'failed', error: 'nothing-to-nest' },
+    ]);
+    expect(md(doc)).toBe(before);
+  });
+
+  it("a person's bullet in the note-taker's OWN list", () => {
+    // The lead's own list is gathered from whatever else is in it — that is
+    // what makes an ordinary regroup work — so the per-member authorship
+    // check is the only thing standing between a person's bullet and a move
+    // it never asked for. The mixed-list case above cannot cover this: there
+    // the whole list is out of reach, here it is the list we are standing in.
+    const doc = notesDoc('## Meeting notes\n\n- lead\n- ours\n- theirs\n');
+    findBlockById(getProseFragment(doc), idOf(doc, 'theirs'))?.removeAttribute('cwAuthor');
+    const res = apply(doc, [
+      {
+        op: 'nest_blocks',
+        leadBlockId: idOf(doc, 'lead'),
+        blockIds: [idOf(doc, 'ours'), idOf(doc, 'theirs')],
+      },
+    ]);
+    expect(res.outcomes).toEqual([{ op: 'nest_blocks', status: 'applied' }]);
+    // Ours moved; theirs is still a top-level bullet where they left it.
+    expect(md(doc)).toBe('## Meeting notes\n\n- lead\n  - ours\n- theirs');
+  });
+
   it('a bullet in the other list that a person owns', () => {
     const doc = notesDoc('## Meeting notes\n\n- one\n- two\n\nA paragraph note.\n\n- three\n');
     const theirs = findBlockById(getProseFragment(doc), idOf(doc, 'three'));
@@ -195,6 +238,24 @@ describe('a regroup that has already been made', () => {
     ]);
     expect(res.outcomes).toEqual([{ op: 'nest_blocks', status: 'applied' }]);
     expect(md(doc)).toBe(before);
+  });
+
+  it('still fails when one of the ids named is gone', () => {
+    // The already-done answer is for a regroup that HOLDS, and it does not
+    // hold when part of what was asked for cannot be found. Reporting applied
+    // here would hide the mode the model really has — six of the twenty-four
+    // failed edits on EN2001a were ids that no longer existed.
+    const doc = notesDoc('## Meeting notes\n\n- lead\n    - sub one\n');
+    const res = apply(doc, [
+      {
+        op: 'nest_blocks',
+        leadBlockId: idOf(doc, 'lead'),
+        blockIds: [idOf(doc, 'sub one'), 'b-gone'],
+      },
+    ]);
+    expect(res.outcomes).toEqual([
+      { op: 'nest_blocks', status: 'failed', error: 'nothing-to-nest' },
+    ]);
   });
 
   it('still fails when the named bullets are somewhere else entirely — the control', () => {

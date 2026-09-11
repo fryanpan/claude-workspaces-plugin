@@ -137,11 +137,14 @@ function reachableLists(list: Y.XmlElement, author: string): Y.XmlElement[] {
   for (const step of [-1, 1]) {
     for (let i = at + step; i >= 0 && i < siblings.length; i += step) {
       const el = siblings[i];
-      // A same-kind list is gathered from AND stepped over, on the same
-      // terms: a person's bullet inside it stops the reach beyond it, so
-      // nothing this agent owns is moved across something it does not.
-      if (isList(el) && el.nodeName === list.nodeName) out.push(el);
+      // CROSSABLE FIRST, THEN GATHERED. A list is judged whole: one bullet in
+      // it that a person owns stops the reach AT that list, so neither it nor
+      // anything past it is gathered from. Gathering before the check moved
+      // our own bullets out of a list a person is also writing in — the reach
+      // reaching into somebody else's paragraph by another route, which is
+      // the thing this whole function refuses to do.
       if (!crossable(el)) break;
+      if (isList(el) && el.nodeName === list.nodeName) out.push(el);
     }
   }
   return out.sort((a, b) => siblings.indexOf(a) - siblings.indexOf(b));
@@ -201,10 +204,15 @@ export function nestBlocksUnderLead(
     // bullet already sits re-asks for a regroup it made ticks ago; answering
     // `nothing-to-nest` turns that into a failed edit, and on a batch of
     // nothing but regroups into a write that landed nothing at all.
-    const named = opts.blockIds
-      .map((id) => findBlockById(fragment, id))
-      .filter((el): el is Y.XmlElement => el !== null && el !== undefined);
-    if (named.length > 0 && named.every((el) => isInside(el, lead))) return { moved: 0 };
+    //
+    // EVERY id has to RESOLVE as well as sit under the lead. Filtering the
+    // unresolved ones away first would let a regroup naming a block that is
+    // gone report itself applied, which is how the mode the model actually
+    // has — naming ids that no longer exist — would stop being counted.
+    const named = opts.blockIds.map((id) => findBlockById(fragment, id));
+    if (named.length > 0 && named.every((el) => el != null && isInside(el, lead))) {
+      return { moved: 0 };
+    }
     return { moved: 0, error: 'nothing-to-nest' };
   }
 
