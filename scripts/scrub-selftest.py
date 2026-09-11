@@ -20,13 +20,18 @@ Run: python3 scripts/scrub-selftest.py    (exit 0 = gate is alive)
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRUB = os.path.join(HERE, "scrub-check.py")
+HAIKU = os.path.join(HERE, "scrub-haiku.py")
 
 sys.path.insert(0, HERE)
 import scrub_git  # noqa: E402
@@ -535,6 +540,251 @@ def check_maintainer_names(tmp: str) -> None:
            0 if "treat EVERY real personal name as a potential leak" in empty else 1, 0)
     expect("maintainer prompt: nobody is named when nobody resolved",
            0 if "Scrub Selftest" not in empty else 1, 0)
+
+
+# --- The Haiku layer's three ways of not running ---------------------------
+#
+# Everything below drives `scrub-haiku.py` against a stub on loopback or
+# against nothing at all. No case reaches the network and no case reads the
+# real key: every run points KEYCHAIN_SERVICE at a name nothing has stored
+# under, so the only key in play is the placeholder below, and the only place
+# it is ever sent is 127.0.0.1.
+
+# Non-empty, because an empty diff short-circuits before the API is consulted,
+# and carrying nothing a scanner should object to. The town is invented.
+HAIKU_FAKE_DIFF = (
+    "diff --git a/example.md b/example.md\n"
+    "--- a/example.md\n"
+    "+++ b/example.md\n"
+    "@@ -0,0 +1 @@\n"
+    "+Notes on the Harborlight ferry timetable.\n"
+)
+
+# Not a key. It exists only to get a case PAST the "no key at all" branch so
+# the branch under test is the one after it.
+HAIKU_PLACEHOLDER_KEY = "scrub-selftest-placeholder-value"
+
+# The API's real answer for a key over its cap, with a fictional reset date.
+# The status is 400 — the same status a malformed request draws — which is why
+# the classifier has to read the message.
+HAIKU_EXHAUSTED_BODY = json.dumps({
+    "type": "error",
+    "error": {
+        "type": "invalid_request_error",
+        "message": (
+            "You have reached your specified API usage limits. "
+            "You will regain access on 2099-01-01 at 00:00 UTC."
+        ),
+    },
+})
+HAIKU_REJECTED_BODY = json.dumps({
+    "type": "error",
+    "error": {"type": "authentication_error", "message": "invalid x-api-key"},
+})
+HAIKU_SERVER_ERROR_BODY = json.dumps({
+    "type": "error",
+    "error": {"type": "api_error", "message": "Internal server error"},
+})
+# A 400 that is NOT a cap. Same status as the exhausted body, so the pair is
+# the control for "the status alone decided it" — if it had, both would sort
+# the same way.
+HAIKU_BAD_REQUEST_BODY = json.dumps({
+    "type": "error",
+    "error": {
+        "type": "invalid_request_error",
+        "message": "messages: at least one message is required",
+    },
+})
+
+HAIKU_STUB_REPLIES = {
+    "/clean": (200, json.dumps({"content": [{"text": "VERDICT: CLEAN"}]})),
+    "/leaks": (200, json.dumps({"content": [{
+        "text": "VERDICT: LEAKS_FOUND\nLEAKS:\n- example.md:1 — a real name",
+    }]})),
+    "/exhausted": (400, HAIKU_EXHAUSTED_BODY),
+    "/rejected": (401, HAIKU_REJECTED_BODY),
+    "/server-error": (500, HAIKU_SERVER_ERROR_BODY),
+    # A 200 that is not JSON at all — a captive portal or a proxy page. The
+    # old code called this a setup error and let the push through.
+    "/garbage": (200, "<html>a proxy answered instead</html>"),
+    # And valid JSON in the wrong shape, which is the harder half: it parses,
+    # so it reaches the code that indexes it.
+    "/wrong-shape": (200, json.dumps({"content": "a gateway wrote a string"})),
+}
+
+
+class HaikuStub(BaseHTTPRequestHandler):
+    """Answers whatever the path asks for, and reads nothing it is sent."""
+
+    def do_POST(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler's spelling)
+        # Drained, never parsed, never logged: the request carries the
+        # placeholder key in a header and there is no reason to look at it.
+        self.rfile.read(int(self.headers.get("content-length") or 0))
+        status, body = HAIKU_STUB_REPLIES.get(self.path, (404, "{}"))
+        payload = body.encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *args) -> None:
+        pass
+
+
+def check_haiku_unavailable() -> None:
+    """A gate that could not look must not answer like one that looked.
+
+    This is the failure that put a real person's name on this public repo's
+    main branch. `call_haiku` returned 2 for every setup or API problem and
+    `main` turned every 2 into exit 0 behind one line of stderr, so a key over
+    its usage cap — which is what the key had been for some time — produced
+    the same verdict as a clean scan. `.githooks/pre-push` believed it.
+
+    So the cases below assert two separate things. That the three ways of not
+    running are told APART: a cap nobody can lift before its reset date, a key
+    that is missing or refused, and a transient fault. And that what each one
+    then does is whatever `UNAVAILABLE_POLICY` says, under every setting it
+    can take — including the one the repo actually ships, which is read from
+    the module rather than restated here, so this stays true when that line
+    changes.
+
+    The two positive controls come first and are not decoration: without a run
+    that reaches a verdict through this same stub, every `0` below could be a
+    `0` for some reason that has nothing to do with policy.
+    """
+    server = ThreadingHTTPServer(("127.0.0.1", 0), HaikuStub)
+    stub = f"http://127.0.0.1:{server.server_address[1]}"
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    # A loopback port with nothing behind it, for the network-failure case:
+    # bind one, take its number, close it.
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    dead = f"http://127.0.0.1:{probe.getsockname()[1]}/clean"
+    probe.close()
+
+    def run_haiku(url: str, policy: str | None, with_key: bool = True):
+        env = clean_git_env()
+        for key in ("SCRUB_SKIP", "SCRUB_SKIP_HAIKU",
+                    "SCRUB_HAIKU_API_KEY", "ANTHROPIC_API_KEY",
+                    "SCRUB_HAIKU_UNAVAILABLE"):
+            env.pop(key, None)
+        # Nothing has ever stored a password under this service name, so the
+        # real entry is neither read nor reachable from any case here.
+        env["SCRUB_HAIKU_KEYCHAIN_SERVICE"] = "scrub-selftest-no-such-service"
+        env["SCRUB_HAIKU_API_URL"] = url
+        if with_key:
+            env["SCRUB_HAIKU_API_KEY"] = HAIKU_PLACEHOLDER_KEY
+        if policy is not None:
+            env["SCRUB_HAIKU_UNAVAILABLE"] = policy
+        return subprocess.run(
+            [sys.executable, HAIKU], input=HAIKU_FAKE_DIFF,
+            capture_output=True, text=True, env=env, cwd=HERE,
+        )
+
+    try:
+        r = run_haiku(f"{stub}/clean", "warn-all")
+        expect("haiku: a CLEAN verdict passes and prints no banner",
+               0 if r.returncode == 0 and "ONLY HALF OF IT RAN" not in r.stderr else 1,
+               0, f"exit {r.returncode}\n{r.stderr}")
+
+        r = run_haiku(f"{stub}/leaks", "warn-all")
+        expect("haiku: a LEAKS verdict still blocks under the weakest policy",
+               r.returncode, 1, r.stderr)
+
+        # The whole matrix. `absent` never makes a request at all, so its url
+        # is irrelevant; the other two fail at the HTTP layer.
+        case_run = {
+            "exhausted": lambda policy: run_haiku(f"{stub}/exhausted", policy),
+            "absent": lambda policy: run_haiku(f"{stub}/clean", policy, with_key=False),
+            "unreachable": lambda policy: run_haiku(dead, policy),
+        }
+        wanted = {
+            "warn-all": {"exhausted": 0, "absent": 0, "unreachable": 0},
+            "block-all": {"exhausted": 1, "absent": 1, "unreachable": 1},
+            "block-except-exhausted": {"exhausted": 0, "absent": 1, "unreachable": 1},
+        }
+        expect("haiku: the policy table has a row for every setting the matrix covers",
+               0 if set(wanted) == set(haiku.POLICIES) else 1, 0,
+               f"module {sorted(haiku.POLICIES)!r} vs test {sorted(wanted)!r}")
+
+        for policy, per_case in wanted.items():
+            for case, want in per_case.items():
+                r = case_run[case](policy)
+                expect(f"haiku {policy}: {case} {'blocks' if want else 'warns'}",
+                       r.returncode, want, f"exit {r.returncode}\n{r.stderr}")
+                expect(f"haiku {policy}: the banner names {case}",
+                       0 if f"could not run — {case}" in r.stderr else 1, 0, r.stderr)
+                expect(f"haiku {policy}: the banner is unmissable ({case})",
+                       0 if "LEAK GATE: ONLY HALF OF IT RAN" in r.stderr
+                       and haiku.BANNER_RULE in r.stderr else 1, 0, r.stderr)
+
+        # The value this repo actually ships, applied with no override in the
+        # environment. Read from the module, so the day it changes this case
+        # follows it instead of going stale or going red.
+        shipped = haiku.UNAVAILABLE_POLICY
+        expect("haiku: the recorded UNAVAILABLE_POLICY names a real policy",
+               0 if shipped in haiku.POLICIES else 1, 0, f"got {shipped!r}")
+        if shipped in wanted:
+            r = case_run["exhausted"](None)
+            expect(f"haiku: with no override, the recorded policy ({shipped}) is what applies",
+                   r.returncode, wanted[shipped]["exhausted"], r.stderr)
+
+        # A setting nobody defined is a gate nobody has read. It must not fall
+        # back to the recorded value and it must not fall back to warning.
+        r = run_haiku(f"{stub}/exhausted", "warn-al")
+        expect("haiku: a misspelled policy blocks rather than softens",
+               r.returncode, 1, f"exit {r.returncode}\n{r.stderr}")
+        expect("haiku: ...and says which value it could not read",
+               0 if "'warn-al'" in r.stderr and "names no policy" in r.stderr else 1,
+               0, r.stderr)
+
+        # A 200 carrying something this tool cannot parse used to be a setup
+        # error, which meant exit 0.
+        r = run_haiku(f"{stub}/garbage", "block-all")
+        expect("haiku: a reply that will not parse is unreachable, not clean",
+               0 if r.returncode == 1 and "could not run — unreachable" in r.stderr else 1,
+               0, f"exit {r.returncode}\n{r.stderr}")
+
+        # Valid JSON in a shape this tool cannot read has to reach the same
+        # answer as unparseable bytes, not raise out as a traceback.
+        r = run_haiku(f"{stub}/wrong-shape", "block-all")
+        expect("haiku: a reply that parses but has the wrong shape is unreachable",
+               0 if r.returncode == 1 and "could not run — unreachable" in r.stderr else 1,
+               0, f"exit {r.returncode}\n{r.stderr}")
+        expect("haiku: ...and says so rather than raising",
+               0 if "Traceback" not in r.stderr else 1, 0, r.stderr)
+
+        # End to end for the OTHER way a key can be absent: present, sent, and
+        # refused. It has to reach the same case as having no key at all.
+        r = run_haiku(f"{stub}/rejected", "block-except-exhausted")
+        expect("haiku: a key the API refuses is absent, and blocks under block-except-exhausted",
+               0 if r.returncode == 1 and "could not run — absent" in r.stderr else 1,
+               0, f"exit {r.returncode}\n{r.stderr}")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    # The sorting itself, driven directly. The last pair is the control for
+    # the rule the classifier is built on: two 400s, one a cap and one not.
+    sorting = [
+        (401, HAIKU_REJECTED_BODY, "absent", "a refused key is a broken install"),
+        (500, HAIKU_SERVER_ERROR_BODY, "unreachable", "a server error is transient"),
+        (400, HAIKU_EXHAUSTED_BODY, "exhausted", "a 400 naming a usage limit is the cap"),
+        (400, HAIKU_BAD_REQUEST_BODY, "unreachable",
+         "...and a 400 that names no limit is not"),
+    ]
+    for status, body, want, label in sorting:
+        got = haiku.classify_http_error(status, body).case
+        expect(f"haiku classify: {label}", 0 if got == want else 1, 0,
+               f"HTTP {status} sorted as {got!r}, wanted {want!r}")
+
+    # The dated reset is the one thing a person can act on in the cap case, so
+    # it has to survive into what they are shown.
+    detail = haiku.classify_http_error(400, HAIKU_EXHAUSTED_BODY).detail
+    expect("haiku classify: the cap case keeps the date access returns",
+           0 if "2099-01-01" in detail else 1, 0, f"got {detail!r}")
 
 
 def check_push_range(registry: str, denylist: str) -> None:
@@ -1157,6 +1407,7 @@ def main() -> int:
     check_identity_redaction()
     with tempfile.TemporaryDirectory() as tmp:
         check_maintainer_names(tmp)
+    check_haiku_unavailable()
     with tempfile.TemporaryDirectory() as tmp:
         registry = os.path.join(tmp, "registry.yaml")
         denylist = os.path.join(tmp, "denylist.txt")
