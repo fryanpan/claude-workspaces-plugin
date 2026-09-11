@@ -650,6 +650,9 @@ describe('the board wakes its lead over the wire', () => {
     const { taskId, lead, tab } = await boardWithReadyWork();
 
     handle.nudgeReadyWork();
+    await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
+    // A window after the arrival, so a duplicate — or a copy broadcast to the
+    // tab — has had the same chance to land as the frame did.
     await settle();
 
     const got = nudges(lead.frames, READY_IDLE_EVENT);
@@ -671,6 +674,7 @@ describe('the board wakes its lead over the wire', () => {
     handle.nudgeReadyWork();
     handle.nudgeReadyWork();
     handle.nudgeReadyWork();
+    await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
     await settle();
 
     expect(nudges(lead.frames, READY_IDLE_EVENT)).toHaveLength(1);
@@ -682,8 +686,7 @@ describe('the board wakes its lead over the wire', () => {
   it('goes quiet once the ready row is claimed', async () => {
     const { workspaceId, taskId, lead, tab } = await boardWithReadyWork();
     handle.nudgeReadyWork();
-    await settle();
-    expect(nudges(lead.frames, READY_IDLE_EVENT)).toHaveLength(1);
+    expect(await waitForFrames(lead.frames, READY_IDLE_EVENT, 1)).toHaveLength(1);
 
     await post(`/workspaces/${workspaceId}/tasks/${taskId}/transition`, {
       to: 'in-progress',
@@ -729,8 +732,7 @@ describe('the board wakes its lead over the wire', () => {
     );
     await settle();
     handle.nudgeReadyWork();
-    await settle();
-    expect(nudges(lead.frames, READY_IDLE_EVENT)).toHaveLength(1);
+    expect(await waitForFrames(lead.frames, READY_IDLE_EVENT, 1)).toHaveLength(1);
 
     await lead.stop();
     await tab.stop();
@@ -764,6 +766,7 @@ describe('the board wakes its lead over the wire', () => {
         },
       ),
     );
+    await waitForFrames(lead.frames, REVIEW_ANSWERED_EVENT, 1);
     await settle();
 
     expect(nudges(lead.frames, REVIEW_ANSWERED_EVENT)).toHaveLength(1);
@@ -791,8 +794,7 @@ describe('the board wakes its lead over the wire', () => {
 
     // Control: before the park, this board wakes its lead about this row.
     handle.nudgeReadyWork();
-    await settle();
-    expect(nudges(lead.frames, READY_IDLE_EVENT)).toHaveLength(1);
+    expect(await waitForFrames(lead.frames, READY_IDLE_EVENT, 1)).toHaveLength(1);
     lead.frames.length = 0;
 
     await jj(
@@ -837,8 +839,7 @@ describe('the board wakes its lead over the wire', () => {
   it('does not treat an agent attach or heartbeat as the board moving', async () => {
     const { workspaceId, lead, tab } = await boardWithReadyWork();
     handle.nudgeReadyWork();
-    await settle();
-    expect(nudges(lead.frames, READY_IDLE_EVENT)).toHaveLength(1);
+    expect(await waitForFrames(lead.frames, READY_IDLE_EVENT, 1)).toHaveLength(1);
 
     // The lead pings. Nothing on the board changed, so nothing re-arms —
     // the stamp is still the one that was already spent.
@@ -866,8 +867,7 @@ describe('the board wakes its lead over the wire', () => {
   it('does not re-fire an identical wake after the server restarts', async () => {
     const { workspaceId, lead, tab } = await boardWithReadyWork();
     handle.nudgeReadyWork();
-    await settle();
-    expect(nudges(lead.frames, READY_IDLE_EVENT)).toHaveLength(1);
+    expect(await waitForFrames(lead.frames, READY_IDLE_EVENT, 1)).toHaveLength(1);
     await lead.stop();
     await tab.stop();
 
@@ -906,8 +906,7 @@ describe('the board wakes its lead over the wire', () => {
     );
     await settle();
     handle.nudgeReadyWork();
-    await settle();
-    expect(nudges(revived.frames, READY_IDLE_EVENT)).toHaveLength(1);
+    expect(await waitForFrames(revived.frames, READY_IDLE_EVENT, 1)).toHaveLength(1);
 
     await revived.stop();
   });

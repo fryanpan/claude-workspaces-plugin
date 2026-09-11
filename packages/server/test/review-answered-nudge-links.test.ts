@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { type NudgePayload, reviewAnsweredLine } from '../../mcp/src/nudge-line.ts';
 import { REVIEW_ANSWERED_EVENT } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
@@ -156,7 +157,13 @@ describe('the review_answered wake only sends its reader to links that exist', (
         author: PERSON,
       }),
     );
-    await settle();
+    // Polled, not slept: a fixed window is a bet on delivery time, and on
+    // macOS the server held a frame written from inside a request ~100ms
+    // (see sse-writer.ts) — longer than the 80ms this used to wait.
+    await waitFor(
+      () => lead.frames.filter((f) => f.event === REVIEW_ANSWERED_EVENT).length > before,
+      { describe: 'the review_answered frame' },
+    ).catch(() => undefined);
     const got = lead.frames.filter((f) => f.event === REVIEW_ANSWERED_EVENT);
     // A wake that never arrived would render nothing, which makes every
     // assertion below vacuous.
