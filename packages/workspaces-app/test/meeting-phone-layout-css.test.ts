@@ -68,10 +68,14 @@ function pane(opts: { zone?: boolean; float?: boolean; floating?: boolean } = {}
   return { editor, dock, float };
 }
 
-/** A float with its two lines, as plan-gate.ts and review-float.ts build it. */
-function floatWithSubtitle(parent: Element): { button: HTMLElement; sub: HTMLElement } {
+/** A float with its two lines, as plan-gate.ts and review-float.ts build it.
+ *  `face` is the per-state class the renderers toggle. */
+function floatWithSubtitle(
+  parent: Element,
+  face = 'plan-float--make',
+): { button: HTMLElement; sub: HTMLElement } {
   const button = document.createElement('button');
-  button.className = 'plan-float plan-float--make';
+  button.className = `plan-float ${face}`;
   const label = document.createElement('span');
   label.className = 'plan-float-label';
   label.textContent = 'Make Plan';
@@ -167,6 +171,25 @@ describe('Make Plan and Review are one short line (rule 3)', () => {
     expect(style.paddingTop).toBe('8px');
     expect(style.paddingBottom).toBe('8px');
     expect(style.minHeight).toBe('44px');
+  });
+
+  it('the Review ask loses it too — both faces a meeting presses', () => {
+    setViewport(PHONE);
+    const { sub } = floatWithSubtitle(document.body, 'review-float review-float--ask');
+    expect(styleOf(sub).display).toBe('none');
+  });
+
+  it('but a receipt keeps its second line: who asked, and whether anyone is listening', () => {
+    // Not decoration — it is the answer to "did that go anywhere", and it is
+    // the line that was added after a Review press with the lead seat empty
+    // read as if an agent were coming. Approve Plan's subtitle is the
+    // consequence of a press that creates tickets, and keeps it for the same
+    // reason.
+    setViewport(PHONE);
+    for (const face of ['plan-float--requested', 'plan-float--approve']) {
+      const { sub } = floatWithSubtitle(document.body, face);
+      expect(styleOf(sub).display, face).not.toBe('none');
+    }
   });
 
   it('control — an iPad keeps both lines and the taller pill', () => {
