@@ -46,7 +46,6 @@ function mount(md: string) {
       storage: { getItem: () => null, setItem: () => {} },
     }),
     onPendingExpiry: vi.fn(),
-    showResolved: () => true,
   });
   open.push(() => {
     projection.clearPendingExpiry();

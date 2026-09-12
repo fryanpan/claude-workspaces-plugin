@@ -10,12 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
-import {
-  handleSuggestCut,
-  readSuggestModePref,
-  setSuggesting,
-  writeSuggestModePref,
-} from '../src/suggest-input.ts';
+import { handleSuggestCut, setSuggesting } from '../src/suggest-input.ts';
 
 /**
  * The Suggesting input mode (redlining Phase 2, commit 4): with the mode ON,
@@ -416,16 +411,5 @@ describe('Suggesting mode — undo discipline', () => {
     handle.editor.commands.undo();
     expect(docText(handle)).toBe('Alpha beta gamma.');
     expect(opsWith(textDelta(fragment), SUGGEST_INSERT_MARK)).toHaveLength(1);
-  });
-});
-
-describe('Suggesting mode — persistence', () => {
-  it('persists per doc: off by default, round-trips, and does not leak across docs', () => {
-    expect(readSuggestModePref('doc-a')).toBe(false);
-    writeSuggestModePref('doc-a', true);
-    expect(readSuggestModePref('doc-a')).toBe(true);
-    expect(readSuggestModePref('doc-b')).toBe(false);
-    writeSuggestModePref('doc-a', false);
-    expect(readSuggestModePref('doc-a')).toBe(false);
   });
 });

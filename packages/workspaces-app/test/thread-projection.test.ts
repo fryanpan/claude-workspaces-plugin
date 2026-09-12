@@ -66,7 +66,7 @@ function returningReader(docId = 'd1') {
   });
 }
 
-function projectionOver(ydoc: Y.Doc, opts: { lines?: boolean; showResolved?: boolean } = {}) {
+function projectionOver(ydoc: Y.Doc, opts: { lines?: boolean } = {}) {
   const surface = fakeSurface(opts);
   const onPendingExpiry = vi.fn();
   const projection = createThreadProjection({
@@ -74,11 +74,6 @@ function projectionOver(ydoc: Y.Doc, opts: { lines?: boolean; showResolved?: boo
     surface: surface.surface,
     seen: returningReader(),
     onPendingExpiry,
-    // Whether a settled thread is drawn on the page is the reader's choice
-    // (doc/resolved-visibility.ts). These cases are about what the projection
-    // BUILDS, so they default to drawing everything; the one case that is
-    // about the choice passes it explicitly.
-    showResolved: () => opts.showResolved ?? true,
   });
   return { projection, onPendingExpiry, ...surface };
 }

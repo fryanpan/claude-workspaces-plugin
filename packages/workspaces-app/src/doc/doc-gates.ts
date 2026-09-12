@@ -2,38 +2,37 @@
  * The last phase of a markdown document's boot: what this browser is allowed
  * to do with the surface.
  *
- * Three things in one place because between them they settle one question.
- * The format bar's own collapse toggle and its hotkey; the view/edit and
- * Suggesting interlock (doc-modes.ts); and the read-only lock that overrides
- * both when the server will not accept writes. The lock has to run AFTER the
- * toggles exist, because it drives them through the handle they hand back —
- * putting the order here is what keeps it from being an accident of two call
- * sites.
+ * Two things in one place because between them they settle one question. The
+ * format bar's own collapse toggle and its hotkey; and the editability of the
+ * document, which is no longer a mode anybody switches — a doc opens ready to
+ * write for a browser the server will accept, and opens read-only, with
+ * nothing offering to change that, for one it will not.
  *
  * Synchronous, and last in the mount, because it speaks for the whole
  * surface: `canWrite` arrived on the MountContext, so nothing here waits on a
  * network answer and nothing is editable in the meantime.
  */
-import type { User } from '@claude-workspaces/core';
+import { initialEditMode } from '../edit-mode.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { lockDocToReading } from '../signin/write-gate.ts';
-import { type DocModeElements, wireDocModes } from './doc-modes.ts';
 import { applyWidthPref, wireFormatBar } from './editor-toolbar.ts';
+
+/** The chrome this phase speaks for. */
+export interface DocGateElements {
+  formatBar: HTMLElement;
+  toggleFormat: HTMLButtonElement;
+}
 
 export interface DocGatesOptions {
   editor: EditorHandle;
   scope: MountScope;
-  els: DocModeElements;
-  docId: string;
-  user: User;
+  els: DocGateElements;
   canWrite: boolean;
-  /** True when this mount started a huddle, which opens in edit mode. */
-  justStarted: boolean;
 }
 
 export function wireDocGates(opts: DocGatesOptions): void {
-  const { editor, scope, els, docId, user, canWrite, justStarted } = opts;
+  const { editor, scope, els, canWrite } = opts;
   const { formatBar, toggleFormat } = els;
 
   // =========================================================================
@@ -46,21 +45,24 @@ export function wireDocGates(opts: DocGatesOptions): void {
   applyWidthPref();
   wireFormatBar(editor, scope);
 
-  // The two mode switches and the interlock between them live in
-  // doc/doc-modes.ts; what stays here is the read-only lock that speaks for
-  // the whole surface, and it drives them through the handle it gets back.
-  const modes = wireDocModes({ editor, scope, els, docId, user, canWrite, justStarted });
-
-  /**
-   * A browser the server will not accept writes from does not get an edit
-   * toggle — or a Suggesting toggle, which is the same door. The socket is
-   * already read-only server-side; this is what stops a person typing into it
-   * and watching the text vanish on reload.
-   */
-  if (!canWrite) {
-    // The crumb and the save-state chip are `lockDocToReading`'s now — they
-    // were here, and the redline and code surfaces went without them.
-    lockDocToReading(modes);
+  // =========================================================================
+  // EDITABILITY — the server's answer, applied once.
+  //   `canWrite` is what main() already awaited, so the first `setEditable`
+  //   of this mount is already the right one. There is no window in which the
+  //   document is live and the answer is outstanding.
+  // =========================================================================
+  const editable = initialEditMode(canWrite) === 'edit';
+  editor.editor.setEditable(editable);
+  document.body.classList.toggle('view-mode', !editable);
+  if (!editable) {
+    // Formatting commands are no-ops on a surface that takes nothing, so the
+    // bar starts collapsed and `body.view-mode` hides its toggle.
+    formatBar.classList.add('is-collapsed');
+    toggleFormat.setAttribute('aria-pressed', 'false');
+    // The crumb ("Editing:" → "Reading:") and the save-state chip are
+    // `lockDocToReading`'s — the redline and code surfaces call it too, which
+    // is what keeps the three from drifting apart.
+    lockDocToReading({});
   }
 
   // =========================================================================

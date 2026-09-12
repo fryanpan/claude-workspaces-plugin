@@ -58,6 +58,9 @@ export interface EditorHandle {
   setInlineCards: (cards: InlineThreadCard[]) => void;
   /** Keep the words a comment is being written about marked; null clears. */
   markPending: (range: { from: number; to: number } | null) => void;
+  /** Adopt the caret the browser just placed at these viewport coordinates.
+   *  See `ReviewSurface.placeCaretAtPoint` for why a click handler needs it. */
+  placeCaretAtPoint: (clientX: number, clientY: number) => boolean;
   getText: () => string;
   setMarkdown: (md: string) => void;
   getMarkdown: () => string;
@@ -241,16 +244,52 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
   // bound .md file). The editor never seeds locally — that would race the
   // server's authoritative content.
 
-  // Links are non-navigable on a plain click (openOnClick:false) so the cursor
-  // can be placed inside them to edit — but a Cmd/Ctrl+Click should open the
-  // link in a new tab, matching the browser convention for opening links in a
-  // read-only surface. Bound at the DOM level so it works in both edit and
-  // view mode. Script-bearing schemes are filtered by safeLinkHref.
+  /**
+   * A single tap or click opens the link — on a phone and under a mouse
+   * alike.
+   *
+   * Tiptap's own opener is off (`openOnClick: false`) and this replaces it,
+   * because the doc is now EDITABLE for everyone who can write it: the
+   * Cmd/Ctrl-click this used to require is a gesture a touch screen does not
+   * have, and a reader on a phone had no way at all to follow a link in their
+   * own notes. The href is still filtered by `safeLinkHref`, so a
+   * script-bearing scheme opens nothing.
+   *
+   * Three gestures are NOT this one:
+   *
+   * - Alt/Option-click, the deliberate "put the caret in here". This is the
+   *   way to edit a link's own words now that a plain click leaves the page,
+   *   and it is the only one: a browser sends the FIRST click of a double
+   *   click with `detail === 1`, so by the time a second arrives the link has
+   *   already opened. Double-click-to-select and click-to-open cannot both
+   *   have the plain gesture, and the spec gives it to opening.
+   * - Shift-click, which extends a selection across it.
+   * - anything but the primary button, which belongs to the context menu.
+   *
+   * `ev.detail > 1` is still refused, and it is not that missing fourth
+   * gesture: it stops the SECOND click of a double click from opening the
+   * same link a second time, in a second tab.
+   *
+   * Bound at the DOM level so it works whether or not the view is editable.
+   */
   const onLinkClick = (ev: MouseEvent) => {
-    if (!(ev.metaKey || ev.ctrlKey)) return;
+    if (ev.button !== 0 || ev.detail > 1 || ev.altKey || ev.shiftKey) return;
     const target = ev.target as HTMLElement | null;
     const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
     if (!anchor) return;
+    // A link the reader has ALREADY commented on belongs to the comment
+    // first. Its words carry a highlight, and that highlight is the only way
+    // into the thread from the prose — take the plain click for the link and
+    // the reader can never reopen their own comment by pointing at what it is
+    // about. So a highlighted link opens its thread on a plain click, and
+    // opens the page on a Cmd/Ctrl-click, which is the gesture a mouse user
+    // already has for "open this link, but not here". Returning leaves the
+    // event to bubble to the `.thread-range` handler on the mount above.
+    // Asked of the CLICK TARGET, not of the anchor: a highlight over a link
+    // may render as a span inside the `<a>` or as one around it, depending on
+    // where the comment's range starts and ends, and only the target is
+    // inside both spellings.
+    if (!ev.metaKey && !ev.ctrlKey && target?.closest?.('.thread-range')) return;
     const href = safeLinkHref(anchor.getAttribute('href'));
     if (!href) return;
     ev.preventDefault();
@@ -344,6 +383,20 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       editor.commands.setTextSelection(clamped);
       editor.commands.scrollIntoView();
       editor.commands.focus();
+    },
+    placeCaretAtPoint(clientX, clientY) {
+      // Nothing to place when there is no caret to begin with: a visitor who
+      // cannot write reads the doc with `editable` false, and moving a
+      // selection there would only steal the page's focus.
+      if (!editor.isEditable) return false;
+      const at = editor.view.posAtCoords({ left: clientX, top: clientY });
+      if (!at) return false;
+      // setTextSelection only — NOT focus() or scrollIntoView(). The click
+      // that brought us here has already focused the editor and the text is
+      // already on screen; either call would scroll the doc out from under
+      // the reader's finger.
+      editor.commands.setTextSelection(at.pos);
+      return true;
     },
     pulseRange(from, to) {
       // Pulse the range by emitting a pulseId meta; the extension adds a

@@ -138,6 +138,7 @@ import {
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
 import type { TrackLossReason } from './meeting-track-watch.ts';
 import type { TranscriptReader } from './meeting-transcript-panel.ts';
+import { WRITE_CONTROL_ATTR } from './signin/write-gate.ts';
 import type { DocSpeakers } from './speaker-voices.ts';
 
 /** How often the elapsed clock is redrawn. Twice a second: a second-resolution
@@ -491,6 +492,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const record = document.createElement('button');
   record.type = 'button';
   record.className = 'meeting-record';
+  // Recording WRITES: the transcript and every note it mints land in this
+  // doc. A visitor who cannot write it was still offered the button, and the
+  // press failed at the server. The strip is built before the doc's write
+  // gate runs (`app.ts` mounts the meeting, then wires the gates), so
+  // carrying the attribute is all either button needs to arrive disabled.
+  record.setAttribute(WRITE_CONTROL_ATTR, '');
   record.setAttribute('aria-haspopup', 'menu');
   record.setAttribute('aria-expanded', 'false');
   const recordGlyph = document.createElement('span');
@@ -512,6 +519,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const options = document.createElement('button');
   options.type = 'button';
   options.className = 'meeting-record-options';
+  options.setAttribute(WRITE_CONTROL_ATTR, '');
   options.setAttribute('aria-label', 'Recording options');
   options.setAttribute('aria-haspopup', 'dialog');
   options.title = 'Recording options';

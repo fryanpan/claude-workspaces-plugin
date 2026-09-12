@@ -1,8 +1,9 @@
 /**
- * Pure decision for "open this link" behaviour. The editor keeps links
- * non-navigable on a plain click (so you can place the cursor to edit them);
- * a Cmd/Ctrl+Click opens them instead. This helper answers only the "what URL,
- * if any, is safe to open" half so it can be unit-tested without a DOM.
+ * Pure decision for "open this link" behaviour. A single tap or click on a
+ * link opens it, editable doc or not (`editor.ts` holds the gesture, and the
+ * gestures that mean "edit this link" rather than "follow it"). This helper
+ * answers only the "what URL, if any, is safe to open" half so it can be
+ * unit-tested without a DOM.
  *
  * Permissive by design — an attachment's own links (relative paths, anchors,
  * mailto/tel) should all open — EXCEPT script-bearing schemes, which must
