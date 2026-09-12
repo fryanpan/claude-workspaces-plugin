@@ -542,6 +542,20 @@ export interface NotesUpdate {
 export type NotesWriteRefusal = 'refused';
 
 /**
+ * The batch landed, and none of what landed was words.
+ *
+ * A write, for everything that asks whether the doc took the tick — the
+ * turns do not carry and the compose is not retried. It is its own answer for
+ * the one reader that asks a narrower question: whether the room's words are
+ * reaching the doc, which is what the not-written notice claims they are not.
+ * An empty batch, a regroup, and a regroup applied beside a note the guard
+ * refused all land and all put no words in, and only the write path can tell
+ * the last of those from a note that arrived — the tick composed words either
+ * way.
+ */
+export type NotesWriteNoWords = 'no-words';
+
+/**
  * "Every place the notes say `from`, they should say `to`" — a rename
  * reaching notes already written.
  *
@@ -782,13 +796,14 @@ export interface MeetingNotesDeps {
    * the ordinary case and must not have to say so.
    *
    * `'refused'` is the third answer and the one that must not be retried:
-   * see {@link NotesWriteRefusal}.
+   * see {@link NotesWriteRefusal}. `'no-words'` is a write that put no words
+   * in: see {@link NotesWriteNoWords}.
    */
   // A sink with nothing to report returns nothing; only an explicit `false`
   // or `'refused'` means the write did not land. The union is the contract,
   // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
+  onNotes: (update: NotesUpdate) => void | boolean | NotesWriteRefusal | NotesWriteNoWords;
   /**
    * Where a rename of a voice already written about goes. Optional: a
    * session with no sink for it composes under the new name from the next
@@ -868,7 +883,7 @@ export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
   // or `'refused'` means the write did not land. The union is the contract,
   // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes?: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
+  onNotes?: (update: NotesUpdate) => void | boolean | NotesWriteRefusal | NotesWriteNoWords;
   taskExtractor?: import('./meeting-task-capture.ts').TaskCaptureExtractor | null;
 };
 
@@ -1957,11 +1972,18 @@ export function beginNotesSession(
         // notice: no words reached the doc, so a sentence saying words are not
         // reaching the doc is still true, and clearing the streak on either
         // would let a meeting alternate refusal and silence while the room is
-        // told nothing. So the test is whether any edit CARRIED WORDS, not
-        // whether the batch had edits in it. The quota notice retracts
-        // unconditionally a few lines down for the opposite reason — the API
-        // answered, which is the whole of what that sentence claims.
-        const wroteWords = edits.some((e) => 'markdown' in e);
+        // told nothing. The quota notice retracts unconditionally a few lines
+        // down for the opposite reason — the API answered, which is the whole
+        // of what that sentence claims.
+        //
+        // THE WRITE PATH'S VERDICT, NOT THE COMPOSE'S EDITS. A third batch
+        // lands with no words in it: a note the guard refused beside a
+        // regroup it let through. Its edits carry words, so reading them said
+        // "wrote", and the notice came down while nothing was being written.
+        // Only the sink knows which edits landed, and it answers `'no-words'`
+        // for all three. A sink that reports nothing — the tests' own — still
+        // gets the old reading, which is right for every batch it can see.
+        const wroteWords = answer !== 'no-words' && edits.some((e) => 'markdown' in e);
         if (wroteWords) writesFailedInARow = 0;
         // A question is only asked once, and it is asked once it has LANDED.
         // Marking them offered before the write meant a refused write lost

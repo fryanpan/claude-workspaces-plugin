@@ -15,6 +15,7 @@
  * All fixtures are invented place names. The repo is public.
  */
 import { describe, expect, test } from 'bun:test';
+import type { prose } from '@claude-workspaces/core';
 import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
 import { NOTES_NOT_WRITTEN_MARK } from '../src/notes-notice.ts';
 import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
@@ -158,6 +159,46 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         return section === undefined
           ? addNotes(input, markdown)
           : [{ op: 'replace_block', blockId: section.id, markdown: `## ${markdown}` }];
+      },
+    });
+    const seen: boolean[] = [];
+    for (const line of ['one', 'two', 'three', 'four', 'five', 'six']) {
+      seen.push(carriesNotice((await h.speak(line)).markdown));
+    }
+    await h.end();
+    seen.push(carriesNotice(h.markdown()));
+    const raised = seen.indexOf(true);
+    expect(raised).toBeGreaterThanOrEqual(0);
+    expect(seen.slice(raised)).toEqual(seen.slice(raised).map(() => true));
+  });
+
+  // AND THROUGH A BATCH THAT MIXES THE TWO. A refused note beside a regroup
+  // the guard lets through is a batch the write path calls a success — the
+  // regroup is what it applied — while the only words in it never reached
+  // the doc. Judging recovery from the edits the tick COMPOSED saw the words
+  // and cleared the notice; only the write path knows which edits landed.
+  // Found by an independent review of this branch.
+  test('leaves it standing through a tick whose words were refused beside a regroup', async () => {
+    const h = createNotesTickHarness({
+      doc: '# Harborlight survey\n',
+      compose: (input) => {
+        const markdown = input.tick.turns.map((t) => `- ${t.text}`).join('\n');
+        if (markdown.length === 0) return [];
+        const section = input.outline.find(
+          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+        );
+        if (section === undefined) return addNotes(input, markdown);
+        const refused: prose.BlockEdit = {
+          op: 'replace_block',
+          blockId: section.id,
+          markdown: `## ${markdown}`,
+        };
+        if (!input.outline.some((e) => e.text.includes(NOTES_NOT_WRITTEN_MARK))) return [refused];
+        const lead = input.outline.find((e) => e.kind === 'listItem');
+        return [
+          refused,
+          { op: 'nest_blocks', leadBlockId: lead?.id ?? 'b-1', blockIds: ['b-gone'] },
+        ];
       },
     });
     const seen: boolean[] = [];

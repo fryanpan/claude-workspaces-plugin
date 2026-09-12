@@ -73,6 +73,7 @@ import {
   type NotesReattribution,
   type NotesRelabel,
   type NotesUpdate,
+  type NotesWriteNoWords,
   type NotesWriteRefusal,
 } from './meeting-notes.ts';
 import {
@@ -635,6 +636,17 @@ export function applyNotesUpdate(
      * string, and a tick whose write LANDED wants none of this.
      */
     onOutcomes?: (outcomes: readonly prose.BlockEditOutcome[]) => void;
+    /**
+     * Called when words from this batch are in the doc — an insert or a
+     * replace that applied, or a note the address repair re-homed.
+     *
+     * A `null` result says the batch landed, not that it wrote a note: a
+     * regroup lands too, including one applied beside a note the guard took
+     * out of the same batch. The not-written notice needs the difference and
+     * cannot get it from the edits it composed, which carry words either way.
+     * A callback for the reason `onOutcomes` is one.
+     */
+    onWordsLanded?: () => void;
   } = {},
 ): NotesWriteResult {
   const doc = docStore.get(update.docId);
@@ -802,17 +814,25 @@ export function applyNotesUpdate(
   // A RECOVERED NOTE COUNTS AS A WRITE, because it is one: the words are in
   // the doc. Reporting the tick as failed anyway would carry turns that are
   // already written up, and the next compose would note them a second time.
+  if (recovered > 0 || res.outcomes.some((o) => o.status !== 'failed' && carriesWords(o))) {
+    opts.onWordsLanded?.();
+  }
   if (res.applied + res.suggested + recovered > 0) return null;
   return failedCarryingWords(res.outcomes) ? 'all-edits-failed' : null;
 }
 
-/** Whether any edit that failed was one that would have PUT WORDS in the doc.
- *  An insert or a replace carries text; a move and a delete do not. */
+/** Whether any edit that failed was one that would have PUT WORDS in the doc. */
 function failedCarryingWords(outcomes: readonly prose.BlockEditOutcome[]): boolean {
-  return outcomes.some(
-    (o) =>
-      o.status === 'failed' &&
-      (o.op === 'insert_at_end' || o.op === 'insert_under_heading' || o.op === 'replace_block'),
+  return outcomes.some((o) => o.status === 'failed' && carriesWords(o));
+}
+
+/** Whether an edit is one that PUTS WORDS in the doc. An insert or a replace
+ *  carries text; a move and a delete do not. */
+function carriesWords(outcome: prose.BlockEditOutcome): boolean {
+  return (
+    outcome.op === 'insert_at_end' ||
+    outcome.op === 'insert_under_heading' ||
+    outcome.op === 'replace_block'
   );
 }
 
@@ -1441,16 +1461,22 @@ export function withServerNotesSinks(
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
       notesSectionForMeeting(heading, { docId, meetingId }, outline, deps.docStore()),
-    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
-      let landed: boolean | NotesWriteRefusal = true;
+    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal | NotesWriteNoWords => {
+      let landed: boolean | NotesWriteRefusal | NotesWriteNoWords = true;
       let outcomes: readonly prose.BlockEditOutcome[] | undefined;
+      let words = false;
       try {
         const skip = applyNotesUpdate(deps.docStore(), update, heading, {
           ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
           onOutcomes: (o) => {
             outcomes = o;
           },
+          onWordsLanded: () => {
+            words = true;
+          },
         });
+        // Landed, and none of it was words: see {@link NotesWriteNoWords}.
+        if (skip === null && !words) landed = 'no-words';
         if (skip !== null) {
           // A GUARD REFUSAL REACHES THE SESSION AS A REFUSAL, not as a failed
           // write. `guard-refused` already says the batch was declined on
