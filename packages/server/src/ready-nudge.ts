@@ -544,14 +544,27 @@ export class ReadyWorkNudger {
     return board && !board.retired ? board : undefined;
   }
 
-  /** Send one addressed wake about one row, now, and spend the board's
-   *  arming on it so the timer does not follow with a second frame over the
-   *  same fact. It re-arms on the next real activity. */
+  /**
+   * Send one addressed wake about one row, now.
+   *
+   * A DELIVERED wake spends the board's arming, so the timer does not follow
+   * with a second frame over the same fact; it re-arms on the next real
+   * activity. An undelivered one spends nothing, which is the same rule the
+   * timed pass keeps and for the same reason: a nudge that reached nobody
+   * must stay owed, or the lead returns to a board that has already decided
+   * it told them.
+   *
+   * Getting that order wrong is worse here than on the timed pass, because
+   * this path also moves the clock. `noteActivity` has already pushed the
+   * board's idle reading to `ts`, so an arming recorded for a lead holding no
+   * stream would match the very stamp the next tick computes — the immediate
+   * wake would be dropped AND the fifteen-minute backstop disarmed with it,
+   * for exactly the state that produces an unattached lead: a restart, a
+   * plugin update, a session that has not come back yet.
+   */
   private wakeLeadNow(board: ReadyWorkSnapshot, ts: number, taskId: string, title: string): void {
     const lead = board.leadAgentId;
     if (lead === undefined) return;
-    this.armed.set(board.workspaceId, this.stampFor(board, ts));
-    this.saveStamps();
     if (!this.reachable(board.workspaceId, lead)) return;
     this.emit(board.workspaceId, lead, {
       event: READY_IDLE_EVENT,
@@ -560,6 +573,8 @@ export class ReadyWorkNudger {
       title,
       ts,
     });
+    this.armed.set(board.workspaceId, this.stampFor(board, ts));
+    this.saveStamps();
   }
 
   /** One pass over every board. Never throws — this runs on a timer. */
