@@ -1,6 +1,20 @@
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
+ * What a refused write says — the sentence the typed composer has always put
+ * in its own note, spelled again here for the host that must say it about a
+ * SPOKEN comment the workspace would not take.
+ *
+ * Spelled, not imported. `widget-auth.ts` is in the budgeted bundle, and
+ * turning its inline literal into an exported name costs every mock page
+ * bytes for a string only a page with a microphone ever reads. The copy is
+ * safe because it is not trusted: a case in `widget-auth.test.ts` opens the
+ * real composer against a workspace that wants a signature and asserts the
+ * note it renders begins with this, so the two cannot drift apart quietly.
+ */
+export const SIGN_IN_NOTE = 'Sign in to post. Your draft is kept.';
+
+/**
  * A microphone on the widget, for a host that has one to hand it.
  *
  * The widget has no voice capture of its own and gets none here. The board
@@ -46,13 +60,54 @@ export interface WidgetMic {
  */
 const MIC_CSS = [
   '.side{bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(126px,calc(env(safe-area-inset-bottom) + 126px)))}',
+  // The phone face folds the floating buttons away under its bottom panel,
+  // and the mic wears .fab-list for its look and its slot, so it folded with
+  // the thread list — leaving the one width where speaking beats typing with
+  // no mic in the mode at all. The mic is the exception, and it says so HERE
+  // rather than in the widget's own sheet: the widget ships to every mock
+  // page under a gzip budget, and none of those pages has a mic to except.
+  // Two classes beats the fold rule's one class plus its :has() on equal
+  // terms, and this sheet is appended after the widget's, so it wins the tie.
+  // It needs nothing to move for it: the slot starts 74px up and the panel is
+  // about 64px tall in its short form. The tall form is what --cw-quick-h is
+  // for, below.
+  '.fab-list.fab-mic{display:flex}',
   '.fab-mic svg{width:20px;height:20px}',
   '.fab-mic.voice-active{background:#d1242f;border-color:#d1242f;color:#fff}',
   '.fab-mic.voice-unavailable{color:#8c959f}',
   // Said on hover, at once, rather than in a `title` that takes a second to
   // appear. Beside the button, toward the page.
-  '[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:56px;top:50%;transform:translateY(-50%);white-space:nowrap;background:#1b1f23;color:#fff;font-size:12px;line-height:1.3;padding:6px 10px;border-radius:6px;pointer-events:none}',
+  //
+  // One line where there is room, and WRAPPED where there is not. The host's
+  // words are the host's — the board's run to seventy-odd characters, because
+  // each one says whose feedback the button takes — and one unbreakable line
+  // of those ran off the left edge of a 430-wide screen by 43px for the mic
+  // and 92px for the list. The bound is the screen: the buttons sit ~76px in
+  // from the right, so a label no wider than `100vw - 88px` keeps its left
+  // edge on screen at every width, and nothing narrows a label that already
+  // fits.
+  //
+  // Three declarations do that one job, and dropping any of them loses it:
+  //
+  // - `width:max-content`, because this box is positioned against the BUTTON,
+  //   44px wide, so shrink-to-fit would size it from 44px minus the 56px
+  //   offset. That is why the old rule needed `nowrap` to be readable at all,
+  //   and why a max-width alone wrapped every label to its longest word.
+  // - `box-sizing:border-box`, because the sheet's own `*` rule does not
+  //   reach a pseudo-element: without it the cap bounds the TEXT and the 20px
+  //   of side padding hangs off the end of it, which is 20px back off-screen.
+  // - the cap itself.
+  '[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:56px;top:50%;transform:translateY(-50%);box-sizing:border-box;width:max-content;max-width:calc(100vw - 88px);background:#1b1f23;color:#fff;font-size:12px;line-height:1.3;padding:6px 10px;border-radius:6px;pointer-events:none}',
   '.readout{position:fixed;right:78px;bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px,calc(env(safe-area-inset-bottom) + 74px)));max-width:min(320px,calc(100vw - 110px));background:#1b1f23;color:#fff;border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.4;z-index:2147483647}',
+  // Both of them above the phone face's bottom panel, whose height
+  // `placeCards` measures into --cw-quick-h every frame. AFTER the two rules
+  // that set their slots, because it is the same property at the same
+  // specificity and the last one is the one that counts.
+  //
+  // `max` rather than a sum, so neither drifts upward on a page with no panel
+  // at all: with nothing docked the 74px slot still wins, and a panel only
+  // ever pushes them further up.
+  '.fab-mic,.readout{bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px,calc(env(safe-area-inset-bottom) + 74px),calc(var(--cw-quick-h, 0px) + 12px)))}',
   // The capture's own states. `createVoiceCapture` puts a spinner in the
   // readout while a post is in flight and takes the long form for a
   // paragraph-length answer; the app's rules for both are in
@@ -68,6 +123,124 @@ const MIC_CSS = [
   // Last, so a hidden readout stays hidden however the capture has classed it.
   '.readout.hidden{display:none}',
 ].join('');
+
+/**
+ * How tall the phone face's bottom panel is right now, published as
+ * `--cw-quick-h` so the mic and its readout can say in CSS that they stay
+ * above it.
+ *
+ * The panel's height is its contents': the mode's prompt is one row, the
+ * composer is a row that grows to four lines as you type, and a workspace
+ * that wants a signature adds a line of news and a button under that. A fixed
+ * 74px slot cleared the short form by ten pixels and disappeared under the
+ * tall one — painted, on screen, and under the reviewer's thumb at the same
+ * moment as the field they are typing in.
+ *
+ * Every `.quick` in the shadow root, not the first: the prompt stays in the
+ * DOM while the composer stands in front of it, and a hidden element measures
+ * zero, so the tallest is the one on screen.
+ *
+ * It lives HERE rather than in the widget's own frame loop because this
+ * module is not in the budgeted bundle and a page with no mic has nothing
+ * this measurement would move: a hook over there would be bytes every mock
+ * page pays for a button it does not have.
+ */
+function reserveQuickPanel(el: FeedbackWidgetEl): void {
+  let h = 0;
+  for (const p of el.shadow.querySelectorAll('.quick')) {
+    h = Math.max(h, Math.round(p.getBoundingClientRect().height));
+  }
+  const next = `${h}px`;
+  // Written only when it moved: this runs every frame.
+  if (el.style.getPropertyValue('--cw-quick-h') !== next) {
+    el.style.setProperty('--cw-quick-h', next);
+  }
+}
+
+/**
+ * Make the widget's one sign-in retry slot hold everything put in it, instead
+ * of only the last thing.
+ *
+ * `retryAfterSignIn` is a single field, and until a host could park something
+ * in it that was safe: the typed composer was the only writer and it re-armed
+ * on each refusal. A mic makes it shared. Two people are then told "your
+ * draft is kept" — the one who spoke and the one who typed — and a plain
+ * assignment keeps whichever was written last and silently drops the other,
+ * which is the sentence-losing bug the mic exists to end, rebuilt one layer
+ * up.
+ *
+ * Done as a property on the instance rather than by asking both writers to
+ * chain, for the same reason the sentence above is spelled twice: the typed
+ * composer lives in the budgeted bundle, and a page with no mic has no
+ * sharing to arrange. Assignment appends, reading hands back one function
+ * that runs the queue oldest first, and `= null` — which the widget does
+ * immediately after running it — empties the queue. So the widget's own two
+ * lines work unchanged and know nothing about this.
+ */
+function shareRetrySlot(el: FeedbackWidgetEl): void {
+  let queue: Array<() => void> = [];
+  Object.defineProperty(el, 'retryAfterSignIn', {
+    configurable: true,
+    get: () =>
+      queue.length === 0
+        ? null
+        : () => {
+            // Taken before running: a retry refused a second time re-arms the
+            // slot, and that belongs to the next sign-in, not this pass.
+            const holding = queue;
+            queue = [];
+            for (const run of holding) run();
+          },
+    set: (next: (() => void) | null) => {
+      if (next === null) queue = [];
+      else queue.push(next);
+    },
+  });
+}
+
+/**
+ * Measure the panel every frame while there IS one, and not one frame more.
+ *
+ * The height has to be read per frame while the panel is up: it grows as the
+ * composer's field fills, and a sampler that runs after the frame puts the
+ * mic a frame behind the thing it is dodging. But a widget sitting idle on a
+ * board has no panel, and a rAF loop that never ends is layout work and
+ * battery for nothing — on the phone this change is FOR, which is the surface
+ * least able to afford it.
+ *
+ * So a MutationObserver, which costs nothing while the shadow root is still,
+ * starts the loop when a panel appears, and the loop stops itself on the
+ * first frame after the last one goes — having written the 0 that puts the
+ * mic back in its plain slot. The panel can arrive either as a new node or as
+ * a class on a node already there, so both are watched. The whole thing ends
+ * with the button: a mic off the page schedules no further frame.
+ */
+function watchQuickPanel(el: FeedbackWidgetEl, button: HTMLElement): void {
+  let running = false;
+  const tick = (): void => {
+    if (!button.isConnected) {
+      running = false;
+      return;
+    }
+    // Before the test, so the frame that loses the panel is the frame that
+    // gives the mic its slot back.
+    reserveQuickPanel(el);
+    if (el.shadow.querySelector('.quick')) requestAnimationFrame(tick);
+    else running = false;
+  };
+  const start = (): void => {
+    if (running || !el.shadow.querySelector('.quick')) return;
+    running = true;
+    requestAnimationFrame(tick);
+  };
+  new MutationObserver(start).observe(el.shadow, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+  start();
+}
 
 /**
  * Put the mic on this widget. Idempotent: a second call hands back the
@@ -103,5 +276,7 @@ export function addMic(el: FeedbackWidgetEl, labels: MicLabels): WidgetMic {
     b.setAttribute('aria-label', tip);
   }
   s.append(style, button, readout);
+  shareRetrySlot(el);
+  watchQuickPanel(el, button);
   return { button, readout };
 }

@@ -136,7 +136,22 @@ export interface VoiceCaptureOpts {
 export interface VoiceCapture {
   destroy(): void;
   holding(): boolean;
+  /**
+   * Put a line in the indicator, the way an ack lands there.
+   *
+   * For the one thing a host can finish that the capture cannot: a send that
+   * is still outstanding when the hold is long over. The widget mic's refused
+   * post is the case — it waits for a sign-in that may be a minute away, and
+   * the answer belongs in the same readout the utterance went into, not in a
+   * second box of the host's own.
+   */
+  say(text: string): void;
 }
+
+/** What the readout says when the send came back with nothing — one wording,
+ *  wherever the send was finished, so a retry cannot report a failure in words
+ *  the first attempt would not have used. */
+export const VOICE_SEND_FAILED = 'Voice request failed — try again.';
 
 /** How long a terminal indicator message stays up. */
 /** How long a one-line ack stays up. The floor of `lingerFor`. */
@@ -511,7 +526,7 @@ export function createVoiceCapture(opts: VoiceCaptureOpts): VoiceCapture {
     show('Routing…', { busy: true });
     void opts.send(text, context).then((ack) => {
       if (!ack) {
-        show('Voice request failed — try again.', { linger: true });
+        show(VOICE_SEND_FAILED, { linger: true });
         return;
       }
       show(ack.ack, { linger: true });
@@ -681,6 +696,7 @@ export function createVoiceCapture(opts: VoiceCaptureOpts): VoiceCapture {
 
   return {
     holding: () => holding,
+    say: (text: string) => show(text, { linger: true }),
     destroy: () => {
       if (spaceHotkey) {
         document.removeEventListener('keydown', onKeyDown);

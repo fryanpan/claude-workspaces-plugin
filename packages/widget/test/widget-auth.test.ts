@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { SIGN_IN_NOTE } from '../src/widget-mic.ts';
 
 /**
  * The widget half of the popup-token handshake.
@@ -506,6 +507,22 @@ describe('a workspace that requires a signed-in writer', () => {
     expect(composer.querySelector('.auth-signin')).toBeTruthy();
     // Reading is untouched: the panel and the pick control are still there.
     expect(el.shadowRoot!.querySelector('.pick-btn')).toBeTruthy();
+  });
+
+  it('says the sentence the mic entry hands to a host, word for word', async () => {
+    // The mic entry spells this sentence again rather than importing it,
+    // because naming it here would cost the budgeted bundle bytes on every
+    // mock page. This is what makes the copy safe: the words a host puts in
+    // its readout for a REFUSED SPOKEN comment are the words the composer
+    // renders for a typed one, or a spoken comment is answered in a language
+    // of its own.
+    const mod = await importWidget();
+    fetchResponder = (url) => (url.includes('/api/auth/session') ? required() : json({}));
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-req-wording' });
+    await flush();
+    const note = openComposer(el).querySelector('.composer-err');
+    expect(note?.textContent, 'CONTROL: the composer really did say something').toBeTruthy();
+    expect(note?.textContent?.startsWith(SIGN_IN_NOTE), SIGN_IN_NOTE).toBe(true);
   });
 
   it('keeps the draft on refusal and posts it once the person signs in', async () => {
