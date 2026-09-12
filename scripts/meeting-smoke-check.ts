@@ -40,18 +40,29 @@
  *      line prints when the recording stops. Its absence was the only trace
  *      the production meeting left, and an absence is not something the
  *      pipeline tests can see.
+ *   4. THE FIRST THING SAID REACHES THE NOTES, and no bullet in the section
+ *      is ever a blank line. The 2026-09-11 recording opened its section with
+ *      an empty bullet, lost the first turn outright and kept the blank line
+ *      wearing the fresh-note tint for the rest of the meeting. So the first
+ *      composer call here answers with exactly that — a heading and a bullet
+ *      with nothing in it — and the check asks whether the words survived it.
+ *      It FAILS on the base commit of this branch.
  *
  * WHAT IT DOES NOT COVER. One doc, one speaker, one width, four turns, no
  * model. It is a smoke test, not a notes-quality eval — `bun run notes:eval`
  * is that, and it bills. Widening this is fine; letting it get slow enough
  * that somebody takes it out of `verify` is not.
  *
- *   bun run check:meeting-smoke [--keep] [--port N]
+ *   bun run check:meeting-smoke [--keep] [--port N] [--shot <png>]
+ *
+ * `--shot` writes a screenshot of the doc at 1180x820 once every assertion has
+ * passed — the reader's own view of the meeting this check just held. Nothing
+ * in `verify` passes it; it is for a person reviewing a change to the notes.
  *
  * All fixtures are invented place names. The repo is public.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +71,7 @@ import {
   type NotesComposer,
   createStubNotesComposer,
 } from '../packages/server/src/meeting-notes.ts';
+import { MEETING_NOTES_HEADING } from '../packages/server/src/notes-doc-access.ts';
 import { type ServerHandle, createServer } from '../packages/server/src/server.ts';
 import {
   type MockScriptTurn,
@@ -124,7 +136,33 @@ const SCRIPT: readonly MockScriptTurn[] = [
     words: ['saltmarsh', 'covers', 'the', 'second', 'week', 'and', 'the', 'week', 'after', 'that'],
     settled: 'Saltmarsh covers the second week, and the week after that.',
   },
+  {
+    words: ['the', 'slipway', 'quote', 'came', 'back', 'under', 'budget', 'by', 'nine', 'percent'],
+    settled: 'The slipway quote came back under budget by nine percent.',
+  },
+  {
+    words: ['we', 'lose', 'the', 'tide', 'window', 'if', 'the', 'crane', 'slips', 'again'],
+    settled: 'We lose the tide window if the crane slips again.',
+  },
+  {
+    words: [
+      'harborlight',
+      'wants',
+      'the',
+      'draft',
+      'timetable',
+      'before',
+      'the',
+      'board',
+      'meets',
+      'again',
+    ],
+    settled: 'Harborlight wants the draft timetable before the board meets again.',
+  },
 ];
+
+/** The first thing said — the sentence the 2026-09-11 meeting lost. */
+const FIRST_TURN = SCRIPT[0]?.settled ?? '';
 
 /**
  * Ticks on the CADENCE clock rather than on pauses, because the fake
@@ -135,8 +173,19 @@ const SCRIPT: readonly MockScriptTurn[] = [
 const CADENCE_MS = 700;
 const QUIET_MS = 400;
 
-/** Which composer call answers with nothing — see assertion 2. */
-const EMPTY_TICK_CALL = 2;
+/**
+ * Which composer call answers the way the production model did on the tick
+ * that opened the section: the heading, and a bullet with no words in it.
+ *
+ * The first call, because that is the tick the report is about — the one
+ * holding the first thing anybody said.
+ */
+const BLANK_BULLET_CALL = 1;
+
+/** Which composer call answers with nothing — see assertion 2. Not the call
+ *  above, and not the one after it: the blank-bullet tick's words carry into
+ *  the next call, which has to be one that writes them. */
+const EMPTY_TICK_CALL = 3;
 
 /** How long a browser-side condition may take before it is a failure. */
 const SETTLE_MS = 8_000;
@@ -146,6 +195,8 @@ const MEETING_MS = 30_000;
 interface Options {
   keep: boolean;
   port: number;
+  /** Where to write a screenshot of the finished doc, if anywhere. */
+  shot?: string;
 }
 
 export function parseArgs(argv: readonly string[]): Options {
@@ -154,6 +205,7 @@ export function parseArgs(argv: readonly string[]): Options {
     const a = argv[i];
     if (a === '--keep') o.keep = true;
     else if (a === '--port') o.port = Number(argv[++i]);
+    else if (a === '--shot') o.shot = argv[++i];
     else throw new Error(`unknown argument ${a}`);
   }
   return o;
@@ -171,8 +223,15 @@ function build(pkg: string): void {
 interface Composed {
   /** The settled words this tick was handed. */
   said: string[];
-  /** Whether the tick wrote anything into the doc. */
-  wrote: boolean;
+  /**
+   * What this call answered with.
+   *
+   * `blank` is the scripted failure — an answer that LOOKS like a write and
+   * puts no words in the doc — so it is neither of the other two: a reader
+   * counting what wrote must not count it, and a reader counting the tick
+   * that composed nothing must not either.
+   */
+  kind: 'wrote' | 'empty' | 'blank';
 }
 
 /**
@@ -192,8 +251,13 @@ function scriptedComposer(seen: Composed[]): NotesComposer {
     async compose(input) {
       const said = input.tick.turns.map((t) => t.text);
       if (said.length === 0) return [];
-      const edits = seen.length + 1 === EMPTY_TICK_CALL ? [] : await stub.compose(input);
-      seen.push({ said, wrote: edits.length > 0 });
+      const call = seen.length + 1;
+      if (call === BLANK_BULLET_CALL) {
+        seen.push({ said, kind: 'blank' });
+        return [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}\n\n- ` }];
+      }
+      const edits = call === EMPTY_TICK_CALL ? [] : await stub.compose(input);
+      seen.push({ said, kind: edits.length > 0 ? 'wrote' : 'empty' });
       return edits;
     },
   };
@@ -376,18 +440,58 @@ async function run(o: Options): Promise<number> {
     await until(cdp, `!!document.querySelector(${js(EDITOR_SELECTOR)})`, 20_000, 'the editor');
     await until(cdp, `!!document.querySelector('.meeting-record-dot')`, 20_000, 'the strip');
 
+    // 4a. THE FIRST THING SAID SURVIVES THE TICK THAT OPENED THE SECTION
+    //     WITH A BLANK. That tick put no words in the doc, so the pipeline
+    //     owes them still — and the very next composer call has to be handed
+    //     them. Asserted on the CALL rather than on the doc, because what is
+    //     under test is that the words were never counted as written up.
+    await untilHere(
+      () => composed.length >= 2,
+      MEETING_MS,
+      `a second composer call (saw ${composed.length})`,
+    );
+    if (composed[0]?.kind !== 'blank') {
+      throw new Error(`the first call was ${composed[0]?.kind ?? 'never made'}, not the blank one`);
+    }
+    const secondSaw = composed[1]?.said ?? [];
+    if (!secondSaw.some((s) => s.includes(FIRST_TURN))) {
+      throw new Error(
+        `the tick after the blank bullet was not handed the first turn again — it heard ${JSON.stringify(secondSaw)}`,
+      );
+    }
+
     // The meeting runs until the script has been spoken and the ticks it
     // needs have composed: two that wrote and the one that answered with
     // nothing.
     await untilHere(
-      () => composed.filter((c) => c.wrote).length >= 2 && composed.some((c) => !c.wrote),
+      () =>
+        composed.filter((c) => c.kind === 'wrote').length >= 2 &&
+        composed.some((c) => c.kind === 'empty'),
       MEETING_MS,
-      `ticks (saw ${composed.length}: ${composed.map((c) => (c.wrote ? 'wrote' : 'empty')).join(', ')})`,
+      `ticks (saw ${composed.length}: ${composed.map((c) => c.kind).join(', ')})`,
     );
-    const wrote = composed.filter((c) => c.wrote);
-    const empty = composed.find((c) => !c.wrote);
+    const wrote = composed.filter((c) => c.kind === 'wrote');
+    const empty = composed.find((c) => c.kind === 'empty');
     if (!empty)
       throw new Error('no tick composed nothing, so the live-transcript half is untested');
+
+    // 4b. AND IT IS IN THE NOTES, with no blank line left behind it. The two
+    //     halves of the report: the sentence that went missing, and the
+    //     bullet that stood in its place.
+    await until(
+      cdp,
+      `(() => { const t = document.querySelector(${js(EDITOR_SELECTOR)})?.textContent ?? '';
+         return t.includes(${js(FIRST_TURN)}); })()`,
+      SETTLE_MS,
+      `the first thing said (${JSON.stringify(FIRST_TURN)}) in the notes`,
+    );
+    const blanks = (await cdp.evaluate(
+      `[...document.querySelectorAll(${js(`${EDITOR_SELECTOR} li`)})]
+         .filter((li) => (li.textContent ?? '').trim().length === 0).length`,
+    )) as number;
+    if (blanks > 0) {
+      throw new Error(`${blanks} bullet(s) in the notes are blank lines carrying the live bar`);
+    }
 
     // 1. NOTES ACCUMULATE. Every written tick's words are still in the prose,
     //    as separate list items — not one line rewritten by the latest topic.
@@ -436,17 +540,22 @@ async function run(o: Options): Promise<number> {
       'the meeting summary line',
     );
 
+    if (o.shot !== undefined) {
+      const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
+      mkdirSync(dirname(o.shot), { recursive: true });
+      writeFileSync(o.shot, Buffer.from(png.data, 'base64'));
+      log(`wrote ${o.shot}`);
+    }
+
     const line = printed.find((l) => summary.test(l)) ?? '';
     log(
-      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, one composed nothing and its words left, ${items} note lines.`,
+      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, one composed nothing and its words left, ${items} note lines, no blank bullet, and the first thing said is in them.`,
     );
     log(`   ${line.trim()}`);
     return 0;
   } catch (err) {
     log(`❌ ${err instanceof Error ? err.message : String(err)}`);
-    log(
-      `   composer calls: ${composed.map((c, i) => `${i + 1}:${c.wrote ? 'wrote' : 'empty'}`).join(' ') || 'none'}`,
-    );
+    log(`   composer calls: ${composed.map((c, i) => `${i + 1}:${c.kind}`).join(' ') || 'none'}`);
     return 1;
   } finally {
     cleanup();
