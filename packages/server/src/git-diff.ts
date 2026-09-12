@@ -251,6 +251,10 @@ function isAncestor(repo: string, a: string, b: string): boolean {
  * branch this worktree has since left, falls back to the merge base rather
  * than producing a diff about nothing.
  *
+ * A RENAME contributes both paths. A builder who moves a screen out of the
+ * client tree changed a file a person looks at, and a list holding only the
+ * destination says the opposite of what happened.
+ *
  * `null` means the question could not be answered — not a repo, no default
  * branch, no merge base, a git that failed. It is deliberately a different
  * value from `[]` ("a readable worktree that has changed nothing"), because
@@ -272,5 +276,10 @@ export function changedFilesInWorktree(repo: string, since?: string): string[] |
       : mergeBase;
   const diff = diffFiles(repo, pinned, null);
   if (!diff.ok) return null;
-  return diff.files.map((f) => f.relPath);
+  const paths: string[] = [];
+  for (const file of diff.files) {
+    paths.push(file.relPath);
+    if (file.oldPath !== undefined && file.oldPath !== file.relPath) paths.push(file.oldPath);
+  }
+  return paths;
 }

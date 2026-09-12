@@ -47,11 +47,18 @@ export interface BuilderWorktree {
  * @param changed files the builder has written since leaving the base, by
  *   path relative to the worktree root. Left uncommitted, because that is the
  *   state a live builder is in for most of its run.
+ * @param existing files that were already on the default branch when the
+ *   builder took the worktree — what it has to have in order to move or
+ *   delete one.
  */
-export function makeBuilderWorktree(changed: Record<string, string> = {}): BuilderWorktree {
+export function makeBuilderWorktree(
+  changed: Record<string, string> = {},
+  existing: Record<string, string> = {},
+): BuilderWorktree {
   const path = mkdtempSync(join(tmpdir(), 'ws-builder-'));
   git(path, 'init', '-q', '-b', 'main');
   write(path, 'README.md', 'base\n');
+  for (const [rel, text] of Object.entries(existing)) write(path, rel, text);
   git(path, 'add', '-A');
   git(path, 'commit', '-qm', 'base');
   const base = git(path, 'rev-parse', 'HEAD');

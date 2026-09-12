@@ -9,15 +9,18 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { changedFilesInWorktree, defaultBaseRef } from '../src/git-diff.ts';
 import { type BuilderWorktree, makeBuilderWorktree } from './builder-worktree-fixture.ts';
 
 const made: BuilderWorktree[] = [];
-const worktree = (files?: Record<string, string>): BuilderWorktree => {
-  const wt = makeBuilderWorktree(files);
+const worktree = (
+  files?: Record<string, string>,
+  existing?: Record<string, string>,
+): BuilderWorktree => {
+  const wt = makeBuilderWorktree(files, existing);
   made.push(wt);
   return wt;
 };
@@ -105,6 +108,25 @@ describe('what the read returns', () => {
     // A commit this repo has never heard of falls back to the merge base
     // rather than failing the read or reporting a diff about nothing.
     expect(changedFilesInWorktree(wt.path, stranger)).toEqual(['src/mine.ts']);
+  });
+
+  it('names both ends of a rename, so a file moved OUT of a tree still counts', () => {
+    // A screen moved into the server's templates is a change to something a
+    // person looks at. A list holding only the destination says otherwise.
+    const wt = worktree({}, { 'packages/app/src/pages/home.tsx': '<main/>\n' });
+    mkdirSync(join(wt.path, 'packages/server/src'), { recursive: true });
+    execFileSync('git', [
+      '-C',
+      wt.path,
+      'mv',
+      'packages/app/src/pages/home.tsx',
+      'packages/server/src/home-template.ts',
+    ]);
+    wt.commit('move the screen');
+    expect(changedFilesInWorktree(wt.path)?.sort()).toEqual([
+      'packages/app/src/pages/home.tsx',
+      'packages/server/src/home-template.ts',
+    ]);
   });
 
   it('does not blame the builder for what the default branch moved on', () => {

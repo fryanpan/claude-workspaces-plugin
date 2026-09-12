@@ -150,6 +150,13 @@ agreed with "did this commit touch `workspaces-app/src` or `widget/src`" on
 travel; a repo that keeps its screens somewhere else reads as no UI change,
 which is the cheap direction.
 
+**A rename is evidence at both ends.** `changedFilesInWorktree` reports a
+renamed file under its old path as well as its new one, because moving a
+screen out of the client tree is a change to something a person looks at and
+a list holding only the destination says the opposite. Rules 2 and 3 both
+read a path, so a `.tsx` moved to a `.ts` under `server/src` would otherwise
+be the one shape of UI work that hides by leaving.
+
 **A worktree outlives a dispatch, so the read starts from a baseline.** The
 dispatch registry records the commit a checkout was sitting on when the
 dispatch was registered (`baseCommit`), and `changedFilesInWorktree` reads
