@@ -7,6 +7,8 @@ import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
+import type { BoardRole } from '../share/board-role.ts';
+import type { ShareLinks } from '../share/share-links.ts';
 import type { SlowLoadAlarm } from '../slow-load-alarm.ts';
 import type { SseBus } from '../sse.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -37,6 +39,9 @@ export interface WorkspaceRoutesContext {
   homeBriefs: HomeBriefStore;
   /** What each agent has asked to be told about. */
   agentWatches: AgentWatches;
+  /** Share links and the board memberships redeeming one creates — who has
+   *  access to a board, and at what level. */
+  shareLinks: ShareLinks;
   /** Where a spoken request is routed and how its answer comes back. */
   voiceRouter: VoiceRouter;
 
@@ -142,6 +147,15 @@ export interface WorkspaceRouteRequest {
   /** The author this request is allowed to claim, from its body's `author`
    *  plus whatever the session, widget token or roster proves. */
   authorFor: (claimed: unknown) => User | undefined;
+  /** The email Cloudflare Access verified for this request, or null when
+   *  nothing proved one — the operator on their own machine, chiefly. */
+  accessEmail: string | null;
+  /** What this caller may DO on a board: `owner` or `member`. Resolved once
+   *  by the admission gate; see `roleFor` there. */
+  roleFor: (workspaceId: string) => BoardRole;
+  /** The owner gate: `null` for the board's owner, the 403 for anyone else.
+   *  `const denied = requireOwner(id); if (denied) return denied;` */
+  requireOwner: (workspaceId: string) => Response | null;
 }
 
 /**
