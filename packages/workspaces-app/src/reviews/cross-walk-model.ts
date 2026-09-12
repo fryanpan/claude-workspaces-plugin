@@ -26,6 +26,7 @@ export type CrossReviewRow = ReviewThreadItem & {
   key: string;
   size: ReviewSize;
   minutes: number;
+  dueAt?: number;
 };
 
 export interface CrossEntry {
@@ -75,6 +76,7 @@ export function crossEntry(row: CrossReviewRow, now: number): CrossEntry | null 
     if (placed) item = { ...placed, key: row.key };
   }
   if (!item) return null;
+  if (row.dueAt !== undefined) item = { ...item, dueAt: row.dueAt };
   return { item, project: row.project, workspaceId: row.workspaceId, size: row.size };
 }
 
@@ -102,6 +104,26 @@ export function aimAfterSizeChange(
   for (let i = Math.max(from, 0); i < entries.length; i += 1) {
     const e = entries[i];
     if (e && sizeAllowed(e.size, level)) return e.item.key;
+  }
+  return null;
+}
+
+/**
+ * Where a step lands once the queue has been re-read: the card the reader
+ * stepped to if it is still open, else the first card after it (in the order
+ * they were shown) that still is. Null is the done screen. A withdrawn item
+ * leaves between two cards, so the re-read before every step is what keeps
+ * the reader from answering an ask its filer has taken back.
+ */
+export function aimAfterRefresh(
+  shownKeys: readonly string[],
+  target: number,
+  fresh: readonly CrossEntry[],
+): string | null {
+  const open = new Set(fresh.map((e) => e.item.key));
+  for (let i = Math.max(target, 0); i < shownKeys.length; i += 1) {
+    const key = shownKeys[i];
+    if (key !== undefined && open.has(key)) return key;
   }
   return null;
 }

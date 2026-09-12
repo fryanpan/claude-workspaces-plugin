@@ -29,7 +29,7 @@ export interface LandingReview {
   summaryOf: (workspaceId: string) => string | undefined;
 }
 
-export const REVIEWS_HREF = '/reviews';
+export const REVIEW_HREF = '/review';
 
 const STOPS: ReadonlyArray<{ size: ReviewSize; label: string; hint: string }> = [
   { size: 'easy', label: 'Easy', hint: '&lt; 1 min' },
@@ -58,7 +58,7 @@ export function renderReviewBar(review: LandingReview): string {
     /</g,
     '\\u003c',
   );
-  return `<div class="allbar"><div class="allhead"><h2 class="alltitle">Review Items for You</h2></div><span class="sizes-label" id="sizes-label">Choose what you have time for:</span><div class="gorow">${renderFillBar('hard', 'sizes-label')}<span class="est">Total estimated time: <span class="est-n" id="est">${total}</span> min</span><a class="allgo" href="${REVIEWS_HREF}">Start review ›</a></div></div>
+  return `<div class="allbar"><div class="allhead"><h2 class="alltitle">Review Items for You</h2></div><span class="sizes-label" id="sizes-label">Choose what you have time for:</span><div class="gorow">${renderFillBar('hard', 'sizes-label')}<span class="est">Total estimated time: <span class="est-n" id="est">${total}</span> min</span><a class="allgo" href="${REVIEW_HREF}">Start review ›</a></div></div>
 <script type="application/json" id="review-sizes">${sizes}</script>`;
 }
 

@@ -3,10 +3,18 @@
  * over the server's Hard, the total follows the bar, and the choice outlives
  * the page. Fixtures are invented.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import type { ReviewSize } from '@claude-workspaces/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BootStorage } from '../src/boot-env.ts';
 import { wakeLandingReviewBar } from '../src/landing-review-bar.ts';
-import { SIZE_PREF_KEY, paintFillBar, readSizePref, writeSizePref } from '../src/review-sizes.ts';
+import {
+  SIZE_PREF_KEY,
+  type SizePrefRemote,
+  createSizeChoice,
+  paintFillBar,
+  readSizePref,
+  writeSizePref,
+} from '../src/review-sizes.ts';
 
 function memory(): BootStorage & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -18,6 +26,24 @@ function memory(): BootStorage & { data: Map<string, string> } {
     },
   };
 }
+
+/** The account's stored choice, answered when the test says so. */
+function account(stored: ReviewSize | null = null) {
+  let answer: (size: ReviewSize | null) => void = () => {};
+  const loaded = new Promise<ReviewSize | null>((resolve) => {
+    answer = resolve;
+  });
+  const saved: ReviewSize[] = [];
+  const remote: SizePrefRemote = {
+    load: () => loaded,
+    save: async (size) => {
+      saved.push(size);
+    },
+  };
+  return { remote, saved, answer: () => answer(stored) };
+}
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 const blocked: BootStorage = {
   getItem: () => {
@@ -41,7 +67,7 @@ function landing(sizes: Array<[string, number]>): void {
           <button type="button" class="board-tab filled board-tab-active" data-size="hard" role="radio" aria-checked="true">Hard <small>any</small></button>
         </div>
         <span class="est">Total estimated time: <span class="est-n" id="est">99</span> min</span>
-        <a class="allgo" href="/reviews">Start review ›</a>
+        <a class="allgo" href="/review">Start review ›</a>
       </div>
     </div>
     <script type="application/json" id="review-sizes">${JSON.stringify(sizes)}</script>`;
@@ -86,6 +112,37 @@ describe('the stored size choice', () => {
   });
 });
 
+describe('the choice follows the signed-in person', () => {
+  it('paints the cache first, then takes the account’s choice when it answers', async () => {
+    const store = memory();
+    store.data.set(SIZE_PREF_KEY, 'hard');
+    const acct = account('easy');
+    const onChange = vi.fn();
+    const choice = createSizeChoice(store, acct.remote, onChange);
+    expect(choice.level()).toBe('hard');
+    acct.answer();
+    await settle();
+    expect(onChange).toHaveBeenCalledWith('easy');
+    expect(choice.level()).toBe('easy');
+    // The cache now holds the account's choice for the next paint.
+    expect(store.data.get(SIZE_PREF_KEY)).toBe('easy');
+  });
+
+  it('saves a pick to the account, and a pick made before the account answers wins', async () => {
+    const store = memory();
+    const acct = account('easy');
+    const onChange = vi.fn();
+    const choice = createSizeChoice(store, acct.remote, onChange);
+    choice.pick('medium');
+    expect(acct.saved).toEqual(['medium']);
+    acct.answer();
+    await settle();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(choice.level()).toBe('medium');
+    expect(store.data.get(SIZE_PREF_KEY)).toBe('medium');
+  });
+});
+
 describe('the all-workspaces review bar', () => {
   const sizes: Array<[string, number]> = [
     ['easy', 1],
@@ -98,7 +155,7 @@ describe('the all-workspaces review bar', () => {
     landing(sizes);
     const store = memory();
     store.data.set(SIZE_PREF_KEY, 'easy');
-    wakeLandingReviewBar(document, store);
+    wakeLandingReviewBar(document, store, account().remote);
     expect(tab('easy').getAttribute('aria-checked')).toBe('true');
     expect(tab('medium').classList.contains('filled')).toBe(false);
     expect(est()).toBe('2');
@@ -108,7 +165,7 @@ describe('the all-workspaces review bar', () => {
   it('moves the total with a tap and remembers the tap', () => {
     landing(sizes);
     const store = memory();
-    wakeLandingReviewBar(document, store);
+    wakeLandingReviewBar(document, store, account().remote);
     expect(est()).toBe('14');
     tab('medium').click();
     expect(est()).toBe('5');
@@ -122,7 +179,7 @@ describe('the all-workspaces review bar', () => {
   it('hides Start review when the chosen size lets nothing through', () => {
     landing([['hard', 12]]);
     const store = memory();
-    wakeLandingReviewBar(document, store);
+    wakeLandingReviewBar(document, store, account().remote);
     expect(go().hidden).toBe(false);
     tab('easy').click();
     expect(est()).toBe('0');

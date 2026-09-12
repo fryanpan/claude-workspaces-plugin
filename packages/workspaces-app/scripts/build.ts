@@ -165,7 +165,7 @@ async function emit(buildId: string): Promise<boolean> {
     return false;
   }
 
-  // The cross-board review page (/reviews): the board's walkthrough card fed
+  // The cross-board review page (/review): the board's walkthrough card fed
   // every board's queue. Splitting for the board's reason — the card's
   // composer pulls the markdown editor chunk only when a reply is typed.
   const reviewsResult = await Bun.build({

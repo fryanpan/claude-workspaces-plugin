@@ -1,17 +1,19 @@
 /**
  * The all-workspaces review bar, woken: the server paints it on Hard with the
- * full total, and this repaints the reader's stored choice and keeps the
+ * full total, and this repaints the reader's choice (cached, then the
+ * account's — see `createSizeChoice`) and keeps the
  * total in step as the bar moves. Only the number changes — the label around
  * it is the server's and stays put.
  */
 import { type ReviewSize, parseReviewSize } from '@claude-workspaces/core';
 import type { BootStorage } from './boot-env.ts';
 import {
+  type SizePrefRemote,
+  createSizeChoice,
+  httpSizePref,
   onFillBarPick,
   paintFillBar,
-  readSizePref,
   totalMinutes,
-  writeSizePref,
 } from './review-sizes.ts';
 
 /** The items the page embedded, as `[size, minutes]` pairs. */
@@ -31,7 +33,11 @@ function readSizes(doc: Document): Array<{ size: ReviewSize; minutes: number }> 
   }
 }
 
-export function wakeLandingReviewBar(doc: Document, storage: BootStorage): void {
+export function wakeLandingReviewBar(
+  doc: Document,
+  storage: BootStorage,
+  remote: SizePrefRemote = httpSizePref(),
+): void {
   const bar = doc.querySelector<HTMLElement>('.allbar .review-sizes');
   if (!bar) return;
   const items = readSizes(doc);
@@ -43,9 +49,10 @@ export function wakeLandingReviewBar(doc: Document, storage: BootStorage): void 
     if (est) est.textContent = String(total);
     if (go) go.hidden = total === 0;
   };
-  paint(readSizePref(storage));
+  const choice = createSizeChoice(storage, remote, paint);
+  paint(choice.level());
   onFillBarPick(bar, (level) => {
-    writeSizePref(storage, level);
+    choice.pick(level);
     paint(level);
   });
 }

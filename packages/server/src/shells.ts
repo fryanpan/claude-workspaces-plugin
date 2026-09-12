@@ -419,10 +419,11 @@ export function renderSettingsShell(
 }
 
 /**
- * The cross-board review page (`/reviews`): every open item on every board,
+ * The cross-board review page (`/review`): every open item on every board,
  * one card at a time, top project first. The board's stylesheets in the
- * board's order, because the card IS the board's walkthrough card; all the
- * behaviour is `/app/reviews.js`, which reads `/api/review-queue`.
+ * board's order and the board's frame — topbar, rail, Home column — because
+ * the card IS the board's walkthrough card; all the behaviour is
+ * `/app/reviews.js`, which reads `/api/review-queue` and fills the rail.
  */
 export function renderReviewsShell(
   sentry: BrowserSentryConfig | null,
@@ -448,7 +449,10 @@ export function renderReviewsShell(
         <a class="back-link" href="/" title="All workspaces" aria-label="All workspaces">←</a>
         <span class="board-ws-name"><span class="board-ws-name-text" id="board-ws-name-text">Workspaces</span></span>
       </header>
-      <main class="reviews-main"><div id="board-walkthrough" class="board-walkthrough"></div></main>
+      <div class="board-main board-main--home" id="board-main">
+        <nav id="board-nav" class="board-nav" aria-label="Workspace pages"></nav>
+        <section id="board-home" class="board-home"><div id="board-walkthrough" class="board-walkthrough"></div></section>
+      </div>
     </div>
     <div id="board-toast" class="board-toast hidden"></div>
     <script type="module" src="${assetHref(assets, 'reviews.js')}"></script>

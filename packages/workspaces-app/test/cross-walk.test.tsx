@@ -19,6 +19,7 @@ import {
 import {
   type CrossEntry,
   type CrossReviewRow,
+  aimAfterRefresh,
   aimAfterSizeChange,
   allowedEntries,
   asQueue,
@@ -139,6 +140,22 @@ describe('the size filter keeps the reader’s place', () => {
     );
   });
 
+  it('re-reads before a step, so a withdrawn card is never the next one', () => {
+    const shown = ['a', 'b', 'c', 'd'];
+    const withoutB = all().filter((e) => e.item.key !== 'b');
+    // Stepping to b after its filer withdrew it lands on c.
+    expect(aimAfterRefresh(shown, 1, withoutB)).toBe('c');
+    expect(aimAfterRefresh(shown, 2, withoutB)).toBe('c');
+    // Nothing left after the target: the done screen.
+    expect(
+      aimAfterRefresh(
+        shown,
+        3,
+        withoutB.filter((e) => e.item.key !== 'd'),
+      ),
+    ).toBeNull();
+  });
+
   it('counts what it hides only for the done screen', () => {
     expect(allowedEntries(all(), 'easy').map((e) => e.item.key)).toEqual(['a', 'd']);
     expect(hiddenNote(all(), 'easy')).toBe('2 harder items not shown');
@@ -208,6 +225,31 @@ describe('the walkthrough in cross-board chrome', () => {
     expect(stops.map((b) => b.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
     stops[2]?.click();
     expect(onPick).toHaveBeenCalledWith('hard');
+  });
+
+  it('shows the task’s due date beside who asked, as plain text', () => {
+    const due = new Date(2026, 8, 20, 12).getTime();
+    const list = entries([ticketRow({ dueAt: due })]);
+    show({ queue: asQueue(list) });
+    expect(root.querySelector('.board-walk-wait')?.textContent).toMatch(/ · Due Sep 20$/);
+    show({ queue: asQueue(entries([ticketRow()])) });
+    expect(root.querySelector('.board-walk-wait')?.textContent).not.toContain('Due');
+  });
+
+  it('puts every word of a long ask, quoted draft included, one tap away', async () => {
+    const draft = Array.from({ length: 1800 }, (_, i) => `word${i}`).join(' ');
+    const detail = `Ship this draft?\n\n> ${draft} closing-line-of-the-draft`;
+    const list = entries([
+      ticketRow({ review: { shape: 'review', headline: 'Ship the draft?', detail } }),
+    ]);
+    show({ queue: asQueue(list) });
+    const expand = root.querySelector<HTMLElement>('.board-walk-body-expand');
+    expect(expand).not.toBeNull();
+    expand?.click();
+    await new Promise((r) => setTimeout(r, 0));
+    const body = root.querySelector('.board-walk-body');
+    expect(body?.classList.contains('board-walk-body-clamp')).toBe(false);
+    expect(body?.textContent).toContain('word1799 closing-line-of-the-draft');
   });
 
   it('ends on how many harder items were held back', () => {

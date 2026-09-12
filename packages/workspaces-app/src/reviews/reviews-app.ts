@@ -1,5 +1,5 @@
 /**
- * The cross-board review (`/reviews`): every open review item on every board,
+ * The cross-board review (`/review`): every open review item on every board,
  * one card at a time, top project first — the "Start review" of the
  * all-workspaces page.
  *
@@ -7,18 +7,25 @@
  * different chrome. Answers go through the board's own review controller, and
  * each row carries its board, so every write posts to that board's existing
  * route and meets the gates it always met.
+ *
+ * The queue is re-read before every step as well as after every answer, so
+ * an item its filer withdrew never becomes the next card. The rail beside the
+ * card is the board's, and goes to the pages of the project the card is from.
  */
 import type { ReviewSize } from '@claude-workspaces/core';
+import { type BoardNav, navPath } from '../board/board-presence-model.ts';
 import { createBoardReviewController } from '../board/board-review-controller.ts';
 import { type ReviewItem, advanceWalk } from '../board/board-review-model.ts';
+import { NAV_COLLAPSE_HTML, navRailItemsHtml, wireNavCollapse } from '../board/board-shell.ts';
 import { mountWalkthroughIsland, walkthroughData } from '../board/walkthrough-island.tsx';
 import { browserStorage } from '../boot-env.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
-import { readSizePref, writeSizePref } from '../review-sizes.ts';
+import { createSizeChoice, httpSizePref } from '../review-sizes.ts';
 import { fetchWriteAccess, installWriteGateNotice } from '../signin/write-gate.ts';
 import {
   type CrossEntry,
   type CrossReviewRow,
+  aimAfterRefresh,
   aimAfterSizeChange,
   allowedEntries,
   asQueue,
@@ -59,7 +66,10 @@ async function boot(): Promise<void> {
   const author = { id: user.id, name: user.name, kind: user.kind, color: user.color };
 
   let entries: CrossEntry[] = (await fetchQueue()) ?? [];
-  let level: ReviewSize = readSizePref(browserStorage);
+  // The account's choice arrives after the cache has painted; it re-aims the
+  // walk exactly as a tap on the bar would.
+  const choice = createSizeChoice(browserStorage, httpSizePref(), (size) => applySize(size));
+  let level: ReviewSize = choice.level();
   // The aim, as the board's walk keeps it: a key, and the index it was at, so
   // the card that replaces an answered one is the one that slid into its place.
   const walk: {
@@ -95,16 +105,47 @@ async function boot(): Promise<void> {
 
   const pickSize = (size: ReviewSize): void => {
     if (size === level) return;
+    choice.pick(size);
+    applySize(size);
+  };
+
+  function applySize(size: ReviewSize): void {
     const current = walk.walkKey;
     level = size;
-    writeSizePref(browserStorage, size);
     walk.walkKey = aimAfterSizeChange(entries, current, size);
     walk.walkIndex = walk.walkKey
       ? allowedEntries(entries, size).findIndex((e) => e.item.key === walk.walkKey)
       : allowedEntries(entries, size).length;
     walk.walkProgress = { cleared: walk.walkProgress.cleared, last: null };
     render();
+  }
+
+  /** Stepping moves on too, after a re-read (see the header). */
+  const step = async (to: number): Promise<void> => {
+    const shown = allowedEntries(entries, level).map((e) => e.item.key);
+    const fresh = await fetchQueue();
+    if (fresh) entries = fresh;
+    const visible = allowedEntries(entries, level);
+    walk.walkKey = aimAfterRefresh(shown, Math.max(0, to), visible);
+    walk.walkIndex = walk.walkKey
+      ? visible.findIndex((e) => e.item.key === walk.walkKey)
+      : visible.length;
+    walk.walkProgress = { cleared: walk.walkProgress.cleared, last: null };
+    render();
   };
+
+  // The board's rail, aimed at the project on the card.
+  const rail = document.getElementById('board-nav');
+  let railWorkspace: string | null = null;
+  if (rail) {
+    rail.innerHTML = navRailItemsHtml() + NAV_COLLAPSE_HTML;
+    wireNavCollapse(document, localStorage);
+    for (const btn of rail.querySelectorAll<HTMLButtonElement>('.board-nav-item[data-nav]')) {
+      btn.addEventListener('click', () => {
+        if (railWorkspace) location.assign(navPath(railWorkspace, btn.dataset.nav as BoardNav));
+      });
+    }
+  }
 
   /** Answering moves on: the write, the re-read, then the aim at the card
    *  that was next when the answer was sent. */
@@ -133,6 +174,10 @@ async function boot(): Promise<void> {
     const current = visible[index] ?? null;
     const next = visible[index + 1] ?? null;
     walk.walkKey = current?.item.key ?? null;
+    railWorkspace = current?.workspaceId ?? null;
+    for (const btn of rail?.querySelectorAll<HTMLButtonElement>('[data-nav]') ?? []) {
+      btn.disabled = railWorkspace === null;
+    }
     if (wsName) wsName.textContent = current ? current.project : 'Workspaces';
     document.title = current ? `Review · ${current.project}` : 'Review · Workspaces';
     walkthroughData.value = {
@@ -172,11 +217,7 @@ async function boot(): Promise<void> {
           openEntry(item.key);
         },
         onStep: (i) => {
-          const to = Math.max(0, i);
-          walk.walkKey = visible[to]?.item.key ?? null;
-          walk.walkIndex = Math.min(to, visible.length);
-          walk.walkProgress = { cleared: walk.walkProgress.cleared, last: null };
-          render();
+          void step(i);
         },
         onClose: leave,
       },

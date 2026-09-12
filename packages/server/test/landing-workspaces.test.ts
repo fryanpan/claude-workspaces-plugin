@@ -230,7 +230,7 @@ describe('the landing page offers every waiting item across boards, sized', () =
       `Total estimated time: <span class="est-n" id="est">${total}</span> min`,
     );
     expect(html).toContain('class="board-tab filled board-tab-active" data-size="hard"');
-    expect(html).toContain('class="allgo" href="/reviews">Start review ›</a>');
+    expect(html).toContain('class="allgo" href="/review">Start review ›</a>');
     // The removed counts: no per-row chip, no "N waiting" sentence.
     expect(html).not.toContain('for you</a>');
     expect(html).not.toContain('waiting on you');

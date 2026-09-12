@@ -164,7 +164,7 @@ export interface WalkthroughView {
 }
 
 /**
- * The cross-board review (`/reviews`) walks the same card through different
+ * The cross-board review (`/review`) walks the same card through different
  * chrome: the way back goes to the workspaces list, the heading names the
  * project the card is from, the top line carries the size bar, and nothing
  * counts what the sitting cleared (the owner's comment on the mock: no stats
@@ -485,6 +485,12 @@ function AdvancedBanner(props: { last: ReviewItem; handlers: WalkthroughHandlers
  * much space") — within one workspace it named the same few goals over and
  * over, and the card's Task line already points at the work.
  */
+/** A task's due date as the card says it: "Sep 20". Plain text; it orders
+ *  nothing. */
+export function dueLabel(at: number): string {
+  return new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function WalkCardHead(props: { item: ReviewItem; now: number }) {
   const { item, now } = props;
   const badge = reviewItemBadge(item);
@@ -504,7 +510,10 @@ function WalkCardHead(props: { item: ReviewItem; now: number }) {
       {/* The head's top-right meta is the card's ONE provenance line — who
           asked and how long ago — replacing both the bare wait chip and the old
           left-bordered context block (approved design, review-flow-mock-v1). */}
-      <span class="board-walk-wait">{askedMeta(item, now)}</span>
+      <span class="board-walk-wait">
+        {askedMeta(item, now)}
+        {item.dueAt !== undefined && ` · Due ${dueLabel(item.dueAt)}`}
+      </span>
     </div>
   );
 }

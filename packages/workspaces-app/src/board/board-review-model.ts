@@ -177,7 +177,7 @@ export interface ReviewThreadItem {
    */
   kind: 'task-thread' | 'goal-thread' | 'doc-thread' | 'task-review';
   /** The board this row lives on, when the page showing it is not that
-   *  board — the cross-board review (`/reviews`). Every write below is
+   *  board — the cross-board review (`/review`). Every write below is
    *  addressed to it; absent means the board in the address. */
   workspaceId?: string;
   /** Which row on the ticket, on a `task-review` item — an answer is stamped
@@ -348,6 +348,8 @@ export interface ReviewItem {
    * Read off the server row; never set client-side.
    */
   revision?: ReviewRevisionNote;
+  /** The task's due date, shown on the card beside who asked. Orders nothing. */
+  dueAt?: number;
 }
 
 export interface ReviewRevisionNote {
