@@ -610,32 +610,32 @@ describe('a proposal whose change is a mark', () => {
   });
 
   it('names the tag when only a speaker tag was added', () => {
-    const doc = docFrom('@Devi wants the deploy gate moved before merge.\n');
+    const doc = docFrom('@Speaker B wants the deploy gate moved before merge.\n');
     const res = suggestReplace(doc, {
-      find: '@Devi',
-      replace: '[@Devi](speaker:B)',
+      find: '@Speaker B',
+      replace: '[@Speaker B](speaker:B)',
       author,
     });
     expect(res.ok).toBe(true);
     expect(previewOf(doc)).toEqual({
-      del: '@Devi',
-      ins: '[@Devi](speaker:B)',
-      snippet: '@Devi → [@Devi](speaker:B)',
+      del: '@Speaker B',
+      ins: '[@Speaker B](speaker:B)',
+      snippet: '@Speaker B → [@Speaker B](speaker:B)',
     });
   });
 
   it('names both voices when a tag is reassigned to another speaker', () => {
-    const doc = docFrom('[@Devi](speaker:B) wants the gate moved.\n');
+    const doc = docFrom('[@Speaker B](speaker:B) wants the gate moved.\n');
     const res = suggestReplace(doc, {
-      find: '@Devi',
-      replace: '[@Devi](speaker:C)',
+      find: '@Speaker B',
+      replace: '[@Speaker B](speaker:C)',
       author,
     });
     expect(res.ok).toBe(true);
     expect(previewOf(doc)).toEqual({
-      del: '[@Devi](speaker:B)',
-      ins: '[@Devi](speaker:C)',
-      snippet: '[@Devi](speaker:B) → [@Devi](speaker:C)',
+      del: '[@Speaker B](speaker:B)',
+      ins: '[@Speaker B](speaker:C)',
+      snippet: '[@Speaker B](speaker:B) → [@Speaker B](speaker:C)',
     });
   });
 

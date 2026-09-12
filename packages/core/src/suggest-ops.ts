@@ -98,8 +98,8 @@ export interface SuggestionSummary {
   snippet: string;
   /** Full (untruncated) inserted CHARACTERS — '' for a pure delete. The
    *  plain text of the offered run and nothing else: a proposal whose
-   *  markdown parsed into marks reads `@Riverbend` here, one that did not
-   *  reads `[@Riverbend](speaker:A)`, and that difference is what pins the
+   *  markdown parsed into marks reads `@Speaker A` here, one that did not
+   *  reads `[@Speaker A](speaker:A)`, and that difference is what pins the
    *  parse. Render a card from `insertedPreview` instead. */
   insertedText: string;
   /** Full (untruncated) deleted characters — '' for a pure insert. */
