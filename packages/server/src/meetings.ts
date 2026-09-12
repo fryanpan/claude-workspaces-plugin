@@ -22,7 +22,12 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type CaptureMode, normalizeSpeakerName, parseCaptureMode } from '@claude-workspaces/core';
+import {
+  type CaptureMode,
+  type MeetingStopReason,
+  normalizeSpeakerName,
+  parseCaptureMode,
+} from '@claude-workspaces/core';
 import {
   DEFAULT_MEETING_RETENTION,
   type MeetingRetention,
@@ -107,6 +112,16 @@ export interface MeetingRecord {
    * companion.
    */
   gaps?: MeetingGap[];
+  /**
+   * Why this meeting ended, when it was not a person ending it.
+   *
+   * Absent on every ordinary stop — the Stop button, a tab closing, a server
+   * shutting down — and `silence` on a recording the server timed out for
+   * having heard nothing (`meeting-silence.ts`). It is on the record because
+   * a fifteen-minute meeting with two turns in it and a fifteen-minute
+   * meeting somebody left running read identically without it.
+   */
+  endedBy?: MeetingStopReason;
   /**
    * How much of this meeting its project chose to keep, as it stood when the
    * meeting started.
@@ -247,6 +262,9 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
       existing.resumedAt = [...(existing.resumedAt ?? []), row.resumedAt];
     }
     if (typeof row.endedAt === 'number') existing.endedAt = row.endedAt;
+    // Only the value the contract names: an unknown one would put a word into
+    // every reader of this record that nothing downstream can render.
+    if (row.endedBy === 'silence') existing.endedBy = 'silence';
     if (typeof row.turns === 'number') existing.turns = row.turns;
     // A gap is two append-only lines, opened by one and closed by the other,
     // so a server that dies mid-outage still leaves the gap in the record
@@ -375,8 +393,13 @@ export interface ActiveMeeting {
    * per-participant tracks); the microphone is the one stream `mic`.
    */
   recordAudio(chunk: Uint8Array, stream?: string): void;
-  /** End the meeting. Idempotent; returns the folded record either way. */
-  stop(): MeetingRecord;
+  /**
+   * End the meeting. Idempotent; returns the folded record either way.
+   *
+   * `reason` is set only when the SERVER ended it rather than a person, and
+   * is written into the index line so the record says why.
+   */
+  stop(reason?: MeetingStopReason): MeetingRecord;
 }
 
 /**
@@ -749,7 +772,7 @@ export class MeetingStore {
         }
         sink.write(chunk);
       },
-      stop(): MeetingRecord {
+      stop(reason?: MeetingStopReason): MeetingRecord {
         const record: MeetingRecord = {
           meetingId,
           docId,
@@ -759,6 +782,7 @@ export class MeetingStore {
           sampleRate,
           mode,
           turns: written.size,
+          ...(reason !== undefined ? { endedBy: reason } : {}),
           ...(Object.keys(speakers).length > 0 ? { speakers: { ...speakers } } : {}),
           segment,
           source,
@@ -779,6 +803,7 @@ export class MeetingStore {
           meetingId,
           endedAt: record.endedAt,
           turns: written.size,
+          ...(reason !== undefined ? { endedBy: reason } : {}),
         });
         // The audio files close first so their byte counts are final, then
         // the raw companion gets this meeting's segment (and any earlier one

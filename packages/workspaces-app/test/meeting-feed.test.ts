@@ -31,8 +31,10 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     names: {} as Record<string, string>,
     liveBot: null as MeetingBotStatus | null,
     farewell: null as string | null,
+    endedNote: '' as string,
     named: [] as string[],
     dismissed: 0,
+    endedDismissed: 0,
     liveZone: undefined as MeetingLiveZone | undefined,
     feed: undefined as unknown as MeetingFeed,
     ...over,
@@ -51,9 +53,13 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     names: () => h.names,
     liveBot: () => h.liveBot,
     botFarewell: () => h.farewell,
+    endedNote: () => h.endedNote,
     nameSpeaker: (label) => h.named.push(label),
     dismissBotNote: () => {
       h.dismissed += 1;
+    },
+    dismissEndedNote: () => {
+      h.endedDismissed += 1;
     },
   });
   return h;
@@ -72,8 +78,10 @@ interface Harness {
   names: Record<string, string>;
   liveBot: MeetingBotStatus | null;
   farewell: string | null;
+  endedNote: string;
   named: string[];
   dismissed: number;
+  endedDismissed: number;
   liveZone: MeetingLiveZone | undefined;
   feed: MeetingFeed;
 }
@@ -222,6 +230,21 @@ describe('createMeetingFeed — the notes that stand in for words', () => {
     expect(note?.textContent).toBe('The bot left the call');
     note?.click();
     expect(h.dismissed).toBe(1);
+  });
+
+  /**
+   * The one note here about a meeting that is already over. An idle strip is
+   * exactly where it has to render: the recording ended itself, so there is
+   * no live state left to hang the explanation on.
+   */
+  it('carries the timed-out recording’s sentence on an idle line, tappable away', () => {
+    const h = makeFeed();
+    h.endedNote = 'Recording stopped after 15 minutes without speech.';
+    h.feed.renderFeed();
+    const note = h.line.querySelector<HTMLButtonElement>('button.meeting-note-dismiss');
+    expect(note?.textContent).toBe('Recording stopped after 15 minutes without speech.');
+    note?.click();
+    expect(h.endedDismissed).toBe(1);
   });
 
   it('leaves an idle line with nothing to say empty', () => {
