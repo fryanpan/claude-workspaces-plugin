@@ -388,6 +388,50 @@ describe('the immediate wake is not gated on free capacity', () => {
     expect(frames[0]).toMatchObject({ taskId: row.id, readyCount: 1, consideredCount: 1 });
   });
 
+  /**
+   * The socket closed between the reachability probe and the send — two reads
+   * of one socket, and `sendToAgent` answers zero for the second. Same
+   * consequence as an absent lead and the same rule: an arming spent on a
+   * frame nobody received takes the backstop with it.
+   */
+  it('leaves the wake owed when the send reaches no sink', () => {
+    let now = 1_000_000;
+    let sinks = 0;
+    const frames: Array<Record<string, unknown>> = [];
+    const board = {
+      workspaceId: 'w-search',
+      leadAgentId: LEAD.id,
+      retired: false,
+      ready: [row],
+      considered: 1,
+      held: {},
+      undetermined: [],
+      lastActivityAt: 0,
+    };
+    const nudger = new ReadyWorkNudger({
+      snapshot: () => [board] as never,
+      lookup: () => board as never,
+      // Says yes. The socket disagrees a moment later.
+      canReach: () => true,
+      send: (_workspaceId, _agentId, frame) => {
+        frames.push(frame as unknown as Record<string, unknown>);
+        return sinks;
+      },
+      now: () => now,
+      idleMs: IDLE_MS,
+      report: () => {},
+    });
+
+    nudger.personQueuedTask({ workspaceId: 'w-search', taskId: row.id });
+    expect(frames, 'the frame was written to a closed socket').toHaveLength(1);
+
+    sinks = 1;
+    now += IDLE_MS + 1;
+    nudger.tick();
+    expect(frames).toHaveLength(2);
+    expect(frames[1]).toMatchObject({ taskId: row.id, readyCount: 1, consideredCount: 1 });
+  });
+
   it('still fires nothing for a row in neither list', () => {
     const { nudger, frames } = nudgerOver({ capacityHeld: 1, capacityTrimmed: [row] });
     nudger.personQueuedTask({ workspaceId: 'w-search', taskId: 't-other' });

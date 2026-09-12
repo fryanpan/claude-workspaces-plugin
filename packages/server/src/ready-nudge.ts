@@ -552,7 +552,8 @@ export class ReadyWorkNudger {
    * activity. An undelivered one spends nothing, which is the same rule the
    * timed pass keeps and for the same reason: a nudge that reached nobody
    * must stay owed, or the lead returns to a board that has already decided
-   * it told them.
+   * it told them. Delivered means the send REPORTED a sink: the reachability
+   * probe and the send are two reads of a socket that can close between them.
    *
    * Getting that order wrong is worse here than on the timed pass, because
    * this path also moves the clock. `noteActivity` has already pushed the
@@ -566,13 +567,18 @@ export class ReadyWorkNudger {
     const lead = board.leadAgentId;
     if (lead === undefined) return;
     if (!this.reachable(board.workspaceId, lead)) return;
-    this.emit(board.workspaceId, lead, {
+    const reached = this.emit(board.workspaceId, lead, {
       event: READY_IDLE_EVENT,
       workspaceId: board.workspaceId,
       taskId,
       title,
       ts,
     });
+    // The DELIVERY, not the attempt. `canReach` and the send are two reads of
+    // a socket that can close between them, and a sink that fails throws —
+    // both come back here as zero, and arming on either would spend a wake
+    // the lead never saw.
+    if (reached === 0) return;
     this.armed.set(board.workspaceId, this.stampFor(board, ts));
     this.saveStamps();
   }
@@ -916,11 +922,15 @@ export class ReadyWorkNudger {
     }
   }
 
-  private emit(workspaceId: string, agentId: string, frame: NudgeFrame): void {
+  /** How many sinks the frame reached. A throw is zero — a send that failed
+   *  delivered nothing, and the one caller that spends an arming on delivery
+   *  must not be able to tell the two apart. */
+  private emit(workspaceId: string, agentId: string, frame: NudgeFrame): number {
     try {
-      this.opts.send(workspaceId, agentId, frame);
+      return this.opts.send(workspaceId, agentId, frame);
     } catch (err) {
       console.error('[nudge] send failed:', err);
+      return 0;
     }
   }
 }
