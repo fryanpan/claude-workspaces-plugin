@@ -24,6 +24,7 @@ import { handleWorkspaceGoals } from './workspace-goals.ts';
 import { handleWorkspaceHome } from './workspace-home.ts';
 import { handleWorkspaceKeepMoving } from './workspace-keep-moving.ts';
 import { handleWorkspaceManifest } from './workspace-manifest.ts';
+import { handleWorkspaceMembers } from './workspace-members.ts';
 import { handleWorkspaceNext } from './workspace-next.ts';
 import { handleWorkspaceRelated } from './workspace-related.ts';
 import type {
@@ -65,6 +66,11 @@ export async function handleWorkspaceRoutes(
     // here, so its position carries no behaviour.
     (await handleWorkspaceRelated(ctx, rq)) ??
     (await handleWorkspaceSettings(ctx, rq)) ??
+    // Who has access to this board, and at what level. Anchored on its own
+    // `members` segment, which nothing else here matches, so its position
+    // carries no behaviour — it sits beside the settings because that is the
+    // panel it is read from.
+    (await handleWorkspaceMembers(ctx, rq)) ??
     (await handleWorkspaceContent(ctx, rq))
   );
 }

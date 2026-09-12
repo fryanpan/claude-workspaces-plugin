@@ -79,6 +79,25 @@ export interface ReviewPayload {
   /** `decision` only, at least two — a "choice" of one is a statement. */
   options?: ReviewOption[];
   /**
+   * Only the BOARD'S OWNER may answer this one. Absent — which is every item
+   * filed so far — means anybody on the board may.
+   *
+   * The flag an ask carries when answering it does something on the owner's
+   * machine rather than on the board: running a command, handing over a
+   * credential. A Regular User is a participant on a board (see
+   * BOARD_MEMBER_ROUTES in the server's host guard), and that is the right
+   * default for work; it is the wrong default for an ask whose answer the
+   * owner's own machine then acts on.
+   *
+   * `true` or absent, never `false`. A field with three states is a field two
+   * readers can disagree about, and the absent state already means the same
+   * thing the third one would.
+   *
+   * Enforced server-side by `requireOwner` in the answer route — the flag is
+   * what the check reads, and hiding the composer is not the enforcement.
+   */
+  ownerOnly?: true;
+  /**
    * The option id a person's answer came from, stamped when they answered by
    * tapping rather than typing. Provenance only: the answer is the reply, and
    * the reply carries the words. Absent on a typed answer, which is not a

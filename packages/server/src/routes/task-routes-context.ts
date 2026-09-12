@@ -7,6 +7,7 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { ReviewGate } from '../review-gate-types.ts';
+import type { BoardRole } from '../share/board-role.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, ParallelismCapChange, Task, TaskStore } from '../tasks.ts';
 
@@ -162,4 +163,10 @@ export interface TaskRouteRequest {
   authorFor: (claimed: unknown) => User | undefined;
   /** The 400 for an author that names a category rather than a person. */
   refuseCategoryAuthor: () => Response;
+  /** What this caller may DO on a board: `owner` or `member`. Resolved once
+   *  by the admission gate; see `roleFor` there. */
+  roleFor: (workspaceId: string) => BoardRole;
+  /** The owner gate: `null` for the board's owner, the 403 for anyone else.
+   *  Read by the owner-only review item — see `handleTaskReviewItems`. */
+  requireOwner: (workspaceId: string) => Response | null;
 }

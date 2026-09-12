@@ -7,6 +7,7 @@ import { answerAsksBack } from '@claude-workspaces/core';
  */
 import { classifyActor } from '../actor-identity.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
+import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { legacyDecisionItem } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
@@ -16,12 +17,29 @@ export async function handleTaskAnswers(
   rq: TaskRouteRequest,
 ): Promise<Response | undefined> {
   const { taskStore, j, safeJson, askBackOnItem } = ctx;
-  const { req, scope, visitor, authorFor } = rq;
+  const { req, scope, visitor, authorFor, requireOwner } = rq;
+
+  /**
+   * The TICKET'S OWN decision can be owner-only too — it is the same ask,
+   * carried on the task rather than on a row beside it — so the three doors
+   * here take the same gate as the review-item family and the doc threads.
+   * One function, `refuseOwnerOnlyWrite`; see it for why `?? ''` is closed
+   * rather than open.
+   */
+  const ownerOnlyDenial = (taskId: string): Response | null => {
+    const task = taskStore.getTask(taskId);
+    const decision = task ? legacyDecisionItem(task) : undefined;
+    return refuseOwnerOnlyWrite(decision?.review, scope?.workspaceId ?? '', requireOwner);
+  };
   // answer_decision (§3.10): record the VERBATIM answer. Does not
   // transition the task — status changes stay with the single gate.
   const taskAnswerMatch = matchRest(scope, /^tasks\/([^/]+)\/answer$/);
   if (taskAnswerMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskAnswerMatch[1] ?? '');
+    {
+      const denied = ownerOnlyDenial(taskId);
+      if (denied) return denied;
+    }
     const body = await safeJson(req);
     const text = body?.text;
     if (typeof text !== 'string' || text.length === 0) {
@@ -88,6 +106,10 @@ export async function handleTaskAnswers(
   const taskAnswerUndoMatch = matchRest(scope, /^tasks\/([^/]+)\/answer\/undo$/);
   if (taskAnswerUndoMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskAnswerUndoMatch[1] ?? '');
+    {
+      const denied = ownerOnlyDenial(taskId);
+      if (denied) return denied;
+    }
     const body = await safeJson(req);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
@@ -101,6 +123,10 @@ export async function handleTaskAnswers(
   const taskMoreInfoMatch = matchRest(scope, /^tasks\/([^/]+)\/more-info$/);
   if (taskMoreInfoMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskMoreInfoMatch[1] ?? '');
+    {
+      const denied = ownerOnlyDenial(taskId);
+      if (denied) return denied;
+    }
     const body = await safeJson(req);
     const question = typeof body?.question === 'string' ? body.question.trim() : '';
     if (question.length === 0) return j(400, { error: 'question required' });

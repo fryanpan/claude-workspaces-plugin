@@ -237,6 +237,14 @@ export interface DocRouteRequest {
   authorFor: (claimed: unknown) => User | undefined;
   /** The 400 for an author that names a category rather than a person. */
   refuseCategoryAuthor: () => Response;
+  /**
+   * The 403 for a Regular User on an act only this board's owner may perform,
+   * or `null` when the caller is its owner. Same function the task routes
+   * hold; a doc thread can carry an owner-only ask too, and one reading of
+   * "is this its owner" is the whole point of routing both through
+   * `requireOwner` (`request-admission.ts`).
+   */
+  requireOwner: (workspaceId: string) => Response | null;
   /** The doc meta a REST reply carries — redacted when the caller is a share
    *  visitor, which is why it is per-request rather than per-server. */
   metaFor: <T extends DocMeta>(meta: T) => Record<string, unknown>;
