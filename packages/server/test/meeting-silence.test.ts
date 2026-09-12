@@ -99,6 +99,22 @@ function scriptedEngine(): {
 /** One frame the relay wrote, or one lifecycle fact it broadcast. */
 type Sent = Record<string, unknown>;
 
+/**
+ * A second socket on a relay that already exists — what a reconnect is.
+ *
+ * The relay outlives the connection, so `attach` is how a test reaches the
+ * state that survives one. Everything else about the connection is new.
+ */
+function attach(relay: MeetingRelay, docId: string): { ws: MeetingClient; sent: Sent[] } {
+  const sent: Sent[] = [];
+  const ws: MeetingClient = {
+    data: { docId },
+    send: (payload) => sent.push(JSON.parse(payload) as Sent),
+  };
+  relay.onOpen(ws);
+  return { ws, sent };
+}
+
 function open(
   store: MeetingStore,
   docId: string,
@@ -121,6 +137,7 @@ function open(
     notes: null,
     broadcast: (_docId, payload) => broadcasts.push(payload),
     schedule: clock.schedule,
+    now: () => clock.now,
   });
   const ws: MeetingClient = {
     data: { docId },
@@ -230,6 +247,55 @@ describe('a recording with nothing in it', () => {
     const record = listMeetings(dataDir, 'saltmarsh-sync')[0];
     // A person's stop is not a timeout, and the record must not claim it was.
     expect(record?.endedBy).toBeUndefined();
+  });
+
+  it('a reconnect resumes the window it left, not a fresh one', async () => {
+    const store = new MeetingStore(dataDir);
+    const h = open(store, 'harborlight-retro');
+    h.relay.onText(h.ws, startFrame);
+    await settle();
+    const meetingId = h.sent.find((m) => m.type === 'ready')?.meetingId as string;
+    expect(meetingId).toBeTruthy();
+    // Somebody says one thing and then the room goes quiet. The words matter
+    // to the setup as well as the story: a meeting with no transcript file
+    // cannot be resumed at all, so the reconnect hazard is only ever reachable
+    // on a meeting that once had content.
+    h.speak({ turn: 0, text: 'the tide is out', final: true });
+    await settle();
+
+    // Fourteen silent minutes, then the network drops the socket. A drop
+    // STOPS the meeting — the resume below is what undoes that.
+    h.clock.advance(14 * MINUTE);
+    h.relay.onClose(h.ws);
+    await settle();
+
+    const again = attach(h.relay, 'harborlight-retro');
+    h.relay.onText(
+      again.ws,
+      JSON.stringify({
+        type: 'start',
+        sampleRate: 16000,
+        encoding: 'pcm_s16le',
+        resume: meetingId,
+      }),
+    );
+    await settle();
+    expect(again.sent.find((m) => m.type === 'ready')?.resumed).toBe(true);
+
+    // One more minute is fifteen since anyone last said anything, and that is
+    // the whole window — not fifteen more starting from the reconnect. A
+    // recording nobody is in must not be kept alive by a flaky network.
+    h.clock.advance(MINUTE);
+    await settle();
+    const stopped = again.sent.find((m) => m.type === 'stopped');
+    expect(stopped?.reason).toBe('silence');
+    const record = listMeetings(dataDir, 'harborlight-retro')[0];
+    expect(record?.meetingId).toBe(meetingId);
+    expect(record?.endedBy).toBe('silence');
+    // One recording, not two: the resume appended to the one that was
+    // already there.
+    expect(listMeetings(dataDir, 'harborlight-retro').length).toBe(1);
+    expect(record?.turns).toBe(1);
   });
 });
 

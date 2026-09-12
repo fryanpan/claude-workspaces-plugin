@@ -21,6 +21,17 @@
  * Same shape as that resolver — read once at module load, and only able to
  * SHORTEN the window, so a stray value in a production environment cannot
  * leave a microphone open longer than the rule says.
+ *
+ * THE SENTENCE ON THE STRIP NAMES THE RULE, NOT THIS NUMBER. It is
+ * `MEETING_SILENCE_NOTE` in core — "Recording stopped after 15 minutes
+ * without speech" — and it stays that way under an override, deliberately.
+ * Deriving it from the resolved window would put the shortened figure in
+ * front of a person, and the overrides that exist are seconds long: "stopped
+ * after 0 minutes without speech" is a worse sentence than a slightly early
+ * stop under a setting only a test harness ever writes. If a deployment ever
+ * wants a genuinely different window for real users, the honest change is to
+ * carry the effective minutes on the `stopped` frame and compose the sentence
+ * from it — not to reinterpret this test seam as configuration.
  */
 
 import { MEETING_SILENCE_MINUTES } from '@claude-workspaces/core';

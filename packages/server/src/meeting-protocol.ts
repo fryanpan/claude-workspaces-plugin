@@ -114,6 +114,15 @@ export interface MeetingRelayDeps {
    */
   schedule?: (ms: number, fn: () => void) => () => void;
   /**
+   * The wall clock the silence deadline measures elapsed time against.
+   *
+   * Separate from `schedule` because the deadline has to SURVIVE a
+   * reconnect: a meeting resumed on a new socket is the same recording, so
+   * what is left of its window is a subtraction, and a subtraction needs a
+   * clock. Absent is `Date.now`.
+   */
+  now?: () => number;
+  /**
    * Record which note-taker this DOC is now using, changed mid-recording.
    *
    * A seam rather than a store because the socket has no business knowing
@@ -277,6 +286,18 @@ export class MeetingRelay {
    * from under it.
    */
   private readonly inFlight = new Set<Promise<void>>();
+
+  /**
+   * When each meeting last had evidence of content — its start, or its last
+   * settled turn.
+   *
+   * Keyed by MEETING id rather than held on the connection, because a
+   * reconnect is a new connection carrying the same recording, and the whole
+   * point of the silence window is that a flaky network cannot hand a room
+   * nobody is in another fifteen minutes. Swept in `armSilence`; see the note
+   * on `clearSilence` for why nothing deletes from it on purpose.
+   */
+  private readonly silenceSince = new Map<string, number>();
 
   constructor(private readonly deps: MeetingRelayDeps) {}
 
@@ -553,8 +574,13 @@ export class MeetingRelay {
     this.deps.store.stopAll();
   }
 
+  /** The clock the window is measured against; `Date.now` in production. */
+  private now(): number {
+    return (this.deps.now ?? Date.now)();
+  }
+
   /**
-   * Start this meeting's silence deadline again, from now.
+   * Start this meeting's silence deadline again, from the last words.
    *
    * Called when the meeting goes live and on every settled turn, which is
    * what makes the window "since the recording started, or since the last
@@ -562,10 +588,31 @@ export class MeetingRelay {
    * arms one: the engine's closing flush settles the final turn after `stop()`
    * has already detached the meeting, and a deadline armed there would outlive
    * the recording it was about.
+   *
+   * WHAT IS LEFT OF THE WINDOW, NOT A FRESH ONE. A dropped socket that
+   * reconnects resumes the SAME recording, and re-arming from the moment of
+   * the reconnect would hand a silent room another fifteen minutes every time
+   * the network hiccuped — which is exactly the meeting nobody notices that
+   * this window exists to end. So the relay remembers when each meeting last
+   * had evidence of content (`silenceSince`, keyed by meeting id, and
+   * therefore surviving the connection), and schedules the remainder.
    */
-  private armSilence(ws: MeetingClient, conn: Conn): void {
+  private armSilence(ws: MeetingClient, conn: Conn, heardWords = false): void {
     this.clearSilence(conn);
     if (conn.state !== 'live') return;
+    const meetingId = conn.meeting?.meetingId;
+    const now = this.now();
+    // No meeting id can only mean no meeting to time out.
+    if (meetingId === undefined) return;
+    // Words settled since the last arm restart the window; anything else
+    // (going live, a resume taking over) keeps whatever baseline the meeting
+    // already had, which is what survives a reconnect.
+    const since = heardWords ? now : (this.silenceSince.get(meetingId) ?? now);
+    this.silenceSince.set(meetingId, since);
+    for (const [id, at] of this.silenceSince) {
+      if (now - at > SILENCE_TIMEOUT_MS * 2) this.silenceSince.delete(id);
+    }
+    const remaining = Math.max(0, SILENCE_TIMEOUT_MS - (now - since));
     const schedule =
       this.deps.schedule ??
       ((ms: number, fn: () => void): (() => void) => {
@@ -574,7 +621,7 @@ export class MeetingRelay {
         (timer as { unref?: () => void }).unref?.();
         return () => clearTimeout(timer);
       });
-    conn.cancelSilence = schedule(SILENCE_TIMEOUT_MS, () => {
+    conn.cancelSilence = schedule(remaining, () => {
       // Cleared first: the stop below runs the ordinary teardown, and a
       // canceller for a deadline that has already fired cancels nothing.
       conn.cancelSilence = null;
@@ -586,7 +633,18 @@ export class MeetingRelay {
     });
   }
 
-  /** Drop this meeting's silence deadline, however the meeting is ending. */
+  /**
+   * Drop this meeting's silence deadline, however the meeting is ending.
+   *
+   * The baseline in `silenceSince` is deliberately NOT dropped here, and
+   * there is no place that drops it on purpose. A socket that goes away
+   * mid-recording STOPS the meeting — and a resume undoes that stop, same id
+   * and same recording — so "this meeting stopped" is not "this meeting is
+   * over", and a delete keyed on it is exactly the fresh window a reconnect
+   * must not get. `armSilence` sweeps instead: a baseline older than twice
+   * the window belongs to a meeting that either ended or was timed out long
+   * ago, since a live one is re-armed before its own window runs out.
+   */
   private clearSilence(conn: Conn): void {
     conn.cancelSilence?.();
     conn.cancelSilence = null;
@@ -814,10 +872,10 @@ export class MeetingRelay {
           if (turn.final) {
             meeting.recordTurn(turnId, turn.text, turn.speaker);
             // Words settled, so the meeting has content and the window starts
-            // again. A PARTIAL does not count: it is the engine still
-            // revising, and a room of noise can produce them for as long as
-            // it is noisy.
-            this.armSilence(ws, conn);
+            // again — the one call that moves the baseline forward. A PARTIAL
+            // does not count: it is the engine still revising, and a room of
+            // noise can produce them for as long as it is noisy.
+            this.armSilence(ws, conn, true);
           }
           // The notes pipeline sees EVERY frame: a partial is speech in
           // progress, which is exactly the evidence that defers a pause tick.
