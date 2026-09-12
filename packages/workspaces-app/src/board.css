@@ -3975,9 +3975,14 @@ html:has(.board-walk-cred-form) {
    end 822px down a 932px viewport with that button spanning 762-806 — half
    the row covered, and its right end, where the time is, not tappable.
    The two `env(safe-area-inset-bottom)` terms cancel: the buttons add one and
-   `--safe-bottom` adds the other, so neither appears here. */
+   `--safe-bottom` adds the other, so neither appears here.
+   Plus 12px of daylight. Reserving exactly 170 left the last row's box ENDING
+   ON the topmost button's top edge (650.3 against 650 at 1180x820, on All
+   files): no room at all, with that button's count badge (`top: -4px`) and
+   its shadow reaching into the row. 12px clears the badge with room to see
+   the gap. */
 .library-body {
-  padding: 4px 0 calc(146px - var(--board-bottom-bar));
+  padding: 4px 0 calc(158px - var(--board-bottom-bar));
   max-width: 1100px;
 }
 .library-body h2 {
