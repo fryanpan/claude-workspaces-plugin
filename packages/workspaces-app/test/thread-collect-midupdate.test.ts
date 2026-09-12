@@ -82,7 +82,7 @@ function commentOn(ydoc: Y.Doc, editor: EditorHandle, threadId: string, phrase: 
       endRel: sel.end,
       snippet: { text: sel.snippet },
     },
-    createdBy: { id: 'u2', name: 'Reviewer', kind: 'known', color: '#c0392b' },
+    createdBy: { id: 'u2', name: 'Bob', kind: 'known', color: '#c0392b' },
     firstComment: { id: `c-${threadId}`, text: 'is this still true?' },
   });
 }
@@ -132,7 +132,7 @@ describe('the comment list survives a remote update arriving mid-repaint', () =>
       ) as Y.Array<Y.Map<unknown>>;
       const reply = new Y.Map<unknown>();
       reply.set('id', 'c-reply');
-      reply.set('author', { id: 'u3', name: 'Peer', kind: 'known', color: '#2980b9' });
+      reply.set('author', { id: 'u3', name: 'Carol', kind: 'known', color: '#2980b9' });
       reply.set('text', 'still true.');
       reply.set('ts', 1_700_000_000_000);
       comments.push([reply]);
