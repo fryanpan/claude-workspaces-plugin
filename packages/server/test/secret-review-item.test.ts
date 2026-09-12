@@ -325,6 +325,74 @@ describe('a secret ask, answered by the board owner', () => {
     expect(await taskJson()).not.toContain('Secrets saved');
   });
 
+  it('refuses WORDS on a secret ask, and names the route that takes values', async () => {
+    // The blocker the UX walk found (2026-09-12): the task page drew the
+    // ordinary answer furniture over this shape — "Record your answer,
+    // verbatim…" and a blue Record answer — and a reviewer typed a value into
+    // it. The words were recorded on the item, written to the store on disk
+    // and echoed into the events log, and the agent was told to proceed.
+    //
+    // The page is fixed. This is the other end: the door refuses the shape,
+    // so a client that has not been fixed — an older bundle, a script, an
+    // agent posting on somebody's behalf — cannot record words here either.
+    const fresh = (
+      await jj<{ item: { id: string } }>(
+        await postLocal(`${scope()}/tasks/${taskId}/review-items`, {
+          review: {
+            shape: 'secret',
+            headline: 'Paste the archive account name so the weekly pass can run',
+            detail: 'The weekly pass signs in to the Saltmarsh archive and posts the index.',
+            secrets: [{ label: 'Archive account name', service: 'saltmarsh-archive-account' }],
+          },
+          author: AGENT,
+        }),
+      )
+    ).item.id;
+
+    const before = written.length;
+    const refused = await postLocal(
+      `${scope()}/tasks/${taskId}/review-items/${fresh}/answer`,
+      // A placeholder, because this repo is public and because the point is
+      // that no value should ever travel this way.
+      { author: READER, text: FIRST_VALUE },
+    );
+    expect(refused.status).toBe(400);
+    const body = (await refused.json()) as { error?: string; message?: string };
+    expect(body.error).toBe('secret-item');
+    // The refusal says where the values DO go, so a caller that hits it can
+    // act on it rather than retrying.
+    expect(body.message).toContain('/secrets');
+    // Nothing moved: no value reached the store, and the words are not on the
+    // item, in the task file or in the feed.
+    expect(written).toHaveLength(before);
+    expect(await taskJson()).not.toContain(FIRST_VALUE);
+    expect(JSON.stringify(await jj<unknown>(await local(`${scope()}/events`)))).not.toContain(
+      FIRST_VALUE,
+    );
+
+    // CONTROL: the SAME door, the same author, an ordinary ask on the same
+    // task — answered, and the words are recorded. Without this the refusal
+    // above would also pass on a board where nobody may answer anything.
+    const ordinary = (
+      await jj<{ item: { id: string } }>(
+        await postLocal(`${scope()}/tasks/${taskId}/review-items`, {
+          review: {
+            shape: 'review',
+            headline: 'Should the weekly pass post the index to the archive as well?',
+            detail: 'The weekly pass writes the archive today and nothing reads it.',
+          },
+          author: AGENT,
+        }),
+      )
+    ).item.id;
+    const answered = await postLocal(`${scope()}/tasks/${taskId}/review-items/${ordinary}/answer`, {
+      author: READER,
+      text: 'Yes, post it to both.',
+    });
+    expect(answered.status).toBe(200);
+    expect(await taskJson()).toContain('Yes, post it to both.');
+  });
+
   it('takes both values in one request and closes the item with the names only', async () => {
     // AC 1's server half: two fields, one submission, no second turn.
     const lines: string[] = [];

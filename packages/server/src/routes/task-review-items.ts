@@ -13,7 +13,12 @@ import { classifyActor } from '../actor-identity.ts';
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { SECRET_FILING_DENIAL, asksForSecret, refuseOwnerOnlyWrite } from '../share/board-role.ts';
+import {
+  SECRET_ANSWER_DENIAL,
+  SECRET_FILING_DENIAL,
+  asksForSecret,
+  refuseOwnerOnlyWrite,
+} from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -127,6 +132,19 @@ export async function handleTaskReviewItems(
     const answeredWith = body?.answeredWith;
     if (answeredWith !== undefined && typeof answeredWith !== 'string') {
       return j(400, { error: 'answeredWith must be a string' });
+    }
+    // A SECRET ASK IS NOT ANSWERED IN WORDS, and this is the door that decides
+    // it. Checked before the owner-only gate below and before the ask-back
+    // conversion, because both of those are writes: the shape is wrong for
+    // this route whoever is asking, so it is refused first and refused the
+    // same way for every caller — a browser on a surface that renders the
+    // wrong card, an agent that reached for the wrong tool, or a bare POST.
+    // The card was got wrong once (the task page drew the verbatim box and
+    // recorded a typed value); this is why that could only ever be a display
+    // bug and not a leak.
+    {
+      const item = taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId);
+      if (asksForSecret(item?.review)) return j(400, SECRET_ANSWER_DENIAL);
     }
     // Checked HERE, before any write and before the ask-back conversion below,
     // because the conversion is itself a write on the item: a Regular User's

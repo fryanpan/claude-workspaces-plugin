@@ -45,8 +45,19 @@ interface Driven {
   answered: string[];
 }
 
-/** Call the door with one stored item and one body. */
-async function drive(item: TaskReviewItem, secrets: unknown): Promise<Driven> {
+/**
+ * Call the door with one stored item and one body.
+ *
+ * `writer` stands in for the machine's store. It defaults to one that always
+ * lands, so a case that is not about the store reads as if there were none;
+ * pass one that refuses to drive the other half of "the answer is recorded
+ * only after the store confirms the write".
+ */
+async function drive(
+  item: TaskReviewItem,
+  secrets: unknown,
+  writer?: (service: string, value: string) => SecretWriteResult,
+): Promise<Driven> {
   const written: Array<{ service: string; value: string }> = [];
   const answered: string[] = [];
   const ctx = {
@@ -65,8 +76,11 @@ async function drive(item: TaskReviewItem, secrets: unknown): Promise<Driven> {
       }),
     safeJson: async (req: Request) => (await req.json()) as Record<string, unknown>,
     secretWriter: async (service: string, value: string): Promise<SecretWriteResult> => {
-      written.push({ service, value });
-      return { ok: true };
+      const verdict = writer?.(service, value) ?? { ok: true };
+      // Only a write that LANDED is recorded here, so a case can assert what
+      // reached the store as well as what the door answered.
+      if (verdict.ok) written.push({ service, value });
+      return verdict;
     },
   } as unknown as TaskRoutesContext;
 
@@ -166,5 +180,46 @@ describe('a value the store cannot hold is refused before anything is written', 
     const ok = await drive(secretAsk, [{ service: SERVICE, value: 'x'.repeat(4096) }]);
     expect(ok.res.status).toBe(200);
     expect(ok.written).toHaveLength(1);
+  });
+});
+
+describe('the ask is recorded only after the store has confirmed every write', () => {
+  it('records no answer when the store cannot verify what it wrote', async () => {
+    // The reviewer saw one hand-over of four report "saved" with nothing in
+    // the store afterwards (UX review, 2026-09-12). The suspicion was their
+    // own restart, and the ordering in the door is already write-then-verify
+    // -then-record — but nothing held it there, so a later edit that moved
+    // the record above the loop would have left the suite green while the
+    // card said saved over an empty store.
+    const twoFields = storedItem({
+      shape: 'secret',
+      headline: 'Paste the two relay values',
+      secrets: [
+        { label: 'Relay account name', service: SERVICE },
+        { label: 'Relay signing value', service: 'saltmarsh-relay-signer' },
+      ],
+    });
+    const values = [
+      { service: SERVICE, value: 'not-a-real-value-1' },
+      { service: 'saltmarsh-relay-signer', value: 'not-a-real-value-2' },
+    ];
+    // The store takes the first field and then cannot read back what it
+    // wrote — the shape a locked keychain or a denied consent dialog takes.
+    const denied = await drive(twoFields, values, (service) =>
+      service === SERVICE ? { ok: true } : { ok: false, error: 'verify-failed' },
+    );
+    expect(denied.res.status).toBe(502);
+    expect(denied.body.error).toBe('store-failed');
+    // The one thing the card must never be told: that it landed.
+    expect(denied.answered).toEqual([]);
+    // And the reply names the step, never a value.
+    expect(JSON.stringify(denied.body)).not.toContain('not-a-real-value');
+
+    // CONTROL: the same two fields with a store that confirms both ARE
+    // recorded, so the assertion above is about the failed verify and not
+    // about the fixture being unanswerable.
+    const ok = await drive(twoFields, values);
+    expect(ok.res.status).toBe(200);
+    expect(ok.answered).toEqual([`Secrets saved: ${SERVICE}, saltmarsh-relay-signer`]);
   });
 });

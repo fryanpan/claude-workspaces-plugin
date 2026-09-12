@@ -118,3 +118,26 @@ export const SECRET_FILING_DENIAL = {
   message:
     "a 'secret' ask is filed from the board's own side, not through a share link — ask a member of the board to file it",
 } as const;
+
+/**
+ * What every FREE-TEXT answer door says to a secret ask.
+ *
+ * The shape's whole claim is that a value reaches the store and nothing else.
+ * An answer recorded as words is the opposite of that in every particular: it
+ * is written onto the item, into the task file, into the events log and into
+ * the activity feed, it is read back by the asking agent, and it closes the
+ * ask so nobody comes looking. A surface that renders this item as an ordinary
+ * question — and one did, on the task page — hands the reader a box that does
+ * all of that with a real value in it.
+ *
+ * So the refusal lives at the door rather than in the card. A card can be got
+ * wrong on one surface and right on another; a door cannot. It names the route
+ * that does take the values, because the caller refused here is either a
+ * person's browser on a surface that has not caught up or an agent that read
+ * the wrong tool, and both need to be sent somewhere rather than stopped.
+ */
+export const SECRET_ANSWER_DENIAL = {
+  error: 'secret-item',
+  message:
+    "a 'secret' ask is answered by handing the values to its own route (POST …/review-items/<id>/secrets), not by recording words — an answer recorded here is stored, echoed to the feed and read back by the agent",
+} as const;

@@ -7,7 +7,7 @@ import { answerAsksBack } from '@claude-workspaces/core';
  */
 import { classifyActor } from '../actor-identity.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
+import { SECRET_ANSWER_DENIAL, asksForSecret, refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { legacyDecisionItem } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
@@ -39,6 +39,16 @@ export async function handleTaskAnswers(
     {
       const denied = ownerOnlyDenial(taskId);
       if (denied) return denied;
+    }
+    // The ticket's own decision takes the same refusal as a row beside it.
+    // Nothing derives a `secret` decision today, so this is unreachable — and
+    // it is here for the same reason the row's is: what makes the shape safe
+    // is that NO free-text answer door takes it, and a door that would have
+    // to be remembered later is a door that will not be.
+    {
+      const task = taskStore.getTask(taskId);
+      const decision = task ? legacyDecisionItem(task) : undefined;
+      if (asksForSecret(decision?.review)) return j(400, SECRET_ANSWER_DENIAL);
     }
     const body = await safeJson(req);
     const text = body?.text;
