@@ -61,6 +61,7 @@ function settings(band: Viewport, opts: { collapsed?: boolean } = {}): void {
 }
 
 const text = (id: string): string => document.getElementById(id)?.textContent?.trim() ?? '';
+const rail = (): HTMLElement => document.getElementById('board-settings-rail') as HTMLElement;
 const label = (): HTMLElement =>
   document.querySelector('#board-settings-rail .settings-rail-label') as HTMLElement;
 
@@ -109,8 +110,12 @@ describe('what the settings page keeps from the board', () => {
         .getElementById('board-settings-rail')
         ?.classList.contains('settings-rail--collapsed'),
     ).toBe(true);
-    // The class is not the outcome — the labels going is.
+    // The class is not the outcome. Both halves of the outcome are: the
+    // labels go, AND the rail is the width the board's rail collapses to.
+    // The width is the half a single-class rule loses, because settings.css
+    // loads after board.css and sets .settings-rail's own width.
     expect(getComputedStyle(label()).display).toBe('none');
+    expect(getComputedStyle(rail()).width).toBe('58px');
   });
 
   it('positive control: an expanded board rail draws its labels here too', () => {
@@ -122,5 +127,6 @@ describe('what the settings page keeps from the board', () => {
     ).toBe(false);
     expect(getComputedStyle(label()).display).not.toBe('none');
     expect(label().textContent).toBe('Home');
+    expect(getComputedStyle(rail()).width).toBe('148px');
   });
 });

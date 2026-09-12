@@ -370,8 +370,13 @@ body.board-body {
    choice about the whole workspace, not about the task list — a rail that
    sprang back open on the way into settings and shut again on the way out
    read as the page having lost it (UX review of PR 947). Same 58px the
-   board's own rail collapses to, so nothing moves sideways at the boundary. */
-.settings-rail--collapsed {
+   board's own rail collapses to, so nothing moves sideways at the boundary.
+
+   Compound, because `settings.css` loads AFTER this file and its own
+   `.settings-rail` sets the 148px: a single class here loses that
+   equal-specificity tie to the later rule, and the walk found exactly that —
+   the labels went and the rail stayed 148px wide. */
+.settings-rail.settings-rail--collapsed {
   width: 58px;
   padding-left: 6px;
   padding-right: 6px;
