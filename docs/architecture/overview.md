@@ -462,6 +462,16 @@ restart mid-recording keeps writing under the section it opened rather than
 opening a second one. Ids and a block id, no meeting words, so it sits with
 `notes-timing.ts` rather than with the stores that own durable text.
 
+`notes-section-tidy.ts` joins the same `notes-*` family and moves nothing in
+the picture: it is the repair on a notes section that neither a prompt nor a
+block edit can make — an empty paragraph under the heading, a topic heading
+repeating the topic directly above it — and it is the one module here that
+writes the document directly rather than through `applyBlockEdits`, because
+neither block has an authorship to write through. Two callers, both after a
+write has had the last word: the tick path in `meeting-notes-doc.ts` (topic
+headings only) and `notes-cleanup-pass.ts` (both). It reads no transcript and
+composes nothing.
+
 `notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
 the picture either: it is the at-stop tidy-up, and it is deliberately not a
 second note-taking path — it reuses `NotesComposer`, the shared
