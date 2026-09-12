@@ -154,8 +154,9 @@ export function placeOf(doc: PlacedDoc, ctx: PlacingContext): Omit<LibraryPlace,
   return missing(flag({ label: 'Outside the project', folder: false }));
 }
 
+/** Structured, so a folder name holding the separator cannot alias another place. */
 const placeKey = (kind: LibraryKind, p: Omit<LibraryPlace, 'key'>): string =>
-  `${kind}:${p.label}:${p.note ?? ''}`;
+  JSON.stringify([kind, p.label, p.note ?? '']);
 
 /**
  * Every kind's locations, and the place key of each doc in input order.

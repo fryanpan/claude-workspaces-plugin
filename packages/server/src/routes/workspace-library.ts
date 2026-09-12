@@ -149,8 +149,18 @@ function sourcesFor(
     projectRoot: (repoKey) => (hidden(repoKey) ? null : mounts.rootFor(repoKey)),
     markdownFiles: ctx.markdownFiles,
     mountedFiles: (repoKey) => {
-      const root = mounts.rootFor(repoKey);
+      // Each file's birth time is read in the checkout its MOUNT was made
+      // from, which may be a worktree the project root is not.
+      const roots = new Map<string, string | null>();
+      const rootOf = (mountId: string): string | null => {
+        if (!roots.has(mountId)) {
+          const mount = mounts.registry.mountById(repoKey, mountId);
+          roots.set(mountId, mount ? mounts.checkoutRootOf(repoKey, mount) : null);
+        }
+        return roots.get(mountId) ?? null;
+      };
       return mounts.listFiles(repoKey, { limit: MAX_MOUNTED_FILES }).files.map((f) => {
+        const root = rootOf(f.mountId);
         const st = root ? statBound(join(root, f.relPath)) : undefined;
         const born = st ? birthOf(st) : {};
         return { fileId: f.fileId, relPath: f.relPath, mtimeMs: f.mtimeMs, ...born };
