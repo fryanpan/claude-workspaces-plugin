@@ -94,6 +94,7 @@ import {
   readNotesOutline,
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
+import { repairNotesEditAddresses } from './notes-edit-address.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
 import {
   type NotesHeadingStore,
@@ -538,6 +539,29 @@ function noteGuardKept(docId: string, meetingId: string, why: string): void {
 }
 
 /**
+ * One line per tick whose words were recovered from a failed address.
+ *
+ * IT SAYS HOW MANY LANDED, not only how many were tried, because the repair
+ * can itself fail — a doc whose section has gone takes neither batch — and a
+ * line reading "2 notes re-addressed" over a doc that took none would be the
+ * second lie in this file's history. `console.warn` rather than `log`: a
+ * repair means the composer addressed something wrongly, which is worth
+ * seeing in a quiet log even though the meeting kept its note.
+ */
+function noteAddressRepair(
+  docId: string,
+  meetingId: string,
+  repaired: readonly string[],
+  landed: number,
+): void {
+  console.warn(
+    `[meeting-notes] ${docId} meeting ${meetingId}: recovered ${landed} of ` +
+      `${repaired.length} note${repaired.length === 1 ? '' : 's'} whose address the doc ` +
+      `could not honour — ${repaired.join(', ')}`,
+  );
+}
+
+/**
  * One line per tick that composed a link it was never given.
  *
  * ONE LINE WITH A COUNT, not a line per link, and unlike a refusal it says
@@ -708,6 +732,20 @@ export function applyNotesUpdate(
   const ids = { docId: update.docId, meetingId: update.meetingId };
   const after = readNotesOutline(docStore, update.docId, { headingsOnly: true });
   heading.learn(ids, before, after);
+  const section = heading.headingId(ids, after);
+  // WORDS THAT COMPOSED AND DID NOT LAND GET A HOME. An edit the applier
+  // failed for an ADDRESS reason — the block is gone, or it is not a heading
+  // — carried a note nothing else has a copy of, and dropping it is what
+  // makes a repeating mistake lose a meeting (`notes-edit-address.ts` has the
+  // measurement). Re-addressed to this meeting's own section, in a second
+  // batch, and only ever for a batch that already failed something.
+  const repair = repairNotesEditAddresses(linked.edits, res.outcomes, section);
+  let recovered = 0;
+  if (repair.edits.length > 0) {
+    const again = applyNotesBlockEdits(docStore, update.docId, repair.edits);
+    recovered = again.ok ? again.applied + again.suggested : 0;
+    noteAddressRepair(update.docId, update.meetingId, repair.repaired, recovered);
+  }
   // A TOPIC OPENED TWICE IS FOLDED IN THE TICK THAT OPENED IT. A tick is
   // shown a slice of the doc, so it can open a `### ` heading the section
   // already carries a little further up — which is what put `Note-taker
@@ -727,7 +765,6 @@ export function applyNotesUpdate(
   // the one that wrote it rather than at the end of the meeting, because
   // what the reader sees meanwhile is a blank line wearing the fresh-note
   // tint (2026-09-11).
-  const section = heading.headingId(ids, after);
   if (section !== undefined) {
     const tidied = tidyNotesSection(doc.ydoc, section, () => commentedBlockIds(doc.ydoc), {
       blanks: false,
@@ -761,7 +798,11 @@ export function applyNotesUpdate(
   // on an hour-long AMI meeting: two consecutive ticks came back as four
   // `nest_blocks` edits, all answered `nothing-to-nest`, and both were
   // reported as writes that failed.
-  if (res.applied + res.suggested > 0) return null;
+  //
+  // A RECOVERED NOTE COUNTS AS A WRITE, because it is one: the words are in
+  // the doc. Reporting the tick as failed anyway would carry turns that are
+  // already written up, and the next compose would note them a second time.
+  if (res.applied + res.suggested + recovered > 0) return null;
   return failedCarryingWords(res.outcomes) ? 'all-edits-failed' : null;
 }
 

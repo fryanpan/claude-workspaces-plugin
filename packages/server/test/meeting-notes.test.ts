@@ -36,7 +36,7 @@ import {
   createPauseTicker,
   createStubNotesComposer,
 } from '../src/meeting-notes.ts';
-import { QUOTA_NOTICE_MARK, QUOTA_NOTICE_TEXT } from '../src/notes-quota-notice.ts';
+import { QUOTA_NOTICE_MARK, QUOTA_NOTICE_TEXT } from '../src/notes-notice.ts';
 import { createNotesTimingLog } from '../src/notes-timing.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';

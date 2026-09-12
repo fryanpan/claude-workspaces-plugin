@@ -18,7 +18,7 @@ import {
   announceQuotaOutage,
   createQuotaNoticeState,
   retractQuotaNotice,
-} from '../src/notes-quota-notice.ts';
+} from '../src/notes-notice.ts';
 
 const notice = (id: string): NoticeOutlineEntry => ({
   id,

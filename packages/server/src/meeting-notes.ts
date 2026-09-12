@@ -68,10 +68,15 @@ import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import {
+  NOTES_NOT_WRITTEN_AFTER,
+  NOTES_NOT_WRITTEN_NOTICE,
+  announceNotice,
   announceQuotaOutage,
+  createNoticeState,
   createQuotaNoticeState,
+  retractNotice,
   retractQuotaNotice,
-} from './notes-quota-notice.ts';
+} from './notes-notice.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import { type MeetingSpend, meetingSpend } from './notes-spend.ts';
 import {
@@ -1288,6 +1293,24 @@ export function beginNotesSession(
   const quotaNotice = createQuotaNoticeState();
 
   /**
+   * Whether the doc is currently carrying "some of what was just said could
+   * not be written", and how many writes have failed since the last one that
+   * landed.
+   *
+   * THE SECOND FAILURE RAISES IT, NOT THE FIRST. One failed write is a tick
+   * the pipeline recovers by itself: the turns carry and the next compose
+   * notes them again, so the words are late rather than lost, and a sentence
+   * in the doc about a note that arrives ten seconds later would be noise on
+   * the one surface the room is reading. What a person cannot see, and what
+   * this exists for, is the failure that REPEATS — `retriedFailure` is
+   * cleared only by a success, so from the second failure on nothing is
+   * recovering anything and the words on the live transcript are not on
+   * their way anywhere.
+   */
+  const notWrittenNotice = createNoticeState();
+  let writesFailedInARow = 0;
+
+  /**
    * Put a notice edit (or its retraction) in the doc, out of band from the
    * tick's own write.
    *
@@ -1296,7 +1319,7 @@ export function beginNotesSession(
    * allowed to throw — the section-open path above treats a throw as a
    * refusal for the same reason.
    */
-  const writeQuotaNotice = (edits: readonly prose.BlockEdit[]): boolean => {
+  const writeNotice = (edits: readonly prose.BlockEdit[]): boolean => {
     if (edits.length === 0) return false;
     try {
       const answer = deps.onNotes({
@@ -1313,7 +1336,7 @@ export function beginNotesSession(
       // notice goes missing for the rest of the meeting.
       return answer !== false && answer !== 'refused';
     } catch (err) {
-      deps.onError?.(err instanceof Error ? err.message : 'notes quota notice failed');
+      deps.onError?.(err instanceof Error ? err.message : 'notes notice not written');
       return false;
     }
   };
@@ -1909,9 +1932,23 @@ export function beginNotesSession(
           // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. This is
           // the case the guard produces: the same edits refused a second
           // time, one tick's compose spent to learn nothing.
+          // THE ROOM IS TOLD, once the failure has stopped being one the
+          // pipeline recovers. `notesHeadingId` and `outline` are this tick's
+          // own reads, which is what the quota notice uses too.
+          writesFailedInARow++;
+          if (writesFailedInARow >= NOTES_NOT_WRITTEN_AFTER) {
+            announceNotice(
+              NOTES_NOT_WRITTEN_NOTICE,
+              notWrittenNotice,
+              outline,
+              notesHeadingId,
+              writeNotice,
+            );
+          }
           if (answer !== 'refused') retryAfterFailure(tick);
           return;
         }
+        writesFailedInARow = 0;
         // A question is only asked once, and it is asked once it has LANDED.
         // Marking them offered before the write meant a refused write lost
         // the questions outright — the retry composed without them.
@@ -1939,7 +1976,11 @@ export function beginNotesSession(
         // UNCONDITIONALLY, not only when this session remembers writing one:
         // a session that started mid-outage remembers nothing, and the doc
         // would go on claiming an outage that ended before it began.
-        retractQuotaNotice(quotaNotice, outline, writeQuotaNotice);
+        retractQuotaNotice(quotaNotice, outline, writeNotice);
+        // And the same for the write-failure notice: the doc has just taken a
+        // tick's words, so a line saying it could not is the stale claim the
+        // retraction rule exists for.
+        retractNotice(NOTES_NOT_WRITTEN_NOTICE, notWrittenNotice, outline, writeNotice);
       } catch (err) {
         carry = [...raw, ...carry];
         // Same reason as the refused-write path: an idea whose second look
@@ -1962,7 +2003,7 @@ export function beginNotesSession(
         // indistinguishable from a quiet meeting. Once per outage — see
         // `notes-quota-notice.ts`.
         if (isQuotaFailure(reason)) {
-          announceQuotaOutage(quotaNotice, outline, notesHeadingId, writeQuotaNotice);
+          announceQuotaOutage(quotaNotice, outline, notesHeadingId, writeNotice);
         }
         // Only a size refusal is worth trying again at once; see
         // `retryAfterFailure`.
