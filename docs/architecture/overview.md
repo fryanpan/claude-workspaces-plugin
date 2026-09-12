@@ -45,7 +45,7 @@ arranged. Read it before non-trivial work.
 ```mermaid
 flowchart TB
   subgraph browser[Browser]
-    app["workspaces-app<br/>6 bundles: doc · board · settings · signin · landing · sentry"]
+    app["workspaces-app<br/>7 bundles: doc · board · settings · signin · landing · reviews · sentry"]
     wid["widget<br/>injectable web component"]
   end
   plug["plugin<br/>skills · hooks · bundled mcp"]
@@ -53,7 +53,7 @@ flowchart TB
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
-    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts"]
+    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
@@ -184,7 +184,11 @@ due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
 and filing one review item when a rule has gone stale — and
 `task-scheduled-wake.ts` get somebody onto the instance: an addressed frame
 to an attached owner, one spawn request to the fleet's spawner for a detached
-one, bounded retries, then a review item. What the loop reads — every rule
+one, bounded retries, then a review item. `task-run-output.ts` runs on the
+same pass: a run that wrote files into the rule's declared output folder
+files ONE review item linking them, replaced by the next run. It reads the
+project's files through the Library's listing, which `server.ts` hands it from
+`routes/workspace-library.ts`, so the scheduler never imports a route. What the loop reads — every rule
 task with its cursor resolved, including the last change of the doc or task an
 on-change rule watches — is `task-scheduler-rows.ts`. All of them join the
 Board group under its `task-*.ts` glob rather than changing the picture — they
@@ -204,11 +208,12 @@ new module sits beside the store rather than inside the group that consumes
 it. Nothing about dispatch changes: a declared wait alters what the wake
 SAYS, and `block_task` remains the verb for a blocker the board can verify.
 
-**A schedule rule has one spelling.** `core` holds nine modules for it and no
+**A schedule rule has one spelling.** `core` holds ten modules for it and no
 other package holds any: `task-schedule.ts` (the rule type and the occurrence
 arithmetic), `schedule-trigger.ts` (the kind that runs on a doc or task
 change, and its quiet window), `schedule-parse.ts` (a rule read off the
-wire), `schedule-timezone.ts` (instant ⇄ wall clock),
+wire), `schedule-output.ts` (the folder a rule writes into, and which of a
+project's files are one run's output), `schedule-timezone.ts` (instant ⇄ wall clock),
 `schedule-missed.ts` (what a rule wants done about an occurrence the server
 missed — catch up, skip, or fold into the open catch-up that is the lock),
 `schedule-run-record.ts` (what the task says about its last run, and when a
@@ -519,6 +524,15 @@ sits outside the doc store — a cadence with an environment override is a
 decision a test reads and a reviewer checks, not a number buried in a
 `setTimeout`. No state, no `Request`, nothing to schedule: the relay owns the
 timer, this owns only how long it runs.
+
+`meeting-namer.ts` and `meeting-titler.ts` join the same family and change
+nothing in the picture: a meeting starts as "Meeting" and is renamed to its
+topic from its own notes, only while nobody has named it. The namer is the
+adapter (prompt, parser, one Haiku call, built only in `server-deps.ts`); the
+titler decides when it runs and holds the guard, and `meeting-notes-doc.ts`
+calls it from the sinks it already wraps. The one-time rename of the old clock
+titles is `retitleClockTitles` in the titler, which `server.ts` starts once
+the port is bound, beside the effort re-scoring pass. No route reaches it.
 
 `notes-invented-links.ts` sits in the Meetings box beside `notes-edit-guard.ts`
 and is the second deterministic refusal on the applier path: the guard says
@@ -865,6 +879,21 @@ three additions, MCP tool schema, route and service, and the route is the one
 nothing type-checks, so add an HTTP-level test for every new parameter. The
 audio socket is the meeting's lifecycle: every way it can end ends the meeting
 exactly once, and nothing word-rate enters the SSE buffer.
+
+**The cross-board review** reads every board at once and writes through none
+of its own routes. `cross-review.ts` builds one queue from each board's Home
+rows (`home-pane.ts`), sized by `review-sizing.ts` against the rates in core's
+`review-size.ts` and ordered project-first by `review-plan.ts` and
+`cross-review-queue.ts`. `/review` walks that queue with the board's own
+walkthrough card (`workspaces-app/src/reviews/`), and each answer posts to the
+board the item lives on. When an answer lands, `review-answer-ledger.ts`
+records where it stood in the order last shown and how long it waited, which
+is what `/api/review-wait` reads back per board. The landing page's bar and
+project list are `landing-review.ts`, with each project's one-line summary
+from `board-summary.ts`. The size a person picks is kept per signed-in identity
+by `review-size-prefs.ts` (the browser's copy is only a cache), and the project
+order comes from a hand-edited `review-plan.json` naming the plan board —
+there is no route that sets it.
 
 ## Subsystem docs
 

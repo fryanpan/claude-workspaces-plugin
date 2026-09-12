@@ -25,6 +25,7 @@ import {
   resolveGoogleOauthCreds,
 } from './google-oauth.ts';
 import { stamped } from './log-stamp.ts';
+import { haikuMeetingNamer } from './meeting-namer.ts';
 import { createHaikuTaskCaptureExtractor } from './meeting-task-capture.ts';
 import { createNotesMethodComposer } from './notes-method-composer.ts';
 import { readNotesMethod } from './notes-method-store.ts';
@@ -323,6 +324,12 @@ export function createServerDeps(
     );
   }
 
+  // The ONLY place the real meeting namer is constructed — the same key and
+  // the same consent as the notes composer, because what it sends is the
+  // notes that composer wrote. Absent key or CW_MEETING_TITLES=0 → null → a
+  // meeting keeps the title it was created with until somebody renames it.
+  const titleNamer = haikuMeetingNamer();
+
   // The ONLY place a real plugin refresher is constructed — same seam rule as
   // the summarizer above, and here it also means no test run and no `bun run
   // staging` can mutate this machine's plugin cache. A deploy has to be asked
@@ -378,6 +385,7 @@ export function createServerDeps(
     calendarBot,
     notesComposer,
     taskExtractor,
+    titleNamer,
     pluginRefresher,
     deployer,
   };

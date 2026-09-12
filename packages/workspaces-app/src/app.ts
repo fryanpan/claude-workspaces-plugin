@@ -9,6 +9,7 @@ import { marginComposerSlot } from './doc/composer-slot.ts';
 import { type CommentPillHandle, mountCommentPill } from './doc/doc-comment-pill.ts';
 import { mountDocFloats } from './doc/doc-floats.ts';
 import { wireDocGates } from './doc/doc-gates.ts';
+import { mountMeetingHeading } from './doc/doc-heading.ts';
 import { mountDocMargin } from './doc/doc-margin.ts';
 import { type DocMeetingMount, mountDocMeeting } from './doc/doc-meeting-mount.ts';
 import { mountPointerPillLayer } from './doc/doc-pointer-pill.ts';
@@ -349,6 +350,15 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   // branch, or a companion doc under `navDocId`, is not a plan a person
   // approves.
   if (ctx.docType === 'markdown' && ctx.navDocId === undefined) {
+    // A meeting's title as its page's heading, with its dates under it.
+    mountMeetingHeading({
+      ...ctx,
+      editorMount,
+      ydoc,
+      huddle,
+      whenSynced: (cb) => client.onReady(cb),
+      scope,
+    });
     mountDocFloats({
       docId,
       root: editorMount,

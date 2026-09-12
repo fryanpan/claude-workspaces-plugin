@@ -36,6 +36,12 @@ import {
 import { type BrowserSentryConfig, sentryHeadTags } from './browser-sentry.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import type { DocStore, WorkspaceDirNode, WorkspaceFileNode } from './doc-store.ts';
+import {
+  LANDING_REVIEW_CSS,
+  type LandingReview,
+  agoText,
+  renderReviewBar,
+} from './landing-review.ts';
 import type {
   LandingModel,
   LandingProjectLink,
@@ -413,6 +419,48 @@ export function renderSettingsShell(
 }
 
 /**
+ * The cross-board review page (`/review`): every open item on every board,
+ * one card at a time, top project first. The board's stylesheets in the
+ * board's order and the board's frame — topbar, rail, Home column — because
+ * the card IS the board's walkthrough card; all the behaviour is
+ * `/app/reviews.js`, which reads `/api/review-queue` and fills the rail.
+ */
+export function renderReviewsShell(
+  sentry: BrowserSentryConfig | null,
+  assets: AssetManifest = {},
+): string {
+  const sentryTags = sentryHeadTags(sentry, 'board', assets);
+  const sentryMeta = sentryTags ? `\n    ${sentryTags}` : '';
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <title>Review · Workspaces</title>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#2e7dd7" />${sentryMeta}
+    <link rel="stylesheet" href="${assetHref(assets, 'board.css')}" />
+    <link rel="stylesheet" href="${assetHref(assets, 'styles.css')}" />
+    <link rel="stylesheet" href="${assetHref(assets, 'tokens.css')}" />
+  </head>
+  <body class="board-body reviews-body">
+    <div id="board-root">
+      <header class="board-topbar">
+        <a class="back-link" href="/" title="All workspaces" aria-label="All workspaces">←</a>
+        <span class="board-ws-name"><span class="board-ws-name-text" id="board-ws-name-text">Workspaces</span></span>
+      </header>
+      <div class="board-main board-main--home" id="board-main">
+        <nav id="board-nav" class="board-nav" aria-label="Workspace pages"></nav>
+        <section id="board-home" class="board-home"><div id="board-walkthrough" class="board-walkthrough"></div></section>
+      </div>
+    </div>
+    <div id="board-toast" class="board-toast hidden"></div>
+    <script type="module" src="${assetHref(assets, 'reviews.js')}"></script>
+  </body>
+</html>`;
+}
+
+/**
  * The page shell every not-found page in this file renders into.
  *
  * ONE shell rather than four near-copies, because the four are one message:
@@ -619,6 +667,26 @@ function flattenWorkspaceFiles(node: WorkspaceDirNode | WorkspaceFileNode): Land
   return node.children.flatMap(flattenWorkspaceFiles);
 }
 
+/** The newest real event on one board — see `collectLandingWorkspaces`. The
+ *  cross-board review ranks unplanned projects by the same reading. */
+export function boardLastActivity(
+  docStore: DocStore,
+  taskStore: TaskStore,
+  ws: BoardWorkspace,
+): number {
+  let last = ws.createdAt;
+  // Archived rows included: archiving IS activity on this board, and a
+  // reading that dropped the row afterwards would step the timestamp
+  // backwards the moment somebody tidied up.
+  for (const task of taskStore.listTasks(ws.id, { includeArchived: true })) {
+    if (task.updatedAt > last) last = task.updatedAt;
+    for (const thread of docStore.listThreads(`task:${task.id}`)) {
+      if (thread.lastActivity > last) last = thread.lastActivity;
+    }
+  }
+  return last;
+}
+
 /**
  * The `/` model's inputs, computed from the live stores.
  *
@@ -632,38 +700,15 @@ function flattenWorkspaceFiles(node: WorkspaceDirNode | WorkspaceFileNode): Land
 export function collectLandingWorkspaces(
   docStore: DocStore,
   taskStore: TaskStore,
-  // The landing route passes Home's own counter here (`reviewItemsFor` +
-  // `homeQueueTotal`, both closure-bound in createServer), so the chip and
-  // the queue it opens are one computation, not two that can drift.
-  waitingOf?: (ws: BoardWorkspace) => number,
 ): LandingWorkspaceInput[] {
-  return taskStore.listWorkspaces().map((ws) => {
-    let last = ws.createdAt;
-    // Archived rows included: archiving IS activity on this board, and a
-    // reading that dropped the row afterwards would step the timestamp
-    // backwards the moment somebody tidied up.
-    for (const task of taskStore.listTasks(ws.id, { includeArchived: true })) {
-      if (task.updatedAt > last) last = task.updatedAt;
-      for (const thread of docStore.listThreads(`task:${task.id}`)) {
-        if (thread.lastActivity > last) last = thread.lastActivity;
-      }
-    }
-    // A retired board contributes NO review items to this page — no chip on
-    // its row, nothing into the bar or the Review-all chain. Retiring is the
-    // owner saying "get this out of my way", and every one of those surfaces
-    // steering the reader back in contradicts the act. Filtered here at the
-    // source, not in the renderer: the count is simply never computed, so no
-    // later consumer of this model can reintroduce it. Un-retiring brings
-    // the items straight back — nothing about them was touched.
-    const waiting = !isRetired(ws) && waitingOf ? waitingOf(ws) : 0;
-    return {
-      id: ws.id,
-      name: ws.name,
-      lastActivity: last,
-      ...(isRetired(ws) ? { retired: true } : {}),
-      ...(waiting > 0 ? { waiting } : {}),
-    };
-  });
+  // A retired board contributes nothing to the review bar either — the
+  // cross-board queue reads live boards only (cross-review.ts).
+  return taskStore.listWorkspaces().map((ws) => ({
+    id: ws.id,
+    name: ws.name,
+    lastActivity: boardLastActivity(docStore, taskStore, ws),
+    ...(isRetired(ws) ? { retired: true } : {}),
+  }));
 }
 
 /** Every project owner that has at least one attachment — the links behind
@@ -874,12 +919,6 @@ a:hover{text-decoration:underline}
 .grp-meta{color:#8b95a1;font-size:12px;margin-top:2px}
 .grp-flex{display:flex;align-items:center;gap:8px}
 .grp-flex .grp-link{flex:1;min-width:0}
-.needs{flex-shrink:0;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#bf5b16;background:#fff1e6;border-radius:99px;padding:6px 12px;min-height:32px}
-.needs:hover{text-decoration:none;background:#ffe7d1}
-.needs .n{background:#e36f1e;color:#fff;border-radius:99px;font-size:11px;min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
-.allbar{display:flex;align-items:center;gap:10px;background:#fff8f2;border:1px solid #f5d9c2;border-radius:10px;padding:10px 14px;margin:10px 0 14px}
-.allsum{flex:1;min-width:0;font-size:13px;font-weight:600;color:#8a4a12}
-.allgo{flex-shrink:0;font-size:13px;font-weight:600;padding:7px 4px}
 .badge{font-size:10.5px;padding:1.5px 7px;border-radius:99px;background:#f6f8fa;color:#6e7781;font-weight:500;flex-shrink:0}
 .badge-open{background:#fff1e6;color:#bf5b16}
 .badge-resolved{background:#e8f5ed;color:#2da44e}
@@ -930,7 +969,7 @@ function landingShell(
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#2e7dd7">${sentryMeta}
-<style>${LANDING_CSS}</style>
+<style>${LANDING_CSS}${LANDING_REVIEW_CSS}</style>
 ${body}
 <footer>POST /workspaces/&lt;ws&gt;/docs · /widget.iife.js · /demos/mockup</footer>`;
 }
@@ -943,18 +982,27 @@ function renderLandingWorkspaceRow(w: LandingWorkspaceRow): string {
   // phone.
   const activity =
     w.lastActivity > 0 ? `active ${formatRelative(w.lastActivity)}` : 'no activity yet';
-  // The chip is a SIBLING anchor, not a child — a nested <a> is invalid HTML
-  // and browsers split it unpredictably. The row opens Home; the chip opens
-  // the same Home with the walkthrough already running (?walk=1), so
-  // answering never needs a second tap to find the queue.
-  const chip =
-    (w.waiting ?? 0) > 0
-      ? `<a class="needs" href="${escape(`${w.href}?walk=1`)}"><span class="n">${w.waiting}</span> for you</a>`
-      : '';
   return `<li class="grp grp-flex"><a class="grp-link" href="${escape(w.href)}">
     <div class="grp-row"><span class="grp-name">${escape(w.name)}</span></div>
     <div class="grp-meta">${escape(activity)}</div>
-  </a>${chip}</li>`;
+  </a></li>`;
+}
+
+/** The active boards in project order — the order the review flow walks. A
+ *  board the ranking has not seen keeps its recency place after the rest. */
+function prioritized(rows: LandingWorkspaceRow[], review: LandingReview): LandingWorkspaceRow[] {
+  const rank = (w: LandingWorkspaceRow) => review.rankOf.get(w.id) ?? Number.MAX_SAFE_INTEGER;
+  return [...rows].sort((a, b) => rank(a) - rank(b));
+}
+
+/** One numbered project: its name, then the last hour in a sentence ending in
+ *  the grey last-active time — or the time alone for a board gone quiet. */
+function renderPrioritizedRow(w: LandingWorkspaceRow, n: number, summary?: string): string {
+  const ago = w.lastActivity > 0 ? agoText(w.lastActivity, Date.now()) : 'no activity yet';
+  return `<li class="grp grp-flex"><span class="rank">${n}</span><a class="grp-link" href="${escape(w.href)}">
+    <div class="grp-row"><span class="grp-name">${escape(w.name)}</span></div>
+    <div class="grp-summary">${summary ? `${escape(summary)} ` : ''}<span class="ago">${escape(ago)}</span></div>
+  </a></li>`;
 }
 
 function renderLandingProjectLink(p: LandingProjectLink): string {
@@ -968,6 +1016,7 @@ export function renderLanding(
   sentry: BrowserSentryConfig | null,
   notesWorkspaceName: string,
   assets: AssetManifest = {},
+  review: LandingReview = { items: [], rankOf: new Map(), summaryOf: () => undefined },
 ): string {
   const days = Math.round(model.windowMs / 86_400_000);
   // Retired boards are NOT in this denominator. "Nothing active, 3 inactive
@@ -983,7 +1032,10 @@ export function renderLanding(
       ? total === 0
         ? '<div class="empty">No workspaces yet.</div>'
         : `<div class="empty">Nothing active in the last ${days} days (${total} inactive below).</div>`
-      : `<ul>${model.active.map(renderLandingWorkspaceRow).join('')}</ul>`;
+      : `<div class="prio-label">Prioritized Projects</div>
+<ul>${prioritized(model.active, review)
+          .map((w, i) => renderPrioritizedRow(w, i + 1, review.summaryOf(w.id)))
+          .join('')}</ul>`;
   const inactive =
     model.inactive.length === 0
       ? ''
@@ -1005,39 +1057,12 @@ export function renderLanding(
       ? ''
       : `<details class="fold"><summary>Attachments by project <span class="count">${model.projects.length}</span></summary>
 <ul>${model.projects.map(renderLandingProjectLink).join('')}</ul></details>`;
-  // Every row with a waiting count, page order (active first, then the
-  // quiet fold — an item on a quiet board still waits). The bar totals them
-  // and "Review all" starts the walkthrough in the most recently active one,
-  // handing the rest over via ?then= so the client chains the queues
-  // without coming back here between boards. Retired boards are OUT — the
-  // collector never computes a waiting count for one, so they can carry no
-  // chip, no share of the total, and no place in the chain; this filter is
-  // the belt to that suspender.
-  const waitingRows = [...model.active, ...model.inactive].filter((w) => (w.waiting ?? 0) > 0);
-  const waitingTotal = waitingRows.reduce((sum, w) => sum + (w.waiting ?? 0), 0);
-  const firstWaiting = waitingRows[0];
-  const allHref = firstWaiting
-    ? `${firstWaiting.href}?walk=1${
-        waitingRows.length > 1
-          ? `&then=${waitingRows
-              .slice(1)
-              .map((w) => encodeURIComponent(w.id))
-              .join(',')}`
-          : ''
-      }`
-    : '';
-  const allbar = firstWaiting
-    ? `<div class="allbar"><span class="allsum">${waitingTotal} waiting on you${
-        waitingRows.length > 1 ? ` across ${waitingRows.length} workspaces` : ''
-      }</span><a class="allgo" href="${escape(allHref)}">Review all ›</a></div>`
-    : '';
   return landingShell(
     'Workspaces',
     `<h1>Workspaces</h1>
-<div class="summary">Active in the last ${days} days, most recent first</div>
 <meeting-banner workspace-name="${escape(notesWorkspaceName)}"></meeting-banner>
 <script type="module" src="${assetHref(assets, 'landing.js')}"></script>
-${allbar}
+${renderReviewBar(review)}
 ${active}
 ${inactive}
 ${retired}

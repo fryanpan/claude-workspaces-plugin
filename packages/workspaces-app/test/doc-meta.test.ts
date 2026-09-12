@@ -126,4 +126,13 @@ describe('fetchDocMeta', () => {
     serve({ meta: { type: 'markdown', relPath: 'plan.md' } });
     expect((await fetchDocMeta('d7')).huddle).toBeUndefined();
   });
+
+  it('carries when the doc last changed, which a meeting heading shows', async () => {
+    serve({
+      meta: { type: 'markdown', relPath: 'huddles/d-abc1.md', lastActivityAt: 1_789_000_000_000 },
+    });
+    expect((await fetchDocMeta('d8')).lastActivityAt).toBe(1_789_000_000_000);
+    serve({ meta: { type: 'markdown', relPath: 'plan.md' } });
+    expect((await fetchDocMeta('d9')).lastActivityAt).toBeUndefined();
+  });
 });

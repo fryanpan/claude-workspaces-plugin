@@ -1,3 +1,4 @@
+import { scheduleOutputField } from '@claude-workspaces/core/schedule-output';
 import { parseSchedule } from '@claude-workspaces/core/schedule-parse';
 /**
  * The fields of a row that are edited one at a time, plus its soft delete.
@@ -266,6 +267,9 @@ export async function handleTaskFields(
       // The policy clause was parsed and then dropped here for a release —
       // "skip if missed" saved as catch-up. It is a field like the other two.
       ...(parsed.onMissed !== undefined ? { onMissed: parsed.onMissed } : {}),
+      // Unsaid keeps the stored folder: the phrase editor never sends one,
+      // and a chip edit must not quietly stop a digest reaching Home.
+      ...scheduleOutputField(parsed.output, taskStore.getTask(taskId)?.schedule?.output),
       armedAt: Date.now(),
       armedBy: author.name,
     });

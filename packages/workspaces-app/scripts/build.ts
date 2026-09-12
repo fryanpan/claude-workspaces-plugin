@@ -30,6 +30,7 @@ const HASHED = [
   'board.js',
   'signin.js',
   'settings.js',
+  'reviews.js',
   'landing.js',
   'sentry.js',
   'sw.js',
@@ -160,6 +161,27 @@ async function emit(buildId: string): Promise<boolean> {
   if (!settingsResult.success) {
     console.error('settings build failed:');
     for (const m of settingsResult.logs) console.error(m);
+    if (!isWatch) process.exit(1);
+    return false;
+  }
+
+  // The cross-board review page (/review): the board's walkthrough card fed
+  // every board's queue. Splitting for the board's reason — the card's
+  // composer pulls the markdown editor chunk only when a reply is typed.
+  const reviewsResult = await Bun.build({
+    entrypoints: [join(pkgRoot, 'src', 'reviews', 'reviews-app.ts')],
+    outdir: dist,
+    target: 'browser',
+    format: 'esm',
+    splitting: true,
+    sourcemap: 'external',
+    define,
+    naming: { entry: 'reviews.js', chunk: '[name]-[hash].js', asset: '[name].[ext]' },
+    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
+  });
+  if (!reviewsResult.success) {
+    console.error('reviews build failed:');
+    for (const m of reviewsResult.logs) console.error(m);
     if (!isWatch) process.exit(1);
     return false;
   }

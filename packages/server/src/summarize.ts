@@ -57,6 +57,7 @@ const MAX_TOKENS = 200;
  * gets stored.
  */
 const BRIEF_MAX_TOKENS = 1_200;
+const BOARD_SUMMARY_MAX_TOKENS = 80;
 const TIMEOUT_MS = 20_000;
 
 export interface SummarizerOpts {
@@ -486,6 +487,22 @@ export class ThreadSummarizer {
       console.error('[summarize] brief hit the token ceiling; keeping the deterministic brief');
       return null;
     }
+    return reply.text;
+  }
+
+  /**
+   * One sentence about a board's last hour, for the all-workspaces page
+   * (`board-summary.ts`). A small ceiling: the sentence is 80 characters, and
+   * a reply cut at the ceiling is a fragment, refused for the brief's reason.
+   */
+  async generateBoardSummary(prompt: { system: string; user: string }): Promise<string | null> {
+    if (!this.enabled || !this.key) return null;
+    const reply = await this.postRaw(
+      prompt.system,
+      [{ role: 'user', content: prompt.user }],
+      BOARD_SUMMARY_MAX_TOKENS,
+    );
+    if (reply === null || reply.stopReason === 'max_tokens') return null;
     return reply.text;
   }
 

@@ -240,12 +240,17 @@ describe('library routes', () => {
     // The page it names answers, so the tap lands on a doc rather than a 404.
     const page = await at(`/workspaces/${WS}/docs/${encodeURIComponent(docId)}?format=json`);
     expect(page.status).toBe(200);
-    // Now it is the board's doc: listed once, as a doc, and a second open
-    // of the same path is refused rather than minting a twin.
+    // Now it is the board's doc: listed once, as a doc. A second open of the
+    // same path — a link on a Home item tapped twice — lands on that doc
+    // rather than minting a twin.
     const lib = await items();
     const rows = lib.files.filter((f) => f.href === href || f.open === 'docs/tide-gauge.md');
     expect(rows).toEqual([expect.objectContaining({ href })]);
-    expect((await open('docs/tide-gauge.md')).status).toBe(404);
+    const again = await open('docs/tide-gauge.md');
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ docId, href });
+    const after = (await items()).files.filter((f) => f.name === 'tide-gauge.md');
+    expect(after).toHaveLength(1);
   });
 
   it('opens a mounted file from the checkout its mount recorded', async () => {
@@ -361,7 +366,12 @@ describe('library routes', () => {
     expect((await open('docs/tide-gauge.md')).status).toBe(200);
     expect((await open('private/hidden.md')).status).toBe(404);
     expect((await open('../outside.md')).status).toBe(404);
-    expect((await open('handbook.md')).status).toBe(404);
     expect((await open('')).status).toBe(400);
+    // A path a doc of this board already holds is not offered, and opens
+    // that doc.
+    const row = (await items()).files.find((f) => f.name === 'handbook.md');
+    const held = await open('handbook.md');
+    expect(held.status).toBe(200);
+    expect(((await held.json()) as { href: string }).href).toBe(row?.href ?? 'no row');
   });
 });

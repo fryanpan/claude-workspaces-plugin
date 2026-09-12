@@ -41,6 +41,23 @@ const NAV_ITEMS: ReadonlyArray<{ nav: BoardNav; label: string; icon: string }> =
   { nav: 'activity', label: 'Activity', icon: NAV_ICONS.activity },
 ];
 
+/** The four destinations as rail buttons — the board's rail, and the one the
+ *  cross-board review draws beside its card. */
+export function navRailItemsHtml(): string {
+  return NAV_ITEMS.map(
+    (
+      n,
+    ) => `<button type="button" class="board-nav-item" data-nav="${n.nav}" title="${escapeHtml(n.label)}">
+          <span class="board-nav-icon" aria-hidden="true">${n.icon}</span><span class="board-nav-label">${escapeHtml(n.label)}</span>
+        </button>`,
+  ).join('');
+}
+
+/** The rail's collapse toggle; `wireNavCollapse` gives it its behaviour. */
+export const NAV_COLLAPSE_HTML = `<button type="button" id="board-nav-collapse" class="board-nav-item board-nav-collapse" title="Collapse">
+          <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.collapse}</span><span class="board-nav-label">Collapse</span>
+        </button>`;
+
 /**
  * The back arrow, or nothing.
  *
@@ -80,13 +97,7 @@ export function buildShell(
     <div id="board-connection" class="conn-banner hidden" role="status" aria-live="polite"></div>
     <div class="board-main" id="board-main">
       <nav id="board-nav" class="board-nav" aria-label="Workspace pages">
-        ${NAV_ITEMS.map(
-          (
-            n,
-          ) => `<button type="button" class="board-nav-item" data-nav="${n.nav}" title="${escapeHtml(n.label)}">
-          <span class="board-nav-icon" aria-hidden="true">${n.icon}</span><span class="board-nav-label">${escapeHtml(n.label)}</span>
-        </button>`,
-        ).join('')}
+        ${navRailItemsHtml()}
         <!-- The rail's foot, apart from the four tabs above it (Bryan,
              2026-09-11: settings reached "from a bottom-left button in the
              nav bar", "so that settings never crowd the main tabs or the top
@@ -97,9 +108,7 @@ export function buildShell(
         <button type="button" id="board-nav-settings" class="board-nav-item board-nav-settings" title="Settings">
           <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.settings}</span><span class="board-nav-label">Settings</span>
         </button>
-        <button type="button" id="board-nav-collapse" class="board-nav-item board-nav-collapse" title="Collapse">
-          <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.collapse}</span><span class="board-nav-label">Collapse</span>
-        </button>
+        ${NAV_COLLAPSE_HTML}
         <div class="board-nav-dock" role="group" aria-label="Voice">
           <button type="button" id="board-mic" class="voice-mic" title="Hold to talk (or hold Space)" aria-label="Hold to talk">${MIC_ICON}</button>
           <div id="board-voice" class="voice-indicator hidden" aria-live="polite"></div>

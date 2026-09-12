@@ -2363,6 +2363,10 @@ export const TOOL_LIST: ListToolsResult = {
             description:
               "What to do about an occurrence the server missed while down. Absent is catch-up: fire it late. 'skip' waits for the next one.",
           },
+          output: {
+            description:
+              "The folder the rule's runs write into, as {folder} relative to the board's project root, e.g. {folder:'digests'}. Each run that writes files there files ONE review item on the rule linking them, which the next run replaces. Absent keeps the stored folder; null clears it.",
+          },
         },
         required: ['workspaceId', 'taskId', 'rule'],
       },

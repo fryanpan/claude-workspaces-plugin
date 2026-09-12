@@ -65,6 +65,9 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/repos/live-copy` | GET | `routes/repos.ts` | loopback-only |  |
 | `/api/review-items` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/review-items/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/review-queue` | GET | `routes/review-queue.ts` | trusted-local |  |
+| `/api/review-size` | GET, PUT | `routes/review-queue.ts` | trusted-local |  |
+| `/api/review-wait` | GET | `routes/review-queue.ts` | trusted-local |  |
 | `/api/reviews` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/reviews/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/sentry` | GET, POST | `routes/ops.ts` | loopback-only |  |
@@ -98,6 +101,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/projects/:owner` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/recall/:token` | GET | `routes/upgrade-stream.ts` | recall-callback |  |
 | `/recall/status` | POST | `routes/recall-webhook.ts` | recall-callback |  |
+| `/review` | GET | `routes/review-queue.ts` | trusted-local |  |
 | `/s/:slug` | GET | `routes/auth-share.ts` | trusted-local |  |
 | `/settings` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/settings/prompts` | GET | `routes/shell-static.ts` | trusted-local |  |

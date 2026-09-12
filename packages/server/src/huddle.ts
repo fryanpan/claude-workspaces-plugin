@@ -12,7 +12,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { type HuddleKind, docKindLabel } from '@claude-workspaces/core';
+import { type HuddleKind, defaultMeetingTitle } from '@claude-workspaces/core';
 
 export type { HuddleKind };
 
@@ -22,22 +22,26 @@ export const HUDDLE_TOPIC_MAX = 200;
 const pad = (n: number): string => String(n).padStart(2, '0');
 
 /**
- * "Plan 2026-08-29 14:05" / "Meeting notes 2026-08-29 14:05" — the doc's kind
- * in the product's words, then the clock, to the minute, in the SERVER's
- * local time. The server is the box on Bryan's desk, so its clock is the
- * room's clock; a browser-supplied zone would be one more thing to get
- * wrong for a title that only has to read naturally to the people in it.
- *
- * The word is the KIND, not the mechanism: Bryan retired "Huddle" from the
- * UI on 2026-09-02 ("We can have plans and meeting notes"). An absent kind is
- * a caller from before the split and reads as meeting notes, which is what
- * an untyped live doc has always been.
+ * What a new huddle is called until something names it: "Meeting", or
+ * "Planning Meeting" for a plan (Bryan, 2026-09-12). It used to be the kind
+ * plus the clock — "Meeting notes 2026-08-29 14:05" — which told nobody what
+ * the meeting was about; the doc record keeps when it started, and the
+ * meeting namer (`meeting-namer.ts`) replaces this with the topic once notes
+ * exist. The doc is created with `titleSource: 'default'`, which is what
+ * lets it.
  */
-export function huddleTitle(at: number, kind?: HuddleKind): string {
-  const d = new Date(at);
-  const clock = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  return `${docKindLabel(kind)} ${clock}`;
+export function huddleTitle(kind?: HuddleKind): string {
+  return defaultMeetingTitle(kind);
 }
+
+/**
+ * The clock titles this server used to mint: "Meeting notes 2026-08-29
+ * 14:05", "Plan 2026-08-29 14:05", and a calendar meeting's untitled
+ * "Meeting 2026-09-01 14:05". Exact, so a title a person typed is never
+ * mistaken for one — the boot pass that retitles them (`meeting-titler.ts`) rewrites
+ * only a title that still reads as the server minted it.
+ */
+export const CLOCK_TITLE = /^(?:Meeting notes|Plan|Meeting) \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
 
 /**
  * The readable name the doc is created under — `huddle-20260829-1405-x7q2`.
@@ -209,14 +213,12 @@ export function huddleFilePath(dataDir: string, docId: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The event's own title when the calendar has one; the clock, huddle-style,
- * when it does not — an untitled event is still a real meeting, and "Meeting"
- * plus when it happened is how a person will look for it later.
+ * The event's own title when the calendar has one; "Meeting" when it does
+ * not — the same default a huddle gets, and for the same reason: the doc
+ * record keeps when it happened, and the namer can name it from its notes.
  */
-export function meetingDocTitle(eventTitle: string | null, at: number): string {
-  if (eventTitle) return eventTitle;
-  const d = new Date(at);
-  return `Meeting ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+export function meetingDocTitle(eventTitle: string | null): string {
+  return eventTitle || defaultMeetingTitle();
 }
 
 /** `meeting-20260901-1405-x7q2` — same construction as `huddleAlias`. */

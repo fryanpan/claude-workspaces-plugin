@@ -23,9 +23,11 @@ import {
   agentTokenKey as deriveAgentTokenKey,
 } from './auth/agent-token.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
+import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { maybeCompress, maybeNotModified } from './compress.ts';
+import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
@@ -41,6 +43,7 @@ import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
 import { MEETING_CAPTURE_ACTOR } from './meeting-task-capture.ts';
+import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
@@ -74,6 +77,8 @@ import {
 } from './review-archive.ts';
 import { createReviewGate } from './review-gate.ts';
 import type { ReviewThreadItem } from './review-queue.ts';
+import { ReviewSizePrefs } from './review-size-prefs.ts';
+import type { SizedReviewItemRow } from './review-sizing.ts';
 import {
   type AgentIdentityRoutesContext,
   handleAgentIdentityRoutes,
@@ -106,6 +111,7 @@ import {
 } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext, handleRepoRoutes } from './routes/repos.ts';
 import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/review-files.ts';
+import { type ReviewQueueRoutesContext, handleReviewQueueRoutes } from './routes/review-queue.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
 import { createShellStatic } from './routes/shell-static.ts';
@@ -117,7 +123,11 @@ import {
   handleTaskRoutes,
 } from './routes/tasks.ts';
 import { createUpgradeStream } from './routes/upgrade-stream.ts';
-import { type LibraryRoutesContext, handleLibraryRoutes } from './routes/workspace-library.ts';
+import {
+  type LibraryRoutesContext,
+  handleLibraryRoutes,
+  libraryRunOutputSource,
+} from './routes/workspace-library.ts';
 import { handleWorkspaceNotFound } from './routes/workspace-not-found.ts';
 import {
   type MeetingHomeResolution,
@@ -138,6 +148,7 @@ import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
 import { HTTP_IDLE_TIMEOUT_SEC, SseBus } from './sse.ts';
 import { createStallWiring } from './stall-wiring.ts';
 import { TaskProjection, taskBodyDocId } from './task-projection.ts';
+import { type RunOutputSource, observeRunOutput } from './task-run-output.ts';
 import { DEFAULT_SPAWNER_AGENT_ID, observeScheduledWake } from './task-scheduled-wake.ts';
 import { type FiredOccurrence, SCHEDULER_ACTOR, createTaskScheduler } from './task-scheduler.ts';
 import {
@@ -170,10 +181,12 @@ import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import {
   HTML_SHELL_HEADERS,
   appCacheControl,
+  boardLastActivity,
   readAppAssetManifest,
   renderBoardMemberNotFound,
   renderBoardNotFound,
   renderBoardShell,
+  renderReviewsShell,
   renderSigninShell,
   serveStaticUnder,
 } from './shells.ts';
@@ -422,6 +435,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ? withServerNotesSinks(opts.meetingNotes, {
           docStore: () => docStore,
           tasks: () => taskStore,
+          // The meeting namer's reads and its guarded title write.
+          titleStore: () => docStore,
           // One reader: the legacy-transcript removal, which must not take a
           // `Raw transcript` heading out of a doc bound into somebody's
           // working tree, where the old note-taker never wrote one.
@@ -1121,6 +1136,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // `schedulerNow` is a seam for the same reason `stallNudgeQuietMs` is one:
   // the feature IS a comparison against a clock, so a test that could not move
   // the clock would have to burn real minutes to assert anything.
+  let runOutputSource = (): RunOutputSource => ({ files: () => null, opened: () => false });
   const taskScheduler = createTaskScheduler(taskStore, {
     ...(opts.schedulerNow !== undefined ? { now: opts.schedulerNow } : {}),
     observers: [
@@ -1137,6 +1153,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         },
         SCHEDULER_ACTOR,
       ),
+      // A declared output folder's new files reach Home as one item per run.
+      // The Library's context is built further down; a tick reads it late.
+      observeRunOutput(
+        taskStore,
+        {
+          files: (ws) => runOutputSource().files(ws),
+          opened: (ws, relPath) => runOutputSource().opened(ws, relPath),
+        },
+        SCHEDULER_ACTOR,
+        (message) => console.error(message),
+      ),
     ],
   });
   // The late binding `DocStore` was constructed with: the bridge needs the task
@@ -1148,11 +1175,30 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // because everything the pane reads — the stores, the doc store and the
   // summarizer seam — is in hand by this line, and the routes below take the
   // same four names off it that they used to take off this closure.
-  const { homeBriefs, reviewItemsFor, homeQueueTotal, homePayload } = createHomePane({
+  const { homeBriefs, reviewItemsFor, sizer, homePayload } = createHomePane({
     dataDir,
     taskStore,
     docStore,
     summarizer,
+  });
+  // One queue over every board, in project order, and the ledger that records
+  // where each answered item stood in it. Composed beside the Home pane
+  // because it reads that pane's own rows — the cross-board order and a
+  // board's Home order are one computation.
+  const crossReview = createCrossReview({
+    dataDir,
+    taskStore,
+    docStore,
+    reviewItemsFor,
+    sizer,
+    lastActivityOf: (w) => boardLastActivity(docStore, taskStore, w),
+    spawnerAgentId: spawnerAgentId ?? null,
+    onError: (err) => captureServerError(err, { where: 'cross-review answer ledger' }),
+  });
+  const boardSummaries = createBoardSummaries({
+    dataDir,
+    summarizer,
+    titleOf: (taskId) => taskStore.getTask(taskId)?.title,
   });
   /**
    * Rewrite a task's description through its live `task:<id>` body doc, with
@@ -1245,7 +1291,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           // than a bare `.filter`, because `.filter` alone leaves the union
           // intact and the field reads below would not compile.
           .filter(
-            (item): item is ReviewThreadItem => item.kind !== 'task-review' && item.docId === docId,
+            (item): item is SizedReviewItemRow & ReviewThreadItem =>
+              item.kind !== 'task-review' && item.docId === docId,
           )
           .map((item) => ({
             threadId: item.threadId,
@@ -1739,8 +1786,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     redirectTo,
     withReviewUrl,
-    reviewItemsFor,
-    homeQueueTotal,
+    landingReview: () => {
+      const q = crossReview.queue();
+      // Fire and forget: the page shows what is stored, and a sentence that
+      // arrives now is on the next load. Each refresh declines unless due.
+      for (const p of q.projects) void boardSummaries.refresh({ id: p.workspaceId, name: p.name });
+      return {
+        items: q.items,
+        rankOf: new Map(q.projects.map((p) => [p.workspaceId, p.rank])),
+        summaryOf: (id) => boardSummaries.read(id),
+      };
+    },
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
   });
 
@@ -1812,6 +1868,18 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** The words this server's prompts run on — the settings page's data. */
   const promptRoutesCtx: PromptRoutesContext = { promptStore, j, safeJson };
 
+  /** The cross-board review queue and its wait report — trusted-local only. */
+  const reviewQueueRoutesCtx: ReviewQueueRoutesContext = {
+    crossReview,
+    boardName: (id) => taskStore.getWorkspace(id)?.name,
+    sizePrefs: new ReviewSizePrefs(dataDir),
+    sessionIdentityId: (req) => sessionIdentityFor(req)?.id ?? null,
+    renderPage: () => renderReviewsShell(browserSentry, readAppAssetManifest(markdownAppDist)),
+    pageHeaders: HTML_SHELL_HEADERS,
+    j,
+    safeJson,
+  };
+
   /**
    * The repo registry — checkouts of a project, and which copy of a doc is
    * live. Loopback-only, for the same reason the deploy route is: every value
@@ -1852,6 +1920,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     markdownFiles: createMarkdownLister(),
     requestAddress: (req) => server.requestIP(req)?.address,
   };
+  runOutputSource = () =>
+    libraryRunOutputSource(libraryRoutesCtx, (id) => taskStore.getWorkspace(id));
 
   /**
    * Where a board's meetings file: its project, and what that project chose.
@@ -2701,6 +2771,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         if (handled) return handled;
       }
 
+      // --- REST + page: the cross-board review queue --- see
+      // ./routes/review-queue.ts. Top-level for the prompts' reason: it is
+      // about every board, not one.
+      {
+        const handled = await handleReviewQueueRoutes(reviewQueueRoutesCtx, {
+          req,
+          pathname,
+          url,
+          visitor,
+        });
+        if (handled) return handled;
+      }
+
       // --- Web log --- see ./routes/ops.ts. Same chain position as before
       // the split: under the doc resource routes, above the shell tail.
       {
@@ -2813,6 +2896,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // over the same 99 rows, and the abandoned one still calling the API.
   // Reaching this line is what makes a server real.
   void rescoreStaleEffortEstimates();
+  // The old clock titles are renamed here for the same reason: once, by the
+  // server that was kept, never blocking the boot it follows.
+  void retitleClockTitlesAtBoot(docStore, opts.meetingNotes?.titleNamer ?? null);
 
   /**
    * The base every human-facing URL this server emits is built on.
@@ -3082,6 +3168,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // marked as recording by a socket that died with the process. Awaited
       // because the close handlers above start their teardowns async, and
       // their notes belong in the docs this flushes next.
+      crossReview.dispose();
       await meetingRelay.dispose();
       // And the bots. A bot left in a call after this process is gone bills
       // two vendors and delivers nothing — see RecallMeetingRelay.dispose.
