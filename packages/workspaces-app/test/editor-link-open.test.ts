@@ -145,17 +145,23 @@ describe('a tap opens a link while the doc is editable', () => {
 });
 
 /**
- * The gestures that mean "edit this link", not "follow it". Without these a
- * link's own words would be unreachable on a doc that is always editable —
- * which is the same bug in the other direction.
+ * The gestures that are not the opening one.
+ *
+ * Alt-click is the one that matters: it is how a link's own words stay
+ * editable on a doc that is always editable. Double-click is NOT on that
+ * list, and cannot be — a browser sends the first click of a double click
+ * with `detail === 1`, so the link has opened before the second arrives.
  */
-describe('the gestures that edit a link instead of following it', () => {
-  it('leaves a double click alone, so the words can be selected and retyped', () => {
+describe('the gestures that are not the opening one', () => {
+  it('opens once for a double click, not twice — the second click is refused', () => {
     setViewportWidth(1180);
     const opened = watchOpen();
     mount(LINKED);
-    click(anchor(), { detail: 2 });
-    expect(opened.calls).toEqual([]);
+    const a = anchor();
+    // A browser's real sequence for a double click.
+    click(a, { detail: 1 });
+    click(a, { detail: 2 });
+    expect(opened.calls.length).toBe(1);
   });
 
   it('leaves Alt-click alone — the way to put the caret inside a link', () => {

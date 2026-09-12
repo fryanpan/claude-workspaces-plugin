@@ -252,14 +252,20 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
    * own notes. The href is still filtered by `safeLinkHref`, so a
    * script-bearing scheme opens nothing.
    *
-   * Four gestures are NOT this one, and each is somebody's way of editing the
-   * link rather than following it:
+   * Three gestures are NOT this one:
    *
-   * - a double or triple click, which selects the words to retype them;
-   * - Alt/Option-click, the deliberate "put the caret in here" — the escape
-   *   hatch that keeps a link's text editable now that a plain tap leaves;
-   * - Shift-click, which extends a selection across it;
+   * - Alt/Option-click, the deliberate "put the caret in here". This is the
+   *   way to edit a link's own words now that a plain click leaves the page,
+   *   and it is the only one: a browser sends the FIRST click of a double
+   *   click with `detail === 1`, so by the time a second arrives the link has
+   *   already opened. Double-click-to-select and click-to-open cannot both
+   *   have the plain gesture, and the spec gives it to opening.
+   * - Shift-click, which extends a selection across it.
    * - anything but the primary button, which belongs to the context menu.
+   *
+   * `ev.detail > 1` is still refused, and it is not that missing fourth
+   * gesture: it stops the SECOND click of a double click from opening the
+   * same link a second time, in a second tab.
    *
    * Bound at the DOM level so it works whether or not the view is editable.
    */
