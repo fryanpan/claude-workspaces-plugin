@@ -241,13 +241,30 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
   // bound .md file). The editor never seeds locally — that would race the
   // server's authoritative content.
 
-  // Links are non-navigable on a plain click (openOnClick:false) so the cursor
-  // can be placed inside them to edit — but a Cmd/Ctrl+Click should open the
-  // link in a new tab, matching the browser convention for opening links in a
-  // read-only surface. Bound at the DOM level so it works in both edit and
-  // view mode. Script-bearing schemes are filtered by safeLinkHref.
+  /**
+   * A single tap or click opens the link — on a phone and under a mouse
+   * alike.
+   *
+   * Tiptap's own opener is off (`openOnClick: false`) and this replaces it,
+   * because the doc is now EDITABLE for everyone who can write it: the
+   * Cmd/Ctrl-click this used to require is a gesture a touch screen does not
+   * have, and a reader on a phone had no way at all to follow a link in their
+   * own notes. The href is still filtered by `safeLinkHref`, so a
+   * script-bearing scheme opens nothing.
+   *
+   * Four gestures are NOT this one, and each is somebody's way of editing the
+   * link rather than following it:
+   *
+   * - a double or triple click, which selects the words to retype them;
+   * - Alt/Option-click, the deliberate "put the caret in here" — the escape
+   *   hatch that keeps a link's text editable now that a plain tap leaves;
+   * - Shift-click, which extends a selection across it;
+   * - anything but the primary button, which belongs to the context menu.
+   *
+   * Bound at the DOM level so it works whether or not the view is editable.
+   */
   const onLinkClick = (ev: MouseEvent) => {
-    if (!(ev.metaKey || ev.ctrlKey)) return;
+    if (ev.button !== 0 || ev.detail > 1 || ev.altKey || ev.shiftKey) return;
     const target = ev.target as HTMLElement | null;
     const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
     if (!anchor) return;
