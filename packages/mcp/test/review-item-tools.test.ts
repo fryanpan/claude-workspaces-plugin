@@ -605,7 +605,12 @@ describe('what the tool schemas tell an agent', () => {
     // used to say, which is how an ask arrived severed from its work.
     expect(review?.description?.toLowerCase()).toContain('add_review_item');
     // Same payload, not a second one: the shape came from the shared schema.
-    const shared = byName('create_thread').inputSchema.properties?.review as {
+    // Compared against `add_review_item` rather than `create_thread`, because
+    // the two TASK-borne schemas are the pair that must not fork — a row's
+    // review item and an item added to an existing task are the same ask
+    // filed a beat apart. What separates them from the comment-borne pair is
+    // asserted on its own, below.
+    const shared = byName('add_review_item').inputSchema.properties?.review as {
       properties?: Record<string, unknown>;
     };
     expect(
@@ -644,27 +649,48 @@ describe('what the tool schemas tell an agent', () => {
   });
 
   /**
-   * ONE review-item schema, checked on the resolved JSON rather than on the
-   * spread that produced it.
+   * ONE review-item schema per place an item can be filed, checked on the
+   * resolved JSON rather than on the spread that produced it.
    *
    * The old form matched `...REVIEW_ITEM_SCHEMA` in the source and counted
    * `required: ['headline']` occurrences. Both are claims about how the
    * registry is WRITTEN: a second schema that happened to be identical failed
    * them, and a `review` block that had drifted apart by an added property
    * passed them as long as the spread was still spelt that way. What has to
-   * hold is that every tool taking a review item advertises the same payload,
-   * which is exactly what the delivered schemas say.
+   * hold is what the delivered schemas say.
+   *
+   * It used to be one family. It is now two, and the split is deliberate: a
+   * 'secret' item is answered on a door addressed by task and item id, so a
+   * comment-borne one would have nowhere to send the values but the ordinary
+   * answer path, which records words. The server refuses that shape on the
+   * comment path, and the schema not offering it there is how an author finds
+   * out before the call rather than after it. So the test below asserts three
+   * things instead of one: the comment-borne tools agree with each other, the
+   * task-borne tools agree with each other, and the difference between the
+   * families is EXACTLY the secret fields — nothing else may drift across
+   * under cover of this exception.
    */
-  it('every tool that takes a review item advertises the SAME payload', () => {
+  it('review-item payloads fork only where a secret may be asked for', () => {
     const reviewSchemas = tools
-      .map((t) => ({ name: t.name, review: t.inputSchema.properties?.review }))
+      .map((t) => ({
+        name: t.name,
+        review: t.inputSchema.properties?.review,
+        // Where the item lands. A tool naming a taskId files on a task; the
+        // rest file on a comment thread.
+        onTask: t.inputSchema.properties?.taskId !== undefined,
+      }))
       .filter(
-        (r): r is { name: string; review: Record<string, unknown> } => r.review !== undefined,
+        (r): r is { name: string; review: Record<string, unknown>; onTask: boolean } =>
+          r.review !== undefined,
       );
     // Positive control: the probe found the tools, so an agreement below is
-    // not agreement across an empty set.
-    expect(reviewSchemas.map((r) => r.name)).toEqual(
-      expect.arrayContaining(['create_thread', 'post_reply', 'add_review_item']),
+    // not agreement across an empty set — and it found BOTH families, so
+    // neither half of the claim is vacuous.
+    expect(reviewSchemas.filter((r) => !r.onTask).map((r) => r.name)).toEqual(
+      expect.arrayContaining(['create_thread', 'post_reply']),
+    );
+    expect(reviewSchemas.filter((r) => r.onTask).map((r) => r.name)).toEqual(
+      expect.arrayContaining(['add_review_item']),
     );
     // Everything but the top-level `description`, which each tool overrides
     // on purpose — `add_review_item` says "a review item on this ticket"
@@ -674,15 +700,38 @@ describe('what the tool schemas tell an agent', () => {
       const { description: _drop, ...rest } = r;
       return rest;
     };
-    const first = reviewSchemas[0];
-    for (const r of reviewSchemas)
-      expect(payloadOf(r.review), r.name).toEqual(payloadOf(first?.review ?? {}));
+    const agree = (family: typeof reviewSchemas): Record<string, unknown> => {
+      const first = family[0];
+      for (const r of family) expect(payloadOf(r.review), r.name).toEqual(payloadOf(first.review));
+      return first.review;
+    };
+    const onComment = agree(reviewSchemas.filter((r) => !r.onTask));
+    const onTask = agree(reviewSchemas.filter((r) => r.onTask));
+
     // …and it really is the review-item payload, not an empty object every
     // tool agrees about by accident.
-    expect((first?.review as { required?: string[] }).required).toEqual(['headline']);
-    expect(
-      Object.keys((first?.review as { properties?: Record<string, unknown> }).properties ?? {}),
-    ).toEqual(expect.arrayContaining(['headline', 'detail']));
+    expect((onComment as { required?: string[] }).required).toEqual(['headline']);
+    expect((onTask as { required?: string[] }).required).toEqual(['headline']);
+    const propsOf = (r: Record<string, unknown>) =>
+      (r as { properties?: Record<string, unknown> }).properties ?? {};
+    expect(Object.keys(propsOf(onComment))).toEqual(expect.arrayContaining(['headline', 'detail']));
+
+    // The difference, named. `secrets` exists on the task family alone, and
+    // the two enums the shape travels in are widened by exactly one value.
+    expect(Object.keys(propsOf(onComment))).not.toContain('secrets');
+    expect(Object.keys(propsOf(onTask))).toContain('secrets');
+    const enumOf = (r: Record<string, unknown>, key: string) =>
+      (propsOf(r)[key] as { enum?: string[] } | undefined)?.enum ?? [];
+    expect(enumOf(onTask, 'review_type')).toEqual([...enumOf(onComment, 'review_type'), 'secret']);
+    expect(enumOf(onTask, 'shape')).toEqual([...enumOf(onComment, 'shape'), 'secret']);
+    // Nothing ELSE forked: strip the three known differences and the two
+    // payloads are the same object again.
+    const withoutSecretFields = (r: Record<string, unknown>) => {
+      const { description: _drop, ...rest } = r;
+      const { secrets: _s, review_type: _rt, shape: _sh, ...props } = propsOf(r);
+      return { ...rest, properties: props };
+    };
+    expect(withoutSecretFields(onTask)).toEqual(withoutSecretFields(onComment));
   });
 });
 

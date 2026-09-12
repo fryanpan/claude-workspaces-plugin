@@ -11,8 +11,8 @@ import { gzipSync } from 'node:zlib';
  * it: origin/main built to 40,940 bytes gzipped — TWENTY bytes under the old
  * ceiling. At that margin the gate had stopped being a budget and become a
  * tripwire on the next change to `packages/core`, whatever it was: the secret
- * review-item shape added 103 bytes of payload reading and tripped it, and so
- * would have any other addition to a module `schema.ts` reaches.
+ * review-item shape carried the bundle to 41,123 and tripped it, and so would
+ * have any other addition to a module `schema.ts` reaches.
  *
  * One kilobyte, not a round-up to the next comfortable number, because the
  * point of the gate is that somebody has to come back here and write a
