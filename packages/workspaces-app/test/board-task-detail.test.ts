@@ -9,7 +9,7 @@
  * once per revision however many times the render path calls it, and a failed
  * ask leaves the list row standing rather than blanking the panel.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardState } from '../src/board/board-actions.ts';
 import type { BoardTask } from '../src/board/board-model.ts';
 import {
@@ -212,7 +212,10 @@ describe('mergeTaskDetail', () => {
 describe('asking for the rest of a row', () => {
   let state: BoardState;
   let fetchMock: ReturnType<typeof vi.fn>;
-  let renderDetail: ReturnType<typeof vi.fn>;
+  // vitest 4's bare `vi.fn()` is typed `Mock<Procedure | Constructable>` —
+  // callable OR newable — which no longer satisfies the plain `() => void`
+  // this is handed to. The signature says which of the two it is.
+  let renderDetail: Mock<() => void>;
 
   function loads() {
     return createTaskDetailLoads({
@@ -227,7 +230,7 @@ describe('asking for the rest of a row', () => {
 
   beforeEach(() => {
     state = boardState({ tasks: new Map([['t-1', trimmed('t-1', 10)]]) });
-    renderDetail = vi.fn();
+    renderDetail = vi.fn<() => void>();
     fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ task: whole('t-1', 10, 'the whole description') }),
