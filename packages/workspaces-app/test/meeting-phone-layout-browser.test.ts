@@ -51,8 +51,36 @@ const SPAWN_MS = 110_000;
 const dirs: string[] = [];
 const owned: string[] = [];
 
+/**
+ * The two floats AFTER BOTH ARE PRESSED. The receipt face is not the ask
+ * face shortened: the one-line phone rule below covers `--make` and
+ * `--ask` only, deliberately, because a receipt's second line answers "did
+ * that go anywhere" rather than explaining a press. So the pair grows from
+ * 44px to 84px under a runway that was sized for the short ones — which is
+ * the whole reason this state gets a case of its own.
+ */
+const PRESSED_DOCK = `
+    <button type="button" class="plan-float plan-float--requested" disabled data-face="requested">
+      <span class="plan-float-label">Plan requested</span>
+      <span class="plan-float-sub">Asked by Saltmarsh — no lead attached; answered when one joins</span>
+    </button>
+    <button type="button" class="plan-float review-float plan-float--requested" disabled data-face="requested">
+      <span class="plan-float-label">Review requested</span>
+      <span class="plan-float-sub">Asked by Saltmarsh — no lead attached; answered when one joins</span>
+    </button>`;
+
+const ASKING_DOCK = `
+    <button type="button" class="plan-float plan-float--make">
+      <span class="plan-float-label">Make Plan</span>
+      <span class="plan-float-sub">Ask your agent to create a plan</span>
+    </button>
+    <button type="button" class="plan-float review-float review-float--ask">
+      <span class="plan-float-label">Review</span>
+      <span class="plan-float-sub">Ask your agent to review the notes</span>
+    </button>`;
+
 /** Enough prose to make the scroller scroll, then the live transcript. */
-function page(): string {
+function page(dock: string = ASKING_DOCK): string {
   const paragraphs = Array.from(
     { length: 24 },
     (_, i) =>
@@ -80,15 +108,7 @@ function page(): string {
       <div class="lz-lines"><span class="lz-turn">Harborlight wants the draft timetable before the board meets again, and Saltmarsh covers the second week and the week after that if the tide allows it at all.</span></div>
     </div>
   </div>
-  <div class="doc-floats">
-    <button type="button" class="plan-float plan-float--make">
-      <span class="plan-float-label">Make Plan</span>
-      <span class="plan-float-sub">Ask your agent to create a plan</span>
-    </button>
-    <button type="button" class="plan-float review-float review-float--ask">
-      <span class="plan-float-label">Review</span>
-      <span class="plan-float-sub">Ask your agent to review the notes</span>
-    </button>
+  <div class="doc-floats">${dock}
   </div>
 </section>
 </main></div>
@@ -98,11 +118,11 @@ function page(): string {
 </body></html>`;
 }
 
-function buildPage(): string {
+function buildPage(dock?: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'cw-phone-meeting-'));
   dirs.push(dir);
   const html = join(dir, 'meeting.html');
-  writeFileSync(html, page());
+  writeFileSync(html, page(dock));
   return html;
 }
 
@@ -171,6 +191,9 @@ const PROBE = `(() => {
 function measure(
   html: string,
   preset: 'ipad' | 'phone',
+  /** A viewport the presets do not name — the short phone, where these
+   *  surfaces have failed before. Replaces `--preset` when given. */
+  size?: string,
 ): { fixed: Reading; control: Reading; floating: Reading } {
   const dir = mkdtempSync(join(tmpdir(), 'cw-phone-meeting-probe-'));
   dirs.push(dir);
@@ -180,7 +203,16 @@ function measure(
   owned.push(runId);
   const r = spawnSync(
     'bun',
-    [SHOT, '--url', `file://${html}`, '--preset', preset, '--settle', '200', '--eval-file', file],
+    [
+      SHOT,
+      '--url',
+      `file://${html}`,
+      ...(size === undefined ? ['--preset', preset] : ['--size', size]),
+      '--settle',
+      '200',
+      '--eval-file',
+      file,
+    ],
     { encoding: 'utf8', timeout: SPAWN_MS, env: { ...process.env, [RUN_ID_ENV]: runId } },
   );
   expect(r.status, r.stderr).toBe(0);
@@ -223,6 +255,42 @@ describe.skipIf(!CHROME)('the meeting page at 430, in a real browser', () => {
     },
     BROWSER_CASE_MS,
   );
+});
+
+/**
+ * AND AFTER BOTH BUTTONS ARE PRESSED — the state a fresh-eyes walk asked
+ * about, and which was NOT broken: measured against 1c7bcf00 the transcript
+ * ended 13.8px above the dock at 430x560 and at 430x932 alike, and with a
+ * 34px safe-area inset (the inset moves the dock and the runway by the same
+ * amount, so it cancels). This locks that in rather than claiming a fix for
+ * it.
+ *
+ * IT IS THE THIN CASE, though, and that is why it is worth its runtime: the
+ * runway is a 104px CONSTANT sized for the 44px pills of the ask faces, and
+ * the receipts are 83.8px. One more wrapped line of receipt — a longer
+ * sentence, a wider name, a smaller pill — spends the whole margin.
+ */
+describe.skipIf(!CHROME)('the meeting page at 430 once both floats are receipts', () => {
+  for (const size of ['430x560', '430x932'] as const) {
+    it(
+      `the pressed dock is taller and the transcript still clears it at ${size}`,
+      () => {
+        const { fixed, control } = measure(buildPage(PRESSED_DOCK), 'phone', size);
+        // The receipts really are the tall face — a reading off two 44px
+        // pills would be the case the other describe already covers.
+        for (const h of fixed.floatHeights) expect(h).toBeGreaterThan(60);
+        for (const h of fixed.subtitleHeights) expect(h).toBeGreaterThan(0);
+        // The done-when: at maximum scroll the last line is above them.
+        expect(fixed.scrollRemaining).toBe(0);
+        expect(fixed.behind).toBeLessThan(0);
+        // And the same control the ask faces get: without the runway this
+        // page collides, so the clearance above is the runway's doing.
+        expect(control.scrollRemaining).toBe(0);
+        expect(control.behind).toBeGreaterThan(0);
+      },
+      BROWSER_CASE_MS,
+    );
+  }
 });
 
 describe.skipIf(!CHROME)('the meeting page at 1180x820, in a real browser', () => {

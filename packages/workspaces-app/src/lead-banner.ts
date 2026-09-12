@@ -21,7 +21,17 @@ import { api } from './doc-path.ts';
 
 export interface LeadBannerOpts {
   docId: string;
-  /** Where the line goes — prepended, so it sits above the prose. */
+  /**
+   * The SCROLLER this line stands above — `#editor` on a doc page.
+   *
+   * The banner becomes a row of that scroller's pane, inserted directly
+   * above it, so the reading area starts below the line instead of running
+   * under it; see `.lead-banner` in doc.css for the live transcript this was
+   * covering while the line was a `sticky` layer inside the scroller. The
+   * pane is found the way plan-gate.ts finds it, and a root with no pane
+   * (a test, a surface that is only a scroller) keeps the old placement:
+   * first child of `parent`.
+   */
   parent: HTMLElement;
   /** Injected so a test drives this without a server or an EventSource. */
   fetchJson?: (url: string) => Promise<unknown>;
@@ -122,7 +132,9 @@ export function mountLeadBanner(opts: LeadBannerOpts): LeadBanner {
   const text = doc.createElement('span');
   text.className = 'lead-banner__text';
   element.append(dot, text);
-  opts.parent.prepend(element);
+  const pane = opts.parent.closest<HTMLElement>('#editor-pane');
+  if (pane) pane.insertBefore(element, opts.parent);
+  else opts.parent.prepend(element);
 
   let current: LeadPresence | null = null;
   let disposed = false;
