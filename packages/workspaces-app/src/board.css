@@ -4248,13 +4248,16 @@ html:has(.board-walk-cred-form) {
 .library-where-fold > summary::before {
   content: "";
   flex: 0 0 auto;
-  border-left: 5px solid currentColor;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
+  width: 6px;
+  height: 6px;
+  margin-right: 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
   transition: transform 120ms ease;
 }
 .library-where-fold[open] > summary::before {
-  transform: rotate(90deg);
+  transform: translateY(-2px) rotate(45deg);
 }
 .library-body .library-where-fold > summary h2 {
   margin: 0;
