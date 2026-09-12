@@ -14056,7 +14056,31 @@ function denominatorClause(p) {
   }
   return ` (${parts.join("; ")})`;
 }
+function freedList(rows, total) {
+  const named = rows.map((r) => {
+    const title = r.title ? `"${truncate3(r.title, 60)}"` : null;
+    if (title && r.id)
+      return `${title} (${r.id})`;
+    return title ?? r.id ?? null;
+  }).filter((s) => s !== null);
+  if (named.length === 0)
+    return "";
+  const more = total - named.length;
+  return `${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+}
+function releasedLine(p, freed) {
+  const rows = freed.rows ?? [];
+  const total = freed.count ?? rows.length;
+  const one = total === 1;
+  const list = freedList(rows, total);
+  const named = list || namedTask(p);
+  const subject = `${total} ${one ? "task" : "tasks"} just became ready`;
+  return `[workspace.ready_idle] ${subject}${named ? `: ${named}` : ""} — held work a person released just now. Take ${one ? "it" : "them"} in priority order with next_tasks / task_transition.`;
+}
 function readyIdleLine(p) {
+  const freed = p.freed;
+  if (freed && (freed.count ?? freed.rows?.length ?? 0) > 0)
+    return releasedLine(p, freed);
   const count = p.readyCount;
   const unread = undeterminedCount(p);
   if (count === 0 && unread > 0) {
@@ -19717,7 +19741,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.223";
+var PLUGIN_VERSION = "0.1.224";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

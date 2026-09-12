@@ -42,6 +42,26 @@ export async function handleTaskStatusAndLinks(
     const author = authorFor(body?.author);
     const to = body?.to as TaskStatus | undefined;
     if (!author || !to) return j(400, { error: 'author + to required' });
+    // Read the board's dispatchable rows BEFORE the write, so the success arm
+    // can say which rows this move FREED — see `personFreedWork`. A person can
+    // make work dispatchable without transitioning the work: agreeing a goal
+    // band releases every row under it (the transition is on the GOAL row) and
+    // closing a blocker releases what waited on the `after` edge (it is on the
+    // BLOCKER). Neither is a transition on the row that became ready, so the
+    // row-watching wake below sees nothing and the board falls silent until
+    // the fifteen-minute window.
+    //
+    // Only for a person, and only a reading — the mark costs one board
+    // snapshot on a human-rate route and nothing at all on an agent's.
+    // The row's OWN workspace rather than the addressed one: the two agree
+    // today, and the mark has to be taken against the board the release will
+    // be judged on.
+    const releasingBoard =
+      classifyActor(author) === 'person'
+        ? (taskStore.getTask(taskId)?.workspaceId ?? taskStore.getGoalRow(taskId)?.workspaceId)
+        : undefined;
+    const readyBefore =
+      releasingBoard !== undefined ? ctx.readyNudger.markReady(releasingBoard) : undefined;
     const res = taskStore.transition(taskId, to, {
       actor: author,
       note: body?.note as string | undefined,
@@ -99,6 +119,19 @@ export async function handleTaskStatusAndLinks(
     // where a misread would wake the lead on every builder's own transition.
     if (to === 'todo' && classifyActor(author) === 'person') {
       ctx.readyNudger.personQueuedTask({ workspaceId: res.task.workspaceId, taskId: res.task.id });
+    }
+    // And the rows this move freed WITHOUT being about them — the goal band it
+    // agreed, the `after` edge it cleared. One wake for the whole release, and
+    // none at all when the move freed nothing, which is every ordinary
+    // transition. `except` is the moved row itself: the line above already
+    // announced it, and two frames about one move is the noise the arming
+    // rules exist to prevent.
+    if (releasingBoard !== undefined && readyBefore !== undefined) {
+      ctx.readyNudger.personFreedWork({
+        workspaceId: releasingBoard,
+        before: readyBefore,
+        except: taskId,
+      });
     }
     // The success arm carries the NON-enforcing blockers as warnings, which
     // is the same report and the same cut.

@@ -124,6 +124,102 @@ describe('readyIdleLine', () => {
 });
 
 /**
+ * The RELEASE wake — a person agreed a goal band or closed a blocker, and work
+ * that was held is dispatchable now.
+ *
+ * A different sentence from the idle one rather than the same with different
+ * numbers: the idle line answers "has this been sitting here", and this one
+ * answers "what just changed". Rendering a release through the idle wording
+ * would tell the lead that rows created seconds ago had "been ready" for an
+ * unstated time, which is the one thing the idle line's duration exists to say.
+ */
+describe('readyIdleLine on a release', () => {
+  const FREED = {
+    taskId: 't-rank',
+    title: 'Rank results by recency',
+    freed: {
+      count: 2,
+      rows: [
+        { id: 't-rank', title: 'Rank results by recency' },
+        { id: 't-facets', title: 'Cache the facet counts' },
+      ],
+    },
+  };
+
+  it('names every freed row and says a person did it', () => {
+    const line = readyIdleLine(FREED);
+    expect(line).toContain('[workspace.ready_idle]');
+    expect(line).toContain('2 tasks just became ready');
+    expect(line).toContain('Rank results by recency');
+    expect(line).toContain('t-facets');
+    expect(line).toContain('a person released');
+    expect(line).toContain('next_tasks');
+  });
+
+  it('does not claim the work has been sitting there', () => {
+    // The idle line's whole subject is elapsed time. A release has none, and
+    // borrowing that wording would state a duration nothing measured.
+    const line = readyIdleLine(FREED);
+    expect(line).not.toContain('been ready');
+    expect(line).not.toContain('stood still');
+    expect(line).not.toContain('undefined');
+  });
+
+  it('reads as one task in the singular', () => {
+    const line = readyIdleLine({
+      taskId: 't-rank',
+      title: 'Rank results by recency',
+      freed: { count: 1, rows: [{ id: 't-rank', title: 'Rank results by recency' }] },
+    });
+    expect(line).toContain('1 task just became ready');
+    expect(line).toContain('Take it in priority order');
+  });
+
+  it('says how many it did not name, so the named few do not read as all of them', () => {
+    const line = readyIdleLine({
+      taskId: 't-b0',
+      title: 'Band row 0',
+      freed: {
+        count: 8,
+        rows: Array.from({ length: 5 }, (_, i) => ({ id: `t-b${i}`, title: `Band row ${i}` })),
+      },
+    });
+    expect(line).toContain('8 tasks just became ready');
+    expect(line).toContain('and 3 more');
+  });
+
+  it('falls back to the row the frame names when it carries a count and no rows', () => {
+    const line = readyIdleLine({
+      taskId: 't-rank',
+      title: 'Rank results by recency',
+      freed: { count: 3 },
+    });
+    expect(line).toContain('3 tasks just became ready');
+    expect(line).toContain('Rank results by recency');
+    expect(line).not.toContain(': —');
+  });
+
+  it('renders the timed wake unchanged when the field is absent or empty', () => {
+    // An older server sends no `freed` at all, and a release that freed
+    // nothing is never sent — so neither may change the idle sentence.
+    expect(readyIdleLine(IDLE)).toContain('3 tasks have been ready');
+    expect(readyIdleLine({ ...IDLE, freed: { count: 0, rows: [] } })).toContain(
+      '3 tasks have been ready',
+    );
+  });
+
+  it('truncates a very long freed title', () => {
+    const line = readyIdleLine({
+      taskId: 't-rank',
+      freed: { count: 1, rows: [{ id: 't-rank', title: 'y'.repeat(200) }] },
+    });
+    expect(line).not.toContain('y'.repeat(200));
+    expect(line).toContain('…');
+    expect(line).toContain('next_tasks');
+  });
+});
+
+/**
  * The line has to state its DENOMINATOR, for the same reason the presence
  * strip says "(1 checked)" rather than nothing.
  *
