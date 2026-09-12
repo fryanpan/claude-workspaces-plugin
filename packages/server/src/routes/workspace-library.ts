@@ -7,6 +7,7 @@ import {
   type LibrarySources,
   type ProjectFile,
   buildLibrary,
+  createMarkdownLister,
   openableFiles,
   projectRepoKey,
 } from '../library.ts';
@@ -266,7 +267,9 @@ function heldOnBoard(
  * whether one has been opened. Read as a member on the box sees it, because
  * the item lands on the board's own queue — except that a local-only
  * project's files are never offered, so their names never reach an item a
- * share visitor can read.
+ * share visitor can read. It walks the project afresh rather than reading the
+ * page's short-lived cache: a scan taken just before a late write would hide
+ * that file, and a run is looked at only once.
  */
 export function libraryRunOutputSource(
   ctx: LibraryRoutesContext,
@@ -280,7 +283,7 @@ export function libraryRunOutputSource(
     files: (workspaceId) => {
       const scope = scopeOf(workspaceId);
       if (!scope) return null;
-      const src = sourcesFor(ctx, scope, false);
+      const src = { ...sourcesFor(ctx, scope, false), markdownFiles: createMarkdownLister() };
       const repoKey = projectRepoKey(src.docs, src.docKeyOf);
       if (!repoKey || !src.projectRoot(repoKey)) return null;
       const byPath = new Map<string, number | undefined>();
