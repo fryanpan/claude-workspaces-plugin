@@ -1012,6 +1012,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     collabMemberOf,
     shareLinkMemberOf,
     redeemShareLink,
+    boardRoleOf,
     boardsForDoc,
     boardIndexForListing,
     boardsForDocIndexed,
@@ -1654,6 +1655,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     collabMemberOf,
     shareLinkMemberOf,
     redeemShareLink,
+    boardRoleOf,
     safeDecodeSegment,
     withReviewUrl,
     recallRelay,
@@ -2011,6 +2013,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   );
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     chatAudit,
+    shareLinks,
     taskStore,
     taskProjection,
     docStore,
@@ -2168,7 +2171,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // union is what makes that a compile error rather than a review note.
       const gate = await admit(req, { pathname });
       if (!gate.admitted) return gate.response;
-      const { visitor, visitorShareId, visitorMemberKey, metaFor } = gate;
+      const { visitor, visitorShareId, visitorMemberKey, metaFor, roleFor, requireOwner } = gate;
 
       // --- REST: email login ---
       // Reachability (the host gate, Access, a share session) and identity
@@ -2390,6 +2393,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           url,
           visitor,
           authorFor,
+          accessEmail: gate.accessEmail,
+          roleFor,
+          requireOwner,
         });
         if (handled) return handled;
       }
@@ -2410,6 +2416,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           visitor,
           authorFor,
           refuseCategoryAuthor,
+          roleFor,
+          requireOwner,
         });
         if (handled) return handled;
       }
@@ -2424,6 +2432,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           url,
           visitor,
           authorFor,
+          accessEmail: gate.accessEmail,
+          roleFor,
+          requireOwner,
         });
         if (handled) return handled;
       }
@@ -2466,6 +2477,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           visitor,
           authorFor,
           refuseCategoryAuthor,
+          roleFor,
+          requireOwner,
         });
         if (handled) return handled;
       }
@@ -2538,6 +2551,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           url,
           visitor,
           authorFor,
+          accessEmail: gate.accessEmail,
+          roleFor,
+          requireOwner,
         });
         if (handled) return handled;
       }
@@ -2562,6 +2578,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           url,
           visitor,
           authorFor,
+          accessEmail: gate.accessEmail,
+          roleFor,
+          requireOwner,
         });
         if (handled) return handled;
       }

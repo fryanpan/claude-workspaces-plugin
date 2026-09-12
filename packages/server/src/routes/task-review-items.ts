@@ -35,7 +35,7 @@ export async function handleTaskReviewItems(
     judgeReviewItem,
     judgeTaskDecision,
   } = ctx;
-  const { req, scope, visitor, authorFor, refuseCategoryAuthor } = rq;
+  const { req, scope, visitor, authorFor, refuseCategoryAuthor, requireOwner } = rq;
   // ── A ticket's review items: 0..n, several possibly open at once ────
   //
   // The two routes ABOVE are untouched and stay that way. They are the
@@ -99,6 +99,30 @@ export async function handleTaskReviewItems(
     const answeredWith = body?.answeredWith;
     if (answeredWith !== undefined && typeof answeredWith !== 'string') {
       return j(400, { error: 'answeredWith must be a string' });
+    }
+    /**
+     * OWNER-ONLY ITEMS. An ask whose answer the owner's own machine then acts
+     * on — running a command, handing over a credential — carries
+     * `review.ownerOnly`, and only the board's owner may answer it.
+     *
+     * Checked HERE, before any write and before the ask-back conversion below,
+     * because the conversion is itself a write on the item: a Regular User's
+     * question would otherwise land on the thread of an ask they may not
+     * touch, and the refusal would arrive after the board had already changed.
+     *
+     * The board comes off the SCOPE, not off the task record: the path is the
+     * argument, and `middleware/workspace-scope.ts` has already refused a task
+     * filed on a different board. One reading of "which board", one reading of
+     * "is this its owner" (`requireOwner`).
+     */
+    if (scope) {
+      const gated = taskStore
+        .listReviewItems(taskId)
+        .find((r) => r.id === reviewItemId && r.review.ownerOnly === true);
+      if (gated) {
+        const denied = requireOwner(scope.workspaceId);
+        if (denied) return denied;
+      }
     }
     // A question typed where the answer goes is an ASK BACK, not a
     // decision. Recording it as the answer closed the item and left
