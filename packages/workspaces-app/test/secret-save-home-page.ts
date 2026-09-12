@@ -71,6 +71,32 @@ export interface Look {
   scrollY: number;
 }
 
+/**
+ * The grip's whole reach, and what it leaves Save standing on.
+ *
+ * Dragging a textarea's grip makes the browser write an inline height on it,
+ * which `max-height` then clamps — so asking for far more than the cap is the
+ * same geometry as dragging to the bottom of the grip's travel, and it needs
+ * no number from the stylesheet to say where that is. Every field, because a
+ * reader with three values to paste has three fields they might want to see
+ * more of.
+ */
+export interface Grip {
+  /** Computed `resize` on a field. `none` is the answer that says the browser
+   *  draws no grip at all, so there is nothing to take hold of. */
+  resize: string;
+  /** Field heights before and after the drag. With no grip they are equal —
+   *  that equality is the claim, not the absence of a screenshot. */
+  before: number[];
+  after: number[];
+  /** Where Save was before the drag, so the control can say what the drag did
+   *  WITHOUT reading a second reading. A control that borrowed the no-grip
+   *  reading for its baseline went red alongside the case it was meant to
+   *  vouch for, which is the one thing a control may not do. */
+  saveBefore: Rect;
+  look: Look;
+}
+
 export interface Reading {
   width: number;
   height: number;
@@ -97,6 +123,13 @@ export interface Reading {
    *  scrolls. This is the page as the UX walk found it, and Save has to land
    *  under the dock — a fixture that passes here proves nothing above. */
   unreserved: Look;
+  /** What a drag on the field's resize grip does to a settled form. */
+  dragged: Grip;
+  /** CONTROL: the same drag forced through whatever `resize` says, so the
+   *  reading above is taken against a page where the height CAN move. A field
+   *  the reader can grow puts Save under the dock, which is both why the grip
+   *  is gone and why `dragged` reading clean means something. */
+  draggable: Grip;
 }
 
 const rect = (el: Element): Rect => {
@@ -267,6 +300,39 @@ export async function unreserved(): Promise<Look> {
   return out;
 }
 
+/**
+ * Take hold of every field's resize grip and pull it as far as it goes.
+ *
+ * The ordinary path, and the one the UX walk took: the reader pastes a key,
+ * the field caps at a few lines, and the grip in its corner is an invitation
+ * to see the rest. The form is repainted first so the drag happens on a
+ * settled page — the same first draw every other reading is taken from —
+ * rather than on whatever the half-filled Save left behind.
+ *
+ * `force` is the control. A drag is a thing a POINTER does, so it is only
+ * possible where the browser drew a grip; with `resize: none` there is
+ * nothing there and `heights` cannot move. Forcing the inline height anyway
+ * is the same page with a grip on it, which is what says the clean reading is
+ * about the grip rather than about a form that could not have moved either
+ * way.
+ */
+export async function grip(force: boolean): Promise<Grip> {
+  await paint();
+  const fields = boxes();
+  const resize = fields[0] ? getComputedStyle(fields[0]).resize : 'no field';
+  const heightOf = (el: Element): number => Math.round(el.getBoundingClientRect().height);
+  const before = fields.map(heightOf);
+  const saveBefore = rect(need('.board-walk-cred-send'));
+  if (force || resize !== 'none') {
+    // Past any cap on purpose: `max-height` clamps it, so this lands exactly
+    // where the bottom of the grip's travel is without naming that number.
+    for (const box of fields) box.style.height = '999px';
+  }
+  await frame();
+  await frame();
+  return { resize, before, after: fields.map(heightOf), saveBefore, look: look() };
+}
+
 /** Everything the driver asks for at one viewport, as JSON. */
 export async function read(width: number, height: number): Promise<string> {
   await paint();
@@ -278,6 +344,9 @@ export async function read(width: number, height: number): Promise<string> {
   const focused = look();
   await submitHalfFilled();
   const message = look();
+  // Each of these repaints, so neither inherits the half-filled form above.
+  const dragged = await grip(false);
+  const draggable = await grip(true);
   const reading: Reading = {
     width,
     height,
@@ -290,6 +359,8 @@ export async function read(width: number, height: number): Promise<string> {
     focused,
     message,
     unreserved: control,
+    dragged,
+    draggable,
   };
   return JSON.stringify(reading);
 }

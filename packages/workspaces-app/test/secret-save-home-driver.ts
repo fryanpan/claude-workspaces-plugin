@@ -40,7 +40,7 @@ import {
 import { chromeLaunchArgs, profilesOfRun, resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
 import type { Reading } from './secret-save-home-page.ts';
 
-export type { Look, Reading } from './secret-save-home-page.ts';
+export type { Grip, Look, Reading } from './secret-save-home-page.ts';
 
 const SRC = join(import.meta.dirname, '../src');
 const PAGE = join(import.meta.dirname, 'secret-save-home-page.ts');

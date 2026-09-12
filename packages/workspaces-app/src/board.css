@@ -1539,19 +1539,29 @@ body.board-body {
    A TEXTAREA, so a pasted SSH key or service-account file keeps its line
    breaks — a browser `input` strips them out of a paste before any script
    sees them. It grows with the value up to a few lines and then scrolls,
-   rather than pushing Save off the card. */
+   rather than pushing Save off the card.
+
+   WHAT IS NOT WRITTEN HERE, AND WHY. This block is `.board-walk-cred-input`,
+   (0,1,0). The form wears `.board-walk-answer`, so every field in it is also
+   matched by the reply-box rule further down at `.board-walk-answer textarea`,
+   (0,1,1) — which wins every declaration the two share, wherever either one
+   is written. So the field's height floor, its border and its border-radius
+   all come from THAT rule, and the `min-height: 42px` and `border: 0` this
+   block used to carry were dead text: measured in Chrome, the field computed
+   `min-height: 62px` and a 1px border of its own inside the box's. Reading a
+   value off this block is reading a guess; read the composed rule.
+
+   `resize` is the one of the three that had to move rather than go, and it is
+   below with the reason. */
 .board-walk-cred-input {
   flex: 1;
   min-width: 0;
-  min-height: 42px;
   max-height: 7.5em;
-  border: 0;
   padding: 9px 11px;
   background: transparent;
   color: var(--fg);
   font: inherit;
   letter-spacing: 0.12em;
-  resize: none;
   overflow-y: auto;
   field-sizing: content;
 }
@@ -1626,6 +1636,31 @@ body.board-body {
 .board-walk-thread-form .md-composer-surface:focus-within,
 .board-walk-question-form .md-composer-surface:focus-within {
   border-color: var(--accent);
+}
+/* NO GRIP ON A MASKED FIELD, and it is written HERE — after the reply-box
+   rule, at the same specificity — for exactly the reason the form's own
+   `flex-direction` is, in the block below. `resize: none` sat in the
+   cred-input block further up, where (0,1,0) loses to the reply box's
+   (0,1,1) wherever either one is written: the computed value read
+   `vertical`, and Chrome drew a drag grip in every field. One drag
+   on the first field at 430x844 took it 62px → 120px and Save's bottom from
+   740 to 786 against a dock top of 789 — three pixels of clearance left, and
+   the reviewer, dragging further, landed Save's edge on `board-nav-item`,
+   where a tap navigates away and drops the pasted key (UX review,
+   2026-09-12).
+
+   NONE RATHER THAN A BOUNDED `vertical`, because the grip cannot show the
+   reader anything the field would not have shown them anyway. `field-sizing:
+   content` already sizes the box to its value, and `max-height: 7.5em` caps
+   both it and the grip at the same 120px — so dragging can only leave blank
+   space under a short value, or crop a long one below the height the browser
+   picked. On a box of discs neither is a thing anyone wants. And the room
+   that keeps Save clear is `scroll-padding-bottom`, which is read when
+   something SCROLLS; a drag scrolls nothing, so no reserve — fixed or
+   computed — can follow a height the reader sets by hand. The way back from a
+   paste that went wrong is the eye, not the grip. */
+textarea.board-walk-cred-input {
+  resize: none;
 }
 /* The secret form wears `.board-walk-answer` too, so it sits in the answering
    slot — but its fields are a COLUMN, and Save goes under them rather than
