@@ -429,6 +429,51 @@ describe('stalledLine', () => {
     expect(stalledLine(STALL)).toContain('Cache the facet counts');
   });
 
+  it('asks for a line from the holder of a row that owes a check-in, and names the window', () => {
+    const due = [
+      {
+        id: 't-b9',
+        title: 'Fold the CSV writer into the exporter',
+        bucket: 'check-in-due',
+        quietMs: 34 * 60_000,
+      },
+    ];
+    const line = stalledLine({ ...STALL, checkIn: due });
+    expect(line).toContain('Fold the CSV writer into the exporter');
+    expect(line).toContain('not reported for over half an hour');
+    // The remedy is the protocol's own words, so the reader can quote it.
+    expect(line).toContain('every 30 minutes');
+    // Its own sentence, beside the stall rather than inside it: the acts
+    // differ, and a merged count would ask for the wrong one.
+    expect(line).toContain('stopped moving');
+    // And nothing about a check-in on a frame that carries none.
+    expect(stalledLine(STALL)).not.toContain('half an hour');
+  });
+
+  it('a frame carrying only a check-in is still a real wake', () => {
+    const line = stalledLine({
+      taskId: 't-b9',
+      title: 'Fold the CSV writer into the exporter',
+      stalledCount: 0,
+      consideredCount: 5,
+      checkIn: [
+        { id: 't-b9', title: 'Fold the CSV writer into the exporter', bucket: 'check-in-due' },
+      ],
+    });
+    expect(line).toContain('Fold the CSV writer into the exporter');
+    expect(line).not.toContain('treat this as a bug in the wake');
+  });
+
+  it('names newly-due check-ins under what changed', () => {
+    const line = stalledLine({
+      ...STALL,
+      changed: {
+        checkIn: [{ id: 't-b9', title: 'Fold the CSV writer', bucket: 'check-in-due' }],
+      },
+    });
+    expect(line).toContain('NEW since the last wake: 1 task(s) owe a check-in');
+  });
+
   it('says how many rows the parallelism cap kept out of the pass, inside the denominator', () => {
     // Nine open rows checked, five judged — the four beyond the cap are idle
     // by rule, and a reader must not count them as healthy.

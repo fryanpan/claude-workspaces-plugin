@@ -15,6 +15,8 @@ import type { EventRow, ReviewItemRow, TaskRow } from '../src/keep-moving.ts';
 import {
   BUILDER_SILENT_BUCKET,
   BUILDER_SILENT_MULTIPLIER_DEFAULT,
+  CHECK_IN_BUCKET,
+  CHECK_IN_DEFAULT_MS,
   HELD_ITEM_DEFAULT_MS,
   STALL_QUIET_DEFAULT_MS,
   evaluateStalls,
@@ -47,6 +49,7 @@ function evaluate(
     quietMs?: number;
     watchingDispatchTaskIds?: Set<string>;
     builderSilentMultiplier?: number;
+    checkInMs?: number;
     threadActivity?: Map<string, number>;
   } = {},
 ) {
@@ -66,6 +69,7 @@ function evaluate(
     ...(over.builderSilentMultiplier !== undefined
       ? { builderSilentMultiplier: over.builderSilentMultiplier }
       : {}),
+    ...(over.checkInMs !== undefined ? { checkInMs: over.checkInMs } : {}),
     ...(over.threadActivity ? { threadActivity: over.threadActivity } : {}),
   });
 }
@@ -384,6 +388,86 @@ describe('a row with a watching builder dispatch is judged by builder silence', 
    *  to it should have to come back through this test. */
   it('doubles the window by default', () => {
     expect(BUILDER_SILENT_MULTIPLIER_DEFAULT).toBe(2);
+  });
+});
+
+describe('a dispatched row whose holder has not reported owes a check-in', () => {
+  const quietFor = (minutes: number) =>
+    task({ id: 't-1', transitions: [{ ts: now - minutes * MIN, to: 'in-progress' }] });
+  const watching = new Set(['t-1']);
+
+  it('is due past thirty minutes and not before', () => {
+    expect(CHECK_IN_DEFAULT_MS).toBe(30 * MIN);
+    // Either side of the window by a minute, so what is under test is the
+    // threshold rather than the distance from it.
+    const inside = evaluate({ tasks: [quietFor(29)], watchingDispatchTaskIds: watching });
+    expect(inside.checkIn).toHaveLength(0);
+    const due = evaluate({ tasks: [quietFor(31)], watchingDispatchTaskIds: watching });
+    expect(due.checkIn.map((r) => r.id)).toEqual(['t-1']);
+    expect(due.checkIn[0]?.bucket).toBe(CHECK_IN_BUCKET);
+    expect(due.checkIn[0]?.quietMs).toBe(31 * MIN);
+    // …and it is NOT also a stall: one row, one ask.
+    expect(due.stalled).toHaveLength(0);
+  });
+
+  it('the window is what makes it due — a shorter one names the same quiet row', () => {
+    // Mutation control for the threshold: 29 minutes is not due by default
+    // (above) and IS due at a ten-minute window, so the reading above is the
+    // constant rather than a list that is empty for another reason.
+    const verdict = evaluate({
+      tasks: [quietFor(29)],
+      watchingDispatchTaskIds: watching,
+      checkInMs: 10 * MIN,
+    });
+    expect(verdict.checkIn.map((r) => r.id)).toEqual(['t-1']);
+  });
+
+  it('a row past the builder-silence window is a stall, and not also a reminder', () => {
+    const verdict = evaluate({ tasks: [quietFor(50)], watchingDispatchTaskIds: watching });
+    expect(verdict.stalled.map((r) => r.bucket)).toEqual([BUILDER_SILENT_BUCKET]);
+    // The lead's act differs — probe the builder, versus ask for a line —
+    // so the row appears under exactly one of them.
+    expect(verdict.checkIn).toHaveLength(0);
+  });
+
+  it('an UNDISPATCHED quiet row owes nothing: its silence is already a stall', () => {
+    const verdict = evaluate({ tasks: [quietFor(31)] });
+    expect(verdict.checkIn).toHaveLength(0);
+    // Control: the same row IS seen, as the stall it has always been.
+    expect(verdict.stalled.map((r) => r.bucket)).toEqual(['in-progress']);
+  });
+
+  it('a dispatched row nobody has claimed owes nothing — the check-in is the holder’s', () => {
+    const verdict = evaluate({
+      tasks: [
+        task({ id: 't-1', status: 'todo', transitions: [{ ts: now - 31 * MIN, to: 'todo' }] }),
+      ],
+      watchingDispatchTaskIds: watching,
+    });
+    expect(verdict.checkIn).toHaveLength(0);
+  });
+
+  it('worktree churn or a comment inside the window clears it', () => {
+    const verdict = evaluate({
+      tasks: [quietFor(200)],
+      watchingDispatchTaskIds: watching,
+      threadActivity: new Map([['t-1', now - 5 * MIN]]),
+    });
+    expect(verdict.checkIn).toHaveLength(0);
+  });
+
+  it('still fires when the stall window has been widened past it', () => {
+    // `CW_STALL_NUDGE_MINUTES` is the first number to turn when the wake is
+    // noisy. Turning it must not silently switch the check-in off: at a
+    // 45-minute stall window a row quiet for 35 minutes is not stalled at
+    // all, and the reminder is the only thing that speaks for it.
+    const verdict = evaluate({
+      tasks: [quietFor(35)],
+      watchingDispatchTaskIds: watching,
+      quietMs: 45 * MIN,
+    });
+    expect(verdict.stalled).toHaveLength(0);
+    expect(verdict.checkIn.map((r) => r.bucket)).toEqual([CHECK_IN_BUCKET]);
   });
 });
 

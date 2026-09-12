@@ -317,7 +317,12 @@ describe('homeActivity', () => {
       const moved = task({
         notes: [note(40 * MIN, 'older')],
         transitions: [
-          { ts: NOW - 2 * MIN, from: 'todo', to: 'in-progress', by: { name: 'Beacon Bot', kind: 'agent' } },
+          {
+            ts: NOW - 2 * MIN,
+            from: 'todo',
+            to: 'in-progress',
+            by: { name: 'Beacon Bot', kind: 'agent' },
+          },
         ],
       });
       expect((groups([moved])[0] as ActivityGroup).quiet.age).toBe('2m');

@@ -299,7 +299,9 @@ describe('home-activity island rendering', () => {
   it('gives each note line a little more room than the 2px/1.4 it had', () => {
     const { host, unmount, pick } = pane(IPAD);
     expect(Number.parseFloat(styleOf(pick('.acti-notes')).gap)).toBeGreaterThan(2);
-    expect(Number.parseFloat(styleOf(pick('.board-activity-note')).lineHeight)).toBeGreaterThan(1.4);
+    expect(Number.parseFloat(styleOf(pick('.board-activity-note')).lineHeight)).toBeGreaterThan(
+      1.4,
+    );
     // …and still ONE line at the tablet tier: height is the scarce axis, so
     // the air may not come from letting a line wrap.
     expect(styleOf(pick('.board-activity-note')).whiteSpace).toBe('nowrap');

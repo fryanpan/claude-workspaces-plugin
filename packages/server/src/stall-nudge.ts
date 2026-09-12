@@ -111,6 +111,22 @@ export const STALL_REPEAT_DEFAULT_MS = 4 * 60 * 60_000;
  *  and the window is what decides when a wake is owed. */
 export const STALL_TICK_DEFAULT_MS = 60_000;
 
+/**
+ * How often ONE task may cost the lead a check-in reminder.
+ *
+ * Thirty minutes, the same window that makes a row due in the first place
+ * (`CHECK_IN_DEFAULT_MS`), so a row that stays silent is re-said once per
+ * missed check-in and never more. This is the one clock-keyed repeat in this
+ * file, and it is keyed on the TASK rather than on the board: the ask is "get
+ * a line out of whoever is on this row", and a row that has now missed two
+ * check-ins is a worse fact than one that has missed one — the same argument
+ * the escalation bucket makes for stalls, at the granularity the protocol
+ * actually asks about.
+ *
+ * `CW_CHECK_IN_MINUTES` moves it, beside the window itself.
+ */
+export const CHECK_IN_REPEAT_DEFAULT_MS = 30 * 60_000;
+
 /** Its own event name rather than a reason field on an existing one, because
  *  the plugin renders a board event off the name alone — one name would make a
  *  stall and a ready-work wake indistinguishable in the lead's channel. */
@@ -162,6 +178,13 @@ export interface StallSnapshot {
    *  revised past the quiet window — off the reader's queue until revised
    *  (`stall-gate.ts` `AskedBackRow`). Absent when none. */
   askedBack?: readonly AskedBackRow[];
+  /**
+   * Dispatched, in-progress rows whose holder has not reported inside the
+   * check-in window (`stall-gate.ts`, `CHECK_IN_DEFAULT_MS`). Absent when
+   * none, and absent from a caller that does not compute them, which is the
+   * same thing.
+   */
+  checkIn?: readonly StalledRow[];
   /**
    * Rows an agent filed that read as UI work and are being built with no
    * answered review item on them — the UI gate's breaches
@@ -311,6 +334,13 @@ export interface StallNudgeFrame {
    */
   ungatedUi?: readonly UngatedUiRow[];
   /**
+   * Rows whose holder owes a check-in: somebody IS on them, and has said
+   * nothing for half an hour. Absent when none. A frame carrying only this is
+   * a real wake — the remedy is a message to the builder, which nothing else
+   * in this frame asks for.
+   */
+  checkIn?: readonly StalledRow[];
+  /**
    * What is new since the last wake this board was sent — the reason the
    * lead is being woken again rather than the whole state of the board.
    *
@@ -335,6 +365,9 @@ export interface StallNudgeFrame {
     askedBack?: readonly AskedBackRow[];
     /** Rows that went past the UI gate since the last wake. */
     ungatedUi?: readonly UngatedUiRow[];
+    /** Rows that became due for a check-in since the last wake — a first
+     *  miss, or another half hour on a row that had already missed one. */
+    checkIn?: readonly StalledRow[];
     /** The board's worst row crossed another repeat window. Present only when
      *  true, so its absence is "nothing got older", not "false". */
     escalated?: true;
@@ -388,6 +421,9 @@ export interface StallNudgerOptions {
    * the same items. Defaults to the quiet window a row may stand in.
    */
   leadHeldMs?: number;
+  /** How long a check-in reminder about ONE task silences the next one.
+   *  Defaults to `CHECK_IN_REPEAT_DEFAULT_MS`. */
+  checkInRepeatMs?: number;
   repeatMs?: number;
   now?: () => number;
   /**
@@ -507,6 +543,7 @@ export class StallNudger {
   private readonly now: () => number;
   private readonly repeatMs: number;
   private readonly leadHeldMs: number;
+  private readonly checkInRepeatMs: number;
   private readonly report: (message: string) => void;
   /** The stamp each workspace was last woken for. */
   private readonly armed = new Map<string, string>();
@@ -550,6 +587,17 @@ export class StallNudger {
    * avoid it. Pruned when the item leaves the held list.
    */
   private readonly filersTold = new Set<string>();
+  /**
+   * When each task last cost the lead a check-in reminder, by
+   * `<workspaceId>|<taskId>`.
+   *
+   * Its own clock rather than the stamp, because the stamp is the board's
+   * CURRENT set and a check-in is owed per task per window — a row that keeps
+   * missing has to be said again, and a row that reported and went quiet
+   * again has to be said afresh. Memory only: after a restart a board pays at
+   * most one duplicate reminder, the same trade every other map here makes.
+   */
+  private readonly checkInTold = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly stampFile: string | null;
   /** What the file already holds, so an unchanged map costs no write. `tick`
@@ -562,6 +610,7 @@ export class StallNudger {
     this.now = opts.now ?? Date.now;
     this.repeatMs = opts.repeatMs ?? STALL_REPEAT_DEFAULT_MS;
     this.leadHeldMs = opts.leadHeldMs ?? STALL_QUIET_DEFAULT_MS;
+    this.checkInRepeatMs = opts.checkInRepeatMs ?? CHECK_IN_REPEAT_DEFAULT_MS;
     this.report = opts.report ?? ((message) => console.error(message));
     this.stampFile = opts.stampFile ?? null;
     this.loadStamps();
@@ -596,6 +645,9 @@ export class StallNudger {
     for (const key of this.reported.keys()) if (!live.has(key)) this.reported.delete(key);
     for (const key of this.filersTold) {
       if (!live.has(key.slice(0, key.indexOf('|')))) this.filersTold.delete(key);
+    }
+    for (const key of this.checkInTold.keys()) {
+      if (!live.has(key.slice(0, key.indexOf('|')))) this.checkInTold.delete(key);
     }
     this.saveStamps();
   }
@@ -672,13 +724,18 @@ export class StallNudger {
     // a check that omitted it would report the board healthy at exactly the
     // moment the rule it exists for is being broken.
     const ungatedUi = board.ungatedUi ?? [];
+    // The rows owing a check-in whose window has actually come round again.
+    // Filtered HERE rather than in `changeOn`, because this finding's repeat
+    // is its own clock and the stamp must never see a row it is holding back.
+    const checkIn = this.dueCheckIns(key, board.checkIn ?? [], now);
     if (
       board.stalled.length === 0 &&
       board.unfiled.length === 0 &&
       board.undetermined.length === 0 &&
       held.length === 0 &&
       askedBack.length === 0 &&
-      ungatedUi.length === 0
+      ungatedUi.length === 0 &&
+      checkIn.length === 0
     ) {
       this.armed.delete(key);
       this.held.delete(key);
@@ -701,6 +758,7 @@ export class StallNudger {
       held,
       askedBack,
       ungatedUi,
+      checkIn,
     );
     if (!change) {
       // Silent, but RECORDED. A shrink that left the old stamp standing would
@@ -718,7 +776,8 @@ export class StallNudger {
     // has ANYBODY on it is the escalation's question, and it answers it from
     // the store's liveness reads rather than from a failed delivery here.
     if (to === undefined) return;
-    const top = board.stalled[0] ?? board.unfiled[0] ?? held[0] ?? askedBack[0] ?? ungatedUi[0];
+    const top =
+      board.stalled[0] ?? board.unfiled[0] ?? held[0] ?? askedBack[0] ?? ungatedUi[0] ?? checkIn[0];
     this.emit(key, to.agentId, {
       event: STALL_EVENT,
       workspaceId: key,
@@ -738,6 +797,7 @@ export class StallNudger {
       ...(held.length > 0 ? { heldItems: held } : {}),
       ...(askedBack.length > 0 ? { askedBack } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
+      ...(checkIn.length > 0 ? { checkIn } : {}),
       ...(board.undetermined.length > 0
         ? {
             undetermined: {
@@ -772,7 +832,38 @@ export class StallNudger {
         memory.rows.set(item.id, { bucket: UNKNOWN_BUCKET, seenAt: now });
     }
     this.rememberHighWater(key, board, memory.rows);
+    // Recorded only on a DELIVERED wake, like every other memory here: a
+    // reminder nobody received must stay owed.
+    for (const row of checkIn) this.checkInTold.set(`${key}|${row.id}`, now);
     this.capTold(memory.rows);
+  }
+
+  /**
+   * The check-in rows this board may actually spend a reminder on: those
+   * never said, or said longer ago than the repeat window.
+   *
+   * The filter is what bounds the cost. Without it a row that stays quiet
+   * would be named on every tick for as long as it stays quiet, which is the
+   * once-a-minute wake the whole file is built to refuse.
+   */
+  private dueCheckIns(
+    workspaceId: string,
+    rows: readonly StalledRow[],
+    now: number,
+  ): readonly StalledRow[] {
+    const due = rows.filter((row) => {
+      const told = this.checkInTold.get(`${workspaceId}|${row.id}`);
+      return told === undefined || now - told >= this.checkInRepeatMs;
+    });
+    // A row that has reported since must not keep a stale told-time that
+    // would swallow its NEXT miss inside the window.
+    const live = new Set(rows.map((row) => row.id));
+    const prefix = `${workspaceId}|`;
+    for (const key of this.checkInTold.keys()) {
+      if (key.startsWith(prefix) && !live.has(key.slice(prefix.length)))
+        this.checkInTold.delete(key);
+    }
+    return due;
   }
 
   /**
@@ -1101,6 +1192,7 @@ export class StallNudger {
     held: readonly HeldItemRow[],
     askedBack: readonly AskedBackRow[],
     ungatedUi: readonly UngatedUiRow[],
+    checkIn: readonly StalledRow[],
   ): StallNudgeFrame['changed'] | undefined {
     const before = prior === undefined ? undefined : parseStamp(prior);
     const after = parseStamp(next);
@@ -1131,13 +1223,18 @@ export class StallNudger {
     const ungated = ungatedUi.filter(
       (row) => before === undefined || !before.ids.has(`ui:${row.id}`),
     );
+    // Already filtered to the rows whose window has come round (`dueCheckIns`)
+    // — so every row still here is news by its own clock, and it does not ride
+    // the stamp. That is the one departure from the stamp rule in this method,
+    // and it is deliberate: a missed check-in repeats per task per window.
     if (
       !escalated &&
       rows.length === 0 &&
       undetermined.length === 0 &&
       heldItems.length === 0 &&
       asked.length === 0 &&
-      ungated.length === 0
+      ungated.length === 0 &&
+      checkIn.length === 0
     )
       return undefined;
     return {
@@ -1146,6 +1243,7 @@ export class StallNudger {
       ...(heldItems.length > 0 ? { heldItems } : {}),
       ...(asked.length > 0 ? { askedBack: asked } : {}),
       ...(ungated.length > 0 ? { ungatedUi: ungated } : {}),
+      ...(checkIn.length > 0 ? { checkIn } : {}),
       ...(escalated ? { escalated: true as const } : {}),
     };
   }
@@ -1355,7 +1453,7 @@ export class StallNudger {
           (frame.escalatedFrom !== undefined ? `to=${agentId} ` : '') +
           `stalled=${frame.stalledCount} unfiled=${frame.unfiled?.length ?? 0} ` +
           `undetermined=${frame.undetermined?.count ?? 0} held=${frame.heldItems?.length ?? 0} ` +
-          `askedBack=${frame.askedBack?.length ?? 0}`,
+          `askedBack=${frame.askedBack?.length ?? 0} checkIn=${frame.checkIn?.length ?? 0}`,
       );
     } catch {
       // A reporter that throws must not undo a wake that was already

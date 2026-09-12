@@ -159,7 +159,7 @@ export interface UngatedUiRowPayload {
   keyword?: string;
 }
 
-/** What `workspace.stalled` carries. Six lists, because the lead's next act
+/** What `workspace.stalled` carries. Seven lists, because the lead's next act
  *  differs for each — see `stalledLine`. */
 export interface StallPayload {
   taskId?: string;
@@ -171,6 +171,8 @@ export interface StallPayload {
   undetermined?: { count?: number; reasons?: string[] };
   /** `heldItems`, not `held` — ready_idle spends that name on its counts. */
   heldItems?: HeldRowPayload[];
+  /** Rows somebody holds and has not reported on for the check-in window. */
+  checkIn?: StalledRowPayload[];
   /** Items a person asked back on, unrevised — off that person's queue. */
   askedBack?: AskedBackRowPayload[];
   /** Rows built past the UI gate. A frame carrying only this is a real
@@ -187,6 +189,7 @@ export interface StallPayload {
     heldItems?: HeldRowPayload[];
     askedBack?: AskedBackRowPayload[];
     ungatedUi?: UngatedUiRowPayload[];
+    checkIn?: StalledRowPayload[];
     escalated?: boolean;
   };
   /** The cap that kept them out, with who moved it and when. Sent only
@@ -410,6 +413,8 @@ function changedClause(changed: StallPayload['changed']): string {
   if (asked.length > 0) bits.push(`${asked.length} review item(s) newly asked back`);
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0) bits.push(`${ungated.length} task built past the UI gate`);
+  const checkIn = changed.checkIn ?? [];
+  if (checkIn.length > 0) bits.push(`${checkIn.length} task(s) owe a check-in`);
   if (changed.escalated === true)
     bits.push('the board\u2019s quietest task crossed another repeat window');
   if (bits.length === 0) return '';
@@ -506,7 +511,21 @@ export function stalledLine(p: StallPayload): string {
         'Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.',
     );
   }
-  // Never empty: the server does not send this frame with all six lists
+  // The one finding here about a row that has somebody on it and is not yet
+  // stalled. Its remedy is a message to that somebody, which no other sentence
+  // in this line asks for — so it is its own sentence and says the window out
+  // loud, because the reader's next act is to quote it at the builder.
+  const checkIn = p.checkIn ?? [];
+  if (checkIn.length > 0) {
+    const noun = checkIn.length === 1 ? 'task has' : 'tasks have';
+    parts.push(
+      `${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? 'it' : 'them'} who has not ` +
+        `reported for over half an hour — ${stalledRowsClause(checkIn)}. Ask each holder for a ` +
+        'line now: the protocol is an activity update every 30 minutes, even if it is ' +
+        '"still on X, next Y".',
+    );
+  }
+  // Never empty: the server does not send this frame with all seven lists
   // empty, and a line that could render to a bare slug would be the
   // no-subject wake the whole file exists to prevent.
   // Ahead of the lists, so a repeat says what moved before it says what to

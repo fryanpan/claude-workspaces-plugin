@@ -196,6 +196,25 @@ describe('a dead board escalates; a live one never does', () => {
       expect(sent).toHaveLength(0);
     });
 
+    it('a check-in reminder changes nothing: it is the lead’s tap, not an escalation', () => {
+      // The reminder is a new finding on the same snapshot the escalation
+      // reads, so this pins that the escalation still turns on LIVENESS
+      // alone. Live board: nothing, whatever it owes. Dead board: what it
+      // escalates is the stuck row, and the reminder neither adds a filing
+      // nor stands in for one.
+      const a = make('Fold the CSV writer into the exporter');
+      const escalations = build();
+      const due = { checkIn: [row(a, 'check-in-due', 31 * 60_000)] };
+      escalations.onBoard(board(wsId, { sessionLive: true, ...due }), now);
+      expect(items(a.id)).toHaveLength(0);
+      expect(sent).toHaveLength(0);
+      // Dead, and owing a check-in with nothing actually stuck: still nothing,
+      // because a reminder is not a finding the reader can act on.
+      escalations.onBoard(board(wsId, { sessionLive: false, ...due }), now);
+      expect(items(a.id)).toHaveLength(0);
+      expect(sent).toHaveLength(0);
+    });
+
     it('a dead board with a row waiting on a person, and nothing stuck, produces nothing', () => {
       const a = make('Choose the retention window');
       build().onBoard(

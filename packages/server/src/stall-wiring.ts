@@ -175,6 +175,10 @@ export interface StallWiringContext {
   readyNudgeIdleMs?: number;
   /** Quiet time before a row is a stall finding (ms). */
   stallNudgeQuietMs?: number;
+  /** How long a dispatched, in-progress row may go unreported before its
+   *  lead is reminded to ask for a check-in, and how long that reminder
+   *  silences the next one for that row (ms). */
+  checkInMs?: number;
   /** How much longer a watched builder's silence may run (multiplier). */
   stallBuilderSilentMultiplier?: number;
   /** How often an unchanged bad board is re-said (ms). */
@@ -582,6 +586,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       parallelismCap,
       priorityOrder,
       ...(ctx.stallNudgeQuietMs !== undefined ? { quietMs: ctx.stallNudgeQuietMs } : {}),
+      ...(ctx.checkInMs !== undefined ? { checkInMs: ctx.checkInMs } : {}),
       ...(watchingDispatchTaskIds.size > 0 ? { watchingDispatchTaskIds } : {}),
       ...(ctx.stallBuilderSilentMultiplier !== undefined
         ? { builderSilentMultiplier: ctx.stallBuilderSilentMultiplier }
@@ -922,6 +927,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(held.length > 0 ? { held } : {}),
       ...(askedBackRows.length > 0 ? { askedBack: askedBackRows } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
+      ...(verdict.checkIn.length > 0 ? { checkIn: verdict.checkIn } : {}),
     };
   };
   /**
@@ -998,6 +1004,10 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // above counts it under — not at the filer's shorter one.
     ...(ctx.stallNudgeQuietMs !== undefined ? { leadHeldMs: ctx.stallNudgeQuietMs } : {}),
     ...(ctx.stallNudgeRepeatMs !== undefined ? { repeatMs: ctx.stallNudgeRepeatMs } : {}),
+    // One task costs the lead a check-in reminder at most once per window —
+    // the same window that makes the row due, so the reminder is one per
+    // missed check-in.
+    ...(ctx.checkInMs !== undefined ? { checkInRepeatMs: ctx.checkInMs } : {}),
     escalate: (board, now) => escalations.onBoard(board, now),
     // Prod restarts at every merge; without this each deploy would re-fire one
     // wake per board over rows their leads had already been told about.

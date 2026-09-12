@@ -272,6 +272,14 @@ export interface ServerOptions {
    */
   stallNudgeQuietMs?: number;
   /**
+   * How long a dispatched, in-progress row may go unreported before the board
+   * reminds its lead to get a check-in out of whoever holds it, and how long
+   * that reminder silences the next one for that same row (default
+   * `CHECK_IN_DEFAULT_MS`, thirty minutes; `CW_CHECK_IN_MINUTES` sets it on
+   * the box). A test seam for the same reason `stallNudgeQuietMs` is one.
+   */
+  checkInMs?: number;
+  /**
    * The socket idle timeout handed to `Bun.serve` (default
    * `HTTP_IDLE_TIMEOUT_SEC`, 120s). A test seam, and the ONLY way to watch a
    * stream die of the timeout this server configures rather than of Bun's own

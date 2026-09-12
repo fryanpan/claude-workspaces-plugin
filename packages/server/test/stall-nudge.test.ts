@@ -21,6 +21,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  CHECK_IN_REPEAT_DEFAULT_MS,
   REVIEW_ITEM_HELD_EVENT,
   type ReviewItemHeldFrame,
   STALL_EVENT,
@@ -63,6 +64,7 @@ function harness(
   opts: {
     repeatMs?: number;
     leadHeldMs?: number;
+    checkInRepeatMs?: number;
     stampFile?: string;
     world?: World;
     filerDelivers?: () => number;
@@ -95,6 +97,7 @@ function harness(
     report: (line) => reported.push(line),
     ...(opts.repeatMs !== undefined ? { repeatMs: opts.repeatMs } : {}),
     ...(opts.leadHeldMs !== undefined ? { leadHeldMs: opts.leadHeldMs } : {}),
+    ...(opts.checkInRepeatMs !== undefined ? { checkInRepeatMs: opts.checkInRepeatMs } : {}),
     ...(opts.stampFile !== undefined ? { stampFile: opts.stampFile } : {}),
   });
   return { world, sent, toFilers, reported, nudger };
@@ -1419,5 +1422,131 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     nudger.tick();
 
     expect(sent).toHaveLength(1);
+  });
+});
+
+/** A dispatched, in-progress row whose holder has said nothing for half an
+ *  hour — `stall-gate.ts`'s `check-in-due` bucket. */
+const DUE = {
+  id: 't-11',
+  title: 'Fold the CSV writer into the exporter',
+  bucket: 'check-in-due',
+  quietMs: 31 * MIN,
+};
+
+describe('a dispatched row whose holder stopped reporting is the lead’s reminder', () => {
+  it('wakes the lead on a board where nothing else is wrong, naming the row', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+
+    nudger.tick();
+
+    expect(sent).toHaveLength(1);
+    const frame = sent[0]?.frame as StallNudgeFrame;
+    expect(frame.checkIn).toEqual([DUE]);
+    // Nameable without a lookup: the lead's next act is to message whoever
+    // holds this row.
+    expect(frame.taskId).toBe('t-11');
+    expect(frame.title).toBe(DUE.title);
+    expect(frame.stalledCount).toBe(0);
+  });
+
+  it('says it once per repeat window per task, whatever the tick rate', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+
+    nudger.tick();
+    // Twenty ticks a minute apart, all inside the window: the row is still
+    // due on every one of them and must cost the lead nothing.
+    for (let i = 0; i < 20; i += 1) {
+      world.now += MIN;
+      nudger.tick();
+    }
+    expect(sent).toHaveLength(1);
+
+    // One second past the window, and the second missed check-in is said.
+    world.now += CHECK_IN_REPEAT_DEFAULT_MS - 20 * MIN + 1_000;
+    nudger.tick();
+    expect(sent).toHaveLength(2);
+    expect((sent[1]?.frame as StallNudgeFrame).checkIn).toEqual([DUE]);
+  });
+
+  it('the window is what silences it — a shorter one lets the next reminder through', () => {
+    // Mutation control for the clock above: the SAME twenty ticks, with the
+    // repeat window at one minute, produce twenty reminders. Without this the
+    // first test would pass against a build that never re-sent at all.
+    const { world, sent, nudger } = harness({ checkInRepeatMs: MIN });
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+
+    nudger.tick();
+    for (let i = 0; i < 20; i += 1) {
+      world.now += MIN;
+      nudger.tick();
+    }
+    expect(sent).toHaveLength(21);
+  });
+
+  it('goes quiet the tick the holder reports, and is owed afresh if they stop again', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+
+    // The builder posted a line: the row leaves the list.
+    world.boards = [board({ stalled: [], checkIn: [] })];
+    world.now += MIN;
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+
+    // …and goes quiet again well INSIDE what would have been the first
+    // reminder's window. A told-time left standing would swallow this.
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+    world.now += MIN;
+    nudger.tick();
+    expect(sent).toHaveLength(2);
+  });
+
+  it('rides beside a stall rather than replacing it, and is named under `changed` on a repeat', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board()];
+
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+    expect((sent[0]?.frame as StallNudgeFrame).checkIn).toBeUndefined();
+
+    world.boards = [board({ checkIn: [DUE] })];
+    world.now += MIN;
+    nudger.tick();
+
+    expect(sent).toHaveLength(2);
+    const frame = sent[1]?.frame as StallNudgeFrame;
+    // The stall is still the frame's subject; the reminder rides beside it.
+    expect(frame.taskId).toBe('t-1');
+    expect(frame.checkIn).toEqual([DUE]);
+    expect(frame.changed?.checkIn).toEqual([DUE]);
+  });
+
+  it('a reminder nobody could be sent stays owed', () => {
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+    world.reachable.clear();
+
+    nudger.tick();
+    expect(sent).toHaveLength(0);
+
+    world.reachable.add('agent-cartographer');
+    world.now += MIN;
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('is counted on the wake line, so what it costs can be read off a log', () => {
+    const { world, reported, nudger } = harness();
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+
+    nudger.tick();
+
+    expect(reported.find((line) => line.includes('[stall] wake'))).toContain('checkIn=1');
   });
 });

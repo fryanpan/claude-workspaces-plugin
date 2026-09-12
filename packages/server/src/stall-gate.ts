@@ -79,6 +79,33 @@ import {
 export const STALL_QUIET_DEFAULT_MS = 20 * 60_000;
 
 /**
+ * How long a DISPATCHED, in-progress row may go without anybody saying
+ * anything before its lead is reminded to ask for a check-in.
+ *
+ * Thirty minutes (Bryan, 2026-09-11: *"let's do something to make sure lead
+ * agent or subagents working on a task send an activity update at least once
+ * every 30m"*). It is the same half hour the board skills now ask every
+ * session to report on, and the same one Home's quiet pill turns amber at, so
+ * what the reader sees and what the lead is told cannot drift apart.
+ *
+ * Not the stall clock, and deliberately a DIFFERENT finding. A stall says
+ * nobody is on the row; this says somebody is and has stopped narrating, so
+ * the lead's move is to poke the builder rather than to re-home the work.
+ * Scoped to rows with a watching dispatch for the reason `builder-silent`
+ * below is: a row whose watcher is dead cannot be told apart from a quiet
+ * one, and a degraded signal must not manufacture findings.
+ *
+ * `CW_CHECK_IN_MINUTES` overrides it.
+ */
+export const CHECK_IN_DEFAULT_MS = 30 * 60_000;
+
+/** The bucket a row due for a check-in carries. Its own word, like
+ *  `BUILDER_SILENT_BUCKET`: the lead's move differs, and a frame that
+ *  flattened the two would send them hunting for a new owner instead of
+ *  asking the one they have for a line. */
+export const CHECK_IN_BUCKET = 'check-in-due';
+
+/**
  * How many quiet windows a row with a WATCHING builder dispatch gets before
  * it stalls. Two: the ordinary window, plus one full missed check-in.
  *
@@ -164,6 +191,15 @@ export interface StallVerdict {
   /** Rows whose state could not be read. Not stalled, and not healthy. */
   undetermined: StallUndeterminedRow[];
   /**
+   * Dispatched, in-progress rows whose holder has not reported for
+   * `CHECK_IN_DEFAULT_MS` — the missed half-hourly check-in, quietest first.
+   *
+   * Disjoint from `stalled` by construction: a row the gate already named as
+   * stalled or builder-silent is not listed here too, because the lead would
+   * then be asked to do two different things about one row in one frame.
+   */
+  checkIn: StalledRow[];
+  /**
    * Runnable rows the board's parallelism cap put out of reach — ranked past
    * the top `parallelismCap` of `priorityOrder` — and so NOT judged for
    * stalling. Zero when no cap was given. Stated for the same reason
@@ -196,6 +232,8 @@ export interface EvaluateStallsInput {
   unreadableReviewTaskIds?: ReadonlySet<string>;
   now: number;
   quietMs?: number;
+  /** Test seam over `CHECK_IN_DEFAULT_MS` — same reason `quietMs` is one. */
+  checkInMs?: number;
   /** Newest comment per row, for the rows worth the lookup. A comment IS the
    *  row moving; without this a ticket whose whole conversation is live on its
    *  thread reads as abandoned. */
@@ -279,7 +317,9 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     }
   }
 
+  const checkInMs = input.checkInMs ?? CHECK_IN_DEFAULT_MS;
   const stalled: StalledRow[] = [];
+  const checkIn: StalledRow[] = [];
   const unfiled: StalledRow[] = [];
   const waiting: WaitingRow[] = [];
   const undetermined: StallUndeterminedRow[] = [];
@@ -309,10 +349,17 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // window the builder has been silent EVERYWHERE, which is a missed
     // check-in — named as `builder-silent` so the lead probes the builder
     // instead of hunting for someone to claim the row.
-    if (row.stalled && watchingDispatches.has(row.id)) {
-      if (row.sinceActivityMs > builderQuietMs)
+    const dispatched = watchingDispatches.has(row.id);
+    let namedStalled = false;
+    if (row.stalled && dispatched) {
+      if (row.sinceActivityMs > builderQuietMs) {
         stalled.push({ ...named, bucket: BUILDER_SILENT_BUCKET });
-    } else if (row.stalled) stalled.push(named);
+        namedStalled = true;
+      }
+    } else if (row.stalled) {
+      stalled.push(named);
+      namedStalled = true;
+    }
     // Restricted to the row that actually needs the ask filed. `unfiledAsk` is
     // also set on rows BEHIND such a row, whose chain bottoms out in it —
     // listing those would hand the lead the same single action several times
@@ -334,6 +381,25 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // A filed wait, by address. Not gated on the clock: it is not a finding.
     else if (row.bucket === 'blocked-on-owner' && row.waitingOn && row.waitingOn.length > 0)
       waiting.push({ id: row.id, title: row.title, waitingOn: row.waitingOn });
+
+    // The check-in, judged on its own and AFTER the lists above — a row the
+    // gate has already named as stalled must not be named a second time under
+    // a bucket asking for a different act.
+    //
+    // In-progress and dispatched, and both halves are load-bearing. The claim
+    // is what says somebody took this work; the dispatch is what says their
+    // activity can be seen at all, so a row whose watcher is dead keeps the
+    // silence it always had. `sinceActivityMs` already folds in worktree
+    // churn, comments and board events, so past this window the holder has
+    // been silent everywhere, which is the missed check-in the protocol asks
+    // about.
+    if (
+      dispatched &&
+      !namedStalled &&
+      row.bucket === 'in-progress' &&
+      row.sinceActivityMs > checkInMs
+    )
+      checkIn.push({ ...named, bucket: CHECK_IN_BUCKET });
   }
   // `classifyOpenTasks` already sorts by silence, longest first, and both
   // lists inherit that order — the row at the top is the one to start with.
@@ -343,6 +409,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     waiting,
     considered: rows.length,
     undetermined,
+    checkIn,
     beyondCapacity: beyond.size,
   };
 }
