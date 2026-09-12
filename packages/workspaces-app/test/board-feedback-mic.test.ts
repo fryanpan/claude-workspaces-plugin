@@ -204,6 +204,28 @@ describe('the board mic when the workspace wants a signature', () => {
     v.capture.destroy();
   });
 
+  it('holds every utterance said before the sign-in, not just the last', async () => {
+    // The widget keeps ONE retry slot and the typed composer arms it too, so
+    // an assignment here answers "your draft is kept" to two sentences and
+    // keeps the later one. Say two things while signed out and both go.
+    const v = widgetWithMic({ refuse: true, signInToWrite: true });
+    await utter(v, 'the ferry times are wrong');
+    await utter(v, 'and the map is upside down');
+    expect(
+      v.sent.map((x) => x.text),
+      'CONTROL: both were tried and both refused',
+    ).toEqual(['the ferry times are wrong', 'and the map is upside down']);
+
+    v.accept();
+    v.widget.retryAfterSignIn?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(
+      v.sent.slice(2).map((x) => x.text),
+      'oldest first',
+    ).toEqual(['the ferry times are wrong', 'and the map is upside down']);
+    v.capture.destroy();
+  });
+
   it('CONTROL: a refusal with nothing to sign in to is still a failure', async () => {
     // The sign-in wording is not the new name for every refusal: a workspace
     // that never asked for a signature gets the plain report back.

@@ -77,7 +77,15 @@ export function mountFeedbackMic(
       return { route: 'feedback', ack: `Sent as Workspaces feedback: “${text}”` };
     }
     if (!widget.signInToWrite || widget.authToken) return null;
+    // Chained, never assigned over. The widget holds ONE retry slot and the
+    // typed composer arms it too, so a plain assignment here would answer
+    // "your draft is kept" to two people and keep the later one — which is
+    // the sentence-losing bug this whole change exists to end, rebuilt one
+    // layer up. Held utterances run oldest first, and the widget clears the
+    // slot once the chain has run.
+    const earlier = widget.retryAfterSignIn;
     widget.retryAfterSignIn = () => {
+      earlier?.();
       void post(text).then((ack) => capture.say(ack ? ack.ack : VOICE_SEND_FAILED));
     };
     return { route: 'feedback', ack: SIGN_IN_NOTE };

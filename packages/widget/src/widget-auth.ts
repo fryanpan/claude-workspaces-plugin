@@ -287,7 +287,12 @@ export function composerSignIn(
   btn.textContent = 'Sign in';
   btn.addEventListener('click', () => startSignIn(el));
   composerNote(composer, `${SIGN_IN_NOTE} `).appendChild(btn);
+  // Chained: a host may have armed a retry of its own for a refusal the
+  // composer never saw (the board's mic holds a spoken comment this way), and
+  // both were told their draft was kept.
+  const earlier = el.retryAfterSignIn;
   el.retryAfterSignIn = () => {
+    earlier?.();
     if (composer.isConnected) submit.click();
   };
 }
