@@ -48,6 +48,11 @@ export interface LibraryPageDeps {
   history: Pick<BootHistory, 'pushState' | 'back' | 'state'>;
   /** The page's own address, for the history entry "See all" pushes. */
   here: () => string;
+  /**
+   * A file the address asks to open (`?open=<path>`, how a run-output item on
+   * Home links a file), taken off the address so Back does not open it again.
+   */
+  takeRequestedOpen?: () => string | null;
   now?: () => number;
 }
 
@@ -284,6 +289,9 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
 
   return {
     async open() {
+      // Read before the first await: the board rewrites its address as it
+      // boots, and the question would be gone by the time the list arrived.
+      const wanted = deps.takeRequestedOpen?.() ?? null;
       list = 'main';
       render();
       const next = await deps.fetchJson<LibraryPayload>(`${base}/items`);
@@ -294,6 +302,8 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       // so is the honest page.
       payload = next;
       render();
+      // Opened after the list, so a refusal's message is not painted over.
+      if (wanted) await openFile(wanted);
     },
   };
 }
