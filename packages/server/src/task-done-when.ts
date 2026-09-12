@@ -174,6 +174,22 @@ export function buildDoneWhenLines(
   });
 }
 
+/**
+ * The one line the Activity tab gets when the ticket closes itself.
+ *
+ * It names the lines THIS call closed rather than the last element of the
+ * array: reporting line 1 when lines 2 and 3 were already met closes the
+ * ticket on line 1, and a note that said "line 3" would be a false record of
+ * what finished the work. A call that closed nothing by name — a list edit
+ * that dropped the open lines — says so by saying nothing more.
+ */
+function closingNote(closedBy: readonly DoneWhenLine[]): string {
+  const head = 'Done: every done-when line is met.';
+  if (closedBy.length === 0) return head;
+  if (closedBy.length === 1) return `${head} The last one open was "${closedBy[0]?.text}".`;
+  return `${head} The last ones open were ${closedBy.map((l) => `"${l.text}"`).join(', ')}.`;
+}
+
 /** The done-when verbs. One per `TaskStore`, holding no state of its own. */
 export class TaskDoneWhenStore {
   constructor(private readonly p: DoneWhenPersistence) {}
@@ -209,7 +225,10 @@ export class TaskDoneWhenStore {
     // Editing the list can complete it — the last OPEN line removed leaves a
     // list that is entirely met. Same close as a report's, through the same
     // door, so "the ticket moves itself" holds whichever write finished it.
-    const closed = this.closeIfComplete(task, actor);
+    // No line is named: an edit that completes a list did it by REMOVING the
+    // lines that were open, and naming one of the survivors would credit a
+    // line nobody reported today.
+    const closed = this.closeIfComplete(task, actor, []);
     return { ok: true, task, lines, closed };
   }
 
@@ -269,6 +288,12 @@ export class TaskDoneWhenStore {
         };
       }
     }
+    // Which lines this call CLOSES, read before the write: the note must not
+    // claim a line that was already met, and the array's last element is not
+    // the same thing as the last one still open.
+    const closedByThis = lines.filter(
+      (l) => l.verdict !== 'met' && entries.some((e) => e.id === l.id && e.verdict === 'met'),
+    );
     const ts = Date.now();
     for (const entry of entries) {
       const line = byId.get(entry.id);
@@ -281,7 +306,7 @@ export class TaskDoneWhenStore {
     }
     task.updatedAt = ts;
     this.p.scheduleSave(task.workspaceId);
-    const closed = this.closeIfComplete(task, actor);
+    const closed = this.closeIfComplete(task, actor, closedByThis);
     return { ok: true, task, lines: task.doneWhen ?? [], closed };
   }
 
@@ -333,12 +358,15 @@ export class TaskDoneWhenStore {
     if (verdict !== 'met' && verdict !== 'not-met') {
       return { ok: false, error: 'bad-verdict', message: 'verdict must be met or not-met' };
     }
+    // The line was open by construction — the guard above let only `owner`
+    // through, and `owner` is not `met` — so the owner's yes is what closed
+    // it, and their no leaves it open.
     line.verdict = verdict;
     line.by = actor.name;
     line.at = Date.now();
     task.updatedAt = line.at;
     this.p.scheduleSave(task.workspaceId);
-    const closed = this.closeIfComplete(task, actor);
+    const closed = this.closeIfComplete(task, actor, verdict === 'met' ? [line] : []);
     return { ok: true, task, lines: task.doneWhen ?? [], closed };
   }
 
@@ -355,10 +383,13 @@ export class TaskDoneWhenStore {
    * a comment: "the ticket closed itself" is where the work stands, and
    * comments are for asks and decisions.
    */
-  private closeIfComplete(task: Task, actor: DoneWhenActor): boolean {
+  private closeIfComplete(
+    task: Task,
+    actor: DoneWhenActor,
+    closedBy: readonly DoneWhenLine[],
+  ): boolean {
     if (!doneWhenComplete(task.doneWhen)) return false;
     if (task.status === 'done') return false;
-    const last = (task.doneWhen ?? []).at(-1);
     const moved = this.p.transition(task.id, 'done', {
       actor,
       note: 'every done-when line is met',
@@ -366,7 +397,7 @@ export class TaskDoneWhenStore {
     if (!moved.ok) return false;
     this.p.appendNote(task.id, {
       kind: 'status',
-      text: `Done: every done-when line is met. The last was "${last?.text ?? ''}".`,
+      text: closingNote(closedBy),
       agent: actor.name,
       ts: Date.now(),
     });

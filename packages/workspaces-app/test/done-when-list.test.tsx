@@ -99,19 +99,59 @@ describe('the words are the control', () => {
     expect(all('.dw-verdict-tag')).toHaveLength(0);
   });
 
-  it('commits the words on Enter and sends a fresh empty line after the one edited', () => {
+  it('commits the words on Enter and opens a blank line after the one edited', () => {
     const { onLines } = mount(LINES);
     const words = $<HTMLElement>('.dw-text');
     words.dispatchEvent(new Event('click', { bubbles: true }));
     words.textContent = 'the share link opens the list for a signed-out reader';
     words.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 
+    // The edit is filed. The blank line is not — it holds no words yet, and
+    // the server refuses a criterion nobody could answer.
     expect(onLines).toHaveBeenCalledTimes(1);
     expect(sent(onLines)).toEqual([
       { id: 'd-0', text: 'the share link opens the list for a signed-out reader' },
-      { text: '' },
       { id: 'd-1', text: 'the panel reads at 430px' },
     ]);
+    // The blank one sits between the two, where the next criterion goes. The
+    // edited line reads as the fixture still holds it: the words are the
+    // server's to change, and this harness's task never moves.
+    expect(all('.dw-text').map((e) => e.textContent)).toEqual([
+      'the share link opens the list',
+      '',
+      'the panel reads at 430px',
+    ]);
+  });
+
+  it('files the blank line only once it has words, in the place it was opened', () => {
+    const { onLines } = mount(LINES);
+    $<HTMLButtonElement>('.dw-add').click();
+    expect(onLines).not.toHaveBeenCalled();
+
+    const blank = all<HTMLElement>('.dw-text')[2];
+    if (!blank) throw new Error('no blank line to type into');
+    blank.dispatchEvent(new Event('click', { bubbles: true }));
+    blank.textContent = 'the count on the board matches the panel';
+    blank.dispatchEvent(new Event('blur', { bubbles: true }));
+
+    expect(onLines).toHaveBeenCalledTimes(1);
+    expect(sent(onLines)).toEqual([
+      { id: 'd-0', text: 'the share link opens the list' },
+      { id: 'd-1', text: 'the panel reads at 430px' },
+      { text: 'the count on the board matches the panel' },
+    ]);
+  });
+
+  it('forgets a blank line left empty, and writes nothing at all', () => {
+    const { onLines } = mount(LINES);
+    $<HTMLButtonElement>('.dw-add').click();
+    expect(all('.dw-line')).toHaveLength(3);
+
+    const blank = all<HTMLElement>('.dw-text')[2];
+    blank?.dispatchEvent(new Event('blur', { bubbles: true }));
+
+    expect(all('.dw-line')).toHaveLength(2);
+    expect(onLines).not.toHaveBeenCalled();
   });
 
   it('puts the old words back on Escape and writes nothing', () => {
@@ -134,17 +174,19 @@ describe('the words are the control', () => {
     expect(sent(onLines)).toEqual([{ id: 'd-1', text: 'the panel reads at 430px' }]);
   });
 
-  it('appends an empty line from "Add done criteria"', () => {
+  it('opens a blank line at the foot from "Add done criteria", with no write', () => {
     const { onLines } = mount(LINES);
     const add = $<HTMLButtonElement>('.dw-add');
     expect(add.textContent).toBe('Add done criteria');
     add.click();
 
-    expect(sent(onLines)).toEqual([
-      { id: 'd-0', text: 'the share link opens the list' },
-      { id: 'd-1', text: 'the panel reads at 430px' },
-      { text: '' },
+    expect(all('.dw-line')).toHaveLength(3);
+    expect(all('.dw-text').map((e) => e.textContent)).toEqual([
+      'the share link opens the list',
+      'the panel reads at 430px',
+      '',
     ]);
+    expect(onLines).not.toHaveBeenCalled();
   });
 
   it('drops a line whose words are emptied, because a criterion with no words cannot be checked', () => {

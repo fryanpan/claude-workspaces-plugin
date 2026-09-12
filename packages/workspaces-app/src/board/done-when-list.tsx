@@ -16,6 +16,12 @@
  * "Add done criteria" is the visible way in for anyone who does not know that
  * the words are clickable.
  *
+ * That fresh line is LOCAL until it has words. The server refuses a criterion
+ * with nothing in it — rightly, since nobody could ever answer one — so a
+ * blank line filed on the way in would be refused and the reader would get no
+ * line to type into. It exists in this component, and becomes a write on the
+ * first commit that carries text.
+ *
  * Every write sends the WHOLE list, because the server's write is the whole
  * list — add, edit, remove and reorder are one verb there, so they are one
  * call here. A line the caller sends with its `id` keeps its verdict and its
@@ -27,6 +33,7 @@
  * should have to go through this flow using tools. Not me."*
  */
 import { type DoneWhenVerdict, doneWhenChipLabel } from '@claude-workspaces/core/done-when';
+import type { ComponentChild } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { BoardDoneWhenLine, BoardTask } from './board-model.ts';
 
@@ -109,6 +116,10 @@ function LineWords(props: {
   onCommit: (text: string, andAnother: boolean) => void;
   /** Focus this line's words on mount — the freshly added one. */
   autoFocus?: boolean;
+  /** This is the blank line being typed, which the task does not hold yet.
+   *  It reports even an empty, unchanged commit, because that is the event
+   *  that ends it. */
+  draft?: boolean;
 }) {
   const { line, editable, onCommit } = props;
   const ref = useRef<HTMLSpanElement | null>(null);
@@ -134,8 +145,9 @@ function LineWords(props: {
     setEditing(false);
     // Unchanged words are not a write. The board repaints on every event, and
     // a blur that posted the same sentence back would be a round trip per
-    // click on a line nobody edited.
-    if (text === line.text && !andAnother) return;
+    // click on a line nobody edited. The draft is the exception: an empty one
+    // abandoned is still news, because it is what puts the blank line away.
+    if (text === line.text && !andAnother && props.draft !== true) return;
     onCommit(text, andAnother);
   };
 
@@ -197,10 +209,11 @@ export function DoneWhenList(props: {
   const { task, handlers } = props;
   const lines = task.doneWhen ?? [];
   const editable = handlers.onLines !== undefined && task.status !== 'done';
-  // The line to put the caret in on the next paint: the one "Add done
-  // criteria" or an Enter just created. Cleared once it has been used, so a
-  // repaint does not drag the reader back into it.
-  const [focusId, setFocusId] = useState<string | null>(null);
+  // Where the blank line being typed sits, as an index into the sequence, or
+  // null when there is none. It is LOCAL: a criterion with no words is not a
+  // criterion, the server refuses one, and a reader who opens a line and then
+  // changes their mind has written nothing. The write happens on the words.
+  const [draftAt, setDraftAt] = useState<number | null>(null);
 
   if (lines.length === 0 && !editable) return null;
 
@@ -211,117 +224,144 @@ export function DoneWhenList(props: {
 
   const asInput = (line: BoardDoneWhenLine) => ({ id: line.id, text: line.text });
 
-  const commitLine = (line: BoardDoneWhenLine, text: string, andAnother: boolean): void => {
-    const next: Array<{ id?: string; text: string }> = [];
-    for (const l of lines) {
-      if (l.id !== line.id) {
-        next.push(asInput(l));
-        continue;
+  const commitLine = (
+    index: number,
+    line: BoardDoneWhenLine,
+    text: string,
+    andAnother: boolean,
+  ) => {
+    if (text !== line.text) {
+      const next: Array<{ id?: string; text: string }> = [];
+      for (const l of lines) {
+        if (l.id !== line.id) {
+          next.push(asInput(l));
+          continue;
+        }
+        // Emptying a line removes it. The × is the deliberate way out and this
+        // is the accidental one — either way a criterion with no words is not
+        // a criterion, and keeping it would put an unanswerable line in the
+        // gate.
+        if (text !== '') next.push({ id: l.id, text });
       }
-      // Emptying a line removes it. The × is the deliberate way out and this
-      // is the accidental one — either way a criterion with no words is not a
-      // criterion, and keeping it would put an unanswerable line in the gate.
-      if (text !== '') next.push({ id: l.id, text });
-      if (andAnother) next.push({ text: '' });
+      write(next);
     }
-    write(next);
-    // The new line has no id yet, so the focus is claimed by POSITION: the
-    // paint after the write re-reads the list from the server and the line
-    // that follows the one just committed is the new one.
-    if (andAnother) setFocusId(`after:${line.id}`);
+    // Enter opens the next line where this one's successor will be — at this
+    // index when the words were emptied, because the line just left.
+    if (andAnother) setDraftAt(text === '' ? index : index + 1);
   };
+
+  const commitDraft = (text: string, andAnother: boolean): void => {
+    const at = draftAt;
+    if (at === null) return;
+    if (text === '') {
+      // Abandoned. Nothing was ever sent, so there is nothing to undo.
+      setDraftAt(null);
+      return;
+    }
+    const next: Array<{ id?: string; text: string }> = lines.map(asInput);
+    next.splice(at, 0, { text });
+    write(next);
+    setDraftAt(andAnother ? at + 1 : null);
+  };
+
+  const draftRow = (at: number) => (
+    // Keyed by position so a committed draft remounts EMPTY for the next one:
+    // the words are uncontrolled, and a node kept across the commit would
+    // still be holding the sentence just filed.
+    <li key={`dw-draft-${at}`} class="dw-line">
+      <div class="dw-cell">
+        <div class="dw-body">
+          <LineWords
+            draft={true}
+            line={{ id: '', text: '' }}
+            editable={true}
+            autoFocus={true}
+            onCommit={commitDraft}
+          />
+          <button
+            type="button"
+            class="dw-line-x"
+            title="Remove this line"
+            aria-label="Remove the new done-when line"
+            onClick={() => setDraftAt(null)}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    </li>
+  );
+
+  const items: ComponentChild[] = [];
+  lines.forEach((line, i) => {
+    if (draftAt === i) items.push(draftRow(i));
+    items.push(
+      <li
+        key={line.id}
+        class={`dw-line${props.refusedLineId === line.id ? ' dw-line-refused' : ''}`}
+      >
+        <div class="dw-cell">
+          <div class="dw-body">
+            <LineWords
+              line={line}
+              editable={editable}
+              onCommit={(text, andAnother) => commitLine(i, line, text, andAnother)}
+            />
+            {line.verdict !== undefined && (
+              <span class={chipClass(line.verdict)}>{doneWhenChipLabel(line.verdict)}</span>
+            )}
+            {editable && (
+              <button
+                type="button"
+                class="dw-line-x"
+                title="Remove this line"
+                aria-label={`Remove done-when line ${i + 1}`}
+                onClick={() => write(lines.filter((l) => l.id !== line.id).map((l) => asInput(l)))}
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {(line.proof ?? []).length > 0 && (
+            <div class="dw-proof">
+              <div class="dw-proof-head">Builder's proof</div>
+              {(line.proof ?? []).map((p) => (
+                <ProofRow key={`${p.text}${p.url ?? ''}`} proof={p} />
+              ))}
+            </div>
+          )}
+          {line.verdict === 'owner' && handlers.onCheck && (
+            <div class="dw-actions">
+              <button
+                type="button"
+                class="board-btn board-btn-primary"
+                onClick={() => void handlers.onCheck?.(task, line.id, 'met')}
+              >
+                Looks right
+              </button>
+              <button
+                type="button"
+                class="board-btn"
+                onClick={() => void handlers.onCheck?.(task, line.id, 'not-met')}
+              >
+                Not met
+              </button>
+            </div>
+          )}
+        </div>
+      </li>,
+    );
+  });
+  // A draft past the end of the list — the usual one, from the button.
+  if (draftAt !== null && draftAt >= lines.length) items.push(draftRow(lines.length));
 
   return (
     <>
       <h3 class="board-detail-subhead dw-head">Done when</h3>
-      <ol class="dw-list">
-        {lines.map((line, i) => {
-          const previous = lines[i - 1];
-          // The fresh line has no id of its own yet, so it is claimed by
-          // POSITION: it is the empty line sitting where the write put it,
-          // right after the line the reader committed (or at the head, when
-          // the list was empty).
-          const autoFocus =
-            focusId === line.id ||
-            (line.text === '' &&
-              (previous !== undefined ? focusId === `after:${previous.id}` : focusId === 'after:'));
-          return (
-            <li
-              key={line.id}
-              class={`dw-line${props.refusedLineId === line.id ? ' dw-line-refused' : ''}`}
-            >
-              <div class="dw-cell">
-                <div class="dw-body">
-                  <LineWords
-                    line={line}
-                    editable={editable}
-                    autoFocus={autoFocus}
-                    onCommit={(text, andAnother) => {
-                      if (autoFocus) setFocusId(null);
-                      commitLine(line, text, andAnother);
-                    }}
-                  />
-                  {line.verdict !== undefined && (
-                    <span class={chipClass(line.verdict)}>{doneWhenChipLabel(line.verdict)}</span>
-                  )}
-                  {editable && (
-                    <button
-                      type="button"
-                      class="dw-line-x"
-                      title="Remove this line"
-                      aria-label={`Remove done-when line ${i + 1}`}
-                      onClick={() =>
-                        write(lines.filter((l) => l.id !== line.id).map((l) => asInput(l)))
-                      }
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-                {(line.proof ?? []).length > 0 && (
-                  <div class="dw-proof">
-                    <div class="dw-proof-head">Builder's proof</div>
-                    {(line.proof ?? []).map((p) => (
-                      <ProofRow key={`${p.text}${p.url ?? ''}`} proof={p} />
-                    ))}
-                  </div>
-                )}
-                {line.verdict === 'owner' && handlers.onCheck && (
-                  <div class="dw-actions">
-                    <button
-                      type="button"
-                      class="board-btn board-btn-primary"
-                      onClick={() => void handlers.onCheck?.(task, line.id, 'met')}
-                    >
-                      Looks right
-                    </button>
-                    <button
-                      type="button"
-                      class="board-btn"
-                      onClick={() => void handlers.onCheck?.(task, line.id, 'not-met')}
-                    >
-                      Not met
-                    </button>
-                  </div>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+      <ol class="dw-list">{items}</ol>
       {editable && (
         <div class="dw-actions dw-field-act">
-          <button
-            type="button"
-            class="board-btn dw-add"
-            onClick={() => {
-              write([...lines.map((l) => asInput(l)), { text: '' }]);
-              // Focus the line the write is about to create — same claim by
-              // position the Enter path makes, anchored on the last line the
-              // list currently holds (or on the empty list).
-              setFocusId(lines.length > 0 ? `after:${lines[lines.length - 1]?.id}` : 'after:');
-            }}
-          >
+          <button type="button" class="board-btn dw-add" onClick={() => setDraftAt(lines.length)}>
             Add done criteria
           </button>
         </div>
