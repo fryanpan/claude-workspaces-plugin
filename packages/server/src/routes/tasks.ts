@@ -22,6 +22,7 @@
 import { handleDispatchAndNoteRoutes } from './dispatch-and-notes.ts';
 import { handleTaskAnswers } from './task-answers.ts';
 import { handleTaskDetail } from './task-detail.ts';
+import { handleTaskDoneWhen } from './task-done-when.ts';
 import { handleTaskFields } from './task-fields.ts';
 import { handleTaskReviewItems } from './task-review-items.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -44,6 +45,10 @@ export async function handleTaskRoutes(
     (await handleTaskListCreate(ctx, rq)) ??
     (await handleTaskBatch(ctx, rq)) ??
     (await handleTaskDetail(ctx, rq)) ??
+    // Before the field routes: none of its three patterns can collide with
+    // one of theirs (`done-when` is a segment no field route names), so the
+    // position is for reading order rather than for precedence.
+    (await handleTaskDoneWhen(ctx, rq)) ??
     (await handleTaskStatusAndLinks(ctx, rq)) ??
     (await handleTaskAnswers(ctx, rq)) ??
     (await handleTaskReviewItems(ctx, rq)) ??

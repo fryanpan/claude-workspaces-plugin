@@ -379,13 +379,26 @@ state standing. `isBoardOwnedDoc` (`doc-ids.ts`) is the prefix authority for
 which docs those are, `ws:` and `task:`, and none of them is ever file-bound.
 **What a projected task carries is a size decision, because sync-step-2 is one
 frame.** Opening a board costs the whole `ws:` doc, so the projection sends a
-CLOSED task out in slim form: `task-row-slim.ts` drops the five fields only the
+CLOSED task out in slim form: `task-row-slim.ts` drops the six fields only the
 open panel renders, and `routes/task-detail.ts` hands the whole task back to the
 one reader who opens it. `board-doc-compaction.ts` sheds the doc's delete set
 at hydrate, which is safe for a `ws:` doc and nothing else because the sidecar
 is the record and the projection is reasserted after load. `slow-load-alarm.ts`
 reports a board load that crossed its budget. Measured together on the live
 board: 1.53 MB on the wire before, 0.22 MB after.
+
+**"Done when" is a field on the task, and it is what closes the task.** The
+list lives beside the body rather than inside it, so the server can read it:
+`task-done-when.ts` (`server`) is the verb family that writes the list, takes
+a builder's report against it and takes the owner's word on a line only a
+person can judge, and it is also what moves the task to done once every line
+is met. `done-when.ts` (`core`) holds the wire type and the pure readers both
+halves share — how many lines are met, which line is still open, and what the
+chip on a line says — so `task-lifecycle.ts`'s refusal to close a task with an
+open line and the board's own rendering cannot disagree about what "open"
+means. The lines are the sixth field `task-row-slim.ts` drops, because a
+closed task's row carries only the two numbers the pill needs. The routes are
+`routes/task-done-when.ts`, one family, three paths under `tasks/:id/`.
 
 **A rebuild changes every clientID, so a tab that was away is told to start
 over.** Sync is a state-vector exchange, and after a rebuild a reconnecting

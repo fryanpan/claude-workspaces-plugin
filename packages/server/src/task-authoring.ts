@@ -23,6 +23,7 @@ import {
   checkDecisionShape,
   decisionShapeMessage,
 } from './decision-shape.ts';
+import { buildDoneWhenLines } from './task-done-when.ts';
 import { bumpWordsRevision, cryptoId } from './task-fields.ts';
 import { CHORES_GOAL_ID } from './task-goals.ts';
 import { initialTaskStatus } from './task-helpers.ts';
@@ -151,6 +152,8 @@ export class TaskAuthoringStore {
       shapeGaps = check.gaps;
     }
 
+    const doneWhen = buildDoneWhenLines(opts.doneWhen ?? [], undefined);
+
     const now = this.p.now();
     // Where the row came from, as a revision it can later be measured
     // against. Asked of the injected reader HERE — the one place every
@@ -180,6 +183,10 @@ export class TaskAuthoringStore {
       ...(assigneeId !== undefined ? { assigneeId } : {}),
       ...(opts.needs !== undefined ? { needs: opts.needs } : {}),
       ...(options.length > 0 ? { options } : {}),
+      // Minted at the create, so the row can be reported on without a second
+      // write. No verdicts: a line nobody has measured carries none, which is
+      // what makes the panel draw no chip until a builder speaks.
+      ...(doneWhen.length > 0 ? { doneWhen } : {}),
       goal,
       order,
       // A plan draft is triage WHOEVER filed it: the batch declared its rows

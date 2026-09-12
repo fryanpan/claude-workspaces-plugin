@@ -18,7 +18,7 @@
  * So the gate is now per FIELD, and each one below names the reader that
  * decides it:
  *
- *   - **`reviews` and `quote` go from every row.** Their only readers are
+ *   - **`reviews`, `quote` and `doneWhen` go from every row.** Their only readers are
  *     `heldReviewItems`, `discussionStream` and the panel's "Original words"
  *     block — three surfaces that exist only while a ticket is open on
  *     screen. 14.9% of the wire, carried by 22 rows.
@@ -70,8 +70,11 @@ export type ProjectedTaskRow = Record<string, unknown>;
  */
 export const DETAIL_FRESH_MS = 24 * 60 * 60 * 1000;
 
-/** Read by nothing outside the open panel, on any row, ever. */
-export const ALWAYS_TRIMMED_FIELDS = ['reviews', 'quote'] as const;
+/** Read by nothing outside the open panel, on any row, ever. `doneWhen` joins
+ *  them because the board ROW draws only `doneWhenProgress` — two numbers the
+ *  projection keeps on every row — while the words, the verdicts and every
+ *  proof behind them are the panel's alone. */
+export const ALWAYS_TRIMMED_FIELDS = ['reviews', 'quote', 'doneWhen'] as const;
 
 /** The description, kept on the one row shape a list surface renders it on. */
 export const BODY_FIELDS = ['body', 'bodyTruncated'] as const;
