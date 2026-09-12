@@ -22,6 +22,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { burstLabel, fileEntries } from '../../workspaces-app/src/board/library-model.ts';
 import { type LibraryPayload, createMarkdownLister } from '../src/library.ts';
 import type { ShareTarget } from '../src/middleware/host-guard.ts';
 import { MountStore } from '../src/mount-store.ts';
@@ -102,6 +103,46 @@ describe('library routes', () => {
     expect(byName.get('handbook.md')?.href).toMatch(/^\/workspaces\/[^/]+\/docs\//);
     expect(byName.get('tide-gauge.md')?.open).toBe('docs/tide-gauge.md');
     expect(lib.files.some((f) => f.name.includes('hidden'))).toBe(false);
+  });
+
+  /**
+   * A generated burst, end to end: real files written into the repo with the
+   * timing a generator leaves — seven files four seconds apart across three
+   * sibling folders, its summary four minutes later, ordinary edits around
+   * them — read back through the real listing and grouped by the page's own
+   * rule. Nothing about the burst is a hand-built record.
+   */
+  it('collapses a burst of generated files read off disk into one front-page entry', async () => {
+    const t0 = Math.floor(Date.now() / 1000) - 3600;
+    const write = (rel: string, secondsFromT0: number) => {
+      const path = join(repo, rel);
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, `# ${rel}\n`);
+      utimesSync(path, t0 + secondsFromT0, t0 + secondsFromT0);
+    };
+    write('handbook.md', 600);
+    write('docs/tide-gauge.md', 300);
+    write('docs/ferry-schedule.md', 0);
+    write('docs/dock-inspection.md', -180);
+    write('roundups/2026-09-12-roundup.md', -360);
+    const clips = ['heron-post', 'marsh-ledger', 'gull-gazette'];
+    for (let i = 0; i < 7; i++) {
+      write(`clippings/${clips[i % 3]}/clip-${i + 1}.md`, -600 - i * 4);
+    }
+
+    const entries = fileEntries((await items()).files);
+    expect(entries.map((e) => (e.kind === 'file' ? e.row.name : `[${burstLabel(e)}]`))).toEqual([
+      'handbook.md',
+      'tide-gauge.md',
+      'ferry-schedule.md',
+      'dock-inspection.md',
+      '2026-09-12-roundup.md',
+      '[7 files in clippings]',
+    ]);
+    const burst = entries.at(-1);
+    expect(burst?.kind === 'burst' ? burst.rows.map((r) => r.open) : []).toEqual(
+      Array.from({ length: 7 }, (_, i) => `clippings/${clips[i % 3]}/clip-${i + 1}.md`),
+    );
   });
 
   /**

@@ -134,6 +134,94 @@ describe('the Library front page', () => {
   });
 
   /**
+   * A generator's burst takes ONE line of the ten (Bryan, 2026-09-12: "Daily
+   * digest creates 7 new files, interrupting workflow"). Twelve files — five
+   * edits, a seven-file run written seconds apart, then more edits — must
+   * still show every edit on the front page.
+   */
+  describe('a burst of files written together', () => {
+    const edit = (name: string, hoursAgo: number): LibraryRow => ({
+      name,
+      at: NOW - hoursAgo * HOUR,
+      open: `notes/${name}`,
+      folder: 'notes',
+    });
+    const burstRows = Array.from({ length: 7 }, (_, i) => ({
+      name: `2026-09-12-clip-${i + 1}.md`,
+      at: NOW - 3 * HOUR - i * 4_000,
+      open: `clippings/c${i}/2026-09-12-clip-${i + 1}.md`,
+      folder: `clippings/c${i}`,
+    }));
+    const BURST: LibraryPayload = {
+      project: { name: 'riverbend', path: '~/dev/riverbend' },
+      meetings: [],
+      files: [
+        edit('trail-log.md', 1),
+        edit('culvert-estimate.md', 2),
+        edit('roundup.md', 2.9),
+        ...burstRows,
+        edit('field-guide.md', 5),
+        edit('handbook.md', 6),
+        edit('tide-gauge.md', 7),
+      ],
+    };
+    const filesTable = (root: ParentNode) => root.querySelectorAll('.library-tbl')[1] as Element;
+    const lines = (root: ParentNode) =>
+      [...filesTable(root).querySelectorAll('.library-list > *')].map(
+        (n) => n.querySelector('.library-name')?.textContent,
+      );
+
+    it('is one line of Recent files, so every edit around it stays on the front page', async () => {
+      const { page, root } = drive({ payload: BURST });
+      await page.open();
+      expect(lines(root)).toEqual([
+        'trail-log.md',
+        'culvert-estimate.md',
+        'roundup.md',
+        '7 files in clippings',
+        'field-guide.md',
+        'handbook.md',
+        'tide-gauge.md',
+      ]);
+      // Seven lines of ten: nothing is left over for "See all".
+      expect(root.querySelector('.library-more[data-list=files]')).toBeNull();
+      const head = filesTable(root).querySelector('.library-burst-head') as HTMLElement;
+      expect(head.getAttribute('aria-expanded')).toBe('false');
+      expect(head.querySelector('.library-when')?.textContent).toBe('3h ago');
+    });
+
+    it('opens in place onto its files, each one a tap from its doc, and closes again', async () => {
+      const { page, root, sent } = drive({ payload: BURST });
+      await page.open();
+      await click(filesTable(root).querySelector('.library-burst-head') as HTMLElement);
+      const head = filesTable(root).querySelector('.library-burst-head') as HTMLElement;
+      expect(head.getAttribute('aria-expanded')).toBe('true');
+      expect(document.activeElement).toBe(head);
+      const members = filesTable(root).querySelectorAll('.library-burst-rows .library-row');
+      expect([...members].map((m) => m.querySelector('.library-name')?.textContent)).toEqual(
+        burstRows.map((r) => r.name),
+      );
+      await click(members[0] as HTMLElement);
+      expect(sent.map((s) => s.body)).toEqual([{ path: burstRows[0]?.open }]);
+      await click(filesTable(root).querySelector('.library-burst-head') as HTMLElement);
+      expect(filesTable(root).querySelector('.library-burst-rows')).toBeNull();
+    });
+
+    it('counts as one of the ten when deciding whether there is more to see', async () => {
+      const more = Array.from({ length: 10 }, (_, i) => edit(`older-${i + 1}.md`, 10 + i));
+      const { page, root } = drive({ payload: { ...BURST, files: [...BURST.files, ...more] } });
+      await page.open();
+      expect(lines(root)).toHaveLength(10);
+      expect(lines(root).at(-1)).toBe('older-3.md');
+      await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
+      // The full list is every file, one row each: nothing a burst held is
+      // further than "See all" away.
+      expect(names(root)).toHaveLength(BURST.files.length + more.length);
+      expect(root.querySelector('.library-burst-head')).toBeNull();
+    });
+  });
+
+  /**
    * Two meetings of one title is the ordinary case, not a corner: every
    * huddle is named from the clock at the minute it opened. The page has to
    * separate them where the reader is — in the row.

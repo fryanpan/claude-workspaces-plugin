@@ -64,6 +64,13 @@ export interface LibraryRow {
    *  page to go to. Never a host path — the server resolves it against a
    *  root it chose. */
   open?: string;
+  /**
+   * The folder a file row's project file sits in, from the repo root — `''`
+   * at the root. Set exactly when the row is named by that file, so it says
+   * nothing the name could not. The page groups a burst of generated files
+   * under it rather than printing it on a row.
+   */
+  folder?: string;
 }
 
 export interface LibraryProject {
@@ -119,6 +126,12 @@ export interface LibrarySources {
 }
 
 const isMarkdownPath = (relPath: string): boolean => relPath.toLowerCase().endsWith('.md');
+
+/** `a/b/c.md` → `a/b`; a file at the repo root → `''`. */
+const folderOf = (relPath: string): string => {
+  const dir = posix.dirname(relPath);
+  return dir === '.' ? '' : dir;
+};
 
 /**
  * Most recent first; ties by name so the order is stable across loads. A row
@@ -374,17 +387,16 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
   ]);
   const files: LibraryRow[] = docFiles.map((d) => {
     const rel = named(d);
-    return {
-      name: (rel === undefined ? undefined : names.get(rel)) ?? d.title,
-      at: d.at,
-      href: d.href,
-    };
+    if (rel === undefined) return { name: d.title, at: d.at, href: d.href };
+    return { name: names.get(rel) ?? d.title, at: d.at, href: d.href, folder: folderOf(rel) };
   });
   for (const f of loose) {
     const name = names.get(f.relPath) ?? f.relPath;
-    if (isMarkdownPath(f.relPath)) files.push({ name, at: f.mtimeMs, open: f.relPath });
+    const folder = folderOf(f.relPath);
+    if (isMarkdownPath(f.relPath)) files.push({ name, at: f.mtimeMs, open: f.relPath, folder });
     else if (f.fileId) {
-      files.push({ name, at: f.mtimeMs, href: `/mounts/${encodeURIComponent(f.fileId)}/raw` });
+      const href = `/mounts/${encodeURIComponent(f.fileId)}/raw`;
+      files.push({ name, at: f.mtimeMs, href, folder });
     }
   }
 
