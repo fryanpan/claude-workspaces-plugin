@@ -143,7 +143,6 @@ export function createBoardSummaries(deps: {
   const now = deps.now ?? Date.now;
   const readRows = deps.readRows ?? ((id: string) => readEventRows(deps.dataDir, id));
   const store = new BoardSummaryStore(deps.dataDir);
-  const inflight = new Set<string>();
   const tried = new Map<string, number>();
 
   return {
@@ -153,16 +152,16 @@ export function createBoardSummaries(deps: {
     },
     async refresh(board) {
       const { summarizer } = deps;
-      if (!summarizer || inflight.has(board.id)) return;
+      if (!summarizer) return;
       const t = now();
       const stored = store.get(board.id);
       if (stored && t - stored.at < SUMMARY_WINDOW_MS) return;
       // The page asks on every load, and reading a board's log to find a
-      // quiet hour costs the same as finding a busy one.
+      // quiet hour costs the same as finding a busy one. Stamped before the
+      // first await, so it is also what keeps two loads from asking twice.
       const last = tried.get(board.id);
       if (last !== undefined && t - last < RETRY_MS) return;
       tried.set(board.id, t);
-      inflight.add(board.id);
       try {
         const user = boardSummaryPrompt({
           name: board.name,
@@ -177,8 +176,6 @@ export function createBoardSummaries(deps: {
         if (text) store.set(board.id, { text, at: t });
       } catch (err) {
         console.error('[board-summary] refresh failed:', err instanceof Error ? err.message : err);
-      } finally {
-        inflight.delete(board.id);
       }
     },
   };
