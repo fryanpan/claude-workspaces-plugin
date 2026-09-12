@@ -99,9 +99,62 @@ describe('the Library front page', () => {
       'See all meetings',
     ]);
     // A row is its title and how long ago — nothing else.
+    // A row is what it is called, what tells it apart, and its one clock
+    // reading — in two slots, so it stays one grid line at every width.
     const first = root.querySelector('.library-row') as HTMLElement;
-    expect([...first.children].map((c) => c.className)).toEqual(['library-name', 'library-when']);
+    expect([...first.children].map((c) => c.className)).toEqual(['library-main', 'library-when']);
     expect(first.querySelector('.library-when')?.textContent).toBe('just now');
+  });
+
+  /**
+   * Two meetings of one title is the ordinary case, not a corner: every
+   * huddle is named from the clock at the minute it opened. The page has to
+   * separate them where the reader is — in the row.
+   */
+  it('separates two meetings of the same title, and leaves file rows alone', async () => {
+    const twins: LibraryPayload = {
+      project: { name: 'riverbend', path: '~/dev/riverbend' },
+      meetings: [
+        { name: 'Meeting notes', at: NOW, durationMs: 5 * 60_000, href: '/m/1' },
+        { name: 'Meeting notes', at: NOW - 26 * HOUR, durationMs: 47 * 60_000, href: '/m/2' },
+      ],
+      files: [{ name: 'handbook.md', at: NOW - HOUR, href: '/f/1' }],
+    };
+    const { page, root } = drive({ payload: twins });
+    await page.open();
+    const [meetings, files] = [...root.querySelectorAll('.library-tbl')];
+    const subs = [...(meetings as Element).querySelectorAll('.library-sub')].map(
+      (n) => n.textContent,
+    );
+    expect(subs).toHaveLength(2);
+    expect(subs[0]).not.toBe(subs[1]);
+    expect(subs[0]).toContain('5 min');
+    expect(subs[1]).toContain('47 min');
+    // No second label on a file: its name already identifies it.
+    expect((files as Element).querySelectorAll('.library-sub')).toHaveLength(0);
+  });
+
+  it('says so, rather than guessing, for a file with no readable clock', async () => {
+    const noClock: LibraryPayload = {
+      project: null,
+      meetings: [],
+      files: [{ name: 'gone.md', href: '/f/9' }],
+    };
+    const { page, root } = drive({ payload: noClock });
+    await page.open();
+    expect(root.querySelector('.library-when')?.textContent).toBe('—');
+  });
+
+  it('names the clock in the header of each column', async () => {
+    const { page, root } = drive();
+    await page.open();
+    const headers = [...root.querySelectorAll('.library-cols')].map((h) =>
+      [...h.children].map((c) => c.textContent),
+    );
+    expect(headers).toEqual([
+      ['Title', 'Held'],
+      ['Name', 'File modified'],
+    ]);
   });
 
   it('opens a full list, with its own history entry and a way back', async () => {
