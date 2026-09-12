@@ -1,4 +1,5 @@
 import { matchRest } from '../middleware/workspace-scope.ts';
+import { SECRET_VALUE_MAX_CHARS, isStorableSecretValue } from '../secret-store.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
@@ -120,8 +121,20 @@ export async function handleTaskSecrets(
           message: 'every entry must name one of the services this item asks for',
         });
       }
-      if (typeof value !== 'string' || value === '') {
-        return j(400, { error: 'each entry needs a non-empty string value' });
+      // EVERY VALUE IS JUDGED BEFORE THE FIRST ONE IS WRITTEN, against the
+      // store's own rules rather than a looser copy of them. The writer
+      // refuses an empty value, a value carrying a newline (the prompt it
+      // feeds is line-based) and a value over `SECRET_VALUE_MAX_CHARS` — and
+      // it refuses them one at a time, mid-loop, which is how the second
+      // field of a pair could be refused with the first already in the
+      // store. Nothing here can roll a Keychain write back, so the fix is
+      // that the refusable cases are all spent before any write happens.
+      // The value is never echoed, and neither is its length.
+      if (!isStorableSecretValue(value) || value.length > SECRET_VALUE_MAX_CHARS) {
+        return j(400, {
+          error: 'unstorable-value',
+          message: `each value is one line of text, not empty, and at most ${SECRET_VALUE_MAX_CHARS} characters`,
+        });
       }
       if (sent.has(service)) return j(400, { error: 'one entry per service' });
       sent.set(service, value);
@@ -141,8 +154,13 @@ export async function handleTaskSecrets(
       const wrote = await secretWriter(field.service, sent.get(field.service) ?? '');
       if (!wrote.ok) {
         // The tag names the STEP, never the value — see `secret-store.ts`.
-        // The item stays open: a retry rewrites whatever did land, because
-        // the writer updates in place rather than refusing an existing name.
+        // Reachable only for a store that FAILED — a locked keychain, a
+        // denied consent dialog — because every refusable value was refused
+        // above, before the first write. An earlier field of the same
+        // hand-over may already be stored, and no Keychain write can be
+        // rolled back; the item stays open and a retry rewrites whatever
+        // landed, because the writer updates in place rather than refusing
+        // an existing name.
         return j(502, {
           error: 'store-failed',
           reason: wrote.error,
