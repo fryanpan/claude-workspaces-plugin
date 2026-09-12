@@ -14083,6 +14083,12 @@ function stalledRowClause(row) {
   const named = row.title ? `"${truncate3(row.title, 50)}" (${row.id})` : row.id ?? "a task";
   return row.quietMs === undefined ? named : `${named} quiet ${humanDuration2(row.quietMs)}`;
 }
+function declaredWaitClause(wait, now2) {
+  const named = wait.title ? `"${truncate3(wait.title, 50)}" (${wait.id})` : wait.id ?? "a task";
+  const what = wait.what ? ` on ${truncate3(wait.what, 80)}` : "";
+  const held = now2 !== undefined && wait.since !== undefined ? `, ${humanDuration2(now2 - wait.since)} so far` : "";
+  return `${named}${what}${held}`;
+}
 function stalledRowsClause(rows) {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(stalledRowClause);
   const rest = rows.length - shown.length;
@@ -14131,6 +14137,17 @@ function stalledLine(p) {
   if (unfiled.length > 0) {
     const noun = unfiled.length === 1 ? "task is" : "tasks are";
     parts.push(`${unfiled.length} ${noun} waiting on a person with NO question filed — ` + `${stalledRowsClause(unfiled)}. File the ask where they will see it, or the wait is invisible.`);
+  }
+  const waits = p.declaredWaits ?? [];
+  const standing = waits.filter((w) => w.lapsed !== true);
+  const lapsed = waits.filter((w) => w.lapsed === true);
+  if (standing.length > 0) {
+    const noun = standing.length === 1 ? "task is" : "tasks are";
+    parts.push(`${standing.length} ${noun} declared to be waiting on something off the board — ` + `${standing.map((w) => declaredWaitClause(w, p.ts)).join("; ")}. ` + "Not escalated while the wait stands; clear it with declare_wait(clear: true) when the thing arrives.");
+  }
+  if (lapsed.length > 0) {
+    const noun = lapsed.length === 1 ? "declared wait has" : "declared waits have";
+    parts.push(`${lapsed.length} ${noun} LAPSED and the task(s) are back on the escalation clock — ` + `${lapsed.map((w) => declaredWaitClause(w, p.ts)).join("; ")}. ` + "Either the wait is over and the work is yours to drive, or it is still real and needs declaring again.");
   }
   const unread = p.undetermined?.count ?? p.undetermined?.reasons?.length ?? 0;
   if (unread > 0) {
@@ -16734,6 +16751,33 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "declare_wait",
+      description: "Say what a task is waiting on when the thing is NOT on the board — a peer restarting the fleet, a release elsewhere, a queue draining. The stall check stops escalating that task until the wait lapses, and the wake names your words instead of re-reporting the silence. The task keeps its status and its queue position: this changes what the board SAYS, not what it does. The wait EXPIRES (default 1 hour, maximum 8), and when it does the task comes back loud carrying all the silence it accumulated — so declare the time you actually expect, and declare again if it runs long. Use block_task instead when another task is the blocker, and add_review_item when a person is: a declared wait never excuses an ask nobody filed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
+          },
+          taskId: { type: "string" },
+          waitingOn: {
+            type: "string",
+            description: 'What it is waiting on, in a reader’s words — for example "the fleet restart, then a peer filing the follow-up". This is what the lead reads in the wake, so write a subject, not a token. Up to 200 characters. Required unless clear is true.'
+          },
+          hours: {
+            type: "number",
+            description: "How long the wait stands before it lapses. Default 1, maximum 8; a value above 8 is refused rather than trimmed. Re-declaring the same wait renews it and keeps the time it started, so the board can see a wait that has been rolling over all day."
+          },
+          clear: {
+            type: "boolean",
+            description: "Pass true to end the wait now — the thing arrived, or it turned out not to be what the task was waiting on. Everything else is ignored. Clearing a task with no wait answers changed: false rather than erroring."
+          }
+        },
+        required: ["workspaceId", "taskId"]
+      }
+    },
+    {
       name: "archive_task",
       description: "Take a task off the board without destroying it. This is the soft delete, and the only removal a task has. Use it for a duplicate, a task the goal moved past, or a capture that turned out not to be work. unarchive_task reverses it. Archiving is not completing: when the work happened, use done.",
       inputSchema: {
@@ -18539,6 +18583,25 @@ async function handleTaskTool(name, a, ctx) {
         changed: res.changed
       });
     }
+    case "declare_wait": {
+      const { taskId, waitingOn, hours, clear } = a;
+      if (clear !== true && (typeof waitingOn !== "string" || waitingOn.trim() === "")) {
+        return err2("waitingOn is required: say what this task is waiting on, in words a reader understands — or pass clear: true to end the wait");
+      }
+      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/wait`, {
+        ...clear === true ? { clear: true } : { what: waitingOn, ...hours !== undefined ? { hours } : {} },
+        author: AUTHOR
+      });
+      if (clear === true)
+        return ok2({ taskId, cleared: true, changed: res.changed ?? false });
+      return ok2({
+        taskId,
+        waitingOn: res.wait?.what,
+        until: res.wait?.until,
+        waitingSince: res.wait?.since,
+        status: res.task.status
+      });
+    }
     case "archive_task": {
       const { taskId, reason } = a;
       const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/archive`, {
@@ -19654,7 +19717,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.222";
+var PLUGIN_VERSION = "0.1.223";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

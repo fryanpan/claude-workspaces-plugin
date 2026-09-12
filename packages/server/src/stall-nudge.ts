@@ -84,6 +84,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { ParallelismCapSummary } from './ready-nudge.ts';
 import {
   type AskedBackRow,
+  type DeclaredWaitRow,
   type HeldItemRow,
   STALL_QUIET_DEFAULT_MS,
   type StallUndeterminedRow,
@@ -161,6 +162,12 @@ export interface StallSnapshot {
    *  finding and never woken over; carried so the verdict and the escalation
    *  can check the ask. Absent when none, the same as empty. */
   waiting?: readonly WaitingRow[];
+  /**
+   * Declared waits on the rows this pass named — what an agent said the row
+   * waits on that the board cannot see (`stall-gate.ts`, `task-wait.ts`).
+   * Absent when none, the same as empty.
+   */
+  declaredWaits?: readonly DeclaredWaitRow[];
   /** THE DENOMINATOR: how many open rows the gate examined. */
   considered: number;
   /** Rows the gate could not evaluate. Neither stalled nor healthy. */
@@ -341,6 +348,16 @@ export interface StallNudgeFrame {
    * in this frame asks for.
    */
   checkIn?: readonly StalledRow[];
+  /**
+   * What the named rows were DECLARED to be waiting on, for things the board
+   * cannot see (`task-wait.ts`). Never a wake by itself — it is an annotation
+   * on rows this frame already carries, which is what lets the wake explain a
+   * silence instead of repeating it. Absent when none.
+   *
+   * A lapsed entry is the important one: it says a declaration the lead wrote
+   * has run out, which is why the row is loud again.
+   */
+  declaredWaits?: readonly DeclaredWaitRow[];
   /**
    * What is new since the last wake this board was sent — the reason the
    * lead is being woken again rather than the whole state of the board.
@@ -804,6 +821,11 @@ export class StallNudger {
       ...(askedBack.length > 0 ? { askedBack } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
       ...(checkIn.length > 0 ? { checkIn } : {}),
+      // Rides along with the rows it explains. Never a reason for the frame —
+      // `changeOn` above has already decided that on the findings themselves.
+      ...(board.declaredWaits && board.declaredWaits.length > 0
+        ? { declaredWaits: board.declaredWaits }
+        : {}),
       ...(board.undetermined.length > 0
         ? {
             undetermined: {
@@ -950,6 +972,22 @@ export class StallNudger {
    *    Home queue. Disjoint from the named lists today (`stall-gate.ts` sorts
    *    a row into exactly one), and listed here anyway so a later classifier
    *    change cannot quietly put the clock back.
+   *  - a STALLED row carrying a DECLARED wait that has not lapsed — an agent
+   *    saying what the row waits on when the board cannot see the thing
+   *    (`task-wait.ts`). The three above are waits the board can verify; this
+   *    one it cannot, which is why it is the only one that expires. Past
+   *    `until` the row comes back onto the clock carrying its whole
+   *    accumulated silence, so the escalation is deferred rather than
+   *    cancelled, and the frame says the declaration lapsed.
+   *
+   * ── Why a declared wait does NOT quieten an unfiled row ─────────────────
+   *
+   * `unfiled` is a row waiting on a PERSON with the question filed nowhere
+   * they read. Its remedy is the lead's and available right now — file the
+   * ask — so a sentence about waiting on something else cannot excuse it,
+   * and letting it would make the one finding that catches a protocol
+   * violation the easiest of all to silence. The filter below therefore
+   * intersects the declarations with the STALLED ids and nothing wider.
    *
    * ── What counts as the SAME wait ────────────────────────────────────────
    *
@@ -973,10 +1011,14 @@ export class StallNudger {
     askedBack: readonly AskedBackRow[],
   ): readonly StalledRow[] {
     const rows = [...board.stalled, ...board.unfiled];
+    const stalledIds = new Set(board.stalled.map((row) => row.id));
     const waits = new Set<string>([
       ...held.map((item) => item.id),
       ...askedBack.map((item) => item.id),
       ...(board.waiting ?? []).map((row) => row.id),
+      ...(board.declaredWaits ?? [])
+        .filter((wait) => wait.lapsed !== true && stalledIds.has(wait.id))
+        .map((wait) => wait.id),
     ]);
     if (waits.size === 0) return rows;
     return rows.filter((row) => !waits.has(row.id));

@@ -1872,6 +1872,38 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'declare_wait',
+      description:
+        'Say what a task is waiting on when the thing is NOT on the board — a peer restarting the fleet, a release elsewhere, a queue draining. The stall check stops escalating that task until the wait lapses, and the wake names your words instead of re-reporting the silence. The task keeps its status and its queue position: this changes what the board SAYS, not what it does. The wait EXPIRES (default 1 hour, maximum 8), and when it does the task comes back loud carrying all the silence it accumulated — so declare the time you actually expect, and declare again if it runs long. Use block_task instead when another task is the blocker, and add_review_item when a person is: a declared wait never excuses an ask nobody filed.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description:
+              'The board this resource is on. get_workspace lists the boards you are attached to.',
+          },
+          taskId: { type: 'string' },
+          waitingOn: {
+            type: 'string',
+            description:
+              'What it is waiting on, in a reader’s words — for example "the fleet restart, then a peer filing the follow-up". This is what the lead reads in the wake, so write a subject, not a token. Up to 200 characters. Required unless clear is true.',
+          },
+          hours: {
+            type: 'number',
+            description:
+              'How long the wait stands before it lapses. Default 1, maximum 8; a value above 8 is refused rather than trimmed. Re-declaring the same wait renews it and keeps the time it started, so the board can see a wait that has been rolling over all day.',
+          },
+          clear: {
+            type: 'boolean',
+            description:
+              'Pass true to end the wait now — the thing arrived, or it turned out not to be what the task was waiting on. Everything else is ignored. Clearing a task with no wait answers changed: false rather than erroring.',
+          },
+        },
+        required: ['workspaceId', 'taskId'],
+      },
+    },
+    {
       name: 'archive_task',
       description:
         'Take a task off the board without destroying it. This is the soft delete, and the only removal a task has. Use it for a duplicate, a task the goal moved past, or a capture that turned out not to be work. unarchive_task reverses it. Archiving is not completing: when the work happened, use done.',

@@ -482,6 +482,11 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       // server's receipt on a slow flush, and the classifier reads notes
       // directly so the CLI report and this loop agree.
       ...(t.notes !== undefined ? { notes: t.notes } : {}),
+      // What the row's holder declared it is waiting on, for a thing the
+      // board cannot see. Not activity and not a bucket — the gate reads it
+      // only to annotate the rows it names, and the wake only to stop
+      // escalating a stalled one (`task-wait.ts`).
+      ...(t.externalWait !== undefined ? { externalWait: t.externalWait } : {}),
     }));
     // Every row timestamp as an activity tick. Deliberately unfiltered by
     // actor: the question this feeds is "did anything touch this row", and an
@@ -928,6 +933,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       stalled: verdict.stalled,
       unfiled: verdict.unfiled,
       ...(verdict.waiting.length > 0 ? { waiting: verdict.waiting } : {}),
+      ...(verdict.declaredWaits.length > 0 ? { declaredWaits: verdict.declaredWaits } : {}),
       considered: verdict.considered,
       undetermined: verdict.undetermined,
       ...(verdict.beyondCapacity > 0 ? { beyondCapacity: verdict.beyondCapacity } : {}),

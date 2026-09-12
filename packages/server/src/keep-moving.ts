@@ -16,6 +16,8 @@
  * guess from an agent's end-of-turn text was removed with that step.
  */
 
+import type { ExternalWait } from '@claude-workspaces/core/task-wire';
+
 export interface TaskRow {
   id: string;
   title: string;
@@ -49,6 +51,17 @@ export interface TaskRow {
    * holding the row is still there, and a note is the agent saying so.
    */
   notes?: Array<{ ts: number; kind?: string; text?: string; agent?: string; sessionId?: string }>;
+  /**
+   * A wait the BOARD cannot see, declared on the row (`task-wait.ts`).
+   *
+   * Read by `evaluateStalls` and by nothing in this module: it is not a
+   * bucket and it must never become one. A bucket is a claim about what the
+   * board knows; this is a claim by an agent that the board cannot check, so
+   * it may quieten a wake (`stall-nudge.ts`'s `clockRows`) and may not change
+   * what the keep-moving verdict counts. Carried here only because the gate
+   * is handed tasks and a parallel map would be a second thing to disagree.
+   */
+  externalWait?: ExternalWait;
 }
 export interface EventRow {
   taskId?: string;

@@ -24,7 +24,7 @@
  * repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import type { AskedBackRow, HeldItemRow, StalledRow } from '../src/stall-gate.ts';
+import type { AskedBackRow, DeclaredWaitRow, HeldItemRow, StalledRow } from '../src/stall-gate.ts';
 import {
   STALL_REPEAT_DEFAULT_MS,
   type StallNudgeFrame,
@@ -80,7 +80,7 @@ function heldOn(over: Partial<HeldItemRow> = {}): HeldItemRow {
 function board(over: Partial<StallSnapshot> = {}): StallSnapshot {
   return {
     workspaceId: 'w-atlas',
-    leadAgentId: 'agent-cartographer',
+    leadAgentId: 'agent-lead',
     retired: false,
     stalled: [quietRow()],
     unfiled: [],
@@ -105,7 +105,7 @@ function harness(initial: StallSnapshot = board()) {
     now: () => world.now,
     snapshot: () => world.boards,
     canReach: () => true,
-    attachedAgents: () => ['agent-cartographer'],
+    attachedAgents: () => ['agent-lead'],
     send: (_workspaceId, _agentId, frame) => {
       sent.push(frame);
       return 1;
@@ -277,6 +277,119 @@ describe('a row whose ask is filed and pending', () => {
     h.windows(3);
 
     expect(h.sent).toHaveLength(1);
+  });
+});
+
+describe('a row carrying a DECLARED wait on something off the board', () => {
+  // The case the other three could not cover. `t-rollout` here has no held
+  // item, no question asked back and nothing on anybody's Home queue: its
+  // holder has simply said, in words, that it is waiting on a thing the board
+  // cannot see. Before this the row was a plain stall — measured at seven
+  // frames over six windows, every one of them `changed: { escalated: true }`
+  // and nothing else.
+  const declared = (over: Partial<DeclaredWaitRow> = {}): DeclaredWaitRow => ({
+    id: 't-rollout',
+    title: 'Agree the rollout window',
+    what: 'the fleet restart, then a peer filing the follow-up',
+    since: START - 20 * MIN,
+    until: START + 4 * 60 * MIN,
+    by: 'Team Lead',
+    ...over,
+  });
+
+  it('is named once, then says nothing for three repeat windows', () => {
+    const h = harness(board({ declaredWaits: [declared()] }));
+
+    h.tick();
+    expect(h.sent).toHaveLength(1);
+    // Named, never hidden — in the declarer's own words, so the lead reads
+    // what the wait IS rather than being told a second time that a row is
+    // quiet.
+    expect(h.sent[0]?.declaredWaits?.[0]?.what).toBe(
+      'the fleet restart, then a peer filing the follow-up',
+    );
+    expect(h.sent[0]?.rows?.[0]?.id).toBe('t-rollout');
+
+    h.windows(3);
+
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it('comes back loud the moment the declaration LAPSES', () => {
+    // The anti-mute property. The silence a declaration buys is deferred,
+    // never cancelled: the row re-enters the clock carrying every minute it
+    // accumulated, so the next tick escalates rather than the next window.
+    const h = harness(board({ declaredWaits: [declared()] }));
+    h.tick();
+    h.windows(3);
+    expect(h.sent).toHaveLength(1);
+
+    h.set({ ...h.current(), declaredWaits: [declared({ lapsed: true })] });
+    h.tick();
+
+    expect(h.sent).toHaveLength(2);
+    expect(h.sent[1]?.changed?.escalated).toBe(true);
+    // …and the frame says which sentence ran out, so the lead knows why the
+    // row got loud rather than only that it did.
+    expect(h.sent[1]?.declaredWaits?.[0]?.lapsed).toBe(true);
+  });
+
+  it('escalates again once the wait is cleared', () => {
+    const h = harness(board({ declaredWaits: [declared()] }));
+    h.tick();
+    h.windows(2);
+    expect(h.sent).toHaveLength(1);
+
+    h.set({ ...h.current(), declaredWaits: [] });
+    h.windows(2);
+
+    expect(h.sent.length).toBeGreaterThan(1);
+    expect(h.sent[h.sent.length - 1]?.changed?.escalated).toBe(true);
+  });
+
+  it('does NOT quieten a row waiting on a person with nothing filed', () => {
+    // The mute-button guard. `unfiled` is a protocol violation whose remedy —
+    // file the ask — is the lead's and available right now, so a sentence
+    // about waiting on something else annotates it and never excuses it.
+    const h = harness(
+      board({
+        stalled: [],
+        unfiled: [quietRow({ id: 't-palette', title: 'Pick the palette' })],
+        declaredWaits: [declared({ id: 't-palette', title: 'Pick the palette' })],
+      }),
+    );
+
+    h.tick();
+    expect(h.sent).toHaveLength(1);
+
+    h.windows(3);
+
+    expect(h.sent.length).toBeGreaterThan(3);
+    for (const frame of h.sent.slice(1)) expect(frame.changed?.escalated).toBe(true);
+  });
+
+  it("does not let one row's declared wait swallow another row's escalation", () => {
+    // The high-water mark is filtered with the stamp, so a five-hour declared
+    // wait must not hold the board's bucket up where a short plain stall
+    // beside it can never climb high enough to be re-said. Same failure the
+    // held-item case pins one describe up.
+    const h = harness(
+      board({
+        stalled: [
+          quietRow({ id: 't-plain', title: 'Trim the index writer', quietMs: 10 * MIN }),
+          quietRow({ id: 't-rollout', quietMs: 300 * MIN }),
+        ],
+        declaredWaits: [declared()],
+      }),
+    );
+
+    h.tick();
+    expect(h.sent).toHaveLength(1);
+
+    h.windows(2);
+
+    expect(h.sent.length).toBeGreaterThan(1);
+    expect(h.sent[h.sent.length - 1]?.changed?.escalated).toBe(true);
   });
 });
 
