@@ -26,7 +26,7 @@ describe('parseBoardLocation', () => {
 
   it('reads the nav suffix', () => {
     expect(parseBoardLocation('/workspaces/w1/home', '').nav).toBe('home');
-    expect(parseBoardLocation('/workspaces/w1/mine', '').nav).toBe('mine');
+    expect(parseBoardLocation('/workspaces/w1/library', '').nav).toBe('library');
     expect(parseBoardLocation('/workspaces/w1/activity', '').nav).toBe('activity');
   });
 
@@ -131,7 +131,7 @@ describe('historyStep', () => {
 
   it('changing nav destination is a navigation', () => {
     expect(historyStep(at({}), at({ nav: 'home' }))).toBe('push');
-    expect(historyStep(at({ task: 't1' }), at({ nav: 'mine', task: 't1' }))).toBe('push');
+    expect(historyStep(at({ task: 't1' }), at({ nav: 'library', task: 't1' }))).toBe('push');
   });
 
   it('refining the open resource rewrites the entry instead of adding one', () => {

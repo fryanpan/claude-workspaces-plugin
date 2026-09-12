@@ -30,8 +30,6 @@ import { type ShimHandlers, disposeBoards, renderBoard } from './support/board.t
 const NOW = 1_700_000_000_000;
 const GOALS: BoardGoal[] = [{ id: 'g-board', title: 'The board reads clearly' }];
 const filters: BoardFilters = {
-  tab: 'all',
-  userName: 'Wren',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
 };

@@ -489,7 +489,7 @@ export function answerBody(transcript: string): string | null {
  * imported — the server does not depend on the client package — and pinned
  * by voice-nav.test.ts against the paths `home-routes.test.ts` proves served.
  */
-export type BoardDestination = 'home' | 'tasks' | 'mine' | 'activity';
+export type BoardDestination = 'home' | 'tasks' | 'activity';
 
 /**
  * What a person calls each destination, after the opener ("take me to") and
@@ -508,8 +508,19 @@ const BOARD_DESTINATIONS: Record<BoardDestination, readonly string[]> = {
     'my homepage',
     'my home page',
   ],
-  tasks: ['board', 'task board', 'tasks', 'task list', 'all tasks', 'board view'],
-  mine: ['my tasks', 'my task list', 'my tasks tab'],
+  // "my tasks" lands on the board. It used to name a page of its own, which
+  // the board no longer has; a phrase a person still says has to arrive
+  // somewhere real rather than at a path nothing serves.
+  tasks: [
+    'board',
+    'task board',
+    'tasks',
+    'task list',
+    'all tasks',
+    'board view',
+    'my tasks',
+    'my task list',
+  ],
   activity: ['activity', 'activity pane', 'activity feed', 'activity tab', 'activity view', 'feed'],
 };
 

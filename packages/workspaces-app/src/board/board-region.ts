@@ -22,7 +22,6 @@
  * pane performs no writes of its own — it hands the island a gesture and the
  * verb decides.
  */
-import type { User } from '@claude-workspaces/core';
 import type { BoardActions, BoardState } from './board-actions.ts';
 import { type BoardHandlers, boardData } from './board-island.tsx';
 import {
@@ -51,7 +50,6 @@ export interface BoardDeps {
    *  row is opened. */
   state: BoardState;
   /** Whose "My tasks" the tab filter means. */
-  user: Pick<User, 'name'>;
   /** `getElementById`, already narrowed — `bootBoard`'s own `el`. */
   el(id: string): HTMLElement;
   /** Every REST write a board gesture ends in. */
@@ -89,7 +87,6 @@ export interface BoardRegion {
 export function createBoardRegion(deps: BoardDeps): BoardRegion {
   const {
     state,
-    user,
     el,
     actions,
     taskList,
@@ -180,8 +177,6 @@ export function createBoardRegion(deps: BoardDeps): BoardRegion {
 
   function renderBoardRegion(): void {
     const filters = {
-      tab: state.tab,
-      userName: user.name,
       doneWindow: state.doneWindow,
       now: Date.now(),
     };

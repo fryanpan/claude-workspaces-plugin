@@ -545,13 +545,7 @@ export function doneAt(task: BoardTask): number {
 
 // ── Board filters ──────────────────────────────────────────────────────────
 
-export type BoardTab = 'all' | 'mine';
-
 export interface BoardFilters {
-  tab: BoardTab;
-  /** The viewer's display name — "My Tasks" matches assignee 'human' OR the
-   *  viewer's own name (case-insensitive). */
-  userName: string;
   doneWindow: DoneWindow;
   now: number;
 }
@@ -578,25 +572,6 @@ export function ownerKind(task: BoardTask): BoardOwnerKind {
   // a row that reached the client without a resolved kind (an SSE payload,
   // state projected by an older release) saying what it has always said.
   return task.assignee.trim().toLowerCase() === HUMAN_OWNER ? 'person' : 'unknown';
-}
-
-/**
- * "This is in the unnamed-person bucket" — the reserved `human` owner.
- *
- * Deliberately NOT the same question as `ownedByPerson` below, though it was
- * until people could be named. `human` means "a person, and this board does
- * not say which one", which on a single-reader board is a fair proxy for the
- * viewer — so My Tasks keeps using it. Widening this one to every declared
- * person would file a task owned by SOMEBODY ELSE under the viewer's own tab,
- * which is a worse answer than the gap it would close.
- *
- * Case-folded to match `ownerKind` above. They disagreed for one release, and
- * the disagreement had a victim: a row stored `Human` drew the person mark
- * and was still missing from My Tasks — two spellings of one question, in one
- * file, which is the bug generator this module's own comments argue against.
- */
-export function assignedToHuman(task: BoardTask): boolean {
-  return task.assignee.trim().toLowerCase() === HUMAN_OWNER;
 }
 
 /**
@@ -686,11 +661,6 @@ export function taskVisible(task: BoardTask, f: BoardFilters): boolean {
   // projected — the Undo toast and the restore list read it from the same
   // board state — so this filter is the whole of what "off the board" means.
   if (isTaskArchived(task)) return false;
-  if (f.tab === 'mine') {
-    const mine =
-      assignedToHuman(task) || task.assignee.toLowerCase() === f.userName.trim().toLowerCase();
-    if (!mine) return false;
-  }
   if (task.status === 'done') {
     const window = doneWindowMs(f.doneWindow);
     if (window === 0) return false;

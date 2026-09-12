@@ -13,7 +13,6 @@ import {
   paneFromPath,
   panePath,
   shouldPollHome,
-  tabForNav,
   waitingLabel,
 } from '../src/board/board-presence-model.ts';
 import type { BoardNav } from '../src/board/board-presence-model.ts';
@@ -53,9 +52,9 @@ describe('navFromPath / navPath', () => {
 
   it('every destination has a URL, which is the point of promoting them', () => {
     expect(navFromPath('/workspaces/w-abc/home')).toBe('home');
-    expect(navFromPath('/workspaces/w-abc/mine')).toBe('mine');
+    expect(navFromPath('/workspaces/w-abc/library')).toBe('library');
     expect(navFromPath('/workspaces/w-abc/activity')).toBe('activity');
-    expect(navFromPath('/workspaces/w-abc/mine/')).toBe('mine');
+    expect(navFromPath('/workspaces/w-abc/activity/')).toBe('activity');
   });
 
   it('an unknown suffix is Tasks, not a crash', () => {
@@ -64,27 +63,20 @@ describe('navFromPath / navPath', () => {
   });
 
   it('navPath round-trips all four, id encoded', () => {
-    for (const nav of ['home', 'tasks', 'mine', 'activity'] as const) {
+    for (const nav of ['home', 'tasks', 'library', 'activity'] as const) {
       expect(navFromPath(navPath('w-abc', nav))).toBe(nav);
     }
-    expect(navPath('w a', 'mine')).toBe('/workspaces/w%20a/mine');
+    expect(navPath('w a', 'library')).toBe('/workspaces/w%20a/library');
     expect(navPath('w-abc', 'tasks')).toBe('/workspaces/w-abc');
   });
 
-  it('pane and tab derive from nav, and neither Home nor Activity resets the filter', () => {
+  it('the pane derives from nav, and only Home is its own pane', () => {
     expect(paneForNav('home')).toBe('home');
-    expect(['tasks', 'mine', 'activity'].map((n) => paneForNav(n as BoardNav))).toEqual([
+    expect(['tasks', 'library', 'activity'].map((n) => paneForNav(n as BoardNav))).toEqual([
       'board',
       'board',
       'board',
     ]);
-    expect(tabForNav('tasks')).toBe('all');
-    expect(tabForNav('mine')).toBe('mine');
-    // Undefined means "leave the reader's filter alone" — neither of these
-    // renders task rows, so answering 'all' would silently undo their choice
-    // on the way back.
-    expect(tabForNav('home')).toBeUndefined();
-    expect(tabForNav('activity')).toBeUndefined();
   });
 
   it('the old pane paths still resolve, so links already in the field survive', () => {

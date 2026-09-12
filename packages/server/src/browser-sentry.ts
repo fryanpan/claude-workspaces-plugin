@@ -41,8 +41,8 @@ import { type AssetManifest, assetHref } from '@claude-workspaces/core/asset-man
 
 /**
  * The kinds of page whose load times are compared. One value per surface a
- * human opens, not per route: `/workspaces/<id>/home`, `/tasks` and `/mine`
- * are all the board.
+ * human opens, not per route: `/workspaces/<id>/home`, `/tasks` and
+ * `/activity` are all the board.
  */
 export type PageType = 'board' | 'doc' | 'mockup' | 'landing' | 'signin' | 'settings';
 

@@ -33,7 +33,6 @@ export function boardState(over: Partial<BoardState> = {}): BoardState {
     homeEditingRecipe: false,
     homeSettled: new Map(),
     homePollStarted: 0,
-    tab: 'all',
     doneWindow: DEFAULT_DONE_WINDOW,
     view: 'board',
     showArchived: false,

@@ -96,15 +96,13 @@ function closed(agoMs: number, workedMs = HOUR, overrides: Partial<BoardTask> = 
 const GOALS: BoardGoal[] = [{ id: 'g-ship', title: 'Ship the thing' }];
 
 const filters = (over: Partial<BoardFilters> = {}): BoardFilters => ({
-  tab: 'all',
-  userName: 'Bryan',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
   ...over,
 });
 
 describe('boardEffort ignores the reader’s filter', () => {
-  it('gives the same percentage on the All tab and the Mine tab', () => {
+  it('gives the same percentage however narrow the done window is', () => {
     const tasks = [
       closed(2 * DAY),
       closed(3 * DAY),
@@ -115,17 +113,17 @@ describe('boardEffort ignores the reader’s filter', () => {
     if (all?.kind !== 'ready') throw new Error('expected ready');
     expect(all.percentComplete).toBe(50);
 
-    // The rollup takes the unfiltered list, so the tab is irrelevant to it —
-    // and `boardSectionsWithEffort` must hand it the same array it hands the
-    // grouping, not the grouping's output.
-    const mine = boardSectionsWithEffort(GOALS, tasks, filters({ tab: 'mine' }), NOW).find(
+    // The rollup takes the unfiltered list, so the reader's filter is
+    // irrelevant to it — and `boardSectionsWithEffort` must hand it the same
+    // array it hands the grouping, not the grouping's output.
+    const hidden = boardSectionsWithEffort(GOALS, tasks, filters({ doneWindow: 'none' }), NOW).find(
       (s) => s.id === 'g-ship',
     );
-    // The BAND shows one row on the Mine tab…
-    expect(mine?.tasks).toHaveLength(1);
+    // The BAND drops both closed rows with the window on 'none'…
+    expect(hidden?.tasks).toHaveLength(2);
     // …and still reports the goal as half done.
-    if (mine?.effort?.kind !== 'ready') throw new Error('expected ready');
-    expect(mine.effort.percentComplete).toBe(50);
+    if (hidden?.effort?.kind !== 'ready') throw new Error('expected ready');
+    expect(hidden.effort.percentComplete).toBe(50);
   });
 
   it('does not march backwards when the done-window narrows', () => {

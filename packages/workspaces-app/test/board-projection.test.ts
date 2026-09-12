@@ -100,11 +100,11 @@ describe('initialBoardState', () => {
   const stateFor = (pathname: string, search = '') =>
     initialBoardState(parseBoardLocation(pathname, search));
 
-  it('opens the board on the pane and tab the address names', () => {
-    const mine = stateFor('/workspaces/w-1/mine');
-    expect([mine.nav, mine.pane, mine.tab, mine.view]).toEqual(['mine', 'board', 'mine', 'board']);
+  it('opens the board on the pane the address names', () => {
+    const tasks = stateFor('/workspaces/w-1/tasks');
+    expect([tasks.nav, tasks.pane, tasks.view]).toEqual(['tasks', 'board', 'board']);
     const home = stateFor('/workspaces/w-1/home');
-    expect([home.nav, home.pane, home.tab]).toEqual(['home', 'home', 'all']);
+    expect([home.nav, home.pane]).toEqual(['home', 'home']);
   });
 
   it('renders Activity as a view of the board pane', () => {

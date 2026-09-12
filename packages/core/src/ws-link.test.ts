@@ -31,7 +31,7 @@ describe('parseWorkspaceLink', () => {
       workspaceId: 'w-abc123',
       taskId: 't-42fixture',
     });
-    expect(parseWorkspaceLink(`${HOST}/workspaces/w-abc123/mine`)).toEqual({
+    expect(parseWorkspaceLink(`${HOST}/workspaces/w-abc123/library`)).toEqual({
       kind: 'workspace',
       workspaceId: 'w-abc123',
     });

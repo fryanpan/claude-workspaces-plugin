@@ -37,8 +37,6 @@ import { disposeGoalDetail, renderGoalDetail } from './support/goal-detail.ts';
 const NOW = 1_700_000_000_000;
 
 const filters = {
-  tab: 'all',
-  userName: 'Jordan',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
 } as const;

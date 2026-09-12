@@ -420,9 +420,9 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // being is invisible from the client: `setNav` pushes these paths into
     // history, so a suffix missing here costs nothing until somebody
     // RELOADS or shares the URL, at which point they get a 404 on a link
-    // the product handed them. That is exactly what `/tasks`, `/mine` and
+    // the product handed them. That is exactly what `/tasks` and
     // `/activity` did between the nav landing and this line — measured on
-    // a staging build, 404 on all three while `/home` answered 200.
+    // a staging build, 404 on both while `/home` answered 200.
     //
     // The matcher is BUILT from that list rather than written out here, and
     // it moved out of this file for a second reader: the workspace-scope

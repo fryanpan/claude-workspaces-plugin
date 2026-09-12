@@ -768,9 +768,9 @@ body.board-body {
 }
 
 /* --- board controls (inside the board column — §3.9) ---
-   The `.board-controls` row (All / My Tasks tabs, the board/activity toggle, the
-   Done-window select) is gone: the tabs are top-level nav, the toggle is the
-   Activity tab, and the select moved into settings. `.board-tab` survives it —
+   The `.board-controls` row (the board/activity toggle and the Done-window
+   select) is gone: the toggle is the Activity tab and the select moved into
+   settings. `.board-tab` survives it —
    the Activity view's own All / Decisions filter still uses it. */
 .board-tab {
   min-height: 32px;

@@ -60,7 +60,7 @@ describe('resolveWorkspaceScope', () => {
     // The list is shared with the thing that serves them — see
     // workspace-path.ts. `/docs/d-1` is not here: a member address is checked
     // for a page too, and `d-1` is on no board (the case below).
-    for (const p of ['', '/home', '/tasks', '/mine', '/activity']) {
+    for (const p of ['', '/home', '/tasks', '/library', '/activity']) {
       expect(ask(`/workspaces/w-here${p}`).kind, p).toBe('pass');
     }
   });

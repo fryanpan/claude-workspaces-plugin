@@ -43,7 +43,6 @@ function region(over: Partial<Parameters<typeof createBoardRegion>[0]> = {}) {
   const setNav = vi.fn();
   const api = createBoardRegion({
     state,
-    user: { name: 'Bryan' },
     el,
     actions,
     taskList: () => [...state.tasks.values()],

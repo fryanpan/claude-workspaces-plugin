@@ -48,7 +48,7 @@ import {
   type DoneWindow,
   isTaskArchived,
 } from './board-model.ts';
-import { type BoardNav, paneForNav, tabForNav } from './board-presence-model.ts';
+import { type BoardNav, paneForNav } from './board-presence-model.ts';
 import { createBoardProjection, initialBoardState } from './board-projection.ts';
 import { createBoardQueueOpeners } from './board-queue-open.ts';
 import { createBoardRegion } from './board-region.ts';
@@ -344,7 +344,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     renderActivityRegion,
   } = createBoardRegion({
     state,
-    user,
     el,
     actions,
     taskList,
@@ -473,14 +472,10 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   if (state.nav === 'library') void library.open();
 
   /**
-   * The one writer of `nav`, `pane`, `tab` and `view`. Four destinations that
-   * used to be a pane switch, a segmented filter and a toggle button, each
-   * setting its own piece of state — so "My Tasks" had no URL and a reload
-   * dropped you back on All.
-   *
-   * `tab` is left alone for Home and Activity (`tabForNav` answers undefined):
-   * neither renders task rows, so resetting the filter there would silently
-   * undo the reader's choice on the way back.
+   * The one writer of `nav`, `pane` and `view`. Four destinations that used to
+   * be a pane switch and a toggle button, each setting its own piece of state
+   * — so the library and the activity feed had no URL and a reload dropped
+   * you back on the board.
    */
   function setNav(nav: BoardNav, push = true): void {
     state.nav = nav;
@@ -490,8 +485,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     // with no memory of having asked.
     if (state.showArchived) setShowArchived(false);
     state.view = nav === 'activity' || nav === 'library' ? nav : 'board';
-    const tab = tabForNav(nav);
-    if (tab !== undefined) state.tab = tab;
     // Arriving at Home means arriving at the TOP of Home: `/workspaces/<id>/home`
     // names the Home page, and the walkthrough's own address is that page plus
     // `?item=`. Unconditional — tapping Home while already on Home is exactly
@@ -723,8 +716,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   });
 
   // Controls.
-  // Home / Tasks / My Tasks / Library / Activity — pushState every way, and
-  // the back button honours all five.
+  // Home / Tasks / Library / Activity — pushState every way, and the back
+  // button honours all four.
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.board-nav-item[data-nav]')) {
     btn.addEventListener('click', () => setNav((btn.dataset.nav as BoardNav) ?? 'tasks'));
   }
