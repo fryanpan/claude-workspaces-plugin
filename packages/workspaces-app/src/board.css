@@ -509,7 +509,8 @@ body.board-body {
 .board-member-role-text {
   color: var(--fg-muted);
 }
-.board-member .board-btn {
+.board-member .board-btn,
+.board-member .board-select {
   min-height: 44px;
 }
 
