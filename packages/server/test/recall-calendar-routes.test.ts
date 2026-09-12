@@ -213,9 +213,11 @@ describe('calendar routes', () => {
     });
   });
 
-  it('join and events answer not_connected until a calendar exists', async () => {
+  it('events answers an empty 204 until a calendar exists; join still refuses', async () => {
+    // Every board load asks this route; joining ACTS on a connection.
     const events = await fetch(`${base}/api/calendar/events`);
-    expect(events.status).toBe(404);
+    expect(events.status).toBe(204);
+    expect(await events.text()).toBe('');
     const joinRes = await fetch(`${base}/workspaces/${WS}/calendar/events/evt-1/join`, {
       method: 'POST',
     });
