@@ -3,6 +3,11 @@ import { spawnSync } from 'node:child_process';
 /**
  * Read a generic-password entry from macOS Keychain.
  *
+ * READ ONLY. Storing a value a person handed over through a review item is
+ * `../secret-store.ts`, which shares the binary and nothing else — its runner
+ * takes stdin, because the one rule of a write is that the value never
+ * reaches an argument list.
+ *
  * Set up the entry once with:
  *   security add-generic-password -a "$USER" -s "<serviceName>" -w "<value>"
  *
