@@ -91,6 +91,15 @@ export function dockItems(threads: Thread[]): DockItem[] {
         .find((c) => c.review !== undefined && !reviewWithdrawn(c.review));
     if (!declaring?.review) continue;
     if (isReviewPayloadGated(declaring.review)) continue;
+    // An OWNER-ONLY ask never docks. The widget is a guest on somebody else's
+    // page: whoever can open that page sees this bar, and an owner-only item
+    // is one the board itself will not show a member and will not let anyone
+    // but the owner answer. Docking it would put the ask — and the affordance
+    // for answering it — in front of exactly the readers the server refuses,
+    // and the refusal would arrive as a failed POST rather than as a door
+    // that was never there. The board's own queue makes the same call from
+    // the same flag, so the two surfaces cannot disagree about who is asked.
+    if (declaring.review.ownerOnly) continue;
     items.push({
       threadId: t.id,
       commentId: declaring.id,

@@ -88,6 +88,15 @@ describe('which asks a page docks', () => {
     ).toEqual([]);
   });
 
+  it("drops an OWNER-ONLY ask — this bar renders on somebody else's page", () => {
+    const ownerOnly = payload({ ownerOnly: true });
+    expect(dockItems([thread({ comments: [comment({ review: ownerOnly })] })])).toEqual([]);
+    // CONTROL: the identical ask without the flag docks, so the assertion
+    // above is about `ownerOnly` and not about the fixture being undockable
+    // for some other reason.
+    expect(dockItems([thread({ comments: [comment({ review: payload() })] })])).toHaveLength(1);
+  });
+
   it('keeps an ANSWERED item docked, and ranks it below one still waiting', () => {
     const answered = payload({
       headline: 'Settled already',
