@@ -5,6 +5,7 @@
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { OUT_OF_SHARE_SCOPE, firstRefOutOfScope, refInVisitorScope } from '../share/ref-scope.ts';
+import { SECRET_FILING_DENIAL, asksForSecret } from '../share/board-role.ts';
 import { createdVisibility, parseTaskCreate } from '../task-create.ts';
 import { placeableGoals } from '../task-queue.ts';
 import { type TaskStatus, isRetired, retiredRefusal } from '../tasks.ts';
@@ -133,6 +134,11 @@ export async function handleTaskListCreate(
         ...(parsed.message !== undefined ? { message: parsed.message } : {}),
       });
     }
+    // A SHARE VISITOR MAY NOT FILE A SECRET ASK WITH A TICKET EITHER — see
+    // `SECRET_FILING_DENIAL`. The body-borne `review` reaches the same store
+    // the dedicated door does, so a refusal on one door alone would be a
+    // refusal with a second door beside it.
+    if (visitor && asksForSecret(body?.review)) return j(403, SECRET_FILING_DENIAL);
     // `links` and `origin` name their targets in the BODY, which no path
     // check ever read. For a member that makes them the one field on this
     // route that can reach off their board: a stored ref becomes a computed

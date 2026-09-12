@@ -418,4 +418,108 @@ describe('a secret ask, answered by the board owner', () => {
     expect(JSON.stringify(threads)).not.toContain(FIRST_VALUE);
     expect(JSON.stringify(threads)).not.toContain(SECOND_VALUE);
   });
+
+  it('refuses a comment-borne secret ask, and says where it does go', async () => {
+    // The shape's contract is that its answer goes through the secrets door,
+    // which is addressed by task and item id. A comment-borne item has no
+    // such address, so filing one there would ask for values with only the
+    // ordinary answer path — which records words — to send them down.
+    const onAComment = await postLocal(
+      `${scope()}/docs/${encodeURIComponent(`task:${taskId}`)}/threads`,
+      {
+        author: AGENT,
+        anchor: { kind: 'subject' },
+        text: 'Where should the nightly pass get its relay values?',
+        review: {
+          shape: 'secret',
+          headline: 'Paste the relay account name so the nightly post can run',
+          detail: 'The nightly pass signs in to the relay and posts the index.',
+          secrets: [{ label: 'Relay account name', service: 'saltmarsh-comment-account' }],
+        },
+      },
+    );
+    expect(onAComment.status).toBe(400);
+    expect(await onAComment.text()).toContain('add_review_item');
+
+    // CONTROL: the identical filing as an ordinary ask lands, so the refusal
+    // above is about the shape rather than about this thread, this doc or
+    // this author.
+    const asAQuestion = await postLocal(
+      `${scope()}/docs/${encodeURIComponent(`task:${taskId}`)}/threads`,
+      {
+        author: AGENT,
+        anchor: { kind: 'subject' },
+        text: 'Where should the nightly pass get its relay values?',
+        review: {
+          shape: 'review',
+          headline: 'Should the nightly pass read the relay values from this machine?',
+          detail: 'The nightly pass signs in to the relay and posts the index.',
+        },
+      },
+    );
+    expect(asAQuestion.status).toBe(200);
+  });
+
+  it('refuses a share visitor FILING a secret ask, on either door', async () => {
+    // Answering is already the owner's alone. This is the other half: a
+    // link-holder must not be able to put a form in front of the owner
+    // asking them to hand a value over under names the link-holder chose.
+    const secretAsk = {
+      shape: 'secret',
+      headline: 'Paste the relay values so the nightly post can run',
+      detail: 'The nightly pass signs in to the Saltmarsh relay and posts the index.',
+      secrets: [{ label: 'Relay account name', service: 'saltmarsh-visitor-account' }],
+    };
+
+    const onATask = await postAsVisitor(
+      REGULAR,
+      `${scope()}/tasks/${taskId}/review-items`,
+      { review: secretAsk, author: { id: 'u-regular', name: 'Regular User', kind: 'human' } },
+    );
+    expect(onATask.status).toBe(403);
+    expect(((await onATask.json()) as { error?: string }).error).toBe('share-visitor');
+
+    const withATicket = await postAsVisitor(REGULAR, `${scope()}/tasks`, {
+      title: 'Post the weekly index to the Saltmarsh relay',
+      body: 'Agent can post the weekly index so that the archive stays current.',
+      review: secretAsk,
+      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+    });
+    expect(withATicket.status).toBe(403);
+    expect(((await withATicket.json()) as { error?: string }).error).toBe('share-visitor');
+
+    // CONTROL: the same visitor, the same door, an ordinary ask — accepted.
+    // Without this the two refusals above would also pass on a board where a
+    // visitor may file nothing at all.
+    const ordinary = await postAsVisitor(REGULAR, `${scope()}/tasks/${taskId}/review-items`, {
+      review: {
+        shape: 'review',
+        headline: 'Should the weekly index go to the relay as well as the archive?',
+        detail: 'The weekly pass writes the archive today and nothing reads it.',
+      },
+      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+    });
+    expect(ordinary.status).toBe(200);
+
+    // The BATCH door is the third way a review item is filed, and a visitor
+    // does not reach it at all: the address is not in the host guard's member
+    // allowlist, so the refusal is the guard's rather than the route's. The
+    // route carries the same per-row refusal anyway — one door's allowlist is
+    // a list somebody edits, and this shape should not be reachable by the
+    // edit alone.
+    const batch = await postAsVisitor(REGULAR, `${scope()}/tasks/batch`, {
+      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+      tasks: [
+        {
+          title: 'Post the weekly index to the Saltmarsh relay',
+          body: 'Agent can post the weekly index so that the archive stays current.',
+          review: secretAsk,
+        },
+      ],
+    });
+    expect(batch.status).toBe(403);
+
+    // And nothing was filed: the board's asks name no service the visitor chose.
+    expect(await taskJson()).not.toContain('saltmarsh-visitor-account');
+  });
 });

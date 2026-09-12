@@ -13,7 +13,7 @@ import { classifyActor } from '../actor-identity.ts';
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
+import { SECRET_FILING_DENIAL, asksForSecret, refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -81,6 +81,10 @@ export async function handleTaskReviewItems(
     const body = await safeJson(req);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
+    // A SHARE VISITOR MAY NOT FILE THIS SHAPE — see `SECRET_FILING_DENIAL`.
+    // Before the store, so nothing is written and no judge runs on an ask
+    // that is not going to exist.
+    if (visitor && asksForSecret(body?.review)) return j(403, SECRET_FILING_DENIAL);
     // Unvalidated on purpose: `addReviewItem` runs `checkReviewPayload`,
     // and that IS the gate. A pre-check here would be a second copy of
     // the limits, free to drift from the one the card renders against.
