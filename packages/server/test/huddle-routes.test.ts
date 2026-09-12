@@ -30,13 +30,12 @@ import { type AccessHarness, accessHarness, mintAccessShare } from './access-sha
 
 const PERSON: User = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
 /**
- * The doc's KIND, then the clock to the minute in local time — "Meeting notes
- * 2026-08-29 14:05" / "Plan 2026-08-29 14:05". The word is what a person
- * reads, so the two kinds are asserted apart: a plan titled "Meeting notes"
- * is the bug this pair exists to catch.
+ * "Meeting" / "Planning Meeting", and nothing else — no clock (Bryan,
+ * 2026-09-12). The two kinds are asserted apart: a plan titled "Meeting" is
+ * the bug this pair exists to catch.
  */
-const MEETING_TITLE = /^Meeting notes \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
-const PLAN_TITLE = /^Plan \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+const MEETING_TITLE = /^Meeting$/;
+const PLAN_TITLE = /^Planning Meeting$/;
 
 interface HuddleResponse {
   docId: string;
@@ -49,6 +48,7 @@ interface HuddleResponse {
     type?: string;
     huddle?: boolean;
     huddleKind?: 'plan' | 'discussion';
+    titleSource?: string;
   };
 }
 
@@ -202,7 +202,7 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
       expect(doc.blocks[0]?.headingLevel).toBe(1);
       // Block text is rendered markdown, so the heading keeps its marker.
       expect(doc.blocks[0]?.text).toBe('# Onboarding flow');
-      // The title is still the clock — the topic is content, not a name.
+      // The title is still the default — the topic is content, not a name.
       expect(r.meta.title).toMatch(MEETING_TITLE);
     });
 
@@ -215,6 +215,8 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
       expect(r.meta.huddleKind).toBe('plan');
       expect(r.meta.huddle).toBe(true);
       expect(r.meta.title).toMatch(PLAN_TITLE);
+      // Minted, not chosen: the meeting namer may still replace it.
+      expect(r.meta.titleSource).toBe('default');
       const doc = await jj<{
         blocks: Array<{ type: string | null; headingLevel?: number; text: string }>;
       }>(await local(`/workspaces/${workspaceId}/docs/${r.docId}/content`));

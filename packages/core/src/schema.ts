@@ -69,6 +69,7 @@ export function readDocMeta(doc: Y.Doc): DocMeta {
   const diffGroupDetails = m.get('diffGroupDetails') as string | undefined;
   const huddle = m.get('huddle') as boolean | undefined;
   const huddleKind = m.get('huddleKind') as DocMeta['huddleKind'] | undefined;
+  const titleSource = m.get('titleSource') as DocMeta['titleSource'] | undefined;
   const planState = m.get('planState') as DocMeta['planState'] | undefined;
   const planApprovedBy = m.get('planApprovedBy') as string | undefined;
   const planApprovedAt = m.get('planApprovedAt') as number | undefined;
@@ -103,6 +104,7 @@ export function readDocMeta(doc: Y.Doc): DocMeta {
     diffGroupDetails,
     huddle,
     huddleKind,
+    titleSource,
     planState,
     planApprovedBy,
     planApprovedAt,
@@ -150,6 +152,7 @@ export function initDocMeta(doc: Y.Doc, meta: DocMeta): void {
       m.set('diffWhitespaceOnly', meta.diffWhitespaceOnly);
     if (meta.huddle !== undefined && !m.has('huddle')) m.set('huddle', meta.huddle);
     if (meta.huddleKind !== undefined && !m.has('huddleKind')) m.set('huddleKind', meta.huddleKind);
+    if (meta.titleSource !== undefined) m.set('titleSource', meta.titleSource);
     if (meta.diffGroup !== undefined && !m.has('diffGroup')) m.set('diffGroup', meta.diffGroup);
     if (meta.diffGroupRank !== undefined && !m.has('diffGroupRank'))
       m.set('diffGroupRank', meta.diffGroupRank);

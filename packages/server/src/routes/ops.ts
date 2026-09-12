@@ -67,6 +67,11 @@ export interface OpsRoutesContext {
    * meetings — the two are different claims.
    */
   notesQualityRollup: () => NotesQualityRollup | null;
+  /**
+   * Rename every meeting still titled by the clock it started at
+   * (`meeting-titler.ts`). Counts only — never a title or an id.
+   */
+  retitleMeetings: () => Promise<{ renamed: number; skipped: number }>;
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
@@ -369,6 +374,27 @@ export async function handleOpsRoutes(
     if (req.method === 'GET') return j(200, { sentry: serverSentryTelemetry() });
     if (req.method === 'POST') return j(200, { sentry: await selfTestServerSentry() });
     return j(405, { error: 'method not allowed' });
+  }
+
+  // --- REST: the one-time retitle of clock-titled meetings ---
+  // "Meeting notes 2026-09-03 10:15" becomes the meeting's topic, or
+  // "Meeting". Run by the operator once after the deploy that stopped minting
+  // those titles; idempotent, because a retitled doc no longer matches.
+  // The deploy route's gates, for a like reason: it rewrites titles across
+  // every board on the box and spends a model call per meeting with notes,
+  // so the box and only the box may start it — loopback peer, never through
+  // the edge, never a page riding the owner's session, never a visitor.
+  if (pathname === '/api/meetings/retitle') {
+    if (visitor) return j(403, { error: 'not available to share visitors' });
+    if (!isLoopbackAddress(requestAddress(req))) {
+      return j(403, { error: 'meetings are retitled from this machine only (loopback)' });
+    }
+    if (req.headers.has('cf-ray')) {
+      return j(403, { error: 'meetings cannot be retitled through the edge (proxied request)' });
+    }
+    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+    if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
+    return j(200, await ctx.retitleMeetings());
   }
 
   return undefined;

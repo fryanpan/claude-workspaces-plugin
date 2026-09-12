@@ -301,14 +301,16 @@ export async function handleWorkspaceContent(
     // for a name that already resolves, and a huddle is always new.
     let created = docStore.createForCaller(huddleAlias(startedAt), {
       type: 'markdown',
-      title: huddleTitle(startedAt, parsedKind.kind),
+      title: huddleTitle(parsedKind.kind),
+      titleSource: 'default',
       huddle: true,
       huddleKind: parsedKind.kind,
     });
     if (created.ok && !created.minted) {
       created = docStore.createForCaller(huddleAlias(startedAt), {
         type: 'markdown',
-        title: huddleTitle(startedAt, parsedKind.kind),
+        title: huddleTitle(parsedKind.kind),
+        titleSource: 'default',
         huddle: true,
         huddleKind: parsedKind.kind,
       });

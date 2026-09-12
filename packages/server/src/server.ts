@@ -41,6 +41,7 @@ import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
 import { MEETING_CAPTURE_ACTOR } from './meeting-task-capture.ts';
+import { retitleClockTitles } from './meeting-titler.ts';
 import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
@@ -422,6 +423,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ? withServerNotesSinks(opts.meetingNotes, {
           docStore: () => docStore,
           tasks: () => taskStore,
+          // The meeting namer's reads and its guarded title write.
+          titleStore: () => docStore,
           // One reader: the legacy-transcript removal, which must not take a
           // `Raw transcript` heading out of a doc bound into somebody's
           // working tree, where the old note-taker never wrote one.
@@ -1804,6 +1807,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // at the same claim.
     notesQualityRollup: () =>
       rollupNotesQuality(dataDir, { now: Date.now(), windowMs: NOTES_QUALITY_WINDOW_MS }),
+    // The same namer the live meetings use: no key, no topics, and a meeting
+    // with notes is skipped rather than defaulted so a later run can name it.
+    retitleMeetings: () => retitleClockTitles(docStore, opts.meetingNotes?.titleNamer ?? null),
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,

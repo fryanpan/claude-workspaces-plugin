@@ -615,15 +615,20 @@ export async function handleMeetingCalendarRoutes(
       docId = existing.docId;
     } else {
       const now = Date.now();
-      const title = meetingDocTitle(event.title, now);
+      const title = meetingDocTitle(event.title);
+      // The event's own title is a name somebody chose; the default is not,
+      // and the namer may replace it once the meeting has notes.
+      const titleSource = event.title ? 'given' : 'default';
       let created = docStore.createForCaller(meetingDocAlias(now), {
         type: 'markdown',
         title,
+        titleSource,
       });
       if (created.ok && !created.minted) {
         created = docStore.createForCaller(meetingDocAlias(now), {
           type: 'markdown',
           title,
+          titleSource,
         });
       }
       if (!created.ok || !created.minted) return j(500, { error: 'doc-not-minted' });

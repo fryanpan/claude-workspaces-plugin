@@ -885,6 +885,9 @@ export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
   onNotes?: (update: NotesUpdate) => void | boolean | NotesWriteRefusal | NotesWriteNoWords;
   taskExtractor?: import('./meeting-task-capture.ts').TaskCaptureExtractor | null;
+  /** Names the meeting from its notes (`meeting-titler.ts`). The server
+   *  supplies the store around it; absent, a meeting keeps its title. */
+  titleNamer?: import('./meeting-namer.ts').MeetingNamer | null;
 };
 
 export interface MeetingNotesSession {

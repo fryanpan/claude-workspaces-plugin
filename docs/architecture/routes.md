@@ -45,6 +45,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/goals` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/goals/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |
+| `/api/meetings/retitle` | POST | `routes/ops.ts` | loopback-only |  |
 | `/api/metrics` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/mounts` | GET, POST, DELETE | `routes/mounts.ts` | loopback-only |  |
 | `/api/mounts/conventions` | GET, PUT | `routes/mounts.ts` | loopback-only |  |

@@ -227,9 +227,9 @@ describe('a meeting filed into its project', () => {
     const talk = await ok<{ docId: string; meta: { title: string } }>(
       await startHuddle(WS, 'discussion'),
     );
-    // The name it is born with is the clock, which is what makes renaming it
-    // the point: a week later a list of those is a column of timestamps.
-    expect(talk.meta.title).toMatch(/^Meeting notes \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    // The name it is born with is a placeholder, which is what makes renaming
+    // it the point: a week later a list of those is a column of "Meeting".
+    expect(talk.meta.title).toBe('Meeting');
 
     const renamed = await ok<{ title: string }>(
       await send('PUT', `/workspaces/${WS}/docs/${talk.docId}/title`, {
