@@ -3,7 +3,9 @@ import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { createNotesHeadingMemory, notesSectionForMeeting } from '../src/meeting-notes-doc.ts';
 import { NOTES_AUTHOR_ID, type NotesDocStore, readNotesOutline } from '../src/notes-doc-access.ts';
+import type { NotesSectionClaim } from '../src/notes-heading-store.ts';
 import {
+  NOTES_CONTINUATION_WINDOW_MS,
   lastNotesHeadingIndex,
   notesSectionFits,
   notesSectionIsEmpty,
@@ -11,6 +13,28 @@ import {
 import { oneDocStore } from './notes-doc-helpers.ts';
 
 const AGENT = 'agent:notes';
+
+/** A fixed "now" for the rule's one time comparison, so how long ago a
+ *  meeting stopped is data the case states rather than a clock it races. */
+const NOW = 1_760_000_000_000;
+
+/**
+ * The claims a doc carries, by heading block id.
+ *
+ * A row with no age is a meeting that never recorded a stop — one recording
+ * right now, or one the process died under. A row with an age is a meeting
+ * that stopped that many milliseconds before `NOW`.
+ */
+function claims(
+  ...rows: Array<[id: string, stoppedMsAgo?: number]>
+): Map<string, NotesSectionClaim> {
+  return new Map(
+    rows.map(([id, ago]) => [
+      id,
+      ago === undefined ? { headingId: id } : { headingId: id, endedAt: NOW - ago },
+    ]),
+  );
+}
 
 /**
  * Levels matter here, so they are the real ones rather than one flat number.
@@ -120,7 +144,7 @@ describe('the section stops where the next section starts', () => {
       ['bullet', 'Devin: chase the ferry dock quote', AGENT],
     ]);
     expect(notesSectionIsEmpty(empty)).toBe(true);
-    expect(notesSectionFits(empty, new Set(['b0']))).toBe(true);
+    expect(notesSectionFits(empty, claims(['b0']), NOW)).toBe(true);
   });
 
   test('CONTROL: a topic heading INSIDE the section does not end it', () => {
@@ -148,7 +172,7 @@ describe('a claimed heading with nothing under it', () => {
   ]);
 
   test('fits, so no second identical heading is opened under it', () => {
-    expect(notesSectionFits(emptyClaimed, new Set(['b2']))).toBe(true);
+    expect(notesSectionFits(emptyClaimed, claims(['b2']), NOW)).toBe(true);
   });
 
   test('MUTATION CONTROL: give that same claimed heading one line and it does not fit', () => {
@@ -158,11 +182,11 @@ describe('a claimed heading with nothing under it', () => {
       ['heading', 'Meeting notes'],
       ['bullet', 'a previous meeting’s bullet'],
     ]);
-    expect(notesSectionFits(withMinutes, new Set(['b2']))).toBe(false);
+    expect(notesSectionFits(withMinutes, claims(['b2']), NOW)).toBe(false);
   });
 
   test('CONTROL: unclaimed and empty fits too, which it always did', () => {
-    expect(notesSectionFits(emptyClaimed, new Set())).toBe(true);
+    expect(notesSectionFits(emptyClaimed, claims(), NOW)).toBe(true);
   });
 });
 
@@ -289,5 +313,57 @@ describe('the section a meeting adopts, end to end', () => {
     expect(notesSectionForMeeting(memory, ids, readNotesOutline(store, ids.docId), store)).toBe(
       first,
     );
+  });
+});
+
+/**
+ * A SECOND RECORDING ON A DOC WHOSE LAST MEETING IS OVER.
+ *
+ * Bryan stopped a recording and started another one minutes later, and the
+ * notes opened a second `## Meeting notes` at the bottom of the page while
+ * the section from minutes earlier sat above it. The claim was doing it: a
+ * heading some meeting had recorded was that meeting's forever.
+ *
+ * So a claim now says whose the section is while the meeting is RUNNING, and
+ * stops saying it once the meeting has stopped — with a window past which the
+ * doc's last meeting is not this conversation any more.
+ */
+describe('a claimed section whose meeting has stopped', () => {
+  const minutes = outline([
+    ['heading', 'Meeting notes'],
+    ['heading', 'Ferry timetable', AGENT],
+    ['bullet', 'the harbour run moves to the half hour', AGENT],
+  ]);
+
+  test('a recording minutes after the last one continues it', () => {
+    expect(notesSectionFits(minutes, claims(['b0', 12 * 60_000]), NOW)).toBe(true);
+  });
+
+  test('MUTATION CONTROL: the same section under a meeting still recording does not', () => {
+    // Same doc, same claim, same bullets — only the stop is missing. Two
+    // recordings live on one doc keep their sections apart.
+    expect(notesSectionFits(minutes, claims(['b0']), NOW)).toBe(false);
+  });
+
+  test('a meeting that stopped past the window gets a section of its own', () => {
+    // The standing doc: yesterday's minutes are not what today's meeting
+    // writes under.
+    const ago = NOTES_CONTINUATION_WINDOW_MS + 60_000;
+    expect(notesSectionFits(minutes, claims(['b0', ago]), NOW)).toBe(false);
+  });
+
+  test('the window is read against the stop, right up to its edge', () => {
+    expect(notesSectionFits(minutes, claims(['b0', NOTES_CONTINUATION_WINDOW_MS]), NOW)).toBe(true);
+  });
+
+  test('a claim on a heading that is not the last one says nothing about this one', () => {
+    // The answer is about the section both readers take. A stopped meeting's
+    // claim on an EARLIER heading leaves this one judged on its body.
+    const twoSections = outline([
+      ['heading', 'Meeting notes'],
+      ['bullet', 'the harbour run moves to the half hour', AGENT],
+      ['heading', 'Meeting notes'],
+    ]);
+    expect(notesSectionFits(twoSections, claims(['b0', 12 * 60_000]), NOW)).toBe(true);
   });
 });

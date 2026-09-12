@@ -27,6 +27,7 @@
  */
 
 import { prose } from '@claude-workspaces/core';
+import * as Y from 'yjs';
 import { listMeetings, readTranscript } from './meetings.ts';
 import type { NotesDocStore } from './notes-doc-access.ts';
 import {
@@ -45,6 +46,23 @@ import {
 import { notesQualityRecord, writeNotesQuality } from './notes-quality-store.ts';
 import { readTickWaits } from './notes-tick-timing.ts';
 
+/** Whether this block is a list container — the element that serializes its
+ *  children WITH their bullet markers. */
+function isList(el: Y.XmlElement): boolean {
+  return el.nodeName === 'bulletList' || el.nodeName === 'orderedList';
+}
+
+/** The addressable children of a list container, by block id. */
+function childBlockIds(el: Y.XmlElement): string[] {
+  const out: string[] = [];
+  for (const child of el.toArray()) {
+    if (!(child instanceof Y.XmlElement)) continue;
+    const id = prose.readBlockId(child);
+    if (id !== undefined) out.push(id);
+  }
+  return out;
+}
+
 /**
  * The markdown of one section: the block `headingId` names, then every block
  * after it until a heading at that level or above.
@@ -59,6 +77,7 @@ export function readSectionMarkdown(
   docStore: NotesDocStore,
   docId: string,
   headingId: string | undefined,
+  skip: ReadonlySet<string> = new Set(),
 ): string {
   if (headingId === undefined) return '';
   const doc = docStore.get(docId);
@@ -84,7 +103,25 @@ export function readSectionMarkdown(
     const el = all[i]!;
     const level = levelOf(el);
     if (i > start && level !== undefined && level <= openLevel) break;
-    out.push(prose.serializeBlockToMarkdown(el));
+    const id = prose.readBlockId(el);
+    if (i > start && id !== undefined && skip.has(id)) continue;
+    // A LIST HOLDING ANY SKIPPED ITEM IS DROPPED, AND ITS SURVIVORS CARRY
+    // THEIR OWN MARKERS. The walk returns a list AND the items inside it, and
+    // only the list serializes its children with the `- ` a bullet check
+    // reads — so a meeting that appended its notes to a list the previous
+    // recording opened would otherwise have that recording's bullets counted
+    // as its own (the list emits every child) or its own counted as none (the
+    // items emit bare lines). Dropping the container and marking what is left
+    // is the only split that gives each recording its own bullets.
+    if (isList(el) && childBlockIds(el).some((child) => skip.has(child))) continue;
+    const orphaned =
+      el.nodeName === 'listItem' &&
+      el.parent instanceof Y.XmlElement &&
+      isList(el.parent) &&
+      childBlockIds(el.parent).some((child) => skip.has(child));
+    out.push(
+      orphaned ? `- ${prose.serializeBlockToMarkdown(el)}` : prose.serializeBlockToMarkdown(el),
+    );
   }
   return out.join('\n');
 }
@@ -135,6 +172,17 @@ export interface NotesQualityPassDeps {
   dataDir?: string;
   /** The block id of the heading this meeting wrote under. */
   headingIdOf: (docId: string, meetingId: string) => string | undefined;
+  /**
+   * What was already in that section when this meeting took it over.
+   *
+   * A meeting that CONTINUES the last recording's section shares a heading
+   * with notes it did not write, and this pass judges the notes a meeting
+   * wrote: handed the previous recording's five identical bullets it would
+   * file a bad-notes item against a meeting whose own notes are fine. Absent,
+   * or empty — every meeting that opened its own section — the whole section
+   * is read, which is what this pass always did.
+   */
+  priorBlocks?: (docId: string, meetingId: string) => ReadonlySet<string>;
   /** The actor a filed item is attributed to. */
   actor: { id: string; name: string; kind?: string };
   now?: () => number;
@@ -172,7 +220,12 @@ export function runNotesQualityPass(
   const { docId, meetingId } = meeting;
   const now = deps.now?.() ?? Date.now();
 
-  const notes = readSectionMarkdown(deps.docStore(), docId, deps.headingIdOf(docId, meetingId));
+  const notes = readSectionMarkdown(
+    deps.docStore(),
+    docId,
+    deps.headingIdOf(docId, meetingId),
+    deps.priorBlocks?.(docId, meetingId),
+  );
   let transcript: SpokenTurn[] = [];
   if (deps.dataDir !== undefined) {
     try {

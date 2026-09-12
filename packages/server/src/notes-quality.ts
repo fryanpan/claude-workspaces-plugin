@@ -150,7 +150,7 @@ export function duplicateTopics(markdown: string): string[] {
  * heading-less run of bullets a note-taker writes before it opens its first
  * topic. A meeting held in Chinese would have had its topics read as one.
  */
-function topicKey(heading: string): string {
+export function topicKey(heading: string): string {
   return heading
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')

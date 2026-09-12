@@ -1,11 +1,13 @@
 /**
  * A SECOND recording into a doc a meeting has already written notes in.
  *
- * The everyday shape of it is stop-and-restart: somebody ends the meeting,
- * starts it again ten minutes later, and the owner's rule (2026-08-31) is that
- * the second recording appends below the first rather than replacing it. The
- * awkward shape is two recordings live at once on one doc, which the huddle
- * surface allows.
+ * The everyday shape of it is stop-and-restart: somebody ends the meeting and
+ * starts it again ten minutes later. The owner's rule (2026-09-11) is that
+ * the second recording CONTINUES the section the first one wrote, and the
+ * older half of it (2026-08-31) is that it never replaces what is already
+ * written — which authorship, not the section, is what protects. The awkward
+ * shape is two recordings live at once on one doc, which the huddle surface
+ * allows, and those keep their sections apart.
  *
  * Both are the same two facts, and this file is about the seam between them:
  *
@@ -209,15 +211,15 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
     expect(second.notes).toContain('double-charges Harborlight');
   });
 
-  it('CONTROL: a section a PREVIOUS MEETING wrote is still left alone', async () => {
-    // The 2026-08-31 rule, unchanged: a recording that finds a previous
-    // meeting's minutes under the last heading opens its own below them and
-    // neither replaces nor grows them.
+  it('a section the PREVIOUS RECORDING wrote and stopped is continued', async () => {
+    // The 2026-09-11 rule: he stops a recording and starts another one, and
+    // the second one's notes carry on under the heading that is already
+    // there rather than opening a second `Meeting notes` at the bottom.
     //
-    // What makes it the previous meeting's is the heading record, not the
-    // words and not the authorship — `releaseNotesAuthorship` drops every
-    // claim when a recording starts, so a stopped meeting's bullets are
-    // authorless by the time this question is asked.
+    // The earlier meeting's words are untouched by it —
+    // `releaseNotesAuthorship` has dropped every claim, so the new recording
+    // can only propose on them — which is what the 2026-08-31 rule was
+    // protecting and what continuing the section does not cost.
     const heading = createNotesHeadingMemory();
     const ydoc = new Y.Doc();
     const before = createNotesTickHarness({
@@ -237,12 +239,40 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
       compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
     });
     const snap = await harness.speak('the Riverbend import runs twice');
+    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
+    expect(snap.notes).toContain('last week: the tunnel flapped');
+    expect(snap.notes).toContain('the Riverbend import runs twice');
+  });
+
+  it('MUTATION CONTROL: the previous recording still RUNNING keeps its section', async () => {
+    // The same two meetings, one stop short. A claim says whose the section
+    // is while the meeting is going, so a second room recording into the
+    // same doc still opens its own — and that is the only thing separating
+    // the two cases.
+    const heading = createNotesHeadingMemory();
+    const ydoc = new Y.Doc();
+    const before = createNotesTickHarness({
+      ydoc,
+      heading,
+      meetingId: 'm-prev',
+      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n`,
+      compose: (input) => addNotes(input, '- last week: the tunnel flapped'),
+    });
+    await before.speak('last week the tunnel flapped');
+
+    const harness = createNotesTickHarness({
+      ydoc,
+      heading,
+      meetingId: 'm1',
+      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
+    });
+    const snap = await harness.speak('the Riverbend import runs twice');
     expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(2);
     expect(snap.markdown).toContain('last week: the tunnel flapped');
     expect(snap.markdown).toContain('the Riverbend import runs twice');
   });
 
-  it('MUTATION CONTROL: the same words with no meeting behind them are reused', async () => {
+  it('CONTROL: the same words with no meeting behind them are reused', async () => {
     // Same doc, same bullet under the same heading — but nobody recorded it,
     // so it is the doc's own standing section and these minutes join it.
     // Without this pair the check above would be measuring "a section with
