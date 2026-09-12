@@ -796,6 +796,23 @@ export function docLabel(opts: {
   );
 }
 
+/**
+ * The label a phone's top bar shows.
+ *
+ * A PATH becomes its file name: the directories eat the bar and the file is
+ * what the reader opened. If that name is itself long it keeps its TAIL, so
+ * the extension survives — `…report-2026-09-11.md` still says what kind of
+ * file this is.
+ *
+ * A NAME is returned whole, and the stylesheet cuts it — at its END, with an
+ * ellipsis, at whatever width the crumb has. The 32-character cap used to
+ * apply to both, with the ellipsis at the front: "Riverbend permit review with
+ * the planning office" reached the bar as "…h the planning office", throwing
+ * away the words that say WHICH meeting it is. A clock-named doc fared worse,
+ * because the tail it kept was the time. The bar has the room for a name now —
+ * six controls left it — so the truncation is the stylesheet's, where it can
+ * see the width.
+ */
 export function mobileLabel(full: string): string {
   let s = full;
   try {
@@ -803,5 +820,6 @@ export function mobileLabel(full: string): string {
   } catch {}
   const parts = s.split('/').filter(Boolean);
   const base = parts[parts.length - 1] ?? s;
+  if (base === s) return base;
   return base.length <= 32 ? base : `…${base.slice(-31)}`;
 }
