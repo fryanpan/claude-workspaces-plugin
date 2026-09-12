@@ -705,6 +705,22 @@ describe('a proposal whose change is a mark', () => {
     expect(p.ins).toBe('the Riverbend brief [before Friday](/docs/riverbend)');
   });
 
+  it('names both sides when a link boundary moves inside an unchanged phrase', () => {
+    const doc = docFrom('[the Riverbend brief](/docs/riverbend) landed today.\n');
+    const res = suggestReplace(doc, {
+      find: 'the Riverbend brief landed',
+      replace: '[the Riverbend](/docs/riverbend) brief landed',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    // Identical characters on both sides, and the same link in the same
+    // order: only where it ENDS moves. Raw text would put the same words
+    // left and right of the arrow and show no proposal at all.
+    const p = previewOf(doc);
+    expect(p.del).toBe('[the Riverbend brief](/docs/riverbend) landed');
+    expect(p.ins).toBe('[the Riverbend](/docs/riverbend) brief landed');
+  });
+
   it('a word change inside an already-linked span keeps the raw words', () => {
     const doc = docFrom('Read [the Saltmarsh plan](/docs/saltmarsh) before Friday.\n');
     const res = suggestReplace(doc, {

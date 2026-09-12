@@ -297,12 +297,24 @@ function marksDiffer(entry: SuggestionScanEntry): boolean {
  * change reads exactly as it did, and so does one made inside a span that
  * was already linked: nothing about the link is being proposed, so nothing
  * about it belongs on the card.
+ *
+ * With one floor under that, which is where this rule started: if the
+ * CHARACTERS are equal, the raw text is two identical sides and a card built
+ * from it shows no proposal at all — so any difference in markdown is spelled
+ * out, including a mark boundary that moved inside an unchanged phrase
+ * (`[alpha beta](/x) gamma → [alpha](/x) beta gamma`). The known gap is that
+ * same shift WITH a word change alongside it, which the shape test reads as
+ * marks unmoved; narrowing it costs the case above, where a mark sits inside
+ * the range and only the words are being proposed.
  */
 function previewSides(entry: SuggestionScanEntry): { deleted: string; inserted: string } {
-  if (!marksDiffer(entry)) {
-    return { deleted: joinedText(entry, 'delete'), inserted: joinedText(entry, 'insert') };
-  }
-  return { deleted: markedText(entry, 'delete'), inserted: markedText(entry, 'insert') };
+  const deleted = joinedText(entry, 'delete');
+  const inserted = joinedText(entry, 'insert');
+  const mdDeleted = markedText(entry, 'delete');
+  const mdInserted = markedText(entry, 'insert');
+  const hidden = deleted === inserted && mdDeleted !== mdInserted;
+  if (!marksDiffer(entry) && !hidden) return { deleted, inserted };
+  return { deleted: mdDeleted, inserted: mdInserted };
 }
 
 function snippetOf(entry: SuggestionScanEntry): string {
