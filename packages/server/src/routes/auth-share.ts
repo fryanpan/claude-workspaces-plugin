@@ -35,6 +35,7 @@ import type { Identities, IdentityRecord } from '../identities.ts';
 import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { readCookie } from '../share/link-session.ts';
 import { type ShareLinks, shareMemberKey } from '../share/share-links.ts';
 import { ACCESS_NOT_CONFIGURED, type Shares } from '../share/shares.ts';
@@ -920,6 +921,25 @@ export async function handleAuthShareRoutes(
     if (body?.label !== undefined && typeof body.label !== 'string') {
       return j(400, { error: 'bad_label', hint: 'label must be a string' });
     }
+    /**
+     * What everyone who redeems this link arrives as. Omitted = `member`, the
+     * narrower of the two and the role every link minted before this existed
+     * hands out.
+     *
+     * Refused rather than defaulted when it is neither word: a link is an
+     * invitation the operator cannot take back from whoever already used it,
+     * so a typo'd `role` must not quietly mint a link that admits owners.
+     */
+    let role: BoardRole | undefined;
+    if (body?.role !== undefined) {
+      role = normalizeBoardRole(body.role);
+      if (!role) {
+        return j(400, {
+          error: 'bad_role',
+          hint: "role must be 'owner' or 'member' — omit it for a regular user, which is the default",
+        });
+      }
+    }
     // NO EXPIRY BY DEFAULT (Bryan, 2026-09-03: links are long-living). An
     // optional one stays on the record for the cases that want it, and the
     // same resolver as every other share route reads it, so a configured
@@ -954,6 +974,7 @@ export async function handleAuthShareRoutes(
         createdBy: typeof body?.createdBy === 'string' && body.createdBy ? body.createdBy : 'agent',
         ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
         ...(typeof body?.label === 'string' ? { label: body.label } : {}),
+        ...(role !== undefined ? { role } : {}),
       });
       const url = `https://${shareLinkBaseHost}/s/${link.linkId}`;
       return j(200, {

@@ -638,6 +638,36 @@ export async function handleWorkspaceTool(
       const { path } = a as { path: string };
       return ok(await http('GET', `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
     }
+    case 'set_project_meetings': {
+      const { path, meetingsPath, retention, gitignore } = a as {
+        path: string;
+        meetingsPath: string;
+        retention?: string;
+        gitignore?: boolean;
+      };
+      return ok(
+        await http('PUT', '/api/mounts/meetings', {
+          path,
+          meetingsPath,
+          ...(retention !== undefined ? { retention } : {}),
+          ...(gitignore !== undefined ? { gitignore } : {}),
+        }),
+      );
+    }
+    case 'set_doc_title': {
+      const { workspaceId, docId, title } = a as {
+        workspaceId: string;
+        docId: string;
+        title: string;
+      };
+      return ok(
+        await http(
+          'PUT',
+          `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/title`,
+          { title },
+        ),
+      );
+    }
     case 'request_plugin_refresh': {
       // No arguments reach the process this runs — the server's argv is
       // fixed. Nothing a caller can send gets spawned.

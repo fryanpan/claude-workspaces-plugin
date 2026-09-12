@@ -128,6 +128,10 @@ run for a request whatever path it named. `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
+The board-roles work added `routes/workspace-members.ts` — who has access and
+at what level — inside a directory this picture already draws, so the picture
+does not move; what a board's Owner may do that a Regular User may not is
+decided in `request-admission.ts`, beside the rest of admission.
 
 **And every one of those paths is written down once.** `routes/route-table.ts`
 holds the vocabulary — a gate is `trusted-local`, `loopback-only`,
@@ -792,6 +796,22 @@ exactly once, and nothing word-rate enters the SSE buffer.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
 - [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.
+
+`meeting-home.ts` is the one new top-level module in the Meetings box, and it
+holds the two facts a meeting needs before anybody speaks: which folder of its
+project it files into, and how much of it that project chose to keep. The
+choice sits on the `ProjectRecord` the mount registry already keeps per
+project, beside privacy and the conventions path, because it is the same kind
+of thing — something the project decided and this server applies. The filing
+record beside it is one append-only line per meeting saying which board,
+project and lead seat the conversation belonged to, folded on read like
+`meetings.jsonl` next door. Retention is expressed as what is never WRITTEN,
+so nothing here deletes; `meetings.ts` asks it once at start and carries the
+answer on the meeting. `routes/mounts.ts` is the lead's door to the choice and
+`routes/doc-title.ts` is the fourth member of the docs chain, which is where a
+person renames the meeting the clock named. On the client `doc/doc-rename.ts`
+joins the existing `doc/` family in the view tier and adds no box: it makes
+the topbar title its own editor.
 
 ## Adding a file
 

@@ -48,6 +48,8 @@ import {
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 
+import { type BoardRole, DEFAULT_BOARD_ROLE, normalizeBoardRole } from './board-role.ts';
+
 const SECRET_MODE = 0o600;
 const REGISTRY_FILENAME = 'share-links.json';
 
@@ -75,6 +77,17 @@ export interface ShareLinkRecord {
   /** Set by `revoke`; stops new redemptions without touching membership. */
   revokedAt: number | null;
   label?: string;
+  /**
+   * The role everyone who redeems THIS link arrives with. Absent = `member`,
+   * which is the default and the one a link minted before roles existed gets.
+   *
+   * On the link rather than only on the person because that is the shape the
+   * invitation has: the operator decides what they are handing out at the
+   * moment they hand it out, and the redeemer's own request cannot name a
+   * role. Changing it afterwards is `setMemberRole` on the person, which is
+   * the record the gate actually reads.
+   */
+  role?: BoardRole;
   redemptions: ShareLinkRedemption[];
 }
 
@@ -85,6 +98,13 @@ export interface ShareLinkMember {
   addedAt: number;
   /** Which link they came through — provenance, never authorization. */
   viaLinkId: string;
+  /**
+   * What this person may do here. Absent on every row written before roles
+   * existed, and absent reads as `member` — the migration is the read, so no
+   * pass over the registry is needed and a row nobody has touched is judged
+   * exactly as a row that says `member`.
+   */
+  role?: BoardRole;
 }
 
 /**
@@ -105,6 +125,8 @@ export interface CreateShareLinkReq {
   /** Seconds from now. Omitted = no expiry, which is the default. */
   ttlSeconds?: number;
   label?: string;
+  /** What redeemers arrive as. Omitted = `member`. */
+  role?: BoardRole;
 }
 
 interface Persisted {
@@ -142,6 +164,9 @@ export class ShareLinks {
       expiresAt: req.ttlSeconds === undefined ? null : now + req.ttlSeconds * 1000,
       revokedAt: null,
       ...(req.label ? { label: req.label } : {}),
+      // Absent for a `member` link, so a link minted with the default is
+      // byte-identical to every link minted before roles existed.
+      ...(req.role === 'owner' ? { role: req.role } : {}),
       redemptions: [],
     };
     this.links.push(record);
@@ -214,7 +239,7 @@ export class ShareLinks {
     // member. Answering `unknown` rather than a distinct reason keeps the
     // visitor's page identical whatever went wrong.
     if (who === '') return { ok: false, state: 'unknown' };
-    const added = this.addMember(link.workspaceId, who, linkId, now);
+    const added = this.addMember(link.workspaceId, who, linkId, now, link.role);
     if (added) {
       link.redemptions.push({ email: who, at: now });
       this.save();
@@ -239,6 +264,50 @@ export class ShareLinks {
   /** Every member of a workspace, in the order they arrived. */
   membersOf(workspaceId: string): ShareLinkMember[] {
     return this.members.filter((m) => m.workspaceId === workspaceId);
+  }
+
+  /**
+   * What this email may do on this workspace, or `null` when they are not a
+   * member of it at all.
+   *
+   * Null rather than `member`, because "not in" and "in, as a regular user"
+   * are different answers and the gate above this one already distinguishes
+   * them. Collapsing them here would make `roleOf(...) !== 'owner'` read as a
+   * membership test that admits strangers.
+   */
+  roleOf(workspaceId: string, email: string | null | undefined): BoardRole | null {
+    const who = email ? normalizeEmail(email) : '';
+    if (who === '' || !workspaceId) return null;
+    const row = this.members.find((m) => m.workspaceId === workspaceId && m.email === who);
+    if (!row) return null;
+    return row.role ?? DEFAULT_BOARD_ROLE;
+  }
+
+  /**
+   * Promote or demote a member. Answers false when they are not one — there is
+   * no membership to write a role onto, and inventing one here would make this
+   * a second, quieter way to admit somebody.
+   */
+  setMemberRole(workspaceId: string, email: string, role: BoardRole): boolean {
+    const who = normalizeEmail(email);
+    if (who === '' || !workspaceId) return false;
+    const row = this.members.find((m) => m.workspaceId === workspaceId && m.email === who);
+    if (!row) return false;
+    if ((row.role ?? DEFAULT_BOARD_ROLE) === role) return true;
+    // Rebuilt rather than mutated, so a demotion REMOVES the key instead of
+    // writing `undefined` into it: `member` is the absent state (see
+    // `BoardRole`), and a row carrying `"role": undefined` serializes as a
+    // second spelling of it.
+    const next: ShareLinkMember = {
+      workspaceId: row.workspaceId,
+      email: row.email,
+      addedAt: row.addedAt,
+      viaLinkId: row.viaLinkId,
+      ...(role === 'owner' ? { role: 'owner' as const } : {}),
+    };
+    this.members = this.members.map((m) => (m === row ? next : m));
+    this.save();
+    return true;
   }
 
   /**
@@ -289,9 +358,25 @@ export class ShareLinks {
     return this.links.filter((l) => l.workspaceId === workspaceId);
   }
 
-  private addMember(workspaceId: string, email: string, viaLinkId: string, at: number): boolean {
+  private addMember(
+    workspaceId: string,
+    email: string,
+    viaLinkId: string,
+    at: number,
+    role?: BoardRole,
+  ): boolean {
     if (this.isMember(workspaceId, email)) return false;
-    this.members.push({ workspaceId, email, addedAt: at, viaLinkId });
+    // `member` is written as ABSENT, not as the string: the field's whole
+    // contract is that a row which does not name a role is a regular user, and
+    // two spellings of the default are two things a later reader can disagree
+    // about.
+    this.members.push({
+      workspaceId,
+      email,
+      addedAt: at,
+      viaLinkId,
+      ...(role === 'owner' ? { role } : {}),
+    });
     return true;
   }
 
@@ -336,7 +421,22 @@ export class ShareLinks {
             m.workspaceId !== '' &&
             typeof m?.email === 'string',
         )
-        .map((m) => ({ ...m, email: normalizeEmail(m.email) }))
+        .map((m) => {
+          // The role is read through the same normalizer a route uses, so a
+          // hand-edited `"Owner"` is dropped to the default rather than
+          // becoming a role nothing else recognises. Dropping can only narrow.
+          const role = normalizeBoardRole(m.role);
+          // Spread MINUS the role, then add it back only when it survived the
+          // normalizer: `{...m}` would otherwise carry a hand-edited `"Owner"`
+          // straight through the very check that exists to drop it.
+          const { role: _raw, ...rest } = m;
+          const row: ShareLinkMember = {
+            ...rest,
+            email: normalizeEmail(m.email),
+            ...(role === 'owner' ? { role } : {}),
+          };
+          return row;
+        })
         .filter((m) => m.email !== '');
     } catch {
       this.links = [];

@@ -4,9 +4,12 @@ import type { ChatAudit } from '../chat-audit.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
+import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
+import type { BoardRole } from '../share/board-role.ts';
+import type { ShareLinks } from '../share/share-links.ts';
 import type { SlowLoadAlarm } from '../slow-load-alarm.ts';
 import type { SseBus } from '../sse.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -37,6 +40,9 @@ export interface WorkspaceRoutesContext {
   homeBriefs: HomeBriefStore;
   /** What each agent has asked to be told about. */
   agentWatches: AgentWatches;
+  /** Share links and the board memberships redeeming one creates — who has
+   *  access to a board, and at what level. */
+  shareLinks: ShareLinks;
   /** Where a spoken request is routed and how its answer comes back. */
   voiceRouter: VoiceRouter;
 
@@ -109,6 +115,16 @@ export interface WorkspaceRoutesContext {
    * a breach.
    */
   workspacesOfDoc: (docId: string) => string[];
+  /**
+   * Where this board's project files its meetings, or null when it has no
+   * project or the project has not said.
+   *
+   * A function rather than the mount store itself, deliberately: the huddle
+   * route needs exactly one fact — the folder, what it keeps, and the project
+   * it belongs to — and handing it the whole mount table would put the host's
+   * filesystem map inside a route whose other business is a doc.
+   */
+  meetingHomeFor: (workspaceId: string) => MeetingHomeResolution | null;
   /** Whether a watch key still names something on this server. */
   watchKeyExists: (key: string) => boolean;
   /** The board's keep-moving verdicts (`keep-moving-verdict.ts`), read-only. */
@@ -116,6 +132,17 @@ export interface WorkspaceRoutesContext {
     latest: (workspaceId: string) => KeepMovingVerdict | undefined;
     history: (workspaceId: string) => readonly KeepMovingVerdict[];
   };
+}
+
+/** A board's project, and what it decided about meetings. */
+export interface MeetingHomeResolution {
+  repoKey: string;
+  /** POSIX, relative to the repo root. */
+  relPath: string;
+  /** The folder on disk, inside the checkout the project serves from. */
+  abs: string;
+  retention: MeetingRetention;
+  gitignore: boolean;
 }
 
 /** What only this request knows. */
@@ -142,6 +169,15 @@ export interface WorkspaceRouteRequest {
   /** The author this request is allowed to claim, from its body's `author`
    *  plus whatever the session, widget token or roster proves. */
   authorFor: (claimed: unknown) => User | undefined;
+  /** The email Cloudflare Access verified for this request, or null when
+   *  nothing proved one — the operator on their own machine, chiefly. */
+  accessEmail: string | null;
+  /** What this caller may DO on a board: `owner` or `member`. Resolved once
+   *  by the admission gate; see `roleFor` there. */
+  roleFor: (workspaceId: string) => BoardRole;
+  /** The owner gate: `null` for the board's owner, the 403 for anyone else.
+   *  `const denied = requireOwner(id); if (denied) return denied;` */
+  requireOwner: (workspaceId: string) => Response | null;
 }
 
 /**

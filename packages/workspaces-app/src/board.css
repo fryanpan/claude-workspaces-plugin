@@ -480,6 +480,46 @@ body.board-body {
   opacity: 0.6;
   cursor: not-allowed;
 }
+/* Who has access, and at what level. Stacked like the two rows above — the
+   label, then the people — because each person is a row of their own and a
+   side-by-side label would leave them a column too narrow for an address. */
+.board-settings-row--members {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.board-members {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* `wrap` and not `nowrap`: an address is as long as somebody's employer made
+   it, and at 430px a person with the controls beside them needs the second
+   line rather than a panel that scrolls sideways. 44px is the touch floor the
+   rest of this panel's controls take. */
+.board-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+/* `anywhere`, because an address has no spaces to break at: without it one
+   long one sets the panel's width and takes the board sideways with it. */
+.board-member-who {
+  flex: 1 1 12ch;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+.board-member-role-text {
+  color: var(--fg-muted);
+}
+.board-member .board-btn,
+.board-member .board-select {
+  min-height: 44px;
+}
+
 /* 24px keeps the hit area honest on a phone without making the panel taller
    on the iPad, where vertical room is the scarce axis. */
 .board-check {

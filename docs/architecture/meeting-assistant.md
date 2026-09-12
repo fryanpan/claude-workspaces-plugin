@@ -690,6 +690,46 @@ what is actually stored, and deletes anything found (`--delete`); the
 mechanics it has to get right are in
 `packages/server/src/assemblyai-retention.ts`.
 
+### Where a meeting lives, and what its project keeps (`meeting-home.ts`)
+
+A meeting used to belong to nothing. Both buttons — "make a plan" and "have a
+meeting" — minted a doc whose markdown went to `<dataDir>/huddles/<docId>.md`,
+outside every checkout and invisible to the project it was about. Rule 5 of
+the docs decision puts it in the same hierarchy as every other document.
+
+**The project says where.** `PUT /api/mounts/meetings` takes a checkout path
+and a repo-relative folder, stores the choice on that project's
+`ProjectRecord`, creates the folder and mounts it. Mounting is not a detail: a
+folder nobody mounted gives its files no address, so the Library would list
+meetings it could not open. A board with no project, or a project that never
+chose, still writes under the data dir exactly as before — the absence of a
+choice is never this server picking one.
+
+**Each meeting says whose it was.** `<dataDir>/meetings/filings.jsonl` holds
+one append-only line per meeting: the board, the project, the lead seat, the
+kind (`plan` / `discussion` / `calendar`), the provider that heard it (`none`
+until something does), where its markdown landed and what the project was
+keeping at the time. Folded on read, last line per doc winning, for the same
+reason `meetings.jsonl` is.
+
+**Retention is what is never written, not what is deleted afterwards.** Three
+values — keep transcripts and audio, keep transcripts only, keep nothing —
+read once at `MeetingStore.start` and carried on the meeting, so changing the
+project's mind never rewrites a recording already held. `none` creates no
+transcript file and opens no audio sink; the index line still says a meeting
+happened and for how long, because that is metadata about the meeting rather
+than a record of what was said in it. The default is keep-everything, which is
+what every project was already doing, and it is deliberately the opposite
+direction from the privacy default next door: guessing open is the dangerous
+way for what may LEAVE, and guessing "keep nothing" is the dangerous way for
+what is written at all.
+
+**A meeting's name is editable.** `PUT /workspaces/<ws>/docs/<docId>/title`
+(`routes/doc-title.ts`, trusted-local) renames any doc, and the doc's own
+topbar title is the affordance (`doc/doc-rename.ts`). It renames what the doc
+is CALLED and moves nothing on disk — a bound doc keeps the path its comments
+hang off.
+
 ### The raw record: transcript and audio, replayable (meeting ticket, 2026-09-02)
 
 A meeting's only record used to be the polished doc and the pipeline's

@@ -53,6 +53,7 @@ import {
 } from './middleware/host-guard.ts';
 import { recallCallbackAllows } from './middleware/recall-callback-gate.ts';
 import { localHostnames } from './public-host.ts';
+import { type BoardRole } from './share/board-role.ts';
 import { redactMetaForVisitor, relativeReviewUrl } from './share/redact-meta.ts';
 import { shareMemberKey } from './share/share-links.ts';
 import type { Shares } from './share/shares.ts';
@@ -213,6 +214,8 @@ export interface RequestAdmissionContext {
   collabMemberOf: (workspaceId: string, email: string | null) => boolean;
   shareLinkMemberOf: (workspaceId: string, email: string | null) => boolean;
   redeemShareLink: (linkId: string, email: string | null) => Response;
+  /** What a caller may DO on a board — `board-membership.ts`'s one reading. */
+  boardRoleOf: (workspaceId: string, email: string | null, isVisitor: boolean) => BoardRole;
   /** One path segment, decoded without throwing on a bad escape. */
   safeDecodeSegment: (s: string) => string;
   /** Doc metadata decorated with its review URL, before redaction. */
@@ -250,6 +253,27 @@ export type Admission =
       accessEmail: string | null;
       /** Doc metadata as this caller may see it. */
       metaFor: MetaForVisitor;
+      /**
+       * What this caller may DO on a board — `owner` or `member`.
+       *
+       * On the admitted branch beside `visitor` rather than resolved by each
+       * route, for the reason the union itself exists: the two inputs to the
+       * answer (is this an outsider, and which email did Access prove) are
+       * both per-request values the gate has just settled, and a route that
+       * re-derived either would be a second rule free to drift open.
+       */
+      roleFor: (workspaceId: string) => BoardRole;
+      /**
+       * The owner gate: `null` when this caller is the board's owner, and the
+       * 403 otherwise.
+       *
+       * A function that RETURNS THE REFUSAL rather than a boolean, so the
+       * calling shape is `const denied = requireOwner(id); if (denied) return
+       * denied;` — a role that was read and not acted on does not type-check
+       * into anything useful, and the refusal is spelled once instead of at
+       * every site.
+       */
+      requireOwner: (workspaceId: string) => Response | null;
     };
 
 export interface RequestAdmission {
@@ -278,6 +302,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     collabMemberOf,
     shareLinkMemberOf,
     redeemShareLink,
+    boardRoleOf,
     safeDecodeSegment,
     withReviewUrl,
     recallRelay,
@@ -659,7 +684,32 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       };
     };
 
-    return { admitted: true, visitor, visitorShareId, visitorMemberKey, accessEmail, metaFor };
+    const roleFor = (workspaceId: string): BoardRole =>
+      boardRoleOf(workspaceId, accessEmail, visitor !== null);
+
+    /**
+     * 403 and a sentence, never 404. The caller is a member of this board and
+     * already knows it exists, so hiding the route behind "not found" would
+     * buy nothing and cost them the explanation.
+     */
+    const requireOwner = (workspaceId: string): Response | null =>
+      roleFor(workspaceId) === 'owner'
+        ? null
+        : j(403, {
+            error: 'owner_only',
+            message: 'Only this board’s owner can do that.',
+          });
+
+    return {
+      admitted: true,
+      visitor,
+      visitorShareId,
+      visitorMemberKey,
+      accessEmail,
+      metaFor,
+      roleFor,
+      requireOwner,
+    };
   };
 
   return { admit };

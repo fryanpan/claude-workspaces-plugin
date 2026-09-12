@@ -155,6 +155,12 @@ export const MEMBERS: Member[] = [
     argv: ['check:client-boot'],
     ci: 'check:client-boot',
   },
+  {
+    id: 'check:meeting-smoke',
+    title: 'a whole meeting leaves usable notes, through a real server and browser',
+    argv: ['check:meeting-smoke'],
+    ci: 'check:meeting-smoke',
+  },
   // The last three are a chain: both suites run instrumented and write their
   // lcov under .coverage/, and `coverage` reads it back instead of running
   // the suites a second time. `--only coverage` on its own says so rather

@@ -188,6 +188,27 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/voice', 'POST'],
   ]),
 
+  // Who has access, and at what level. The LIST is a member's — everything in
+  // a workspace is available to everyone in it — and the two writes are the
+  // board owner's. The guard admits the paths so that a PROMOTED owner
+  // reaching the board through the share hostname can manage it at all; the
+  // role is what refuses, one layer lower.
+  ...family('routes/workspace-members.ts', [
+    ['share-scope', '/workspaces/:ws/members', 'GET'],
+    [
+      'owner-in-handler',
+      '/workspaces/:ws/members/:email/role',
+      'POST',
+      'the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself',
+    ],
+    [
+      'owner-in-handler',
+      '/workspaces/:ws/members/:email',
+      'DELETE',
+      'the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself',
+    ],
+  ]),
+
   ...family('routes/workspace-content.ts', [
     ['share-scope', '/workspaces/:ws/docs:attach', 'POST'],
     ['trusted-local', '/workspaces/:ws/import-tasks', 'POST'],
@@ -333,6 +354,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/status', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/diff', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/activity', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/title', 'PUT'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/plan', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/plan-request', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/review-request', 'POST'],
@@ -413,6 +435,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['loopback-only', '/api/mounts/files', 'GET'],
     ['loopback-only', '/api/mounts/privacy', 'PUT'],
     ['loopback-only', '/api/mounts/conventions', 'GET PUT'],
+    ['loopback-only', '/api/mounts/meetings', 'GET PUT'],
     // The bytes themselves are member-facing rather than lead-only, so they
     // are not behind `offBox` — but `shareScopeAllows` does not name
     // `/mounts/…`, so a share visitor never reaches them, and the handler

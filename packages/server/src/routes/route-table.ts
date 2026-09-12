@@ -146,6 +146,10 @@ const EXAMPLE_PARAMS: Readonly<Record<string, string>> = {
   owner: 'o-1',
   eventId: 'ev-1',
   fileId: 'f-1',
+  // A membership is addressed by the address Cloudflare verified. The example
+  // stands in for one rather than being one: this table renders into a public
+  // document, and a rendered address there is a person's, invented or not.
+  email: 'member-1',
   token: '0123456789abcdef0123456789abcdef',
 };
 
