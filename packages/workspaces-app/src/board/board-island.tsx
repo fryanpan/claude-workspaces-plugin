@@ -553,6 +553,29 @@ function TaskBadges(props: {
       </span>,
     );
   }
+  // How much of what this ticket promised is proved: `n/N met`, and nothing
+  // else. Drawn only once a builder has reported — a row showing `0/4 met`
+  // the moment somebody writes the criteria would read as a failure rather
+  // than as work not yet started.
+  //
+  // No count of the lines themselves and no byline: "it doesn't matter how
+  // many lines there are" (Bryan), and what a reader acts on is the
+  // remainder, which this pair already carries.
+  const met = task.doneWhenProgress;
+  if (met !== undefined && met.total > 0 && met.met > 0) {
+    badges.push(
+      <span
+        key="donewhen"
+        class={
+          met.met >= met.total
+            ? 'board-badge board-dw-pill board-dw-pill-met'
+            : 'board-badge board-dw-pill'
+        }
+      >
+        {`${met.met}/${met.total} met`}
+      </span>,
+    );
+  }
   if (task.dueAt !== undefined) {
     const due = new Date(task.dueAt);
     const overdue = task.dueAt < Date.now() && task.status !== 'done';

@@ -23,6 +23,7 @@ import {
   reviewPayloadMessage,
 } from '@claude-workspaces/core';
 import { BATCH_REF_SIGIL } from './task-batch-refs.ts';
+import { parseDoneWhenInput } from './task-done-when.ts';
 import {
   ASSIGNEE_REQUIRED_ERROR,
   ASSIGNEE_REQUIRED_MESSAGE,
@@ -329,6 +330,8 @@ export function parseTaskCreate(
   if (!review.ok) return { ok: false, error: BAD_REVIEW_ERROR, message: review.message };
   const links = parseLinks(body.links);
   if (!links.ok) return { ok: false, error: BAD_REF_ERROR };
+  const doneWhen = parseDoneWhenInput(body.doneWhen);
+  if (!doneWhen.ok) return { ok: false, error: doneWhen.error, message: doneWhen.message };
   const origin = parseOrigin(body.origin);
   if (!origin.ok) return { ok: false, error: BAD_ORIGIN_ERROR };
   const strayRef = batchRefIn(body.after) ?? batchRefIn(body.afterEnforce);
@@ -381,6 +384,10 @@ export function parseTaskCreate(
       assigneeKind: kind.assigneeKind ?? (explicit === null && lead !== null ? 'agent' : undefined),
       needs: needs.needs,
       options: options.options,
+      // Words only — the store mints the ids, because a line's id is what a
+      // report and an owner's check address it by and a caller-chosen one
+      // would be a second id space to keep unique.
+      ...(doneWhen.lines !== undefined ? { doneWhen: doneWhen.lines } : {}),
       // Forward undefined untouched: an omitted goal is what routes the task
       // through triage (an explicit 'chores' would skip it).
       goal: body.goal as string | undefined,

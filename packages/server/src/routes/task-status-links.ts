@@ -56,8 +56,13 @@ export async function handleTaskStatusAndLinks(
       // A gate refusal is a refusal, not a malformed request: same 409
       // an enforce-marked blocker returns, so callers have one shape
       // for "the gate said no". A plan-hold refusal is the same shape:
-      // the gate said no, and the message names the release.
-      const refused = res.error === 'blocked' || res.error === 'plan-unapproved';
+      // the gate said no, and the message names the release. So is an open
+      // done-when line: the caller asked a well-formed question and the
+      // answer is no, and a 400 would tell them they had sent it wrong.
+      const refused =
+        res.error === 'blocked' ||
+        res.error === 'plan-unapproved' ||
+        res.error === 'done-when-open';
       const status = res.error === 'not-found' ? 404 : refused ? 409 : 400;
       // The gate names what the row waits on — id, title, status, `needs` —
       // and it reads those rows globally. Nothing but the store's two

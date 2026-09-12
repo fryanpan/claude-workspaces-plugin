@@ -3249,6 +3249,24 @@ body.board-body {
   border-color: var(--red);
   color: var(--red);
 }
+/* "n/N met" — how much of a task's done-when list the builder has reported.
+   It is on the row because it is the one thing about the list a reader wants
+   without opening the panel, and it is the ONLY thing: the lines themselves
+   are trimmed out of the board's projection, so the row carries two numbers
+   and nothing else. Drawn only once a report exists — a task whose lines have
+   never been reported says nothing rather than "0/4 met", which reads as a
+   failure when it is really an absence. Tabular figures so the pill does not
+   jitter as the count climbs. */
+.board-dw-pill {
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+/* Every line met. Green, because the next thing that happens is the task
+   closing itself. */
+.board-dw-pill-met {
+  border-color: var(--green);
+  color: var(--green-strong);
+}
 /* --- scheduled rows: the rule, and when it next runs ---
    Two marks, both on the RIGHT of the row where the due date already sits, in
    the order a reader scans them: what the rule is, then when it fires. No
@@ -4421,6 +4439,243 @@ a.board-link-chip:hover {
 .board-decide-card.is-busy {
   opacity: 0.6;
   cursor: progress;
+}
+
+/* ----- "Done when" — the list of outcomes, under the description -----
+   Style D of the approved mock: the number on the left, the words in the
+   middle, ONE chip on the right, and the builder's proof folded under the
+   line that carries it. No byline and no line count — *"doesn't matter who
+   wrote it"*, *"stop adding extra counts and metadata that is not essential
+   for the use case"*.
+
+   The words ARE the control, exactly as a task title is on the board: click
+   them and type. There is no pencil here because the board has no pencils.
+   Which means the only thing that says a line is editable is how it behaves
+   under a pointer, so it gets the outline on hover and the accent ring while
+   it holds the caret. */
+.dw-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dw-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: dw;
+}
+.dw-line {
+  counter-increment: dw;
+  display: grid;
+  /* Two columns and no third: the number, then everything else. The chip, the
+     × and the proof all live inside the second column so they share one left
+     edge no matter how far the words wrap. */
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 6px;
+  padding: 2px 0;
+}
+.dw-line::before {
+  content: counter(dw);
+  font-size: 12px;
+  /* Aligns the digit with the first line of the words, which sit on a 14px
+     font at 1.45 — not with the 36px tap target beside them. */
+  line-height: 20px;
+  padding: 8px 0;
+  color: var(--fg-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dw-cell {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+/* The words, the chip and the × on ONE row, always. A grid rather than a
+   wrapping flex row: the words are the only cell that may shrink, so a long
+   criterion at 430px wraps its own text and the two controls stay beside it.
+   Wrapping put the × on a row of its own under the words, 26px from the line
+   it removes and 24px from the next one — a control nearer the wrong line
+   than its own is worse than a narrow one. Either trailing column collapses to zero
+   when its child is absent, and the 1fr keeps what remains at the right
+   edge. */
+.dw-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: 6px;
+}
+.dw-text {
+  font-size: 14px;
+  line-height: 1.45;
+  min-width: 0;
+  /* Vertical padding the reader cannot see until the outline appears, pulled
+     back out by the negative margin so an un-hovered line sits on the panel's
+     rhythm rather than on the edit affordance's. The BREATHING ROOM sideways
+     is the outline's offset rather than horizontal padding: padding here grew
+     the box past its own column, which at 430px is an overflow inside the
+     list nobody can scroll to see. */
+  padding: 8px 0;
+  margin: -8px 0;
+  border-radius: 3px;
+  outline: 1px solid transparent;
+  outline-offset: 3px;
+  cursor: text;
+}
+.dw-text:hover {
+  outline-color: var(--border);
+}
+.dw-text[contenteditable="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  background: var(--bg);
+}
+/* The empty line Enter and "Add done criteria" both leave behind. The prompt
+   is what it should say, not what it is. */
+.dw-text:empty::before {
+  content: "Say what is measured, and where a reader reads it.";
+  color: var(--fg-muted);
+}
+/* The line the refused move to Done named. Washed rather than outlined, so
+   the sentence above and the line below are read as one thing. */
+.dw-line-refused {
+  background: var(--red-0, #fdecec);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  margin: 2px 0;
+}
+/* One chip per line, and only after the builder has reported. The four
+   verdicts get four colours and no icons — the word is the label. */
+.dw-verdict-tag {
+  align-self: start;
+  margin-top: 1px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+}
+.dw-verdict-met {
+  border-color: var(--green);
+  background: var(--green-0, #e7f6ec);
+  color: var(--green-strong);
+}
+.dw-verdict-not {
+  border-color: var(--red-3, #f3b6b6);
+  background: var(--red-0, #fdecec);
+  color: var(--red-strong);
+}
+/* Amber, because it is the only verdict that is waiting on a person. */
+.dw-verdict-yours {
+  border-color: var(--orange-2, #ffd8a8);
+  background: var(--warn-wash, #fff4e5);
+  color: var(--warn-fg);
+}
+/* The × — the deliberate way to drop a line. 36px square so it is reachable
+   with a thumb, pulled back vertically so it does not stretch the row it sits
+   on past the words' own height. */
+.dw-line-x {
+  /* Its own grid cell on the line's own row, so it is always beside the words
+     it removes. The flexible first column takes the slack, which is what
+     holds it at the right edge with or without a chip between. */
+  min-width: 36px;
+  min-height: 36px;
+  margin-block: -8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 16px;
+  line-height: 36px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.dw-line-x:hover,
+.dw-line-x:focus-visible {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+/* What the builder attached. A row with a url is a link and says "Open"; one
+   without is the same row without the affordance, because a proof that names
+   what was run still says more than no proof. */
+.dw-proof {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.dw-proof-head {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.dw-proof-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  text-align: left;
+  text-decoration-line: none;
+}
+.dw-proof-head + .dw-proof-row {
+  border-top: 0;
+}
+a.dw-proof-row:hover {
+  background: var(--bg-hover);
+}
+.dw-proof-what {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+.dw-proof-open {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent);
+}
+/* The owner's two buttons, and the "Add done criteria" button under the list.
+   Both wrap; neither ever sits below the tap-target floor. */
+.dw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+.dw-actions .board-btn {
+  min-height: 36px;
+}
+.dw-add {
+  margin-top: 4px;
+}
+/* The refusal, drawn where the Status control is rather than as a toast: the
+   reader has to find the line it names, and a message that disappears while
+   they look is a message they read twice. */
+.dw-refusal {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--red-3, #f3b6b6);
+  border-left: 3px solid var(--red-strong);
+  border-radius: var(--radius);
+  background: var(--red-0, #fdecec);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--red-strong);
 }
 /* ################# BOARD · TASK SCHEDULE #################
    The rule that says when a row's work starts, shown as a sentence you type

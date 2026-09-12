@@ -46,6 +46,12 @@ import type {
 } from './review-items/types.ts';
 import { TaskArchiveStore } from './task-archive.ts';
 import { TaskAuthoringStore } from './task-authoring.ts';
+import {
+  type DoneWhenInput,
+  type DoneWhenReportInput,
+  type DoneWhenResult,
+  TaskDoneWhenStore,
+} from './task-done-when.ts';
 import { TaskEventBus } from './task-event-bus.ts';
 import { isArchived } from './task-fields.ts';
 import type { AttachmentRuntime } from './task-helpers.ts';
@@ -590,6 +596,10 @@ export interface CreateTaskOpts {
   needs?: 'action' | 'decision';
   /** Candidate answers. Decision tasks only; ids are minted here. */
   options?: Array<{ label: string; detail?: string }>;
+  /** What has to be true before the row is finished. Ids are minted here, so
+   *  a caller sends words only. Omitted means the row has no lines, which is
+   *  the state every task had before the field. */
+  doneWhen?: Array<{ text: string }>;
   goal?: string;
   order?: number;
   after?: string[];
@@ -659,7 +669,13 @@ export type TransitionResult =
   | { ok: true; task: BoardRow; blockers: TransitionBlocker[] }
   | {
       ok: false;
-      error: 'not-found' | 'bad-status' | 'same-status' | 'blocked' | 'plan-unapproved';
+      error:
+        | 'not-found'
+        | 'bad-status'
+        | 'same-status'
+        | 'blocked'
+        | 'plan-unapproved'
+        | 'done-when-open';
       blockers?: TransitionBlocker[];
       /** Refusal text shaped to land verbatim in an agent's context. */
       message?: string;
@@ -1881,6 +1897,15 @@ export class TaskStore {
     transition: (taskId, to, opts) => this.transition(taskId, to, opts),
   });
 
+  /** What "finished" means on this ticket, line by line — and the close that
+   *  fires when the last one is met. */
+  private readonly doneWhen = new TaskDoneWhenStore({
+    getTask: (taskId) => this.getTask(taskId),
+    scheduleSave: (workspaceId) => this.scheduleSave(workspaceId),
+    transition: (taskId, to, opts) => this.transition(taskId, to, opts),
+    appendNote: (taskId, input) => this.appendNote(taskId, input),
+  });
+
   /** The quiet records — notes, estimates, artifact checks, reading time. */
   private readonly notes = new TaskNotesStore({
     getTask: (taskId) => this.getTask(taskId),
@@ -2433,6 +2458,37 @@ export class TaskStore {
     input: { kind: TaskNote['kind']; text: string; agent: string; ts: number; sessionId?: string },
   ): { ok: true; task: Task; note: TaskNote } | { ok: false; error: 'not-found' } {
     return this.notes.appendNote(taskId, input);
+  }
+
+  // ── Done when ────────────────────────────────────────────────────────────
+
+  /** Write the whole done-when list (add, edit, remove and reorder are all
+   *  this one write — see `TaskDoneWhenStore.setLines`). */
+  setDoneWhen(
+    taskId: string,
+    lines: readonly DoneWhenInput[],
+    opts: { actor: { id: string; name: string; kind?: string } },
+  ): DoneWhenResult {
+    return this.doneWhen.setLines(taskId, lines, opts.actor);
+  }
+
+  /** The builder's report — a verdict per line, with the proof behind it. */
+  reportDoneWhen(
+    taskId: string,
+    entries: readonly DoneWhenReportInput[],
+    opts: { actor: { id: string; name: string; kind?: string } },
+  ): DoneWhenResult {
+    return this.doneWhen.report(taskId, entries, opts.actor);
+  }
+
+  /** The owner's word on a line only a person can judge. */
+  checkDoneWhen(
+    taskId: string,
+    lineId: string,
+    verdict: 'met' | 'not-met',
+    opts: { actor: { id: string; name: string; kind?: string } },
+  ): DoneWhenResult {
+    return this.doneWhen.ownerCheck(taskId, lineId, verdict, opts.actor);
   }
 
   // ── Review items ─────────────────────────────────────────────────────────

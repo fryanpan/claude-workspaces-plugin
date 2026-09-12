@@ -36,6 +36,7 @@ export * from './schedule-run-record.ts';
 export * from './schedule-wake.ts';
 export * from './schedule-parse.ts';
 export * from './schedule-trigger.ts';
+export * from './done-when.ts';
 export * from './task-schedule.ts';
 export * from './task-wire.ts';
 export * from './footnotes.ts';
