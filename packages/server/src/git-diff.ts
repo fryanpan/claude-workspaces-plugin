@@ -26,12 +26,21 @@ export function isSafeRef(ref: string): boolean {
   return ref.length > 0 && ref.length <= 256 && !ref.startsWith('-') && !/[\s\0]/.test(ref);
 }
 
+/**
+ * A full object id as git prints one — 40 hex under SHA-1, 64 under the
+ * SHA-256 object format. Accepting only the first length makes every read
+ * here answer "cannot tell" in a repository that is perfectly readable.
+ */
+export function isObjectId(s: string): boolean {
+  return /^[0-9a-f]{40}$/.test(s) || /^[0-9a-f]{64}$/.test(s);
+}
+
 /** Resolve a ref to a full commit hash, or null if it doesn't name a commit. */
 export function resolveCommit(repo: string, ref: string): string | null {
   if (!isSafeRef(ref)) return null;
   const res = git(repo, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
   const hash = res.stdout.trim();
-  return res.ok && /^[0-9a-f]{40}$/.test(hash) ? hash : null;
+  return res.ok && isObjectId(hash) ? hash : null;
 }
 
 export interface DiffFileEntry {
@@ -266,7 +275,7 @@ export function changedFilesInWorktree(repo: string, since?: string): string[] |
   if (ref === null) return null;
   const mb = git(repo, ['merge-base', 'HEAD', ref]);
   const mergeBase = mb.stdout.trim();
-  if (!mb.ok || !/^[0-9a-f]{40}$/.test(mergeBase)) return null;
+  if (!mb.ok || !isObjectId(mergeBase)) return null;
   const pinned =
     since !== undefined &&
     resolveCommit(repo, since) !== null &&

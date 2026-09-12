@@ -50,13 +50,17 @@ export interface BuilderWorktree {
  * @param existing files that were already on the default branch when the
  *   builder took the worktree — what it has to have in order to move or
  *   delete one.
+ * @param objectFormat the hash git records commits under. `sha256` prints
+ *   64-character object ids instead of 40, which is a repo shape a reader
+ *   that pattern-matches hashes can fail closed on.
  */
 export function makeBuilderWorktree(
   changed: Record<string, string> = {},
   existing: Record<string, string> = {},
+  objectFormat: 'sha1' | 'sha256' = 'sha1',
 ): BuilderWorktree {
   const path = mkdtempSync(join(tmpdir(), 'ws-builder-'));
-  git(path, 'init', '-q', '-b', 'main');
+  git(path, 'init', '-q', '-b', 'main', `--object-format=${objectFormat}`);
   write(path, 'README.md', 'base\n');
   for (const [rel, text] of Object.entries(existing)) write(path, rel, text);
   git(path, 'add', '-A');

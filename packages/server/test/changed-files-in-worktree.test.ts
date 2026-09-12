@@ -19,8 +19,9 @@ const made: BuilderWorktree[] = [];
 const worktree = (
   files?: Record<string, string>,
   existing?: Record<string, string>,
+  objectFormat?: 'sha1' | 'sha256',
 ): BuilderWorktree => {
-  const wt = makeBuilderWorktree(files, existing);
+  const wt = makeBuilderWorktree(files, existing, objectFormat);
   made.push(wt);
   return wt;
 };
@@ -108,6 +109,14 @@ describe('what the read returns', () => {
     // A commit this repo has never heard of falls back to the merge base
     // rather than failing the read or reporting a diff about nothing.
     expect(changedFilesInWorktree(wt.path, stranger)).toEqual(['src/mine.ts']);
+  });
+
+  it('reads a repository whose object ids are SHA-256', () => {
+    // git prints 64-character ids there. A reader that recognises only the
+    // 40-character shape answers "cannot tell" for every worktree in such a
+    // repo, which silences the gate rather than failing it.
+    const wt = worktree({ 'packages/app/src/board.css': '.b{}\n' }, {}, 'sha256');
+    expect(changedFilesInWorktree(wt.path)).toEqual(['packages/app/src/board.css']);
   });
 
   it('names both ends of a rename, so a file moved OUT of a tree still counts', () => {
