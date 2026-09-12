@@ -338,22 +338,6 @@ function denominatorClause(p: NudgePayload): string {
 }
 
 /**
- * Render `workspace.ready_idle` — ready work nobody has picked up, or the one
- * case where the board could not tell whether there is any.
- *
- * Ordered so the two facts that decide whether to act come first (how much is
- * waiting, how long it has waited), the denominator that says what those
- * numbers are OUT OF next, the row to start with after that, and the tool to
- * start with last. The count is spelled out even at one, because a lone row
- * and a queue are different asks and a bare title says neither.
- *
- * The zero-ready branch is a different sentence rather than the same one with
- * a zero in it. The server sends that frame ONLY when rows could not be
- * evaluated — a genuinely quiet board is silence — so telling its reader to
- * "take the top of the queue" would send them to an empty queue and teach
- * them, correctly, that the wake carries no information.
- */
-/**
  * The freed rows as a list, with the overflow said rather than dropped.
  *
  * A band agreement can release forty rows and the wake is still one message,
@@ -401,6 +385,22 @@ function releasedLine(p: NudgePayload, freed: NonNullable<NudgePayload['freed']>
   return `[workspace.ready_idle] ${subject}${named ? `: ${named}` : ''} — held work a person released just now. Take ${one ? 'it' : 'them'} in priority order with next_tasks / task_transition.`;
 }
 
+/**
+ * Render `workspace.ready_idle` — ready work nobody has picked up, or the one
+ * case where the board could not tell whether there is any.
+ *
+ * Ordered so the two facts that decide whether to act come first (how much is
+ * waiting, how long it has waited), the denominator that says what those
+ * numbers are OUT OF next, the row to start with after that, and the tool to
+ * start with last. The count is spelled out even at one, because a lone row
+ * and a queue are different asks and a bare title says neither.
+ *
+ * The zero-ready branch is a different sentence rather than the same one with
+ * a zero in it. The server sends that frame ONLY when rows could not be
+ * evaluated — a genuinely quiet board is silence — so telling its reader to
+ * "take the top of the queue" would send them to an empty queue and teach
+ * them, correctly, that the wake carries no information.
+ */
 export function readyIdleLine(p: NudgePayload): string {
   // The release wake first: it is the one frame here that is not about elapsed
   // time at all, so none of the idle line's clauses apply to it.

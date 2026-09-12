@@ -234,7 +234,7 @@ describe('a person freeing held rows wakes the lead once, naming them', () => {
     expect(freed?.rows.map((r) => r.id)).toEqual([held]);
   }, 60_000);
 
-  it('stays silent when an AGENT agrees the band, and still fires for his', async () => {
+  it('stays silent when an AGENT agrees the band, and still fires for a person’s move', async () => {
     const [a] = await twoHeldUnderPendingBand();
     // The identical gesture from a builder. Agents agree bands and close their
     // own blockers constantly; waking the lead on each is the noise the idle

@@ -51,8 +51,11 @@ export async function handleTaskStatusAndLinks(
     // row-watching wake below sees nothing and the board falls silent until
     // the fifteen-minute window.
     //
-    // Only for a person, and only a reading — the mark costs one board
-    // snapshot on a human-rate route and nothing at all on an agent's.
+    // Only for a person, and nothing at all on an agent's move. It is not
+    // free: the mark is a full `readyWorkSnapshot`, and a person's `todo` move
+    // now runs three of them (this one, `personQueuedTask`'s, and
+    // `personFreedWork`'s). This route is human-rate, so three reads of one
+    // board is the cheap side of the trade against a lead who is not told.
     // The row's OWN workspace rather than the addressed one: the two agree
     // today, and the mark has to be taken against the board the release will
     // be judged on.

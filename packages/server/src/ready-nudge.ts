@@ -567,10 +567,10 @@ export class ReadyWorkNudger {
    *
    * Split from the wake rather than folded into it because the two readings
    * have to straddle the store write, and nothing else on this object does.
-   * An unreadable or retired board marks as empty: the release then frees
-   * nothing it can name, which is the same silence a release that freed
-   * nothing produces, and is the safe direction — the alternative is claiming
-   * every ready row on the board was just released.
+   * A board nobody could read marks as UNREADABLE rather than as empty, and
+   * the two are not interchangeable: the diff subtracts this reading from the
+   * one after the write, so an empty stand-in would report every ready row on
+   * the board as just released. See `ReadyMark`.
    */
   markReady(workspaceId: string): ReadyMark {
     return readyMark(this.liveBoard(workspaceId));
