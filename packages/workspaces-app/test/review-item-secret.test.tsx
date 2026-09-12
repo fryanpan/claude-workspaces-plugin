@@ -231,15 +231,19 @@ describe('the card', () => {
       'saltmarsh-relay-account',
       'saltmarsh-relay-signer',
     ]);
-    for (const input of Array.from(
-      root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'),
+    for (const field of Array.from(
+      root.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input'),
     )) {
-      expect(input.type).toBe('password');
+      // A TEXTAREA, so a pasted key keeps its line breaks — a browser `input`
+      // strips them out of a paste before any script can see them. Masked by
+      // class rather than by `type`, which a textarea has no equivalent of.
+      expect(field.tagName).toBe('TEXTAREA');
+      expect(field.classList.contains('is-masked')).toBe(true);
       // No manager offers to keep it: an offer to save is an offer to put the
       // value somewhere neither this page nor the store chose.
-      expect(input.getAttribute('autocomplete')).toBe('off');
-      expect(input.getAttribute('data-lpignore')).toBe('true');
-      expect(input.hasAttribute('data-1p-ignore')).toBe(true);
+      expect(field.getAttribute('autocomplete')).toBe('off');
+      expect(field.getAttribute('data-lpignore')).toBe('true');
+      expect(field.hasAttribute('data-1p-ignore')).toBe(true);
     }
     expect(root.querySelector('.board-walk-cred-send')?.textContent).toBe('Save Secret');
   });
@@ -248,13 +252,19 @@ describe('the card', () => {
     // THE CONTROL FIRST, so "no composer" cannot pass by the card failing to
     // render at all: the same component, the same queue shape, an ordinary
     // review item — and a composer.
+    // The secret card has textareas of its OWN now — that is what makes a
+    // multi-line value typeable — so the selector excludes its form. What
+    // must not exist is the FREE-TEXT box, whose words are recorded on the
+    // item and read back by the agent.
+    const composers = () =>
+      root.querySelectorAll('.board-walk-answer:not(.board-walk-cred-form) textarea');
     mountWalk(reviewQueue([], [questionRow()], NOW), walk());
     await tick();
-    expect(root.querySelectorAll('.board-walk-answer textarea').length).toBeGreaterThan(0);
+    expect(composers().length).toBeGreaterThan(0);
 
     mountWalk(reviewQueue([], [secretRow()], NOW), walk());
     await tick();
-    expect(root.querySelectorAll('.board-walk-answer textarea')).toHaveLength(0);
+    expect(composers()).toHaveLength(0);
   });
 
   it('sends both values in one submission and keeps none of them afterwards', async () => {
@@ -377,34 +387,62 @@ describe('the card', () => {
   it('reveals one field at a time, and starts masked', async () => {
     mountWalk(reviewQueue([], [secretRow()], NOW), walk());
     await tick();
+    // Masking is `-webkit-text-security`, which a textarea needs because it
+    // has no `type="password"`. jsdom reports nothing for that property, so
+    // what is read here is the class the component put on the node — the
+    // engine's own rendering of it is the browser's job, and the eye is the
+    // control that tells the reader which state they are in either way.
+    const masks = () =>
+      Array.from(root.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input')).map((f) =>
+        f.classList.contains('is-shown') ? 'shown' : 'masked',
+      );
     const eyes = Array.from(root.querySelectorAll<HTMLButtonElement>('.board-walk-cred-eye'));
-    const typed = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
-    expect(typed.map((i) => i.type)).toEqual(['password', 'password']);
+    const typed = Array.from(root.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input'));
+    expect(masks()).toEqual(['masked', 'masked']);
     typed[0]!.value = FIRST_VALUE;
     eyes[0]!.click();
     await tick();
-    const after = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
-    expect(after.map((i) => i.type)).toEqual(['text', 'password']);
+    expect(masks()).toEqual(['shown', 'masked']);
     // The value survives the toggle: the node is the same one, not a
-    // re-created input that would have dropped what was typed.
-    expect(after[0]!.value).toBe(FIRST_VALUE);
+    // re-created field that would have dropped what was typed.
+    expect(
+      Array.from(root.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input'))[0]!.value,
+    ).toBe(FIRST_VALUE);
     eyes[0]!.click();
     await tick();
-    expect(
-      Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input')).map(
-        (i) => i.type,
-      ),
-    ).toEqual(['password', 'password']);
+    expect(masks()).toEqual(['masked', 'masked']);
   });
 
-  it('labels the Return key send, not done', async () => {
-    mountWalk(reviewQueue([], [secretRow()], NOW), walk());
+  it('keeps every line of a multi-line value, and sends them whole', async () => {
+    // The blocker the UX walk found (2026-09-12): a three-line paste — an SSH
+    // key, a service-account file — was silently joined into one line and the
+    // item said "Secrets saved". The field was a browser `input`, which
+    // strips line breaks out of a paste before any script can see them, so
+    // the server's own newline refusal never had anything to refuse.
+    const saved: Array<Array<{ service: string; value: string }>> = [];
+    const onSaveSecrets = vi.fn(
+      async (_item: unknown, values: ReadonlyArray<{ service: string; value: string }>) => {
+        saved.push([...values]);
+        return true;
+      },
+    );
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk({ onSaveSecrets }));
     await tick();
-    for (const input of Array.from(
-      root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'),
-    )) {
-      expect(input.getAttribute('enterkeyhint')).toBe('send');
-    }
+    const fields = Array.from(root.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input'));
+    const threeLines = 'aaa-not-real-1\nbbb-not-real-2\nccc-not-real-3';
+    fields[0]!.value = threeLines;
+    fields[1]!.value = SECOND_VALUE;
+    root
+      .querySelector('form.board-walk-cred-form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    const sent = saved[0] ?? [];
+    expect(sent[0]?.value).toBe(threeLines);
+    expect(sent[0]?.value.split('\n')).toHaveLength(3);
+    // CONTROL: the second field, a one-line value, travels unchanged — so the
+    // assertion above is about the line breaks surviving rather than about
+    // every value arriving mangled in some new way.
+    expect(sent[1]?.value).toBe(SECOND_VALUE);
   });
 
   it('shows a Regular User the fields with no way to fill them', async () => {

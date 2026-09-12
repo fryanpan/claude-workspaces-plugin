@@ -135,11 +135,14 @@ afterEach(() => {
 
 describe('the task page, on a secret ask', () => {
   it('has no verbatim answer box, where an ordinary question has one', () => {
-    const placeholder = (card: HTMLElement): string | null =>
-      card.querySelector('textarea')?.getAttribute('placeholder') ?? null;
+    // The secret card has textareas of its OWN now — that is what makes a
+    // multi-line value typeable — so the box being asserted absent is the
+    // COMPOSER, whose words are recorded on the item and read back.
+    const composer = (card: HTMLElement): HTMLTextAreaElement | null =>
+      card.querySelector<HTMLTextAreaElement>('.board-decide-form textarea');
 
     const secret = draw(secretAsk(), { onSaveSecrets: vi.fn(), secretsGate: 'open' });
-    expect(secret.querySelector('textarea')).toBeNull();
+    expect(composer(secret)).toBeNull();
     expect(secret.textContent).not.toContain('Record answer');
     expect(secret.querySelector('.board-decide-form')).toBeNull();
 
@@ -149,15 +152,18 @@ describe('the task page, on a secret ask', () => {
     live?.();
     live = null;
     const question = draw(questionAsk());
-    expect(placeholder(question)).toContain('Record your answer');
+    expect(composer(question)?.getAttribute('placeholder')).toContain('Record your answer');
     expect(question.textContent).toContain('Record answer');
   });
 
   it('draws one masked field per secret, and the Save that sends them', () => {
     const card = draw(secretAsk(), { onSaveSecrets: vi.fn(), secretsGate: 'open' });
-    const inputs = card.querySelectorAll<HTMLInputElement>('.board-walk-cred-input');
+    const inputs = card.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input');
     expect(inputs).toHaveLength(2);
-    for (const input of inputs) expect(input.type).toBe('password');
+    for (const field of inputs) {
+      expect(field.tagName).toBe('TEXTAREA');
+      expect(field.classList.contains('is-masked')).toBe(true);
+    }
     expect(card.textContent).toContain('Relay account name');
     expect(card.textContent).toContain('saltmarsh-relay-account');
     expect(card.querySelector('.board-walk-cred-send')?.textContent).toBe('Save Secret');
@@ -177,9 +183,9 @@ describe('the task page, on a secret ask', () => {
     );
     const onAnswerThread = vi.fn(async () => true);
     const card = draw(secretAsk(), { onSaveSecrets, onAnswerThread, secretsGate: 'open' });
-    const inputs = card.querySelectorAll<HTMLInputElement>('.board-walk-cred-input');
-    (inputs[0] as HTMLInputElement).value = FIRST_VALUE;
-    (inputs[1] as HTMLInputElement).value = SECOND_VALUE;
+    const inputs = card.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input');
+    (inputs[0] as HTMLTextAreaElement).value = FIRST_VALUE;
+    (inputs[1] as HTMLTextAreaElement).value = SECOND_VALUE;
     card.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true }));
     expect(onSaveSecrets).toHaveBeenCalledTimes(1);
     // The values went to the door that stores them and records only the
@@ -194,7 +200,7 @@ describe('the task page, on a secret ask', () => {
     // workspace is a shared view — and must not fall back to the box.
     const card = draw(secretAsk());
     expect(card.querySelectorAll('.board-walk-cred-input')).toHaveLength(0);
-    expect(card.querySelector('textarea')).toBeNull();
+    expect(card.querySelector('.board-decide-form textarea')).toBeNull();
     expect(card.textContent).toContain('Relay account name');
     expect(card.textContent).toContain('the machine the board runs on');
   });

@@ -84,8 +84,8 @@ function SecretFieldsForm(props: {
    * the other on screen. The set holds SERVICE NAMES; no value is ever state.
    */
   const [shown, setShown] = useState<readonly string[]>([]);
-  const inputs = (form: HTMLFormElement): HTMLInputElement[] =>
-    Array.from(form.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
+  const inputs = (form: HTMLFormElement): HTMLTextAreaElement[] =>
+    Array.from(form.querySelectorAll<HTMLTextAreaElement>('.board-walk-cred-input'));
   const submit = async (ev: Event): Promise<void> => {
     ev.preventDefault();
     const form = formRef.current;
@@ -96,7 +96,7 @@ function SecretFieldsForm(props: {
     const values = fields.map((f) => ({
       service: f.service,
       value:
-        (form.elements.namedItem(`secret:${f.service}`) as HTMLInputElement | null)?.value ?? '',
+        (form.elements.namedItem(`secret:${f.service}`) as HTMLTextAreaElement | null)?.value ?? '',
     }));
     // All or nothing on this side too, so the refusal a reader sees for a
     // half-filled form is immediate rather than a round trip away — and it is
@@ -144,20 +144,38 @@ function SecretFieldsForm(props: {
                 <span class="board-walk-cred-service">{f.service}</span>
               </span>
               <span class="board-walk-cred-box">
-                <input
+                {/* A TEXTAREA, not an input, and that is the whole of the
+                    multi-line fix. A browser `input` strips line breaks out
+                    of a paste before any script can see them, so a
+                    three-line SSH key arrived as one joined line, passed the
+                    store's own newline check because the newlines were
+                    already gone, and was stored silently wrong under the name
+                    the reader thought held their key (UX review,
+                    2026-09-12).
+
+                    Masked with `-webkit-text-security` rather than
+                    `type="password"`, which a textarea has no equivalent of;
+                    the eye toggles the same class. On an engine without that
+                    property the value is visible rather than hidden — worth
+                    knowing, and the reason the eye is still the control that
+                    says which state you are in.
+
+                    Enter makes a new line here; Save submits. A key that
+                    submitted would make a multi-line value untypeable, which
+                    is what this control exists for. */}
+                <textarea
                   id={`secret:${itemKey}:${f.service}`}
                   name={`secret:${f.service}`}
-                  class="board-walk-cred-input"
-                  type={isShown ? 'text' : 'password'}
+                  class={
+                    isShown ? 'board-walk-cred-input is-shown' : 'board-walk-cred-input is-masked'
+                  }
+                  rows={1}
                   autocomplete="off"
                   autocapitalize="off"
                   autocorrect="off"
                   spellcheck={false}
                   data-1p-ignore
                   data-lpignore="true"
-                  // "send", not "done": the key submits the form, and a phone
-                  // keyboard that says done reads as "close this".
-                  enterkeyhint="send"
                   onInput={() => {
                     if (missing === f.service) setMissing(null);
                   }}
