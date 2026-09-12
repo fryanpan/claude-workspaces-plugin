@@ -26,7 +26,11 @@ function jsonResponse(status: number, body: unknown): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
-    json: () => Promise.resolve(body),
+    // A 204 carries no body. Rejecting here is what makes "reads no body" an
+    // assertion rather than a hope: a reader that calls .json() on one lands
+    // in the element's catch, which is a retry rather than a settled state.
+    json: () =>
+      status === 204 ? Promise.reject(new Error('204 has no body')) : Promise.resolve(body),
   } as unknown as Response;
 }
 
@@ -116,6 +120,18 @@ describe('<meeting-banner>', () => {
     const { el, calls } = mount({ eventsStatus: 503 });
     await settle();
     expect(el.shadowRoot?.querySelector('.banner')).toBeNull();
+    await el.refresh();
+    expect(calls.length).toBe(1);
+  });
+
+  it('renders nothing on 204 (no calendar connected), shows no error, and stops polling', async () => {
+    // The ordinary state of a board with no Google account linked. It is
+    // settled, not a failure — the server stopped answering 404 here so the
+    // browser's error reporter stops seeing a failed request on every load.
+    const { el, calls } = mount({ eventsStatus: 204 });
+    await settle();
+    expect(el.shadowRoot?.querySelector('.banner')).toBeNull();
+    expect(el.shadowRoot?.querySelector('.error')).toBeNull();
     await el.refresh();
     expect(calls.length).toBe(1);
   });

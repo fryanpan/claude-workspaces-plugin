@@ -152,9 +152,11 @@ export class MeetingBannerEl extends HTMLElement {
     if (this.stopped || this.disabled) return;
     try {
       const res = await this.fetchImpl('/api/calendar/events');
-      if (res.status === 503 || res.status === 404) {
-        // No calendar feature, or no Google account connected. Settled, not
-        // an error: stop asking until the next page load.
+      if (res.status === 503 || res.status === 204 || res.status === 404) {
+        // 503 no calendar feature; 204 the feature is there and no Google
+        // account is connected; 404 kept for a server that has neither route.
+        // All three are settled, not errors: stop asking until the next page
+        // load, and read no body — a 204 has none.
         this.disabled = true;
         this.events = [];
         this.render();
