@@ -518,17 +518,21 @@ export function renderBoardNotFound(workspaceId: string): string {
  * root sends them back through a list to find a board they were already on.
  */
 export function renderBoardMemberNotFound(workspaceId: string, rest: string): string {
-  const board = escape(shortAddress(workspaceId));
   const href = escape(`/workspaces/${encodeURIComponent(workspaceId)}`);
+  // No board id printed beside the link. The link carries it, and a reader
+  // cannot do anything with the id that the link does not already do — what
+  // the page owes them is the way out, not the metadata.
+  //
+  // And no guess at WHY the address is dead. "It may have been archived, or
+  // it may belong to a different board" is speculation the board itself
+  // answers one tap away, and it pushes the link further down the page.
   return renderNotFoundPage({
     title: 'Page not found',
     heading: 'Page not found',
     body: `${SERVER_IS_UP}
       <p>Nothing on this board answers to
-      <code>${escape(shortAddress(rest))}</code>. The page may be archived. It
-      may belong to a different board.</p>
-      <p><a href="${href}">Open the board</a> (<code>${board}</code>) and look
-      for the page there.</p>
+      <code>${escape(shortAddress(rest))}</code>.</p>
+      <p><a href="${href}">Open the board</a> and look for the page there.</p>
       <p class="quiet">Report this link to the person who sent it.
       <a href="/">All workspaces</a>.</p>`,
   });

@@ -79,7 +79,7 @@
  * that bypasses the middleware is the route most worth probing, and a table
  * that skipped it would be silent about exactly the path nothing else covers.
  */
-import { isBoardPageRequest, matchWorkspaceRoute } from '../workspace-path.ts';
+import { isBoardPageRequest, matchWorkspaceRoute, wantsJson } from '../workspace-path.ts';
 
 /**
  * The board a request is on, and what under it was addressed.
@@ -277,9 +277,15 @@ export function resolveWorkspaceScope<TBoard>(
    * is not a page this board serves and is exactly the address a person
    * pastes, and it used to answer a tab with a JSON body. So the rendering
    * question is asked of the request instead, and only of a GET.
+   *
+   * `?format=json` still wins over any header. It is the one thing in this
+   * server that means "answer me data whatever the path would otherwise do",
+   * and a browser-shaped `Accept` riding along with it — an `<iframe>`, a
+   * pasted debug URL — must not turn a caller's explicit ask into a page.
    */
   const render =
-    deps.notFoundPage && (page || (method === 'GET' && acceptsHtml(rq.accept ?? null)));
+    deps.notFoundPage &&
+    (page || (method === 'GET' && !wantsJson(url) && acceptsHtml(rq.accept ?? null)));
   const refuse = (
     status: number,
     body: unknown,

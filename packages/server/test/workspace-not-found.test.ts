@@ -112,6 +112,21 @@ describe('a wrong address under a board answers a readable page', () => {
     }
   });
 
+  it('lets ?format=json win over a browser Accept header', async () => {
+    // An explicit ask for data beats the header every time. An iframe or a
+    // pasted debug URL carries a browser's Accept alongside it, and turning
+    // that into a page would answer a caller something it cannot parse.
+    for (const path of [
+      '/workspaces/w-nope/review/d-nope?format=json',
+      `${boardHref()}/docs/d-nope?format=json`,
+    ]) {
+      const r = await local(path, { headers: { accept: 'text/html,application/xhtml+xml' } });
+      expect(r.status).toBe(404);
+      expect(r.headers.get('content-type') ?? '').not.toContain('text/html');
+      expect(JSON.parse(await r.text())).toHaveProperty('error');
+    }
+  });
+
   it('still answers a tool with JSON on the same gone-board addresses', async () => {
     // Only the Accept header decides the shape. A tool sends the wildcard
     // type, and what it parses is unchanged.
