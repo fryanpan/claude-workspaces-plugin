@@ -150,32 +150,32 @@ describe('fileEntries', () => {
     entries.map((e) => (e.kind === 'file' ? e.row.name : `[${burstLabel(e)}]`));
 
   /**
-   * The measured run, shape for shape: two ordinary edits, a digest written
-   * 4m16s after the seven subscription files it summarises (spread over 27s
+   * The measured run, shape for shape: two ordinary edits, a summary written
+   * 4m16s after the seven files it summarises (spread over 27s
    * and four sibling folders), then more ordinary edits.
    */
-  it('collapses a digest run into one entry and leaves the digest and every edit apart', () => {
+  it('collapses a generated run into one entry and leaves its summary and every edit apart', () => {
     const t = NOW;
     const files = [
-      file('learnings.md', t, 'docs/process'),
-      file('survey-estimate.md', t - 112 * SEC, 'docs'),
-      file('2026-09-12-digest.md', t - 60 * MIN, 'digests'),
-      file('dumb-networks.md', t - 60 * MIN - 256 * SEC, 'subscriptions/tide-letter'),
-      file('patchwork-quilt.md', t - 60 * MIN - 256 * SEC, 'subscriptions/tide-letter'),
-      file('driving-the-build.md', t - 60 * MIN - 268 * SEC, 'subscriptions/harbor-weekly'),
-      file('duo-threats.md', t - 60 * MIN - 275 * SEC, 'subscriptions/field-notes'),
-      file('personal-hub.md', t - 60 * MIN - 275 * SEC, 'subscriptions/field-notes'),
-      file('reading-list.md', t - 60 * MIN - 283 * SEC, 'subscriptions/estuary-review'),
-      file('embers.md', t - 60 * MIN - 283 * SEC, 'subscriptions/estuary-review'),
-      file('knowledge-base.md', t - 80 * MIN, ''),
+      file('trail-log.md', t, 'docs/crew'),
+      file('culvert-estimate.md', t - 112 * SEC, 'docs'),
+      file('2026-09-12-roundup.md', t - 60 * MIN, 'roundups'),
+      file('low-tide-notes.md', t - 60 * MIN - 256 * SEC, 'clippings/heron-post'),
+      file('boardwalk-repair.md', t - 60 * MIN - 256 * SEC, 'clippings/heron-post'),
+      file('eelgrass-count.md', t - 60 * MIN - 268 * SEC, 'clippings/marsh-ledger'),
+      file('kayak-launch.md', t - 60 * MIN - 275 * SEC, 'clippings/gull-gazette'),
+      file('oyster-beds.md', t - 60 * MIN - 275 * SEC, 'clippings/gull-gazette'),
+      file('levee-walk.md', t - 60 * MIN - 283 * SEC, 'clippings/reed-review'),
+      file('sandbar-map.md', t - 60 * MIN - 283 * SEC, 'clippings/reed-review'),
+      file('field-guide.md', t - 80 * MIN, ''),
     ];
     const entries = fileEntries(files);
     expect(shape(entries)).toEqual([
-      'learnings.md',
-      'survey-estimate.md',
-      '2026-09-12-digest.md',
-      '[7 files in subscriptions]',
-      'knowledge-base.md',
+      'trail-log.md',
+      'culvert-estimate.md',
+      '2026-09-12-roundup.md',
+      '[7 files in clippings]',
+      'field-guide.md',
     ]);
     const burst = entries[3];
     expect(burst?.kind === 'burst' ? burst.rows : []).toEqual(files.slice(3, 10));

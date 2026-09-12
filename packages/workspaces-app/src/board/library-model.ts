@@ -59,11 +59,10 @@ export type LibraryFileEntry =
 
 /**
  * How close together, in file-modified time, two neighbouring files must be
- * to belong to one burst. Measured on generator output in two local
- * research repos: inside a run the widest gap between consecutive files was
- * 48s (nine review files); the narrowest gap between a run and the file
- * before or after it was 112s (and a digest written 4m16s after its seven
- * subscription files). A minute sits between the two.
+ * to belong to one burst. Measured on generator output: inside a run the
+ * widest gap between consecutive files was 48s; the narrowest gap between a
+ * run and the file before or after it was 112s (and a summary written 4m16s
+ * after the seven files it summarised). A minute sits between the two.
  */
 export const BURST_GAP_MS = 60_000;
 
@@ -81,7 +80,7 @@ export const BURST_MIN = 3;
  * that writes seven files in half a minute takes one line of Recent files,
  * not seven, and everything a person touched before it stays in view.
  *
- * Grouped by time alone. Folder cannot decide it: a digest's run wrote to
+ * Grouped by time alone. Folder cannot decide it: one measured run wrote to
  * four sibling folders, and edits to one folder hours apart are not a burst.
  * A file with no clock reading is never in a burst — nothing measured puts it
  * beside anything.
@@ -125,7 +124,7 @@ function sharedFolder(rows: readonly LibraryRow[]): string {
   return common?.at(-1) ?? '';
 }
 
-/** "7 files in subscriptions", or "7 files" when they share no folder. */
+/** "7 files in clippings", or "7 files" when they share no folder. */
 export function burstLabel(entry: { rows: readonly LibraryRow[]; folder: string }): string {
   const n = `${entry.rows.length} files`;
   return entry.folder ? `${n} in ${entry.folder}` : n;

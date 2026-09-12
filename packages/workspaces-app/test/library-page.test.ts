@@ -147,20 +147,20 @@ describe('the Library front page', () => {
       folder: 'notes',
     });
     const burstRows = Array.from({ length: 7 }, (_, i) => ({
-      name: `2026-09-12-sub-${i + 1}.md`,
+      name: `2026-09-12-clip-${i + 1}.md`,
       at: NOW - 3 * HOUR - i * 4_000,
-      open: `subscriptions/s${i}/2026-09-12-sub-${i + 1}.md`,
-      folder: `subscriptions/s${i}`,
+      open: `clippings/c${i}/2026-09-12-clip-${i + 1}.md`,
+      folder: `clippings/c${i}`,
     }));
     const BURST: LibraryPayload = {
       project: { name: 'riverbend', path: '~/dev/riverbend' },
       meetings: [],
       files: [
-        edit('learnings.md', 1),
-        edit('survey.md', 2),
-        edit('digest.md', 2.9),
+        edit('trail-log.md', 1),
+        edit('culvert-estimate.md', 2),
+        edit('roundup.md', 2.9),
         ...burstRows,
-        edit('knowledge-base.md', 5),
+        edit('field-guide.md', 5),
         edit('handbook.md', 6),
         edit('tide-gauge.md', 7),
       ],
@@ -175,11 +175,11 @@ describe('the Library front page', () => {
       const { page, root } = drive({ payload: BURST });
       await page.open();
       expect(lines(root)).toEqual([
-        'learnings.md',
-        'survey.md',
-        'digest.md',
-        '7 files in subscriptions',
-        'knowledge-base.md',
+        'trail-log.md',
+        'culvert-estimate.md',
+        'roundup.md',
+        '7 files in clippings',
+        'field-guide.md',
         'handbook.md',
         'tide-gauge.md',
       ]);
