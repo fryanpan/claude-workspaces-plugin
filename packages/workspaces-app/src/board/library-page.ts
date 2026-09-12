@@ -23,7 +23,8 @@ import {
   type LibraryList,
   type LibraryPayload,
   type LibraryRow,
-  libraryAgo,
+  libraryWhenColumn,
+  meetingSubtitle,
   searchLibrary,
 } from './library-model.ts';
 
@@ -52,9 +53,15 @@ export interface LibraryPage {
   open(): Promise<void>;
 }
 
+/**
+ * The second column NAMES ITS CLOCK. "Modified" alone was read off two
+ * different measurements — a bound doc's last activity and an unopened file's
+ * mtime — and a reader comparing two rows of one list had no way to know.
+ * One clock now, and the header says which one it is.
+ */
 const COLUMNS: Record<'meetings' | 'files', [string, string]> = {
-  meetings: ['Title', 'When'],
-  files: ['Name', 'Modified'],
+  meetings: ['Title', 'Held'],
+  files: ['Name', 'File modified'],
 };
 const HEADINGS: Record<'meetings' | 'files', { recent: string; all: string; more: string }> = {
   meetings: { recent: 'Recent meetings', all: 'All meetings', more: 'See all meetings' },
@@ -86,20 +93,35 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   const search = root.querySelector('.library-search') as HTMLInputElement;
   const body = root.querySelector('.library-body') as HTMLElement;
 
-  /** One row. `hit` is a search result's highlighted name and list. */
-  function rowHtml(row: LibraryRow, hit?: { nameHtml: string; listHtml: string }): string {
+  /**
+   * One row: its name, a secondary line where the name alone does not
+   * identify it, and its one clock reading.
+   *
+   * `hit` is a search result's highlighted name and list. Both extras sit in
+   * the same middle slot, so the row stays one grid line at every width.
+   */
+  function rowHtml(
+    row: LibraryRow,
+    opts: { sub?: string; hit?: { nameHtml: string; listHtml: string } } = {},
+  ): string {
     const target = row.href
       ? `href="${escapeHtml(row.href)}"`
       : `href="#" data-open="${escapeHtml(row.open ?? '')}"`;
-    const name = hit?.nameHtml ?? escapeHtml(row.name);
-    const label = hit ? `<span class="library-hitpath">${hit.listHtml}</span>` : '';
-    return `<a class="library-row" ${target} title="${escapeHtml(row.name)}"><span class="library-name">${name}</span>${label}<span class="library-when">${escapeHtml(libraryAgo(row.at, now()))}</span></a>`;
+    const name = opts.hit?.nameHtml ?? escapeHtml(row.name);
+    const sub = opts.sub ? `<span class="library-sub">${escapeHtml(opts.sub)}</span>` : '';
+    const label = opts.hit ? `<span class="library-hitpath">${opts.hit.listHtml}</span>` : '';
+    return `<a class="library-row" ${target} title="${escapeHtml(row.name)}"><span class="library-main"><span class="library-name">${name}</span>${sub}${label}</span><span class="library-when">${escapeHtml(libraryWhenColumn(row, now()))}</span></a>`;
+  }
+
+  /** A meeting's "Sep 11, 22:43 · 5 min"; a file's name is its own label. */
+  function subFor(which: 'meetings' | 'files', row: LibraryRow): string | undefined {
+    return which === 'meetings' ? meetingSubtitle(row) || undefined : undefined;
   }
 
   function tableHtml(which: 'meetings' | 'files', rows: LibraryRow[]): string {
     const [c1, c2] = COLUMNS[which];
     const inner = rows.length
-      ? rows.map((r) => rowHtml(r)).join('')
+      ? rows.map((r) => rowHtml(r, { sub: subFor(which, r) })).join('')
       : `<div class="library-empty">No ${which} yet.</div>`;
     return `<div class="library-tbl"><div class="library-cols" aria-hidden="true"><span>${c1}</span><span>${c2}</span></div><div class="library-list">${inner}</div></div>`;
   }
@@ -115,7 +137,10 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     const needle = term.trim().toLowerCase();
     return `<div class="library-results">${hits
       .map(({ row, list: from }) =>
-        rowHtml(row, { nameHtml: markHtml(row.name, needle), listHtml: markHtml(from, needle) }),
+        rowHtml(row, {
+          sub: subFor(from, row),
+          hit: { nameHtml: markHtml(row.name, needle), listHtml: markHtml(from, needle) },
+        }),
       )
       .join('')}</div>`;
   }

@@ -33,10 +33,30 @@ import { scanFolderPaths } from './fs-scan.ts';
  */
 
 export interface LibraryRow {
-  /** The title a person knows it by: the doc's title, or the file's name. */
+  /**
+   * The title a person knows it by: a meeting's title, or — for anything in
+   * the Files list that has a file — THE FILE'S NAME, bound or not.
+   *
+   * A file row is named by its file for one reason: a doc's title is the
+   * first thing binding changes, so a row that switched to it read as though
+   * the file had been renamed the moment somebody opened it. It never was —
+   * nothing here writes to the filesystem — but a list whose labels move
+   * under the reader is the same failure as one that did.
+   */
   name: string;
-  /** Epoch ms — when the meeting was held, or when the file last changed. */
-  at: number;
+  /**
+   * Epoch ms. A meeting: when it started. A file: WHEN ITS BYTES LAST
+   * CHANGED ON DISK, for every row of the list and not only the ones nobody
+   * has opened — the column used to mix that with a doc's last activity,
+   * so two rows of the same list answered two different questions.
+   *
+   * Absent for a file this server cannot stat: a doc bound to a path that
+   * has gone, or to something that is not a file at all. The page says so
+   * rather than substituting a clock it does have.
+   */
+  at?: number;
+  /** How long the meeting ran, for one that has ended. Meetings only. */
+  durationMs?: number;
   /** Where the row opens: a doc's page on this board, or a mounted file. */
   href?: string;
   /** A project markdown file with no doc on this board yet: its path from the
@@ -76,8 +96,18 @@ export interface LibrarySources {
   docs: readonly DocMeta[];
   /** A doc's repo+path identity (`doc-key.ts`), when it has one. */
   docKeyOf: (docId: string) => string | undefined;
-  /** When the doc's most recent meeting started, or undefined if it never held one. */
-  lastMeetingAt: (docId: string) => number | undefined;
+  /** The doc's most recent meeting, or undefined if it never held one. */
+  lastMeeting: (docId: string) => { startedAt: number; endedAt: number | null } | undefined;
+  /**
+   * When the file this doc is bound to last changed on disk, or undefined
+   * when there is no file here to read.
+   *
+   * The Files list's ONE clock. A doc's own `lastActivityAt` is a different
+   * measurement — it moves for a comment, and not for a `git pull` that
+   * rewrote the file — so a list built from both answered "modified" two
+   * ways in one column.
+   */
+  fileMtime: (docId: string) => number | undefined;
   /** The checkout a project's files are read from, or null when none is left. */
   projectRoot: (repoKey: string) => string | null;
   /** The project's markdown files. */
@@ -90,8 +120,16 @@ export interface LibrarySources {
 
 const isMarkdownPath = (relPath: string): boolean => relPath.toLowerCase().endsWith('.md');
 
-/** Most recent first; ties by name so the order is stable across loads. */
+/**
+ * Most recent first; ties by name so the order is stable across loads. A row
+ * whose clock could not be read sorts after every row that has one — it is
+ * not "oldest", it is unknown, and putting it at the top would be a guess.
+ */
 function byRecency(a: LibraryRow, b: LibraryRow): number {
+  if (a.at === undefined || b.at === undefined) {
+    if (a.at !== b.at) return a.at === undefined ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  }
   return b.at - a.at || a.name.localeCompare(b.name);
 }
 
@@ -243,18 +281,36 @@ function docHref(workspaceId: string, meta: DocMeta): string | undefined {
   return undefined;
 }
 
+/** A board doc bound for the Files list, held until every path is known. */
+interface DocFileRow {
+  /** The repo its key names, when it has one. */
+  repoKey?: string;
+  /** Its path in that repo — what it is NAMED by, when the repo is this
+   *  board's project and the project is visible from here. */
+  relPath?: string;
+  /** What it reads as when there is no file name to go by. */
+  title: string;
+  at?: number;
+  href: string;
+}
+
 /** Build the Library for one board. */
 export function buildLibrary(src: LibrarySources): LibraryPayload {
   const meetings: LibraryRow[] = [];
-  const files: LibraryRow[] = [];
+  const docFiles: DocFileRow[] = [];
 
   for (const meta of src.docs) {
     // A review's member (a diff file, a folder bind's opened file) belongs to
     // that review's own page, and a task's description is the task. Neither
     // is a document somebody files on a board.
     if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
+    const href = docHref(src.workspaceId, meta);
+    if (!href) continue;
     const key = src.docKeyOf(meta.docId);
-    const heldAt = src.lastMeetingAt(meta.docId);
+    const parsed = key ? parseDocKey(key) : undefined;
+    const keyRel = parsed?.relPath;
+    const title = meta.title?.trim() || (keyRel ? posix.basename(keyRel) : meta.docId);
+    const held = src.lastMeeting(meta.docId);
     /**
      * Every huddle is a meeting, whichever button opened it.
      *
@@ -266,33 +322,69 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
      * both.
      */
     const isHuddle = meta.huddle === true;
-    const keyRel = key ? parseDocKey(key)?.relPath : undefined;
-    const name = meta.title?.trim() || (keyRel ? posix.basename(keyRel) : meta.docId);
-    if (heldAt !== undefined || isHuddle) {
-      const href = docHref(src.workspaceId, meta);
-      if (href) meetings.push({ name, at: heldAt ?? meta.createdAt, href });
+    if (held !== undefined || isHuddle) {
+      // A meeting keeps its TITLE: its file is a huddle note in the data dir,
+      // named after nothing a person chose.
+      const startedAt = held?.startedAt ?? meta.createdAt;
+      const ended = held?.endedAt ?? null;
+      meetings.push({
+        name: title,
+        at: startedAt,
+        href,
+        durationMs: ended !== null && ended > startedAt ? ended - startedAt : undefined,
+      });
       continue;
     }
-    const href = docHref(src.workspaceId, meta);
-    if (href) files.push({ name, at: meta.lastActivityAt ?? meta.createdAt, href });
+    // The Files list's one clock, for a bound doc exactly as for a loose
+    // file: the bytes' own mtime.
+    docFiles.push({
+      repoKey: parsed?.repoKey,
+      relPath: keyRel,
+      title,
+      href,
+      at: src.fileMtime(meta.docId),
+    });
   }
 
   const repoKey = projectRepoKey(src.docs, src.docKeyOf);
   const root = repoKey ? src.projectRoot(repoKey) : null;
-  let project: LibraryProject | null = null;
-  if (repoKey && root) {
-    project = {
-      name: projectName(repoKey, root),
-      path: abbreviateHome(root, src.home ?? homedir()),
+  const loose = repoKey && root ? looseFiles(src, repoKey, root) : [];
+  const project: LibraryProject | null =
+    repoKey && root
+      ? { name: projectName(repoKey, root), path: abbreviateHome(root, src.home ?? homedir()) }
+      : null;
+
+  // A doc is named by its file only when that file is one THIS LISTING
+  // ALREADY SHOWS — the project's, and the project visible from here. A doc
+  // of some other repo, or any doc at all when a local-only project is hidden
+  // off the box, keeps its title: a filename the listing itself is refusing
+  // to print must not arrive by the other door.
+  const named = (d: DocFileRow): string | undefined =>
+    root !== null && d.repoKey === repoKey ? d.relPath : undefined;
+  // ONE naming pass over every file the list shows, bound docs included. Run
+  // separately, a file and the doc that later held it disambiguated against
+  // different sets, so opening `docs/README.md` could move the row from
+  // `docs/README.md` to `README.md` — the rename this list must not perform.
+  const names = displayNames([
+    ...docFiles.flatMap((d) => {
+      const rel = named(d);
+      return rel === undefined ? [] : [rel];
+    }),
+    ...loose.map((f) => f.relPath),
+  ]);
+  const files: LibraryRow[] = docFiles.map((d) => {
+    const rel = named(d);
+    return {
+      name: (rel === undefined ? undefined : names.get(rel)) ?? d.title,
+      at: d.at,
+      href: d.href,
     };
-    const loose = looseFiles(src, repoKey, root);
-    const names = displayNames(loose.map((f) => f.relPath));
-    for (const f of loose) {
-      const name = names.get(f.relPath) ?? f.relPath;
-      if (isMarkdownPath(f.relPath)) files.push({ name, at: f.mtimeMs, open: f.relPath });
-      else if (f.fileId) {
-        files.push({ name, at: f.mtimeMs, href: `/mounts/${encodeURIComponent(f.fileId)}/raw` });
-      }
+  });
+  for (const f of loose) {
+    const name = names.get(f.relPath) ?? f.relPath;
+    if (isMarkdownPath(f.relPath)) files.push({ name, at: f.mtimeMs, open: f.relPath });
+    else if (f.fileId) {
+      files.push({ name, at: f.mtimeMs, href: `/mounts/${encodeURIComponent(f.fileId)}/raw` });
     }
   }
 
@@ -323,7 +415,16 @@ export function createMarkdownLister(
     const files: ProjectFile[] = [];
     for (const relPath of scanFolderPaths(root)) {
       if (!isMarkdownPath(relPath)) continue;
-      const st = statSync(join(root, relPath), { throwIfNoEntry: false });
+      // `throwIfNoEntry` covers ENOENT alone. Between the walk and this stat a
+      // folder can become a file (ENOTDIR) or lose its permissions (EACCES),
+      // and the page owes the reader every other file regardless — so one
+      // unreadable path drops its own row rather than the whole listing.
+      let st: ReturnType<typeof statSync> | undefined;
+      try {
+        st = statSync(join(root, relPath), { throwIfNoEntry: false });
+      } catch {
+        continue;
+      }
       if (st?.isFile()) files.push({ relPath, mtimeMs: st.mtimeMs });
     }
     cache.set(root, { at: now(), files });

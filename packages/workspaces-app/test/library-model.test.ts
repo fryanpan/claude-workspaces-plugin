@@ -5,8 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   LIBRARY_MAX_HITS,
+  LIBRARY_NO_TIME,
   type LibraryPayload,
   libraryAgo,
+  libraryLength,
+  libraryWhenColumn,
+  meetingSubtitle,
   searchLibrary,
 } from '../src/board/library-model.ts';
 
@@ -35,6 +39,49 @@ describe('libraryAgo', () => {
 
   it('reads a time slightly in the future as just now, not a negative age', () => {
     expect(libraryAgo(NOW + 5_000, NOW)).toBe('just now');
+  });
+});
+
+describe('the time column', () => {
+  it('reads an em dash, never a substituted clock, when the row carries none', () => {
+    // Positive control on the same function: a row that HAS one still reads.
+    expect(libraryWhenColumn({ name: 'Volunteer handbook', at: NOW - HOUR }, NOW)).toBe('1h ago');
+    expect(libraryWhenColumn({ name: 'A doc whose file went away' }, NOW)).toBe(LIBRARY_NO_TIME);
+  });
+});
+
+describe('a meeting row', () => {
+  it.each([
+    [5 * MIN, '5 min'],
+    [30_000, '1 min'],
+    [47 * MIN, '47 min'],
+    [HOUR, '1 hr'],
+    [72 * MIN, '1 hr 12 min'],
+  ])('%i ms of recording reads %s', (ms, text) => {
+    expect(libraryLength(ms)).toBe(text);
+  });
+
+  /**
+   * The finding this exists for: a board's meetings are all titled from the
+   * clock at the minute they opened, so the LIST has to separate them.
+   */
+  it('is told apart from another of the same title by when it ran and for how long', () => {
+    const fmt = { locale: 'en-US', timeZone: 'UTC' };
+    const one = { name: 'Meeting notes 2026-09-11 16:11', at: NOW, durationMs: 5 * MIN };
+    const two = {
+      name: 'Meeting notes 2026-09-11 16:11',
+      at: NOW - 26 * HOUR,
+      durationMs: 47 * MIN,
+    };
+    expect(meetingSubtitle(one, fmt)).toBe('Nov 14, 22:13 · 5 min');
+    expect(meetingSubtitle(two, fmt)).toBe('Nov 13, 20:13 · 47 min');
+    expect(meetingSubtitle(one, fmt)).not.toBe(meetingSubtitle(two, fmt));
+  });
+
+  it('claims no length while it is still running, and nothing at all with no start', () => {
+    const fmt = { locale: 'en-US', timeZone: 'UTC' };
+    expect(meetingSubtitle({ name: 'Live', at: NOW }, fmt)).toBe('Nov 14, 22:13');
+    expect(meetingSubtitle({ name: 'Nothing', href: '/m/9' }, fmt)).toBe('');
   });
 });
 

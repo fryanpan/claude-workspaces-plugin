@@ -196,15 +196,24 @@ describe('a split leaves the words still being spoken where they were', () => {
 /**
  * The settle that cannot lift.
  *
- * A tick that composes nothing reports `empty`, and the server drops those
- * turns from its carry — so they sit at the head of the live stream for the
- * rest of the meeting and every later tick composes turns with a survivor in
- * FRONT of them. Lifted into a chunk anyway, those words leave the middle of
- * the run and the hold pulls the stream a whole line up onto them: 157.5px of
- * one line painted over another, measured in Chrome at 1180x820 and again at
- * 430. The geometry is `meeting-live-overdraw.test.ts`, which drives a whole
- * meeting through a real browser; what is checked here is the decision — which
- * settle each split gets, and the two beats the in-place one runs on.
+ * A later tick can compose words with a SURVIVOR IN FRONT of them. Lifted into
+ * a chunk anyway, those words leave the middle of the run and the hold pulls
+ * the stream a whole line up onto them: 157.5px of one line painted over
+ * another, measured in Chrome at 1180x820 and again at 430. The geometry is
+ * `meeting-live-overdraw.test.ts`, which drives a whole meeting through a real
+ * browser; what is checked here is the decision — which settle each split
+ * gets, and the two beats the in-place one runs on.
+ *
+ * THE SURVIVOR IS A CARRIED TURN, and that is how the stream comes to have
+ * one. A failed tick's words go back into the session's `carry`; the next tick
+ * composes them, but `composeTick` announces `composing` for THAT TICK'S OWN
+ * turns only (meeting-notes.ts), so the carried ones are never named and stay
+ * unflagged at the head of the run.
+ *
+ * It used to be an `empty` tick instead, whose words the server drops from its
+ * carry and which therefore sat at the head of the stream for the rest of the
+ * meeting. They do not sit there any more — see the live-zone suite — so the
+ * case is built on the route that is still real.
  */
 describe('words with a survivor in front of them fade where they sit', () => {
   beforeEach(() => {
@@ -214,14 +223,15 @@ describe('words with a survivor in front of them fade where they sit', () => {
     vi.useRealTimers();
   });
 
-  /** A stream whose head has been stranded by an empty tick, and a later tick
-   *  composing the words after it. */
+  /** A stream whose head is a carried turn — a failed tick's words, which the
+   *  next tick composes without naming — and a later tick composing the words
+   *  after it. */
   const stranded = (): ReturnType<typeof createMeetingLiveZone> => {
     const zone = createMeetingLiveZone({ parent, now, reducedMotion: () => false });
     zone.begin(now());
     zone.onTurn({ turn: 0, text: 'the words no note ever covered', final: true });
     zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
-    zone.onProgress({ tick: 1, phase: 'empty', turns: [0] });
+    zone.onProgress({ tick: 1, phase: 'failed', turns: [0] });
     zone.onTurn({ turn: 1, text: 'and what was said after them', final: true });
     zone.onTurn({ turn: 2, text: 'still talking', final: false });
     zone.onProgress({ tick: 2, phase: 'composing', turns: [1] });
@@ -277,12 +287,24 @@ describe('words with a survivor in front of them fade where they sit', () => {
     expect(textOf()).toContain('the words no note ever covered');
   });
 
-  it('a tick that composes nothing gives its words straight back', () => {
+  it('a tick whose words are carried gives them straight back', () => {
     const zone = stranded();
-    zone.onProgress({ tick: 2, phase: 'empty', turns: [1] });
+    zone.onProgress({ tick: 2, phase: 'failed', turns: [1] });
     expect(turnEls().some((el) => el.classList.contains('lz-chunk'))).toBe(false);
     expect(textOf()).toContain('and what was said after them');
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a tick that composes nothing takes its words with it, in place', () => {
+    // No chunk to hand to a settle, and no note to wait for: the words fade
+    // where they sit and the stream closes over them. What must NOT happen is
+    // the old answer — leaving them in the run, where they read as still on
+    // their way into the notes for the rest of the meeting.
+    const zone = stranded();
+    zone.onProgress({ tick: 2, phase: 'empty', turns: [1] });
+    expect(turnEls().some((el) => el.classList.contains('lz-chunk'))).toBe(false);
+    vi.advanceTimersByTime(FADE_MS + 1);
+    expect(textOf()).not.toContain('and what was said after them');
   });
 
   it('a tick withdrawing mid-fade brings its words back, beat and all', () => {
@@ -314,7 +336,7 @@ describe('words with a survivor in front of them fade where they sit', () => {
     vi.advanceTimersByTime(NOTE_LAND_MS);
     zone.onTurn({ turn: 3, text: 'the next thing said', final: true });
     zone.onProgress({ tick: 3, phase: 'composing', turns: [3] });
-    zone.onProgress({ tick: 3, phase: 'empty', turns: [3] });
+    zone.onProgress({ tick: 3, phase: 'failed', turns: [3] });
 
     // Tick 3 withdrew its own words; tick 2's fade is still running on its
     // own clock and finishes on time.
