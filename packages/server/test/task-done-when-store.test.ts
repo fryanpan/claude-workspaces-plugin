@@ -96,6 +96,20 @@ describe('parseDoneWhenInput', () => {
     expect(parseDoneWhenInput({ text: 'not a list' }).ok).toBe(false);
   });
 
+  it('refuses a sequence that names one line id twice', () => {
+    const parsed = parseDoneWhenInput([
+      { id: 'd-0', text: 'the outcome' },
+      { id: 'd-0', text: 'the same outcome under another name' },
+    ]);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error).toBe('bad-lines');
+    expect(parsed.message).toContain('the same outcome under another name');
+    // Two lines with one identity make every later verb ambiguous: a report
+    // reaches one of them and an owner's check the other.
+    expect(parseDoneWhenInput([{ text: 'a' }, { text: 'b' }]).ok).toBe(true);
+  });
+
   it('refuses more lines than a task may carry', () => {
     const many = Array.from({ length: 51 }, (_, i) => ({ text: `line ${i}` }));
     const parsed = parseDoneWhenInput(many);
@@ -353,6 +367,34 @@ describe('TaskDoneWhenStore.setLines', () => {
 
     expect(res.ok && res.closed).toBe(true);
     expect(moves).toEqual([{ taskId: 't-1', to: 'done' }]);
+  });
+
+  it('refuses to add an open line to a task that is already done', () => {
+    const task = makeTask([
+      { id: 'd-0', text: 'proved', verdict: 'met', proof: [{ text: 'ran' }] },
+    ]);
+    task.status = 'done';
+    const { store } = fake(task);
+
+    const res = store.setLines(
+      task.id,
+      [{ id: 'd-0', text: 'proved' }, { text: 'something nobody proved' }],
+      AGENT,
+    );
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe('task-done');
+      expect(res.message).toContain('something nobody proved');
+    }
+    expect(task.doneWhen).toHaveLength(1);
+
+    // Editing the words of a line already met is still fine — the invariant
+    // is about OPEN lines, not about the list being frozen.
+    expect(
+      store.setLines(task.id, [{ id: 'd-0', text: 'proved, in better words' }], AGENT).ok,
+    ).toBe(true);
+    expect(task.doneWhen?.[0]?.text).toBe('proved, in better words');
   });
 
   it('refuses a task that does not exist', () => {

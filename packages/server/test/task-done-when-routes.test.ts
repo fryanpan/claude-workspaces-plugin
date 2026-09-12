@@ -235,7 +235,9 @@ describe('done-when lines on a task', () => {
       to: 'done',
       author: AGENT,
     });
-    expect(refused.status).toBeGreaterThanOrEqual(400);
+    // A gate said no to a well-formed request — the same 409 a blocker and a
+    // plan hold return, so one shape covers every "the gate said no".
+    expect(refused.status).toBe(409);
     const body = (await refused.json()) as { error?: string; message?: string };
     expect(body.error).toBe('done-when-open');
     expect(body.message).toContain('the second outcome is still open');
@@ -254,6 +256,29 @@ describe('done-when lines on a task', () => {
     });
     expect(moved.status).toBe(200);
     expect((await detail(task.id)).status).toBe('done');
+  });
+
+  it('refuses to hand a finished task a line that is not met', async () => {
+    const task = await mkTask('Agent cannot reopen the question by the back door');
+    const moved = await post(`/workspaces/${ws}/tasks/${task.id}/transition`, {
+      to: 'done',
+      author: AGENT,
+    });
+    expect(moved.status).toBe(200);
+
+    // The panel hides the list on a done task, but this route and
+    // `rewrite_task` both reach the verb directly.
+    const refused = await post(`/workspaces/${ws}/tasks/${task.id}/done-when`, {
+      author: AGENT,
+      lines: [{ text: 'an outcome nobody proved' }],
+    });
+    expect(refused.status).toBe(400);
+    const body = (await refused.json()) as { error?: string; message?: string };
+    expect(body.error).toBe('task-done');
+    expect(body.message).toContain('an outcome nobody proved');
+    const after = await detail(task.id);
+    expect(after.doneWhen).toBeUndefined();
+    expect(after.status).toBe('done');
   });
 
   it('clears the list with an empty array, and refuses a write that names no lines at all', async () => {

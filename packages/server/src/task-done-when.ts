@@ -24,6 +24,7 @@ import {
   type DoneWhenProof,
   type DoneWhenVerdict,
   doneWhenComplete,
+  firstOpenDoneWhen,
 } from '@claude-workspaces/core/done-when';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
@@ -64,6 +65,7 @@ export type DoneWhenError =
   | 'proof-required'
   | 'not-a-person'
   | 'not-yours'
+  | 'task-done'
   | 'no-lines';
 
 export type DoneWhenResult =
@@ -109,6 +111,7 @@ export function parseDoneWhenInput(
     };
   }
   const lines: DoneWhenInput[] = [];
+  const seen = new Set<string>();
   for (const entry of raw) {
     const source = typeof entry === 'string' ? { text: entry } : (entry as DoneWhenInput | null);
     const text = typeof source?.text === 'string' ? source.text.trim() : '';
@@ -127,6 +130,19 @@ export function parseDoneWhenInput(
       };
     }
     const id = typeof source?.id === 'string' && source.id.trim() !== '' ? source.id : undefined;
+    // One line per id. A sequence naming the same id twice would mint two
+    // stored lines with one identity, and the verbs downstream disagree about
+    // which of them they mean — a report reaches the first through a Map, an
+    // owner's check reaches the first through `find`, and the panel draws two
+    // siblings under one key. Send a line with no id to add one.
+    if (id !== undefined && seen.has(id)) {
+      return {
+        ok: false,
+        error: 'bad-lines',
+        message: `"${text}" repeats a done-when line id — each line appears once, and a new line carries no id`,
+      };
+    }
+    if (id !== undefined) seen.add(id);
     lines.push({ text, ...(id !== undefined ? { id } : {}) });
   }
   return { ok: true, lines };
@@ -215,6 +231,21 @@ export class TaskDoneWhenStore {
       };
     }
     const lines = buildDoneWhenLines(inputs, task.doneWhen);
+    // A FINISHED ticket may not be handed an open criterion. The panel hides
+    // the list on a done task, but this verb is reachable from `rewrite_task`
+    // and from REST, and a list written there would leave the row sitting in
+    // Done with something still unmet — the one state this whole feature says
+    // cannot exist. Editing the words of a met line, or clearing the list, is
+    // still fine. Moving the ticket back out of Done is how you reopen the
+    // question.
+    const open = firstOpenDoneWhen(lines);
+    if (open !== undefined && task.status === 'done') {
+      return {
+        ok: false,
+        error: 'task-done',
+        message: `"${task.title}" is already done, so "${open.text}" cannot be added as an open line — move the task out of Done first`,
+      };
+    }
     // The FIELD goes away when the list is emptied rather than becoming `[]`:
     // a stored empty array would read as "this task has criteria" everywhere
     // that asks whether the field is present.
