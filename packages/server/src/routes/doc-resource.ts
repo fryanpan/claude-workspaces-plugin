@@ -149,7 +149,7 @@ export async function handleDocResourceCore(
     // already a display name everywhere the board shows one.
     const lead = boardWs ? taskStore.getWorkspace(boardWs)?.leadAgentId : undefined;
     return j(200, {
-      meta: metaFor(doc.meta),
+      meta: metaFor({ ...doc.meta, lastActivityAt: docStore.activityAt(docId) }),
       ...(taskRefs.length > 0 ? { tasks: taskRefs } : {}),
       ...(boardWs ? { hubWorkspaceId: boardWs } : {}),
       ...(lead !== undefined ? { leadAgentId: lead } : {}),

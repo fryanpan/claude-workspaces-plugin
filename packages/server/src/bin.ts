@@ -140,6 +140,7 @@ const {
   calendarBot,
   notesComposer,
   taskExtractor,
+  titleNamer,
   pluginRefresher,
   deployer,
 } = deps;
@@ -270,7 +271,9 @@ while (!handle) {
       ...(transcription ? { transcription } : {}),
       ...(meetingBot ? { meetingBot } : {}),
       ...(meetingBotWebhookSecret ? { meetingBotWebhookSecret } : {}),
-      ...(notesComposer ? { meetingNotes: { composer: notesComposer, taskExtractor } } : {}),
+      ...(notesComposer
+        ? { meetingNotes: { composer: notesComposer, taskExtractor, titleNamer } }
+        : {}),
       ...(pluginRefresher ? { pluginRefresher } : {}),
       ...(deployer ? { deployer } : {}),
       // The one construction of the secret writer, and the reason the option

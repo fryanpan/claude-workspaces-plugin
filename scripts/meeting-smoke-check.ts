@@ -47,6 +47,10 @@
  *      composer call here answers with exactly that — a heading and a bullet
  *      with nothing in it — and the check asks whether the words survived it.
  *      It FAILS on the base commit of this branch.
+ *   5. THE MEETING NAMES ITSELF. The doc starts as the default "Meeting"; the
+ *      namer (a stub — still no model call) is asked from the notes the
+ *      meeting wrote, and the topic reaches the reader's page through the
+ *      synced title rather than only the server's copy.
  *
  * WHAT IT DOES NOT COVER. One doc, one speaker, one width, four turns, no
  * model. It is a smoke test, not a notes-quality eval — `bun run notes:eval`
@@ -189,6 +193,8 @@ const EMPTY_TICK_CALL = 3;
 
 /** How long a browser-side condition may take before it is a failure. */
 const SETTLE_MS = 8_000;
+/** What the stub namer calls the meeting (assertion 5). */
+const TOPIC = 'Survey boat schedule';
 /** How long the meeting may run before it has to have produced its ticks. */
 const MEETING_MS = 30_000;
 
@@ -273,24 +279,21 @@ async function postJson(url: string, body: unknown): Promise<Record<string, unkn
   return (await res.json()) as Record<string, unknown>;
 }
 
-/** A board and a doc to hold the meeting on, seeded over the real routes. */
-async function seedDoc(base: string, dataDir: string): Promise<{ ws: string; docId: string }> {
+/**
+ * A board and a meeting to hold, seeded over the real routes — the call the
+ * Board's "Have a meeting" makes, so the doc is a huddle titled "Meeting"
+ * exactly as a person's is.
+ */
+async function seedDoc(base: string): Promise<{ ws: string; docId: string }> {
   const board = (await postJson(`${base}/workspaces`, {
     name: 'meeting smoke check',
     author: { id: 'agent:meeting-smoke', name: 'meeting-smoke', kind: 'agent' },
   })) as { workspace?: { id?: string } };
   const ws = board.workspace?.id;
   if (!ws) throw new Error(`no workspace id: ${JSON.stringify(board)}`);
-  const docId = 'meeting-smoke';
-  const path = join(dataDir, `${docId}.md`);
-  writeFileSync(path, '# Survey planning\n\nWhat we agreed before the recording started.\n');
-  await postJson(`${base}/workspaces/${ws}/docs`, {
-    docId,
-    type: 'markdown',
-    title: 'Survey planning',
-    sourceUrl: path,
-  });
-  return { ws, docId };
+  const huddle = (await postJson(`${base}/workspaces/${ws}/huddles`, {})) as { docId?: string };
+  if (!huddle.docId) throw new Error(`no huddle doc: ${JSON.stringify(huddle)}`);
+  return { ws, docId: huddle.docId };
 }
 
 /** Poll until `pred` reads true in the page, or fail saying what was wanted. */
@@ -322,6 +325,8 @@ async function run(o: Options): Promise<number> {
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-smoke-data-'));
   const releaseRoot = mkdtempSync(join(tmpdir(), 'cw-meeting-smoke-release-'));
   const composed: Composed[] = [];
+  /** The notes the namer was handed, one entry per call (assertion 5). */
+  const named: string[] = [];
   /** Every line the server printed, so the summary's absence is visible. */
   const printed: string[] = [];
   const realLog = console.log;
@@ -392,10 +397,14 @@ async function run(o: Options): Promise<number> {
         composer: scriptedComposer(composed),
         cadenceMs: CADENCE_MS,
         quietMs: QUIET_MS,
+        titleNamer: async ({ notes }) => {
+          named.push(notes);
+          return TOPIC;
+        },
       },
     });
     const base = `http://127.0.0.1:${server.port}`;
-    const { ws, docId } = await seedDoc(base, dataDir);
+    const { ws, docId } = await seedDoc(base);
     // `?huddle=1&mode=solo` is the address the Board writes when somebody
     // presses "Have a meeting", and the editor starts the capture on load —
     // so the meeting begins the way a person's does, with no synthetic click.
@@ -540,6 +549,18 @@ async function run(o: Options): Promise<number> {
       'the meeting summary line',
     );
 
+    // 5. THE MEETING NAMES ITSELF, from what it wrote, on the reader's page.
+    await untilHere(() => named.length > 0, SETTLE_MS, 'the namer to be asked for a title');
+    if (!wantedNotes.some((s) => named.some((n) => n.includes(s)))) {
+      throw new Error('the namer was not handed the notes this meeting wrote');
+    }
+    await until(
+      cdp,
+      `document.querySelector('.doc-heading-title')?.textContent === ${js(TOPIC)}`,
+      SETTLE_MS,
+      `the page's heading to show the meeting's topic (${JSON.stringify(TOPIC)})`,
+    );
+
     if (o.shot !== undefined) {
       const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
       mkdirSync(dirname(o.shot), { recursive: true });
@@ -549,7 +570,7 @@ async function run(o: Options): Promise<number> {
 
     const line = printed.find((l) => summary.test(l)) ?? '';
     log(
-      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, one composed nothing and its words left, ${items} note lines, no blank bullet, and the first thing said is in them.`,
+      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, one composed nothing and its words left, ${items} note lines, no blank bullet, the first thing said is in them, and the meeting named itself.`,
     );
     log(`   ${line.trim()}`);
     return 0;

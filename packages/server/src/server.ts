@@ -43,6 +43,7 @@ import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
 import { MEETING_CAPTURE_ACTOR } from './meeting-task-capture.ts';
+import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
@@ -434,6 +435,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ? withServerNotesSinks(opts.meetingNotes, {
           docStore: () => docStore,
           tasks: () => taskStore,
+          // The meeting namer's reads and its guarded title write.
+          titleStore: () => docStore,
           // One reader: the legacy-transcript removal, which must not take a
           // `Raw transcript` heading out of a doc bound into somebody's
           // working tree, where the old note-taker never wrote one.
@@ -2893,6 +2896,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // over the same 99 rows, and the abandoned one still calling the API.
   // Reaching this line is what makes a server real.
   void rescoreStaleEffortEstimates();
+  // The old clock titles are renamed here for the same reason: once, by the
+  // server that was kept, never blocking the boot it follows.
+  void retitleClockTitlesAtBoot(docStore, opts.meetingNotes?.titleNamer ?? null);
 
   /**
    * The base every human-facing URL this server emits is built on.

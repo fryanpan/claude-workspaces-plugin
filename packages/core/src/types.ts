@@ -62,6 +62,35 @@ export function docKindLabel(kind?: HuddleKind): string {
 }
 
 /**
+ * What a new meeting is called before anything names it: "Meeting", or
+ * "Planning Meeting" for the Board's "Make a plan" flow. No clock — the doc
+ * record carries when it was created, and a title that is a timestamp is a
+ * column of timestamps a week later (Bryan, 2026-09-12).
+ */
+export function defaultMeetingTitle(kind?: HuddleKind): string {
+  return kind === 'plan' ? 'Planning Meeting' : 'Meeting';
+}
+
+/**
+ * Who chose a doc's title, which decides whether the meeting namer may still
+ * replace it.
+ *  - `default`: minted by the server ("Meeting") — the namer may replace it.
+ *  - `auto`: the namer's topic — the namer may replace it again.
+ *  - `given`: supplied at creation by a caller that knew the name (a calendar
+ *    event's title) — never replaced.
+ *  - `person`: a rename, by a person or an agent — never replaced.
+ * Absent on every doc from before this existed, which reads as `given`:
+ * nothing rewrites an old title except the one-time clock-title migration,
+ * and that matches the exact minted string before it writes.
+ */
+export type DocTitleSource = 'default' | 'auto' | 'given' | 'person';
+
+/** May the namer write this doc's title? Only while nobody has named it. */
+export function titleIsUnnamed(source: DocTitleSource | undefined): boolean {
+  return source === 'default' || source === 'auto';
+}
+
+/**
  * A doc's declared origin repo: where its on-disk copy belongs, as
  * repo + branch + path-within-the-repo. `repoRoot` may be any checkout of
  * the repo — the server resolves the repo's identity (git common dir) from
@@ -241,6 +270,10 @@ export interface DocMeta {
    * the document.
    */
   huddleKind?: HuddleKind;
+  /** Who chose `title` — see `DocTitleSource`. In the CRDT meta beside the
+   *  title: it describes the document, and the editor dresses a default
+   *  title as a placeholder. */
+  titleSource?: DocTitleSource;
   /**
    * Optional provenance passthrough captured at create/bind time, so the
    * activity event stream can attribute a doc to the agent + session that

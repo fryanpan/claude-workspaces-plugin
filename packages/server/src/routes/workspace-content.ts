@@ -246,7 +246,7 @@ export async function handleWorkspaceContent(
   }
   // --- REST: start a huddle ---
   // The Board's "Make a plan" / "Have a meeting" buttons. ONE call: a
-  // workspace-tied markdown doc, titled by its kind and the clock, empty or headed
+  // workspace-tied markdown doc, titled "Meeting" or "Planning Meeting", empty or headed
   // by the topic, filed on this board exactly as every other board doc
   // is (so `list_docs`, the board's docs list and the board fan-out see
   // it with no new verb), flagged `huddle`, and answered with where to
@@ -301,14 +301,16 @@ export async function handleWorkspaceContent(
     // for a name that already resolves, and a huddle is always new.
     let created = docStore.createForCaller(huddleAlias(startedAt), {
       type: 'markdown',
-      title: huddleTitle(startedAt, parsedKind.kind),
+      title: huddleTitle(parsedKind.kind),
+      titleSource: 'default',
       huddle: true,
       huddleKind: parsedKind.kind,
     });
     if (created.ok && !created.minted) {
       created = docStore.createForCaller(huddleAlias(startedAt), {
         type: 'markdown',
-        title: huddleTitle(startedAt, parsedKind.kind),
+        title: huddleTitle(parsedKind.kind),
+        titleSource: 'default',
         huddle: true,
         huddleKind: parsedKind.kind,
       });

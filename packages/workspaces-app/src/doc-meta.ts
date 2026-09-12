@@ -36,6 +36,7 @@ export async function fetchDocMeta(docId: string): Promise<DocMeta> {
         diffTarget?: string;
         huddle?: boolean;
         huddleKind?: HuddleKind;
+        lastActivityAt?: number;
       };
       // Top-level, NOT under `meta`: `meta.workspaceId` is the GROUPING id of
       // a diff review / folder browse, which is a different thing from the
@@ -58,6 +59,10 @@ export async function fetchDocMeta(docId: string): Promise<DocMeta> {
       // The crumb's word — "Plan" or "Meeting notes" — comes off this, so a
       // field dropped here silently mislabels every plan doc.
       ...(data.meta?.huddleKind ? { huddleKind: data.meta.huddleKind } : {}),
+      // A meeting's heading says when it last changed from this.
+      ...(typeof data.meta?.lastActivityAt === 'number'
+        ? { lastActivityAt: data.meta.lastActivityAt }
+        : {}),
     };
   } catch {
     return fallback;

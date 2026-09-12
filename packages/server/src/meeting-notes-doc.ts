@@ -85,6 +85,7 @@ import {
   runTaskCapture,
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
+import { type MeetingTitleStore, createMeetingTitler } from './meeting-titler.ts';
 import { meetingTimingPath } from './meetings.ts';
 import { commentedBlockIds, sectionIds } from './notes-cleanup-scope.ts';
 import { recordMeetingCost } from './notes-cost-store.ts';
@@ -1099,6 +1100,9 @@ export function withServerNotesSinks(
      * its citation into the notes and the row simply gains no backlink.
      */
     linkTaskToDoc?: (taskId: string, docId: string) => void;
+    /** What the meeting namer reads and writes the title through — the doc
+     *  store in the server. Only read when `titleNamer` is present. */
+    titleStore?: () => MeetingTitleStore;
     /** Tests: a heading memory they can share across two harnesses to model a
      *  second meeting on one doc. */
     heading?: NotesHeadingMemory;
@@ -1120,6 +1124,17 @@ export function withServerNotesSinks(
 ): MeetingNotesDeps {
   const extractor = options.taskExtractor;
   const captureBoard = deps.captureBoard;
+  // The meeting's title, from its notes: early at about three bullets and
+  // again at the stop, only while nobody has named the doc.
+  const titleStore = deps.titleStore;
+  const titler =
+    options.titleNamer && titleStore
+      ? createMeetingTitler({
+          namer: options.titleNamer,
+          store: titleStore,
+          onError: (message) => console.error(message),
+        })
+      : null;
   // One heading memory per wiring, i.e. per server: it is keyed by doc and
   // meeting, and a meeting is the life of one notes section. Backed by the
   // data dir when there is one, so the section survives a restart mid-meeting
@@ -1272,6 +1287,9 @@ export function withServerNotesSinks(
       // on under this section or open its own (`notesSectionFits`), so a
       // quality pass that fails must not cost the doc a second heading.
       heading.endMeeting({ docId: summary.docId, meetingId: summary.meetingId });
+      // Named from the whole meeting, in the background: the stop does not
+      // wait on a model call, and the title lands when it lands.
+      if (titler) void titler.onMeetingEnd(summary.docId);
       // AND WHAT THE NOTES THEMSELVES CAME OUT LIKE. The line above says how
       // much of the meeting reached a compose, and a meeting once reported
       // every turn handled while its doc carried dozens of repeated lines,
@@ -1367,6 +1385,7 @@ export function withServerNotesSinks(
       // lands in.
       releaseNotesAuthorship(deps.docStore(), ids.docId);
       heading.beginMeeting(ids);
+      titler?.onSessionStart(ids.docId);
       reviewAsked.delete(ids.docId);
       spentCues.delete(ids.docId);
       options.onSessionStart?.(ids);
@@ -1499,6 +1518,14 @@ export function withServerNotesSinks(
         // are carried instead of vanishing.
         landed = false;
         console.error('[meeting-notes] doc write failed:', err);
+      }
+      if (landed === true && titler) {
+        try {
+          titler.onNotesLanded(update.docId);
+        } catch (err) {
+          // A title is decoration on the notes; it must never cost a tick.
+          console.error('[meeting-notes] title check failed:', err);
+        }
       }
       options.onNotes?.(update);
       return landed;
