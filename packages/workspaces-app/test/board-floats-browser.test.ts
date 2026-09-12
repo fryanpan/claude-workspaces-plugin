@@ -270,3 +270,30 @@ describe.skipIf(!CHROME)('the Library list clears the floating buttons, in a rea
     );
   }
 });
+describe.skipIf(!CHROME)('the rail foot is never under its own mic, in a real browser', () => {
+  it(
+    'at 1180x820 Settings, Collapse and the mic are each on top at every scroll position',
+    () => {
+      const r = reading('ipad');
+      // The page really scrolled past the foot, and all three were on screen.
+      expect(r.positions).toBeGreaterThan(10);
+      expect(r.seen.sort()).toEqual(['collapse', 'mic', 'settings']);
+      expect(r.covered).toEqual([]);
+      // The control is the bug: unstuck, Settings and Collapse go under the dock.
+      expect(r.coveredControl.map((c) => c.control)).toEqual(
+        expect.arrayContaining(['settings', 'collapse']),
+      );
+    },
+    BROWSER_CASE_MS,
+  );
+
+  it(
+    'at 430 the foot is not drawn and the mic in the bottom bar is never covered',
+    () => {
+      const r = reading('phone');
+      expect(r.seen).toEqual(['mic']);
+      expect(r.covered).toEqual([]);
+    },
+    BROWSER_CASE_MS,
+  );
+});
