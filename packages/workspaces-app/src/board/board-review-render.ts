@@ -72,6 +72,21 @@ export function reviewItemRow(
     li.append(body);
   }
 
+  // A SECRET ask echoed into the comment history, with the comment box
+  // underneath it. Nothing here can take the values — the comment box records
+  // words, which is the one thing this shape must not do — and the row said
+  // nothing about that, so the reader's nearest affordance was the wrong one
+  // (UX review, 2026-09-12). One line, only while it is still waiting: an
+  // answered ask needs no instruction, and a withdrawn one has no card to be
+  // sent to.
+  if (r.shape === 'secret' && item.answer === undefined && !withdrawn) {
+    const note = document.createElement('p');
+    note.className = 'board-comment-review-note';
+    note.textContent =
+      'Answered on the card above, never in a comment — a comment is recorded and read back.';
+    li.append(note);
+  }
+
   if (item.answer !== undefined) {
     li.classList.add('board-comment-answered-item');
     const a = item.answer;

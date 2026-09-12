@@ -1,3 +1,4 @@
+import type { ReviewShape } from '@claude-workspaces/core';
 import type { DoneWhenVerdict } from '@claude-workspaces/core/done-when';
 /**
  * The board's pure view-model: what a row is, which section it lands in, and
@@ -350,11 +351,14 @@ export interface BoardReviewItem {
   id: string;
   /** The declaration. `shape`, `options` and `withdrawnAt` are read by the
    *  comment stream's row for the item; an older fixture carrying only the
-   *  headline still renders as a question. */
+   *  headline still renders as a question. `shape` is the payload's full set
+   *  rather than the two this row once knew: a `secret` ask reaches the
+   *  comment history like any other, and a narrower type here is what let it
+   *  be badged as a question there. */
   review: {
     headline: string;
     detail?: string;
-    shape?: 'review' | 'decision';
+    shape?: ReviewShape;
     options?: Array<{ id: string; label: string }>;
     withdrawnAt?: number;
   };

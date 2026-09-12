@@ -481,7 +481,7 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
   ): Promise<boolean> {
     const reqSpec = reviewSecretsRequest(item, values);
     if (!reqSpec) return false;
-    return sendSecrets(reqSpec, values.length);
+    return sendSecrets(reqSpec, values);
   }
 
   /**
@@ -498,16 +498,30 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
     reviewItemId: string,
     values: ReadonlyArray<{ service: string; value: string }>,
   ): Promise<boolean> {
-    return sendSecrets(secretsRequestFor(taskId, reviewItemId, values), values.length);
+    return sendSecrets(secretsRequestFor(taskId, reviewItemId, values), values);
   }
 
-  /** The one POST, so the refusal and the reload read the same on both
-   *  surfaces. `count` is only ever a number of FIELDS. */
+  /**
+   * The one POST, so the refusal, the confirmation and the reload read the
+   * same on both surfaces.
+   *
+   * `values` is read for two things and neither is a value: how many fields
+   * there are, and what they are CALLED. The confirmation names the services
+   * and nothing else — the same words the item's own answer carries, which is
+   * the only thing about this hand-over anybody is ever told.
+   *
+   * Home had a confirmation of its own: the card settles into the answered
+   * stack and the tally moves. The task panel had none — the card simply
+   * vanished, because a ticket-borne item's answered record lives on a
+   * declaring comment and there is no comment (UX review, 2026-09-12). So the
+   * line is here, where both surfaces pass through, rather than bolted onto
+   * the one that was missing it.
+   */
   async function sendSecrets(
     reqSpec: { path: string; body: Record<string, unknown> },
-    count: number,
+    values: ReadonlyArray<{ service: string; value: string }>,
   ): Promise<boolean> {
-    if (count === 0) return false;
+    if (values.length === 0) return false;
     const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
     if (!res.ok) {
       // The message never names a value, and there is nothing of the reader's
@@ -515,6 +529,7 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
       showToast('Saving failed — nothing was recorded. Try again.');
       return false;
     }
+    showToast(`Saved: ${values.map((v) => v.service).join(', ')}`);
     await loadReviewItems();
     return true;
   }

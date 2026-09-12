@@ -1148,12 +1148,17 @@ body.board-body {
   color: var(--accent);
   background: var(--accent-wash, rgba(59, 111, 212, 0.07));
 }
-/* A secret ask. The quietest of the three tones on purpose: the badge says
-   what KIND of ask this is, and an ask for a value the reader is being
-   trusted with should not also be shouting. */
+/* A secret ask, at a decision's weight — the same amber the task panel and
+   the comment row give it. It was the quietest of the three tones, on the
+   theory that an ask for a value the reader is trusted with should not shout;
+   what that produced was one ask badged grey on Home, where Bryan lands
+   first, and amber on the two surfaces he reaches afterwards. One mapping,
+   one weight, and the weight is a decision's: both are asks only one person
+   can answer, and the quieter of the two should not be the one that must
+   never be answered in words. */
 .board-walk-k-secret {
-  color: var(--fg-muted);
-  background: var(--bg-subtle, var(--bg));
+  color: var(--warn-fg, #b25e09);
+  background: var(--warn-wash, #fff4e5);
 }
 /* The owner revised the item after the reader asked on it — the editor's
    resolved-range green, so "this came back changed" reads the same way a
@@ -1266,18 +1271,6 @@ body.board-body {
      the same call the composer's Send makes one block below. */
   .board-walk-cred-send {
     flex: 1 1 100%;
-  }
-  /* SAVE STAYS ON SCREEN WITH THE KEYBOARD UP. At 430 the software keyboard
-     takes about half the viewport, the card is short enough that the page has
-     only ~100px of scroll to give, and Save sat under the keyboard with no
-     way to reach it. Sticking the row to the bottom of the card's scroll
-     puts it above the keyboard instead of below the fold; the panel colour is
-     what keeps the field it overlaps readable as it passes under. */
-  .board-walk-cred-send-row {
-    position: sticky;
-    bottom: calc(8px + var(--safe-bottom, 0px));
-    background: var(--bg-panel);
-    padding: 6px 0 0;
   }
   .board-walk-body-clamp {
     /* ~8 lines at 1.55 line-height, then a fade that says "there is more". */
@@ -1494,17 +1487,35 @@ body.board-body {
 .board-walk-cred-box:focus-within {
   border-color: var(--accent);
 }
-/* The letter-spacing is what makes a masked value countable at a glance. */
+/* The letter-spacing is what makes a masked value countable at a glance.
+   A TEXTAREA, so a pasted SSH key or service-account file keeps its line
+   breaks — a browser `input` strips them out of a paste before any script
+   sees them. It grows with the value up to a few lines and then scrolls,
+   rather than pushing Save off the card. */
 .board-walk-cred-input {
   flex: 1;
   min-width: 0;
   min-height: 42px;
+  max-height: 7.5em;
   border: 0;
   padding: 9px 11px;
   background: transparent;
   color: var(--fg);
   font: inherit;
   letter-spacing: 0.12em;
+  resize: none;
+  overflow-y: auto;
+  field-sizing: content;
+}
+/* Masked is the resting state. `type="password"` has no textarea equivalent,
+   so the masking is this property — WebKit and Blink, which is Safari on the
+   iPad and every browser this board is used from. On an engine without it the
+   value shows; the eye is what says which state you are in either way. */
+.board-walk-cred-input.is-masked {
+  -webkit-text-security: disc;
+}
+.board-walk-cred-input.is-shown {
+  -webkit-text-security: none;
 }
 .board-walk-cred-input:focus {
   outline: none;
@@ -1583,7 +1594,19 @@ body.board-body {
 /* Save, and the one line a half-filled form answers with, on one row — the
    message to the left of the control it is about, so a reader who pressed
    Save and went nowhere reads WHY beside the button they pressed. */
+/* SAVE STAYS ON SCREEN. At 430 the software keyboard takes about half the
+   viewport and Save sat under it; on the iPad's task panel Save drew 9px
+   below the fold on a two-field ask and was not reachable without scrolling a
+   panel the reader had no reason to think scrolled. Sticking the row to the
+   bottom of the card's scroll answers both, so the rule is not in the phone
+   block — a sticky row with nothing to scroll past behaves exactly like a
+   static one. The panel colour keeps the field it overlaps readable as it
+   passes under. */
 .board-walk-cred-send-row {
+  position: sticky;
+  bottom: calc(8px + var(--safe-bottom, 0px));
+  background: var(--bg-panel);
+  padding: 6px 0 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -5932,6 +5955,15 @@ label.board-sched-chip:hover {
    so the weight is carried by the colour alone. */
 .board-comment-review-k.is-secret {
   color: var(--warn-fg, #b25e09);
+}
+/* Where a secret ask is answered, said on the row that echoes it into the
+   comment history — because the comment box is the nearest affordance to it
+   and is the one place its values must never go. */
+.board-comment-review-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg-muted);
 }
 
 /* A retracted ask in the board's comment stream. It stays in the history, and
