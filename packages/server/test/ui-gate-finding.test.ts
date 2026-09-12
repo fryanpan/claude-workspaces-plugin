@@ -96,14 +96,16 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     taskId: string,
     work: Record<string, string>,
     inherited?: Record<string, string>,
-  ): Promise<void> {
-    const wt = makeBuilderWorktree(inherited ?? {});
-    worktrees.push(wt);
+    into?: BuilderWorktree,
+  ): Promise<BuilderWorktree> {
+    const wt = into ?? makeBuilderWorktree(inherited ?? {});
+    if (into === undefined) worktrees.push(wt);
     if (inherited) wt.commit('the previous occupant');
     await jj(
       await post(`/workspaces/${workspaceId}/dispatches`, { taskId, worktreePath: wt.path }),
     );
     wt.edit(work);
+    return wt;
   }
 
   /** A board, and one row the FILER agent filed and then took. */
@@ -111,18 +113,25 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     title: string,
     body = 'Agent can reach the two actions without opening the row.',
     author: typeof FILER | typeof PERSON = FILER,
+    onBoard?: string,
   ): Promise<{ workspaceId: string; taskId: string }> {
-    const { workspace } = await jj<{ workspace: { id: string } }>(
-      await post('/workspaces', { name: 'atlas', leadAgentId: LEAD.id }),
-    );
+    const workspace =
+      onBoard !== undefined
+        ? { id: onBoard }
+        : (
+            await jj<{ workspace: { id: string } }>(
+              await post('/workspaces', { name: 'atlas', leadAgentId: LEAD.id }),
+            )
+          ).workspace;
     // The filer's own attach — what puts it in the roster, which is the one
     // read that answers "an agent filed this" without guessing from a name.
-    await jj(
-      await post(`/workspaces/${workspace.id}/agents`, {
-        agentId: FILER.id,
-        runtime: 'claude-code-local',
-      }),
-    );
+    if (onBoard === undefined)
+      await jj(
+        await post(`/workspaces/${workspace.id}/agents`, {
+          agentId: FILER.id,
+          runtime: 'claude-code-local',
+        }),
+      );
     const { task } = await jj<{ task: { id: string; status: string } }>(
       await post(`/workspaces/${workspace.id}/tasks`, {
         title,
@@ -233,6 +242,23 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     await dispatch(workspaceId, taskId, SERVER_WORK, UI_WORK);
     const lead = await agentStream(workspaceId, LEAD);
     await expectSilence(lead, workspaceId);
+  }, 20_000);
+
+  it('says nothing about two rows sharing one checkout', async () => {
+    // Two live dispatches in one worktree are one pile of edits with no way
+    // to say whose. Naming both is two findings off one stylesheet, at least
+    // one of them wrong — so the gate declines to guess.
+    const first = await boardWithRow('Agent can tap Plan and Review from the ticket button row');
+    const second = await boardWithRow(
+      'Agent can be told when a task becomes ready',
+      'The fix is the idle clock.',
+      FILER,
+      first.workspaceId,
+    );
+    const shared = await dispatch(first.workspaceId, first.taskId, UI_WORK);
+    await dispatch(first.workspaceId, second.taskId, {}, undefined, shared);
+    const lead = await agentStream(first.workspaceId, LEAD);
+    await expectSilence(lead, first.workspaceId);
   }, 20_000);
 
   it('says nothing about a UI row nobody registered a builder for', async () => {

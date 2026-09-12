@@ -95,10 +95,10 @@ today's code fails is flagged.
   asserts the lead's frame and the verdict both name it with that file. Beside
   it sits the widening — a task whose words say nothing about a screen, whose
   builder is editing the stylesheet, and which the gate names anyway — and
-  five controls: a task whose builder is editing the server while its own
+  six controls: a task whose builder is editing the server while its own
   words say "button", a task with no registered builder, a builder that
-  inherited a finished task's stylesheet, a task with an answered item, and a
-  task a person filed.
+  inherited a finished task's stylesheet, two tasks sharing one checkout, a
+  task with an answered item, and a task a person filed.
 - **Must never:** name a task a person filed, a task nobody has started, a
   task somebody answered an item on, or a task whose builder has touched no
   screen. A finding here costs a lead turn about work that is going fine, so
@@ -176,6 +176,13 @@ somebody else wrote — the same false positive in a new spelling. A dispatch
 with no baseline (a path git cannot answer for, a record persisted before the
 field existed) falls back to the merge base; the reader degrades, it never
 refuses.
+
+**Two live dispatches in one checkout are ambiguous, and ambiguous evidence
+is no evidence.** The registry does not stop a lead putting two tasks in one
+worktree, and nothing in a diff says which task an edit was for — naming both
+would be two findings off one stylesheet with at least one of them wrong. The
+reader drops every task whose worktree another open dispatch also names, so
+both go unjudged.
 
 **And when there is no diff, the gate says nothing.** No registered dispatch,
 a worktree that has gone, a directory that is not a repo: the changed-file

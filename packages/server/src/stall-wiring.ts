@@ -861,8 +861,16 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * price of each board's snapshot being its own.
    */
   function changedFilesReader(): (taskId: string) => readonly string[] | undefined {
+    const open = dispatches.list();
+    // Two live dispatches in one checkout are one pile of edits with no way
+    // to say whose, and a stylesheet written for either would convict both.
+    // Ambiguous evidence is no evidence: both rows go unjudged.
+    const sharers = new Map<string, number>();
+    for (const d of open) sharers.set(d.worktreePath, (sharers.get(d.worktreePath) ?? 0) + 1);
     const worktreeOf = new Map(
-      dispatches.list().map((d) => [d.taskId, { path: d.worktreePath, since: d.baseCommit }]),
+      open
+        .filter((d) => sharers.get(d.worktreePath) === 1)
+        .map((d) => [d.taskId, { path: d.worktreePath, since: d.baseCommit }]),
     );
     const byWorktree = new Map<string, readonly string[] | undefined>();
     return (taskId) => {
