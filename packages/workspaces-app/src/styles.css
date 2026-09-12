@@ -325,6 +325,13 @@ button {
    name — and this is the rule that lets the attribute win. */
 .doc-path[dir="ltr"] {
   direction: ltr;
+  /* …and a name is PROSE, so it is set in the prose face. The monospace
+     above is what makes a file path scannable — even columns, a visible
+     difference between l and 1 — and it is what made "Riverbend permit
+     review with the Harborlight planning office" read as a terminal line in
+     the top bar. `dir` already carries the only question that decides it:
+     a label with a slash in it is a path, anything else is a name. */
+  font-family: var(--sans);
 }
 .save-state {
   flex: 0 0 auto;
