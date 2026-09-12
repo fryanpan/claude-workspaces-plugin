@@ -141,6 +141,11 @@ export function readReviewPayload(value: unknown): ReviewPayload | undefined {
   const out: ReviewPayload = { shape, headline };
   const detail = foldLegacyBody(value.why, value.lookFor, value.detail);
   if (detail !== undefined) out.detail = detail;
+  // Strictly `true`, never truthy: this field narrows who may answer, and a
+  // reader that accepted `"no"` or `1` would set it from a payload that meant
+  // nothing by them. Anything else reads as absent, which is the open state —
+  // safe because the flag's absence is what every item filed before it had.
+  if (value.ownerOnly === true) out.ownerOnly = true;
   if (typeof value.answeredWith === 'string') out.answeredWith = value.answeredWith;
   // Read back defensively like the rest: a peer could sync anything here, and
   // an item whose answer stamp arrived as a string must not read as answered
