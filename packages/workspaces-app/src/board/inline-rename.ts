@@ -145,6 +145,19 @@ export function wireWordsInPlace(
   current: () => string,
   commit: (v: string) => void,
   onEdit?: (editing: boolean) => void,
+  /**
+   * How to register the two listeners. The board owns its elements for the
+   * life of the page and needs nothing here; the review topbar's title is a
+   * single element in `index.html` that every doc mount re-wires, so there a
+   * per-document scope hands in its own registrar and takes the listeners
+   * away again on navigation. Without it a reader who opened four docs would
+   * have four editors racing for one element.
+   */
+  listen: (target: EventTarget, type: string, handler: EventListener) => void = (
+    target,
+    type,
+    handler,
+  ) => target.addEventListener(type, handler),
 ): { begin: (caret?: number) => void; isEditing: () => boolean } {
   let original = '';
   let editing = false;
@@ -161,7 +174,7 @@ export function wireWordsInPlace(
     if (save) commit(text);
   };
 
-  el.addEventListener('keydown', (ev) => {
+  listen(el, 'keydown', ((ev: KeyboardEvent) => {
     if (!editing) return;
     if (ev.key !== 'Enter' && ev.key !== 'Escape') {
       // Every other key belongs to the edit. The row above listens for `r`
@@ -179,13 +192,13 @@ export function wireWordsInPlace(
     const v = (el.textContent ?? '').trim();
     if (v && v !== original) end(v, true);
     else end(original, false);
-  });
+  }) as EventListener);
 
   // Blur saves a changed title, the same as Enter (Bryan, 2026-09-01: a
   // click away while editing reverted the edit). The click that opens the
   // editor never changes the text, so an unchanged or emptied value still
   // restores; Escape is the deliberate cancel.
-  el.addEventListener('blur', () => {
+  listen(el, 'blur', () => {
     const v = (el.textContent ?? '').trim();
     if (v && v !== original) end(v, true);
     else end(original, false);

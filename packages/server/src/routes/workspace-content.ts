@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { attachmentIdOf } from '@claude-workspaces/core';
 /**
  * Content filed onto a board: a doc attached, a tracker imported, a huddle opened.
@@ -7,6 +7,7 @@ import { attachmentIdOf } from '@claude-workspaces/core';
  * Lifted verbatim out of `createServer`'s request closure; the handlers
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
+import { docKeyForPath } from '../doc-key.ts';
 import {
   huddleAlias,
   huddleFilePath,
@@ -15,6 +16,7 @@ import {
   parseHuddleKind,
   parseHuddleTopic,
 } from '../huddle.ts';
+import { type MeetingKind, meetingFileName, recordMeetingFiling } from '../meeting-home.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import { redactMetaForVisitor, relativeReviewUrl } from '../share/redact-meta.ts';
@@ -50,6 +52,7 @@ export async function handleWorkspaceContent(
     fileUnderBoardWorkspace,
     unfileFromDefault,
     workspacesOfDoc,
+    meetingHomeFor,
   } = ctx;
   const { req, pathname, scope, authorFor, visitor } = rq;
   /**
@@ -316,11 +319,28 @@ export async function handleWorkspaceContent(
     const doc = created.doc;
     const docId = doc.docId;
     const boardWorkspaceId = fileUnderBoardWorkspace(docId, workspaceId);
+    /**
+     * Where this meeting's markdown goes.
+     *
+     * Under the project's own meetings folder when the project named one —
+     * rule 5 of the docs decision: a meeting lives in the same hierarchy as
+     * every other document, findable by grep, next to the code it is about.
+     * Under the data dir when the board has no project or the project has not
+     * said, which is exactly where every meeting went before this existed, so
+     * a project nobody configured sees no change at all.
+     *
+     * The FILE NAME is the doc's alias either way. Inside a project folder it
+     * is also what somebody reads in a directory listing, which is why it is
+     * the readable `huddle-20260829-1405-x7q2` rather than the doc id.
+     */
+    const home = meetingHomeFor(boardWorkspaceId);
+    const alias = doc.meta.alias;
+    const file =
+      home && alias ? join(home.abs, meetingFileName(alias)) : huddleFilePath(dataDir, docId);
     // The file first, then the bind — `attachFile` seeds the doc from
     // the file when the doc is empty, so the topic heading lands
     // through the same path a bound project file's content does, and
     // the doc is a record on disk before anyone has typed a word.
-    const file = huddleFilePath(dataDir, docId);
     try {
       mkdirSync(dirname(file), { recursive: true });
       if (!existsSync(file))
@@ -329,8 +349,55 @@ export async function handleWorkspaceContent(
       console.error(`[huddle] could not write ${file}:`, err);
       return j(500, { error: 'huddle-file-failed' });
     }
+    /**
+     * Who this meeting belongs to, written before the bind can fail.
+     *
+     * The board it was started on, the project that board works in, and the
+     * lead agent seated there — plus the kind, which is the button that was
+     * pressed, and the provider, which starts as `none` because nothing has
+     * been heard yet. A meeting nobody transcribes keeps that value, and that
+     * is a true statement about it rather than a missing one.
+     */
+    const kind: MeetingKind = parsedKind.kind === 'plan' ? 'plan' : 'discussion';
+    try {
+      recordMeetingFiling(dataDir, {
+        docId,
+        workspaceId: boardWorkspaceId,
+        filedAt: startedAt,
+        ...(home ? { repoKey: home.repoKey } : {}),
+        ...(targetBoard.leadAgentId !== undefined ? { leadAgentId: targetBoard.leadAgentId } : {}),
+        kind,
+        provider: 'none',
+        ...(home && alias ? { relPath: `${home.relPath}/${meetingFileName(alias)}` } : {}),
+        retention: home?.retention ?? 'transcripts-and-audio',
+      });
+    } catch (err) {
+      // The filing is a record ABOUT the meeting; the meeting itself is the
+      // doc and the file, both of which exist by now. A failure here must not
+      // cost the person the conversation they are about to have.
+      console.error(`[huddle] could not file ${docId}:`, err);
+    }
     const attached = await docStore.attachFileAsync(docId, file);
     if (!attached.ok) return j(409, { error: 'attach_failed', attached });
+    /**
+     * A meeting inside a project holds that project's ADDRESS, like every
+     * other bound project file.
+     *
+     * Without the claim the file is a project markdown file no doc holds, so
+     * the Library lists the same meeting twice — once under meetings with its
+     * title, once under files with its raw filename — and opening the second
+     * row would mint a SECOND document over the same bytes, with its own
+     * comment set. It never came up while huddles wrote to the data dir,
+     * because nothing outside a checkout has a key at all.
+     */
+    if (home) {
+      try {
+        const key = docKeyForPath(file);
+        if (key) docStore.repos.claim(key.docKey, docId);
+      } catch (err) {
+        console.error(`[huddle] could not address ${docId} in its project:`, err);
+      }
+    }
     if (typeof huddleTaskId === 'string') {
       const linked = taskStore.linkRef(huddleTaskId, { kind: 'doc', docId });
       // Link changes emit no store event; refresh by hand, as the

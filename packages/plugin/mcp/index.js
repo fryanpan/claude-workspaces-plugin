@@ -17357,6 +17357,55 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "set_project_meetings",
+      description: "Say where this project's meetings file and how much of them it keeps. Meetings then land in that folder under the project instead of the server's data dir, and show on the Library page. Retention decides what is WRITTEN, so turning transcripts off keeps the words out of a future meeting and removes nothing already recorded. Machine-scoped: no workspaceId.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute path anywhere inside the project."
+          },
+          meetingsPath: {
+            type: "string",
+            description: 'The folder from the repo root, e.g. "docs/meetings". No "..", and no dot-directory. It is mounted as it is set.'
+          },
+          retention: {
+            type: "string",
+            enum: ["transcripts-and-audio", "transcripts", "none"],
+            description: "What the project keeps. 'transcripts-and-audio' is the default and today's behaviour; 'transcripts' writes no audio; 'none' writes neither. Left out, the project's current choice stands."
+          },
+          gitignore: {
+            type: "boolean",
+            description: "True writes a .gitignore inside the folder so meetings stay out of git; false removes the one this server wrote. A .gitignore somebody else wrote is never touched."
+          }
+        },
+        required: ["path", "meetingsPath"]
+      }
+    },
+    {
+      name: "set_doc_title",
+      description: "Rename a doc — the title people and every list know it by. Use it to give a meeting a name instead of the clock it started at. It changes the title only: a bound doc keeps its file path and every comment stays where it is. A blank title, or one over 200 characters, is refused.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board the doc is filed on."
+          },
+          docId: {
+            type: "string",
+            description: "The doc to rename."
+          },
+          title: {
+            type: "string",
+            description: "The new title, one line."
+          }
+        },
+        required: ["workspaceId", "docId", "title"]
+      }
+    },
+    {
       name: "request_plugin_refresh",
       description: "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces: nothing running is interrupted, and each session picks the new bundle up at its next restart. `changed: false` with matching versions means the cache was already current.",
       inputSchema: {
@@ -19149,6 +19198,19 @@ async function handleWorkspaceTool(name, a, ctx) {
     case "read_project_conventions": {
       const { path } = a;
       return ok2(await http("GET", `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
+    }
+    case "set_project_meetings": {
+      const { path, meetingsPath, retention, gitignore } = a;
+      return ok2(await http("PUT", "/api/mounts/meetings", {
+        path,
+        meetingsPath,
+        ...retention !== undefined ? { retention } : {},
+        ...gitignore !== undefined ? { gitignore } : {}
+      }));
+    }
+    case "set_doc_title": {
+      const { workspaceId, docId, title } = a;
+      return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/title`, { title }));
     }
     case "request_plugin_refresh": {
       return ok2(await http("POST", "/api/plugin/refresh"));

@@ -17,6 +17,11 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import {
+  DEFAULT_MEETING_RETENTION,
+  type MeetingHomeChoice,
+  parseMeetingRetention,
+} from './meeting-home.ts';
 
 export const MOUNT_REGISTRY_FILE = 'mounts.json';
 const REGISTRY_VERSION = 1;
@@ -74,6 +79,17 @@ export interface ProjectRecord {
   privacy: ProjectPrivacy;
   /** Repo-relative path of the conventions index. */
   conventionsPath: string;
+  /**
+   * Where this project's meetings file, and how much of them it keeps.
+   *
+   * Absent is the whole of "nobody has been asked": meetings go where they
+   * have always gone, under the server's data dir, and everything is kept.
+   * The field appears the moment a lead sets it and never goes back to
+   * absent, so "unset" and "set back to the defaults" stay distinguishable —
+   * the second is a decision somebody made, and a project that made it should
+   * not be re-prompted as though it had not.
+   */
+  meetings?: MeetingHomeChoice;
   mounts: MountRecord[];
 }
 
@@ -157,7 +173,29 @@ function normalizeProject(raw: Partial<ProjectRecord>): ProjectRecord {
       typeof raw.conventionsPath === 'string' && raw.conventionsPath !== ''
         ? raw.conventionsPath
         : DEFAULT_CONVENTIONS_PATH,
+    ...(normalizeMeetings(raw.meetings) !== undefined
+      ? { meetings: normalizeMeetings(raw.meetings) as MeetingHomeChoice }
+      : {}),
     mounts: Array.isArray(raw.mounts) ? raw.mounts : [],
+  };
+}
+
+/**
+ * A stored meetings choice, or undefined when the row has none.
+ *
+ * A row whose `relPath` is missing or empty is not a choice at all — the
+ * folder is the whole of it — so it reads as unset rather than as a project
+ * filing meetings into its repo root. An unrecognised retention falls back to
+ * the permissive default for the reason `DEFAULT_MEETING_RETENTION` gives.
+ */
+function normalizeMeetings(raw: unknown): MeetingHomeChoice | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const row = raw as Partial<MeetingHomeChoice>;
+  if (typeof row.relPath !== 'string' || row.relPath === '') return undefined;
+  return {
+    relPath: row.relPath,
+    retention: parseMeetingRetention(row.retention) ?? DEFAULT_MEETING_RETENTION,
+    gitignore: row.gitignore === true,
   };
 }
 

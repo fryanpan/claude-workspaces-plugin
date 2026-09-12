@@ -163,6 +163,14 @@ jobs:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
         run: bun run check:client-boot
 
+      # The whole meeting, end to end: a real server with a mock transcription
+      # engine and a scripted composer, driven by the built client in headless
+      # Chrome. No model is called, so this costs nothing per run.
+      - name: A whole meeting leaves usable notes
+        env:
+          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+        run: bun run check:meeting-smoke
+
   # The client + unit suite, in four shards.
   #
   # It is CPU-bound — 134 seconds of CPU inside 42 of wall clock locally, with

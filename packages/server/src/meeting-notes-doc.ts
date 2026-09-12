@@ -447,6 +447,13 @@ function noteGuardRefusal(docId: string, meetingId: string, why: string): void {
   console.log(`[meeting-notes] ${docId} meeting ${meetingId}: refused ${why}`);
 }
 
+/** One line per replace the guard turned into an insert. A different verb
+ *  from a refusal on purpose: nothing was dropped, so a reader counting lost
+ *  edits must not find this line among them. */
+function noteGuardKept(docId: string, meetingId: string, why: string): void {
+  console.log(`[meeting-notes] ${docId} meeting ${meetingId}: kept ${why}`);
+}
+
 /**
  * One line per tick that composed a link it was never given.
  *
@@ -559,9 +566,13 @@ export function applyNotesUpdate(
       full,
       docStore,
     ),
+    outline: full,
   });
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);
+  }
+  for (const why of guarded.kept) {
+    noteGuardKept(update.docId, update.meetingId, why);
   }
   // THE SECOND DETERMINISTIC REFUSAL ON THIS PATH, and it runs after the
   // guard for the same reason the guard runs before the store: an edit that
