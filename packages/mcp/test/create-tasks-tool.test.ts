@@ -217,6 +217,70 @@ describe('the task-writing verbs point completion criteria at the field', () => 
     expect(body).toMatch(/criteria[^.]*`doneWhen`/);
   });
 
+  /** One described field of one tool, with the path the sweep found it at. */
+  type Field = { path: string; name: string; description: string };
+
+  /** As much of a JSON Schema node as the sweep walks. */
+  type SchemaNode = {
+    description?: string;
+    properties?: Record<string, SchemaNode>;
+    items?: SchemaNode;
+  };
+
+  /**
+   * Every described field of every tool the bundle serves, nested rows
+   * included — `create_tasks` keeps the row contract under `tasks.items`, so
+   * a sweep that only read top-level properties would miss the field this
+   * whole change is about.
+   */
+  const everyField = (): Field[] => {
+    const out: Field[] = [];
+    const walk = (path: string, name: string, node: SchemaNode | undefined): void => {
+      if (!node) return;
+      if (typeof node.description === 'string')
+        out.push({ path, name, description: node.description });
+      for (const [key, child] of Object.entries(node.properties ?? {}))
+        walk(`${path}.${key}`, key, child);
+      if (node.items) walk(`${path}[]`, name, node.items);
+    };
+    for (const t of mcp.tools) walk(t.name, t.name, t.inputSchema as SchemaNode | undefined);
+    return out;
+  };
+
+  /** Task-completion criteria, however they are spelled. Not the review-item
+   *  criteria `set_review_item_criteria` sets, which are a different feature
+   *  and say only the bare word. */
+  const MENTIONS_CRITERIA = /done[-\s]?when|completion criteria|acceptance criteria/i;
+  /** The redirect: the description names the field the criteria belong to. */
+  const NAMES_THE_FIELD = /`doneWhen`/;
+
+  it('no field anywhere mentions the criteria without pointing at the field', () => {
+    // The guard above names two rows, which is a guard that expires the next
+    // time somebody adds a filing verb — and the old wording lived on a verb
+    // nobody thought to name. So: sweep every tool.
+    //
+    // What the sweep means is deliberately narrow. A description that merely
+    // says the words passes; `report_done_when` is about the criteria and is
+    // not telling anyone where to write them. What fails is a field that
+    // brings the criteria up and does NOT send the author to `doneWhen` —
+    // which is exactly what both old sentences did, and neither of them
+    // named the field. The first run over this schema flagged nothing: only
+    // two fields mention the criteria at all, and both redirect.
+    const fields = everyField();
+    // Positive control, in the same read: the sweep walked real schemas and
+    // reached the NESTED row. A walker that returned nothing would satisfy
+    // the emptiness below while checking nothing at all.
+    expect(fields.length).toBeGreaterThan(200);
+    expect(fields.map((f) => f.path)).toContain('create_tasks.tasks[].doneWhen');
+
+    const offenders = fields
+      .filter((f) => f.name !== 'doneWhen')
+      .filter((f) => MENTIONS_CRITERIA.test(f.description))
+      .filter((f) => !NAMES_THE_FIELD.test(f.description))
+      .map((f) => f.path);
+    expect(offenders).toEqual([]);
+  });
+
   it('describes `doneWhen` on both verbs as the field, written at filing time', () => {
     const created = rowField('doneWhen');
     // It exists and says what it is for: one outcome per entry, and the
