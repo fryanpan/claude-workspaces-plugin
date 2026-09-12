@@ -30,6 +30,7 @@ import {
   mountWalkthroughIsland,
   walkthroughData,
 } from '../src/board/walkthrough-island.tsx';
+import { IPAD, installSheets, setViewport, styleOf } from './css-harness.ts';
 import { WS } from './support/board-drive.ts';
 
 const NOW = 1_700_000_000_000;
@@ -150,6 +151,41 @@ describe('the model: the name a person reads, and where the values go', () => {
     expect(
       reviewSecretsRequest(item as ReviewItem, [{ service: 'x', value: FIRST_VALUE }]),
     ).toBeNull();
+  });
+});
+
+describe('the card, laid out', () => {
+  // Read off the computed style with the real stylesheet installed, because
+  // the bug this guards against is a CASCADE bug and no assertion about the
+  // markup can see it: the form wears `.board-walk-answer` so it lands in the
+  // answering slot, and that class is the reply box's — a row with the field
+  // and a dark Send beside it. The secret form has to override it to a
+  // column. The first version of the rule was written EARLIER in the file,
+  // lost to the later rule at equal specificity, and rendered the fields as a
+  // narrow right-hand column with half the card empty beside them, at 1180
+  // and at 430 alike. Everything about the DOM was correct.
+  let sheets: (() => void) | null = null;
+  beforeEach(() => {
+    setViewport(IPAD);
+    sheets = installSheets('board.css', 'styles.css');
+  });
+  afterEach(() => {
+    sheets?.();
+    sheets = null;
+  });
+
+  it('stacks the fields down the card rather than beside the button', async () => {
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk());
+    await tick();
+    const form = root.querySelector<HTMLElement>('.board-walk-cred-form');
+    const fields = root.querySelector<HTMLElement>('.board-walk-creds');
+    if (!form || !fields) throw new Error('the secret form did not render');
+    expect(styleOf(form).flexDirection).toBe('column');
+    expect(styleOf(form).alignItems).toBe('stretch');
+    // Positive control on the harness: a property the rule does set, read
+    // back from the same computed style, so a `styleOf` that answered blanks
+    // could not pass the two assertions above.
+    expect(styleOf(fields).flexDirection).toBe('column');
   });
 });
 

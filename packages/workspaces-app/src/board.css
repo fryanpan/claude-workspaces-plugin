@@ -1488,19 +1488,6 @@ body.board-body {
 .board-walk-cred.is-refused {
   opacity: 0.55;
 }
-/* The fields are a COLUMN, so Save goes under them rather than beside them
-   the way the one-line reply box does. */
-.board-walk-cred-form {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-}
-.board-walk-cred-send {
-  min-height: 40px;
-  align-self: flex-end;
-}
-
 /* The reply box (mockup `.replybox`): the field and its dark Send side by
    side, stacking under a thumb — see the ≤900px block. */
 .board-walk-answer,
@@ -1530,6 +1517,22 @@ body.board-body {
 .board-walk-thread-form .md-composer-surface:focus-within,
 .board-walk-question-form .md-composer-surface:focus-within {
   border-color: var(--accent);
+}
+/* The secret form wears `.board-walk-answer` too, so it sits in the answering
+   slot — but its fields are a COLUMN, and Save goes under them rather than
+   beside them the way the one-line reply box does. It has to be written AFTER
+   the reply-box rule above: the two select the same element at the same
+   specificity, and the first version of this block sat earlier in the file,
+   lost the cascade, and rendered the fields as a narrow right-hand column
+   with half the card empty beside them. */
+.board-walk-cred-form {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.board-walk-cred-send {
+  min-height: 40px;
+  align-self: flex-end;
 }
 /* Skip (mockup `.actions`), and "I have a question" beside it — both are
    ways out of answering. The old "Tell me more" control that shared this row
