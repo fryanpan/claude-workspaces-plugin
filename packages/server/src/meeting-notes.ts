@@ -68,10 +68,14 @@ import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
 import {
+  NOTES_NOT_WRITTEN_AFTER,
+  NOTES_NOT_WRITTEN_NOTICE,
+  announceNotice,
   announceQuotaOutage,
-  createQuotaNoticeState,
+  createNoticeState,
+  retractNotice,
   retractQuotaNotice,
-} from './notes-quota-notice.ts';
+} from './notes-notice.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import { type MeetingSpend, meetingSpend } from './notes-spend.ts';
 import {
@@ -538,6 +542,20 @@ export interface NotesUpdate {
 export type NotesWriteRefusal = 'refused';
 
 /**
+ * The batch landed, and none of what landed was words.
+ *
+ * A write, for everything that asks whether the doc took the tick — the
+ * turns do not carry and the compose is not retried. It is its own answer for
+ * the one reader that asks a narrower question: whether the room's words are
+ * reaching the doc, which is what the not-written notice claims they are not.
+ * An empty batch, a regroup, and a regroup applied beside a note the guard
+ * refused all land and all put no words in, and only the write path can tell
+ * the last of those from a note that arrived — the tick composed words either
+ * way.
+ */
+export type NotesWriteNoWords = 'no-words';
+
+/**
  * "Every place the notes say `from`, they should say `to`" — a rename
  * reaching notes already written.
  *
@@ -778,13 +796,14 @@ export interface MeetingNotesDeps {
    * the ordinary case and must not have to say so.
    *
    * `'refused'` is the third answer and the one that must not be retried:
-   * see {@link NotesWriteRefusal}.
+   * see {@link NotesWriteRefusal}. `'no-words'` is a write that put no words
+   * in: see {@link NotesWriteNoWords}.
    */
   // A sink with nothing to report returns nothing; only an explicit `false`
   // or `'refused'` means the write did not land. The union is the contract,
   // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
+  onNotes: (update: NotesUpdate) => void | boolean | NotesWriteRefusal | NotesWriteNoWords;
   /**
    * Where a rename of a voice already written about goes. Optional: a
    * session with no sink for it composes under the new name from the next
@@ -864,7 +883,7 @@ export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
   // or `'refused'` means the write did not land. The union is the contract,
   // not a slip.
   // biome-ignore lint/suspicious/noConfusingVoidType: deliberate optional-return sink
-  onNotes?: (update: NotesUpdate) => void | boolean | NotesWriteRefusal;
+  onNotes?: (update: NotesUpdate) => void | boolean | NotesWriteRefusal | NotesWriteNoWords;
   taskExtractor?: import('./meeting-task-capture.ts').TaskCaptureExtractor | null;
 };
 
@@ -1285,7 +1304,25 @@ export function beginNotesSession(
 
   /** Whether the doc is currently carrying "notes are paused" — one notice
    *  per outage, taken away by the first tick that composes again. */
-  const quotaNotice = createQuotaNoticeState();
+  const quotaNotice = createNoticeState();
+
+  /**
+   * Whether the doc is currently carrying "some of what was just said could
+   * not be written", and how many writes have failed since the last one that
+   * landed.
+   *
+   * THE SECOND FAILURE RAISES IT, NOT THE FIRST. One failed write is a tick
+   * the pipeline recovers by itself: the turns carry and the next compose
+   * notes them again, so the words are late rather than lost, and a sentence
+   * in the doc about a note that arrives ten seconds later would be noise on
+   * the one surface the room is reading. What a person cannot see, and what
+   * this exists for, is the failure that REPEATS — `retriedFailure` is
+   * cleared only by a success, so from the second failure on nothing is
+   * recovering anything and the words on the live transcript are not on
+   * their way anywhere.
+   */
+  const notWrittenNotice = createNoticeState();
+  let writesFailedInARow = 0;
 
   /**
    * Put a notice edit (or its retraction) in the doc, out of band from the
@@ -1296,7 +1333,7 @@ export function beginNotesSession(
    * allowed to throw — the section-open path above treats a throw as a
    * refusal for the same reason.
    */
-  const writeQuotaNotice = (edits: readonly prose.BlockEdit[]): boolean => {
+  const writeNotice = (edits: readonly prose.BlockEdit[]): boolean => {
     if (edits.length === 0) return false;
     try {
       const answer = deps.onNotes({
@@ -1313,7 +1350,7 @@ export function beginNotesSession(
       // notice goes missing for the rest of the meeting.
       return answer !== false && answer !== 'refused';
     } catch (err) {
-      deps.onError?.(err instanceof Error ? err.message : 'notes quota notice failed');
+      deps.onError?.(err instanceof Error ? err.message : 'notes notice not written');
       return false;
     }
   };
@@ -1909,9 +1946,45 @@ export function beginNotesSession(
           // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. This is
           // the case the guard produces: the same edits refused a second
           // time, one tick's compose spent to learn nothing.
+          // THE ROOM IS TOLD, once the failure has stopped being one the
+          // pipeline recovers. `notesHeadingId` and `outline` are this tick's
+          // own reads, which is what the quota notice uses too.
+          writesFailedInARow++;
+          if (writesFailedInARow >= NOTES_NOT_WRITTEN_AFTER) {
+            announceNotice(
+              NOTES_NOT_WRITTEN_NOTICE,
+              notWrittenNotice,
+              outline,
+              notesHeadingId,
+              writeNotice,
+            );
+          }
           if (answer !== 'refused') retryAfterFailure(tick);
           return;
         }
+        // A TICK THAT PUT NO WORDS IN IS NOT A TICK THAT WROTE. Two batches
+        // reach here as successes while the doc takes none of the room's
+        // words: an empty compose, which answers `null` before the guard ever
+        // sees it, and a batch of nothing but moves and deletes, which answers
+        // `null` whether the moves landed or not (`failedCarryingWords` — a
+        // regroup that did not happen is not a note that did not arrive).
+        // Both are successes for everything below. Neither is one for the
+        // notice: no words reached the doc, so a sentence saying words are not
+        // reaching the doc is still true, and clearing the streak on either
+        // would let a meeting alternate refusal and silence while the room is
+        // told nothing. The quota notice retracts unconditionally a few lines
+        // down for the opposite reason — the API answered, which is the whole
+        // of what that sentence claims.
+        //
+        // THE WRITE PATH'S VERDICT, NOT THE COMPOSE'S EDITS. A third batch
+        // lands with no words in it: a note the guard refused beside a
+        // regroup it let through. Its edits carry words, so reading them said
+        // "wrote", and the notice came down while nothing was being written.
+        // Only the sink knows which edits landed, and it answers `'no-words'`
+        // for all three. A sink that reports nothing — the tests' own — still
+        // gets the old reading, which is right for every batch it can see.
+        const wroteWords = answer !== 'no-words' && edits.some((e) => 'markdown' in e);
+        if (wroteWords) writesFailedInARow = 0;
         // A question is only asked once, and it is asked once it has LANDED.
         // Marking them offered before the write meant a refused write lost
         // the questions outright — the retry composed without them.
@@ -1939,7 +2012,12 @@ export function beginNotesSession(
         // UNCONDITIONALLY, not only when this session remembers writing one:
         // a session that started mid-outage remembers nothing, and the doc
         // would go on claiming an outage that ended before it began.
-        retractQuotaNotice(quotaNotice, outline, writeQuotaNotice);
+        retractQuotaNotice(quotaNotice, outline, writeNotice);
+        // And the same for the write-failure notice, but only for a tick that
+        // actually put words in: see `wroteWords` above.
+        if (wroteWords) {
+          retractNotice(NOTES_NOT_WRITTEN_NOTICE, notWrittenNotice, outline, writeNotice);
+        }
       } catch (err) {
         carry = [...raw, ...carry];
         // Same reason as the refused-write path: an idea whose second look
@@ -1960,9 +2038,9 @@ export function beginNotesSession(
         // A quota refusal is the one failure the room has to be told about:
         // it will refuse the next tick too, and the notes simply stopping is
         // indistinguishable from a quiet meeting. Once per outage — see
-        // `notes-quota-notice.ts`.
+        // `notes-notice.ts`.
         if (isQuotaFailure(reason)) {
-          announceQuotaOutage(quotaNotice, outline, notesHeadingId, writeQuotaNotice);
+          announceQuotaOutage(quotaNotice, outline, notesHeadingId, writeNotice);
         }
         // Only a size refusal is worth trying again at once; see
         // `retryAfterFailure`.

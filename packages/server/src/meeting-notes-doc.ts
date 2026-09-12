@@ -73,6 +73,7 @@ import {
   type NotesReattribution,
   type NotesRelabel,
   type NotesUpdate,
+  type NotesWriteNoWords,
   type NotesWriteRefusal,
 } from './meeting-notes.ts';
 import {
@@ -94,6 +95,7 @@ import {
   readNotesOutline,
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
+import { repairNotesEditAddresses } from './notes-edit-address.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
 import {
   type NotesHeadingStore,
@@ -538,6 +540,29 @@ function noteGuardKept(docId: string, meetingId: string, why: string): void {
 }
 
 /**
+ * One line per tick whose words were recovered from a failed address.
+ *
+ * IT SAYS HOW MANY LANDED, not only how many were tried, because the repair
+ * can itself fail — a doc whose section has gone takes neither batch — and a
+ * line reading "2 notes re-addressed" over a doc that took none would be the
+ * second lie in this file's history. `console.warn` rather than `log`: a
+ * repair means the composer addressed something wrongly, which is worth
+ * seeing in a quiet log even though the meeting kept its note.
+ */
+function noteAddressRepair(
+  docId: string,
+  meetingId: string,
+  repaired: readonly string[],
+  landed: number,
+): void {
+  console.warn(
+    `[meeting-notes] ${docId} meeting ${meetingId}: recovered ${landed} of ` +
+      `${repaired.length} note${repaired.length === 1 ? '' : 's'} whose address the doc ` +
+      `could not honour — ${repaired.join(', ')}`,
+  );
+}
+
+/**
  * One line per tick that composed a link it was never given.
  *
  * ONE LINE WITH A COUNT, not a line per link, and unlike a refusal it says
@@ -611,6 +636,17 @@ export function applyNotesUpdate(
      * string, and a tick whose write LANDED wants none of this.
      */
     onOutcomes?: (outcomes: readonly prose.BlockEditOutcome[]) => void;
+    /**
+     * Called when words from this batch are in the doc — an insert or a
+     * replace that applied, or a note the address repair re-homed.
+     *
+     * A `null` result says the batch landed, not that it wrote a note: a
+     * regroup lands too, including one applied beside a note the guard took
+     * out of the same batch. The not-written notice needs the difference and
+     * cannot get it from the edits it composed, which carry words either way.
+     * A callback for the reason `onOutcomes` is one.
+     */
+    onWordsLanded?: () => void;
   } = {},
 ): NotesWriteResult {
   const doc = docStore.get(update.docId);
@@ -708,6 +744,20 @@ export function applyNotesUpdate(
   const ids = { docId: update.docId, meetingId: update.meetingId };
   const after = readNotesOutline(docStore, update.docId, { headingsOnly: true });
   heading.learn(ids, before, after);
+  const section = heading.headingId(ids, after);
+  // WORDS THAT COMPOSED AND DID NOT LAND GET A HOME. An edit the applier
+  // failed for an ADDRESS reason — the block is gone, or it is not a heading
+  // — carried a note nothing else has a copy of, and dropping it is what
+  // makes a repeating mistake lose a meeting (`notes-edit-address.ts` has the
+  // measurement). Re-addressed to this meeting's own section, in a second
+  // batch, and only ever for a batch that already failed something.
+  const repair = repairNotesEditAddresses(linked.edits, res.outcomes, section);
+  let recovered = 0;
+  if (repair.edits.length > 0) {
+    const again = applyNotesBlockEdits(docStore, update.docId, repair.edits);
+    recovered = again.ok ? again.applied + again.suggested : 0;
+    noteAddressRepair(update.docId, update.meetingId, repair.repaired, recovered);
+  }
   // A TOPIC OPENED TWICE IS FOLDED IN THE TICK THAT OPENED IT. A tick is
   // shown a slice of the doc, so it can open a `### ` heading the section
   // already carries a little further up — which is what put `Note-taker
@@ -727,7 +777,6 @@ export function applyNotesUpdate(
   // the one that wrote it rather than at the end of the meeting, because
   // what the reader sees meanwhile is a blank line wearing the fresh-note
   // tint (2026-09-11).
-  const section = heading.headingId(ids, after);
   if (section !== undefined) {
     const tidied = tidyNotesSection(doc.ydoc, section, () => commentedBlockIds(doc.ydoc), {
       blanks: false,
@@ -761,17 +810,29 @@ export function applyNotesUpdate(
   // on an hour-long AMI meeting: two consecutive ticks came back as four
   // `nest_blocks` edits, all answered `nothing-to-nest`, and both were
   // reported as writes that failed.
-  if (res.applied + res.suggested > 0) return null;
+  //
+  // A RECOVERED NOTE COUNTS AS A WRITE, because it is one: the words are in
+  // the doc. Reporting the tick as failed anyway would carry turns that are
+  // already written up, and the next compose would note them a second time.
+  if (recovered > 0 || res.outcomes.some((o) => o.status !== 'failed' && carriesWords(o))) {
+    opts.onWordsLanded?.();
+  }
+  if (res.applied + res.suggested + recovered > 0) return null;
   return failedCarryingWords(res.outcomes) ? 'all-edits-failed' : null;
 }
 
-/** Whether any edit that failed was one that would have PUT WORDS in the doc.
- *  An insert or a replace carries text; a move and a delete do not. */
+/** Whether any edit that failed was one that would have PUT WORDS in the doc. */
 function failedCarryingWords(outcomes: readonly prose.BlockEditOutcome[]): boolean {
-  return outcomes.some(
-    (o) =>
-      o.status === 'failed' &&
-      (o.op === 'insert_at_end' || o.op === 'insert_under_heading' || o.op === 'replace_block'),
+  return outcomes.some((o) => o.status === 'failed' && carriesWords(o));
+}
+
+/** Whether an edit is one that PUTS WORDS in the doc. An insert or a replace
+ *  carries text; a move and a delete do not. */
+function carriesWords(outcome: prose.BlockEditOutcome): boolean {
+  return (
+    outcome.op === 'insert_at_end' ||
+    outcome.op === 'insert_under_heading' ||
+    outcome.op === 'replace_block'
   );
 }
 
@@ -1400,16 +1461,22 @@ export function withServerNotesSinks(
     },
     notesHeadingId: ({ docId, meetingId, outline }): string | undefined =>
       notesSectionForMeeting(heading, { docId, meetingId }, outline, deps.docStore()),
-    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal => {
-      let landed: boolean | NotesWriteRefusal = true;
+    onNotes: (update: NotesUpdate): boolean | NotesWriteRefusal | NotesWriteNoWords => {
+      let landed: boolean | NotesWriteRefusal | NotesWriteNoWords = true;
       let outcomes: readonly prose.BlockEditOutcome[] | undefined;
+      let words = false;
       try {
         const skip = applyNotesUpdate(deps.docStore(), update, heading, {
           ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
           onOutcomes: (o) => {
             outcomes = o;
           },
+          onWordsLanded: () => {
+            words = true;
+          },
         });
+        // Landed, and none of it was words: see {@link NotesWriteNoWords}.
+        if (skip === null && !words) landed = 'no-words';
         if (skip !== null) {
           // A GUARD REFUSAL REACHES THE SESSION AS A REFUSAL, not as a failed
           // write. `guard-refused` already says the batch was declined on

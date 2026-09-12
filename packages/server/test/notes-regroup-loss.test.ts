@@ -13,11 +13,24 @@
  * and one that only MOVES them. A batch of moves that all fail leaves the
  * notes exactly as they were, which is a regroup that did not happen, not a
  * note that did not arrive.
+ *
+ * WHY THE WORD-CARRYING ARMS FAIL ON `empty` RATHER THAN ON A MISSING BLOCK.
+ * They named a block that was gone until `notes-edit-address.ts` landed, and
+ * that is now the one word-carrying failure the write RECOVERS from: the note
+ * is re-addressed to the meeting's section and lands, so the tick is a write
+ * and reporting it failed would note the same turns twice
+ * (`notes-address-recovery.test.ts` is that half). What is left, and what
+ * these pin, is a batch whose WORDS the doc refused — nothing to re-address,
+ * because there is nothing to say.
  */
 import { describe, expect, test } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import { applyNotesUpdate, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
+import {
+  type NotesHeadingMemory,
+  applyNotesUpdate,
+  createNotesHeadingMemory,
+} from '../src/meeting-notes-doc.ts';
 import type { NotesUpdate } from '../src/meeting-notes.ts';
 import type { NotesDocStore } from '../src/notes-doc-access.ts';
 import { oneDocStore } from './notes-doc-helpers.ts';
@@ -32,15 +45,25 @@ function update(edits: readonly prose.BlockEdit[]): NotesUpdate {
 }
 
 /** A notes section the note-taker itself wrote, so every block is its own. */
-function notesDoc(markdown: string): { store: NotesDocStore; bullets: string[] } {
+function notesDoc(markdown: string): {
+  store: NotesDocStore;
+  bullets: string[];
+  /** The topic heading under the section — a real address, so an edit that
+   *  fails here failed on its words and not on where it was pointed. */
+  topic: string;
+  /** The memory that opened the section, so the guard knows which heading is
+   *  the meeting's own. */
+  heading: NotesHeadingMemory;
+} {
   const ydoc = new Y.Doc();
   const store = oneDocStore('d', { ydoc, meta: { type: 'markdown' } });
   const heading = createNotesHeadingMemory();
   expect(applyNotesUpdate(store, update([{ op: 'insert_at_end', markdown }]), heading)).toBeNull();
-  const bullets = (store.readOutline('d')?.blocks ?? [])
-    .filter((b) => b.kind === 'listItem')
-    .map((b) => b.id);
-  return { store, bullets };
+  const blocks = store.readOutline('d')?.blocks ?? [];
+  const bullets = blocks.filter((b) => b.kind === 'listItem').map((b) => b.id);
+  const topic = blocks.find((b) => b.kind === 'heading' && b.text.trim() === 'Topic');
+  if (topic === undefined) throw new Error('fixture has no topic heading');
+  return { store, bullets, topic: topic.id, heading };
 }
 
 describe('a regroup that moves nothing', () => {
@@ -62,10 +85,10 @@ describe('a regroup that moves nothing', () => {
   });
 
   test('still reports a failure when a batch that carried words wrote none', () => {
-    const { store } = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
+    const { store, topic } = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
     const skip = applyNotesUpdate(
       store,
-      update([{ op: 'insert_under_heading', headingId: 'h-gone', markdown: '- a real note' }]),
+      update([{ op: 'insert_under_heading', headingId: topic, markdown: '   ' }]),
       createNotesHeadingMemory(),
     );
     expect(skip).toBe('all-edits-failed');
@@ -77,11 +100,11 @@ describe('a regroup that moves nothing', () => {
   // most: `replace_block` is how a bullet is corrected, and a correction that
   // silently reports success is a correction the meeting never sees and never
   // retries.
-  test('still reports a failure when a rewrite named a block that is gone', () => {
-    const { store } = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
+  test('still reports a failure when a rewrite had nothing to put in the block', () => {
+    const { store, bullets } = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
     const skip = applyNotesUpdate(
       store,
-      update([{ op: 'replace_block', blockId: 'b-gone', markdown: '- the corrected point' }]),
+      update([{ op: 'replace_block', blockId: bullets[0]!, markdown: '   ' }]),
       createNotesHeadingMemory(),
     );
     expect(skip).toBe('all-edits-failed');
@@ -98,17 +121,101 @@ describe('a regroup that moves nothing', () => {
   });
 
   test('reports a failure when a failed move rides with a note that also failed', () => {
-    const { store, bullets } = notesDoc(
+    const { store, bullets, topic } = notesDoc(
       '## Meeting notes\n\n### Topic\n\n- one\n- two\n- three\n- four\n',
     );
     const skip = applyNotesUpdate(
       store,
       update([
         { op: 'nest_blocks', leadBlockId: bullets[0]!, blockIds: ['b-gone'] },
-        { op: 'insert_under_heading', headingId: 'h-gone', markdown: '- a real note' },
+        { op: 'insert_under_heading', headingId: topic, markdown: '   ' },
       ]),
       createNotesHeadingMemory(),
     );
     expect(skip).toBe('all-edits-failed');
+  });
+});
+
+// WHETHER WORDS LANDED IS THE WRITE PATH'S TO SAY. `null` means the batch
+// landed, and a regroup lands; the not-written notice asks the narrower
+// question and used to answer it from the edits the tick composed, which
+// carry words whether or not the guard let them through.
+describe('which landed writes put words in', () => {
+  function landedWords(
+    fixture: { store: NotesDocStore; heading: NotesHeadingMemory },
+    edits: readonly prose.BlockEdit[],
+  ): { skip: ReturnType<typeof applyNotesUpdate>; words: boolean } {
+    let words = false;
+    const skip = applyNotesUpdate(fixture.store, update(edits), fixture.heading, {
+      onWordsLanded: () => {
+        words = true;
+      },
+    });
+    return { skip, words };
+  }
+
+  test('a note that landed is words', () => {
+    const fixture = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
+    const got = landedWords(fixture, [
+      {
+        op: 'insert_under_heading',
+        headingId: fixture.topic,
+        markdown: '- the pier needs a permit',
+      },
+    ]);
+    expect(got).toEqual({ skip: null, words: true });
+  });
+
+  test('a note the guard refused beside a regroup it let through is not', () => {
+    const fixture = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n- two\n- three\n');
+    const { store, bullets } = fixture;
+    const section = store
+      .readOutline('d')
+      ?.blocks.find((b) => b.kind === 'heading' && b.text.trim() === 'Meeting notes');
+    if (section === undefined) throw new Error('fixture has no notes section');
+    const got = landedWords(fixture, [
+      { op: 'replace_block', blockId: section.id, markdown: '## the pier needs a permit' },
+      { op: 'nest_blocks', leadBlockId: bullets[0]!, blockIds: [bullets[1]!] },
+    ]);
+    // A success for everything that asks whether the doc took the batch…
+    expect(got.skip).toBeNull();
+    // …and the words it composed are nowhere in the doc.
+    expect(store.readOutline('d')?.blocks.map((b) => b.text)).not.toContain(
+      'the pier needs a permit',
+    );
+    expect(store.readOutline('d')?.blocks.map((b) => b.text)).toContain('Meeting notes');
+    expect(got.words).toBe(false);
+  });
+
+  // THE OUTCOME, NOT THE BATCH THE GUARD PASSED. A rewrite with nothing to
+  // put in the block gets past the guard and fails in the applier, so
+  // reading the guarded edits calls this words too.
+  test('a note the applier refused beside a regroup that landed is not', () => {
+    const fixture = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n- two\n- three\n');
+    const got = landedWords(fixture, [
+      { op: 'replace_block', blockId: fixture.bullets[2]!, markdown: '   ' },
+      { op: 'nest_blocks', leadBlockId: fixture.bullets[0]!, blockIds: [fixture.bullets[1]!] },
+    ]);
+    expect(got).toEqual({ skip: null, words: false });
+  });
+
+  test('a batch of moves is not', () => {
+    const fixture = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n- two\n');
+    const got = landedWords(fixture, [
+      { op: 'nest_blocks', leadBlockId: fixture.bullets[0]!, blockIds: ['b-gone'] },
+    ]);
+    expect(got).toEqual({ skip: null, words: false });
+  });
+
+  test('a note re-homed by the address repair is words', () => {
+    const fixture = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n');
+    const got = landedWords(fixture, [
+      { op: 'insert_under_heading', headingId: 'b-gone', markdown: '- the pier needs a permit' },
+    ]);
+    expect(got.skip).toBeNull();
+    expect(fixture.store.readOutline('d')?.blocks.map((b) => b.text)).toContain(
+      'the pier needs a permit',
+    );
+    expect(got.words).toBe(true);
   });
 });

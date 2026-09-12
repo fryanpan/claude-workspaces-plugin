@@ -368,14 +368,16 @@ describe('a batch the guard empties is reported under its own name', () => {
     expect(notesWriteSkipDetail('guard-refused')).toContain('guard');
   });
 
-  test('CONTROL: a batch naming a block that is gone is still all-edits-failed', () => {
+  // CONTROL, and the needle moved once `notes-edit-address.ts` landed. A
+  // batch naming a block that is GONE used to be the example here, and is not
+  // one any more: an address the doc cannot honour now has its words put back
+  // under the meeting's section, so that batch writes and answers `null`.
+  // What is still `all-edits-failed` is a batch whose words were the problem
+  // — nothing to re-address, because there is nothing to say.
+  test('CONTROL: a batch whose words the doc refused is still all-edits-failed', () => {
     const { store, memory } = meetingWithSection();
     expect(
-      applyNotesUpdate(
-        store,
-        tick('d', [{ op: 'replace_block', blockId: 'blk-not-there', markdown: '- moved' }]),
-        memory,
-      ),
+      applyNotesUpdate(store, tick('d', [{ op: 'insert_at_end', markdown: '   ' }]), memory),
     ).toBe('all-edits-failed');
   });
 });
@@ -402,10 +404,10 @@ describe('a refused write is carried rather than composed again', () => {
       ),
     ).toBe('refused');
     // CONTROL: a batch the doc merely failed still answers `false`, which is
-    // what earns it the immediate retry below.
-    expect(
-      sinks.onNotes(tick('d', [{ op: 'replace_block', blockId: 'blk-gone', markdown: '- x' }])),
-    ).toBe(false);
+    // what earns it the immediate retry below. The words have to be the thing
+    // that failed — a wrong ADDRESS is recovered now (`notes-edit-address.ts`)
+    // and writes, so it would no longer discriminate.
+    expect(sinks.onNotes(tick('d', [{ op: 'insert_at_end', markdown: '   ' }]))).toBe(false);
   });
 
   /** A scheduler the test fires by hand: the session arms its quiet timer

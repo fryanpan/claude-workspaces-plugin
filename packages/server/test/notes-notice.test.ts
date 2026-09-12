@@ -16,9 +16,9 @@ import {
   QUOTA_NOTICE_MARK,
   QUOTA_NOTICE_TEXT,
   announceQuotaOutage,
-  createQuotaNoticeState,
+  createNoticeState,
   retractQuotaNotice,
-} from '../src/notes-quota-notice.ts';
+} from '../src/notes-notice.ts';
 
 const notice = (id: string): NoticeOutlineEntry => ({
   id,
@@ -41,7 +41,7 @@ function writer(accepts = true) {
 describe('announcing a quota outage', () => {
   it('writes the notice under the meeting section when there is one', () => {
     const w = writer();
-    const state = createQuotaNoticeState();
+    const state = createNoticeState();
     announceQuotaOutage(state, [], 'h1', w.write);
     expect(w.batches).toEqual([
       [{ op: 'insert_under_heading', headingId: 'h1', markdown: QUOTA_NOTICE_TEXT }],
@@ -51,13 +51,13 @@ describe('announcing a quota outage', () => {
 
   it('writes at the end of the doc when the section is not open yet', () => {
     const w = writer();
-    announceQuotaOutage(createQuotaNoticeState(), [], undefined, w.write);
+    announceQuotaOutage(createNoticeState(), [], undefined, w.write);
     expect(w.batches).toEqual([[{ op: 'insert_at_end', markdown: QUOTA_NOTICE_TEXT }]]);
   });
 
   it('says it once per outage: a second refusal writes nothing', () => {
     const w = writer();
-    const state = createQuotaNoticeState();
+    const state = createNoticeState();
     announceQuotaOutage(state, [], 'h1', w.write);
     announceQuotaOutage(state, [], 'h1', w.write);
     announceQuotaOutage(state, [], 'h1', w.write);
@@ -68,7 +68,7 @@ describe('announcing a quota outage', () => {
     // The write bounced, so the doc says nothing about the outage. Believing
     // it had landed would suppress every later refusal for the whole meeting.
     const declined = writer(false);
-    const state = createQuotaNoticeState();
+    const state = createNoticeState();
     announceQuotaOutage(state, [], 'h1', declined.write);
     expect(state.open).toBe(false);
 
@@ -80,7 +80,7 @@ describe('announcing a quota outage', () => {
 
   it('adopts a notice already in the doc, so a restarted session adds no second one', () => {
     const w = writer();
-    const state = createQuotaNoticeState();
+    const state = createNoticeState();
     announceQuotaOutage(state, [notice('b7')], 'h1', w.write);
     expect(w.batches).toEqual([]);
     expect(state.open).toBe(true);
@@ -89,13 +89,13 @@ describe('announcing a quota outage', () => {
   it('ignores a person’s own line that happens to start the same way', () => {
     const w = writer();
     const theirs: NoticeOutlineEntry = { id: 'b3', text: `${QUOTA_NOTICE_MARK} again?` };
-    announceQuotaOutage(createQuotaNoticeState(), [theirs], 'h1', w.write);
+    announceQuotaOutage(createNoticeState(), [theirs], 'h1', w.write);
     expect(w.batches).toHaveLength(1);
   });
 
   it('says nothing at all about the credential', () => {
     const w = writer();
-    announceQuotaOutage(createQuotaNoticeState(), [], 'h1', w.write);
+    announceQuotaOutage(createNoticeState(), [], 'h1', w.write);
     const edit = w.batches[0]?.[0];
     const text = edit && 'markdown' in edit ? edit.markdown : '';
     expect(text).not.toMatch(/key|token|x-api|secret/i);
@@ -105,7 +105,7 @@ describe('announcing a quota outage', () => {
 describe('retracting the notice', () => {
   it('deletes every notice the note-taker wrote, and nothing else', () => {
     const w = writer();
-    const state = createQuotaNoticeState();
+    const state = createNoticeState();
     announceQuotaOutage(state, [], 'h1', writer().write);
     const outline: NoticeOutlineEntry[] = [
       { id: 'b1', text: 'Deployment moved to Thursday.', author: 'meeting-notes' },
@@ -125,7 +125,7 @@ describe('retracting the notice', () => {
 
   it('writes nothing when the doc carries no notice', () => {
     const w = writer();
-    retractQuotaNotice(createQuotaNoticeState(), [], w.write);
+    retractQuotaNotice(createNoticeState(), [], w.write);
     expect(w.batches).toEqual([]);
   });
 
@@ -134,7 +134,7 @@ describe('retracting the notice', () => {
     // would mean no later tick ever looks, and the doc claims an outage that
     // ended for the rest of the meeting.
     const declined = writer(false);
-    const state = createQuotaNoticeState();
+    const state = createNoticeState();
     announceQuotaOutage(state, [], 'h1', writer().write);
     retractQuotaNotice(state, [notice('b2')], declined.write);
     expect(state.open).toBe(true);
@@ -150,14 +150,14 @@ describe('retracting the notice', () => {
     // recovered before its first compose, its own memory is the wrong thing
     // to ask; the doc is the right thing.
     const w = writer();
-    const fresh = createQuotaNoticeState();
+    const fresh = createNoticeState();
     expect(fresh.open).toBe(false);
     retractQuotaNotice(fresh, [notice('b9')], w.write);
     expect(w.batches).toEqual([[{ op: 'delete_block', blockId: 'b9' }]]);
   });
 
   it('reopens the outage after a clear, so a later one is announced again', () => {
-    const state = createQuotaNoticeState();
+    const state = createNoticeState();
     announceQuotaOutage(state, [], 'h1', writer().write);
     retractQuotaNotice(state, [notice('b2')], writer().write);
     const w = writer();
