@@ -71,6 +71,10 @@ export interface RunOutputSource {
 
 type Actor = { id: string; name: string; kind?: string };
 
+/** Longest folder or file name a headline carries. Two of them plus the
+ *  fixed words stay well inside the store's one-line ceiling. */
+const NAME_MAX_CHARS = 120;
+
 /** The item's words. Exported so a test reads what a person would see. */
 export function buildOutputReview(input: {
   workspaceId: string;
@@ -81,7 +85,14 @@ export function buildOutputReview(input: {
   fresh: number;
 }): Record<string, unknown> {
   const { workspaceId, rule, folder, paths, fresh } = input;
-  const base = (p: string) => (p.split('/').pop() ?? p).replace(/[[\]]/g, '');
+  // A file name may hold a line break, and a folder segment may run to 512
+  // characters: either would make the headline one the store refuses.
+  const oneLine = (s: string) =>
+    Array.from(s, (c) => (c < ' ' || c === '\x7f' ? ' ' : c))
+      .join('')
+      .replace(/[[\]]/g, '');
+  const clip = (s: string) => (s.length > NAME_MAX_CHARS ? `${s.slice(0, NAME_MAX_CHARS)}…` : s);
+  const base = (p: string) => clip(oneLine(p.split('/').pop() ?? p));
   const link = (p: string) =>
     `- [${base(p)}](/workspaces/${encodeURIComponent(workspaceId)}/library?open=${encodeURIComponent(p)})`;
   const newest = paths[0] ?? '';
@@ -98,7 +109,7 @@ export function buildOutputReview(input: {
   ].join('\n');
   return {
     review_type: 'question',
-    headline: `New in ${folder.split('/').pop() ?? folder}: ${base(newest)}${more}`,
+    headline: `New in ${clip(oneLine(folder.split('/').pop() ?? folder))}: ${base(newest)}${more}`,
     detail,
   };
 }
@@ -163,7 +174,8 @@ export function observeRunOutput(
     // A writer may flush just after reporting done; look once that has passed.
     if (now < last.closedAt + OUTPUT_SLACK_MS) return save();
 
-    const carriedItem = state.output?.item;
+    const previous = state.output;
+    const carriedItem = previous?.item;
     state.output = { forSuccessAt: successAt, ...(carriedItem ? { item: carriedItem } : {}) };
     changed = true;
     const files = source.files(ws);
@@ -190,7 +202,10 @@ export function observeRunOutput(
       { actor },
     );
     if (!res.ok) {
+      // The success stays unconsumed, so the next tick tries this run again
+      // rather than its news being lost.
       report(`[scheduler] ${rule.id} output item refused: ${res.error}`);
+      state.output = previous;
       return save();
     }
     if (carriedItem) {

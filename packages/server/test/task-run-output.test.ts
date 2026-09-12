@@ -24,12 +24,17 @@ import { join } from 'node:path';
 import {
   type TaskReviewItem,
   type User,
+  checkReviewPayload,
   isReviewItemOpen,
   reviewWithdrawn,
 } from '@claude-workspaces/core';
 import { createMarkdownLister } from '../src/library.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { observeRunOutput } from '../src/task-run-output.ts';
+import {
+  type RunOutputStore,
+  buildOutputReview,
+  observeRunOutput,
+} from '../src/task-run-output.ts';
 import { SCHEDULER_ACTOR, createTaskScheduler } from '../src/task-scheduler.ts';
 import { TaskStore } from '../src/tasks.ts';
 import { seedGoalsOverHttp } from './goal-seed.ts';
@@ -236,7 +241,7 @@ describe('the run-output pass on a real store', () => {
   });
 
   /** A lister whose cache never outlives a pass: each read is a fresh walk. */
-  function schedulerFor(clock: () => number, output = true) {
+  function schedulerFor(clock: () => number, output = true, through: RunOutputStore = store) {
     let listerNow = 0;
     const lister = createMarkdownLister(() => (listerNow += DAY));
     const { workspaceId, ruleId } = seed(store, {
@@ -249,7 +254,7 @@ describe('the run-output pass on a real store', () => {
       report: () => {},
       observers: [
         observeRunOutput(
-          store,
+          through,
           {
             files: () => lister(repo).map((f) => ({ relPath: f.relPath, at: f.mtimeMs })),
             opened: (_ws, relPath) => opened.has(relPath),
@@ -350,5 +355,50 @@ describe('the run-output pass on a real store', () => {
     const open = openOn(store.listReviewItems(ruleId));
     expect(open).toHaveLength(1);
     expect(open[0]?.review.detail).not.toContain('Not opened yet');
+  });
+
+  it('tries a run again on the next tick when the store refused its item', () => {
+    let now = MON + DAY + MIN;
+    let refusals = 1;
+    const refusing: RunOutputStore = {
+      getTask: (id) => store.getTask(id),
+      listReviewItems: (id) => store.listReviewItems(id),
+      addReviewItem: (id, review, opts) =>
+        refusals-- > 0
+          ? { ok: false, error: 'bad-review', message: 'refused once' }
+          : store.addReviewItem(id, review, opts),
+      withdrawReviewItem: (id, itemId, opts) => store.withdrawReviewItem(id, itemId, opts),
+      scheduleSave: (ws) => store.scheduleSave(ws),
+    };
+    const { workspaceId, ruleId, scheduler } = schedulerFor(() => now, true, refusing);
+    scheduler.tick();
+    runAt(workspaceId, ruleId, MON + DAY, ['roundups/ferry-0303.md']);
+    now = MON + DAY + 30 * MIN;
+    scheduler.tick();
+    expect(store.listReviewItems(ruleId)).toHaveLength(0);
+    expect(reports.some((m) => m.includes('output item refused'))).toBe(true);
+    now += MIN;
+    scheduler.tick();
+    expect(openOn(store.listReviewItems(ruleId)).map((i) => i.review.headline)).toEqual([
+      'New in roundups: ferry-0303.md',
+    ]);
+  });
+});
+
+describe('the item a run files', () => {
+  it('is one the store accepts even for a long folder and a file name with a line break', () => {
+    const rule = { id: 't-rule', title: 'Write the ferry roundup' } as Parameters<
+      typeof buildOutputReview
+    >[0]['rule'];
+    const folder = `notes/${'tide'.repeat(127)}`;
+    const review = buildOutputReview({
+      workspaceId: 'w-harbour',
+      rule,
+      folder,
+      paths: [`${folder}/ferry\nroundup.md`],
+      fresh: 1,
+    });
+    expect(checkReviewPayload(review).ok).toBe(true);
+    expect(String(review.headline)).toStartWith('New in tidetide');
   });
 });
