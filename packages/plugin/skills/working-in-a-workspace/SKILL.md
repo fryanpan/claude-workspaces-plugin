@@ -75,10 +75,39 @@ Someone who was not in the conversation should be able to see a task, know why i
   - Keep the whole description under 250 words
   - Use the clearest presentation in markdown, tables, diagrams
   - Start with a **Problem** section that describes outcome and why it's valuable
-  - Then have **Done When** in a numbered list (good for workflow steps) or bullet points. The criteria should be specific and falsifiable.
   - The problem should tie to the top level goal the task is assigned to
+  - Put the done-when criteria in the `doneWhen` field, not in the description. See below.
 - **Ask Questions**
   - If you can't write a clear task, write what you can and then ask the primary user questions using `add_review_item(taskId, review)`
+
+## Done When
+
+A task carries its criteria in the `doneWhen` field. The field is a list. Each entry is one outcome. The board shows the list under the description, and it shows how many entries you reported.
+
+**Write the list when you file the task.** Give `doneWhen` to `create_tasks` as `[{text}]`. Give it to `rewrite_task` to change the list later. `rewrite_task` replaces the whole list. Keep an entry's `id` to keep its verdict and its proof.
+
+Write each entry so a reader can check it alone:
+
+- Name what is measured, and where the reader reads it.
+- Write one outcome in one entry. Do not join two outcomes with "and".
+- Do not write the steps you will do. Write the result the steps must give.
+
+**Report what you found with `report_done_when`.** Give one entry for each line you checked: `{id, verdict, proof?}`.
+
+| Verdict | Use it when |
+| --- | --- |
+| `met` | You checked the line. It holds. |
+| `not-met` | You checked the line. It does not hold. |
+| `unchecked` | You could not check the line. Say why in a proof. |
+| `owner` | Only a person can judge the line. |
+
+`met` needs one proof or more. The board refuses a `met` with no proof, and it names the line. A proof is `{text, url?}`: what you ran or read, and where a reader sees it.
+
+**The board closes the task for you.** When you report the last open line as `met`, the board moves the task to done. It also records which line closed the task. Do not call `task_transition` after that.
+
+**A line you report as `owner` goes to the person who owns the task.** They get two buttons on the task. Do not wait for a tool to answer. Take other work.
+
+**You cannot move a task to done while a line is open.** The board refuses the transition, and it names the first open line. Report the line met with proof, or remove the line with `rewrite_task`. A task with no `doneWhen` entries moves to done as before.
 
 ## Keep the Lead and Primary User Up to Date
 

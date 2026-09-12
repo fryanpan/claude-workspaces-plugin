@@ -16435,6 +16435,11 @@ var TOOL_LIST = {
                 quote: {
                   type: "string",
                   description: "The person's VERBATIM words, for an ask that came from chat, kept on the task. For a thread-born ask use spin_off_task, which captures the quote itself."
+                },
+                doneWhen: {
+                  type: "array",
+                  description: "What has to be true before this task is done, one outcome per entry: [{text}]. It is a FIELD, not prose in the body — the task will not move to done until every line is reported met, and reports it back a line at a time through report_done_when. Write each line so a reader can check it without asking you: name what is measured and where they read it. At most 50.",
+                  items: { type: "object" }
                 }
               },
               required: ["title"]
@@ -16704,12 +16709,37 @@ var TOOL_LIST = {
             type: "string",
             description: "The FULL new description, replacing what is there. Omit it to leave the body alone. Open with the user story, keep it readable on a phone, and state a falsifiable done-when."
           },
+          doneWhen: {
+            type: "array",
+            description: "The WHOLE done-when list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed.",
+            items: { type: "object" }
+          },
           reason: {
             type: "string",
             description: 'Why you are rewriting, in one line, for example "title named the artifact, not the outcome". It is recorded on the audit entry and shown in the activity feed.'
           }
         },
         required: ["workspaceId", "taskId", "reason"]
+      }
+    },
+    {
+      name: "report_done_when",
+      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge; they get two buttons on the task and you do not wait on a tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
+          },
+          taskId: { type: "string" },
+          lines: {
+            type: "array",
+            description: "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. Every entry is validated before anything is written, so a bad entry writes nothing.",
+            items: { type: "object" }
+          }
+        },
+        required: ["workspaceId", "taskId", "lines"]
       }
     },
     {
@@ -18402,9 +18432,20 @@ async function handleTaskTool(name, a, ctx) {
       });
     }
     case "rewrite_task": {
-      const { taskId, title, body, reason } = a;
+      const { taskId, title, body, reason, doneWhen } = a;
+      if (body === undefined && title === undefined && doneWhen === undefined) {
+        return err2("nothing to rewrite — pass title, body, doneWhen, or any combination");
+      }
+      let doneWhenLines;
+      if (doneWhen !== undefined) {
+        const dw = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/done-when`, {
+          lines: doneWhen,
+          author: AUTHOR
+        });
+        doneWhenLines = dw.lines;
+      }
       if (body === undefined && title === undefined) {
-        return err2("nothing to rewrite — pass title, body, or both");
+        return ok2({ taskId, doneWhen: doneWhenLines });
       }
       if (body !== undefined) {
         const res2 = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/body`, {
@@ -18417,7 +18458,8 @@ async function handleTaskTool(name, a, ctx) {
           taskId,
           title: res2.task?.title,
           body: res2.task?.body,
-          quote: res2.task?.quote
+          quote: res2.task?.quote,
+          ...doneWhenLines !== undefined ? { doneWhen: doneWhenLines } : {}
         });
       }
       const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/title`, {
@@ -18425,7 +18467,20 @@ async function handleTaskTool(name, a, ctx) {
         ...reason !== undefined ? { reason } : {},
         author: AUTHOR
       });
-      return ok2({ taskId, title: res.task?.title, changed: res.changed ?? false });
+      return ok2({
+        taskId,
+        title: res.task?.title,
+        changed: res.changed ?? false,
+        ...doneWhenLines !== undefined ? { doneWhen: doneWhenLines } : {}
+      });
+    }
+    case "report_done_when": {
+      const { taskId, lines } = a;
+      if (!Array.isArray(lines) || lines.length === 0) {
+        return err2("lines must name at least one done-when line to report");
+      }
+      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/done-when/report`, { lines, author: AUTHOR });
+      return ok2({ taskId, lines: res.lines, closed: res.closed, status: res.status });
     }
     case "set_task_goal": {
       const { taskId, goal, position, batchId } = a;
@@ -19453,7 +19508,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.213";
+var PLUGIN_VERSION = "0.1.215";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
