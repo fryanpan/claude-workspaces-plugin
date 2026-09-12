@@ -341,6 +341,9 @@ export function createMeetingLiveZone(opts: {
    *  starting a second clock over the same run. */
   let inPlacePending: readonly number[] = [];
   let inPlaceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the batch's land beat is due. A frame joining the batch may push
+   *  that later, never earlier — see `landInPlace`. */
+  let inPlaceLandAt = 0;
 
   /** Holds the stream still across a split — meeting-live-hold.ts. */
   const streamHold = createStreamHold(lines);
@@ -513,6 +516,7 @@ export function createMeetingLiveZone(opts: {
   function stopInPlace(): void {
     if (inPlaceTimer !== null) clearTimeout(inPlaceTimer);
     inPlaceTimer = null;
+    inPlaceLandAt = 0;
     for (const id of inPlacePending) {
       const t = turns.get(id);
       if (t) {
@@ -542,6 +546,7 @@ export function createMeetingLiveZone(opts: {
   function finishInPlace(): void {
     if (inPlaceTimer !== null) clearTimeout(inPlaceTimer);
     inPlaceTimer = null;
+    inPlaceLandAt = 0;
     for (const id of inPlacePending) turns.delete(id);
     inPlacePending = [];
   }
@@ -556,23 +561,34 @@ export function createMeetingLiveZone(opts: {
    * starting a second clock: two clocks over one run left whichever finished
    * first deleting only its own half, and the other half flagged composing
    * for the rest of the meeting.
+   *
+   * Joining may push the batch's land beat LATER, never earlier. An `empty`
+   * frame asks for no beat at all (`afterMs` 0), and a batch it joins is
+   * already waiting out a note that really did land: shortening that wait
+   * would snatch the pause from words the reader is watching arrive.
    */
-  function landInPlace(ids: readonly number[]): void {
+  function landInPlace(ids: readonly number[], afterMs: number = NOTE_LAND_MS): void {
     const going = [...new Set([...inPlacePending, ...ids.filter((id) => turns.has(id))])];
     if (going.length === 0) return;
+    const joining = inPlaceTimer !== null && inPlacePending.length > 0;
+    const landAt = Math.max(joining ? inPlaceLandAt : 0, now() + afterMs);
     if (inPlaceTimer !== null) clearTimeout(inPlaceTimer);
     inPlacePending = going;
-    inPlaceTimer = setTimeout(() => {
-      for (const id of going) {
-        const t = turns.get(id);
-        if (t) t.fading = true;
-      }
-      render();
-      inPlaceTimer = setTimeout(() => {
-        finishInPlace();
+    inPlaceLandAt = landAt;
+    inPlaceTimer = setTimeout(
+      () => {
+        for (const id of going) {
+          const t = turns.get(id);
+          if (t) t.fading = true;
+        }
         render();
-      }, FADE_MS);
-    }, NOTE_LAND_MS);
+        inPlaceTimer = setTimeout(() => {
+          finishInPlace();
+          render();
+        }, FADE_MS);
+      },
+      Math.max(0, landAt - now()),
+    );
   }
 
   /**
@@ -633,18 +649,32 @@ export function createMeetingLiveZone(opts: {
         land(e.turns);
         return;
       }
-      // `failed` or `empty`: no note carries these words. A failed tick's are
-      // composed again in the next one; an empty tick's have had their look
-      // and produced nothing. Either way they are still provisional and
-      // nothing has been written up, so they go back to the stream rather
-      // than fading out of it — the fade means "this is in the notes now",
-      // and on an empty tick that would be a lie the reader cannot check.
+      // BOTH OF THE REMAINING PHASES GIVE THE WORDS BACK TO THE STREAM FIRST,
+      // because both mean the same thing about the chunk they were lifted
+      // into: no note landed in it, so it goes with no settle rather than
+      // with the one that says a note did.
       withdrawInPlace(e.turns);
       for (const id of e.turns) {
         const t = turns.get(id);
         if (t) t.composing = false;
       }
       render();
+      // AND AN `empty` TICK'S WORDS THEN LEAVE ANYWAY, WHICH IS THE FIX.
+      // They used to stay, on the reasoning that fading them would say "this
+      // is in the notes now" about words no note carries. True, and the
+      // alternative turned out to be the worse claim: the server marks an
+      // empty tick's turns composed and never looks at them again, so words
+      // left in the stream say "still being written up" for the rest of the
+      // meeting. A five-minute meeting reported it exactly that way — old
+      // phrases sitting in the live transcript while newer ones, from ticks
+      // that did write a note, faded away around them.
+      //
+      // So they go, without the beat that means a note landed: no
+      // `NOTE_LAND_MS` wait for a note that is not coming, just the fade
+      // where they sit and the stream closing over the gap. A `failed`
+      // tick's words stay, and that half is unchanged — those are composed
+      // again in the next tick, so they really are still on their way.
+      if (e.phase === 'empty') landInPlace(e.turns, 0);
     },
     setNames(next) {
       names = next;
