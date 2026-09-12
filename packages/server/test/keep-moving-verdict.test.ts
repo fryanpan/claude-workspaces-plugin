@@ -88,7 +88,16 @@ describe('what a verdict says', () => {
     // that is moving, and a FAIL on its own.
     expect(
       keepMovingVerdictFor(
-        board('w-1', { ungatedUi: [{ id: 't-ui', title: 'move the button', keyword: 'button' }] }),
+        board('w-1', {
+          ungatedUi: [
+            {
+              id: 't-ui',
+              title: 'move the button',
+              file: 'packages/workspaces-app/src/board.css',
+              keyword: 'button',
+            },
+          ],
+        }),
         T0,
         quiet,
       ),

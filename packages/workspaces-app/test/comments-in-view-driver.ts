@@ -116,6 +116,32 @@ export interface Probe {
   replaceStill: StillReading;
   /** A block-rewriting tick arriving as a remote update: do the cards stay? */
   cardsKept: CardsKeptReading;
+  /** The document arriving under a pane nobody has touched: is its own first
+   *  heading on screen once it has? */
+  opened: OpenedReading;
+}
+
+/**
+ * A doc opening: the editor is built empty, the hold mounts over it, and the
+ * document's blocks arrive afterwards — the boot order the real page has.
+ */
+export interface OpenedReading {
+  /** Blocks in the prose when the hold took its first reading. One: the empty
+   *  paragraph ProseMirror renders for an empty document. */
+  blocksAtMount: number;
+  /** …and after the sync, so a run where nothing arrived cannot read as a
+   *  pass. */
+  blocksAfter: number;
+  scrollHeightBefore: number;
+  scrollHeightAfter: number;
+  clientHeight: number;
+  /** Where the pane came to rest. Nobody scrolled it. */
+  scrollTop: number;
+  /** The pane's own top edge — on the real page, the line the top bar ends on. */
+  paneTop: number;
+  headingTop: number;
+  headingBottom: number;
+  headingText: string;
 }
 
 /** Reaching a comment from the strip, with the transcript still growing. */
@@ -448,6 +474,9 @@ async function settle(m: Mounted): Promise<void> {
 }
 
 async function probe(): Promise<string> {
+  // First, into a pane nothing has mounted into yet: the doc's own opening.
+  const opened = await openedArm();
+
   const m = mount();
   await frame();
 
@@ -508,8 +537,68 @@ async function probe(): Promise<string> {
     rewrapStill,
     replaceStill,
     cardsKept,
+    opened,
   };
   return JSON.stringify(out);
+}
+
+/**
+ * A DOC OPENS WITH ITS OWN TITLE ON SCREEN.
+ *
+ * The boot order the real page has, and the one every other arm here skips by
+ * filling the ydoc before it builds the editor: the editor is created over an
+ * EMPTY document, the hold mounts over that, and the document's blocks arrive
+ * afterwards — on the live server, ~13ms later, when the first sync lands.
+ *
+ * What that used to do. ProseMirror renders an empty document as one empty
+ * paragraph, so the hold's first reading was taken against it; the sync then
+ * put the heading in above that paragraph and reused the paragraph for the
+ * doc's first one, which moved it down the pane. The hold corrected by exactly
+ * that much — 71px at 1180x820 and 48px at 430x932, measured on the live
+ * server — and the doc's own H1 went above the pane's clip box and under the
+ * top bar, on every doc, before anyone had touched anything.
+ */
+async function openedArm(): Promise<OpenedReading> {
+  const editorEl = document.getElementById('editor') as HTMLElement;
+  const ydoc = new Y.Doc();
+  const editor = createEditor({ parent: editorEl, ydoc, awareness: new Awareness(ydoc) });
+  const scope = new MountScope();
+  // Mounted where `doc-margin.ts` mounts it: over an editor that has no
+  // document yet.
+  mountReadingHold({ scroller: editorEl, scope });
+  await frame();
+
+  const proseEl = editor.editor.view.dom;
+  const blocksAtMount = proseEl.children.length;
+  const scrollHeightBefore = editorEl.scrollHeight;
+
+  // The first sync, in one transaction, the way `whenSynced` delivers it.
+  prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks(fixtureMarkdown(60)));
+  await frame();
+  await sleep(160);
+  await frame();
+
+  const heading = proseEl.querySelector('h1');
+  const headingRect = heading?.getBoundingClientRect();
+  const reading: OpenedReading = {
+    blocksAtMount,
+    blocksAfter: proseEl.children.length,
+    scrollHeightBefore,
+    scrollHeightAfter: editorEl.scrollHeight,
+    clientHeight: editorEl.clientHeight,
+    scrollTop: editorEl.scrollTop,
+    paneTop: editorEl.getBoundingClientRect().top,
+    headingTop: headingRect?.top ?? Number.NaN,
+    headingBottom: headingRect?.bottom ?? Number.NaN,
+    headingText: heading?.textContent ?? '',
+  };
+
+  scope.dispose();
+  editor.destroy();
+  editorEl.replaceChildren();
+  editorEl.className = 'prose';
+  editorEl.scrollTop = 0;
+  return reading;
 }
 
 /** The reader scrolls the pane down to its foot, by hand. */

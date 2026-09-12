@@ -205,8 +205,10 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
   scope.onCleanup(() => strip.destroy());
   // The standing line for an empty lead seat — huddle docs only, because
   // a huddle is the doc whose every ask addresses that seat (the floats
-  // above, the assistant's spoken captures). Sits at the top of the
-  // scrolling prose; see lead-banner.ts for what "listening" means.
+  // above, the assistant's spoken captures). It becomes a ROW OF THE PANE
+  // above this scroller rather than a layer inside it, so it never lies over
+  // the live transcript — lead-banner.ts places it and says what "listening"
+  // means; doc.css says what the overlay cost.
   let watchLeadPresence: LeadBanner['watch'] | undefined;
   if (huddle) {
     const banner = mountLeadBanner({ docId, parent: editorMount });

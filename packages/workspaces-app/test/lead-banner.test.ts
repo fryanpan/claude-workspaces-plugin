@@ -47,6 +47,62 @@ function mounted(first: Promise<unknown>) {
   };
 }
 
+describe('where the line goes', () => {
+  /** The doc page's real shape: a pane holding the scroller the banner
+   *  stands above. */
+  function paneShape(): { pane: HTMLElement; scroller: HTMLElement } {
+    const pane = document.createElement('section');
+    pane.id = 'editor-pane';
+    const bar = document.createElement('div');
+    bar.id = 'format-bar';
+    const scroller = document.createElement('div');
+    scroller.id = 'editor';
+    scroller.append(document.createElement('p'));
+    pane.append(bar, scroller);
+    return { pane, scroller };
+  }
+
+  /**
+   * A ROW OF THE PANE, ABOVE THE SCROLLER — not a child of the scroller.
+   * While it was the latter it held its place by lying over the text that
+   * scrolled under it, and on a meeting doc that text is the live
+   * transcript; the pixels are in `lead-banner-row-browser.test.ts`. Here
+   * the claim is only where the element lands, which is what decides it.
+   */
+  it('becomes the pane row directly above the scroller', () => {
+    const { pane, scroller } = paneShape();
+    const banner = mountLeadBanner({
+      docId: 'doc-1',
+      parent: scroller,
+      fetchJson: () => Promise.resolve(presence({ live: false })),
+      subscribe: () => () => {},
+    });
+    expect(banner.element.parentElement).toBe(pane);
+    expect(banner.element.nextElementSibling).toBe(scroller);
+    // Nothing of the doc is inside the banner's own box, and nothing of the
+    // banner is inside the scroller's.
+    expect(scroller.contains(banner.element)).toBe(false);
+    banner.destroy();
+    expect(pane.querySelector('.lead-banner')).toBeNull();
+  });
+
+  /** A surface that is only a scroller — a test harness, a page with no
+   *  pane — keeps the placement it always had rather than going nowhere. */
+  it('falls back to the first child when there is no pane', () => {
+    const parent = document.createElement('div');
+    parent.append(document.createElement('p'));
+    const banner = mountLeadBanner({
+      docId: 'doc-1',
+      parent,
+      fetchJson: () => Promise.resolve(presence({ live: false })),
+      subscribe: () => () => {},
+    });
+    expect(parent.firstElementChild).toBe(banner.element);
+    banner.destroy();
+    expect(parent.querySelector('.lead-banner')).toBeNull();
+  });
+});
+
 describe('lead banner', () => {
   it('sits above the prose and says nothing until it knows', async () => {
     let resolve: (v: unknown) => void = () => {};

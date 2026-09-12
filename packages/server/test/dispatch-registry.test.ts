@@ -30,6 +30,65 @@ function fakeWatch() {
   return { factory, handles, closed };
 }
 
+describe('the commit a dispatch started from', () => {
+  it('is recorded at registration, survives a restart, and is per dispatch', () => {
+    // A reader asking what THIS builder changed needs the line between the
+    // branch it was handed and the work it did. The registry records it once,
+    // at the only moment the answer is still that dispatch's starting line.
+    const dataDir = tempDir();
+    const first = tempDir();
+    const second = tempDir();
+    const heads: Record<string, string> = { [first]: 'a'.repeat(40), [second]: 'b'.repeat(40) };
+    const { factory } = fakeWatch();
+    const opts = {
+      dataDir,
+      watchFactory: factory,
+      headCommitOf: (path: string) => heads[path] ?? null,
+    };
+    const reg = new DispatchRegistry(opts);
+    try {
+      reg.register('t-one', first);
+      reg.register('t-two', second);
+      const byTask = Object.fromEntries(reg.list().map((d) => [d.taskId, d.baseCommit]));
+      expect(byTask).toEqual({ 't-one': 'a'.repeat(40), 't-two': 'b'.repeat(40) });
+
+      // Persisted, so a builder still working after a restart is still
+      // measured from where it started rather than from the branch's root.
+      const revived = new DispatchRegistry(opts);
+      try {
+        expect(revived.list().find((d) => d.taskId === 't-one')?.baseCommit).toBe('a'.repeat(40));
+      } finally {
+        revived.stop();
+      }
+    } finally {
+      reg.stop();
+      rmSync(dataDir, { recursive: true, force: true });
+      rmSync(first, { recursive: true, force: true });
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  it('is simply absent when the path is not something git can answer for', () => {
+    const dataDir = tempDir();
+    const worktree = tempDir();
+    const { factory } = fakeWatch();
+    const reg = new DispatchRegistry({
+      dataDir,
+      watchFactory: factory,
+      headCommitOf: () => null,
+    });
+    try {
+      const res = reg.register('t-alpha', worktree);
+      expect(res.ok).toBe(true);
+      expect(reg.list()[0]?.baseCommit).toBeUndefined();
+    } finally {
+      reg.stop();
+      rmSync(dataDir, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('dispatch registry', () => {
   it('registers a dispatch and reports watcher-driven activity', () => {
     const dataDir = tempDir();

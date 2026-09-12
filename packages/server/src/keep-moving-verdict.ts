@@ -31,10 +31,11 @@
  *   escalated   review items the BOARD filed to the reader inside the last
  *               day (`stall-escalation.ts`) — the last resort, counted so
  *               that it is visible when it is not a last resort
- *   ungatedUi   rows an agent filed that read as UI work and are being built
- *               with no answered review item on them (`ui-review-gate.ts`) —
- *               the one finding here about a row that IS moving, because the
- *               rule it breaks is about what got skipped on the way
+ *   ungatedUi   rows an agent filed whose builder has changed a file a
+ *               person looks at, with no answered review item on them
+ *               (`ui-review-gate.ts`) — the one finding here about a row
+ *               that IS moving, because the rule it breaks is about what
+ *               got skipped on the way
  *
  * Any of them non-zero is a FAIL. A FAIL is not an alarm — the wake already
  * told the lead — it is the record that the promise was not kept at that

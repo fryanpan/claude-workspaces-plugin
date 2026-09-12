@@ -58,6 +58,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, watch, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { resolveCommit } from './git-diff.ts';
 
 const FILENAME = 'dispatches.json';
 const FORMAT_VERSION = 1;
@@ -104,6 +105,23 @@ export interface DispatchRecord {
    *  parallelism-cap refusal can name who holds the slot instead of just the
    *  task id. Absent for callers on an older bundle that never sent it. */
   agentName?: string;
+  /**
+   * The commit the worktree was sitting on when this dispatch was
+   * registered — the line between whatever was already on that branch and
+   * what THIS dispatch's builder writes.
+   *
+   * It exists because a worktree outlives a dispatch. Reuse one for a second
+   * task and the branch still carries the first task's commits, so a reader
+   * asking "what has this builder changed" off the default branch alone is
+   * handed the previous occupant's work as well. The UI gate is that reader,
+   * and a stylesheet edit inherited from a finished task is exactly the
+   * false positive it exists to stop.
+   *
+   * Absent when the path is not a git repo, when git could not be asked, and
+   * on a record persisted before this field existed. A reader must degrade
+   * to the default-branch merge base, never refuse to read.
+   */
+  baseCommit?: string;
 }
 
 export type RegisterResult =
@@ -116,11 +134,15 @@ interface Entry {
   lastActivityAt?: number;
   watcher: { close: () => void } | null;
   agentName?: string;
+  baseCommit?: string;
 }
 
 interface FileShape {
   version: number;
-  dispatches: Record<string, { worktreePath: string; registeredAt: number; agentName?: string }>;
+  dispatches: Record<
+    string,
+    { worktreePath: string; registeredAt: number; agentName?: string; baseCommit?: string }
+  >;
 }
 
 export interface DispatchRegistryOptions {
@@ -134,6 +156,12 @@ export interface DispatchRegistryOptions {
    * task is ever over and only the path check applies.
    */
   isTaskOver?: (taskId: string) => boolean;
+  /**
+   * The commit a worktree is sitting on, asked once at registration. The
+   * default asks git; a unit test passes its own so the registry needs no
+   * repo on disk. Returning null is fine and means "no baseline recorded".
+   */
+  headCommitOf?: (worktreePath: string) => string | null;
 }
 
 export class DispatchRegistry {
@@ -141,6 +169,7 @@ export class DispatchRegistry {
   private readonly now: () => number;
   private readonly watchFactory: WatchFactory;
   private readonly isTaskOver: (taskId: string) => boolean;
+  private readonly headCommitOf: (worktreePath: string) => string | null;
   private readonly entries = new Map<string, Entry>();
   /** Set when the file on disk was unreadable and moved aside. */
   readonly loadError: string | null = null;
@@ -153,6 +182,7 @@ export class DispatchRegistry {
     this.now = opts.now ?? Date.now;
     this.watchFactory = opts.watchFactory ?? fsWatchFactory;
     this.isTaskOver = opts.isTaskOver ?? (() => false);
+    this.headCommitOf = opts.headCommitOf ?? ((path) => resolveCommit(path, 'HEAD'));
     if (!existsSync(this.path)) return;
     try {
       const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<FileShape>;
@@ -168,6 +198,9 @@ export class DispatchRegistry {
           watcher: null,
           ...(typeof rec.agentName === 'string' && rec.agentName.length > 0
             ? { agentName: rec.agentName }
+            : {}),
+          ...(typeof rec.baseCommit === 'string' && rec.baseCommit.length > 0
+            ? { baseCommit: rec.baseCommit }
             : {}),
         };
         this.entries.set(taskId, entry);
@@ -198,11 +231,15 @@ export class DispatchRegistry {
     // Re-registering replaces: the newest dispatch is the live one, and the
     // old worktree's activity must not vouch for the new worktree's silence.
     this.closeEntry(taskId);
+    // Asked BEFORE the builder has written anything, which is the only
+    // moment the answer is this dispatch's own starting line.
+    const baseCommit = this.headCommitOf(worktreePath);
     const entry: Entry = {
       worktreePath,
       registeredAt: this.now(),
       watcher: null,
       ...(agentName ? { agentName } : {}),
+      ...(baseCommit ? { baseCommit } : {}),
     };
     this.entries.set(taskId, entry);
     this.arm(entry);
@@ -316,6 +353,7 @@ export class DispatchRegistry {
       ...(entry.lastActivityAt !== undefined ? { lastActivityAt: entry.lastActivityAt } : {}),
       watching: entry.watcher !== null,
       ...(entry.agentName !== undefined ? { agentName: entry.agentName } : {}),
+      ...(entry.baseCommit !== undefined ? { baseCommit: entry.baseCommit } : {}),
     };
   }
 
@@ -327,6 +365,7 @@ export class DispatchRegistry {
         worktreePath: entry.worktreePath,
         registeredAt: entry.registeredAt,
         ...(entry.agentName !== undefined ? { agentName: entry.agentName } : {}),
+        ...(entry.baseCommit !== undefined ? { baseCommit: entry.baseCommit } : {}),
       };
     }
     const tmp = `${this.path}.tmp`;
