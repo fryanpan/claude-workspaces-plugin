@@ -36,7 +36,7 @@ import { seedGoalsOverHttp } from './goal-seed.ts';
 import { type Frame, listenFrames, waitForFrames } from './sse-frames.ts';
 import { waitFor } from './wait-for.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+const PERSON = { id: 'known-owner', name: 'Board Owner', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 /** The production window. Nothing in this file may wait it out. */
