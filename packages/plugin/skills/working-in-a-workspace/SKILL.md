@@ -125,6 +125,12 @@ Write each entry so a reader can check it alone:
   2. The task's link (`?task=<taskId>` on the board URL).
   3. Any blocker, in one line.
 
+### Check in every 30 minutes
+
+While a task is `in-progress`, post an activity update on it at least every half hour. Use `post_status`. The update does not have to be a milestone. "Still on the parser, next the CSV writer" is a fine update. A long build or a long read still counts as silence, so say so before you start one.
+
+Home shows the age of each task's newest activity on a pill beside its title. The pill turns amber at 30 minutes and red at 60. The board also reminds your lead, once per half hour, about any task you hold and have not reported on.
+
 ### Handover notes
 
 Builders die mid-task, and a replacement that restarts from scratch redoes finished work. The task's Activity tab is the handover. At each milestone (worktree created, first commit, tests green, PR open) and whenever you stop, `post_status` a note under 70 words in four parts:

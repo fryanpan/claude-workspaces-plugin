@@ -1098,6 +1098,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     reviseCallFor: (address) => reviseCallFor(address),
     ...(opts.readyNudgeIdleMs !== undefined ? { readyNudgeIdleMs: opts.readyNudgeIdleMs } : {}),
     ...(opts.stallNudgeQuietMs !== undefined ? { stallNudgeQuietMs: opts.stallNudgeQuietMs } : {}),
+    ...(opts.checkInMs !== undefined ? { checkInMs: opts.checkInMs } : {}),
     ...(opts.stallBuilderSilentMultiplier !== undefined
       ? { stallBuilderSilentMultiplier: opts.stallBuilderSilentMultiplier }
       : {}),

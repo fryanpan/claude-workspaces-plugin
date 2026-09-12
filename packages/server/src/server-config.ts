@@ -127,6 +127,7 @@ export function resolveServerConfig(opts: {
   // STALLED (stall-nudge.ts) — a different question from the one above, which
   // asks whether ready work has been picked up.
   const stallNudgeQuietMs = positiveEnvDuration(env, 'CW_STALL_NUDGE_MINUTES', MINUTE_MS);
+  const checkInMs = positiveEnvDuration(env, 'CW_CHECK_IN_MINUTES', MINUTE_MS);
 
   // How many quiet windows a row with a WATCHING builder dispatch gets before
   // the board calls its builder silent (stall-gate.ts). A bare multiplier —
@@ -612,6 +613,7 @@ export function resolveServerConfig(opts: {
     releaseSourceRef,
     readyNudgeIdleMs,
     stallNudgeQuietMs,
+    checkInMs,
     stallBuilderSilentMultiplier,
     stallNudgeRepeatMs,
     heldReviewItemMs,

@@ -206,7 +206,7 @@ describe('home-activity island rendering', () => {
     host.remove();
   });
 
-  it('wears at most one flag badge, worded off-band / stale / dark', () => {
+  it('wears at most one flag badge — and a dark group wears the pill instead', () => {
     const off = task({
       id: 't-off',
       goal: CHORES_ID,
@@ -229,11 +229,82 @@ describe('home-activity island rendering', () => {
     expect(badge('t-off')?.className).toContain('board-badge-offband');
     expect(badge('t-stale')?.textContent).toBe('stale');
     expect(badge('t-stale')?.className).toContain('board-badge-stale');
-    expect(badge('t-dark')?.textContent).toBe('dark');
-    expect(badge('t-dark')?.className).toContain('board-badge-dark');
+    // `dark` and the pill say the same thing — an in-progress task nobody has
+    // spoken about — so the group wears ONE marker and it is the pill.
+    expect(badge('t-dark')).toBeNull();
+    expect(byId.get('t-dark')?.querySelector('.acti-quiet')?.className).toContain(
+      'acti-quiet-warn',
+    );
     expect(badge('t-clean')).toBeNull();
-    for (const g of byId.values())
+    for (const g of byId.values()) {
       expect(g.querySelectorAll('.board-badge').length).toBeLessThan(2);
+      // Every group has exactly one pill, badge or no badge.
+      expect(g.querySelectorAll('.acti-quiet').length).toBe(1);
+    }
+    unmount();
+    host.remove();
+  });
+
+  it('ends every title line with the quiet pill, tinted only for a quiet in-progress task', () => {
+    const fresh = task({ id: 't-fresh', notes: [note(5 * MIN, 'CI green')] });
+    const warn = task({ id: 't-warn', notes: [note(40 * MIN, 'Opened PR')] });
+    const error = task({ id: 't-err', notes: [note(90 * MIN, 'Opened PR')] });
+    const doneOld = task({ id: 't-done', status: 'done', notes: [note(90 * MIN, 'Shipped')] });
+    const { host, unmount } = mount([fresh, warn, error, doneOld]);
+    const byId = new Map(groupsIn(host).map((g) => [g.dataset.taskId, g]));
+    const quiet = (id: string) => byId.get(id)?.querySelector('.acti-quiet') as HTMLElement;
+    expect(quiet('t-fresh').textContent).toBe('5m');
+    expect(quiet('t-fresh').className).toContain('acti-quiet-neutral');
+    expect(quiet('t-warn').textContent).toBe('40m');
+    expect(quiet('t-warn').className).toContain('acti-quiet-warn');
+    expect(quiet('t-err').textContent).toBe('2h');
+    expect(quiet('t-err').className).toContain('acti-quiet-error');
+    // The same age on a done task is just an age — the tint is for work that
+    // is supposed to be moving.
+    expect(quiet('t-done').textContent).toBe('2h');
+    expect(quiet('t-done').className).toContain('acti-quiet-neutral');
+    // The pill sits on the title line, after the title itself.
+    const head = byId.get('t-warn')?.querySelector('.acti-head') as HTMLElement;
+    expect(head.lastElementChild).toBe(quiet('t-warn'));
+    unmount();
+    host.remove();
+  });
+
+  it('the warn and error pills are painted differently from the neutral one', () => {
+    const { host, unmount, pick } = pane(IPAD, [
+      task({ id: 't-n', notes: [note(5 * MIN, 'CI green')] }),
+      task({ id: 't-w', notes: [note(40 * MIN, 'Opened PR')] }),
+      task({ id: 't-e', notes: [note(90 * MIN, 'Opened PR')] }),
+    ]);
+    const neutral = styleOf(pick('.acti-quiet-neutral'));
+    const warn = styleOf(pick('.acti-quiet-warn'));
+    const error = styleOf(pick('.acti-quiet-error'));
+    // Read against the tokens the sheets actually define, not against a
+    // literal: a colour written here would pass on a sheet that had stopped
+    // reaching the pill at all.
+    const token = (name: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    expect(neutral.color).toBe(token('--fg-muted'));
+    expect(warn.color).toBe(token('--warn-fg'));
+    expect(error.color).toBe(token('--red-strong'));
+    expect(warn.borderColor).toBe(token('--warn-fg'));
+    expect(error.borderColor).toBe(token('--red-strong'));
+    // …and none of them is an unresolved var(): every one of the three had to
+    // come out as a real colour for the three readings above to differ.
+    expect(new Set([neutral.color, warn.color, error.color]).size).toBe(3);
+    unmount();
+    host.remove();
+  });
+
+  it('gives each note line a little more room than the 2px/1.4 it had', () => {
+    const { host, unmount, pick } = pane(IPAD);
+    expect(Number.parseFloat(styleOf(pick('.acti-notes')).gap)).toBeGreaterThan(2);
+    expect(Number.parseFloat(styleOf(pick('.board-activity-note')).lineHeight)).toBeGreaterThan(
+      1.4,
+    );
+    // …and still ONE line at the tablet tier: height is the scarce axis, so
+    // the air may not come from letting a line wrap.
+    expect(styleOf(pick('.board-activity-note')).whiteSpace).toBe('nowrap');
     unmount();
     host.remove();
   });
@@ -537,6 +608,8 @@ describe('commenting on a note like a doc', () => {
     expect(pillShown(host), 'pill on an agent name').toBe(false);
     await selectAll(g.querySelector('.board-badge') as Element);
     expect(pillShown(host), 'pill on a badge').toBe(false);
+    await selectAll(g.querySelector('.acti-quiet') as Element);
+    expect(pillShown(host), 'pill on the quiet pill').toBe(false);
     await selectAll(g.querySelector('.acti-more') as Element);
     expect(pillShown(host), 'pill on "+N more"').toBe(false);
     // Positive controls: the note text and the title.

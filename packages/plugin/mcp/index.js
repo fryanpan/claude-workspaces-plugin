@@ -14107,6 +14107,9 @@ function changedClause(changed) {
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0)
     bits.push(`${ungated.length} task built past the UI gate`);
+  const checkIn = changed.checkIn ?? [];
+  if (checkIn.length > 0)
+    bits.push(`${checkIn.length} task(s) owe a check-in`);
   if (changed.escalated === true)
     bits.push("the board’s quietest task crossed another repeat window");
   if (bits.length === 0)
@@ -14148,6 +14151,11 @@ function stalledLine(p) {
   if (ungated.length > 0) {
     const noun = ungated.length === 1 ? "UI task is" : "UI tasks are";
     parts.push(`${ungated.length} ${noun} being built past the review gate — an agent filed it, it reads as ` + `UI work, and nobody answered a review item on it — ${ungatedRowsClause(ungated)}. ` + "Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.");
+  }
+  const checkIn = p.checkIn ?? [];
+  if (checkIn.length > 0) {
+    const noun = checkIn.length === 1 ? "task has" : "tasks have";
+    parts.push(`${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? "it" : "them"} who has gone ` + `quiet past the check-in window — ${stalledRowsClause(checkIn)}. Ask each holder for a ` + "line now: the protocol is an activity update every 30 minutes, even if it is " + '"still on X, next Y".');
   }
   const changed = changedClause(p.changed);
   if (changed)
@@ -19599,7 +19607,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.216";
+var PLUGIN_VERSION = "0.1.217";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

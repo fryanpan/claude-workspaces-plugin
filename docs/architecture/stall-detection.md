@@ -47,6 +47,31 @@ frame per board:
 | `stalled` | todo/in-progress, not dependency-blocked, no pending human review item, quiet ≥ threshold | 20 min quiet (`CW_STALL_NUDGE_MINUTES`) |
 | `unfiled` | waiting on the owner but with NO review item on their queue — an ask that exists nowhere they read; a protocol violation | same 20-min quiet (#411) — a fresh ask gets a grace window for the lead to file it |
 | `undetermined` | tasks whose review data could not be read — the one thing that could have explained the silence | none; unreadable is always reported |
+| `checkIn` | in-progress, with a WATCHING dispatch, and nobody has reported on it for the check-in window — somebody is on it and has stopped narrating | 30 min quiet (`CW_CHECK_IN_MINUTES`) |
+
+**The check-in is a reminder, not a stall, and the two never name one task at
+once.** A stalled task says nobody is on it; a check-in says somebody is and
+has said nothing for half an hour, and the lead's act is a message to that
+somebody rather than re-homing the work. It is scoped to a watching dispatch
+for the same reason `builder-silent` is — a dead watcher cannot tell activity
+from absence — and it sits between the ordinary quiet window and the doubled
+builder one, so the same task is named under exactly one of the three. It is
+also the ONE repeat in this loop keyed on a clock rather than on the stamp:
+one reminder per task per window, because a task that has now missed two
+check-ins is a worse fact than one that has missed one, and the protocol asks
+about the task rather than about the board. Home draws the same half hour on
+the quiet pill beside every task's title (`activity-model.ts`,
+`QUIET_WARN_MS`), so the reader and the lead are told on one clock. The
+escalation is untouched: it fires on liveness alone, and a board owing a
+check-in escalates nothing it would not have escalated anyway.
+
+The silence it reads is the MERGED one. Check-in candidates go through the
+loop's second pass beside the stalled and unfiled tasks, so a builder churning
+a checkout the board cannot see, an agent rewriting a linked doc, and somebody
+talking on the task's own discussion each count as a report. Without that a
+builder who worked steadily for the whole half hour would still owe a
+check-in, which is the false wake the worktree witness already exists to stop
+(`stall-wiring.ts`, and the pair in `check-in-second-pass.test.ts`).
 
 Deliberate exclusions: **triage** tasks (unvetted work shouldn't nag),
 tasks with a **pending review item** (that's legitimately waiting on the
@@ -440,6 +465,7 @@ grace window that #411 fixed.
 |---|---|---|
 | `CW_STALL_NUDGE_MINUTES` | 20 | quiet time before a task is a finding |
 | `CW_STALL_REPEAT_HOURS` | 4 | how often an unchanged bad board is re-said |
+| `CW_CHECK_IN_MINUTES` | 30 | how long a dispatched, in-progress task may go unreported before its lead is reminded — and how long that reminder silences the next one for that task |
 | `CW_HELD_ITEM_MINUTES` | 5 | how long a held review item may stand before its filer is told; the lead hears at the quiet window (`CW_STALL_NUDGE_MINUTES`) |
 | `CW_STALL_ESCALATE_MINUTES` | 60 | how long a board must be without any live session — no stream, no heartbeat, no agent write — before it files past its lead: to Team Lead first, the reader only if Team Lead is unreachable too |
 | `CW_REVIEW_GATE` | on | `0` turns the judge off; every item passes unjudged (also the state with no summary API key) |

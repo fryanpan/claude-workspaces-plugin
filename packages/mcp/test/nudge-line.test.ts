@@ -429,6 +429,57 @@ describe('stalledLine', () => {
     expect(stalledLine(STALL)).toContain('Cache the facet counts');
   });
 
+  it("asks for a line from the holder, and quotes the protocol's window rather than the server's", () => {
+    const due = [
+      {
+        id: 't-b9',
+        title: 'Fold the CSV writer into the exporter',
+        bucket: 'check-in-due',
+        quietMs: 34 * 60_000,
+      },
+    ];
+    const line = stalledLine({ ...STALL, checkIn: due });
+    expect(line).toContain('Fold the CSV writer into the exporter');
+    // The silence is the ROW's own number, not the server's window: the
+    // window moves with `CW_CHECK_IN_MINUTES` and a stated one would be
+    // false on a board configured shorter.
+    expect(line).toContain('quiet 34m');
+    expect(line).not.toContain('half an hour');
+    // The remedy is the protocol's own words, so the reader can quote it —
+    // and 30 minutes is what the skills ask for and what Home's pill draws,
+    // wherever the server's knob is set.
+    expect(line).toContain('every 30 minutes');
+    // Its own sentence, beside the stall rather than inside it: the acts
+    // differ, and a merged count would ask for the wrong one.
+    expect(line).toContain('stopped moving');
+    // And nothing about a check-in on a frame that carries none.
+    expect(stalledLine(STALL)).not.toContain('check-in window');
+  });
+
+  it('a frame carrying only a check-in is still a real wake', () => {
+    const line = stalledLine({
+      taskId: 't-b9',
+      title: 'Fold the CSV writer into the exporter',
+      stalledCount: 0,
+      consideredCount: 5,
+      checkIn: [
+        { id: 't-b9', title: 'Fold the CSV writer into the exporter', bucket: 'check-in-due' },
+      ],
+    });
+    expect(line).toContain('Fold the CSV writer into the exporter');
+    expect(line).not.toContain('treat this as a bug in the wake');
+  });
+
+  it('names newly-due check-ins under what changed', () => {
+    const line = stalledLine({
+      ...STALL,
+      changed: {
+        checkIn: [{ id: 't-b9', title: 'Fold the CSV writer', bucket: 'check-in-due' }],
+      },
+    });
+    expect(line).toContain('NEW since the last wake: 1 task(s) owe a check-in');
+  });
+
   it('says how many rows the parallelism cap kept out of the pass, inside the denominator', () => {
     // Nine open rows checked, five judged — the four beyond the cap are idle
     // by rule, and a reader must not count them as healthy.

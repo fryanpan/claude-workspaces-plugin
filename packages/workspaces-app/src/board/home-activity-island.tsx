@@ -10,6 +10,12 @@
  * them. No fetches, no subscriptions of its own; a background event's signal
  * write still waits for the reader's finger through the repaint-guard.
  *
+ * Every group's title line ends in a QUIET PILL: how long since that task's
+ * newest activity (Bryan, 2026-09-11). On an in-progress task it turns to a
+ * warning past half an hour and to an error past an hour — the keep-moving
+ * protocol's check-in, made visible where the work is listed. It is the only
+ * marker a `dark` group wears, because it says the same thing.
+ *
  * One action only: commenting on a phrase of a note line or of the title,
  * doc-style. The lines are plain text — not buttons — so a selection can
  * land on them (and a tap on a word selects it); the walkthrough card's
@@ -52,7 +58,8 @@ export interface ActivityHandlers {
  *  rules and a rule change never touches board-app. */
 export const homeActivityData = signal<ActivityInput>({ tasks: [], goals: [], now: 0 });
 
-/** The one line the pane shows when nothing has moved in a day. Names the
+/** The one line the pane shows when nothing has moved inside the window.
+ *  Names the
  *  plugin version whose hooks post the notes, because until an agent restarts
  *  on it the pane is empty for a reason the reader can act on. */
 export const ACTIVITY_EMPTY =
@@ -188,11 +195,16 @@ function Group(props: {
           <span class="board-review-row-title acti-title-text">
             <Marked text={group.title} mark={mark} />
           </span>
-          {group.flag && (
+          {/* One marker per title line. `dark` is the same fact the pill
+              carries — an in-progress task nobody has spoken about — so the
+              badge for it is suppressed and the pill speaks instead; `stale`
+              and `off-band` say something the age cannot. */}
+          {group.flag && group.flag !== 'dark' && (
             <span class={`board-badge board-badge-${group.flag.replace('-', '')}`}>
               {group.flag}
             </span>
           )}
+          <span class={`acti-quiet acti-quiet-${group.quiet.level}`}>{group.quiet.age}</span>
         </div>
         <div class="acti-notes" ref={notesRef}>
           {group.notes.map((n) => (
@@ -234,8 +246,9 @@ function HomeActivity(props: { handlers: ActivityHandlers; user: User }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
   // The group the selection sits in — and only when the words are the
-  // task's own: its title or a note's text. An age, an agent's name, a badge
-  // or "+N more" are the pane's chrome, not something to comment on, so a
+  // task's own: its title or a note's text. An age, an agent's name, a badge,
+  // the quiet pill or "+N more" are the pane's chrome, not something to
+  // comment on, so a
   // selection whose common ancestor is not inside `.acti-title-text` or
   // `.acti-text` gets no pill. That also covers a drag from one group into
   // the next (its ancestor is the list) and one from a note's text out over

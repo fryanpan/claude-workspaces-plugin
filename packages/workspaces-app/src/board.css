@@ -2094,18 +2094,53 @@ body.board-body {
   border-color: var(--yellow);
   color: var(--yellow);
 }
+/* The QUIET PILL, at the right end of every title line: how long since this
+   task's newest activity (Bryan, 2026-09-11). Outline only, like the `dark`
+   badge beside it — a filled chip at the end of every row would be the
+   loudest thing on the page, and the level is what has to stand out.
+
+   Only an in-progress task ever reaches `warn` or `error`; `neutral` is the
+   muted default every other row wears. Both tinted states use tokens
+   `styles.css` actually DEFINES (`--warn-fg`, `--red-strong`) rather than the
+   `--warn-bg` / `--danger-bg` the badges next door reach for and no sheet in
+   this app declares. */
+.acti-quiet {
+  flex: none;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 15px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+}
+.acti-quiet-warn {
+  border-color: var(--warn-fg);
+  color: var(--warn-fg);
+  font-weight: 600;
+}
+.acti-quiet-error {
+  border-color: var(--red-strong);
+  color: var(--red-strong);
+  font-weight: 600;
+}
 /* The notes: the queue's subline style, indented past the mark and its gap
-   (11 + 6) so they hang under the title's words, newest first. */
+   (11 + 6) so they hang under the title's words, newest first.
+
+   The gap and the leading are a few px looser than the 2px/1.4 they were
+   (Bryan, 2026-09-11: "a little more space per activity line"). A FEW px, on
+   purpose: height is the scarce axis at 1180x820, and a line that grew into
+   two would cost more of it than the air is worth. */
 .acti-notes {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   margin: 0 0 8px 17px;
   padding: 0 8px;
 }
 .board-activity-note {
   font-size: 12.5px;
-  line-height: 1.4;
+  line-height: 1.55;
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;

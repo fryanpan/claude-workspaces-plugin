@@ -175,6 +175,10 @@ export interface StallWiringContext {
   readyNudgeIdleMs?: number;
   /** Quiet time before a row is a stall finding (ms). */
   stallNudgeQuietMs?: number;
+  /** How long a dispatched, in-progress row may go unreported before its
+   *  lead is reminded to ask for a check-in, and how long that reminder
+   *  silences the next one for that row (ms). */
+  checkInMs?: number;
   /** How much longer a watched builder's silence may run (multiplier). */
   stallBuilderSilentMultiplier?: number;
   /** How often an unchanged bad board is re-said (ms). */
@@ -582,13 +586,22 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       parallelismCap,
       priorityOrder,
       ...(ctx.stallNudgeQuietMs !== undefined ? { quietMs: ctx.stallNudgeQuietMs } : {}),
+      ...(ctx.checkInMs !== undefined ? { checkInMs: ctx.checkInMs } : {}),
       ...(watchingDispatchTaskIds.size > 0 ? { watchingDispatchTaskIds } : {}),
       ...(ctx.stallBuilderSilentMultiplier !== undefined
         ? { builderSilentMultiplier: ctx.stallBuilderSilentMultiplier }
         : {}),
     };
     const first = evaluateStalls(input);
-    const suspect = [...first.stalled, ...first.unfiled];
+    // The check-in candidates ride with the stalled and unfiled rows, and
+    // they have to. `stall-gate.ts` says of the check-in that
+    // `sinceActivityMs` "already folds in worktree churn, comments and board
+    // events" — that sentence is only true of a row this second pass looked
+    // at, because the fold IS this loop. Left out, a builder churning its
+    // worktree for the whole half hour still owes a check-in on the first
+    // pass's board-only clock, which is the false wake the worktree witness
+    // was added to stop, arriving through a second door.
+    const suspect = [...first.stalled, ...first.unfiled, ...first.checkIn];
     if (suspect.length === 0) return first;
     // Second pass over the handful the first pass named. A doc that was never
     // opened holds no threads and answers nothing, which is the right answer:
@@ -922,6 +935,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(held.length > 0 ? { held } : {}),
       ...(askedBackRows.length > 0 ? { askedBack: askedBackRows } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
+      ...(verdict.checkIn.length > 0 ? { checkIn: verdict.checkIn } : {}),
     };
   };
   /**
@@ -998,6 +1012,10 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // above counts it under — not at the filer's shorter one.
     ...(ctx.stallNudgeQuietMs !== undefined ? { leadHeldMs: ctx.stallNudgeQuietMs } : {}),
     ...(ctx.stallNudgeRepeatMs !== undefined ? { repeatMs: ctx.stallNudgeRepeatMs } : {}),
+    // One task costs the lead a check-in reminder at most once per window —
+    // the same window that makes the row due, so the reminder is one per
+    // missed check-in.
+    ...(ctx.checkInMs !== undefined ? { checkInRepeatMs: ctx.checkInMs } : {}),
     escalate: (board, now) => escalations.onBoard(board, now),
     // Prod restarts at every merge; without this each deploy would re-fire one
     // wake per board over rows their leads had already been told about.
