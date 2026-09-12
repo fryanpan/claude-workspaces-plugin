@@ -182,7 +182,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/goal', 'PUT'],
     ['trusted-local', '/workspaces/:ws/retired', 'PUT'],
     ['trusted-local', '/workspaces/:ws/parallelism-cap', 'GET PUT'],
-    ['share-scope', '/workspaces/:ws/settings', 'GET PUT'],
+    [
+      'owner-in-handler',
+      '/workspaces/:ws/settings',
+      'GET PUT',
+      'the guard admits both verbs; the GET is a member’s and `workspace-settings.ts` ' +
+        'refuses a Regular User’s PUT itself — every field it writes is board-wide',
+    ],
     ['trusted-local', '/workspaces/:ws/rename', 'POST'],
     ['trusted-local', '/workspaces/:ws/lead', 'PUT'],
     ['trusted-local', '/workspaces/:ws/voice', 'POST'],

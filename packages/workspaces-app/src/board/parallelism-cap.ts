@@ -34,6 +34,15 @@ export interface ParallelismCapDeps {
   note: HTMLElement;
   save: HTMLButtonElement;
   useDefault: HTMLButtonElement;
+  /** Where the number is drawn for a reader who may not change it. It and the
+   *  editor are never up together — see `showEditor`. */
+  text: HTMLElement;
+  /** The Save / Use-the-default pair, as one element, for the reason
+   *  `review-criteria.ts` gives: their flex row keeps its gap otherwise. */
+  actions: HTMLElement;
+  /** May this reader write the cap? Read on every refresh — the panel learns
+   *  the role from the members read it already does on every open. */
+  canEdit: () => boolean;
   /** Read the board's cap. `null` is a failed read, never a made-up number. */
   read: () => Promise<ParallelismCap | null>;
   /** Write it. `null` restores the shipped default. Resolves false when the
@@ -45,6 +54,9 @@ export interface ParallelismCapDeps {
 }
 
 export interface ParallelismCapHandle {
+  /** The editor or the plain number for the CURRENT level, read nothing —
+   *  see `ReviewCriteriaHandle.applyLevel`. */
+  applyLevel(): void;
   /** Re-read and repaint. Called every time the panel opens. */
   refresh(): Promise<void>;
   /** Resolves when any in-flight write has finished. Tests await it. */
@@ -72,7 +84,19 @@ export function parallelismCapNote(cap: ParallelismCap, now = Date.now()): strin
 export function mountParallelismCap(deps: ParallelismCapDeps): ParallelismCapHandle {
   let inFlight: Promise<void> | null = null;
 
+  /** The editor or the plain number, never both — the same rule, and the same
+   *  reason, as `review-criteria.ts`: the cap is board-wide configuration and
+   *  the server refuses a Regular User's write of it. */
+  function showEditor(): boolean {
+    const editable = deps.canEdit();
+    deps.box.classList.toggle('hidden', !editable);
+    deps.actions.classList.toggle('hidden', !editable);
+    deps.text.classList.toggle('hidden', editable);
+    return editable;
+  }
+
   async function refresh(): Promise<void> {
+    const editable = showEditor();
     const cap = await deps.read();
     if (!cap) {
       // Disabled, not zero. A failed read that a reader then saves would
@@ -80,6 +104,7 @@ export function mountParallelismCap(deps: ParallelismCapDeps): ParallelismCapHan
       deps.box.disabled = true;
       deps.save.disabled = true;
       deps.useDefault.disabled = true;
+      deps.text.textContent = '';
       deps.note.textContent = 'Could not read the cap — reopen this panel to try again.';
       return;
     }
@@ -87,7 +112,10 @@ export function mountParallelismCap(deps: ParallelismCapDeps): ParallelismCapHan
     deps.save.disabled = false;
     deps.useDefault.disabled = false;
     deps.box.value = String(cap.value);
-    deps.note.textContent = parallelismCapNote(cap);
+    deps.text.textContent = String(cap.value);
+    // The note ends by saying what editing the number would do, so it goes
+    // with the editor — see `review-criteria.ts` for why nothing replaces it.
+    deps.note.textContent = editable ? parallelismCapNote(cap) : '';
   }
 
   async function write(value: number | null): Promise<void> {
@@ -121,6 +149,9 @@ export function mountParallelismCap(deps: ParallelismCapDeps): ParallelismCapHan
   deps.useDefault.addEventListener('click', () => run(null));
 
   return {
+    applyLevel: () => {
+      showEditor();
+    },
     refresh,
     settled: async () => {
       await inFlight;

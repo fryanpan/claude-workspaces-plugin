@@ -69,6 +69,11 @@ export function resetBoardServer(): void {
     generating: false,
   });
   server.on(`/workspaces/${WS}/settings`, {});
+  // Who has access, which the settings panel reads to learn THIS reader's
+  // level — the board-wide editors in it are drawn as editors or as plain
+  // text depending on the answer. The default is the operator on their own
+  // machine: an owner, holding no membership record of their own.
+  server.on(`/workspaces/${WS}/members`, { you: { email: null, role: 'owner' }, members: [] });
 }
 
 /** A projected row, with the defaults every board fixture repeats. */

@@ -37,7 +37,8 @@ function dom() {
         <small id="board-review-criteria-note" class="board-settings-note"></small>
       </label>
       <textarea id="board-review-criteria" class="board-criteria"></textarea>
-      <div class="board-criteria-actions">
+      <p id="board-review-criteria-text" class="board-settings-readonly hidden"></p>
+      <div id="board-review-criteria-actions" class="board-criteria-actions">
         <button type="button" id="board-review-criteria-save" class="board-btn"></button>
         <button type="button" id="board-review-criteria-default" class="board-btn"></button>
       </div>
@@ -47,6 +48,8 @@ function dom() {
     note: document.getElementById('board-review-criteria-note') as HTMLElement,
     save: document.getElementById('board-review-criteria-save') as HTMLButtonElement,
     useDefault: document.getElementById('board-review-criteria-default') as HTMLButtonElement,
+    text: document.getElementById('board-review-criteria-text') as HTMLElement,
+    actions: document.getElementById('board-review-criteria-actions') as HTMLElement,
   };
 }
 
@@ -54,6 +57,7 @@ function mount(
   opts: {
     read?: () => Promise<ReviewCriteria | null>;
     write?: (value: string | null) => Promise<boolean>;
+    canEdit?: boolean;
   } = {},
 ) {
   const els = dom();
@@ -64,6 +68,7 @@ function mount(
     read: opts.read ?? (async () => ({ value: DEFAULT_TEXT, isDefault: true })),
     write,
     toast: (m) => toasts.push(m),
+    canEdit: () => opts.canEdit !== false,
   });
   return { ...els, handle, toasts, write };
 }
@@ -163,6 +168,20 @@ describe('the review-item criteria field', () => {
     await f.handle.settled();
     expect(f.box.value).toBe(OWN_TEXT);
     expect(f.toasts).toEqual(['Could not save the criteria']);
+  });
+
+  it('draws the criteria as plain text for a reader who may not write them', async () => {
+    const f = mount({ canEdit: false, read: async () => ({ value: OWN_TEXT, isDefault: false }) });
+    await f.handle.refresh();
+    // The words are readable — the whole point of the field is that nobody is
+    // judged in secret — and they are readable where the box was.
+    expect(f.text.textContent).toBe(OWN_TEXT);
+    expect(f.text.classList.contains('hidden')).toBe(false);
+    expect(f.box.classList.contains('hidden')).toBe(true);
+    expect(f.actions.classList.contains('hidden')).toBe(true);
+    // No caption takes the control's place: the note says what editing would
+    // do, so it goes with the editor rather than becoming an explanation.
+    expect(f.note.textContent).toBe('');
   });
 });
 

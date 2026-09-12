@@ -238,7 +238,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/retired` | PUT | `routes/workspace-settings.ts` | trusted-local |  |
 | `/workspaces/:ws/review-items` | GET | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/review-items/:itemId` | GET | `routes/workspace-home.ts` | trusted-local |  |
-| `/workspaces/:ws/settings` | GET, PUT | `routes/workspace-settings.ts` | share-scope |  |
+| `/workspaces/:ws/settings` | GET, PUT | `routes/workspace-settings.ts` | owner-in-handler | the guard admits both verbs; the GET is a member’s and `workspace-settings.ts` refuses a Regular User’s PUT itself — every field it writes is board-wide |
 | `/workspaces/:ws/tasks` | GET, POST | `routes/tasks-list-create.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId` | GET | `routes/task-page.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/*` | GET | `routes/task-page.ts` | trusted-local |  |

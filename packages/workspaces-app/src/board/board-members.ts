@@ -50,6 +50,17 @@ export interface BoardMembersDeps {
   remove: (email: string) => Promise<boolean>;
   /** The board's one-line report. */
   toast: (message: string) => void;
+  /**
+   * The reader's own level, handed on after every read — `null` when the read
+   * failed and nobody knows.
+   *
+   * THIS LIST IS THE PANEL'S ONE READING OF WHO YOU ARE. The settings panel
+   * has other controls that are the Owner's, and a second fetch to learn the
+   * same fact is a second answer that can disagree with this one mid-panel.
+   * So the subsection that already asks the question says what came back, and
+   * the panel decides what the rest of it draws.
+   */
+  onRole?: (role: BoardRole | null) => void;
 }
 
 export interface BoardMembersHandle {
@@ -234,6 +245,9 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
   async function refresh(): Promise<void> {
     view = await deps.read();
     confirming = null;
+    // Before the paint, so the panel's other controls settle on the same turn
+    // this list does rather than one behind it.
+    deps.onRole?.(view ? view.you.role : null);
     paint();
   }
 

@@ -101,6 +101,22 @@ describe('the level is enforced by the API', () => {
       body: JSON.stringify(body),
     });
 
+  const putAsVisitor = async (email: string, path: string, body: unknown) =>
+    asVisitor(email, path, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  /** The board's own settings, as the operator reads them back. */
+  const boardSettings = async (): Promise<{ criteria: string; cap: number }> => {
+    const body = await jj<{
+      reviewItemCriteria: { value: string };
+      parallelismCap: { value: number };
+    }>(await local(`/workspaces/${encodeURIComponent(board)}/settings`));
+    return { criteria: body.reviewItemCriteria.value, cap: body.parallelismCap.value };
+  };
+
   const jj = async <T>(res: Response): Promise<T> => {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return (await res.json()) as T;
@@ -413,6 +429,55 @@ describe('the level is enforced by the API', () => {
     expect(res.status).toBe(200);
     const answered = (await itemsOnTask()).find((i) => i.id === gatedItem);
     expect(answered?.answer?.text).toBe('Go ahead');
+  });
+
+  it('refuses a Regular User’s change to the board’s settings, and the settings do not move', async () => {
+    // Every field this PUT can move is board-wide configuration — the words
+    // every agent's ask on this board is judged against, and how many builders
+    // a dispatch may run at once. A guest is invited to WORK the board, not to
+    // retune the rules the rest of it runs by.
+    const before = await boardSettings();
+    const guest = { id: 'u-guest', name: 'Keeper', kind: 'human' };
+    const refusals = await Promise.all([
+      putAsVisitor(REGULAR, `/workspaces/${encodeURIComponent(board)}/settings`, {
+        reviewItemCriteria: 'Anything at all counts as a good ask.',
+        author: guest,
+      }),
+      putAsVisitor(REGULAR, `/workspaces/${encodeURIComponent(board)}/settings`, {
+        parallelismCap: 9,
+        author: guest,
+      }),
+    ]);
+    expect(refusals.map((r) => r.status)).toEqual([403, 403]);
+    // A 403 that still wrote is the failure this is guarding: read the board
+    // back rather than trusting the status.
+    expect(await boardSettings()).toEqual(before);
+  });
+
+  it('leaves the same settings readable to a Regular User, and writable by an Owner', async () => {
+    // The read is everyone's: a criterion you cannot read is one your agents
+    // are judged against in secret.
+    const read = await jj<{
+      reviewItemCriteria: { value: string };
+      parallelismCap: { value: number };
+      notesHome?: unknown;
+    }>(await asVisitor(REGULAR, `/workspaces/${encodeURIComponent(board)}/settings`));
+    expect(read.reviewItemCriteria.value.length).toBeGreaterThan(0);
+    // …minus the one field that is a path on the operator's machine.
+    expect(read.notesHome).toBeUndefined();
+    // And the gate is the ROLE, not the hostname: the promoted guest writes.
+    const res = await putAsVisitor(PROMOTED, `/workspaces/${encodeURIComponent(board)}/settings`, {
+      parallelismCap: 5,
+      author: { id: 'u-pilot', name: 'Pilot', kind: 'human' },
+    });
+    expect(res.status).toBe(200);
+    expect((await boardSettings()).cap).toBe(5);
+    // notesHome stays refused even for them — it is not about the board.
+    const home = await putAsVisitor(PROMOTED, `/workspaces/${encodeURIComponent(board)}/settings`, {
+      notesHome: null,
+      author: { id: 'u-pilot', name: 'Pilot', kind: 'human' },
+    });
+    expect(home.status).toBe(403);
   });
 
   it('ends a person’s access when the Owner says so', async () => {

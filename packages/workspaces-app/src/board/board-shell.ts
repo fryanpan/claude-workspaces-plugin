@@ -133,7 +133,12 @@ export function buildShell(
             <small id="board-review-criteria-note" class="board-settings-note"></small>
           </label>
           <textarea id="board-review-criteria" class="board-criteria" rows="5" aria-describedby="board-review-criteria-note" placeholder="Plain English: what an agent’s ask has to do before it reaches you."></textarea>
-          <div class="board-criteria-actions">
+          <!-- The same words as plain text, for a reader the server will not
+               let write them. Drawn instead of the textarea and the actions,
+               never beside them, and carrying no caption of its own: a
+               read-only field is the value where the editor was. -->
+          <p id="board-review-criteria-text" class="board-settings-readonly hidden"></p>
+          <div id="board-review-criteria-actions" class="board-criteria-actions">
             <button type="button" id="board-review-criteria-save" class="board-btn board-btn-primary">Save</button>
             <button type="button" id="board-review-criteria-default" class="board-btn">Use the default</button>
           </div>
@@ -155,7 +160,8 @@ export function buildShell(
             <small id="board-parallelism-cap-note" class="board-settings-note"></small>
           </label>
           <input type="number" id="board-parallelism-cap" class="board-cap-input" min="1" step="1" aria-describedby="board-parallelism-cap-note" />
-          <div class="board-criteria-actions">
+          <p id="board-parallelism-cap-text" class="board-settings-readonly hidden"></p>
+          <div id="board-parallelism-cap-actions" class="board-criteria-actions">
             <button type="button" id="board-parallelism-cap-save" class="board-btn board-btn-primary">Save</button>
             <button type="button" id="board-parallelism-cap-default" class="board-btn">Use the default</button>
           </div>
