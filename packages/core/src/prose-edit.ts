@@ -341,6 +341,42 @@ export function insertTextWithMarks(
 }
 
 /**
+ * Replace `length` characters at `offset` in `node` with `text` — inserting
+ * FIRST and deleting after.
+ *
+ * The order is the whole point, and it is what keeps a comment thread alive
+ * across an edit that rewrites every word it quoted. A thread stores its end
+ * as a `Y.RelativePosition` with assoc `-1` (which is what @tiptap/y-tiptap
+ * builds from a selection), so that position HOLDS THE LAST CHARACTER of the
+ * quoted span rather than the gap after it. Delete the span first and that
+ * character is gone: the position walks left over the rest of the deleted run
+ * and lands on the span's own start, so start and end collapse onto each
+ * other, the range resolves to zero width, and every review surface reads
+ * that as "this anchor no longer exists" — card gone, highlight gone, and
+ * gone again after a reload, because the collapse is in the persisted doc.
+ * (Yjs' own insert compounds it: `minimizeAttributeChanges` walks an insert
+ * FORWARD over a deleted run, so text inserted at the deleted span's offset
+ * lands to its right and cannot be walked back onto.)
+ *
+ * Insert first and the replacement is already sitting to the left of the old
+ * characters when they go, so the end position walks back onto the END of the
+ * replacement and the thread re-anchors onto the new words. A partial replace
+ * never had the problem — its anchor still had a live character to hold — and
+ * is unaffected by the order.
+ */
+function spliceText(
+  node: Y.XmlText,
+  offset: number,
+  length: number,
+  text: string,
+  opts: { parseInlineMarks: boolean; attributes: Record<string, unknown> },
+): void {
+  const before = node.length;
+  insertTextWithMarks(node, offset, text, opts);
+  node.delete(offset + (node.length - before), length);
+}
+
+/**
  * Resolve a find (with optional context) and replace it in place. The
  * replacement is inserted into the SAME Y.XmlText node, carrying the marks
  * (bold, italic, code, link, strike) that covered the matched text — which is
@@ -492,8 +528,7 @@ export function findAndReplace(
           { node: m.segment.node, offset: m.offsetInNode, length: m.length },
         ]);
         for (const k of siteMarks.dropped) droppedUnion.add(k);
-        m.segment.node.delete(m.offsetInNode, m.length);
-        insertTextWithMarks(m.segment.node, m.offsetInNode, opts.replace, {
+        spliceText(m.segment.node, m.offsetInNode, m.length, opts.replace, {
           parseInlineMarks: opts.parseInlineMarks === true,
           attributes: siteMarks.attributes,
         });
@@ -531,8 +566,7 @@ export function findAndReplace(
   ]);
 
   doc.transact(() => {
-    chosen.segment.node.delete(chosen.offsetInNode, chosen.length);
-    insertTextWithMarks(chosen.segment.node, chosen.offsetInNode, opts.replace, {
+    spliceText(chosen.segment.node, chosen.offsetInNode, chosen.length, opts.replace, {
       parseInlineMarks: opts.parseInlineMarks === true,
       attributes: marks.attributes,
     });
@@ -867,8 +901,7 @@ export function rewriteRange(
     const to = Math.max(start.offset, end.offset);
     const marks = coveringInlineMarks([{ node: start.node, offset: from, length: to - from }]);
     doc.transact(() => {
-      start.node.delete(from, to - from);
-      insertTextWithMarks(start.node, from, opts.replacement, {
+      spliceText(start.node, from, to - from, opts.replacement, {
         parseInlineMarks,
         attributes: marks.attributes,
       });
@@ -908,21 +941,29 @@ export function rewriteRange(
   const marks = coveringInlineMarks(slices);
 
   doc.transact(() => {
+    // Insert BEFORE deleting, for the reason spliceText carries: an anchor's
+    // end holds the last character of the span, so the replacement has to be
+    // in the document to its left before that character goes. The insert
+    // lands in the FIRST touched node, so only that node's delete offset
+    // moves; every other node is untouched by it.
+    const firstNode = touched[0]!.node;
+    const beforeLen = firstNode.length;
+    insertTextWithMarks(firstNode, firstOffset, opts.replacement, {
+      parseInlineMarks,
+      attributes: marks.attributes,
+    });
+    const inserted = firstNode.length - beforeLen;
     // Delete from the END so earlier node indices don't shift.
     for (let i = touched.length - 1; i >= 0; i--) {
       const seg = touched[i]!;
       if (i === touched.length - 1) {
         seg.node.delete(0, lastOffset);
       } else if (i === 0) {
-        seg.node.delete(firstOffset, seg.length - firstOffset);
+        seg.node.delete(firstOffset + inserted, seg.length - firstOffset);
       } else {
         seg.node.delete(0, seg.length);
       }
     }
-    insertTextWithMarks(touched[0]!.node, firstOffset, opts.replacement, {
-      parseInlineMarks,
-      attributes: marks.attributes,
-    });
   }, opts.transactionOrigin ?? 'agent');
   return { ok: true, ...marksReport(marks.dropped) };
 }
