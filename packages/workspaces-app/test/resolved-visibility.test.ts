@@ -1,38 +1,28 @@
 /**
- * Settled comments leave the page, and one control brings them back.
+ * Settled comments leave the page.
  *
- * Four surfaces have to agree about a resolved thread and they are wired
+ * Three surfaces have to agree about a resolved thread and they are wired
  * separately, so each is driven here: the anchor highlights (the projection),
- * the balloon margin (which picks its cards from those highlights), the phone
- * card in the flow, and the topbar control that flips all three. The thread
- * list is the deliberate exception — it is where a hidden thread stays
- * visible, which is what makes hiding reversible rather than destructive, so
- * a case asserts it keeps the resolved thread it was handed.
+ * the balloon margin (which picks its cards from those highlights), and the
+ * phone card in the flow. The comments panel is the deliberate exception — it
+ * is where a hidden thread stays visible, which is what makes hiding
+ * reversible rather than destructive, so a case asserts it keeps the resolved
+ * thread it was handed.
  *
- * Every assertion below has a mutation control beside it: the same drive with
- * the preference the other way, or with the thread still open. A test that
- * passes for both is not testing the rule.
+ * Every assertion below has a mutation control beside it: the same drive over
+ * a thread that is still open. A test that passes for both is not testing the
+ * rule.
  */
 import { createThread, setStatus } from '@claude-workspaces/core';
 import type { Comment, Thread, User } from '@claude-workspaces/core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createSeenTracker } from '../src/comment-seen.ts';
-import {
-  SHOW_RESOLVED_PREF_KEY,
-  anchoredThreads,
-  onShowResolvedChange,
-  resetShowResolvedCache,
-  setShowResolved,
-  showResolved,
-  showResolvedFromStored,
-  wireResolvedToggle,
-} from '../src/doc/resolved-visibility.ts';
+import { anchoredThreads } from '../src/doc/resolved-visibility.ts';
 import { type ThreadDecoration, createThreadProjection } from '../src/doc/thread-projection.ts';
 import { type MobileReviewOpts, mountMobileReview } from '../src/mobile-review.ts';
 import type { InlineThreadCard, ReviewSurface } from '../src/review-surface.ts';
 import { ThreadPanel } from '../src/threads.ts';
-import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 const NADIA: User = { id: 'u1', name: 'Nadia Okonkwo', kind: 'known', color: '#2e7dd7' };
 
@@ -60,55 +50,9 @@ function plainThread(id: string, status: Thread['status']): Thread {
   };
 }
 
-function clearPref(): void {
-  try {
-    localStorage.removeItem(SHOW_RESOLVED_PREF_KEY);
-  } catch {
-    // nothing stored
-  }
-  resetShowResolvedCache();
-}
-
-beforeEach(clearPref);
 afterEach(() => {
-  clearPref();
   document.body.innerHTML = '';
   document.head.innerHTML = '';
-});
-
-// --- the stored preference ---------------------------------------------------
-
-describe('the stored preference', () => {
-  it('hides settled comments until this reader has asked for them', () => {
-    expect(showResolvedFromStored(null)).toBe(false);
-    expect(showResolvedFromStored('0')).toBe(false);
-    // The control: the one stored value that means yes.
-    expect(showResolvedFromStored('1')).toBe(true);
-  });
-
-  it('persists the choice and tells the mounted surfaces to repaint', () => {
-    const repaint = vi.fn();
-    const off = onShowResolvedChange(repaint);
-    expect(showResolved()).toBe(false);
-
-    setShowResolved(true);
-    expect(showResolved()).toBe(true);
-    expect(localStorage.getItem(SHOW_RESOLVED_PREF_KEY)).toBe('1');
-    expect(repaint).toHaveBeenCalledTimes(1);
-
-    // Control: setting it to what it already is repaints nothing, so a
-    // redundant call cannot churn every card on the page.
-    setShowResolved(true);
-    expect(repaint).toHaveBeenCalledTimes(1);
-
-    setShowResolved(false);
-    expect(localStorage.getItem(SHOW_RESOLVED_PREF_KEY)).toBe('0');
-    expect(repaint).toHaveBeenCalledTimes(2);
-    off();
-    setShowResolved(true);
-    // Control: an unsubscribed surface stops hearing about it.
-    expect(repaint).toHaveBeenCalledTimes(2);
-  });
 });
 
 // --- the shared filter -------------------------------------------------------
@@ -120,19 +64,17 @@ describe('which threads an anchored surface may draw', () => {
     plainThread('open-b', 'open'),
   ];
 
-  it('drops the settled ones while they are hidden, and keeps them otherwise', () => {
-    expect(anchoredThreads(threads, false).map((t) => t.id)).toEqual(['open-a', 'open-b']);
-    // The control: nothing is removed once the reader has asked to see them,
-    // and the order the document put them in is untouched.
-    expect(anchoredThreads(threads, true).map((t) => t.id)).toEqual([
-      'open-a',
-      'settled',
-      'open-b',
-    ]);
+  it('drops the settled ones and keeps the rest in document order', () => {
+    expect(anchoredThreads(threads).map((t) => t.id)).toEqual(['open-a', 'open-b']);
+    // The control: the same three threads with nothing resolved keeps all of
+    // them, so the absence above is the status and not the filter dropping
+    // whatever sits in the middle.
+    const allOpen = threads.map((t) => ({ ...t, status: 'open' }) as Thread);
+    expect(anchoredThreads(allOpen).map((t) => t.id)).toEqual(['open-a', 'settled', 'open-b']);
   });
 
   it('never destroys anything — the array it was handed is the same length', () => {
-    anchoredThreads(threads, false);
+    anchoredThreads(threads);
     expect(threads).toHaveLength(3);
     expect(threads.map((t) => t.status)).toEqual(['open', 'resolved', 'open']);
   });
@@ -181,40 +123,43 @@ function docWithOneOfEach(): Y.Doc {
 }
 
 describe('the highlight on the sentence', () => {
-  const project = (visible: boolean) => {
+  const project = (ydoc: Y.Doc) => {
     const { surface, last } = fakeSurface();
     const projection = createThreadProjection({
-      ydoc: docWithOneOfEach(),
+      ydoc,
       surface,
       seen: createSeenTracker({ docId: 'd1' }),
       onPendingExpiry: () => {},
-      showResolved: () => visible,
     });
     projection.refreshDecorations(null);
     return { ids: last().map((r) => r.id), collected: projection.collect() };
   };
 
   it('comes off a thread the moment it is resolved', () => {
-    expect(project(false).ids).toEqual(['still-open']);
-    // The control: the same doc, the same resolved thread, the preference the
-    // other way — so the absence above is the preference and not a broken
-    // anchor.
-    expect(project(true).ids).toEqual(['still-open', 'settled']);
+    expect(project(docWithOneOfEach()).ids).toEqual(['still-open']);
+    // The control: the same doc with that second thread left open decorates
+    // both — so the absence above is the status and not a broken anchor at
+    // positions 10-14.
+    const bothOpen = docWithOneOfEach();
+    setStatus(bothOpen, 'settled', 'open');
+    expect(project(bothOpen).ids).toEqual(['still-open', 'settled']);
   });
 
   it('leaves the thread itself in the store, marked resolved', () => {
-    const settled = project(false).collected.find((t) => t.id === 'settled');
+    const settled = project(docWithOneOfEach()).collected.find((t) => t.id === 'settled');
     expect(settled).toBeTruthy();
     expect(settled?.status).toBe('resolved');
     // The control: the thread the projection DID decorate is not somehow
     // marked resolved too.
-    expect(project(false).collected.find((t) => t.id === 'still-open')?.status).toBe('open');
+    expect(project(docWithOneOfEach()).collected.find((t) => t.id === 'still-open')?.status).toBe(
+      'open',
+    );
   });
 });
 
 // --- the phone's card in the flow -------------------------------------------
 
-function inlineHarness(threads: Thread[], visible: boolean) {
+function inlineHarness(threads: Thread[]) {
   document.body.innerHTML = `
     <div id="shell"><div id="editor"></div>
       <div id="threads-pane"><div id="threads-list"></div></div></div>`;
@@ -243,13 +188,10 @@ function inlineHarness(threads: Thread[], visible: boolean) {
       scrollToPos: () => {},
     } as unknown as MobileReviewOpts['surface'],
     setActive: (id) => panel.setActive(id),
-    getActive: () => panel.getActive(),
     revealInSheet: () => {},
     openSheet: () => {},
     closeSheet: () => {},
     isSheetOpen: () => false,
-    showResolved: () => visible,
-    listen: (target, type, handler) => target.addEventListener(type, handler),
   };
   const mobile = mountMobileReview(opts);
   panel.setThreads(threads);
@@ -265,120 +207,24 @@ describe("the phone's list of what is on this screen", () => {
   ];
 
   it('follows the same rule as the margin', () => {
-    const hidden = inlineHarness(threads, false);
+    const hidden = inlineHarness(threads);
     expect(hidden.mobile.inlineThreads().map((t) => t.id)).toEqual(['open-a', 'open-b']);
     expect(hidden.placed().map((c) => c.id)).toEqual(['open-a', 'open-b']);
 
-    // The control: revealed, the settled card is back in the flow in document
-    // order — so the two assertions above are the preference, not a card that
-    // never built.
-    const shown = inlineHarness(threads, true);
+    // The control: the same middle thread left open IS placed, in document
+    // order — so the two assertions above are the status, not a card that
+    // never builds in the middle slot.
+    const allOpen = threads.map((t) => ({ ...t, status: 'open' }) as Thread);
+    const shown = inlineHarness(allOpen);
     expect(shown.mobile.inlineThreads().map((t) => t.id)).toEqual(['open-a', 'settled', 'open-b']);
     expect(shown.placed().map((c) => c.id)).toEqual(['open-a', 'settled', 'open-b']);
   });
 
-  it('keeps the settled thread in the sheet list either way', () => {
-    const { panel } = inlineHarness(threads, false);
+  it('keeps the settled thread in the panel list', () => {
+    const { panel } = inlineHarness(threads);
     expect(panel.countByStatus().resolved).toBe(1);
     // The control: the count is of what the panel HOLDS, and it still holds
     // both open ones too.
     expect(panel.countByStatus().open).toBe(2);
-  });
-});
-
-// --- the control -------------------------------------------------------------
-
-describe('the "Show resolved (n)" control', () => {
-  /** What each of the control's two labels currently reads. */
-  function labels(btn: HTMLElement): { long: string; short: string } {
-    return {
-      long: btn.querySelector('.rt-long')?.textContent ?? '',
-      short: btn.querySelector('.rt-short')?.textContent ?? '',
-    };
-  }
-
-  function button(): HTMLButtonElement {
-    const btn = document.createElement('button');
-    btn.id = 'toggle-resolved';
-    btn.className = 'icon-btn resolved-toggle';
-    btn.hidden = true;
-    document.body.appendChild(btn);
-    return btn;
-  }
-
-  it('names the count, reveals, and hides again', () => {
-    const btn = button();
-    const { paint } = wireResolvedToggle({
-      btn,
-      listen: (t, type, h) => t.addEventListener(type, h),
-    });
-    paint(3);
-    expect(labels(btn).long).toBe('Show resolved (3)');
-    expect(btn.getAttribute('aria-pressed')).toBe('false');
-    // The phone's label carries the same count in the space it has.
-    expect(labels(btn).short).toBe('✓ 3');
-
-    btn.click();
-    expect(showResolved()).toBe(true);
-    expect(labels(btn).long).toBe('Hide resolved (3)');
-    expect(btn.getAttribute('aria-pressed')).toBe('true');
-    // The accessible name says the whole thing whichever label is drawn.
-    expect(btn.getAttribute('aria-label')).toBe('Hide 3 resolved comments');
-
-    // The control: pressing it again is the way back, so the reveal is not a
-    // one-way door.
-    btn.click();
-    expect(showResolved()).toBe(false);
-    expect(labels(btn).long).toBe('Show resolved (3)');
-    expect(btn.getAttribute('aria-label')).toBe('Show 3 resolved comments');
-  });
-
-  it('offers nothing on a doc with nothing settled', () => {
-    const btn = button();
-    const { paint } = wireResolvedToggle({
-      btn,
-      listen: (t, type, h) => t.addEventListener(type, h),
-    });
-    paint(0);
-    expect(btn.hidden).toBe(true);
-    // The control: one resolved thread is enough to bring the control back,
-    // so the hiding above is the count and not a control that never shows.
-    paint(1);
-    expect(btn.hidden).toBe(false);
-    expect(labels(btn).long).toBe('Show resolved (1)');
-  });
-
-  it('is a word-shaped button that disappears when hidden', () => {
-    const cleanup = installSheets('styles.css', 'doc.css');
-    const btn = button();
-    expect(styleOf(btn).display).toBe('none');
-    // The control: the same element, shown, is laid out like the rest of the
-    // topbar rather than staying invisible.
-    btn.hidden = false;
-    expect(styleOf(btn).display).toBe('inline-flex');
-    expect(styleOf(btn).whiteSpace).toBe('nowrap');
-    cleanup();
-  });
-
-  it('drops to the count on a phone and spells it out on the tablet', () => {
-    const cleanup = installSheets('styles.css', 'doc.css');
-    const btn = button();
-    btn.hidden = false;
-    wireResolvedToggle({ btn, listen: (t, type, h) => t.addEventListener(type, h) }).paint(2);
-    const long = btn.querySelector('.rt-long') as HTMLElement;
-    const short = btn.querySelector('.rt-short') as HTMLElement;
-
-    setViewport(PHONE);
-    expect(styleOf(long).display).toBe('none');
-    expect(styleOf(short).display).toBe('inline');
-
-    // The control: at Bryan's own width the words are the label and the
-    // glyph is the one that stands down — so neither assertion above is a
-    // rule that never applies.
-    setViewport(IPAD);
-    expect(styleOf(short).display).toBe('none');
-    expect(styleOf(long).display).not.toBe('none');
-    cleanup();
-    setViewport(IPAD);
   });
 });

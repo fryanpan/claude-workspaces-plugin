@@ -371,8 +371,9 @@ describe('identity and the write gate are settled before anything connects', () 
     server.on('/api/auth/session', { authenticated: false, canWrite: false });
     await boot('https://docs.test/workspaces/w-1/docs/d-notes');
     expect(document.querySelector('.signin-bar')).not.toBeNull();
-    const toggle = document.getElementById('toggle-edit-mode') as HTMLButtonElement;
-    expect(toggle.classList.contains('hidden') || toggle.disabled).toBe(true);
+    // No toggle to disable any more: the doc simply mounts read-only, which
+    // `body.view-mode` is what says on the page.
+    expect(document.body.classList.contains('view-mode')).toBe(true);
   });
 
   it('shows no bar when writes are allowed', async () => {

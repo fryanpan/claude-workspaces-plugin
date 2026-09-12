@@ -1,4 +1,4 @@
-import { type User, prose } from '@claude-workspaces/core';
+import { prose } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
@@ -10,13 +10,11 @@ import { MountScope } from '../src/mount-scope.ts';
  * The last phase of a document's boot (doc/doc-gates.ts): what this browser
  * is allowed to do with the surface.
  *
- * Three things settle one question, and the ORDER is the whole reason they
- * share a module. The format bar and the mode toggles have to exist before
- * the read-only lock can drive them, because the lock works through the
- * handle they hand back. A browser the server will not accept writes from
- * gets neither the edit toggle nor the Suggesting one — they are the same
- * door — and it must be shut synchronously, with no window in which the doc
- * is live and the answer is outstanding.
+ * There is no mode to switch any more. A doc opens ready to write for a
+ * browser the server will accept, and opens read-only — with nothing offering
+ * to change that — for one it will not. The lock has to be shut
+ * synchronously, with no window in which the doc is live and the answer is
+ * outstanding, which is what the last case here is for.
  */
 
 const open: Array<() => void> = [];
@@ -33,12 +31,9 @@ beforeEach(() => {
     <span id="save-state" class="save-state--saved">All changes saved</span>
     <button id="toggle-format" aria-pressed="false">Aa</button>
     <div id="format-bar" class="is-collapsed"></div>
-    <button id="toggle-edit-mode" data-write-control></button>
-    <button id="toggle-suggest-mode" data-write-control></button>
+    <button id="a-write-control" data-write-control></button>
     <div id="editor"></div>`;
 });
-
-const testUser: User = { id: 'u1', name: 'Alice', kind: 'known', color: '#2e7dd7' };
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -55,15 +50,10 @@ function wire(canWrite: boolean) {
     editor,
     scope,
     els: {
-      toggleEditMode: byId<HTMLButtonElement>('toggle-edit-mode'),
-      toggleSuggestMode: byId<HTMLButtonElement>('toggle-suggest-mode'),
       formatBar: byId('format-bar'),
       toggleFormat: byId<HTMLButtonElement>('toggle-format'),
     },
-    docId: 'd1',
-    user: testUser,
     canWrite,
-    justStarted: false,
   });
   open.push(() => {
     scope.dispose();
@@ -107,24 +97,24 @@ describe('the format bar', () => {
 });
 
 describe('a browser the server accepts writes from', () => {
-  it('gets both doors, and can open the editor', () => {
+  it('gets a document that is already typeable, with nothing to press first', () => {
     const { editor } = wire(true);
-    expect(byId<HTMLButtonElement>('toggle-edit-mode').disabled).toBe(false);
-    expect(byId<HTMLButtonElement>('toggle-suggest-mode').disabled).toBe(false);
-    byId('toggle-edit-mode').click();
     expect(editor.editor.isEditable).toBe(true);
     expect(document.body.classList.contains('view-mode')).toBe(false);
+  });
+
+  it('keeps every write control live', () => {
+    wire(true);
+    expect(byId<HTMLButtonElement>('a-write-control').disabled).toBe(false);
   });
 });
 
 describe('a browser the server will not accept writes from', () => {
-  it('gets neither door — they are the same door', () => {
+  it('has every write control shut, saying why', () => {
     wire(false);
-    for (const id of ['toggle-edit-mode', 'toggle-suggest-mode']) {
-      const btn = byId<HTMLButtonElement>(id);
-      expect(btn.disabled).toBe(true);
-      expect(btn.getAttribute('aria-label')).toBe('Sign in to edit this doc');
-    }
+    const btn = byId<HTMLButtonElement>('a-write-control');
+    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute('aria-label')).toBe('Sign in to edit this doc');
   });
 
   it('is left reading, synchronously, with nothing editable in between', () => {
@@ -141,9 +131,11 @@ describe('a browser the server will not accept writes from', () => {
     expect(byId('save-state').classList.contains('save-state--saved')).toBe(false);
   });
 
-  it('cannot open the editor by clicking the locked toggle anyway', () => {
-    const { editor } = wire(false);
-    byId('toggle-edit-mode').click();
-    expect(editor.editor.isEditable).toBe(false);
+  it('is not offered the formatting bar either', () => {
+    // `body.view-mode` hides the Aa button, and the bar starts collapsed —
+    // formatting commands are no-ops on a surface that takes nothing.
+    wire(false);
+    expect(byId('format-bar').classList.contains('is-collapsed')).toBe(true);
+    expect(byId('toggle-format').getAttribute('aria-pressed')).toBe('false');
   });
 });

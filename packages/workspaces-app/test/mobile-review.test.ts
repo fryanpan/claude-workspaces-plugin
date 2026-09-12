@@ -1,28 +1,14 @@
 import type { Comment, Thread, User } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  PLACEMENT_PREF_KEY,
-  applyPlacement,
-  cardPlacement,
-  effectiveSurface,
-  inlineCardsVisible,
-  otherPlacement,
-  placementToggleLabel,
-  setCardPlacement,
-} from '../src/card-placement.ts';
-import {
-  type MobileReviewOpts,
-  centreScrollTop,
-  mountMobileReview,
-  stepIndex,
-} from '../src/mobile-review.ts';
+import { applyPlacement, cardPlacement, inlineCardsVisible } from '../src/card-placement.ts';
+import { type MobileReviewOpts, centreScrollTop, mountMobileReview } from '../src/mobile-review.ts';
 import type { InlineThreadCard } from '../src/review-surface.ts';
 import { ThreadPanel } from '../src/threads.ts';
 import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 /**
- * Mobile review: comments inline in the document/source, the over-doc sheet
- * the comment badge opens, and the ‹ › nav that walks the inline cards.
+ * Mobile review: comments inline in the document/source, and the over-doc
+ * sheet the comment badge opens.
  *
  * happy-dom has no layout, so the geometry lives behind a pure function
  * (`centreScrollTop`) which is tested on its own; the DOM tests assert the
@@ -101,8 +87,6 @@ function harness(
   document.body.innerHTML = `
     <div id="shell">
       <div id="editor"></div>
-      <button id="prev-comment" title="Previous comment">‹</button>
-      <button id="next-comment" title="Next comment">›</button>
       <div id="threads-pane"><div id="threads-list"></div></div>
     </div>`;
   const editor = document.getElementById('editor') as HTMLElement;
@@ -121,7 +105,6 @@ function harness(
 
   let placed: InlineThreadCard[] = [];
   const scrolledTo: number[] = [];
-  const listeners: Array<() => void> = [];
   const mobile = mountMobileReview({
     inlineVisible: () => true,
     threads: () => threads,
@@ -139,24 +122,11 @@ function harness(
       scrollToPos: (pos) => scrolledTo.push(pos),
     },
     setActive: (id) => panel.setActive(id),
-    getActive: () => panel.getActive(),
     revealInSheet: (id) => panel.revealThread(id),
     openSheet: () => shell.classList.add('threads-open'),
     closeSheet: () => shell.classList.remove('threads-open'),
     isSheetOpen: () => shell.classList.contains('threads-open'),
-    // The inline surface's own hide-resolved rule has its own suite
-    // (resolved-visibility.test.ts); everything here predates it and asserts
-    // the wiring, so the harness keeps every thread on the page unless a case
-    // says otherwise.
-    showResolved: () => true,
-    listen: (target, type, handler) => {
-      target.addEventListener(type, handler);
-      listeners.push(() => target.removeEventListener(type, handler));
-    },
     ...over,
-  });
-  cleanups.push(() => {
-    for (const off of listeners) off();
   });
 
   panel.setThreads(threads);
@@ -207,26 +177,6 @@ describe('centreScrollTop', () => {
   });
 });
 
-describe('stepIndex', () => {
-  it('starts at the first item going forward and the last going back', () => {
-    expect(stepIndex(-1, 1, 3)).toBe(0);
-    expect(stepIndex(-1, -1, 3)).toBe(2);
-  });
-
-  it('wraps in both directions', () => {
-    expect(stepIndex(2, 1, 3)).toBe(0);
-    expect(stepIndex(0, -1, 3)).toBe(2);
-  });
-
-  it('survives an index left over from a longer list', () => {
-    expect(stepIndex(9, 1, 3)).toBe(1);
-  });
-
-  it('reports "nothing to walk" for an empty list', () => {
-    expect(stepIndex(-1, 1, 0)).toBe(-1);
-  });
-});
-
 // --- which threads are inline -------------------------------------------------
 
 describe('inline placement', () => {
@@ -235,21 +185,21 @@ describe('inline placement', () => {
     expect(h.placed().map((c) => c.id)).toEqual(['t1', 't2']);
   });
 
-  it('gives an orphaned thread NO inline card — the sheet is its only home; a resolved one keeps its card', () => {
+  it('gives an orphaned or settled thread NO inline card — the sheet is its only home', () => {
     const h = harness([
       thread('open1'),
       orphanThread('orph1'),
       thread('done1', { status: 'resolved' }),
     ]);
-    // Positive control first: the surface really does receive cards. The
-    // resolved thread keeps a faint highlight and so keeps a (folded) card.
+    // Positive control first: the surface really does receive cards, so the
+    // two absences below are the thread and not an empty surface.
     expect(
       h
         .placed()
         .map((c) => c.id)
         .sort(),
-    ).toEqual(['done1', 'open1']);
-    // …and the orphan, which has nowhere to sit, is reachable in the sheet.
+    ).toEqual(['open1']);
+    // …and both of the others are reachable in the sheet.
     const ids = (): string[] =>
       Array.from(h.sheetList.querySelectorAll('.thread'))
         .map((e) => e.getAttribute('data-thread-id') ?? '')
@@ -370,9 +320,9 @@ describe('expand state is shared between the inline copy and the sheet copy', ()
   });
 });
 
-// --- nav ----------------------------------------------------------------------
+// --- scrolling to a card -------------------------------------------------------
 
-describe('prev/next comment nav', () => {
+describe('showThread scrolls the card into the middle of its own scroller', () => {
   function stubScroller(h: Harness, metrics = { client: 600, scroll: 5000 }): number[] {
     const tops: number[] = [];
     Object.defineProperty(h.editor, 'clientHeight', { configurable: true, value: metrics.client });
@@ -382,35 +332,6 @@ describe('prev/next comment nav', () => {
     };
     return tops;
   }
-
-  it('walks the inline threads in document order and wraps', () => {
-    const h = harness([thread('a'), thread('b'), thread('c')], {}, { a: 1, b: 2, c: 3 });
-    h.mountPlaced();
-    stubScroller(h);
-
-    h.mobile.step(1);
-    expect(h.panel.getActive()).toBe('a');
-    h.mobile.step(1);
-    expect(h.panel.getActive()).toBe('b');
-    h.mobile.step(1);
-    expect(h.panel.getActive()).toBe('c');
-    h.mobile.step(1);
-    expect(h.panel.getActive()).toBe('a');
-    h.mobile.step(-1);
-    expect(h.panel.getActive()).toBe('c');
-  });
-
-  it('skips orphaned threads — they cannot be walked to', () => {
-    const h = harness([thread('a'), orphanThread('o'), thread('b')], {}, { a: 1, b: 4 });
-    h.mountPlaced();
-    stubScroller(h);
-    h.mobile.step(1);
-    h.mobile.step(1);
-    h.mobile.step(1);
-    // Three steps over a two-item list wraps back to the first — it never
-    // lands on the orphan.
-    expect(h.panel.getActive()).toBe('a');
-  });
 
   it("scrolls the card's OWN container and never calls scrollIntoView", () => {
     const h = harness([thread('a')]);
@@ -424,50 +345,13 @@ describe('prev/next comment nav', () => {
     const intoView = vi.fn();
     card.scrollIntoView = intoView;
 
-    h.mobile.step(1);
+    h.mobile.showThread('a');
 
     // 1000 - 600/2 + 100/2 = 750, inside [0, 4400].
     expect(tops).toEqual([750]);
     expect(intoView).not.toHaveBeenCalled();
   });
-
-  it('disables the buttons when nothing is inline, and says why', () => {
-    const h = harness([orphanThread('o')]);
-    const prev = document.getElementById('prev-comment') as HTMLButtonElement;
-    const next = document.getElementById('next-comment') as HTMLButtonElement;
-    expect(h.placed()).toEqual([]);
-    expect(prev.disabled).toBe(true);
-    expect(next.disabled).toBe(true);
-    expect(prev.title).toMatch(/No comments anchored/);
-
-    // Positive control: with one inline thread they come back, with their
-    // original titles.
-    const h2 = harness([thread('a')]);
-    expect(h2.placed()).toHaveLength(1);
-    expect((document.getElementById('prev-comment') as HTMLButtonElement).disabled).toBe(false);
-    expect((document.getElementById('next-comment') as HTMLButtonElement).title).toBe(
-      'Next comment',
-    );
-  });
-
-  it('does nothing (rather than wrapping onto nothing) when there is no inline thread', () => {
-    const h = harness([orphanThread('o')]);
-    expect(() => h.mobile.step(1)).not.toThrow();
-    expect(h.panel.getActive()).toBe(null);
-  });
-
-  it('the app-bar buttons are wired to the walk', () => {
-    const h = harness([thread('a'), thread('b')], {}, { a: 1, b: 2 });
-    h.mountPlaced();
-    stubScroller(h);
-    (document.getElementById('next-comment') as HTMLButtonElement).click();
-    expect(h.panel.getActive()).toBe('a');
-    (document.getElementById('prev-comment') as HTMLButtonElement).click();
-    expect(h.panel.getActive()).toBe('b');
-  });
 });
-
-// --- threads with no inline position ------------------------------------------
 
 describe('showThread for a thread with no line to sit beside', () => {
   it('opens the sheet instead of jumping to nothing', () => {
@@ -573,86 +457,60 @@ describe('the mobile sheet rides the keyboard', () => {
 });
 
 /**
- * The 430px sheet — the state the mock names and the one neither in-flow
- * surface covers.
+ * 430px — the comments in the flow, and nothing in a margin.
  *
- * A reader who put their cards in the margin on a laptop has not changed
- * their mind by picking up a phone, so `cardPlacement` still reads `balloon`
- * there. But 430px has no margin to ride in, so the over-doc sheet becomes
- * the comment surface and NOTHING sits in the document flow. That is a state
- * with a real way to get everything wrong: build inline cards anyway and the
- * reader gets both surfaces at once; build none and disable the walk with
- * them and the comments become unreachable from the app bar.
+ * There is no stored placement any more, so this is simply what the width
+ * decides, and it is the state with a real way to get everything wrong: draw
+ * the margin anyway and a 260px track sits beside 430px of prose and scrolls
+ * the page sideways; draw neither surface and the comments vanish from the
+ * document altogether.
  */
-describe('the 430px sheet', () => {
+describe('430px puts the comments in the flow', () => {
   afterEach(() => {
-    try {
-      localStorage.removeItem(PLACEMENT_PREF_KEY);
-    } catch {
-      // nothing stored to clear
-    }
     document.body.removeAttribute('data-cards');
     setViewport({ width: 1024, height: 768 });
   });
 
-  it('builds no inline card, yet ‹ › still walks and lands the reader in the sheet', () => {
+  it('builds an inline card per anchored thread, and the badge still opens the sheet', () => {
     setViewport(PHONE);
-    setCardPlacement('balloon');
     const h = harness([thread('a'), thread('b')], { inlineVisible: inlineCardsVisible });
-    expect(h.placed()).toEqual([]);
-    // Disabling the walk along with the cards is the tempting mistake: the
-    // buttons count ANCHORED THREADS, and stepping is exactly how a reader
-    // reaches a thread whose only copy is in the sheet.
-    const next = document.getElementById('next-comment') as HTMLButtonElement;
-    expect(next.disabled).toBe(false);
-    next.click();
+    expect(cardPlacement()).toBe('inline');
+    expect(h.placed().map((c) => c.id)).toEqual(['a', 'b']);
+    // The sheet is still the whole list, and an orphan's only home.
+    h.mobile.showThread('missing');
     expect(h.sheetOpen()).toBe(true);
-    expect(h.panel.getActive()).toBe('a');
-    next.click();
-    expect(h.panel.getActive()).toBe('b');
   });
 
-  it('keeps the choice the reader made, and offers to move the cards into the flow', () => {
-    setViewport(PHONE);
-    setCardPlacement('balloon');
-    // What was chosen, what is on screen, and what the toggle offers are three
-    // different answers here — and only the middle one changed.
-    expect(cardPlacement()).toBe('balloon');
-    expect(effectiveSurface()).toBe('sheet');
-    expect(otherPlacement(cardPlacement())).toBe('inline');
-    expect(placementToggleLabel(effectiveSurface()).title).toContain('sheet');
-  });
-
-  it('leaves nothing in the document flow, and no 260px track to scroll sideways past', () => {
+  it('shows the inline card and no margin, with no 260px track to scroll sideways past', () => {
     // Both sheets: the placement rules live in `doc.css` since the editor's
     // CSS became its own file, and a negative read against the base alone
     // would pass on a stylesheet that never had the rule.
     const off = installSheets('styles.css', 'doc.css');
     cleanups.push(off);
     setViewport(PHONE);
-    setCardPlacement('balloon');
     applyPlacement();
-    expect(document.body.dataset.cards).toBe('sheet');
+    expect(document.body.dataset.cards).toBe('inline');
     const editor = attach('redline-layout', { attrs: { id: 'editor' } });
     const margin = attach('markup-margin', { parent: editor });
     const inline = attach('cw-inline-card', { parent: editor });
     expect(styleOf(margin).display).toBe('none');
-    expect(styleOf(inline).display).toBe('none');
+    expect(styleOf(inline).display).not.toBe('none');
     // Single-column flow: the two-track grid is what put a 260px column
     // beside 430px of prose and made the page scroll sideways.
     expect(styleOf(editor).display).toBe('block');
   });
 
-  it('positive control: the same nodes at 1180 with balloons chosen do show the margin', () => {
+  it('positive control: the same nodes at 1180 do show the margin and not the inline card', () => {
     const off = installSheets('styles.css', 'doc.css');
     cleanups.push(off);
     setViewport(IPAD);
-    setCardPlacement('balloon');
     applyPlacement();
     expect(document.body.dataset.cards).toBe('balloon');
     const editor = attach('redline-layout', { attrs: { id: 'editor' } });
     const margin = attach('markup-margin', { parent: editor });
+    const inline = attach('cw-inline-card', { parent: editor });
     expect(styleOf(margin).display).not.toBe('none');
+    expect(styleOf(inline).display).toBe('none');
     expect(styleOf(editor).display).not.toBe('block');
   });
 });

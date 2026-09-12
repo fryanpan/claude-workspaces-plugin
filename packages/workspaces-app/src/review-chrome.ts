@@ -1,26 +1,12 @@
 import { type Thread, type User, readDocMeta } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
-import {
-  applyPlacement,
-  cardPlacement,
-  effectiveSurface,
-  inlineCardsVisible,
-  onPlacementChange,
-  otherPlacement,
-  placementToggleLabel,
-  setCardPlacement,
-} from './card-placement.ts';
+import { applyPlacement, inlineCardsVisible, onPlacementChange } from './card-placement.ts';
 import { type SeenTracker, createSeenTracker } from './comment-seen.ts';
 import type { ChromeSelection } from './doc/anchor-body.ts';
 import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
 import type { ComposerSlot } from './doc/composer-slot.ts';
 import { labelDirection, wireDocRename } from './doc/doc-rename.ts';
-import {
-  onShowResolvedChange,
-  showResolved,
-  wireResolvedToggle,
-} from './doc/resolved-visibility.ts';
 import { wireReviewComposer } from './doc/review-composer.ts';
 import { createThreadActions } from './doc/thread-actions.ts';
 import { createThreadProjection } from './doc/thread-projection.ts';
@@ -121,44 +107,6 @@ export interface ChromeOpts {
    * it required turns "did I wire all three" into a compile error.
    */
   canWrite: boolean;
-}
-
-/**
- * Wire the topbar's comment-placement toggle: cards in the flow, or cards in
- * the right margin.
- *
- * Beside the doc-list toggle and the comments toggle, because it is the same
- * kind of thing — a stored per-device view preference, not a doc setting. Runs
- * once per page for the same reason `wireSetPaneToggle` does: chrome remounts
- * on every doc change, and a second listener would flip the placement twice
- * per click.
- *
- * The glyph shows the surface IN FORCE and the labels name the destination,
- * so a reader who has never touched it can still tell where their comments
- * are. There is no `aria-pressed`: this is not an on/off, it is a choice
- * between two surfaces, and "pressed = margin" would be an arbitrary reading
- * of which one counts as on.
- */
-export function wireCardPlacementToggle(): void {
-  const btn = document.getElementById('toggle-cards');
-  if (!btn || btn.dataset.wired === '1') return;
-  btn.dataset.wired = '1';
-  const paint = () => {
-    // The SURFACE, not the stored choice: on a phone a stored `balloon`
-    // resolves to the sheet, and the button has to say so.
-    const label = placementToggleLabel(effectiveSurface());
-    btn.textContent = label.glyph;
-    btn.title = label.title;
-    btn.setAttribute('aria-label', label.ariaLabel);
-  };
-  paint();
-  // Repaint on a width change too: with nothing stored the placement follows
-  // the width, so crossing the default boundary moves the cards and a button
-  // still showing the old glyph would be describing the other surface.
-  onPlacementChange((target, type, fn) => target.addEventListener(type, fn), paint);
-  btn.addEventListener('click', () => {
-    setCardPlacement(otherPlacement(cardPlacement()));
-  });
 }
 
 /** `CSS.escape` guarded — happy-dom (and very old browsers) may not have it.
@@ -299,7 +247,6 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
   // keys the margin and the inline cards off `body[data-cards]`, and a first
   // paint with the attribute missing lays every card out on the wrong surface.
   applyPlacement();
-  wireCardPlacementToggle();
   wireResizeHandle({
     pane: document.getElementById('set-pane'),
     cssVar: '--set-w',
@@ -345,26 +292,6 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
   // the fan-out below: which surfaces get repainted when that projection
   // changes.
 
-  // "Show resolved (n)" — the one control that decides whether settled
-  // comments are drawn on the page at all (`doc/resolved-visibility.ts`).
-  // Wired per mount rather than once per page, unlike the doc-list and
-  // placement toggles: its label carries THIS document's resolved count, so
-  // it has to be repainted from `redrawThreads` and torn down with the scope
-  // that owns that redraw.
-  const resolvedToggleEl = document.getElementById('toggle-resolved');
-  const resolvedToggle = resolvedToggleEl
-    ? wireResolvedToggle({
-        btn: resolvedToggleEl,
-        listen: (target, type, handler) => on(target, type, handler),
-      })
-    : null;
-  // Revealing or hiding is a repaint of every anchored surface at once: the
-  // highlights come off the prose, and the margin picks its balloons from the
-  // highlights, so one redraw moves all three.
-  const unsubscribeResolved = onShowResolvedChange(() => redrawThreads());
-  if (opts.scope) opts.scope.onCleanup(unsubscribeResolved);
-  else modalCleanups.push(unsubscribeResolved);
-
   // Per doc, per browser: which threads this reader has looked at. Drives the
   // red "new" dot on the card, the highlight and the off-screen hints.
   const seen = createSeenTracker({ docId });
@@ -373,7 +300,6 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     surface,
     seen,
     onPendingExpiry: () => redrawThreads(),
-    showResolved,
   });
   const {
     collect: collectThreads,
@@ -391,10 +317,6 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     const openCount = counts.open + counts.orphan;
     threadsCount.textContent = String(openCount);
     threadsCount.classList.toggle('has-count', openCount > 0);
-    // "Show resolved (n)" says how many there are to bring back — so it has
-    // to be repainted from the same signal the cards are, not once at mount:
-    // resolving the last open question changes both numbers at once.
-    resolvedToggle?.paint(counts.resolved);
     // The inline cards are a second rendering of the same threads. They go
     // stale exactly when the drawer would, so they refresh from the same
     // signal rather than a listener of their own.
@@ -591,22 +513,16 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     setActive: (id) => {
       threadsPanel.setActive(id);
     },
-    getActive: () => threadsPanel.getActive(),
     revealInSheet: (id) => requestAnimationFrame(() => threadsPanel.revealThread(id)),
     openSheet: openDrawer,
     closeSheet: closeDrawer,
     isSheetOpen: () => shell.classList.contains('threads-open'),
-    showResolved,
-    listen: on,
     onCleanup: (fn) => opts.scope?.onCleanup(fn),
   });
-  // Crossing the phone breakpoint changes which surface owns the comments —
+  // Crossing either width boundary changes which surface owns the comments —
   // inline cards must appear (or be handed back) at the same width the
-  // stylesheet swaps the drawer for a sheet.
-  // Which surface owns the comments can move three ways — the reader flips
-  // the topbar toggle, or the window crosses either of the two widths where
-  // the DEFAULT changes — and a listener on one of them alone is a silent
-  // half-fix. `onPlacementChange` subscribes to all three.
+  // stylesheet swaps the margin for the flow, and the flow for a sheet.
+  // `onPlacementChange` subscribes to both.
   onPlacementChange(on, () => {
     applyPlacement();
     mobile.refresh();

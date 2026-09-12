@@ -1026,51 +1026,6 @@ body.has-set .doc-switcher-caret {
   }
 }
 
-/* ========== the "Show resolved (n)" control (doc/resolved-visibility.ts) ==========
-   A word-shaped button in a bar of glyphs, because the count IS the reason to
-   press it — "how many settled comments am I not looking at" cannot be drawn.
-   It recedes to the weight of the chrome around it until hovered, and takes
-   the shared `.icon-btn[aria-pressed="true"]` look while the settled cards
-   are on the page — so it reads the same as the comments toggle beside it. */
-#toggle-resolved.resolved-toggle {
-  min-width: 0;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  color: var(--fg-muted);
-}
-#toggle-resolved.resolved-toggle:hover {
-  color: var(--fg);
-}
-#toggle-resolved.resolved-toggle[aria-pressed="true"] {
-  color: #fff;
-}
-/* `.icon-btn` is inline-flex, which outranks the UA's `[hidden]` rule — so a
-   doc with nothing resolved would show an empty pill without this. */
-#toggle-resolved[hidden] {
-  display: none;
-}
-/* Above the phone tier the words say what pressing it does. */
-#toggle-resolved .rt-short {
-  display: none;
-}
-/* On a phone the topbar is already carrying the doc title, the comment nav
-   and the badge, and the words were measured overrunning them at 430. The
-   count stays, because the count is the half that changes. */
-@media (max-width: 720px) {
-  #toggle-resolved.resolved-toggle {
-    padding: 6px 8px;
-  }
-  #toggle-resolved .rt-long {
-    display: none;
-  }
-  #toggle-resolved .rt-short {
-    display: inline;
-    font-size: 13px;
-  }
-}
-
 /* ================= MEETING RECORD CHROME =================
    One Record Audio button in the top bar owns everything audio; the live
    transcript strip is #shell's second grid row, fused directly under the bar
@@ -3228,13 +3183,11 @@ body.composer-open .composer-scrim.composer-scrim--clear {
 }
 
 /* ================= CODE REVIEW SURFACE ================= */
-/* The read-only CodeMirror surface for type='code' docs. The format bar
-   and the edit-mode toggle are markdown/Tiptap-only — hide them so the
-   code surface shows only the comment affordances. */
+/* The read-only CodeMirror surface for type='code' docs. The format bar is
+   markdown/Tiptap-only — hide it so the code surface shows only the comment
+   affordances. */
 body.code-mode #format-bar,
-body.code-mode #toggle-format,
-body.code-mode #toggle-edit-mode,
-body.code-mode #toggle-suggest-mode {
+body.code-mode #toggle-format {
   display: none !important;
 }
 
@@ -3781,21 +3734,6 @@ body.redline-mode .ProseMirror .cw-block-del {
 body.redline-mode .ProseMirror ins.cw-ins,
 body.redline-mode .ProseMirror del.cw-del {
   overflow-wrap: anywhere;
-}
-
-/* The Suggesting toggle reads as "engaged" while the mode is on. */
-#toggle-suggest-mode[aria-pressed="true"] {
-  background: var(--accent-subtle, rgba(46, 125, 215, 0.1));
-  color: var(--accent, #2e7dd7);
-}
-
-/* The Suggesting toggle is wired by the markdown mount only — hide it on the
-   redline surface until its chrome learns the mode (commit 5). Suggestions
-   authored elsewhere still RENDER there: the marks that paint them are
-   unscoped, and they live in styles.css (EDITOR) because the board mounts
-   the same editor over a task body and never loads this file. */
-body.redline-mode #toggle-suggest-mode {
-  display: none !important;
 }
 
 /* The three-way toggle must not overflow a 430px viewport. */

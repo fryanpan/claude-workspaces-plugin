@@ -24,10 +24,16 @@ const bob = { id: 'u2', name: 'Bob', kind: 'known' as const, color: '#c0392b' };
 /** happy-dom's viewport width drives `window.matchMedia`, which is the same
  *  1100px query the stylesheet uses. Default is 1024px — BELOW it — so any
  *  test about the desktop treatment has to widen it first. */
+/** Move the window, and let the media queries the app listens to fire. The
+ *  bare `setInnerWidth` moves `innerWidth` without telling any
+ *  `MediaQueryList`, which is how a case could cross a breakpoint and see
+ *  nothing react. */
 function setViewportWidth(w: number): void {
   (
-    window as unknown as { happyDOM: { setInnerWidth: (w: number) => void } }
-  ).happyDOM.setInnerWidth(w);
+    window as unknown as {
+      happyDOM: { setViewport: (v: { width: number; height: number }) => void };
+    }
+  ).happyDOM.setViewport({ width: w, height: 820 });
 }
 
 function mountChromeDom(): void {
@@ -257,7 +263,6 @@ describe('narrow viewports keep the surface they already have', () => {
     tapCard();
     expect(modalOpen()).toBe(true);
     setViewportWidth(430);
-    window.matchMedia('(max-width: 1100px)').dispatchEvent(new Event('change'));
     expect(modalOpen()).toBe(false);
   });
 });

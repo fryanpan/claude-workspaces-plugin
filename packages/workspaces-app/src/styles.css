@@ -378,9 +378,8 @@ button {
   color: #fff;
   border-color: var(--accent);
 }
-/* A control that cannot be used has to LOOK unusable. Same treatment as
-   `.comment-nav:disabled` above, hoisted to every icon button, because the
-   sign-in gate disables the edit and Suggesting toggles and they sat
+/* A control that cannot be used has to LOOK unusable, because the sign-in
+   gate disables every `data-write-control` button and they sat
    pixel-identical to the live controls beside them. A `title` is not a
    substitute: the primary device here is an iPad, where nothing hovers.
    The `:hover` and pressed-state overrides are the point — without them a
@@ -398,9 +397,9 @@ button {
   color: var(--fg);
   border-color: var(--border);
 }
-/* In view mode, the editor is read-only — formatting commands are no-ops
-   and the Aa toggle would just confuse. Hide it. The 💬 (threads) and
-   ✏️ (edit-mode) buttons stay useful. */
+/* A reader the server will not accept writes from gets the editor read-only —
+   formatting commands are no-ops and the Aa toggle would just confuse. Hide
+   it. The 💬 (threads) button stays useful. */
 body.view-mode #toggle-format {
   display: none;
 }
@@ -421,30 +420,6 @@ body.view-mode #toggle-format {
 }
 .icon-btn .badge.has-count {
   display: inline-block;
-}
-
-/* ‹ › comment nav. Shown wherever the comments are INLINE (≤1100px): the
-   cards are spread through the document, so stepping between them is the
-   only way to walk the conversation. Above that the balloon margin shows
-   every comment at once beside the text, and stepping is a solution to a
-   problem that doesn't exist. Narrower than the other
-   icon buttons (still ≥36px tall for the tap target) because two of them sit
-   beside the badge in an already-crowded app bar. */
-.comment-nav {
-  display: none;
-  min-width: 32px;
-  padding: 6px;
-  font-size: 18px;
-  font-family: var(--sans);
-}
-.comment-nav:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-@media (max-width: 1100px) {
-  .comment-nav {
-    display: inline-flex;
-  }
 }
 
 /* ================= VOICE (hold-to-talk, §2.4/§3.8) =================
@@ -1025,7 +1000,7 @@ body.is-reading-width #editor > .ProseMirror {
   .toolbar::-webkit-scrollbar {
     display: none;
   }
-  .toolbar .icon-btn:not(.comment-nav) {
+  .toolbar .icon-btn {
     min-width: 36px;
     padding-left: 7px;
     padding-right: 7px;
