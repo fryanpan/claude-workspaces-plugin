@@ -56,9 +56,10 @@ export interface WidgetMic {
 /**
  * Minified by hand: the widget's build minifies `styles*.ts` only, and this
  * sheet ships in the host's bundle rather than the widget's, so there is no
- * budget pressing on it — but it is still one rule a line.
+ * budget pressing on it — but it is still one rule a line. Exported so a
+ * browser test can seat the real buttons beside the board's own page.
  */
-const MIC_CSS = [
+export const MIC_CSS = [
   '.side{bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(126px,calc(env(safe-area-inset-bottom) + 126px)))}',
   // The phone face folds the floating buttons away under its bottom panel,
   // and the mic wears .fab-list for its look and its slot, so it folded with

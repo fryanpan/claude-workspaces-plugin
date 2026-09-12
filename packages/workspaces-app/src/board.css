@@ -1992,6 +1992,33 @@ html:has(.board-walk-cred-form) {
   margin-top: 0;
   font-weight: 500;
 }
+/* The pair sticks with the mic, stacked above it. The dock below is `sticky`
+   so the mic stays in view on a page taller than the viewport; Settings and
+   Collapse were not, so on the way down the page they scrolled up from the
+   viewport's foot INTO the stuck dock and sat under it — measured on the
+   Library's All files at 1180x820, between 220 and 320px of a 380px scroll
+   the centre of each hit-tested to `.board-nav-dock`. Sticking them too, each
+   parked exactly its own flow distance above the dock, keeps the three in the
+   order the rail draws them at every scroll position, and at the page's end
+   (where none of the three is stuck) changes nothing.
+
+   The offsets are the dock's box, built up from the parts that set it:
+     Collapse = the dock's 8px + its 1px border + 10px padding + the 44px mic
+                + the 10px margin above it                            = 73px
+     Settings = Collapse's 73px + its own 36px + the rail's 2px gap   = 111px
+   No `z-index`: under the task detail's scrim, like every other nav item.
+   Scoped to a rail that has the dock: the cross-board review's rail has no
+   mic, so nothing there is stuck and its toggle has nothing to clear. */
+.board-nav:has(> .board-nav-dock) > .board-nav-settings,
+.board-nav:has(> .board-nav-dock) > .board-nav-collapse {
+  position: sticky;
+}
+.board-nav:has(> .board-nav-dock) > .board-nav-settings {
+  bottom: 111px;
+}
+.board-nav:has(> .board-nav-dock) > .board-nav-collapse {
+  bottom: 73px;
+}
 /* A rail with no settings seat (the cross-board review's) still keeps the
    toggle at its foot. */
 .board-nav-item:not(.board-nav-settings) + .board-nav-item.board-nav-collapse {
@@ -4037,9 +4064,14 @@ html:has(.board-walk-cred-form) {
    end 822px down a 932px viewport with that button spanning 762-806 — half
    the row covered, and its right end, where the time is, not tappable.
    The two `env(safe-area-inset-bottom)` terms cancel: the buttons add one and
-   `--safe-bottom` adds the other, so neither appears here. */
+   `--safe-bottom` adds the other, so neither appears here.
+   Plus 12px of daylight. Reserving exactly 170 left the last row's box ENDING
+   ON the topmost button's top edge (650.3 against 650 at 1180x820, on All
+   files): no room at all, with that button's count badge (`top: -4px`) and
+   its shadow reaching into the row. 12px clears the badge with room to see
+   the gap. */
 .library-body {
-  padding: 4px 0 calc(146px - var(--board-bottom-bar));
+  padding: 4px 0 calc(158px - var(--board-bottom-bar));
   max-width: 1100px;
 }
 .library-body h2 {
