@@ -4466,13 +4466,17 @@ a.board-link-chip:hover {
   line-height: 1.45;
   min-width: 0;
   flex: 1 1 auto;
-  /* Padding the reader cannot see until the outline appears, pulled back out
-     by the negative margin so an un-hovered line sits on the panel's rhythm
-     rather than on the edit affordance's. */
-  padding: 8px 4px;
-  margin: -8px -4px;
+  /* Vertical padding the reader cannot see until the outline appears, pulled
+     back out by the negative margin so an un-hovered line sits on the panel's
+     rhythm rather than on the edit affordance's. The BREATHING ROOM sideways
+     is the outline's offset rather than horizontal padding: padding here grew
+     the box past its own column, which at 430px is an overflow inside the
+     list nobody can scroll to see. */
+  padding: 8px 0;
+  margin: -8px 0;
   border-radius: 3px;
   outline: 1px solid transparent;
+  outline-offset: 3px;
   cursor: text;
 }
 .dw-text:hover {
@@ -4533,9 +4537,14 @@ a.board-link-chip:hover {
    on past the words' own height. */
 .dw-line-x {
   flex: none;
+  /* On a line narrow enough that the chip pushed the × onto its own row, the
+     auto margin keeps it at the right edge where it belongs, rather than
+     leaving a stray glyph under the first word. It does nothing on a line
+     that fits, where the words already take the slack. */
+  margin-left: auto;
   min-width: 36px;
   min-height: 36px;
-  margin: -8px 0;
+  margin-block: -8px;
   padding: 0;
   border: 0;
   background: none;
