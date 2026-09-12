@@ -200,6 +200,10 @@ export function parseMeetingServerMessage(raw: unknown): MeetingServerMessage | 
         type: 'stopped',
         meetingId: str(m.meetingId),
         endedAt: typeof m.endedAt === 'number' ? m.endedAt : 0,
+        // Only the reason the contract names. A server that grows a second
+        // one reaches an older client as an ordinary stop, which is what the
+        // field being optional is for.
+        ...(m.reason === 'silence' ? { reason: 'silence' as const } : {}),
       };
     case 'error':
       return { type: 'error', message: str(m.message) };

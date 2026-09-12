@@ -3,6 +3,7 @@ import {
   MAX_SPEAKER_NAME,
   MEETING_AUDIO_ENCODING,
   MEETING_SAMPLE_RATE,
+  MEETING_SILENCE_NOTE,
   type MeetingBotState,
   type MeetingBotStatus,
   RECORDING_CONSENT_NOTE,
@@ -1053,6 +1054,84 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 2_000 });
     expect(h.root.dataset.state).toBe('idle');
     expect(h.root.classList.contains('is-live')).toBe(false);
+  });
+
+  /**
+   * A recording the SERVER ended for hearing nothing. Nobody pressed
+   * anything, so the strip is the only place the reason can appear — and the
+   * person it is for is the one who was not watching, which is why the
+   * sentence survives into the idle strip instead of going with the meeting.
+   */
+  it('says why a recording that timed itself out is over, and offers a fresh one', async () => {
+    const h = mount();
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({
+      type: 'stopped',
+      meetingId: 'm1',
+      endedAt: 2_000,
+      reason: 'silence',
+    });
+    expect(h.root.dataset.state).toBe('idle');
+    expect(h.note()).toBe(MEETING_SILENCE_NOTE);
+    // The button is back to its idle face, and the strip is still on screen
+    // carrying the sentence.
+    expect(h.record().textContent).toContain('Record Audio');
+    expect(h.root.hidden).toBe(false);
+
+    // And a tap starts a fresh recording: a new socket, and the sentence about
+    // the last one gone.
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    expect(h.sockets).toHaveLength(2);
+    h.sockets[1]?.onopen?.();
+    h.sockets[1]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 9_000, engine: 'test' });
+    expect(h.root.dataset.state).toBe('recording');
+
+    // And the sentence belonged to the meeting that timed out, not to the
+    // doc: this one was stopped by a person, so its end says nothing.
+    h.sockets[1]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 10_000 });
+    expect(h.note()).toBe('');
+    expect(h.root.hidden).toBe(true);
+  });
+
+  /**
+   * The tidy-up card offers to re-read what a meeting wrote. A recording that
+   * timed out having heard nothing wrote nothing, so the card would ask about
+   * an empty transcript — on the one ending nobody asked for.
+   */
+  it('offers no tidy-up for a timeout with no words, and still offers one after speech', async () => {
+    const onMeetingEnded = vi.fn();
+    const h = mount(undefined, { onMeetingEnded });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 2_000, reason: 'silence' });
+    expect(onMeetingEnded).not.toHaveBeenCalled();
+
+    // A timeout after somebody spoke is an ordinary end: there is a
+    // transcript, and the offer is worth making.
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[1]?.onopen?.();
+    h.sockets[1]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 3_000, engine: 'test' });
+    h.sockets[1]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
+    h.sockets[1]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 9_000, reason: 'silence' });
+    expect(onMeetingEnded).toHaveBeenCalledWith('m2');
+  });
+
+  it('says nothing extra when a person stopped the recording', async () => {
+    const h = mount();
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 2_000 });
+    expect(h.note()).toBe('');
+    expect(h.root.hidden).toBe(true);
   });
 });
 

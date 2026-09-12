@@ -331,6 +331,17 @@ describe('motion', () => {
     // not happening.
     const dead = attach('meeting-strip', { attrs: { 'data-state': 'unavailable' } });
     expect(styleOf(attach('meeting-blinker', { parent: dead })).animation).toBe('none');
+    // And idle, which the strip is now visible in: a recording that timed
+    // itself out leaves its sentence there, and a live-red dot beside
+    // "Recording stopped" claims the same thing the refused mic did.
+    const over = attach('meeting-strip', { attrs: { 'data-state': 'idle' } });
+    const overDot = styleOf(attach('meeting-blinker', { parent: over }));
+    expect(overDot.animation).toBe('none');
+    expect(overDot.background).toBe(token('--border-strong'));
+    // Control: the live dot is neither still nor that colour.
+    expect(styleOf(attach('meeting-blinker', { parent: live })).background).not.toBe(
+      token('--border-strong'),
+    );
   });
 
   it('flashes only the word the model rewrote', () => {
