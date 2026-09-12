@@ -432,6 +432,38 @@ describe('the release wake spends nothing it did not deliver', () => {
     expect(freed.rows.map((r) => r.id)).toEqual(band.slice(0, FREED_ROWS_NAMED).map((r) => r.id));
   });
 
+  it('mentions the moved task once when one act both queues it and frees others', () => {
+    // The two immediate wakes side by side. No transition reaches this today —
+    // an `after` edge clears on `done`, not on `todo`, so a move that queues a
+    // task cannot free a sibling — but the invariant is what a reader trusts,
+    // and a board that named the same task in two frames reads as one that has
+    // lost track of its own state. Driven here rather than over HTTP because
+    // the route cannot currently build it.
+    const board = emptyBoard();
+    const { nudger, frames } = harness(board);
+    const before = nudger.markReady('w-search');
+    board.ready = [rank, facets];
+
+    nudger.personQueuedTask({ workspaceId: 'w-search', taskId: rank.id });
+    nudger.personFreedWork({ workspaceId: 'w-search', before, except: rank.id });
+
+    expect(frames).toHaveLength(2);
+    // One frame is about the moved task, the other about what it freed, and
+    // the moved task is named in exactly one of them.
+    expect(frames[0]).toMatchObject({ taskId: rank.id });
+    expect(frames[0]?.freed).toBeUndefined();
+    const freed = frames[1]?.freed as { count: number; rows: Array<{ id: string }> };
+    expect(freed.rows.map((r) => r.id)).toEqual([facets.id]);
+    const mentions = frames.filter(
+      (f) =>
+        f.taskId === rank.id ||
+        ((f.freed as { rows?: Array<{ id: string }> } | undefined)?.rows ?? []).some(
+          (r) => r.id === rank.id,
+        ),
+    );
+    expect(mentions, 'the moved task is announced once, by one wake').toHaveLength(1);
+  });
+
   it('marks a board it cannot read UNREADABLE, and then frees nothing', () => {
     // The pre-write lookup threw and the post-write one succeeds. An empty mark
     // would make every ready row read as just released; an unreadable one says

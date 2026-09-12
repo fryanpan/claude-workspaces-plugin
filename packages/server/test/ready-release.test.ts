@@ -71,6 +71,20 @@ describe('freedRows', () => {
     expect(freedRows(trimmed, { ready: [rank, facets] })).toEqual([]);
   });
 
+  it('frees a whole release that never reaches `ready`, on a board with no slot', () => {
+    // The shape `readyWorkSnapshot` produces when every slot is busy: it trims
+    // `ready` to the free slots, so a fully-occupied board presents an EMPTY
+    // ready list at both readings and carries the entire release in
+    // `capacityTrimmed`. A diff that read `ready` alone would answer nothing
+    // here — and this is the board a lead most needs told, because the work is
+    // piling up behind a cap they are the one who can move.
+    const before = readyMark({ ready: [], capacityTrimmed: [rank] });
+    expect(freedRows(before, { ready: [], capacityTrimmed: [rank, facets, crawler] })).toEqual([
+      facets,
+      crawler,
+    ]);
+  });
+
   it('keeps the board’s own priority order, ready before trimmed', () => {
     const before = readyMark({ ready: [] });
     expect(freedRows(before, { ready: [rank, facets], capacityTrimmed: [crawler] })).toEqual([
