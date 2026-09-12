@@ -88,7 +88,7 @@ function rail(route: PromptsRoute): string {
     `<nav class="settings-rail" aria-label="Workspace">` +
     item(`/workspaces/${ws}/home`, 'home', 'Home') +
     item(`/workspaces/${ws}/tasks`, 'tasks', 'Tasks') +
-      item(`/workspaces/${ws}/activity`, 'activity', 'Activity') +
+    item(`/workspaces/${ws}/activity`, 'activity', 'Activity') +
     `<div class="settings-rail-spacer"></div>` +
     `<a class="settings-rail-item" href="${listHref(route)}" aria-current="page">` +
     `${icon('settings', 'settings-rail-icon')}Settings</a>` +

@@ -144,14 +144,13 @@ describe('the walkthrough card head keeps a readable title on a phone', () => {
   });
 });
 
-describe('settings popover + presence visibility', () => {
-  it('the settings panel floats instead of shifting the page', () => {
+describe('settings page + presence visibility', () => {
+  it('the settings page covers the board rather than shifting it', () => {
     setViewport(IPAD);
-    const panel = styleOf(attach('board-settings-panel'));
-    expect(panel.backgroundColor).not.toBe(''); // positive control: rule found
-    expect(panel.position).toBe('absolute');
-    // Anchored to the header, which must therefore be a positioned ancestor.
-    expect(styleOf(attach('board-topbar', { tag: 'header' })).position).toBe('relative');
+    const view = styleOf(attach('settings-shell board-settings-view'));
+    expect(view.backgroundColor).not.toBe(''); // positive control: rule found
+    expect(view.position).toBe('fixed');
+    expect(Number(view.zIndex)).toBeGreaterThan(0);
   });
 
   it('no width band hides the circle presence strip any more', () => {

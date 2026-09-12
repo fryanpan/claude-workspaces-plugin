@@ -16,12 +16,13 @@
  * either.
  */
 import { escapeHtml } from '@claude-workspaces/core';
-import { MIC_ICON, SVG, SVG_ENDS } from '../icons.ts';
+import { MIC_ICON, NAV_ICONS } from '../icons.ts';
 // Defines <meeting-banner>, rendered by buildShell at the top of the board
 // column. Import for the side effect; the element manages itself.
 import '../meeting-banner.ts';
 import { DEFAULT_DONE_WINDOW, DONE_WINDOWS } from './board-model.ts';
 import type { BoardNav } from './board-presence-model.ts';
+import { buildSettingsView } from './board-settings-view.ts';
 
 /** Where the collapse choice is remembered — `bootBoard`'s injected
  *  `localStorage`, so a test can hand it a plain map. */
@@ -29,21 +30,6 @@ export interface NavCollapseStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 }
-
-/** Icons. The four nav glyphs are the approved mockup's (home-pane-mockup-v1);
- *  share and settings are new, for the top-right cluster. The shared
- *  attributes and the mic come from `../icons.ts`, because the mic is mounted
- *  by three surfaces and only one of them is a board module. */
-export const NAV_ICONS = {
-  home: `<svg ${SVG} ${SVG_ENDS}><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>`,
-  tasks: `<svg ${SVG} ${SVG_ENDS}><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg>`,
-  activity: `<svg ${SVG} ${SVG_ENDS}><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>`,
-  library: `<svg ${SVG} ${SVG_ENDS}><path d="M5 4.5h9l5 5V19.5H5z"/><path d="M14 4.5v5h5"/><path d="M8.5 13h7M8.5 16.5h7"/></svg>`,
-  collapse: `<svg ${SVG} ${SVG_ENDS}><polyline points="14 6 8 12 14 18"/></svg>`,
-  expand: `<svg ${SVG} ${SVG_ENDS}><polyline points="10 6 16 12 10 18"/></svg>`,
-  share: `<svg ${SVG} ${SVG_ENDS}><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.3 10.8 7.4-4.3M8.3 13.2l7.4 4.3"/></svg>`,
-  settings: `<svg ${SVG} ${SVG_ENDS}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
-};
 
 /** The nav, in the order it renders. Four destinations and nothing else: the
  *  settings button below them is not a page of the workspace, so it is not
@@ -86,85 +72,10 @@ export function buildShell(
       <div class="board-cluster">
         <div id="board-people" class="board-presence board-people hidden"></div>
         <button type="button" id="board-share" class="board-icon-btn" title="Share workspace" aria-label="Share workspace">${NAV_ICONS.share}</button>
-        <button type="button" id="board-settings" class="board-icon-btn" title="Workspace settings" aria-label="Workspace settings" aria-expanded="false">${NAV_ICONS.settings}<span id="board-settings-alarm" class="board-alarm-dot hidden" aria-hidden="true"></span></button>
+        <button type="button" id="board-settings" class="board-icon-btn" title="Workspace settings" aria-label="Workspace settings">${NAV_ICONS.settings}<span id="board-settings-alarm" class="board-alarm-dot hidden" aria-hidden="true"></span></button>
         <button type="button" id="board-me" class="board-me" title="Signed in" aria-haspopup="true" aria-expanded="false"></button>
       </div>
       <div id="board-me-menu" class="board-me-menu hidden" role="region" aria-label="Your identity"></div>
-      <div id="board-settings-panel" class="board-settings-panel hidden" role="region" aria-label="Workspace settings">
-        <div id="board-drift" class="board-presence hidden"></div>
-        <div id="board-lead" class="board-lead"></div>
-        <label class="board-settings-row" for="board-done-filter">Show done tasks from
-          <select id="board-done-filter" class="board-select" aria-label="Done task visibility"></select>
-        </label>
-        <!-- Per DEVICE, not per account — a push subscription belongs to this
-             browser on this machine, so the row says so rather than reading
-             like a workspace-wide preference somebody set once. -->
-        <label class="board-settings-row board-settings-row--push" for="board-push-toggle">
-          <span class="board-settings-label">Notify me on this device
-            <small id="board-push-note" class="board-settings-note"></small>
-          </span>
-          <input type="checkbox" id="board-push-toggle" class="board-check" aria-describedby="board-push-note" />
-        </label>
-        <!-- Who can reach this board, and at what level (Bryan, 2026-09-11:
-             "share a board with someone who can read and comment but cannot
-             act as him"). Everyone in the workspace can read the list — a
-             person who cannot see who else is here cannot know who reads what
-             they write — and the controls are drawn for an Owner only. The
-             enforcement is the API's: the routes behind these controls refuse
-             a Regular User with a 403 whether or not the page drew them. -->
-        <div class="board-settings-row board-settings-row--members">
-          <span class="board-settings-label">Who has access
-            <small id="board-members-note" class="board-settings-note"></small>
-          </span>
-          <div id="board-members-list" class="board-members"></div>
-        </div>
-        <!-- What the quality gate judges an agent's ask against, in the
-             owner's own words (Bryan, 2026-08-29: "Something we can change in
-             the settings. It's a natural language prompt."). A textarea and
-             not a rule table for that reason. It shows the DEFAULT when this
-             board has never written one, so the words are always readable
-             even when nobody has edited them — a criterion you cannot read is
-             one your agents are judged against in secret. -->
-        <div class="board-settings-row board-settings-row--criteria">
-          <label class="board-settings-label" for="board-review-criteria">What makes a good review item
-            <small id="board-review-criteria-note" class="board-settings-note"></small>
-          </label>
-          <textarea id="board-review-criteria" class="board-criteria" rows="5" aria-describedby="board-review-criteria-note" placeholder="Plain English: what an agent’s ask has to do before it reaches you."></textarea>
-          <!-- The same words as plain text, for a reader the server will not
-               let write them. Drawn instead of the textarea and the actions,
-               never beside them, and carrying no caption of its own: a
-               read-only field is the value where the editor was. -->
-          <p id="board-review-criteria-text" class="board-settings-readonly hidden"></p>
-          <div id="board-review-criteria-actions" class="board-criteria-actions">
-            <button type="button" id="board-review-criteria-save" class="board-btn board-btn-primary">Save</button>
-            <button type="button" id="board-review-criteria-default" class="board-btn">Use the default</button>
-          </div>
-        </div>
-        <!-- The way into the prompts page. A link and not a panel: five of
-             the seven prompts belong to the SERVER rather than to this board,
-             so they cannot live inside a per-board popover, and the words are
-             paragraphs — a textarea apiece in here would bury the three
-             settings that are genuinely this board's. -->
-        <a class="board-settings-row board-settings-row--link" id="board-prompts-link"
-           href="/settings/prompts?ws=${encodeURIComponent(workspaceId)}">Prompts</a>
-        <!-- How many builders this board's lead may dispatch at once
-             (Bryan, by voice: "add support for limiting parallelism in the
-             workspace"). register_dispatch enforces the number server-side;
-             this is where it's read, changed, and shown alongside how many
-             slots are already spent. -->
-        <div class="board-settings-row board-settings-row--cap">
-          <label class="board-settings-label" for="board-parallelism-cap">Parallelism cap
-            <small id="board-parallelism-cap-note" class="board-settings-note"></small>
-          </label>
-          <input type="number" id="board-parallelism-cap" class="board-cap-input" min="1" step="1" aria-describedby="board-parallelism-cap-note" />
-          <p id="board-parallelism-cap-text" class="board-settings-readonly hidden"></p>
-          <div id="board-parallelism-cap-actions" class="board-criteria-actions">
-            <button type="button" id="board-parallelism-cap-save" class="board-btn board-btn-primary">Save</button>
-            <button type="button" id="board-parallelism-cap-default" class="board-btn">Use the default</button>
-          </div>
-        </div>
-        </div>
-      </div>
     </header>
     <div id="board-connection" class="conn-banner hidden" role="status" aria-live="polite"></div>
     <div class="board-main" id="board-main">
@@ -234,7 +145,8 @@ export function buildShell(
         </dl>
       </div>
     </div>
-    <div id="board-toast" class="board-toast hidden"></div>`;
+    <div id="board-toast" class="board-toast hidden"></div>
+    ${buildSettingsView(workspaceId)}`;
   const doneSelect = document.getElementById('board-done-filter') as HTMLSelectElement;
   for (const w of DONE_WINDOWS) {
     const opt = document.createElement('option');

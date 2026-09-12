@@ -56,6 +56,7 @@ import { renderQuickActions } from './board-render.ts';
 import { createBoardReviewController } from './board-review-controller.ts';
 import { type WalkSources, reviewQueue } from './board-review-model.ts';
 import { wireBoardSettingsPanel } from './board-settings-panel.ts';
+import { mountBoardSettingsView } from './board-settings-view.ts';
 import { buildShell, wireNavCollapse } from './board-shell.ts';
 import { wireBoardShortcuts } from './board-shortcuts.ts';
 import { createTaskDetailLoads } from './board-task-detail.ts';
@@ -743,6 +744,29 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // the share button beside it. `board-settings-panel.ts`, called here so the
   // document-level click and keydown listeners register in the same order
   // relative to the ones around them.
+  // The settings PAGE — its second-level nav and the two bands' different
+  // ways of choosing a type. Mounted before the panel below, which opens it.
+  // Through the DOM's own view rather than the injected `window`, which is
+  // an EventTarget a test can hand in: the query belongs to the document that
+  // is being painted, and a test document without one answers the wide band.
+  const narrowBand = document.defaultView?.matchMedia('(max-width: 1100px)') ?? null;
+  const settingsView = mountBoardSettingsView({
+    document,
+    narrow: () => narrowBand?.matches === true,
+    onClose: () => {
+      state.settingsOpen = false;
+      renderSettingsPanel();
+    },
+    onNav: (nav) => {
+      state.settingsOpen = false;
+      renderSettingsPanel();
+      setNav(nav);
+    },
+  });
+  // A width change between the two bands must not strand a reader on a pane
+  // whose nav has just gone — the subnav is drawn on one band and the row
+  // list on the other.
+  narrowBand?.addEventListener('change', () => settingsView.bandChanged());
   wireBoardSettingsPanel({
     document,
     el,
@@ -757,6 +781,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       state.settingsOpen = open;
     },
     renderSettingsPanel,
+    onOpen: () => settingsView.open(),
     href: () => location.href,
   });
 

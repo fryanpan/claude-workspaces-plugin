@@ -206,21 +206,37 @@ describe('the settings panel carries the field', () => {
     server.on(`/workspaces/${WS}/settings`, CRITERIA_SETTINGS);
   });
 
-  // The panel is a popover with document-level listeners; leaving it open
-  // would let a later test's unrelated click reach a torn-down handler.
   afterEach(async () => {
-    const panel = document.getElementById('board-settings-panel');
-    if (panel && !panel.classList.contains('hidden')) await click(el('board-settings'));
     document.body.innerHTML = '';
   });
 
-  /** Press the gear the way a reader does, and hand back the panel. */
+  /**
+   * Walk in the way a reader does — the gear, then the Board section — and
+   * hand back the pane it lands on.
+   *
+   * Two steps because the page has a second-level nav now: on the phone band
+   * (which is the width a test document reports) settings opens on the list
+   * of sections, and Board is the one these fields live under.
+   */
   async function openSettings(): Promise<HTMLElement> {
     await bootTestBoard({ tasks: [boardRow('t-1')] });
     await click(el('board-settings'));
+    expect(
+      el('board-settings-view').classList.contains('hidden'),
+      'the gear did not open settings',
+    ).toBe(false);
+    await click(document.querySelector('.settings-type-list [data-type=board]') as HTMLElement);
     const panel = el('board-settings-panel');
-    expect(panel.classList.contains('hidden'), 'the gear did not open the panel').toBe(false);
+    expect(panel.classList.contains('hidden'), 'the Board section did not open').toBe(false);
     return panel;
+  }
+
+  /** Leave settings and come back, so the page's reads run again. */
+  async function reopenSettings(): Promise<void> {
+    await click(el('board-settings-back'));
+    await click(el('board-settings-back'));
+    await click(el('board-settings'));
+    await click(document.querySelector('.settings-type-list [data-type=board]') as HTMLElement);
   }
 
   it('answers the reviewer’s own query — [id*=criteri] against the open panel', async () => {
@@ -262,8 +278,7 @@ describe('the settings panel carries the field', () => {
     server.on(`/workspaces/${WS}/settings`, {
       reviewItemCriteria: { value: DEFAULT_TEXT, isDefault: true },
     });
-    await click(el('board-settings')); // close
-    await click(el('board-settings')); // and open again
+    await reopenSettings();
     expect(box.value).toBe(DEFAULT_TEXT);
   });
 

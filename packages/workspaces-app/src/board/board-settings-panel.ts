@@ -43,6 +43,9 @@ export interface BoardSettingsPanelDeps {
   setOpen(open: boolean): void;
   /** Paint the open/closed state. `bootBoard` owns the render layer. */
   renderSettingsPanel(): void;
+  /** The settings page is being entered: choose which type it opens on.
+   *  `board-settings-view.ts` owns that; this file owns the reads. */
+  onOpen(): void;
   /** The address the share button copies. */
   href(): string;
 }
@@ -215,10 +218,12 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
    */
   function applyLevel(): void {
     // A page address, not a control, and still the same bug: the prompts page
-    // is trusted-local, so for a Regular User this row is a link that leads to
-    // a refusal. It goes rather than greys out — there is nothing to read
-    // there that they could have read.
+    // is trusted-local, so for a Regular User this is a link that leads to a
+    // refusal. It goes rather than greys out — there is nothing to read there
+    // that they could have read. Both navs carry it: the subnav column is the
+    // wide band's and the row list is the phone's.
     el('board-prompts-link').classList.toggle('hidden', !canEdit);
+    el('board-prompts-row').classList.toggle('hidden', !canEdit);
     reviewCriteria.applyLevel();
     parallelismCap.applyLevel();
   }
@@ -238,40 +243,32 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     await Promise.all([reviewCriteria.refresh(), parallelismCap.refresh()]);
   }
 
-  el('board-settings').addEventListener('click', () => {
-    deps.setOpen(!deps.isOpen());
+  /**
+   * Open the settings page and re-read everything on it.
+   *
+   * The gear that reaches it is not a toggle any more. A page is left by the
+   * way out it draws — the back arrow, or the rail's own destinations — not
+   * by pressing the button that opened it, which on a full-screen page is not
+   * on screen to press.
+   */
+  function openSettings(): void {
+    if (deps.isOpen()) return;
+    deps.setOpen(true);
+    // Before the reads, so the page is painted in the shape the level we last
+    // knew calls for rather than in the shell's own.
+    applyLevel();
+    deps.onOpen();
     deps.renderSettingsPanel();
     // Re-read on open: permission can change in site settings while the tab
     // sits here, and the row is only ever read at the moment it is opened.
     // Same reason for the criteria, which an agent can rewrite from a tool.
-    if (deps.isOpen()) {
-      // Before the reads, so the popover is painted in the shape the level we
-      // last knew calls for rather than in the shell's own.
-      applyLevel();
-      void pushToggle.refresh();
-      void refreshRoleAndBoardSettings();
-    }
-  });
-  // A popover that only closes by hitting the same small button again is one
-  // people leave open over the list they were trying to read.
-  document.addEventListener('click', (ev) => {
-    if (!deps.isOpen()) return;
-    const t = ev.target as Node | null;
-    if (!t) return;
-    // Reads the tree as it is NOW, which is after every handler inside the
-    // panel has run. A control that repaints its own section from a click
-    // handler has detached the button by this point, and the click that
-    // started inside the panel would test as one outside it and close the
-    // whole panel under the person who tapped. That is why the members list
-    // repaints on a later turn (`board-members.ts`), and why a new control in
-    // here must not repaint synchronously either.
-    if (el('board-settings-panel').contains(t) || el('board-settings').contains(t)) return;
-    deps.setOpen(false);
-    deps.renderSettingsPanel();
-  });
-  // Escape closes it too — it floats over the board now, and a floating panel
-  // that ignores Escape reads as stuck. Focus goes back to the button that
-  // opened it, so a keyboard user is not dropped at the top of the document.
+    void pushToggle.refresh();
+    void refreshRoleAndBoardSettings();
+  }
+  el('board-settings').addEventListener('click', openSettings);
+  // Escape leaves the page, the way it closed the popover this replaced.
+  // Focus goes back to the button that opened it, so a keyboard user is not
+  // dropped at the top of the document.
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !deps.isOpen()) return;
     deps.setOpen(false);

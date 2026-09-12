@@ -270,6 +270,7 @@ export function renderBoardShell(
   const boardJs = assetHref(assets, 'board.js');
   const stylesCss = assetHref(assets, 'styles.css');
   const boardCss = assetHref(assets, 'board.css');
+  const settingsCss = assetHref(assets, 'settings.css');
   const tokensCss = assetHref(assets, 'tokens.css');
   const safeName = escape(name);
   const safeId = escape(workspaceId);
@@ -310,6 +311,12 @@ export function renderBoardShell(
          which a .board-topbar .back-link:hover rule in board.css now pins. -->
     <link rel="stylesheet" href="${boardCss}" />
     <link rel="stylesheet" href="${stylesCss}" />
+    <!-- The settings page's own rules, in the position they hold on
+         /settings/prompts — after styles.css, before the Open Props remap.
+         The board reaches them because its settings page IS that page's
+         chrome (board/board-settings-view.ts); one stylesheet, so the two
+         cannot drift into two designs. -->
+    <link rel="stylesheet" href="${settingsCss}" />
     <!-- Open Props trial layer — after styles.css on purpose; see
          packages/workspaces-app/index.html. -->
     <link rel="stylesheet" href="${tokensCss}" />

@@ -42,12 +42,16 @@ describe('the way to the prompts page', () => {
     );
   });
 
-  it('sits inside the settings panel, not loose in the topbar', () => {
+  it('sits in the settings page’s section nav, not loose in the topbar', () => {
     const { root } = board();
     const link = root.querySelector('#board-prompts-link') as HTMLAnchorElement;
-    // The panel is the reader's one place for configuration. A link that
-    // escaped it would still pass the assertion above while sitting somewhere
-    // nobody looks.
-    expect(link.closest('#board-settings-panel')).not.toBeNull();
+    // Prompts is one of the settings page's three sections, and a link that
+    // escaped that nav would still pass the assertion above while sitting
+    // somewhere nobody looks.
+    expect(link.closest('.settings-subnav')).not.toBeNull();
+    expect(link.closest('#board-settings-view')).not.toBeNull();
+    // The phone's nav is the row list, and it carries the same address.
+    const row = root.querySelector('#board-prompts-row') as HTMLAnchorElement;
+    expect(row.getAttribute('href')).toBe(link.getAttribute('href'));
   });
 });

@@ -88,6 +88,7 @@ function panel(role: 'owner' | 'member' = 'owner'): Panel {
     setOpen: (next) => {
       open = next;
     },
+    onOpen: () => {},
     renderSettingsPanel: () => {
       el('board-settings-panel').classList.toggle('hidden', !open);
     },
@@ -124,11 +125,8 @@ describe('the settings panel and its members subsection', () => {
     );
     expect(remove).not.toBeNull();
     remove?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    // The document listener has already run — it is part of the same dispatch
-    // — so the panel's fate is settled before the repaint this waits for.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    // The panel is still open — the click began inside it, whatever the
-    // button's fate by the time the document listener reads the tree.
+    // Settings is still open, and the row repainted under the tap.
     expect(p.isOpen()).toBe(true);
     expect(document.getElementById('board-settings-panel')?.classList.contains('hidden')).toBe(
       false,
@@ -138,13 +136,18 @@ describe('the settings panel and its members subsection', () => {
     expect(confirm?.textContent).toContain(`Remove ${KEEPER}?`);
   });
 
-  it('still closes when the click really was outside', async () => {
+  it('a click anywhere else on the page leaves settings open', async () => {
+    // The popover this replaced closed on any click outside itself, which is
+    // what made the Remove tap above a bug worth a test: a control repainting
+    // its own section had detached the button by the time that listener read
+    // the tree. A page closes by the way out it draws, so neither case can
+    // come back.
     const p = panel();
     p.open();
     await Promise.resolve();
     expect(p.isOpen()).toBe(true);
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(p.isOpen()).toBe(false);
+    expect(p.isOpen()).toBe(true);
   });
 
   it('draws "Who has access" above the two editors a long panel buries', async () => {
