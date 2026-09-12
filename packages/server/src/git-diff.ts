@@ -230,11 +230,30 @@ export function textLooksBinary(text: string): boolean {
 export function defaultBaseRef(repo: string): string | null {
   const head = git(repo, ['rev-parse', '--abbrev-ref', 'origin/HEAD']);
   const named = head.stdout.trim();
-  if (head.ok && named.length > 0 && isSafeRef(named)) return named;
-  for (const ref of ['origin/main', 'origin/master']) {
-    if (resolveCommit(repo, ref) !== null) return ref;
+  const candidates = new Set<string>();
+  if (head.ok && named.length > 0 && isSafeRef(named)) candidates.add(named);
+  candidates.add('origin/main');
+  candidates.add('origin/master');
+
+  // The closest trunk wins, not the first one that answers. `origin/HEAD` is
+  // written at clone time and git never refreshes it, so a repo that renamed
+  // master to main and kept the old branch points a builder at a trunk it
+  // left long ago — and every file somebody else has landed on the real one
+  // since then reads as this builder's work. That is the false positive this
+  // whole read exists to remove, arriving by a different door.
+  let best: { ref: string; mergeBase: string } | null = null;
+  for (const ref of candidates) {
+    if (resolveCommit(repo, ref) === null) continue;
+    const mb = git(repo, ['merge-base', 'HEAD', ref]);
+    const mergeBase = mb.stdout.trim();
+    if (!mb.ok || !isObjectId(mergeBase)) continue;
+    if (
+      best === null ||
+      (best.mergeBase !== mergeBase && isAncestor(repo, best.mergeBase, mergeBase))
+    )
+      best = { ref, mergeBase };
   }
-  return null;
+  return best?.ref ?? null;
 }
 
 /** Is `a` an ancestor of `b` (or the same commit)? */
@@ -251,6 +270,12 @@ function isAncestor(repo: string, a: string, b: string): boolean {
  * moved on meanwhile. Reading to the working tree rather than to HEAD is the
  * other half of the same instinct — a builder is judged on what it has
  * written, not on what it has got round to committing.
+ *
+ * The baseline below pins COMMITTED history only, and this reads to the
+ * working tree: a worktree handed on while the last occupant's edits were
+ * still uncommitted attributes them to whoever holds it now. Committing
+ * before the handover is what the registry's own dispatch flow does; a
+ * baseline cannot reach work that has no commit.
  *
  * `since` narrows it to one stretch of that branch's life: pass the commit a
  * worktree was sitting on when its CURRENT occupant took it, and the read

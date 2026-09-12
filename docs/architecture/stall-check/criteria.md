@@ -92,11 +92,13 @@ today's code fails is flagged.
   changed file it rests on. *Passes since the diff rewrite:* the wired test
   (`ui-gate-finding.test.ts`) files a task as an attached agent, takes it
   in-progress, registers a builder worktree holding a stylesheet edit, and
-  asserts the lead's frame and the verdict both name it with that file; its
-  five controls are a task whose builder is editing the server while its own
-  words say "button", a task with no registered builder, a task with an
-  answered item, a task a person filed, and — the widening — a task whose
-  words say nothing about a screen whose builder is editing the stylesheet.
+  asserts the lead's frame and the verdict both name it with that file. Beside
+  it sits the widening — a task whose words say nothing about a screen, whose
+  builder is editing the stylesheet, and which the gate names anyway — and
+  five controls: a task whose builder is editing the server while its own
+  words say "button", a task with no registered builder, a builder that
+  inherited a finished task's stylesheet, a task with an answered item, and a
+  task a person filed.
 - **Must never:** name a task a person filed, a task nobody has started, a
   task somebody answered an item on, or a task whose builder has touched no
   screen. A finding here costs a lead turn about work that is going fine, so
@@ -157,6 +159,13 @@ a list holding only the destination says the opposite. Rules 2 and 3 both
 read a path, so a `.tsx` moved to a `.ts` under `server/src` would otherwise
 be the one shape of UI work that hides by leaving.
 
+**The trunk is the closest one, not the one `origin/HEAD` names.** That ref
+is written at clone time and git never refreshes it, so a repo that renamed
+`master` to `main` and kept the old branch would hand a builder a trunk it
+left long ago — and every file anybody has landed on the real one since would
+read as this builder's work. `defaultBaseRef` resolves each candidate and
+keeps the one whose merge base with HEAD is furthest forward.
+
 **A worktree outlives a dispatch, so the read starts from a baseline.** The
 dispatch registry records the commit a checkout was sitting on when the
 dispatch was registered (`baseCommit`), and `changedFilesInWorktree` reads
@@ -198,6 +207,13 @@ Three misses remain, written down rather than hidden:
    flight; a task taken and finished between two ticks is never seen.
 3. **A task being built somewhere the board cannot see** — no dispatch
    registered, or a builder working outside its worktree.
+4. **A screen this repo renders from the server.** `shells.ts` and
+   `widget-auth-page.ts` carry no UI extension and sit under no client
+   directory, so rules 2 and 3 both read them as server code. Measured over
+   the same 300 commits, four changed one of them and no client file at all.
+   The rule is about path shape and stays that way: hard-coding one repo's
+   file names into it would buy this repo four findings and every other repo
+   nothing.
 
 The prose match survives as colour. A finding carries the word from the
 task's own words when there is one, beside the file, because the lead who

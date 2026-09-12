@@ -26,6 +26,18 @@ const worktree = (
   return wt;
 };
 
+const run = (wt: BuilderWorktree, ...args: string[]): string =>
+  execFileSync('git', ['-C', wt.path, ...args], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 't',
+      GIT_AUTHOR_EMAIL: 't@t',
+      GIT_COMMITTER_NAME: 't',
+      GIT_COMMITTER_EMAIL: 't@t',
+    },
+  }).trim();
+
 afterEach(() => {
   for (const wt of made.splice(0)) wt.cleanup();
 });
@@ -33,6 +45,27 @@ afterEach(() => {
 describe('the base a builder is judged against', () => {
   it('is the remote default branch the clone names', () => {
     expect(defaultBaseRef(worktree().path)).toBe('origin/main');
+  });
+
+  it('is the closest trunk, not whichever ref origin/HEAD was cloned against', () => {
+    // The repo renamed master to main and kept the old branch. git never
+    // refreshes origin/HEAD, so it still names the abandoned trunk — and
+    // reading from there blames the builder for everything main has landed
+    // since the rename.
+    const wt = worktree();
+    const base = run(wt, 'rev-parse', 'HEAD');
+    run(wt, 'checkout', '-q', 'main');
+    wt.edit({ 'packages/app/src/board.css': '.somebody-else{}\n' });
+    run(wt, 'add', '-A');
+    run(wt, 'commit', '-qm', 'somebody else moves main on');
+    run(wt, 'update-ref', 'refs/remotes/origin/main', run(wt, 'rev-parse', 'HEAD'));
+    run(wt, 'update-ref', 'refs/remotes/origin/master', base);
+    run(wt, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/master');
+    run(wt, 'checkout', '-q', '-b', 'builder2');
+    wt.edit({ 'packages/server/src/clock.ts': 'export const t = 1;\n' });
+
+    expect(defaultBaseRef(wt.path)).toBe('origin/main');
+    expect(changedFilesInWorktree(wt.path)).toEqual(['packages/server/src/clock.ts']);
   });
 
   it('is nothing at all when no remote branch answers', () => {

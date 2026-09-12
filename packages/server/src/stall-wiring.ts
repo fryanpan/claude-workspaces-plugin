@@ -854,9 +854,11 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * that at registration; a dispatch with none falls back to the default
    * branch's merge base.
    *
-   * Memoised per worktree-and-baseline for the life of ONE pass, because the
-   * read spawns git. The map is thrown away with the pass, so the next tick
-   * sees whatever the builder has written since.
+   * Memoised per worktree-and-baseline for the life of ONE BOARD's pass,
+   * because the read spawns git. The map is thrown away with that pass, so
+   * the next tick sees whatever the builder has written since — and a
+   * worktree serving rows on two boards is read once per board, which is the
+   * price of each board's snapshot being its own.
    */
   function changedFilesReader(): (taskId: string) => readonly string[] | undefined {
     const worktreeOf = new Map(
