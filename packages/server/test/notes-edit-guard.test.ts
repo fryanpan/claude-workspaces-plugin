@@ -173,6 +173,150 @@ describe('what the guard deliberately leaves alone', () => {
   });
 });
 
+describe('a revision may not throw away the note it replaces', () => {
+  /**
+   * The measured shape, in one edit: the doc holds a note about one thing and
+   * the tick answers with a note about another, addressed as a replace. The
+   * pair below is the point — the same edit destroys a note unguarded and
+   * keeps both notes guarded.
+   */
+  const OVERWRITE = '- the Riverbend batch is running two days behind';
+  const REVISION = '- point 0 about the export dialog, and the print preview';
+
+  function bulletDoc(): { doc: Y.Doc; headingId: string; first: string } {
+    const { doc, headingId, bulletIds } = docWithNotes(3);
+    return { doc, headingId, first: bulletIds[0]! };
+  }
+
+  test('CONTROL: unguarded, the replace takes the old note out of the doc', () => {
+    const { doc, first } = bulletDoc();
+    apply(doc, [{ op: 'replace_block', blockId: first, markdown: OVERWRITE }]);
+    const text = prose.readOutline(doc).map((e) => e.text);
+    expect(text.some((t) => t.includes('point 0'))).toBe(false);
+    expect(text.filter((t) => t.startsWith('point')).length).toBe(2);
+  });
+
+  test('guarded, the note about the new speech is ADDED and the old one stays', () => {
+    const { doc, headingId, first } = bulletDoc();
+    const guarded = guardNotesEdits(
+      [{ op: 'replace_block', blockId: first, markdown: OVERWRITE }],
+      { notesHeadingId: headingId, outline: prose.readOutline(doc) },
+    );
+    expect(guarded.refused).toHaveLength(0);
+    expect(guarded.kept).toHaveLength(1);
+    expect(guarded.edits[0]?.op).toBe('insert_under_heading');
+    apply(doc, guarded.edits);
+    const text = prose.readOutline(doc).map((e) => e.text);
+    expect(text.some((t) => t.includes('point 0'))).toBe(true);
+    expect(text.some((t) => t.includes('Riverbend batch'))).toBe(true);
+  });
+
+  test('a real revision of the same note still replaces it in place', () => {
+    // The mutation control for the rule itself: a guard that simply never
+    // replaced anything would pass every test above and fail this one.
+    const { doc, headingId, first } = bulletDoc();
+    const guarded = guardNotesEdits([{ op: 'replace_block', blockId: first, markdown: REVISION }], {
+      notesHeadingId: headingId,
+      outline: prose.readOutline(doc),
+    });
+    expect(guarded.kept).toHaveLength(0);
+    expect(guarded.edits[0]?.op).toBe('replace_block');
+    apply(doc, guarded.edits);
+    const bullets = prose.readOutline(doc).filter((e) => e.text.startsWith('point'));
+    expect(bullets).toHaveLength(3);
+    expect(bullets[0]?.text).toContain('print preview');
+  });
+
+  test('a regroup replacing one bullet with a lead and its sub-points still replaces', () => {
+    const { doc, headingId, first } = bulletDoc();
+    const regroup = '- the export dialog\n  - point 0 about the export dialog';
+    const guarded = guardNotesEdits([{ op: 'replace_block', blockId: first, markdown: regroup }], {
+      notesHeadingId: headingId,
+      outline: prose.readOutline(doc),
+    });
+    expect(guarded.kept).toHaveLength(0);
+    expect(guarded.edits[0]?.op).toBe('replace_block');
+  });
+
+  test('a bullet nobody marked as the note-taker’s is left alone', () => {
+    // An edit to a block the note-taker does not own reaches the person as a
+    // suggestion, which destroys nothing — so the rule has no business there.
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(
+      prose.getProseFragment(doc),
+      '## Meeting notes\n\n- a line the person typed themselves\n',
+    );
+    prose.ensureBlockIds(doc);
+    const outline = prose.readOutline(doc);
+    const heading = outline.find((e) => e.kind === 'heading')!;
+    const theirs = outline.find((e) => e.kind === 'listItem')!;
+    const guarded = guardNotesEdits(
+      [{ op: 'replace_block', blockId: theirs.id, markdown: OVERWRITE }],
+      { notesHeadingId: heading.id, outline },
+    );
+    expect(guarded.kept).toHaveLength(0);
+    expect(guarded.edits[0]?.op).toBe('replace_block');
+  });
+
+  test('the added note lands under the replaced bullet’s own topic heading', () => {
+    const { doc, headingId } = docWithNotes(1);
+    apply(doc, [
+      { op: 'insert_under_heading', headingId, markdown: '### Packaging' },
+      { op: 'insert_under_heading', headingId, markdown: '- the vendor raised the unit cost' },
+    ]);
+    for (const el of prose.addressableBlocks(prose.getProseFragment(doc))) {
+      prose.claimSubtree(el, AUTHOR);
+    }
+    const outline = prose.readOutline(doc);
+    const topic = outline.find((e) => e.text.trim() === 'Packaging')!;
+    const under = outline.find((e) => e.text.includes('unit cost'))!;
+    const guarded = guardNotesEdits(
+      [{ op: 'replace_block', blockId: under.id, markdown: OVERWRITE }],
+      { notesHeadingId: headingId, outline },
+    );
+    expect(guarded.edits[0]).toEqual({
+      op: 'insert_under_heading',
+      headingId: topic.id,
+      markdown: OVERWRITE,
+    });
+  });
+
+  test('a note too short to judge is still replaced, and that is the floor talking', () => {
+    // Three content words leave no room for a share: a small wording fix on a
+    // short note would read as an overwrite under any threshold, so the rule
+    // does not look at one. Named here so the blind spot is a decision rather
+    // than a surprise.
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(
+      prose.getProseFragment(doc),
+      '## Meeting notes\n\n- rough note\n',
+    );
+    prose.ensureBlockIds(doc);
+    for (const el of prose.addressableBlocks(prose.getProseFragment(doc))) {
+      prose.claimSubtree(el, AUTHOR);
+    }
+    const outline = prose.readOutline(doc);
+    const heading = outline.find((e) => e.kind === 'heading')!;
+    const bullet = outline.find((e) => e.kind === 'listItem')!;
+    const guarded = guardNotesEdits(
+      [{ op: 'replace_block', blockId: bullet.id, markdown: '- sharper note' }],
+      { notesHeadingId: heading.id, outline },
+    );
+    expect(guarded.kept).toHaveLength(0);
+    expect(guarded.edits[0]?.op).toBe('replace_block');
+  });
+
+  test('with no outline to judge against, every replace passes as it always did', () => {
+    const { headingId, bulletIds } = docWithNotes(3);
+    const guarded = guardNotesEdits(
+      [{ op: 'replace_block', blockId: bulletIds[0]!, markdown: OVERWRITE }],
+      { notesHeadingId: headingId },
+    );
+    expect(guarded.kept).toHaveLength(0);
+    expect(guarded.edits[0]?.op).toBe('replace_block');
+  });
+});
+
 /** One tick's worth of edits, addressed to `docId`'s meeting. */
 const tick = (docId: string, edits: prose.BlockEdit[]): NotesUpdate => ({
   docId,
