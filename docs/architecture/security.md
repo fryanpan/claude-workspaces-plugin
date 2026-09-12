@@ -155,6 +155,16 @@ its own visitor refusal lives.
 Answer heading 1 of the security-review checklist from that table, and add the
 row in the same pull request as the route.
 
+The cross-board review reads every board at once, so its four paths —
+`/review`, `/api/review-queue`, `/api/review-wait` and `/api/review-size` —
+are `trusted-local`. No member allowlist names them, and the handler refuses a
+visitor again behind admission. The one write is `PUT /api/review-size`, a
+person's own Easy/Medium/Hard choice: it needs a live session cookie (the
+handler answers 401 without one, even to a caller the write gate took for an
+agent), is keyed by that session's identity so it can change nobody else's,
+and accepts only the three sizes. Every answer goes to the owning board's
+existing route and meets that route's gate.
+
 ## Where to look
 
 Every hostname below is a placeholder; the real ones live in the launchd configuration, not in this repository.

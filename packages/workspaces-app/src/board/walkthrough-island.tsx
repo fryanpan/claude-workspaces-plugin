@@ -39,7 +39,13 @@
  * be answering about a queue several answers old. Same reasoning as the board
  * island's `knownAgentIds`: what changes per paint travels on the signal.
  */
-import { REVIEW_LIMITS, reviewItemBodyMarkdown } from '@claude-workspaces/core';
+import {
+  REVIEW_LIMITS,
+  REVIEW_SIZES,
+  type ReviewSize,
+  reviewItemBodyMarkdown,
+  sizeAllowed,
+} from '@claude-workspaces/core';
 import { signal } from '@preact/signals';
 import { Fragment, render } from 'preact';
 import { type MutableRef, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -49,6 +55,7 @@ import {
   focusMarkdownComposer,
   refreshMarkdownComposer,
 } from '../md-composer.ts';
+import { REVIEW_SIZE_LABELS } from '../review-sizes.ts';
 import { type BoardDecisionOption, type BoardTask } from './board-model.ts';
 import {
   type ReviewItem,
@@ -151,6 +158,56 @@ export interface WalkthroughView {
    *  reasons to say. Rides with the data rather than being read at mount,
    *  because a visitor's level arrives with the queue's own read. */
   secretsGate: SecretsGate;
+  /** The words and controls around the card, when the page is not a board's
+   *  Home. Absent is the board's own chrome, unchanged. */
+  chrome?: WalkChrome;
+}
+
+/**
+ * The cross-board review (`/review`) walks the same card through different
+ * chrome: the way back goes to the workspaces list, the heading names the
+ * project the card is from, the top line carries the size bar, and nothing
+ * counts what the sitting cleared (the owner's comment on the mock: no stats
+ * anywhere but the total time).
+ */
+export interface WalkChrome {
+  backLabel: string;
+  heading: string;
+  /** The size bar on the top line: the chosen size, and what a tap does. */
+  size?: { level: ReviewSize; onPick: (size: ReviewSize) => void };
+  /** The done screen's line. Absent is "Nothing else is waiting…". */
+  doneNote?: string;
+  doneLabel: string;
+  /** Whether the stepper and the done screen show the sitting's tally. */
+  tally: boolean;
+}
+
+/** The one bar, drawn the way `paintFillBar` paints the server's copy: every
+ *  stop up to the chosen one filled, the chosen one checked. */
+function SizeBar(props: { level: ReviewSize; onPick: (size: ReviewSize) => void }) {
+  return (
+    <div
+      class="board-activity-filters review-sizes"
+      role="radiogroup"
+      aria-label="Show only what you have time for"
+    >
+      {REVIEW_SIZES.map((size) => (
+        <button
+          key={size}
+          type="button"
+          class={`board-tab${sizeAllowed(size, props.level) ? ' filled' : ''}${size === props.level ? ' board-tab-active' : ''}`}
+          data-size={size}
+          // biome-ignore lint/a11y/useSemanticElements: a filled bar of buttons, the same markup as the landing page's server-rendered copy
+          role="radio"
+          aria-checked={size === props.level}
+          onClick={() => props.onPick(size)}
+        >
+          {`${REVIEW_SIZE_LABELS[size].label} `}
+          <small>{REVIEW_SIZE_LABELS[size].hint}</small>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /** A closed walkthrough answers nothing, which is what the signal holds until
@@ -428,6 +485,12 @@ function AdvancedBanner(props: { last: ReviewItem; handlers: WalkthroughHandlers
  * much space") — within one workspace it named the same few goals over and
  * over, and the card's Task line already points at the work.
  */
+/** A task's due date as the card says it: "Sep 20". Plain text; it orders
+ *  nothing. */
+export function dueLabel(at: number): string {
+  return new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function WalkCardHead(props: { item: ReviewItem; now: number }) {
   const { item, now } = props;
   const badge = reviewItemBadge(item);
@@ -447,7 +510,10 @@ function WalkCardHead(props: { item: ReviewItem; now: number }) {
       {/* The head's top-right meta is the card's ONE provenance line — who
           asked and how long ago — replacing both the bare wait chip and the old
           left-bordered context block (approved design, review-flow-mock-v1). */}
-      <span class="board-walk-wait">{askedMeta(item, now)}</span>
+      <span class="board-walk-wait">
+        {askedMeta(item, now)}
+        {item.dueAt !== undefined && ` · Due ${dueLabel(item.dueAt)}`}
+      </span>
     </div>
   );
 }
@@ -977,14 +1043,18 @@ function WalkCard(props: {
  * ENDING rather than an empty surface: a sitting that cleared four things and
  * one that found nothing waiting read identically otherwise.
  */
-function WalkDone(props: { progress: WalkProgress; handlers: WalkthroughHandlers }) {
-  const { progress, handlers } = props;
+function WalkDone(props: {
+  progress: WalkProgress;
+  handlers: WalkthroughHandlers;
+  chrome: WalkChrome | undefined;
+}) {
+  const { progress, handlers, chrome } = props;
   return (
     <div class="board-walk-done">
       {progress.last && <AdvancedBanner last={progress.last} handlers={handlers} />}
       <h2>All caught up</h2>
-      <p>Nothing else is waiting on you right now.</p>
-      {progress.cleared > 0 && (
+      <p>{chrome?.doneNote ?? 'Nothing else is waiting on you right now.'}</p>
+      {(chrome?.tally ?? true) && progress.cleared > 0 && (
         <p class="board-walk-done-tally">
           {progress.cleared === 1
             ? 'You cleared 1 in this sitting.'
@@ -992,7 +1062,7 @@ function WalkDone(props: { progress: WalkProgress; handlers: WalkthroughHandlers
         </p>
       )}
       <button type="button" class="board-btn board-btn-primary" onClick={() => handlers.onClose()}>
-        Back to Home
+        {chrome?.doneLabel ?? 'Back to Home'}
       </button>
     </div>
   );
@@ -1023,7 +1093,7 @@ function useHostVisibility(host: HTMLElement, closed: boolean): void {
  * shell — rail, topbar — where it was.
  */
 function Walkthrough(props: { host: HTMLElement }) {
-  const { queue, index, progress, now, handlers, secretsGate } = walkthroughData.value;
+  const { queue, index, progress, now, handlers, secretsGate, chrome } = walkthroughData.value;
   useHostVisibility(props.host, index < 0);
   if (index < 0) return null;
   const item = queue.items[index] ?? null;
@@ -1037,19 +1107,20 @@ function Walkthrough(props: { host: HTMLElement }) {
           class="board-btn board-btn-ghost board-walk-home"
           onClick={() => handlers.onClose()}
         >
-          ‹ Back to Home
+          {chrome?.backLabel ?? '‹ Back to Home'}
         </button>
+        {chrome?.size && <SizeBar level={chrome.size.level} onPick={chrome.size.onPick} />}
       </div>
       {item === null ? (
-        <WalkDone progress={progress} handlers={handlers} />
+        <WalkDone progress={progress} handlers={handlers} chrome={chrome} />
       ) : (
         <Fragment>
           <div class="board-walk-head">
-            <h2 class="board-walk-heading">Review</h2>
+            <h2 class="board-walk-heading">{chrome?.heading ?? 'Review'}</h2>
             <WalkStepper
               index={index}
               total={queue.items.length}
-              cleared={progress.cleared}
+              cleared={(chrome?.tally ?? true) ? progress.cleared : 0}
               handlers={handlers}
             />
           </div>

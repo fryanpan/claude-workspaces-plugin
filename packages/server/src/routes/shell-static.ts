@@ -38,6 +38,7 @@ import type { DocType } from '@claude-workspaces/core';
 import type { BrowserSentryConfig, PageType } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
 import type { DocStore } from '../doc-store.ts';
+import type { LandingReview } from '../landing-review.ts';
 import { buildLandingModel } from '../landing.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import {
@@ -50,7 +51,6 @@ import { injectMockupLive, parseVersionParam } from '../mockup-live.ts';
 import { listMockupVersions, readMockupVersion, recordMockupVersion } from '../mockup-versions.ts';
 import { injectWidget } from '../mockup-widget.ts';
 import { decodePathParam } from '../path-params.ts';
-import type { ReviewItemRow } from '../review-queue.ts';
 import {
   HTML_SHELL_HEADERS,
   appCacheControl,
@@ -70,7 +70,7 @@ import {
   serveStatic,
   serveStaticUnder,
 } from '../shells.ts';
-import type { BoardWorkspace, TaskStore } from '../tasks.ts';
+import type { TaskStore } from '../tasks.ts';
 import { BOARD_PAGE_PATH, BOARD_PAGE_RESOURCE_PATH } from '../workspace-path.ts';
 
 /** Files the workspaces-app build emits that must ALSO answer at the root
@@ -126,10 +126,9 @@ export interface ShellStaticContext {
   withReviewUrl: <T extends { docId: string; type: DocType; sourceUrl?: string }>(
     meta: T,
   ) => T & { reviewUrl?: string };
-  /** Home's own queue counter, so the number on `/` is the number the
-   *  reader sees when they open the board. See home-pane.ts. */
-  reviewItemsFor: (workspace: BoardWorkspace) => ReviewItemRow[];
-  homeQueueTotal: (workspace: BoardWorkspace, items: ReviewItemRow[]) => number;
+  /** The top of `/`: every waiting item's size, the project order, and each
+   *  board's last hour in a sentence. See landing-review.ts. */
+  landingReview: () => LandingReview;
   /** The holding-pen board's name, which the landing banner's join names. */
   defaultBoardWorkspaceName: string;
 }
@@ -165,8 +164,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     isValidDocId,
     redirectTo,
     withReviewUrl,
-    reviewItemsFor,
-    homeQueueTotal,
+    landingReview,
     defaultBoardWorkspaceName,
   } = ctx;
 
@@ -578,9 +576,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // --- Landing ---
     if (pathname === '/') {
       const model = buildLandingModel(
-        collectLandingWorkspaces(docStore, taskStore, (ws) =>
-          homeQueueTotal(ws, reviewItemsFor(ws)),
-        ),
+        collectLandingWorkspaces(docStore, taskStore),
         collectLandingProjects(docStore),
         Date.now(),
       );
@@ -598,6 +594,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           browserSentry,
           defaultBoardWorkspaceName,
           readAppAssetManifest(markdownAppDist),
+          landingReview(),
         ),
         { headers: HTML_SHELL_HEADERS },
       );

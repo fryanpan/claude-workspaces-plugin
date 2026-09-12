@@ -23,7 +23,7 @@
  * internal: nothing outside this module reached them inside `createServer`
  * either, and the in-flight set is only correct if exactly one thing owns it.
  */
-import { reviewItemState } from '@claude-workspaces/core';
+import { type Thread, reviewItemState } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import {
   type BriefCoverage,
@@ -40,6 +40,12 @@ import {
   readerKey,
 } from './home-brief.ts';
 import { type ReviewItemRow, reviewItemRows } from './review-queue.ts';
+import {
+  type ReviewSizer,
+  type SizedReviewItemRow,
+  createReviewSizer,
+  filesInSetOf,
+} from './review-sizing.ts';
 import type { ThreadSummarizer } from './summarize.ts';
 import { taskBodyDocId } from './task-projection.ts';
 import {
@@ -81,12 +87,22 @@ export interface HomePayload {
   generating: boolean;
 }
 
+/** One posted comment, by where it sits. */
+export interface PostedComment {
+  docId: string;
+  commentId: string;
+}
+
 /** What `createServer` keeps a handle on. */
 export interface HomePane {
   /** The read-marker + stored-brief store, also read by the Home routes. */
   homeBriefs: HomeBriefStore;
-  /** The review items exactly as `GET /review-items` ships them. */
-  reviewItemsFor: (workspace: BoardWorkspace) => ReviewItemRow[];
+  /** The review items exactly as `GET /review-items` ships them, each with
+   *  its estimated minutes and size. `without` reads the threads as they
+   *  stood before that one comment was posted. */
+  reviewItemsFor: (workspace: BoardWorkspace, without?: PostedComment) => SizedReviewItemRow[];
+  /** The same estimate for one item, answered or not. */
+  sizer: ReviewSizer;
   /** How many items the Home queue holds right now, over those items. */
   homeQueueTotal: (workspace: BoardWorkspace, items: ReviewItemRow[]) => number;
   /** Everything `GET /home` answers, brief included. */
@@ -100,59 +116,78 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
   /** One generation in flight per workspace+reader: the client polls while
    *  `generating`, and N polls must cost one call, not N. */
   const homeBriefInflight = new Set<string>();
+  /** Sizes ride on every row so Home, the landing page and the cross-board
+   *  flow filter by one estimate. See `review-sizing.ts`. */
+  const sizer = createReviewSizer({
+    textLength: (docId) => docStore.getDocStatus(docId)?.textLength ?? null,
+    filesInSet: (setId) => filesInSetOf(docStore.list(), setId),
+  });
 
   /** The review items exactly as GET /review-items ships them.
    *  ONE builder for that route and for the brief's queue count, so the
    *  number the brief prints cannot drift from the queue rendered under it. */
-  const reviewItemsFor = (workspace: BoardWorkspace): ReviewItemRow[] =>
-    reviewItemRows({
-      tasks: taskStore.listTasks(workspace.id).map((t) => ({
-        id: t.id,
-        title: t.title,
-        bodyDocId: taskBodyDocId(t.id),
-        done: t.status === 'done',
-        // The ticket's OWN review items — 0..n, and for a legacy decision task
-        // the one row `listReviewItems` derives from `needs`/`options`/`answer`
-        // without writing anything back. This is what lets a decision reach the
-        // one route that answers "what is waiting on me"; before it, a board of
-        // nothing but open decisions answered with an empty list.
-        reviews: taskStore.listReviewItems(t.id),
-      })),
-      // Goals queue their discussions the same way. Without this a review
-      // item declared on a goal — "does 'ten teams' mean ten that renew?" —
-      // sits in a thread nothing tells the reader about, which is the whole
-      // failure the queue exists to prevent, on the row that matters most.
-      // No `reviews`: that array is a task field and a goal row has none.
-      goals: taskStore.listGoalRows(workspace.id).map((g) => ({
-        id: g.id,
-        title: g.title,
-        bodyDocId: taskBodyDocId(g.id),
-        done: g.status === 'done',
-      })),
-      docs: workspace.docIds.map((docId) => {
-        const meta = docStore.peekMeta(docId);
-        // Title, else the file's BASENAME — never `relPath` whole and
-        // never `sourceUrl`. Those describe the host machine, and a
-        // share visitor reads this route (§3.3): a label is workspace
-        // content, a path is not.
-        const base = meta?.relPath?.split('/').pop();
-        // The doc's KIND rides along so a question asked on a mockup opens
-        // the mockup. It is not a host-machine fact — `relPath` and
-        // `sourceUrl` are, and stay out for that reason — it is what sort of
-        // thing the workspace holds, which is workspace content.
-        return {
-          docId,
-          title: meta?.title || base || docId,
-          ...(meta?.type ? { type: meta.type } : {}),
-        };
+  const reviewItemsFor = (
+    workspace: BoardWorkspace,
+    without?: PostedComment,
+  ): SizedReviewItemRow[] => {
+    const threads = (list: Thread[], docId: string): Thread[] =>
+      without && docId === without.docId
+        ? list.map((t) => ({
+            ...t,
+            comments: t.comments.filter((c) => c.id !== without.commentId),
+          }))
+        : list;
+    return sizer.rows(
+      reviewItemRows({
+        tasks: taskStore.listTasks(workspace.id).map((t) => ({
+          id: t.id,
+          title: t.title,
+          bodyDocId: taskBodyDocId(t.id),
+          done: t.status === 'done',
+          // The ticket's OWN review items — 0..n, and for a legacy decision task
+          // the one row `listReviewItems` derives from `needs`/`options`/`answer`
+          // without writing anything back. This is what lets a decision reach the
+          // one route that answers "what is waiting on me"; before it, a board of
+          // nothing but open decisions answered with an empty list.
+          reviews: taskStore.listReviewItems(t.id),
+        })),
+        // Goals queue their discussions the same way. Without this a review
+        // item declared on a goal — "does 'ten teams' mean ten that renew?" —
+        // sits in a thread nothing tells the reader about, which is the whole
+        // failure the queue exists to prevent, on the row that matters most.
+        // No `reviews`: that array is a task field and a goal row has none.
+        goals: taskStore.listGoalRows(workspace.id).map((g) => ({
+          id: g.id,
+          title: g.title,
+          bodyDocId: taskBodyDocId(g.id),
+          done: g.status === 'done',
+        })),
+        docs: workspace.docIds.map((docId) => {
+          const meta = docStore.peekMeta(docId);
+          // Title, else the file's BASENAME — never `relPath` whole and
+          // never `sourceUrl`. Those describe the host machine, and a
+          // share visitor reads this route (§3.3): a label is workspace
+          // content, a path is not.
+          const base = meta?.relPath?.split('/').pop();
+          // The doc's KIND rides along so a question asked on a mockup opens
+          // the mockup. It is not a host-machine fact — `relPath` and
+          // `sourceUrl` are, and stay out for that reason — it is what sort of
+          // thing the workspace holds, which is workspace content.
+          return {
+            docId,
+            title: meta?.title || base || docId,
+            ...(meta?.type ? { type: meta.type } : {}),
+          };
+        }),
+        source: {
+          threadsOf: (docId) => threads(docStore.listThreads(docId, { status: 'open' }), docId),
+          // Unfiltered, and only for the roster: who counts as a person
+          // here must not depend on whether their thread is still open.
+          allThreadsOf: (docId) => threads(docStore.listThreads(docId), docId),
+        },
       }),
-      source: {
-        threadsOf: (docId) => docStore.listThreads(docId, { status: 'open' }),
-        // Unfiltered, and only for the roster: who counts as a person
-        // here must not depend on whether their thread is still open.
-        allThreadsOf: (docId) => docStore.listThreads(docId),
-      },
-    });
+    );
+  };
 
   /**
    * How many items the Home queue holds right now. Feeds only the brief's
@@ -310,6 +345,7 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
   return {
     homeBriefs,
     reviewItemsFor,
+    sizer,
     homeQueueTotal,
     homePayload,
   };
