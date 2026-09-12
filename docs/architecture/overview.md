@@ -701,6 +701,15 @@ glob is deliberate: `review-item-look-ask.ts` is the gate's two English
 heuristics lifted out whole when the gate crossed the line, and it changes no
 boundary the diagram draws.
 
+`secret-name.ts` joins that third tier for the same reason, with the two
+readers furthest apart in this repo: the server's writer spells the stored
+name when it runs `security`, and the MCP tool descriptions tell an agent the
+name to read back. Neither package can import the other, and the two used to
+be hand-written copies of one prefix — one in code, one in prose — so a rename
+could leave every agent reading an entry that does not exist. It changes no
+boundary the diagram draws; it holds names and one command string, and no
+value passes through it.
+
 `mock-swap-noise.ts` joins that third tier for the same reason and an unusual
 pair of readers: the widget's mockup swap raises a flag there while it inserts
 a script it is about to retry, and the page's Sentry init reads it in
