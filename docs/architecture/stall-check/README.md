@@ -98,14 +98,17 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    agent-filed task that changes what a person sees on screen clears a review
    item — answered — before anybody builds it. That is the complex-task gate
    the two board skills already carry; what is new is that a breach is
-   VISIBLE. A task an agent filed, in flight, whose words read as UI work
-   (`ui-review-gate.ts`), with no answered review item on either of its two
-   surfaces, is named in the lead's stall frame as `ungatedUi` and counted on
-   the verdict's `ungatedUi` line. It is the only finding here about a task
-   that IS moving, which is the point: the rule it breaks is about what got
-   skipped on the way, and every other check on this board is a check for
-   silence. Three of its four reads are explicit state; the fourth is a
-   keyword read of the task's own words, and its limits are in
+   VISIBLE. A task an agent filed, in flight, whose BUILDER has changed a
+   file a person looks at (`ui-review-gate.ts`), with no answered review item
+   on either of its two surfaces, is named in the lead's stall frame as
+   `ungatedUi` and counted on the verdict's `ungatedUi` line. It is the only
+   finding here about a task that IS moving, which is the point: the rule it
+   breaks is about what got skipped on the way, and every other check on this
+   board is a check for silence. All four of its reads are explicit state —
+   the roster, the transitions, the builder's changed-file list and the two
+   review-item surfaces. It used to read the task's own words for the third
+   of those, and was wrong six times out of six; the story, and why the check
+   now says nothing at all about a task with no diff to read, are in
    [criteria.md](criteria.md).
 
 ## How to read the verdict
