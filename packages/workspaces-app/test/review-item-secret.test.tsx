@@ -187,6 +187,29 @@ describe('the card, laid out', () => {
     // could not pass the two assertions above.
     expect(styleOf(fields).flexDirection).toBe('column');
   });
+
+  it('draws each field as a bordered box, and Save at the 44px floor', async () => {
+    // Both found by a fresh-eyes pass: the field was drawn with a top rule
+    // and nothing else, so an empty one had no border and no placeholder and
+    // read as a gap under a label; and Save was 40px against a 44px floor.
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk());
+    await tick();
+    const box = root.querySelector<HTMLElement>('.board-walk-cred-box');
+    const save = root.querySelector<HTMLElement>('.board-walk-cred-send');
+    if (!box || !save) throw new Error('the secret form did not render');
+    for (const side of ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'] as const) {
+      expect(styleOf(box)[side]).toBe('1px');
+    }
+    expect(styleOf(save).minHeight).toBe('44px');
+    // Control on the harness: an element the sheet does not select, read
+    // through the same function, comes back with no border at all — so the
+    // four readings above are of this rule rather than of something `styleOf`
+    // answers for everything.
+    const bare = document.createElement('div');
+    document.body.append(bare);
+    expect(styleOf(bare).borderTopWidth).not.toBe('1px');
+    bare.remove();
+  });
 });
 
 describe('the card', () => {
@@ -273,6 +296,107 @@ describe('the card', () => {
     // …and the one value already typed is still there, because nothing was
     // sent: clearing here would lose work to a validation the reader can fix.
     expect(inputs[0]!.value).toBe(FIRST_VALUE);
+  });
+
+  it('sends the reader to the field that is EMPTY, and names it', async () => {
+    // The bug a fresh-eyes pass found: Save did nothing visible. The focus
+    // hop asked for `.board-walk-cred-input[value=""]`, and an input carries
+    // no `value` ATTRIBUTE unless somebody wrote one — so the selector matched
+    // nothing, focus fell back to the FIRST field (already filled), and there
+    // was no message at all.
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk());
+    await tick();
+    const inputs = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
+    inputs[0]!.value = FIRST_VALUE;
+    root
+      .querySelector('form.board-walk-cred-form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    expect(document.activeElement).toBe(inputs[1]!);
+    expect(root.querySelector('.board-walk-cred-miss')?.textContent).toContain(
+      'Relay signing value',
+    );
+    // And it names ONE field — the one they are being sent to — rather than
+    // listing what is wrong.
+    expect(root.querySelector('.board-walk-cred-miss')?.textContent).not.toContain(
+      'Relay account name',
+    );
+
+    // Typing in that field takes the line away again, so a stale complaint
+    // cannot sit under a filled box.
+    inputs[1]!.value = SECOND_VALUE;
+    inputs[1]!.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    expect(root.querySelector('.board-walk-cred-miss')).toBeNull();
+  });
+
+  it('keeps what was typed when the save FAILS', async () => {
+    // A refusal used to empty both boxes, which on a phone means retyping
+    // both values from whatever the reader got them out of.
+    const onSaveSecrets = vi.fn(async () => false);
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk({ onSaveSecrets }));
+    await tick();
+    const inputs = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
+    inputs[0]!.value = FIRST_VALUE;
+    inputs[1]!.value = SECOND_VALUE;
+    root
+      .querySelector('form.board-walk-cred-form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    await tick();
+    expect(onSaveSecrets).toHaveBeenCalledTimes(1);
+    expect(inputs.map((i) => i.value)).toEqual([FIRST_VALUE, SECOND_VALUE]);
+    // The values live in the nodes the reader typed them into and nowhere
+    // else — not in the card's markup, where a repaint could carry them.
+    expect(root.innerHTML).not.toContain(FIRST_VALUE);
+    expect(root.innerHTML).not.toContain(SECOND_VALUE);
+    // CONTROL: the same submission against a save that SUCCEEDS does clear
+    // them, so the assertion above is about the failure and not about the
+    // clear never happening.
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk({ onSaveSecrets: vi.fn(async () => true) }));
+    await tick();
+    const second = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
+    second[0]!.value = FIRST_VALUE;
+    second[1]!.value = SECOND_VALUE;
+    root
+      .querySelector('form.board-walk-cred-form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    await tick();
+    expect(second.map((i) => i.value)).toEqual(['', '']);
+  });
+
+  it('reveals one field at a time, and starts masked', async () => {
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk());
+    await tick();
+    const eyes = Array.from(root.querySelectorAll<HTMLButtonElement>('.board-walk-cred-eye'));
+    const typed = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
+    expect(typed.map((i) => i.type)).toEqual(['password', 'password']);
+    typed[0]!.value = FIRST_VALUE;
+    eyes[0]!.click();
+    await tick();
+    const after = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
+    expect(after.map((i) => i.type)).toEqual(['text', 'password']);
+    // The value survives the toggle: the node is the same one, not a
+    // re-created input that would have dropped what was typed.
+    expect(after[0]!.value).toBe(FIRST_VALUE);
+    eyes[0]!.click();
+    await tick();
+    expect(
+      Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input')).map(
+        (i) => i.type,
+      ),
+    ).toEqual(['password', 'password']);
+  });
+
+  it('labels the Return key send, not done', async () => {
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk());
+    await tick();
+    for (const input of Array.from(
+      root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'),
+    )) {
+      expect(input.getAttribute('enterkeyhint')).toBe('send');
+    }
   });
 
   it('shows a Regular User the fields with no way to fill them', async () => {

@@ -1265,7 +1265,19 @@ body.board-body {
   /* Under a thumb the send is the primary gesture, so it takes the width —
      the same call the composer's Send makes one block below. */
   .board-walk-cred-send {
-    align-self: stretch;
+    flex: 1 1 100%;
+  }
+  /* SAVE STAYS ON SCREEN WITH THE KEYBOARD UP. At 430 the software keyboard
+     takes about half the viewport, the card is short enough that the page has
+     only ~100px of scroll to give, and Save sat under the keyboard with no
+     way to reach it. Sticking the row to the bottom of the card's scroll
+     puts it above the keyboard instead of below the fold; the panel colour is
+     what keeps the field it overlaps readable as it passes under. */
+  .board-walk-cred-send-row {
+    position: sticky;
+    bottom: calc(8px + var(--safe-bottom, 0px));
+    background: var(--bg-panel);
+    padding: 6px 0 0;
   }
   .board-walk-body-clamp {
     /* ~8 lines at 1.55 line-height, then a fade that says "there is more". */
@@ -1465,23 +1477,61 @@ body.board-body {
   color: var(--fg-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-/* Underlined rather than boxed: the field is INSIDE the labelled row, so a
-   second border around it would read as a second control. The letter-spacing
-   is what makes a masked value countable at a glance. */
+/* The field and its eye, as one box. BOXED, not underlined: the first version
+   drew a top rule and nothing else, so an empty field had no border, no
+   placeholder and nothing to aim at — on a phone it read as a label with a
+   gap under it, and the reviewer could not tell there was an input there at
+   all. This is the same border, radius and padding as the composer's box one
+   block below, which is what "every other input on the board" looks like. */
+.board-walk-cred-box {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.board-walk-cred-box:focus-within {
+  border-color: var(--accent);
+}
+/* The letter-spacing is what makes a masked value countable at a glance. */
 .board-walk-cred-input {
-  min-height: 36px;
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
   border: 0;
-  border-top: 1px solid var(--border);
-  padding: 6px 0 0;
+  padding: 9px 11px;
   background: transparent;
   color: var(--fg);
   font: inherit;
   letter-spacing: 0.12em;
-  width: 100%;
 }
 .board-walk-cred-input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+}
+/* Show what I typed — masked is the resting state, and this is the only way
+   back from a paste that may have gone wrong. A full-height 44px target, on
+   the same row, so a thumb reaching for it never lands in the field. */
+.board-walk-cred-eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.board-walk-cred-eye svg {
+  width: 18px;
+  height: 18px;
+}
+.board-walk-cred-eye:hover,
+.board-walk-cred-eye[aria-pressed='true'] {
+  color: var(--fg);
 }
 /* What a reader who may not answer sees: the same rows, dimmed, with no
    inputs in them. */
@@ -1530,9 +1580,25 @@ body.board-body {
   align-items: stretch;
   gap: 10px;
 }
+/* Save, and the one line a half-filled form answers with, on one row — the
+   message to the left of the control it is about, so a reader who pressed
+   Save and went nowhere reads WHY beside the button they pressed. */
+.board-walk-cred-send-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.board-walk-cred-miss {
+  font-size: 13px;
+  color: var(--red-strong);
+  margin-right: auto;
+}
+/* 44px, the floor every other control a thumb aims at holds (design-mobile.md).
+   It was 40. */
 .board-walk-cred-send {
-  min-height: 40px;
-  align-self: flex-end;
+  min-height: 44px;
 }
 /* Skip (mockup `.actions`), and "I have a question" beside it — both are
    ways out of answering. The old "Tell me more" control that shared this row

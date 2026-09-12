@@ -724,6 +724,26 @@ function WalkAskThread(props: {
  * `data-lpignore`, `autocomplete="off"`): an offer to save is an offer to put
  * the value somewhere neither this page nor the store chose.
  */
+/** The eye on a secret field — open when the value is masked (tap to show),
+ *  struck through when it is showing. Inline for the same reason the board's
+ *  other one-off mark is: there is no sprite on this page. */
+function EyeMark(props: { shown: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+      />
+      <circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.4" />
+      {props.shown ? (
+        <path d="M2.5 13.5 13.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+      ) : null}
+    </svg>
+  );
+}
+
 function WalkSecrets(props: {
   fields: readonly ReviewSecretField[];
   itemKey: string;
@@ -732,32 +752,65 @@ function WalkSecrets(props: {
   const { fields, itemKey } = props;
   const formRef = useRef<HTMLFormElement | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * Which field the reader still has to fill, by service — the one line a
+   * half-filled Save answers with.
+   *
+   * A NAME, not a count and not a list: the reader is being sent back to one
+   * box, and the box is also focused. Held as state rather than written into
+   * the DOM so a repaint cannot leave a stale complaint under a filled field.
+   */
+  const [missing, setMissing] = useState<string | null>(null);
+  /**
+   * Which values are showing. Empty by default — masked is the resting state
+   * — and per field, because revealing one to check a paste should not put
+   * the other on screen. The set holds SERVICE NAMES; no value is ever state.
+   */
+  const [shown, setShown] = useState<readonly string[]>([]);
+  const inputs = (form: HTMLFormElement): HTMLInputElement[] =>
+    Array.from(form.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
   const submit = async (ev: Event): Promise<void> => {
     ev.preventDefault();
     const form = formRef.current;
     if (!form || busy) return;
-    // Read the nodes, send, and clear — in that order, and the clear is in a
-    // `finally` so it happens on a refusal and on a thrown request alike.
+    // Read the nodes and send. The value lives in the input the reader typed
+    // it into and nowhere else — not in state, not in a closure that outlives
+    // this call — and the clear below happens only once it has landed.
     const values = fields.map((f) => ({
       service: f.service,
       value:
         (form.elements.namedItem(`secret:${f.service}`) as HTMLInputElement | null)?.value ?? '',
     }));
     // All or nothing on this side too, so the refusal a reader sees for a
-    // half-filled form is immediate rather than a round trip away.
-    if (values.some((v) => v.value === '')) {
-      const first = form.querySelector<HTMLInputElement>('.board-walk-cred-input[value=""]');
-      (first ?? form.querySelector<HTMLInputElement>('.board-walk-cred-input'))?.focus();
+    // half-filled form is immediate rather than a round trip away — and it is
+    // a refusal they can SEE. Focus goes to the first field that is actually
+    // empty, read off `.value`: an `input` element has no `value` ATTRIBUTE
+    // unless somebody wrote one, so the `[value=""]` selector this used to
+    // ask for matched nothing, focus fell back to the first field whether or
+    // not it was filled, and Save read as a button that did nothing.
+    const empty = values.find((v) => v.value === '');
+    if (empty) {
+      setMissing(empty.service);
+      inputs(form)
+        .find((el) => el.value === '')
+        ?.focus();
       return;
     }
+    setMissing(null);
     setBusy(true);
+    let saved = false;
     try {
-      await props.onSave(values);
+      saved = await props.onSave(values);
     } finally {
-      for (const input of Array.from(
-        form.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'),
-      )) {
-        input.value = '';
+      // CLEARED ON SUCCESS ONLY. A failed save used to empty both boxes,
+      // which made a refusal cost the reader everything they had typed — on a
+      // phone, from a password manager they had already dismissed. The nodes
+      // are where a half-finished form always lives, the card is gone from
+      // the queue the moment a save lands, and a failure leaves the reader
+      // exactly where they were: able to fix one character and press Save.
+      if (saved) {
+        for (const input of inputs(form)) input.value = '';
+        setShown([]);
       }
       setBusy(false);
     }
@@ -765,31 +818,63 @@ function WalkSecrets(props: {
   return (
     <form class="board-walk-answer board-walk-cred-form" ref={formRef} onSubmit={submit}>
       <div class="board-walk-creds">
-        {fields.map((f) => (
-          <label key={f.service} class="board-walk-cred" for={`secret:${itemKey}:${f.service}`}>
-            <span class="board-walk-cred-head">
-              <span class="board-walk-cred-label">{f.label}</span>
-              <span class="board-walk-cred-service">{f.service}</span>
-            </span>
-            <input
-              id={`secret:${itemKey}:${f.service}`}
-              name={`secret:${f.service}`}
-              class="board-walk-cred-input"
-              type="password"
-              autocomplete="off"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck={false}
-              data-1p-ignore
-              data-lpignore="true"
-              enterkeyhint="done"
-            />
-          </label>
-        ))}
+        {fields.map((f) => {
+          const isShown = shown.includes(f.service);
+          return (
+            <label key={f.service} class="board-walk-cred" for={`secret:${itemKey}:${f.service}`}>
+              <span class="board-walk-cred-head">
+                <span class="board-walk-cred-label">{f.label}</span>
+                <span class="board-walk-cred-service">{f.service}</span>
+              </span>
+              <span class="board-walk-cred-box">
+                <input
+                  id={`secret:${itemKey}:${f.service}`}
+                  name={`secret:${f.service}`}
+                  class="board-walk-cred-input"
+                  type={isShown ? 'text' : 'password'}
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  // "send", not "done": the key submits the form, and a phone
+                  // keyboard that says done reads as "close this".
+                  enterkeyhint="send"
+                  onInput={() => {
+                    if (missing === f.service) setMissing(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  class="board-walk-cred-eye"
+                  aria-label={isShown ? `Hide ${f.label}` : `Show ${f.label}`}
+                  aria-pressed={isShown}
+                  onClick={() =>
+                    setShown((was) =>
+                      was.includes(f.service)
+                        ? was.filter((s) => s !== f.service)
+                        : [...was, f.service],
+                    )
+                  }
+                >
+                  <EyeMark shown={isShown} />
+                </button>
+              </span>
+            </label>
+          );
+        })}
       </div>
-      <button type="submit" class="board-btn board-btn-ink board-walk-cred-send" disabled={busy}>
-        Save Secret
-      </button>
+      <div class="board-walk-cred-send-row">
+        {missing !== null ? (
+          <span class="board-walk-cred-miss" role="status">
+            {fields.find((f) => f.service === missing)?.label ?? 'One field'} is still empty.
+          </span>
+        ) : null}
+        <button type="submit" class="board-btn board-btn-ink board-walk-cred-send" disabled={busy}>
+          Save Secret
+        </button>
+      </div>
     </form>
   );
 }
