@@ -22,6 +22,12 @@ export interface LibraryRow {
   href?: string;
   /** A project file with no doc yet — opened by `POST …/library/open`. */
   open?: string;
+  /**
+   * The folder a project file sits in, from the repo root: `''` at the root.
+   * Absent for a meeting and for a file the listing does not name by its
+   * path. Never painted on a row — it names a burst (`fileEntries`).
+   */
+  folder?: string;
 }
 
 export interface LibraryPayload {
@@ -39,6 +45,91 @@ export type LibraryList = 'main' | 'meetings' | 'files';
  * items"); meetings keep five, because the ask named files.
  */
 export const LIBRARY_RECENT: Record<'meetings' | 'files', number> = { meetings: 5, files: 10 };
+
+/** One line of the front page's Recent files: a file, or a burst of them. */
+export type LibraryFileEntry =
+  | { kind: 'file'; row: LibraryRow }
+  | {
+      kind: 'burst';
+      /** Newest first, as the list has them. */
+      rows: LibraryRow[];
+      /** The last segment of the folder every member shares, or `''`. */
+      folder: string;
+    };
+
+/**
+ * How close together, in file-modified time, two neighbouring files must be
+ * to belong to one burst. Measured on generator output in three local
+ * research repos: inside a run the widest gap between consecutive files was
+ * 48s (nine review files); the narrowest gap between a run and the file
+ * before or after it was 112s (and a digest written 4m16s after its seven
+ * subscription files). A minute sits between the two.
+ */
+export const BURST_GAP_MS = 60_000;
+
+/**
+ * The fewest files that make a burst. Three, not seven: a rule tuned to one
+ * digest's size misses the generator that writes three. Two stay apart —
+ * collapsing a pair frees one line and hides two files a person may have
+ * saved side by side.
+ */
+export const BURST_MIN = 3;
+
+/**
+ * The files list, as the front page shows it: a run of files each changed
+ * within `BURST_GAP_MS` of the one before becomes ONE entry, so a generator
+ * that writes seven files in half a minute takes one line of Recent files,
+ * not seven, and everything a person touched before it stays in view.
+ *
+ * Grouped by time alone. Folder cannot decide it: a digest's run wrote to
+ * four sibling folders, and edits to one folder hours apart are not a burst.
+ * A file with no clock reading is never in a burst — nothing measured puts it
+ * beside anything.
+ */
+export function fileEntries(files: readonly LibraryRow[]): LibraryFileEntry[] {
+  const out: LibraryFileEntry[] = [];
+  let run: LibraryRow[] = [];
+  const flush = (): void => {
+    if (run.length >= BURST_MIN) out.push({ kind: 'burst', rows: run, folder: sharedFolder(run) });
+    else for (const row of run) out.push({ kind: 'file', row });
+    run = [];
+  };
+  for (const row of files) {
+    const prev = run.at(-1);
+    if (row.at === undefined) {
+      flush();
+      out.push({ kind: 'file', row });
+      continue;
+    }
+    if (prev?.at !== undefined && prev.at - row.at > BURST_GAP_MS) flush();
+    run.push(row);
+  }
+  flush();
+  return out;
+}
+
+/** The last segment of the deepest folder every row sits in, or `''` when
+ *  they share none or any row does not say where it is. */
+function sharedFolder(rows: readonly LibraryRow[]): string {
+  let common: string[] | null = null;
+  for (const row of rows) {
+    if (row.folder === undefined) return '';
+    const segs = row.folder.split('/').filter(Boolean);
+    if (common === null) common = segs;
+    else {
+      let i = 0;
+      while (i < common.length && common[i] === segs[i]) i += 1;
+      common = common.slice(0, i);
+    }
+  }
+  return common?.at(-1) ?? '';
+}
+
+/** "7 files in subscriptions", or "7 files" when they share no folder. */
+export function burstLabel(entry: { rows: readonly LibraryRow[]; folder: string }): string {
+  const n = `${entry.rows.length} files`;
+  return entry.folder ? `${n} in ${entry.folder}` : n;
+}
 
 /**
  * "12m ago", "2h ago", "3d ago", "2w ago", "1mo ago", "2y ago" — the mock's

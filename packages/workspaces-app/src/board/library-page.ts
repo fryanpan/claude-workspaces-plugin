@@ -19,10 +19,13 @@ import { escapeHtml } from '@claude-workspaces/core';
 import type { BootHistory } from '../boot-env.ts';
 import {
   LIBRARY_RECENT,
+  type LibraryFileEntry,
   type LibraryHit,
   type LibraryList,
   type LibraryPayload,
   type LibraryRow,
+  burstLabel,
+  fileEntries,
   libraryWhenColumn,
   meetingSubtitle,
   searchLibrary,
@@ -77,6 +80,8 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   let list: LibraryList = 'main';
   let term = '';
   let opening = false;
+  /** The bursts a reader has opened, by `burstKey`. Survives a re-render. */
+  const expanded = new Set<string>();
 
   root.innerHTML = `<div class="library-page">
     <header class="library-top">
@@ -119,11 +124,36 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   }
 
   function tableHtml(which: 'meetings' | 'files', rows: LibraryRow[]): string {
+    return tableOf(
+      which,
+      rows.length ? rows.map((r) => rowHtml(r, { sub: subFor(which, r) })).join('') : '',
+    );
+  }
+
+  function tableOf(which: 'meetings' | 'files', inner: string): string {
     const [c1, c2] = COLUMNS[which];
-    const inner = rows.length
-      ? rows.map((r) => rowHtml(r, { sub: subFor(which, r) })).join('')
-      : `<div class="library-empty">No ${which} yet.</div>`;
-    return `<div class="library-tbl"><div class="library-cols" aria-hidden="true"><span>${c1}</span><span>${c2}</span></div><div class="library-list">${inner}</div></div>`;
+    const list = inner || `<div class="library-empty">No ${which} yet.</div>`;
+    return `<div class="library-tbl"><div class="library-cols" aria-hidden="true"><span>${c1}</span><span>${c2}</span></div><div class="library-list">${list}</div></div>`;
+  }
+
+  /** A burst is known by its newest file, which a later load leaves in place. */
+  const burstKey = (rows: readonly LibraryRow[]): string =>
+    `${rows[0]?.at ?? ''}|${rows[0]?.name ?? ''}`;
+
+  /**
+   * One line for a burst, which opens in place onto its files. The line reads
+   * as the newest file's clock, because that is where the run sits in a list
+   * ordered by it.
+   */
+  function entryHtml(entry: LibraryFileEntry): string {
+    if (entry.kind === 'file') return rowHtml(entry.row);
+    const key = burstKey(entry.rows);
+    const open = expanded.has(key);
+    const newest = entry.rows[0] as LibraryRow;
+    const members = open
+      ? `<div class="library-burst-rows">${entry.rows.map((r) => rowHtml(r)).join('')}</div>`
+      : '';
+    return `<div class="library-burst"><button type="button" class="library-row library-burst-head" data-burst="${escapeHtml(key)}" aria-expanded="${open}"><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="library-name">${escapeHtml(burstLabel(entry))}</span></span><span class="library-when">${escapeHtml(libraryWhenColumn(newest, now()))}</span></button>${members}</div>`;
   }
 
   function markHtml(name: string, needle: string): string {
@@ -163,14 +193,21 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       body.innerHTML = `<section class="library-all"><button type="button" class="library-back">← Library</button><h2>${HEADINGS[list].all}</h2>${tableHtml(list, payload[list])}</section>`;
       return;
     }
+    // Files are counted in ENTRIES: a burst is one line of the ten, so a
+    // generator's run cannot push everything else off the front page.
+    const entries = fileEntries(payload.files);
     body.innerHTML = (['meetings', 'files'] as const)
       .map((which) => {
-        const rows = payload?.[which] ?? [];
+        const total = which === 'files' ? entries.length : (payload?.meetings.length ?? 0);
         const more =
-          rows.length > LIBRARY_RECENT[which]
+          total > LIBRARY_RECENT[which]
             ? `<button type="button" class="library-more" data-list="${which}">${HEADINGS[which].more}</button>`
             : '';
-        return `<h2>${HEADINGS[which].recent}</h2>${tableHtml(which, rows.slice(0, LIBRARY_RECENT[which]))}${more}`;
+        const table =
+          which === 'files'
+            ? tableOf(which, entries.slice(0, LIBRARY_RECENT.files).map(entryHtml).join(''))
+            : tableHtml(which, (payload?.meetings ?? []).slice(0, LIBRARY_RECENT.meetings));
+        return `<h2>${HEADINGS[which].recent}</h2>${table}${more}`;
       })
       .join('');
   }
@@ -201,6 +238,17 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
 
   root.addEventListener('click', (e) => {
     const target = e.target as Element;
+    const burst = target.closest<HTMLElement>('.library-burst-head');
+    if (burst) {
+      const key = burst.dataset.burst ?? '';
+      if (!expanded.delete(key)) expanded.add(key);
+      render();
+      // The render replaced the button; keep the reader's place on it.
+      for (const head of root.querySelectorAll<HTMLElement>('.library-burst-head')) {
+        if (head.dataset.burst === key) head.focus();
+      }
+      return;
+    }
     const more = target.closest<HTMLElement>('.library-more');
     if (more) {
       // A history entry of its own, on the same address: Back (or a phone's

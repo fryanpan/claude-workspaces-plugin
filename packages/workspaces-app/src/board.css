@@ -4116,6 +4116,38 @@ html:has(.board-walk-cred-form) {
   color: var(--fg-muted);
   padding: 12px 0;
 }
+/* A burst: files a generator wrote within a minute of each other, one line
+   of Recent files that opens in place (`fileEntries`, library-model.ts). The
+   line is a button wearing the row's grid, so it lines up with its
+   neighbours; its files indent under it, behind a rule, when open. */
+.library-burst-head {
+  width: calc(100% + 16px);
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+.library-burst-head .library-name {
+  color: var(--fg-muted);
+}
+.library-caret {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 0;
+  height: 0;
+  border-left: 5px solid var(--fg-muted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 120ms ease;
+}
+.library-burst-head[aria-expanded="true"] .library-caret {
+  transform: rotate(90deg);
+}
+.library-burst-rows {
+  margin: 0 0 4px 3px;
+  padding-left: 13px;
+  border-left: 1px solid var(--border);
+}
 @media (max-width: 1100px) {
   .library-row {
     min-height: 44px;

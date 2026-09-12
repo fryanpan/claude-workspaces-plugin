@@ -197,14 +197,16 @@ describe('buildLibrary', () => {
       }),
     );
     expect(lib.project).toEqual({ name: 'riverbend', path: '~/dev/riverbend' });
+    // `folder` is where each file sits — the page names a burst by it — and a
+    // root file's is empty rather than `.`.
     expect(lib.files).toEqual([
-      { name: 'site-plan-430.png', at: 6_000, href: '/mounts/f-1/raw' },
-      { name: 'guide/README.md', at: 4_000, open: 'docs/guide/README.md' },
+      { name: 'site-plan-430.png', at: 6_000, href: '/mounts/f-1/raw', folder: '.workspace' },
+      { name: 'guide/README.md', at: 4_000, open: 'docs/guide/README.md', folder: 'docs/guide' },
       // Not `./README.md`: a root file keeps its bare name.
-      { name: 'README.md', at: 3_000, open: 'README.md' },
+      { name: 'README.md', at: 3_000, open: 'README.md', folder: '' },
       // The bound doc is its FILE here — same name it had before anybody
       // opened it, same clock as the rows around it.
-      { name: 'plan.md', at: 2_000, href: '/workspaces/w-test/docs/d-plan' },
+      { name: 'plan.md', at: 2_000, href: '/workspaces/w-test/docs/d-plan', folder: 'docs' },
     ]);
   });
 
@@ -246,6 +248,27 @@ describe('buildLibrary', () => {
     expect(lib.project).toBeNull();
     expect(asked).toBe(false);
     expect(lib.files.map((r) => r.name)).toEqual(['Loose note']);
+  });
+
+  it("gives no folder to a doc named by its title rather than its project's file", () => {
+    const other = 'git:example.com/harborlight/saltmarsh';
+    const keys: Record<string, string> = {
+      'd-plan': makeDocKey(REPO, 'docs/plan.md'),
+      'd-away': makeDocKey(other, 'private/away.md'),
+    };
+    const lib = buildLibrary(
+      sources({
+        docs: [meta('d-plan'), meta('d-away', { title: 'Saltmarsh away note' })],
+        docKeyOf: (id) => keys[id],
+        fileMtime: (id) => (id === 'd-plan' ? 2_000 : 1_000),
+      }),
+    );
+    // Another repo's path must not arrive through `folder` when the name
+    // itself refuses to print it.
+    expect(lib.files.map((r) => [r.name, r.folder])).toEqual([
+      ['plan.md', 'docs'],
+      ['Saltmarsh away note', undefined],
+    ]);
   });
 });
 
