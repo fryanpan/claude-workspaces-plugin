@@ -46,6 +46,11 @@ export interface ReviewCriteriaDeps {
 }
 
 export interface ReviewCriteriaHandle {
+  /** Put up the editor or the plain text for the CURRENT level, without
+   *  reading anything. Synchronous on purpose — the panel calls it before the
+   *  popover is painted, so the controls a reader may not use are never on
+   *  screen while the level is still in flight. */
+  applyLevel(): void;
   /** Re-read and repaint. Called every time the panel opens. */
   refresh(): Promise<void>;
   /** Resolves when any in-flight write has finished. Tests await it. */
@@ -141,6 +146,9 @@ export function mountReviewCriteria(deps: ReviewCriteriaDeps): ReviewCriteriaHan
   deps.useDefault.addEventListener('click', () => run(null));
 
   return {
+    applyLevel: () => {
+      showEditor();
+    },
     refresh,
     settled: async () => {
       await inFlight;

@@ -54,6 +54,9 @@ export interface ParallelismCapDeps {
 }
 
 export interface ParallelismCapHandle {
+  /** The editor or the plain number for the CURRENT level, read nothing —
+   *  see `ReviewCriteriaHandle.applyLevel`. */
+  applyLevel(): void;
   /** Re-read and repaint. Called every time the panel opens. */
   refresh(): Promise<void>;
   /** Resolves when any in-flight write has finished. Tests await it. */
@@ -146,6 +149,9 @@ export function mountParallelismCap(deps: ParallelismCapDeps): ParallelismCapHan
   deps.useDefault.addEventListener('click', () => run(null));
 
   return {
+    applyLevel: () => {
+      showEditor();
+    },
     refresh,
     settled: async () => {
       await inFlight;

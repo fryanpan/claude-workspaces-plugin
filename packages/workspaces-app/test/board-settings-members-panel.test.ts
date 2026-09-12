@@ -208,6 +208,38 @@ describe('the settings panel at each level', () => {
     expect(p.sent).toEqual([]);
   });
 
+  it('offers nothing owner-only while the level is still in flight', async () => {
+    // The shell's own markup draws both editors, both Save pairs and the
+    // Prompts link. The level arrives over the network, so between the gear
+    // press and that answer there is a window — short here, long on a phone
+    // — in which the panel is on screen and the reader's level is unknown.
+    // It fails CLOSED: the controls are put away at mount and stay away
+    // across the press, so nothing owner-only is ever pressable by somebody
+    // who turns out to be a Regular User.
+    const p = panel('member');
+    for (const id of [
+      'board-review-criteria',
+      'board-review-criteria-actions',
+      'board-parallelism-cap',
+      'board-parallelism-cap-actions',
+      'board-prompts-link',
+    ]) {
+      expect(shown(id), `#${id} was up before any read`).toBe(false);
+    }
+    // The press itself paints the popover. Read the tree with no await at all
+    // — the same instant the browser would have painted it.
+    p.open();
+    expect(shown('board-review-criteria')).toBe(false);
+    expect(shown('board-prompts-link')).toBe(false);
+    // Control: an Owner gets them back once the read lands, so the "put away"
+    // above is a state the panel leaves rather than one it is stuck in.
+    document.body.innerHTML = '';
+    const owner = panel('owner');
+    await owner.opened();
+    expect(shown('board-review-criteria')).toBe(true);
+    expect(shown('board-prompts-link')).toBe(true);
+  });
+
   it('leaves the Owner’s panel as it was — the editors, the Saves and the link', async () => {
     const p = panel('owner');
     await p.opened();

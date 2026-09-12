@@ -196,13 +196,34 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     toast: showToast,
     onRole: (role: BoardRole | null) => {
       canEdit = role === 'owner';
-      // A page address, not a control, and still the same bug: the prompts
-      // page is trusted-local, so for a Regular User this row is a link that
-      // leads to a refusal. It goes rather than greys out — there is nothing
-      // to read there that they could have read.
-      el('board-prompts-link').classList.toggle('hidden', !canEdit);
+      applyLevel();
     },
   });
+
+  /**
+   * Put every owner-only row into the shape the CURRENT level calls for,
+   * reading nothing.
+   *
+   * Synchronous, and called from three places: once at mount, once at the top
+   * of every open before the popover is painted, and again when the members
+   * read comes back. The first two are the point. `canEdit` starts false, but
+   * the shell's markup draws both editors, both Save pairs and the Prompts
+   * link — so without this the panel would paint them, and a Regular User on
+   * a slow connection could press one, or follow the link, in the window
+   * before the level landed. Hiding them is not the enforcement; the server's
+   * 403 is. This is the panel not offering what it is about to take away.
+   */
+  function applyLevel(): void {
+    // A page address, not a control, and still the same bug: the prompts page
+    // is trusted-local, so for a Regular User this row is a link that leads to
+    // a refusal. It goes rather than greys out — there is nothing to read
+    // there that they could have read.
+    el('board-prompts-link').classList.toggle('hidden', !canEdit);
+    reviewCriteria.applyLevel();
+    parallelismCap.applyLevel();
+  }
+  // Before anything is read, and before the panel is ever on screen.
+  applyLevel();
 
   /**
    * Re-read who you are, THEN what the rest of the panel shows.
@@ -224,6 +245,9 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     // sits here, and the row is only ever read at the moment it is opened.
     // Same reason for the criteria, which an agent can rewrite from a tool.
     if (deps.isOpen()) {
+      // Before the reads, so the popover is painted in the shape the level we
+      // last knew calls for rather than in the shell's own.
+      applyLevel();
       void pushToggle.refresh();
       void refreshRoleAndBoardSettings();
     }
