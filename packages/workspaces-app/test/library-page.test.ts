@@ -86,7 +86,7 @@ describe('the Library front page', () => {
     document.body.innerHTML = '';
   });
 
-  it('shows five of each list, newest first, and a way to the rest', async () => {
+  it('shows the newest meetings and files, and a way to the rest', async () => {
     const { page, root } = drive();
     await page.open();
     expect(root.querySelector('.library-proj')?.textContent).toBe('riverbend');
@@ -104,6 +104,33 @@ describe('the Library front page', () => {
     const first = root.querySelector('.library-row') as HTMLElement;
     expect([...first.children].map((c) => c.className)).toEqual(['library-main', 'library-when']);
     expect(first.querySelector('.library-when')?.textContent).toBe('just now');
+  });
+
+  /** Ten recent files, not five; meetings keep their five (library-model.ts). */
+  it('shows ten of fourteen files, newest first, and "See all files" for the rest', async () => {
+    const many: LibraryPayload = { ...PAYLOAD, files: rows('Saltmarsh plan', 14) };
+    const { page, root } = drive({ payload: many });
+    await page.open();
+    const [meetings, files] = [...root.querySelectorAll('.library-tbl')];
+    expect(names(files as Element)).toEqual(many.files.slice(0, 10).map((r) => r.name));
+    expect(names(meetings as Element)).toHaveLength(5);
+    expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
+      'See all meetings',
+      'See all files',
+    ]);
+    await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
+    expect(names(root)).toHaveLength(14);
+  });
+
+  it.each([9, 10])('shows all %i files, with no filler and no "See all"', async (n) => {
+    const few: LibraryPayload = { ...PAYLOAD, files: rows('Saltmarsh plan', n) };
+    const { page, root } = drive({ payload: few });
+    await page.open();
+    const files = root.querySelectorAll('.library-tbl')[1] as Element;
+    expect(names(files)).toEqual(few.files.map((r) => r.name));
+    expect(files.querySelectorAll('.library-row')).toHaveLength(n);
+    expect(files.querySelector('.library-empty')).toBeNull();
+    expect(root.querySelector('.library-more[data-list=files]')).toBeNull();
   });
 
   /**

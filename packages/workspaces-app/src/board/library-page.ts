@@ -2,8 +2,8 @@
  * The Library tab: a board's recent meetings and recent files, each one tap
  * from the doc it names (approved mock, round 4).
  *
- * Three states, one at a time: the front page (five of each list, then "See
- * all"), one full list with a way back, and search results while the box
+ * Three states, one at a time: the front page (the newest few of each list,
+ * then "See all"), one full list with a way back, and search results while the box
  * holds a term. A row is its title and how long ago — the page exists so that
  * finding a doc never needs a repo path, so no row carries one.
  *
@@ -167,10 +167,10 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       .map((which) => {
         const rows = payload?.[which] ?? [];
         const more =
-          rows.length > LIBRARY_RECENT
+          rows.length > LIBRARY_RECENT[which]
             ? `<button type="button" class="library-more" data-list="${which}">${HEADINGS[which].more}</button>`
             : '';
-        return `<h2>${HEADINGS[which].recent}</h2>${tableHtml(which, rows.slice(0, LIBRARY_RECENT))}${more}`;
+        return `<h2>${HEADINGS[which].recent}</h2>${tableHtml(which, rows.slice(0, LIBRARY_RECENT[which]))}${more}`;
       })
       .join('');
   }
