@@ -65,6 +65,14 @@ the quiet pill beside every task's title (`activity-model.ts`,
 escalation is untouched: it fires on liveness alone, and a board owing a
 check-in escalates nothing it would not have escalated anyway.
 
+The silence it reads is the MERGED one. Check-in candidates go through the
+loop's second pass beside the stalled and unfiled tasks, so a builder churning
+a checkout the board cannot see, an agent rewriting a linked doc, and somebody
+talking on the task's own discussion each count as a report. Without that a
+builder who worked steadily for the whole half hour would still owe a
+check-in, which is the false wake the worktree witness already exists to stop
+(`stall-wiring.ts`, and the pair in `check-in-second-pass.test.ts`).
+
 Deliberate exclusions: **triage** tasks (unvetted work shouldn't nag),
 tasks with a **pending review item** (that's legitimately waiting on the
 owner — their Home queue is the surface), and the **backlog** on boards

@@ -593,7 +593,15 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         : {}),
     };
     const first = evaluateStalls(input);
-    const suspect = [...first.stalled, ...first.unfiled];
+    // The check-in candidates ride with the stalled and unfiled rows, and
+    // they have to. `stall-gate.ts` says of the check-in that
+    // `sinceActivityMs` "already folds in worktree churn, comments and board
+    // events" — that sentence is only true of a row this second pass looked
+    // at, because the fold IS this loop. Left out, a builder churning its
+    // worktree for the whole half hour still owes a check-in on the first
+    // pass's board-only clock, which is the false wake the worktree witness
+    // was added to stop, arriving through a second door.
+    const suspect = [...first.stalled, ...first.unfiled, ...first.checkIn];
     if (suspect.length === 0) return first;
     // Second pass over the handful the first pass named. A doc that was never
     // opened holds no threads and answers nothing, which is the right answer:
