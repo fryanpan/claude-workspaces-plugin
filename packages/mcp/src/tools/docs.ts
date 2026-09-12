@@ -911,6 +911,17 @@ export async function handleDocsTool(
       const res = await http('POST', '/api/share/member/remove', { workspaceId, email });
       return ok(res);
     }
+    case 'set_share_member_role': {
+      // Addressed under the BOARD, not under `/api/share`: the role lives on
+      // the board's membership list, and this is the same route the board's
+      // own Settings panel calls. One door, so an agent and a person cannot
+      // be judged by two different rules.
+      const { email, role } = a as { email: string; role: string };
+      const res = await http('POST', `${board()}/members/${encodeURIComponent(email)}/role`, {
+        role,
+      });
+      return ok(res);
+    }
     case 'set_share_ttl': {
       const { shareId, ttlSeconds } = a as { shareId: string; ttlSeconds: number };
       const res = await http('POST', `/api/share/${encodeURIComponent(shareId)}/ttl`, {
