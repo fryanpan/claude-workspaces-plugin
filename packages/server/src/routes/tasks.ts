@@ -26,6 +26,7 @@ import { handleTaskDoneWhen } from './task-done-when.ts';
 import { handleTaskFields } from './task-fields.ts';
 import { handleTaskReviewItems } from './task-review-items.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
+import { handleTaskSecrets } from './task-secrets.ts';
 import { handleTaskStatusAndLinks } from './task-status-links.ts';
 import { handleTaskBatch } from './tasks-batch.ts';
 import { handleTaskListCreate } from './tasks-list-create.ts';
@@ -51,6 +52,7 @@ export async function handleTaskRoutes(
     (await handleTaskDoneWhen(ctx, rq)) ??
     (await handleTaskStatusAndLinks(ctx, rq)) ??
     (await handleTaskAnswers(ctx, rq)) ??
+    (await handleTaskSecrets(ctx, rq)) ??
     (await handleTaskReviewItems(ctx, rq)) ??
     (await handleTaskFields(ctx, rq))
   );

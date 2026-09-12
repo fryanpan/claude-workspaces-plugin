@@ -90,6 +90,14 @@ export type SecretWriteFailure =
 export type SecretWriteResult = { ok: true } | { ok: false; error: SecretWriteFailure };
 
 /**
+ * The seam the server is wired with: name a service, hand over a value, learn
+ * only whether it landed. Nothing in the result can carry the value back, and
+ * the shape is named here rather than in the route's context module so the
+ * writer and every holder of it move together.
+ */
+export type SecretWriter = (service: string, value: string) => Promise<SecretWriteResult>;
+
+/**
  * Is this something the line-based store can hold?
  *
  * `security` reads the value from a PROMPT, which is line-based: it takes one

@@ -30,6 +30,7 @@ import type { PushFetch } from './push-notify.ts';
 import type { RecallCalendarClient } from './recall-calendar.ts';
 import type { RecallClient } from './recall.ts';
 import type { ReviewJudge } from './review-judge.ts';
+import type { SecretWriter } from './secret-store.ts';
 import type { CfApi } from './share/cf-api.ts';
 import type { ShareConfig } from './share/types.ts';
 import type { ThreadSummarizer } from './summarize.ts';
@@ -231,6 +232,17 @@ export interface ServerOptions {
    * this one writes to a git checkout.
    */
   deployer?: Deployer;
+  /**
+   * Stores a value the board's owner typed into a secret review item, under
+   * the name the item declared. See secret-store.ts.
+   *
+   * Absent by default and constructed in ONE place (bin.ts), which is the
+   * strictest reading of the seam rule in this file and the reason it is a
+   * seam at all: with no default, no test, no embedded server and no fixture
+   * can reach this machine's Keychain even by accident. A server without it
+   * refuses the secrets door with 503 rather than half-answering the item.
+   */
+  secretWriter?: SecretWriter;
   /**
    * The client release root this deployment publishes into (see
    * client-release.ts), enabling the "your browser is running an old client"

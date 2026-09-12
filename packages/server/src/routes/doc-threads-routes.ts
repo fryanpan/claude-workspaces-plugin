@@ -26,6 +26,7 @@ import {
   isReviewPayloadHeld,
   latestThreadedQuestion,
   locateReviewItemRange,
+  normalizeReviewType,
   pendingDeclaration,
   readReviewPayload,
   reviewGapAdvice,
@@ -110,6 +111,25 @@ function reviewFromBody(
     typeof rawIn === 'object' && rawIn !== null && 'judge' in (rawIn as Record<string, unknown>)
       ? (({ judge: _dropped, ...rest }) => rest)(rawIn as Record<string, unknown>)
       : rawIn;
+  // A SECRET ITEM CANNOT BE FILED ON A COMMENT. The shape's whole contract is
+  // that its answer goes through `routes/task-secrets.ts` — the one door that
+  // never records a value — and that door is addressed by task and item id.
+  // A comment-borne item has no such address, so an item filed here would ask
+  // the owner for values with only the ordinary answer path to send them
+  // down, which records words. Refused rather than quietly downgraded: the
+  // asking agent must learn that this is filed on a task or not at all.
+  if (
+    typeof raw === 'object' &&
+    raw !== null &&
+    normalizeReviewType(
+      (raw as Record<string, unknown>).review_type ?? (raw as Record<string, unknown>).shape,
+    ) === 'secret'
+  ) {
+    return {
+      ok: false,
+      error: "a 'secret' item is filed on a task, not on a comment — use add_review_item",
+    };
+  }
   const check = checkReviewPayload(raw, { text });
   if (!check.ok) return { ok: false, error: reviewPayloadMessage(check) };
   const advice = reviewGapAdvice(check.gaps);

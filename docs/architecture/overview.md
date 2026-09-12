@@ -696,7 +696,10 @@ a link edits the stored doc and calls the board. `core` is three tiers: wire typ
 (`review-item*.ts`, `effort-*.ts`, `goal-effort.ts`, and
 `note-suggestion.ts`, which is how a note's written "did you mean this row?"
 is spelled — server writes it, browser reads it back, one definition so the
-two cannot drift into a suggestion nobody can accept).
+two cannot drift into a suggestion nobody can accept). The `review-item*.ts`
+glob is deliberate: `review-item-look-ask.ts` is the gate's two English
+heuristics lifted out whole when the gate crossed the line, and it changes no
+boundary the diagram draws.
 
 `mock-swap-noise.ts` joins that third tier for the same reason and an unusual
 pair of readers: the widget's mockup swap raises a flag there while it inserts
