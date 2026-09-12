@@ -49,7 +49,6 @@ export interface BoardDeps {
    *  filters and the three panel-aim fields, and writes the aim fields when a
    *  row is opened. */
   state: BoardState;
-  /** Whose "My tasks" the tab filter means. */
   /** `getElementById`, already narrowed — `bootBoard`'s own `el`. */
   el(id: string): HTMLElement;
   /** Every REST write a board gesture ends in. */

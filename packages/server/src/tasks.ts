@@ -1745,7 +1745,7 @@ export interface WorkspaceState {
    * Goal rows, keyed by goal id — SEPARATE from `tasks`, and that separation
    * is the safety property rather than a filing preference.
    *
-   * Goals must not appear in `list_tasks`, `next_tasks` or My Tasks (Bryan,
+   * Goals must not appear in `list_tasks` or `next_tasks` (Bryan,
    * 2026-08-23, reversing the earlier try-it-and-see: *"No don't do this. The
    * tasks need more room to focus on the most important part — the title."*).
    * Enforcing that with a `kind` filter on each reader would be one forgotten

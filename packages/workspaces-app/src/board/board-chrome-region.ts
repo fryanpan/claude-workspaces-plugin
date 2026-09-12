@@ -137,9 +137,9 @@ export function createBoardChromeRegion(deps: BoardChromeDeps): BoardChromeRegio
 
   /**
    * Who the board thinks you are. `ensureUserIdentity` has always decided
-   * this — it is what stamps every comment and what "My Tasks" matches on —
-   * and until now nothing rendered it, so a reader with the wrong name saved
-   * found out by seeing their own comment signed by somebody else.
+   * this — it is what stamps every comment — and until now nothing rendered
+   * it, so a reader with the wrong name saved found out by seeing their own
+   * comment signed by somebody else.
    */
   function renderMe(): void {
     const me = el('board-me');
