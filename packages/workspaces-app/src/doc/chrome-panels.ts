@@ -17,7 +17,7 @@ export interface ThreadFocusOpts {
   /** The scroll container that hosts the editor's `.thread-range` spans. */
   editorMount: HTMLElement;
   chrome: ReviewChrome;
-  surface: Pick<ReviewSurface, 'pulseRange'>;
+  surface: Pick<ReviewSurface, 'pulseRange' | 'placeCaretAtPoint'>;
   scope: MountScope;
   /**
    * Try showing the thread in the balloon margin first (the "vice versa" of
@@ -46,6 +46,22 @@ export function wireThreadRangeClicks(opts: ThreadFocusOpts): void {
     if (!threadId) return;
     ev.preventDefault();
     ev.stopPropagation();
+    // FIRST, before any repaint: adopt the caret this very click just put in
+    // the prose.
+    //
+    // The doc is editable now, so a click on a highlight both places a caret
+    // and opens a thread. The browser reports the new caret to the editor
+    // asynchronously, well after this handler returns, while
+    // `refreshThreadDecorations` below repaints the highlight synchronously —
+    // and a repaint writes the editor's selection back to the DOM. So the
+    // editor's PREVIOUS selection, which on a freshly loaded doc is the very
+    // start of it, used to land back on screen a moment after the reader's
+    // finger left the word they tapped. The caret then sat in the title, the
+    // comment pill followed it to the top of the window over the back arrow,
+    // and the next keystroke was typed into the heading — and, this being a
+    // bound doc, saved there.
+    const ptr = ev as MouseEvent;
+    surface.placeCaretAtPoint?.(ptr.clientX, ptr.clientY);
     chrome.refreshThreadDecorations(threadId);
     // No scrollToPos here — the user clicked the highlight, it's already
     // on screen; jumping the doc would feel broken.

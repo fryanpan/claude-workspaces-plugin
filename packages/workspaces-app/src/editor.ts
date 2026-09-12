@@ -58,6 +58,9 @@ export interface EditorHandle {
   setInlineCards: (cards: InlineThreadCard[]) => void;
   /** Keep the words a comment is being written about marked; null clears. */
   markPending: (range: { from: number; to: number } | null) => void;
+  /** Adopt the caret the browser just placed at these viewport coordinates.
+   *  See `ReviewSurface.placeCaretAtPoint` for why a click handler needs it. */
+  placeCaretAtPoint: (clientX: number, clientY: number) => boolean;
   getText: () => string;
   setMarkdown: (md: string) => void;
   getMarkdown: () => string;
@@ -367,6 +370,20 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       editor.commands.setTextSelection(clamped);
       editor.commands.scrollIntoView();
       editor.commands.focus();
+    },
+    placeCaretAtPoint(clientX, clientY) {
+      // Nothing to place when there is no caret to begin with: a visitor who
+      // cannot write reads the doc with `editable` false, and moving a
+      // selection there would only steal the page's focus.
+      if (!editor.isEditable) return false;
+      const at = editor.view.posAtCoords({ left: clientX, top: clientY });
+      if (!at) return false;
+      // setTextSelection only — NOT focus() or scrollIntoView(). The click
+      // that brought us here has already focused the editor and the text is
+      // already on screen; either call would scroll the doc out from under
+      // the reader's finger.
+      editor.commands.setTextSelection(at.pos);
+      return true;
     },
     pulseRange(from, to) {
       // Pulse the range by emitting a pulseId meta; the extension adds a
