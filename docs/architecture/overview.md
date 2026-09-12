@@ -491,6 +491,15 @@ two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
 
+`meeting-silence.ts` joins the same family and changes nothing in the picture
+either: it is one window and its resolver, the fifteen minutes of no settled
+speech after which `meeting-protocol.ts` ends a recording itself. It sits
+beside the relay rather than inside it for the reason `doc-store-timings.ts`
+sits outside the doc store — a cadence with an environment override is a
+decision a test reads and a reviewer checks, not a number buried in a
+`setTimeout`. No state, no `Request`, nothing to schedule: the relay owns the
+timer, this owns only how long it runs.
+
 `notes-invented-links.ts` sits in the Meetings box beside `notes-edit-guard.ts`
 and is the second deterministic refusal on the applier path: the guard says
 which edits may touch the section, this says which links inside them the tick
