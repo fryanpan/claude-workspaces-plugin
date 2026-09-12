@@ -1,30 +1,42 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { wireDocRename } from '../src/doc/doc-rename.ts';
+import { labelDirection, wireDocRename } from '../src/doc/doc-rename.ts';
 
 /**
  * Renaming a doc from its own title in the topbar.
  *
  * A meeting is born named after the clock, and until this existed no screen
  * could change that — so a project's meetings list was a column of timestamps
- * a week later. The affordance is the title itself, which makes two things
- * worth pinning: the editor opens from the FULL title rather than from the
- * abbreviated crumb on screen, and a refused rename puts the old label back
- * instead of leaving the page claiming a name the server does not hold.
+ * a week later.
+ *
+ * The editing is the board's `wireWordsInPlace`, so what is worth pinning
+ * here is the adapter around it: the editor opens from the FULL title rather
+ * than from the abbreviated crumb on screen, a refused rename puts the crumb
+ * back instead of leaving the page claiming a name the server does not hold,
+ * a cancelled edit does the same, and the element becomes editable in place
+ * rather than being swapped for a field of its own.
  */
 describe('wireDocRename', () => {
   let titleEl: HTMLElement;
   /** Every PUT the field made: the url it went to and the title it carried. */
   let sent: Array<{ url: string; title: string }>;
   let renamed: string[];
+  let redrawn: number;
   let answer: boolean;
+  const CRUMB = '2026-09-11 14:05';
+  const FULL = 'Meeting notes 2026-09-11 14:05';
 
   const wire = (over: Partial<Parameters<typeof wireDocRename>[0]> = {}) =>
     wireDocRename({
       titleEl,
       docId: 'd-tide',
       canWrite: true,
-      currentTitle: () => 'Meeting notes 2026-09-11 14:05',
+      currentTitle: () => FULL,
       onRenamed: (t) => renamed.push(t),
+      // What the real caller does: repaint the crumb from what the doc says.
+      redrawLabel: () => {
+        redrawn += 1;
+        titleEl.textContent = CRUMB;
+      },
       send: async (url, title) => {
         sent.push({ url, title });
         return answer;
@@ -32,145 +44,162 @@ describe('wireDocRename', () => {
       ...over,
     });
 
-  const field = (): HTMLInputElement => {
-    const input = titleEl.querySelector('input');
-    if (!input) throw new Error('no editor is open');
-    return input as HTMLInputElement;
+  const type = (text: string): void => {
+    titleEl.textContent = text;
   };
-  const press = (key: string): void => {
-    field().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  const press = (key: string, on: HTMLElement = titleEl): void => {
+    on.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
   };
-  /** Let the commit's promise settle before reading the DOM. */
+  const editing = (): boolean => titleEl.hasAttribute('contenteditable');
+  /** Let the commit's promise and the end-of-edit microtask settle. */
   const settled = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
   beforeEach(() => {
-    titleEl = document.createElement('h1');
+    titleEl = document.createElement('span');
+    titleEl.className = 'doc-path';
     // What the crumb SHOWS is shorter than the title — the kind word is
     // dropped once the page already says it is a meeting.
-    titleEl.textContent = '2026-09-11 14:05';
+    titleEl.textContent = CRUMB;
     document.body.replaceChildren(titleEl);
     sent = [];
     renamed = [];
+    redrawn = 0;
     answer = true;
   });
 
-  it('opens on a click, seeded with the full title rather than the crumb', () => {
+  it('edits the words where they are rather than swapping in a field', () => {
     wire();
     titleEl.click();
-    expect(field().value).toBe('Meeting notes 2026-09-11 14:05');
-    expect(field().maxLength).toBe(200);
+    // The board's mechanism: one attribute changes, the element and its box
+    // are never replaced, so nothing can move as the edit opens.
+    expect(editing()).toBe(true);
+    expect(titleEl.querySelector('input')).toBeNull();
+    expect(titleEl.tagName).toBe('SPAN');
   });
 
-  it('commits on Enter, collapsing the whitespace the server would', async () => {
+  it('opens seeded with the full title rather than the crumb', () => {
     wire();
     titleEl.click();
-    field().value = '  Saltmarsh   tide walk  ';
+    expect(titleEl.textContent).toBe(FULL);
+  });
+
+  it('reads left to right while editing, whatever the crumb was doing', () => {
+    wire();
+    titleEl.click();
+    expect(titleEl.dir).toBe('ltr');
+    // A path keeps the truncate-from-the-start trick; a name never had one.
+    expect(labelDirection('docs/architecture/overview.md')).toBe('rtl');
+    expect(labelDirection(FULL)).toBe('ltr');
+  });
+
+  it('commits on Enter, trimming what was typed', async () => {
+    wire();
+    titleEl.click();
+    type('  Saltmarsh tide walk  ');
     press('Enter');
     await settled();
 
-    expect(sent).toEqual([{ url: sent[0]?.url ?? '', title: 'Saltmarsh tide walk' }]);
+    expect(sent.map((s) => s.title)).toEqual(['Saltmarsh tide walk']);
     expect(sent[0]?.url).toContain('docs/d-tide/title');
     expect(renamed).toEqual(['Saltmarsh tide walk']);
+    expect(editing()).toBe(false);
+    // The new name is on screen straight away, not after a round trip.
     expect(titleEl.textContent).toBe('Saltmarsh tide walk');
-    expect(titleEl.querySelector('input')).toBeNull();
+    expect(redrawn).toBe(0);
   });
 
   it('commits when the reader clicks away', async () => {
     wire();
     titleEl.click();
-    field().value = 'Harborlight retro';
-    field().dispatchEvent(new FocusEvent('blur'));
+    type('Harborlight retro');
+    titleEl.dispatchEvent(new FocusEvent('blur'));
     await settled();
     expect(sent.map((s) => s.title)).toEqual(['Harborlight retro']);
   });
 
-  it('cancels on Escape, sending nothing and restoring the crumb', async () => {
+  it('cancels on Escape, sending nothing and putting the crumb back', async () => {
     wire();
     titleEl.click();
-    field().value = 'Never meant it';
+    type('Never meant it');
     press('Escape');
     await settled();
     expect(sent).toEqual([]);
     expect(renamed).toEqual([]);
-    expect(titleEl.textContent).toBe('2026-09-11 14:05');
+    // Not the full title it was seeded with — the abbreviation it had.
+    expect(titleEl.textContent).toBe(CRUMB);
+    expect(redrawn).toBe(1);
   });
 
   it('treats a blank field and an unchanged title as nothing to do', async () => {
     wire();
     titleEl.click();
-    field().value = '   ';
+    type('   ');
     press('Enter');
     await settled();
     expect(sent).toEqual([]);
-    expect(titleEl.textContent).toBe('2026-09-11 14:05');
+    expect(titleEl.textContent).toBe(CRUMB);
 
     titleEl.click();
     press('Enter');
     await settled();
     expect(sent).toEqual([]);
+    expect(titleEl.textContent).toBe(CRUMB);
   });
 
-  it('puts the old label back when the server refuses', async () => {
+  it('puts the crumb back when the server refuses', async () => {
     answer = false;
     wire();
     titleEl.click();
-    field().value = 'Refused name';
+    type('Refused name');
     press('Enter');
     await settled();
     // It asked, it was told no, and the page went back to what is true.
     expect(sent.map((s) => s.title)).toEqual(['Refused name']);
     expect(renamed).toEqual([]);
-    expect(titleEl.textContent).toBe('2026-09-11 14:05');
+    expect(titleEl.textContent).toBe(CRUMB);
   });
 
   it('gives a reader who cannot write no editor and no affordance', () => {
     wire({ canWrite: false });
     titleEl.click();
-    expect(titleEl.querySelector('input')).toBeNull();
+    expect(editing()).toBe(false);
     expect(titleEl.classList.contains('doc-title-editable')).toBe(false);
-    expect(titleEl.getAttribute('role')).toBeNull();
     // Positive control: the same wiring with the seat opens one.
     wire();
     titleEl.click();
-    expect(titleEl.querySelector('input')).not.toBeNull();
-    expect(titleEl.getAttribute('role')).toBe('button');
+    expect(editing()).toBe(true);
+    expect(titleEl.classList.contains('doc-title-editable')).toBe(true);
   });
 
   it('opens from the keyboard, so the affordance is not mouse-only', () => {
     wire();
-    titleEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(titleEl.querySelector('input')).not.toBeNull();
+    press('Enter');
+    expect(editing()).toBe(true);
+    expect(titleEl.textContent).toBe(FULL);
   });
 
-  it('stays shut while its request is in flight, so a slow rename loses nothing', async () => {
-    let answerThe: ((ok: boolean) => void) | null = null;
-    wire({ send: (_url, _title) => new Promise<boolean>((r) => (answerThe = r)) });
+  it('takes its listeners through the caller scope, so a second doc is not a second editor', () => {
+    const taken: Array<{ type: string; handler: EventListener }> = [];
+    wire({
+      listen: (target, type_, handler) => {
+        taken.push({ type: type_, handler });
+        target.addEventListener(type_, handler);
+      },
+    });
+    // Every listener this wiring installs passed through the scope — there is
+    // nothing left for a navigation to fail to take away.
+    expect(taken.map((t) => t.type).sort()).toEqual(['blur', 'click', 'keydown', 'keydown']);
+    for (const t of taken) titleEl.removeEventListener(t.type, t.handler);
     titleEl.click();
-    field().value = 'Riverbend winter plan';
-    press('Enter');
-    await settled();
-
-    // The name is on screen and the editor is gone, but a click cannot open a
-    // second one: the answer to the first request is still coming, and it
-    // would tear the second editor out from under whoever was typing in it.
-    expect(titleEl.textContent).toBe('Riverbend winter plan');
-    titleEl.click();
-    expect(titleEl.querySelector('input')).toBeNull();
-
-    (answerThe as unknown as (ok: boolean) => void)(true);
-    await settled();
-    // Settled, so the field opens again — the positive control on the lock.
-    titleEl.click();
-    expect(titleEl.querySelector('input')).not.toBeNull();
+    expect(editing()).toBe(false);
   });
 
   it('sends one request when the commit races its own blur', async () => {
     wire();
     titleEl.click();
-    const input = field();
-    input.value = 'Riverbend winter plan';
+    type('Riverbend winter plan');
     press('Enter');
-    input.dispatchEvent(new FocusEvent('blur'));
+    titleEl.dispatchEvent(new FocusEvent('blur'));
     await settled();
     expect(sent).toHaveLength(1);
   });

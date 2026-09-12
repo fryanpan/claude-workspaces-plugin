@@ -251,28 +251,45 @@ button {
 /* The title IS the rename control: click it, type, Enter. No pencil and no
    menu — the word a person wants to change is the one they are looking at.
    Nothing renders for a reader who cannot write; the class is only added
-   when the server said they can. */
+   when the server said they can.
+
+   The tell is the board's, to the pixel: a transparent outline in the resting
+   state that only changes COLOUR on hover, so the words cannot move as it
+   appears (`board.css`, `.board-task-title-text`). An outline is the one
+   border-like paint in CSS that occupies no space at all. Nothing here may
+   add padding, a border or a font metric — the reason this element is edited
+   in place rather than swapped for an input is that the glyphs do not move,
+   and a box added for edit mode would put the jump straight back. */
 .doc-title-editable {
-  cursor: text;
-  border-radius: var(--radius-sm);
-  padding: 0 3px;
-  margin: 0 -3px;
+  border-radius: 3px;
+  outline: 1px solid transparent;
+  outline-offset: 2px;
 }
-.doc-title-editable:hover,
-.doc-title-editable:focus-visible {
-  background: var(--bg-subtle, color-mix(in srgb, var(--fg) 7%, transparent));
+@media (hover: hover) and (pointer: fine) {
+  .doc-title-editable {
+    cursor: text;
+  }
+  .doc-title-editable:hover {
+    outline-color: var(--border);
+  }
 }
-/* Sized off the crumb it replaces, so the topbar does not reflow the moment
-   the field appears — a row that jumps as you click it reads as a misfire. */
-.doc-title-input {
-  width: 100%;
-  min-width: 0;
-  font: inherit;
-  color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 1px 5px;
+/* A pointer that cannot hover cannot reveal anything on hover, so on the iPad
+   the rectangle is simply THERE. The board can leave its rows bare on a
+   coarse pointer because renaming also lives in its detail panel; a doc's
+   title has no second home, so a hidden tell would mean no rename at all on
+   the surface this product is mostly read on. */
+@media (hover: none), (pointer: coarse) {
+  .doc-title-editable {
+    outline-color: var(--border);
+  }
+}
+/* Editing: the rectangle goes and leaves nothing but a caret in the words.
+   `text-overflow: clip` for the duration, because an ellipsis is a lie about
+   text you are editing — you would be typing into characters the topbar is
+   still drawing as "…". */
+.doc-title-editable[contenteditable] {
+  outline-color: transparent;
+  text-overflow: clip;
 }
 .back-link {
   flex: 0 0 auto;
@@ -300,6 +317,14 @@ button {
   min-width: 0;
   direction: rtl; /* keep the file name visible when truncating long paths */
   text-align: left;
+}
+/* …but only for a PATH. The rtl above is a truncation trick, and a bidi
+   engine applies it to meaning too: "Meeting notes 2026-09-11 19:23" came out
+   with the clock first, and typing into it ran backwards. The renderer writes
+   `dir` from the label it just painted — a slash is what tells a path from a
+   name — and this is the rule that lets the attribute win. */
+.doc-path[dir="ltr"] {
+  direction: ltr;
 }
 .save-state {
   flex: 0 0 auto;
@@ -974,6 +999,20 @@ body.is-reading-width #editor > .ProseMirror {
   }
   .doc-crumb {
     min-width: 112px;
+  }
+  /* Renaming: the name is the only thing in this bar that matters for as long
+     as somebody is typing it, so the crumb takes the row and the editing
+     toolbar stands down. On a phone the crumb's share of the topbar is 112px,
+     of which the title got 62 — seven characters of a twenty-six character
+     meeting name, which is not a field anybody can work in. The toolbar comes
+     straight back when the edit ends, and its controls were unreachable while
+     the caret was in the title anyway. */
+  body.doc-renaming .doc-crumb {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+  body.doc-renaming .toolbar {
+    display: none;
   }
   .toolbar {
     flex: 0 1 auto;

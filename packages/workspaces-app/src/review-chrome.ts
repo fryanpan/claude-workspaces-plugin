@@ -15,7 +15,7 @@ import type { ChromeSelection } from './doc/anchor-body.ts';
 import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
 import type { ComposerSlot } from './doc/composer-slot.ts';
-import { wireDocRename } from './doc/doc-rename.ts';
+import { labelDirection, wireDocRename } from './doc/doc-rename.ts';
 import {
   onShowResolvedChange,
   showResolved,
@@ -717,7 +717,11 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
       m.huddle === true
         ? full.replace(/^(?:Plan|Meeting notes) (?=\d{4}-\d{2}-\d{2} \d{2}:\d{2}$)/, '')
         : full;
-    docTitleEl.textContent = mobile ? mobileLabel(shown) : shown;
+    const label = mobile ? mobileLabel(shown) : shown;
+    docTitleEl.textContent = label;
+    // A path truncates from its start and keeps the file name; a title does
+    // not, and `.doc-path`'s rtl put a meeting's clock ahead of its name.
+    docTitleEl.dir = labelDirection(label);
     docTitleEl.title = full;
     // The browser tab names the DOC, not the product — otherwise every open
     // review reads the same until it truncates. This is the one place all
@@ -750,6 +754,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
         huddle: readDocMeta(ydoc).huddle,
       }),
     onRenamed: () => renderDocLabel(),
+    redrawLabel: () => renderDocLabel(),
     listen: (target, type, handler) => on(target, type, handler),
   });
 
