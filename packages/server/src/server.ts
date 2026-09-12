@@ -23,9 +23,11 @@ import {
   agentTokenKey as deriveAgentTokenKey,
 } from './auth/agent-token.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
+import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { maybeCompress, maybeNotModified } from './compress.ts';
+import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
@@ -75,6 +77,8 @@ import {
 } from './review-archive.ts';
 import { createReviewGate } from './review-gate.ts';
 import type { ReviewThreadItem } from './review-queue.ts';
+import { ReviewSizePrefs } from './review-size-prefs.ts';
+import type { SizedReviewItemRow } from './review-sizing.ts';
 import {
   type AgentIdentityRoutesContext,
   handleAgentIdentityRoutes,
@@ -107,6 +111,7 @@ import {
 } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext, handleRepoRoutes } from './routes/repos.ts';
 import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/review-files.ts';
+import { type ReviewQueueRoutesContext, handleReviewQueueRoutes } from './routes/review-queue.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
 import { createShellStatic } from './routes/shell-static.ts';
@@ -176,10 +181,12 @@ import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import {
   HTML_SHELL_HEADERS,
   appCacheControl,
+  boardLastActivity,
   readAppAssetManifest,
   renderBoardMemberNotFound,
   renderBoardNotFound,
   renderBoardShell,
+  renderReviewsShell,
   renderSigninShell,
   serveStaticUnder,
 } from './shells.ts';
@@ -1168,11 +1175,30 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // because everything the pane reads — the stores, the doc store and the
   // summarizer seam — is in hand by this line, and the routes below take the
   // same four names off it that they used to take off this closure.
-  const { homeBriefs, reviewItemsFor, homeQueueTotal, homePayload } = createHomePane({
+  const { homeBriefs, reviewItemsFor, sizer, homePayload } = createHomePane({
     dataDir,
     taskStore,
     docStore,
     summarizer,
+  });
+  // One queue over every board, in project order, and the ledger that records
+  // where each answered item stood in it. Composed beside the Home pane
+  // because it reads that pane's own rows — the cross-board order and a
+  // board's Home order are one computation.
+  const crossReview = createCrossReview({
+    dataDir,
+    taskStore,
+    docStore,
+    reviewItemsFor,
+    sizer,
+    lastActivityOf: (w) => boardLastActivity(docStore, taskStore, w),
+    spawnerAgentId: spawnerAgentId ?? null,
+    onError: (err) => captureServerError(err, { where: 'cross-review answer ledger' }),
+  });
+  const boardSummaries = createBoardSummaries({
+    dataDir,
+    summarizer,
+    titleOf: (taskId) => taskStore.getTask(taskId)?.title,
   });
   /**
    * Rewrite a task's description through its live `task:<id>` body doc, with
@@ -1265,7 +1291,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           // than a bare `.filter`, because `.filter` alone leaves the union
           // intact and the field reads below would not compile.
           .filter(
-            (item): item is ReviewThreadItem => item.kind !== 'task-review' && item.docId === docId,
+            (item): item is SizedReviewItemRow & ReviewThreadItem =>
+              item.kind !== 'task-review' && item.docId === docId,
           )
           .map((item) => ({
             threadId: item.threadId,
@@ -1759,8 +1786,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     redirectTo,
     withReviewUrl,
-    reviewItemsFor,
-    homeQueueTotal,
+    landingReview: () => {
+      const q = crossReview.queue();
+      // Fire and forget: the page shows what is stored, and a sentence that
+      // arrives now is on the next load. Each refresh declines unless due.
+      for (const p of q.projects) void boardSummaries.refresh({ id: p.workspaceId, name: p.name });
+      return {
+        items: q.items,
+        rankOf: new Map(q.projects.map((p) => [p.workspaceId, p.rank])),
+        summaryOf: (id) => boardSummaries.read(id),
+      };
+    },
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
   });
 
@@ -1831,6 +1867,18 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
 
   /** The words this server's prompts run on — the settings page's data. */
   const promptRoutesCtx: PromptRoutesContext = { promptStore, j, safeJson };
+
+  /** The cross-board review queue and its wait report — trusted-local only. */
+  const reviewQueueRoutesCtx: ReviewQueueRoutesContext = {
+    crossReview,
+    boardName: (id) => taskStore.getWorkspace(id)?.name,
+    sizePrefs: new ReviewSizePrefs(dataDir),
+    sessionIdentityId: (req) => sessionIdentityFor(req)?.id ?? null,
+    renderPage: () => renderReviewsShell(browserSentry, readAppAssetManifest(markdownAppDist)),
+    pageHeaders: HTML_SHELL_HEADERS,
+    j,
+    safeJson,
+  };
 
   /**
    * The repo registry — checkouts of a project, and which copy of a doc is
@@ -2723,6 +2771,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         if (handled) return handled;
       }
 
+      // --- REST + page: the cross-board review queue --- see
+      // ./routes/review-queue.ts. Top-level for the prompts' reason: it is
+      // about every board, not one.
+      {
+        const handled = await handleReviewQueueRoutes(reviewQueueRoutesCtx, {
+          req,
+          pathname,
+          url,
+          visitor,
+        });
+        if (handled) return handled;
+      }
+
       // --- Web log --- see ./routes/ops.ts. Same chain position as before
       // the split: under the doc resource routes, above the shell tail.
       {
@@ -3107,6 +3168,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // marked as recording by a socket that died with the process. Awaited
       // because the close handlers above start their teardowns async, and
       // their notes belong in the docs this flushes next.
+      crossReview.dispose();
       await meetingRelay.dispose();
       // And the bots. A bot left in a call after this process is gone bills
       // two vendors and delivers nothing — see RecallMeetingRelay.dispose.
