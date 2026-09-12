@@ -26,6 +26,19 @@ export const SVG_ENDS = 'stroke-linecap="round" stroke-linejoin="round" aria-hid
 export const MIC_ICON = `<svg ${SVG} ${SVG_ENDS}><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3.2"/><path d="M8.6 21.2h6.8"/></svg>`;
 
 /**
+ * A mic inside a speech bubble — voice FEEDBACK, on the widget's button at the
+ * bottom-right of the board.
+ *
+ * A board carries two mics at once: the voice dock's, bottom-left, which talks
+ * to the board, and this one, bottom-right, which sends feedback about the app
+ * itself. Both drew `MIC_ICON`, so the only thing telling them apart was a
+ * hover label — nothing at all to a finger. The bubble is the widget's own
+ * mark (its comment button is one), so the pair reads as "speak" and "speak a
+ * comment" rather than as one control drawn twice.
+ */
+export const FEEDBACK_MIC_ICON = `<svg ${SVG} ${SVG_ENDS}><path d="M5.5 3.2h13a3 3 0 0 1 3 3v7.4a3 3 0 0 1-3 3h-6.7l-4.6 3.6v-3.6H5.5a3 3 0 0 1-3-3V6.2a3 3 0 0 1 3-3z"/><rect x="10.3" y="6.4" width="3.4" height="5.2" rx="1.7"/><path d="M8.5 10.4a3.5 3.5 0 0 0 7 0"/></svg>`;
+
+/**
  * Two people — the Board's "Record a conversation". The mic beside it starts
  * a huddle for one voice; this one says there is somebody else in the room,
  * which is the whole difference between the two buttons.
