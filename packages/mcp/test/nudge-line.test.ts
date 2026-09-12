@@ -605,16 +605,27 @@ describe('stalledLine tells a stand-in why it, and not the lead, was woken', () 
 const UNGATED_ROW = {
   id: 't-u1',
   title: 'Reader sees one subdued new-content badge',
+  file: 'packages/workspaces-app/src/board.css',
   keyword: 'badge',
 };
 
 describe('stalledLine names rows built past the UI gate as their own finding', () => {
-  it('names the row, the word that made it UI work, and what clears it', () => {
+  it('names the row, the changed file it rests on, and what clears it', () => {
     const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, ungatedUi: [UNGATED_ROW] });
     expect(line).toContain('1 UI task is being built past the review gate');
     expect(line).toContain('t-u1');
+    expect(line).toContain('changed: packages/workspaces-app/src/board.css');
     expect(line).toContain('matched: badge');
     expect(line).toContain('answered review item');
+  });
+
+  it('names the file alone on a row whose own words say nothing about a screen', () => {
+    // The finding the word list could never have produced: the evidence is
+    // the diff, so the line has to stand up without a keyword.
+    const { keyword: _dropped, ...noWords } = UNGATED_ROW;
+    const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, ungatedUi: [noWords] });
+    expect(line).toContain('changed: packages/workspaces-app/src/board.css');
+    expect(line).not.toContain('matched:');
   });
 
   it('a frame carrying only the UI gate is a real wake, not a bug report', () => {

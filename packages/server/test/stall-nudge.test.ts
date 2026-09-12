@@ -1361,9 +1361,14 @@ describe('a lead that cannot be woken escalates to whoever is attached', () => {
   });
 });
 
-/** One row an agent filed, in flight, that reads as UI work with nobody's
- *  answer on it (`ui-review-gate.ts`). */
-const UNGATED = { id: 't-9', title: 'Move the Plan button onto the ticket', keyword: 'button' };
+/** One row an agent filed, in flight, whose builder has changed a file a
+ *  person looks at, with nobody's answer on it (`ui-review-gate.ts`). */
+const UNGATED = {
+  id: 't-9',
+  title: 'Move the Plan button onto the ticket',
+  file: 'packages/workspaces-app/src/board.css',
+  keyword: 'button',
+};
 
 describe('a row built past the UI gate is the lead’s finding', () => {
   it('wakes the lead on a board where nothing else is wrong', () => {
@@ -1391,7 +1396,12 @@ describe('a row built past the UI gate is the lead’s finding', () => {
 
     expect(sent).toHaveLength(1);
 
-    const second = { id: 't-10', title: 'Redo the review panel', keyword: 'panel' };
+    const second = {
+      id: 't-10',
+      title: 'Redo the review panel',
+      file: 'packages/workspaces-app/src/doc.css',
+      keyword: 'panel',
+    };
     world.boards = [board({ stalled: [], ungatedUi: [UNGATED, second] })];
     world.now += MIN;
     nudger.tick();

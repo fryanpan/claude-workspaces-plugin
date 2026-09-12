@@ -43,6 +43,7 @@ import { ListeningAnnouncer } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
+import { changedFilesInWorktree } from './git-diff.ts';
 import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
 import type { ReviewItemRow } from './keep-moving.ts';
 import { createLeadPresenceMonitor } from './lead-presence.ts';
@@ -831,6 +832,38 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     }
     return false;
   }
+  /**
+   * What has this row's builder changed? The dispatch registry is the only
+   * thing on the board that knows where a builder works, so a row nobody
+   * registered a dispatch for answers `undefined` — no evidence, and the UI
+   * gate then says nothing about it rather than guessing from its prose.
+   *
+   * Memoised per worktree for the life of ONE pass. Two rows can share a
+   * worktree (a builder re-dispatched onto a second row), and the read
+   * spawns git; the map is thrown away with the pass, so the next tick sees
+   * whatever the builder has written since.
+   */
+  function changedFilesReader(): (taskId: string) => readonly string[] | undefined {
+    const worktreeOf = new Map(dispatches.list().map((d) => [d.taskId, d.worktreePath]));
+    const byWorktree = new Map<string, readonly string[] | undefined>();
+    return (taskId) => {
+      const path = worktreeOf.get(taskId);
+      if (path === undefined) return undefined;
+      if (!byWorktree.has(path)) {
+        // A worktree that has vanished, is not a repo, or whose git fails
+        // reads as no evidence — never as "changed nothing". Throwing here
+        // would take the whole stall pass down over one builder's checkout.
+        let files: readonly string[] | undefined;
+        try {
+          files = changedFilesInWorktree(path) ?? undefined;
+        } catch {
+          files = undefined;
+        }
+        byWorktree.set(path, files);
+      }
+      return byWorktree.get(path);
+    };
+  }
   const stallSnapshot = (workspace: BoardWorkspace): StallSnapshot => {
     const verdict = stallVerdict(workspace);
     const capRead = taskStore.parallelismCap(workspace.id);
@@ -911,10 +944,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // session can be present and deliverable having written nothing on any
     // row yet. Both reads are what `hasLiveAttachment` and the presence strip
     // already answer from; nothing here is measured a second way.
-    // The UI gate's breaches (`ui-review-gate.ts`): rows an agent filed that
-    // read as UI work and are being built with nobody's answer on them.
+    // The UI gate's breaches (`ui-review-gate.ts`): rows an agent filed whose
+    // builder has touched a screen with nobody's answer on the row. The
+    // verdict is the changed-file list, not the row's prose — a word list run
+    // over the body was wrong six times out of six.
     const ungatedUi = collectUngatedUiRows(taskStore.listTasks(workspace.id), {
       isAgentName: (name) => taskStore.resolveAgentId(name) !== null,
+      changedFiles: changedFilesReader(),
       answeredReviewItem: answeredReviewItemOn,
     });
     const sessionLive = taskStore.hasLiveAttachment(workspace.id);
