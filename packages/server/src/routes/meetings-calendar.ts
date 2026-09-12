@@ -518,7 +518,14 @@ export async function handleMeetingCalendarRoutes(
       return j(503, { error: 'not_configured' });
     }
     const connection = calendarStore.connection();
-    if (!connection) return j(404, { error: 'not_connected' });
+    // No calendar linked is the ORDINARY state of a board, not a failure, and
+    // every load asks. A 404 here is a failed request to a browser's error
+    // reporter, so a board that simply has no calendar filed a warning on
+    // every load (CLAUDE-WORKSPACES-E). An empty list of upcoming meetings is
+    // the honest answer, and 204 says it without a body. The verbs that act
+    // ON a connection — disconnect, join — still 404 `not_connected`, because
+    // there the missing connection IS the failure.
+    if (!connection) return new Response(null, { status: 204 });
     try {
       const events = await calendarBot.client.listUpcoming(
         connection.calendarId,
