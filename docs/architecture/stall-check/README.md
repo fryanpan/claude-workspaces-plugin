@@ -39,6 +39,15 @@ The owner is the addressee of exactly one line of that table, and only when
 Team Lead cannot be reached either. A task waiting on the owner with a filed
 item is already on their queue and is never re-announced.
 
+Every line of that table is said again while it stands: the board's repeat
+window is what makes a board nobody is driving get louder. It gets louder only
+about work the lead can move. A ticket whose review item is held, or whose
+reader asked a question back, is quiet for a reason that belongs to its filer,
+so it is named once and then stops driving that clock (`clockRows` in
+`stall-nudge.ts`) until the wait's identity changes — the item held again, a
+second question, or the wait cleared. A task past the parallelism cap is not
+judged at all, so it never enters the clock in the first place.
+
 ## The rebuild, in order
 
 Approved 2026-09-08, each step one PR, no stopgaps.

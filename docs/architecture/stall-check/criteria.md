@@ -35,7 +35,15 @@ today's code fails is flagged.
   once per repeat window, and fall back to any attached session when the
   lead holds no stream.
 - **Must never:** wake on shrink, wake a board whose findings are unchanged
-  inside the window, or address a session it cannot reach.
+  inside the window, address a session it cannot reach, or get louder about a
+  task whose wait somebody else owns. The repeat window is the only clock that
+  may re-say a finding, and `clockRows` decides which tasks it speaks for: a
+  ticket carrying a held item or a question a reader asked back is named once
+  and then not again until that wait's identity changes — a re-hold, a second
+  question, or the wait clearing. Before that filter such a ticket woke its
+  lead every window with `changed: { escalated: true }` and nothing else. A
+  task past the parallelism cap needs no filter: the gate never judges it, and
+  `beyondCapacity` is a count on the frame that never enters the stamp.
 - **Measured by:** the `[stall] wake` log lines per board per day, and the
   lead's act latency from transcripts (measured 2026-09-08: median 0–4 min).
 

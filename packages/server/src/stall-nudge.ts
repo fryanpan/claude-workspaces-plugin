@@ -743,7 +743,12 @@ export class StallNudger {
       this.reported.delete(key);
       return;
     }
-    const stamp = this.stampFor(board, held, askedBack, ungatedUi);
+    // The rows whose silence may drive the board's escalation clock — see
+    // `clockRows`. Computed once and threaded through both the stamp and the
+    // high-water mark, because a row excluded from one and counted in the
+    // other would put the clock back through the side door.
+    const clock = this.clockRows(board, held, askedBack);
+    const stamp = this.stampFor(board, held, askedBack, ungatedUi, clock);
     // Named before both the wake decision and the reachability check below,
     // and that ordering is the point: the commonest reason a wake is not
     // delivered is a lead holding no stream, which is exactly when an
@@ -766,7 +771,7 @@ export class StallNudger {
       // keep naming rows that are no longer on the list, so the board's
       // escalation bucket would be read against a set it no longer has.
       this.armed.set(key, stamp);
-      this.rememberHighWater(key, board, memory.rows);
+      this.rememberHighWater(key, clock, memory.rows);
       return;
     }
     // Checked LAST, and deliberately not recorded when it says no: a wake that
@@ -835,7 +840,7 @@ export class StallNudger {
       if (!memory.rows.has(item.id))
         memory.rows.set(item.id, { bucket: UNKNOWN_BUCKET, seenAt: now });
     }
-    this.rememberHighWater(key, board, memory.rows);
+    this.rememberHighWater(key, clock, memory.rows);
     // Recorded only on a DELIVERED wake, like every other memory here: a
     // reminder nobody received must stay owed.
     for (const row of checkIn) this.checkInTold.set(`${key}|${row.id}`, now);
@@ -915,13 +920,79 @@ export class StallNudger {
   }
 
   /**
+   * The rows whose silence may drive the board's escalation clock.
+   *
+   * The clock is the one thing in this file that may re-say a finding the lead
+   * has already been told about: the board's bucket is the oldest quiet row's
+   * silence divided by the repeat window, and every window it crosses arms
+   * another wake. That is what makes a board the lead is ignoring get louder,
+   * and it stays (the owner's number, 2026-09-11: "report again in half an
+   * hour if still stalled").
+   *
+   * But it is a CLOCK, and a clock re-says a row whether or not anything about
+   * it is different. For a row the lead can act on that is the point. For a row
+   * whose silence the snapshot has already EXPLAINED — a wait somebody else
+   * owns — the repeat is the same sentence with a bigger number on it, and it
+   * arrives beside the finding that actually names the wait, so the lead is
+   * woken to re-read something they cannot move. Measured before this filter:
+   * a board whose only quiet row was a ticket with a held review item woke its
+   * lead every repeat window forever, each frame carrying
+   * `changed: { escalated: true }` and nothing else.
+   *
+   * So three kinds of row are taken out of the clock, and the same three are
+   * still NAMED — none of this hides anything:
+   *
+   *  - a ticket carrying a **held** review item. The filer revises it; the
+   *    lead's frame names it under `heldItems`, armed on `held:<item>@<heldAt>`.
+   *  - a ticket carrying a question a reader **asked back**. Same shape,
+   *    armed on `ask:<item>@<askedAt>`.
+   *  - a row on the **`waiting`** list: an ask filed and pending on somebody's
+   *    Home queue. Disjoint from the named lists today (`stall-gate.ts` sorts
+   *    a row into exactly one), and listed here anyway so a later classifier
+   *    change cannot quietly put the clock back.
+   *
+   * ── What counts as the SAME wait ────────────────────────────────────────
+   *
+   * The identity is the token the stamp already writes, and nothing new is
+   * remembered for it. A new hold, a re-hold after a revision, or a second
+   * question mints a different `@<timestamp>`, so the wake fires at once
+   * rather than waiting out a window. An answer arriving, or the hold lifting,
+   * takes the ticket off these lists — its silence is nobody else's any more,
+   * it re-enters the clock, and the ordinary half-hourly escalation resumes.
+   * The memory therefore survives a restart exactly as far as the stamp file
+   * does, and a lost stamp costs the one duplicate wake this file has always
+   * been willing to pay.
+   *
+   * Rows past the parallelism cap need no mention here: `stall-gate.ts` does
+   * not judge them at all, so they reach neither list, and `beyondCapacity` is
+   * a count on the frame that never enters the stamp.
+   */
+  private clockRows(
+    board: StallSnapshot,
+    held: readonly HeldItemRow[],
+    askedBack: readonly AskedBackRow[],
+  ): readonly StalledRow[] {
+    const rows = [...board.stalled, ...board.unfiled];
+    const waits = new Set<string>([
+      ...held.map((item) => item.id),
+      ...askedBack.map((item) => item.id),
+      ...(board.waiting ?? []).map((row) => row.id),
+    ]);
+    if (waits.size === 0) return rows;
+    return rows.filter((row) => !waits.has(row.id));
+  }
+
+  /**
    * Record which row is speaking for the board's bucket, so the hold above can
    * expire with it. Keeps the standing hold while the row that set it is still
    * remembered and still the worse fact; otherwise the board's current oldest
    * row takes over.
    */
-  private rememberHighWater(key: string, board: StallSnapshot, told: Map<string, ToldRow>): void {
-    const rows = [...board.stalled, ...board.unfiled];
+  private rememberHighWater(
+    key: string,
+    rows: readonly StalledRow[],
+    told: Map<string, ToldRow>,
+  ): void {
     let oldest = rows[0];
     for (const row of rows) if (row.quietMs > (oldest?.quietMs ?? -1)) oldest = row;
     if (oldest === undefined) {
@@ -1087,6 +1158,7 @@ export class StallNudger {
     held: readonly HeldItemRow[],
     askedBack: readonly AskedBackRow[],
     ungatedUi: readonly UngatedUiRow[],
+    clock: readonly StalledRow[],
   ): string {
     const rows = [...board.stalled, ...board.unfiled];
     // Ids alone, without the bucket they used to carry. A row changing bucket
@@ -1123,9 +1195,12 @@ export class StallNudger {
         ...ungatedUi.map((row) => `ui:${row.id}`),
       ]),
     ).sort();
-    // The oldest row speaks for the board. `0` on a board whose only finding
-    // is unreadable rows, which is right: there is no silence to escalate.
-    const oldestQuietMs = rows.reduce((max, row) => Math.max(max, row.quietMs), 0);
+    // The oldest row speaks for the board — of the rows the clock may speak
+    // for at all (`clockRows`). `0` on a board whose only finding is
+    // unreadable rows, which is right: there is no silence to escalate. `0`
+    // too on a board whose every quiet row is waiting on somebody else, which
+    // is the same statement: the board said it once and has nothing to add.
+    const oldestQuietMs = clock.reduce((max, row) => Math.max(max, row.quietMs), 0);
     const bucket = Math.floor(oldestQuietMs / this.repeatMs);
     const undetermined = board.undetermined
       .map((u) => `${u.id}:${u.reason}`)
