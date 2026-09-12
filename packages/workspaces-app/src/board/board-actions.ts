@@ -122,6 +122,17 @@ export interface BoardState {
    *  not send it) — neither is "none". */
   chatAudit: ChatAuditView | null;
   detailTaskId: string | null;
+  /**
+   * Why the last move to Done was refused because a done-when line is still
+   * open — the server's own sentence, and which line it named.
+   *
+   * State rather than a toast, because the refusal is about a line the reader
+   * is looking at: a toast that says "line 2 is not met" disappears before
+   * they have found line 2. Cleared by the next transition attempt on the
+   * same ticket and by closing the panel, so it can never outlive the
+   * situation that produced it.
+   */
+  doneWhenRefusal: { taskId: string; message: string; lineId?: string } | null;
   /** Which tab the task panel opens on. `comments` every way in but one: the
    *  Home activity pane's title tap opens on Activity (Bryan, 2026-08-29).
    *  Reset to `comments` when the panel closes, so nothing lingers into the
@@ -289,10 +300,26 @@ export function createBoardActions(deps: BoardActionDeps) {
   }
 
   async function transitionTask(task: BoardTask, to: BoardTask['status']): Promise<void> {
+    // Whatever the last attempt was refused for, this attempt supersedes it.
+    state.doneWhenRefusal = null;
     const res = await send(api(`tasks/${encodeURIComponent(task.id)}/transition`), 'POST', {
       to,
       author,
     });
+    // A ticket that says what finished means, with a line that is not met.
+    // The message names the line and lands beside the Status control rather
+    // than in a toast — see `BoardState.doneWhenRefusal`.
+    if (res.data?.error === 'done-when-open') {
+      const said = typeof res.data?.message === 'string' ? res.data.message : '';
+      const open = (task.doneWhen ?? []).find((l) => l.verdict !== 'met');
+      state.doneWhenRefusal = {
+        taskId: task.id,
+        message: said || 'A done-when line on this task is not met yet.',
+        ...(open !== undefined ? { lineId: open.id } : {}),
+      };
+      revertToServerTruth();
+      return;
+    }
     if (res.status === 409) {
       const blockers = (res.data?.blockers as Array<{ taskId: string; title?: string }>) ?? [];
       const names = blockers.map((b) => b.title ?? b.taskId).join(', ');
@@ -349,6 +376,49 @@ export function createBoardActions(deps: BoardActionDeps) {
    * editor holds a sentence the reader typed, and a refusal that read as a
    * success would blank it and lose their words.
    */
+  /**
+   * Write the whole done-when list — the panel's add, its in-place edit and
+   * its ×, which are one verb on the server and so one call here.
+   *
+   * Reports whether it landed, because the list editor holds words the reader
+   * typed: a refusal that read as a success would repaint the line from the
+   * stored list and lose them.
+   */
+  async function setDoneWhenLines(
+    task: BoardTask,
+    lines: Array<{ id?: string; text: string }>,
+  ): Promise<boolean> {
+    const res = await send(api(`tasks/${encodeURIComponent(task.id)}/done-when`), 'POST', {
+      lines,
+      author,
+    });
+    if (!res.ok) showToast(addFailureText(res, 'Saving the done-when list failed'));
+    // A write can COMPLETE the list — removing the last open line leaves one
+    // that is entirely met, and the server closes the ticket itself. Clearing
+    // the refusal here is what takes the old sentence off the screen when the
+    // thing it complained about is gone.
+    else state.doneWhenRefusal = null;
+    return res.ok;
+  }
+
+  /** The owner's word on a line the builder left to them. Person-only on the
+   *  server; a refusal is reported rather than swallowed, because the two
+   *  buttons are the reader's own act. */
+  async function checkDoneWhenLine(
+    task: BoardTask,
+    lineId: string,
+    verdict: 'met' | 'not-met',
+  ): Promise<boolean> {
+    const res = await send(
+      api(`tasks/${encodeURIComponent(task.id)}/done-when/${encodeURIComponent(lineId)}/check`),
+      'POST',
+      { verdict, author },
+    );
+    if (!res.ok) showToast(addFailureText(res, 'Recording your check failed'));
+    else state.doneWhenRefusal = null;
+    return res.ok;
+  }
+
   async function setTaskSchedule(task: BoardTask, next: ScheduleWrite): Promise<boolean> {
     const res = await send(api(`tasks/${encodeURIComponent(task.id)}/schedule`), 'POST', {
       ...(next === null ? { rule: null } : next),
@@ -782,6 +852,8 @@ export function createBoardActions(deps: BoardActionDeps) {
     setTaskGoal,
     setTaskDue,
     setTaskSchedule,
+    setDoneWhenLines,
+    checkDoneWhenLine,
     addRelatedLink,
     removeRelatedLink,
     archiveTask,

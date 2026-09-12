@@ -15,6 +15,7 @@ import {
   reviewItemState,
 } from '@claude-workspaces/core';
 import type { TaskReviewItem } from '@claude-workspaces/core';
+import { doneWhenMetCount } from '@claude-workspaces/core/done-when';
 import { TASK_NOTES_READ_CAP } from './agent-notes.ts';
 import { type OwnerKind, resolveOwnerKind } from './task-owner.ts';
 import {
@@ -235,6 +236,27 @@ export function projectTask(
     // one fact about the derived `r-legacy` row the browser cannot read off
     // `options`/`answer`. See `projectDecisionState`.
     ...projectDecisionState(task),
+    // What "finished" means on this ticket, and how much of it is proved.
+    //
+    // TWO keys for one fact, and the split is the payload: the LINES — words,
+    // verdicts and every proof behind them — are read by the open panel and
+    // by nothing else, so `TRIMMED_ROW_FIELDS` drops them from the board's
+    // ydoc and the detail fetch hands them back. What survives the trim is
+    // `doneWhenProgress`, two small numbers, because the board ROW draws a
+    // pill and a row cannot fetch.
+    //
+    // Both conditional, like every optional key here: `refresh` deletes
+    // projected keys absent from this object, so clearing a ticket's list
+    // takes the pill off the row with nothing having to reset a flag.
+    ...(task.doneWhen !== undefined && task.doneWhen.length > 0
+      ? {
+          doneWhen: task.doneWhen,
+          doneWhenProgress: {
+            met: doneWhenMetCount(task.doneWhen),
+            total: task.doneWhen.length,
+          },
+        }
+      : {}),
     goal: task.goal,
     order: task.order,
     after: task.after,

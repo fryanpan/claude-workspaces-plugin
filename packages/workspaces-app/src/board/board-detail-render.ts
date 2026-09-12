@@ -331,6 +331,23 @@ export interface DetailHandlers {
    */
   onScheduleSet?: (task: BoardTask, next: ScheduleWrite) => Promise<boolean>;
   /**
+   * Write the whole done-when list. Absent on a panel that may not edit the
+   * ticket, and the list then renders read-only with no add control.
+   */
+  onDoneWhenLines?: (
+    task: BoardTask,
+    lines: Array<{ id?: string; text: string }>,
+  ) => Promise<boolean>;
+  /** The owner's word on a line the builder marked as theirs to judge. */
+  onDoneWhenCheck?: (
+    task: BoardTask,
+    lineId: string,
+    verdict: 'met' | 'not-met',
+  ) => Promise<boolean>;
+  /** The server's sentence when a move to Done was refused because a line is
+   *  still open, plus the line it named. Absent when nothing was refused. */
+  doneWhenRefusal?: { message: string; lineId?: string };
+  /**
    * Take the task off the board, reversibly. THE PANEL IS THE ONLY PLACE THIS
    * LIVES (Bryan, on the design thread: *"Detail panel only… It's a secondary
    * action. Should not take up space from primary flows."*) — an earlier mock

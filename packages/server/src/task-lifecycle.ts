@@ -1,3 +1,4 @@
+import { doneWhenRefusal } from '@claude-workspaces/core/done-when';
 /**
  * Where a row IS, and who holds it: the one status gate, the two reader
  * functions it consults, and the three field verbs that hand a row over
@@ -249,6 +250,16 @@ export class TaskLifecycleStore {
           `${task.title} is a draft derived from a plan doc (${task.planHold.docId}) that has not been approved. ` +
           'It stays in triage until the plan is approved — which releases it — or the task is archived.',
       };
+    }
+
+    // A ticket that says what "finished" means may not be declared finished
+    // while one of those lines is open. Only `to === 'done'` and only a task:
+    // moving backwards, parking and a goal band's own close are untouched, a
+    // row with no lines is refused by nothing, and the auto-close passes by
+    // construction since it fires only once every line is met.
+    const openLine = isGoalRow(task) || to !== 'done' ? undefined : doneWhenRefusal(task.doneWhen);
+    if (openLine !== undefined) {
+      return { ok: false, error: 'done-when-open', message: openLine };
     }
 
     const forward = to === 'in-progress' || to === 'done';

@@ -73,8 +73,12 @@ export function flattenNestedGoals(goals: readonly NestedGoalInput[]): Workspace
 /** Schemes a `url` ref may carry. A ref is rendered as a clickable chip, so
  *  the value becomes an href — `javascript:` and `data:` are script injection
  *  and `file:` reads the host. Every other kind is an internal id and cannot
- *  express a scheme at all, which is why this check has no analogue there. */
-function isSafeHttpUrl(value: string): boolean {
+ *  express a scheme at all, which is why this check has no analogue there.
+ *
+ *  Exported because a done-when proof carries a url for the same reason and
+ *  becomes an href in the same way — one guard, so the two surfaces cannot
+ *  disagree about what is safe to click. */
+export function isSafeHttpUrl(value: string): boolean {
   // No trimming first, deliberately: a leading space would make `new URL`
   // parse `  javascript:…` fine in some runtimes, and a caller sending
   // padded input is not a caller whose padding we should silently fix.

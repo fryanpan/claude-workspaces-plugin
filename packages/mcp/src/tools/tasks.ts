@@ -539,14 +539,30 @@ export async function handleTaskTool(
       });
     }
     case 'rewrite_task': {
-      const { taskId, title, body, reason } = a as {
+      const { taskId, title, body, reason, doneWhen } = a as {
         taskId: string;
         title?: string;
         body?: string;
         reason?: string;
+        doneWhen?: unknown[];
       };
+      if (body === undefined && title === undefined && doneWhen === undefined) {
+        return err('nothing to rewrite — pass title, body, doneWhen, or any combination');
+      }
+      // The done-when list is a FIELD, so it has its own write. Sent first,
+      // because it is the half that can be refused on its contents: a caller
+      // that sent a bad list learns that before a body replace has landed,
+      // rather than after.
+      let doneWhenLines: unknown;
+      if (doneWhen !== undefined) {
+        const dw = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/done-when`, {
+          lines: doneWhen,
+          author: AUTHOR,
+        })) as { lines?: unknown };
+        doneWhenLines = dw.lines;
+      }
       if (body === undefined && title === undefined) {
-        return err('nothing to rewrite — pass title, body, or both');
+        return ok({ taskId, doneWhen: doneWhenLines });
       }
       if (body !== undefined) {
         // Body (with or without a title): one attributed act through the
@@ -566,6 +582,7 @@ export async function handleTaskTool(
           title: res.task?.title,
           body: res.task?.body,
           quote: res.task?.quote,
+          ...(doneWhenLines !== undefined ? { doneWhen: doneWhenLines } : {}),
         });
       }
       // Title-only: the /title route, which emits an attributed
@@ -575,7 +592,27 @@ export async function handleTaskTool(
         ...(reason !== undefined ? { reason } : {}),
         author: AUTHOR,
       })) as { task: TaskPayload; changed?: boolean };
-      return ok({ taskId, title: res.task?.title, changed: res.changed ?? false });
+      return ok({
+        taskId,
+        title: res.task?.title,
+        changed: res.changed ?? false,
+        ...(doneWhenLines !== undefined ? { doneWhen: doneWhenLines } : {}),
+      });
+    }
+    // The builder's word on the list. The server closes the task itself when
+    // the last open line goes to `met`, so `closed` and `status` come back
+    // rather than the caller having to read the task again to find out.
+    case 'report_done_when': {
+      const { taskId, lines } = a as { taskId: string; lines: unknown[] };
+      if (!Array.isArray(lines) || lines.length === 0) {
+        return err('lines must name at least one done-when line to report');
+      }
+      const res = (await http(
+        'POST',
+        `${board()}/tasks/${encodeURIComponent(taskId)}/done-when/report`,
+        { lines, author: AUTHOR },
+      )) as { lines: unknown[]; closed: boolean; status: string };
+      return ok({ taskId, lines: res.lines, closed: res.closed, status: res.status });
     }
     case 'set_task_goal': {
       const { taskId, goal, position, batchId } = a as {

@@ -111,7 +111,7 @@ describe('reviews and quote — read by nothing outside the open panel', () => {
     const slim = slimTaskRow(heavyRow('t-done'), NOW);
     expect(slim.reviews).toBeUndefined();
     expect(slim.quote).toBeUndefined();
-    expect([...ALWAYS_TRIMMED_FIELDS]).toEqual(['reviews', 'quote']);
+    expect([...ALWAYS_TRIMMED_FIELDS]).toEqual(['reviews', 'quote', 'doneWhen']);
   });
 });
 
@@ -206,7 +206,14 @@ describe('what every trimmed row keeps, and what it says about itself', () => {
     // reader checks the union against, and comparing it to its own element
     // type would make the assertion agree with whatever the constant says.
     const dropped: readonly string[] = TRIMMED_ROW_FIELDS;
-    expect([...dropped].sort()).toEqual(['body', 'bodyTruncated', 'notes', 'quote', 'reviews']);
+    expect([...dropped].sort()).toEqual([
+      'body',
+      'bodyTruncated',
+      'doneWhen',
+      'notes',
+      'quote',
+      'reviews',
+    ]);
     for (const field of TRIMMED_ROW_FIELDS) expect(slim[field]).toBeUndefined();
     expect(slim.detailTrimmed).toBe(true);
     // The list lives in core because the browser's overlay reads it too, and

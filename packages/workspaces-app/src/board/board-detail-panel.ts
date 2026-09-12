@@ -154,6 +154,8 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
     setTaskGoal,
     setTaskDue,
     setTaskSchedule,
+    setDoneWhenLines,
+    checkDoneWhenLine,
     archiveTask,
     restoreTask,
     addRelatedLink,
@@ -462,6 +464,8 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
           state.detailTaskId = null;
           state.detailTab = 'comments';
           state.detailThreadId = null;
+          // The refusal is about an attempt on a panel that is now closed.
+          state.doneWhenRefusal = null;
           renderDetail();
         },
         onCopyLink: (t) => void copyTaskLink(t),
@@ -487,6 +491,21 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
         onGoalSet: (t, goalId) => void setTaskGoal(t, goalId),
         onDueSet: (t, dueAt) => void setTaskDue(t, dueAt),
         onScheduleSet: (t, next) => setTaskSchedule(t, next),
+        onDoneWhenLines: (t, lines) => setDoneWhenLines(t, lines),
+        onDoneWhenCheck: (t, lineId, verdict) => checkDoneWhenLine(t, lineId, verdict),
+        // Only while it is about the ticket that is open: the refusal is a
+        // fact about one attempt, and carrying it onto the next task would
+        // put a stranger's open line beside this one's Status control.
+        ...(task && state.doneWhenRefusal?.taskId === task.id
+          ? {
+              doneWhenRefusal: {
+                message: state.doneWhenRefusal.message,
+                ...(state.doneWhenRefusal.lineId !== undefined
+                  ? { lineId: state.doneWhenRefusal.lineId }
+                  : {}),
+              },
+            }
+          : {}),
         onArchive: (t) => void archiveTask(t),
         onRestore: (t) => void restoreTask(t),
         onComment: (t, text, threadId) => postRowComment(t, text, threadId),

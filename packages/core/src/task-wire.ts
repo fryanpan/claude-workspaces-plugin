@@ -10,6 +10,7 @@
  * display names only, no actor ids — and reads the pieces it shares from
  * here rather than restating them.
  */
+import type { DoneWhenLine } from './done-when.ts';
 import type {
   ReviewItemJudgement,
   ReviewItemRange,
@@ -251,7 +252,20 @@ export const TASK_NOTES_STORE_CAP = 200;
  * A row that lost anything says so with `detailTrimmed`, and
  * `GET /workspaces/:ws/tasks/:taskId/detail` answers with all of it.
  */
-export const TRIMMED_ROW_FIELDS = ['reviews', 'quote', 'body', 'bodyTruncated', 'notes'] as const;
+export const TRIMMED_ROW_FIELDS = [
+  'reviews',
+  'quote',
+  'body',
+  'bodyTruncated',
+  'notes',
+  // The done-when LINES. Their words, their verdicts and every proof behind
+  // them are read by one surface — the open panel — and a board of finished
+  // tickets would otherwise ship every criterion anybody ever wrote to every
+  // reader on every open. What a list surface does read is the pair of
+  // numbers `doneWhenProgress` carries, which is not in this list and stays
+  // on every row.
+  'doneWhen',
+] as const;
 
 /**
  * The field the trim keeps but SHORTENS: every stop survives, its `note` and
@@ -423,6 +437,22 @@ export interface Task {
    * row, so this needs no writer of its own.
    */
   reviews?: StoredReviewItem[];
+  /**
+   * What has to be true before this ticket is finished — an ordered list of
+   * outcomes, each with its own verdict and the builder's proof behind it.
+   * See `@claude-workspaces/core/done-when`.
+   *
+   * A FIELD, not a heading in `body`. The body's "Done when" prose stays
+   * exactly where it is and is NOT migrated into this: a migration would have
+   * to guess which bullets under which heading were criteria, and a wrong
+   * guess arms a gate that refuses somebody's Done over a sentence they never
+   * meant as a condition. A task with no lines behaves exactly as every task
+   * did before this field — the panel offers only "Add done criteria", and
+   * moving it to Done is refused by nothing.
+   *
+   * Absent means no lines, which is every row written before the field.
+   */
+  doneWhen?: DoneWhenLine[];
   /** Goal id; `chores` is the catch-all. */
   goal: string;
   /** Fractional sort key — always room to insert between two tasks. */

@@ -1,3 +1,4 @@
+import type { DoneWhenVerdict } from '@claude-workspaces/core/done-when';
 /**
  * The board's pure view-model: what a row is, which section it lands in, and
  * how much work a goal has left (plan §3.9). Computed from the
@@ -162,6 +163,20 @@ export interface BoardTask {
    */
   ownerKind?: BoardOwnerKind;
   needs?: 'action' | 'decision';
+  /**
+   * What has to be true before this ticket is finished, line by line. Read
+   * only by the open panel — the board's ydoc drops this field from every row
+   * (`TRIMMED_ROW_FIELDS`) and the detail fetch fills it back in, which is why
+   * nothing on a lane may branch on it.
+   */
+  doneWhen?: BoardDoneWhenLine[];
+  /**
+   * How many of those lines are met, and how many there are. Two numbers,
+   * kept on EVERY row because the row's own pill draws them and a row cannot
+   * fetch. Absent when the ticket has no lines, which is what keeps the pill
+   * off every task filed before the field.
+   */
+  doneWhenProgress?: { met: number; total: number };
   goal: string;
   order: number;
   after: string[];
@@ -312,6 +327,22 @@ export interface BoardTask {
   /** Folded-up human attention on this ticket's body doc. Absent means not
    *  measured — never measured at zero. */
   readingTime?: TaskReadingTime;
+}
+
+/**
+ * One done-when line as the board reads it — the projection's own shape, so
+ * the panel renders what the server sent rather than a second opinion about
+ * it. `verdict` absent means nobody has reported on the line, and the panel
+ * draws no chip: that is not a fifth verdict, it is the builder not having
+ * spoken.
+ */
+export interface BoardDoneWhenLine {
+  id: string;
+  text: string;
+  verdict?: DoneWhenVerdict;
+  proof?: Array<{ text: string; url?: string }>;
+  by?: string;
+  at?: number;
 }
 
 /** A projected review item, as far as the board reads it. */

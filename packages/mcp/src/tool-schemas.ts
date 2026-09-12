@@ -1577,6 +1577,12 @@ export const TOOL_LIST: ListToolsResult = {
                   description:
                     "The person's VERBATIM words, for an ask that came from chat, kept on the task. For a thread-born ask use spin_off_task, which captures the quote itself.",
                 },
+                doneWhen: {
+                  type: 'array',
+                  description:
+                    'What has to be true before this task is done, one outcome per entry: [{text}]. It is a FIELD, not prose in the body — the task will not move to done until every line is reported met, and reports it back a line at a time through report_done_when. Write each line so a reader can check it without asking you: name what is measured and where they read it. At most 50.',
+                  items: { type: 'object' },
+                },
               },
               required: ['title'],
             },
@@ -1881,6 +1887,12 @@ export const TOOL_LIST: ListToolsResult = {
             description:
               'The FULL new description, replacing what is there. Omit it to leave the body alone. Open with the user story, keep it readable on a phone, and state a falsifiable done-when.',
           },
+          doneWhen: {
+            type: 'array',
+            description:
+              "The WHOLE done-when list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed.",
+            items: { type: 'object' },
+          },
           reason: {
             type: 'string',
             description:
@@ -1888,6 +1900,29 @@ export const TOOL_LIST: ListToolsResult = {
           },
         },
         required: ['workspaceId', 'taskId', 'reason'],
+      },
+    },
+    {
+      name: 'report_done_when',
+      description:
+        "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge; they get two buttons on the task and you do not wait on a tool.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description:
+              'The board this resource is on. get_workspace lists the boards you are attached to.',
+          },
+          taskId: { type: 'string' },
+          lines: {
+            type: 'array',
+            description:
+              "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. Every entry is validated before anything is written, so a bad entry writes nothing.",
+            items: { type: 'object' },
+          },
+        },
+        required: ['workspaceId', 'taskId', 'lines'],
       },
     },
     {
