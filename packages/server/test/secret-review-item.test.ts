@@ -232,7 +232,7 @@ describe('a secret ask, answered by the board owner', () => {
     // which is why this assertion reads the error and not just the status.
     const before = written.length;
     const res = await postAsVisitor(REGULAR, doorPath(), {
-      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+      author: { id: 'u-regular', name: 'Share Visitor', kind: 'human' },
       secrets: [
         { service: 'saltmarsh-relay-account', value: FIRST_VALUE },
         { service: 'saltmarsh-relay-signer', value: SECOND_VALUE },
@@ -275,7 +275,7 @@ describe('a secret ask, answered by the board owner', () => {
     // is the whole point of sending it rather than deriving it in the client.
     const before = written.length;
     const res = await postAsVisitor(REGULAR, doorPath(), {
-      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+      author: { id: 'u-regular', name: 'Share Visitor', kind: 'human' },
       secrets: [
         { service: 'saltmarsh-relay-account', value: FIRST_VALUE },
         { service: 'saltmarsh-relay-signer', value: SECOND_VALUE },
@@ -473,7 +473,7 @@ describe('a secret ask, answered by the board owner', () => {
 
     const onATask = await postAsVisitor(REGULAR, `${scope()}/tasks/${taskId}/review-items`, {
       review: secretAsk,
-      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+      author: { id: 'u-regular', name: 'Share Visitor', kind: 'human' },
     });
     expect(onATask.status).toBe(403);
     expect(((await onATask.json()) as { error?: string }).error).toBe('share-visitor');
@@ -482,7 +482,7 @@ describe('a secret ask, answered by the board owner', () => {
       title: 'Post the weekly index to the Saltmarsh relay',
       body: 'Agent can post the weekly index so that the archive stays current.',
       review: secretAsk,
-      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+      author: { id: 'u-regular', name: 'Share Visitor', kind: 'human' },
     });
     expect(withATicket.status).toBe(403);
     expect(((await withATicket.json()) as { error?: string }).error).toBe('share-visitor');
@@ -496,7 +496,7 @@ describe('a secret ask, answered by the board owner', () => {
         headline: 'Should the weekly index go to the relay as well as the archive?',
         detail: 'The weekly pass writes the archive today and nothing reads it.',
       },
-      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+      author: { id: 'u-regular', name: 'Share Visitor', kind: 'human' },
     });
     expect(ordinary.status).toBe(200);
 
@@ -507,7 +507,7 @@ describe('a secret ask, answered by the board owner', () => {
     // a list somebody edits, and this shape should not be reachable by the
     // edit alone.
     const batch = await postAsVisitor(REGULAR, `${scope()}/tasks/batch`, {
-      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+      author: { id: 'u-regular', name: 'Share Visitor', kind: 'human' },
       tasks: [
         {
           title: 'Post the weekly index to the Saltmarsh relay',

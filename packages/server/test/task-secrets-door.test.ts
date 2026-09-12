@@ -23,7 +23,7 @@ import type { TaskRouteRequest, TaskRoutesContext } from '../src/routes/task-rou
 import { handleTaskSecrets } from '../src/routes/task-secrets.ts';
 import type { SecretWriteResult } from '../src/secret-store.ts';
 
-const AGENT: User = { id: 'a-riverbend', name: 'Riverbend Bot', kind: 'known', color: '#888888' };
+const AGENT: User = { id: 'a-riverbend', name: 'Nightly Indexer', kind: 'known', color: '#888888' };
 const TASK = 't-nightly';
 const ITEM = 'r-two-values';
 const SERVICE = 'saltmarsh-relay-account';
