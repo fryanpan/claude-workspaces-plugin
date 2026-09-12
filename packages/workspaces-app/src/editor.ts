@@ -277,6 +277,19 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     const target = ev.target as HTMLElement | null;
     const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
     if (!anchor) return;
+    // A link the reader has ALREADY commented on belongs to the comment
+    // first. Its words carry a highlight, and that highlight is the only way
+    // into the thread from the prose — take the plain click for the link and
+    // the reader can never reopen their own comment by pointing at what it is
+    // about. So a highlighted link opens its thread on a plain click, and
+    // opens the page on a Cmd/Ctrl-click, which is the gesture a mouse user
+    // already has for "open this link, but not here". Returning leaves the
+    // event to bubble to the `.thread-range` handler on the mount above.
+    // Asked of the CLICK TARGET, not of the anchor: a highlight over a link
+    // may render as a span inside the `<a>` or as one around it, depending on
+    // where the comment's range starts and ends, and only the target is
+    // inside both spellings.
+    if (!ev.metaKey && !ev.ctrlKey && target?.closest?.('.thread-range')) return;
     const href = safeLinkHref(anchor.getAttribute('href'));
     if (!href) return;
     ev.preventDefault();

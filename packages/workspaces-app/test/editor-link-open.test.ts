@@ -188,3 +188,80 @@ describe('the gestures that are not the opening one', () => {
     expect(opened.calls).toEqual([]);
   });
 });
+
+/**
+ * A link somebody has already commented on.
+ *
+ * Its words then carry both an anchor and a comment highlight, and only one of
+ * them can have the plain click. The highlight is the ONLY way into that
+ * thread from the prose — the card in the margin is the other, and on a phone
+ * there is no margin — so taking the plain click for the link leaves a reader
+ * unable to reopen their own comment by pointing at what it is about. The link
+ * keeps Cmd/Ctrl-click, which is already the mouse gesture for "open this, but
+ * not here".
+ *
+ * The decoration is the real one: `setThreadRanges` is what the doc's thread
+ * projection calls, and the span these cases click is the span it renders.
+ */
+describe('a link the reader has commented on', () => {
+  /** Put a comment highlight over the whole of the rendered link. */
+  function highlightTheLink(editor: EditorHandle): void {
+    const a = anchor();
+    const from = editor.editor.view.posAtDOM(a, 0);
+    const to = from + (a.textContent ?? '').length;
+    editor.setThreadRanges([{ id: 't1', from, to, status: 'open' }], null);
+  }
+
+  /** The click target inside the highlight, whichever way the two spans nest. */
+  const inHighlight = (): HTMLElement => {
+    const el = document.querySelector('.ProseMirror .thread-range') as HTMLElement | null;
+    if (!el) throw new Error('no highlight was rendered over the link');
+    return el;
+  };
+
+  for (const width of WIDTHS) {
+    it(`opens the thread, not the page, on a plain click at ${width}`, () => {
+      setViewportWidth(width);
+      const opened = watchOpen();
+      const editor = mount(LINKED);
+      highlightTheLink(editor);
+      click(inHighlight());
+      expect(opened.calls).toEqual([]);
+    });
+  }
+
+  it('lets the click through, so the highlight handler above can open the thread', () => {
+    setViewportWidth(430);
+    watchOpen();
+    const editor = mount(LINKED);
+    highlightTheLink(editor);
+    // `wireThreadRangeClicks` listens on the mount ABOVE the editor's own DOM,
+    // so a link handler that swallowed the event would leave the thread
+    // unreachable even with nothing opened.
+    const reached: string[] = [];
+    document.body.addEventListener('click', () => reached.push('mount'));
+    click(inHighlight());
+    expect(reached).toEqual(['mount']);
+  });
+
+  it('still opens the page on a Cmd-click, which is the way out to the link', () => {
+    setViewportWidth(1180);
+    const opened = watchOpen();
+    const editor = mount(LINKED);
+    highlightTheLink(editor);
+    click(inHighlight(), { metaKey: true });
+    expect(opened.calls).toEqual([
+      ['https://example.invalid/riverbend', '_blank', 'noopener,noreferrer'],
+    ]);
+  });
+
+  /** THE CONTROL: the same link with no comment on it still opens on a plain
+   *  click, so the case above is about the highlight and not about links. */
+  it('opens on a plain click when nothing has been commented on it', () => {
+    setViewportWidth(430);
+    const opened = watchOpen();
+    mount(LINKED);
+    click(anchor());
+    expect(opened.calls.length).toBe(1);
+  });
+});
