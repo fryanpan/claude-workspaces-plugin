@@ -1620,24 +1620,53 @@ body.board-body {
 /* SAVE'S OWN ROOM IN THE SCROLL — what replaced sticking the row down.
    Tapping a field scrolls it into view, and the browser stops as soon as the
    field itself is inside the scrollport, which leaves Save just past the
-   bottom edge. Reserving the row's own height at the foot of the scrollport
-   makes that same scroll carry Save with the field, so the control and the
-   box it belongs to arrive together — and nothing is ever painted over
-   anything.
+   bottom edge. Reserving a band at the foot of the scrollport makes that same
+   scroll carry Save with the field, so the control and the box it belongs to
+   arrive together — and nothing is ever painted over anything.
 
-   92px: the 44px button, the row's 6px of padding, the 24px of bottom padding
-   the panel carries, and enough over to survive a line of the half-filled
-   form's message wrapping beside it. `--safe-bottom` because the phone's
-   scroller ends above the home indicator.
+   TWO SCROLLERS, AND THE RESERVE HAS TO BE ON THE BOX THAT ACTUALLY SCROLLS.
+   The form has two homes and they scroll differently. In the task panel the
+   scroller is `.board-detail-panel`, a real overflow box. On Home the
+   walkthrough is a page in the Home column, so the scroller is the VIEWPORT
+   — and a viewport takes its scroll reserve from the ROOT element. `body` is
+   not it: `body.board-body`'s own `overflow: auto` PROPAGATES to the
+   viewport, which leaves body itself a non-scrolling box whose
+   `scroll-padding` nothing ever reads. One round shipped the reserve on
+   `body` and it computed `auto` on `html`, so on Home the first-draw scroll
+   put the form's foot flush with the viewport's bottom edge — under the
+   fixed nav dock, where every point of Save hit-tested to `board-nav` and a
+   real tap navigated away and dropped the form (UX review, 2026-09-12).
 
-   Two scrollers, because the form has two homes: the task panel's box and the
-   page itself on Home. One number for both — Home's scroller has no bottom
-   padding of its own, so this over-reserves there by the panel's 24px, which
-   costs a focused field a little more room above the fold and nothing else.
-   `:has()` keeps the reservation to the pages actually showing a form, so no
-   other surface's scroll-into-view moves. */
-:where(.board-detail-panel, body.board-body):has(.board-walk-cred-form) {
+   AND THE TWO BANDS ARE NOT THE SAME BAND, because what ends each scrollport
+   differs. The panel's is the panel's own bottom padding. The viewport's is
+   the dock, which is `position: fixed` and so is not part of the scroll at
+   all — the page can be scrolled to its very end and still have its last
+   58px covered.
+
+   92px in the panel: the 44px button, the row's 6px of padding, the 24px of
+   bottom padding the panel carries, and enough over for a line of the
+   half-filled form's message to wrap beside it.
+
+   104px on Home, and it has to be bigger than the dock rather than added to
+   it: what the first-draw scroll aligns to this band is the FORM, Save
+   included, so a band taller than the 58px dock puts the whole form above it.
+   96px of the 104 is the measured distance from the last field's bottom edge
+   to the form's foot with the "still empty" message showing — the row stacks
+   at this width, so the message sits above the button rather than beside it —
+   and the last 8px keep Save off the dock's edge rather than flush against
+   it. An earlier draft added `--board-bottom-bar` on top of that; the
+   mutation said it bought nothing any measurement could see, so it is not
+   here. `secret-save-home.test.ts` reads the dock's height in the browser and
+   fails if this number ever stops clearing it. `--safe-bottom` because the
+   phone's scroller ends above the home indicator.
+
+   `:has()` keeps both reservations to the pages actually showing a form, so
+   no other surface's scroll-into-view moves. */
+.board-detail-panel:has(.board-walk-cred-form) {
   scroll-padding-bottom: calc(92px + var(--safe-bottom, 0px));
+}
+html:has(.board-walk-cred-form) {
+  scroll-padding-bottom: calc(104px + var(--safe-bottom, 0px));
 }
 .board-walk-cred-miss {
   font-size: 13px;
