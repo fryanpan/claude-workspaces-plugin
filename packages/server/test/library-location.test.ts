@@ -106,6 +106,12 @@ describe('where a doc lives', () => {
       'not mounted',
       true,
     ]);
+    // Still a stray when a broader mount holds the meetings folder.
+    expect(shape(placeOf(inRepo('documents', 'docs/meetings/plan.md'), ctx()))).toEqual([
+      'docs/meetings',
+      'not mounted',
+      true,
+    ]);
   });
 
   it('flags a project doc outside every configured folder, by its real folder', () => {

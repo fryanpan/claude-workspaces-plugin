@@ -138,7 +138,15 @@ export function placeOf(doc: PlacedDoc, ctx: PlacingContext): Omit<LibraryPlace,
     if (!ctx.projectVisible)
       return missing({ label: 'In the project', folder: false, stray: false });
     const rel = doc.relPath;
-    const home = configured.filter((f) => inFolder(rel, f)).sort((a, b) => b.length - a.length)[0];
+    // A document filed in the meetings folder is not where documents go, even
+    // when a broader mount (`docs` over `docs/meetings`) holds it.
+    const meetingsDoc =
+      doc.kind === 'documents' &&
+      ctx.meetingsFolder !== undefined &&
+      inFolder(rel, ctx.meetingsFolder);
+    const home = meetingsDoc
+      ? undefined
+      : configured.filter((f) => inFolder(rel, f)).sort((a, b) => b.length - a.length)[0];
     if (home !== undefined) {
       const at =
         home === '' ? { label: 'Project root', folder: false } : { label: home, folder: true };
