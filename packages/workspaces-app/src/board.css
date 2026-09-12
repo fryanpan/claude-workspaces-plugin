@@ -1632,9 +1632,36 @@ body.board-body {
 /* The collapse toggle sits at the rail's foot, visually quieter than the
    nav items above it. Hidden in the strip/bottom-bar bands — a row of tabs
    has nothing to collapse. */
-.board-nav-collapse {
+/* The settings seat takes the auto margin the collapse toggle used to own,
+   so the pair sits at the rail's foot with the four tabs pushed clear above
+   them. Quiet — the muted weight of an inactive tab — because it is not a
+   fifth page of the workspace. */
+.board-nav-item.board-nav-settings {
   margin-top: auto;
   font-weight: 500;
+}
+.board-nav-collapse {
+  margin-top: 0;
+  font-weight: 500;
+}
+/* The two bands hold ONE of these, never both (Bryan, 2026-09-11: on mobile
+   "leave it up top right"). Above 1100 the rail has the room and the top bar
+   does not; at or below it the nav is a strip and then a bottom bar with four
+   tabs and a mic already in it, so the gear stays where a thumb has always
+   found it. */
+/* Compound selectors, because `board.css` loads BEFORE `styles.css`: a single
+   class here loses an equal-specificity tie to `.board-icon-btn`'s own
+   `display`, which is the later rule. */
+.board-icon-btn.board-topbar-settings {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .board-icon-btn.board-topbar-settings {
+    display: inline-flex;
+  }
+  .board-nav-item.board-nav-settings {
+    display: none;
+  }
 }
 .board-nav-item {
   display: flex;

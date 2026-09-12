@@ -72,7 +72,7 @@ export function buildShell(
       <div class="board-cluster">
         <div id="board-people" class="board-presence board-people hidden"></div>
         <button type="button" id="board-share" class="board-icon-btn" title="Share workspace" aria-label="Share workspace">${NAV_ICONS.share}</button>
-        <button type="button" id="board-settings" class="board-icon-btn" title="Workspace settings" aria-label="Workspace settings">${NAV_ICONS.settings}<span id="board-settings-alarm" class="board-alarm-dot hidden" aria-hidden="true"></span></button>
+        <button type="button" id="board-settings" class="board-icon-btn board-topbar-settings" title="Workspace settings" aria-label="Workspace settings">${NAV_ICONS.settings}<span id="board-settings-alarm" class="board-alarm-dot hidden" aria-hidden="true"></span></button>
         <button type="button" id="board-me" class="board-me" title="Signed in" aria-haspopup="true" aria-expanded="false"></button>
       </div>
       <div id="board-me-menu" class="board-me-menu hidden" role="region" aria-label="Your identity"></div>
@@ -87,6 +87,16 @@ export function buildShell(
           <span class="board-nav-icon" aria-hidden="true">${n.icon}</span><span class="board-nav-label">${escapeHtml(n.label)}</span>
         </button>`,
         ).join('')}
+        <!-- The rail's foot, apart from the four tabs above it (Bryan,
+             2026-09-11: settings reached "from a bottom-left button in the
+             nav bar", "so that settings never crowd the main tabs or the top
+             bar"). Quiet like the collapse toggle beside it, and pushed away
+             from the tabs by the auto margin that toggle used to own. In the
+             strip and bottom-bar bands it is not drawn at all: there the gear
+             stays in the top right, where a thumb already reaches it. -->
+        <button type="button" id="board-nav-settings" class="board-nav-item board-nav-settings" title="Settings">
+          <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.settings}</span><span class="board-nav-label">Settings</span>
+        </button>
         <button type="button" id="board-nav-collapse" class="board-nav-item board-nav-collapse" title="Collapse">
           <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.collapse}</span><span class="board-nav-label">Collapse</span>
         </button>

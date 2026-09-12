@@ -246,10 +246,11 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
   /**
    * Open the settings page and re-read everything on it.
    *
-   * The gear that reaches it is not a toggle any more. A page is left by the
-   * way out it draws — the back arrow, or the rail's own destinations — not
-   * by pressing the button that opened it, which on a full-screen page is not
-   * on screen to press.
+   * Two buttons reach it and neither is a toggle: the rail's Settings seat on
+   * the wide band, the top-right gear on the narrow one. A page is left by
+   * the way out it draws — the back arrow, or the rail's own destinations —
+   * not by pressing the button that opened it, which on a full-screen page
+   * is not on screen to press.
    */
   function openSettings(): void {
     if (deps.isOpen()) return;
@@ -266,6 +267,7 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     void refreshRoleAndBoardSettings();
   }
   el('board-settings').addEventListener('click', openSettings);
+  el('board-nav-settings').addEventListener('click', openSettings);
   // Escape leaves the page, the way it closed the popover this replaced.
   // Focus goes back to the button that opened it, so a keyboard user is not
   // dropped at the top of the document.

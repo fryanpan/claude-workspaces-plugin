@@ -153,6 +153,36 @@ describe('settings page + presence visibility', () => {
     expect(Number(view.zIndex)).toBeGreaterThan(0);
   });
 
+  /**
+   * One settings button per band, and never both.
+   *
+   * Bryan asked for the button at the foot of the nav rail on the iPad and
+   * the desktop "so that settings never crowd the main tabs or the top bar",
+   * and for the gear to stay in the top right on mobile, where the bottom bar
+   * already holds four tabs and the mic. A stylesheet read would pass on
+   * either rule surviving a rename; this reads what each band computes.
+   */
+  it('puts settings in the rail above 1100 and in the top bar at or below it', () => {
+    setViewport(IPAD);
+    expect(styleOf(attach('board-nav-item board-nav-settings')).display).not.toBe('none');
+    expect(styleOf(attach('board-icon-btn board-topbar-settings')).display).toBe('none');
+    // …and the phone band swaps them, rather than dropping one. `inline-flex`
+    // is the cascaded value, which is what this file can read: in a real
+    // browser the gear is a flex item of `.board-cluster`, so blockification
+    // reports `flex` there. Measured at 430 on staging, and the same button.
+    setViewport(PHONE);
+    expect(styleOf(attach('board-nav-item board-nav-settings')).display).toBe('none');
+    expect(styleOf(attach('board-icon-btn board-topbar-settings')).display).toBe('inline-flex');
+  });
+
+  /** The rail's foot: settings sits apart from the four tabs, pushed there by
+   *  the auto margin the collapse toggle used to own. */
+  it('parks the rail’s settings seat at the foot, away from the tabs', () => {
+    setViewport(IPAD);
+    expect(styleOf(attach('board-nav-item board-nav-settings')).marginTop).toBe('auto');
+    expect(styleOf(attach('board-nav-item board-nav-collapse')).marginTop).toBe('0px');
+  });
+
   it('no width band hides the circle presence strip any more', () => {
     // The old ≤560px rule was `.board-presence.board-people { display: none }`.
     // The circles fit, so nothing may hide the strip at any width — read at
