@@ -1,4 +1,5 @@
 import type { FeedbackClient, User } from '@claude-workspaces/core';
+import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardActions } from '../src/board/board-actions.ts';
 import { createBoardDetailPanel } from '../src/board/board-detail-panel.ts';
@@ -178,10 +179,10 @@ describe('createBoardDetailPanel', () => {
 
   it('lists the goal’s schedule rules in its panel, since archiving the goal takes them too', () => {
     const p = panel();
-    const rule = {
+    const rule: TaskSchedule = {
       rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [1, 2, 3, 4, 5] },
       armedAt: Date.now(),
-    } as const;
+    };
     p.state.tasks.set('t-rule', task('t-rule', { goal: 'g-1', schedule: rule }));
     p.state.tasks.set('t-other', task('t-other', { goal: 'g-2', schedule: rule }));
     p.state.detailGoalId = 'g-1';
