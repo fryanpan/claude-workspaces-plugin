@@ -689,6 +689,22 @@ describe('a proposal whose change is a mark', () => {
     });
   });
 
+  it('names both sides when the same link moves to different words', () => {
+    const doc = docFrom('Read [the Riverbend brief](/docs/riverbend) before Friday.\n');
+    const res = suggestReplace(doc, {
+      find: 'the Riverbend brief before Friday',
+      replace: 'the Riverbend brief [before Friday](/docs/riverbend)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    // One link on each side, and it is not the same proposal for that: accept
+    // this and the link lands on other words. The characters are equal, so
+    // only the syntax can say so.
+    const p = previewOf(doc);
+    expect(p.del).toBe('[the Riverbend brief](/docs/riverbend) before Friday');
+    expect(p.ins).toBe('the Riverbend brief [before Friday](/docs/riverbend)');
+  });
+
   it('a word change inside an already-linked span keeps the raw words', () => {
     const doc = docFrom('Read [the Saltmarsh plan](/docs/saltmarsh) before Friday.\n');
     const res = suggestReplace(doc, {

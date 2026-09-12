@@ -234,27 +234,40 @@ function markedText(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): stri
 }
 
 /**
- * Every inline mark one kind's ranges carry, as comparable `key=value`
- * strings. A SET, because the two sides are compared and never walked: what
- * decides the preview is whether one side carries a mark the other does not,
- * not where in the run it sits.
+ * One side's mark STRUCTURE: the sequence of mark sets its runs carry, each
+ * set flattened to a sorted `key=value` string, with consecutive equal ones
+ * collapsed and empty runs skipped.
+ *
+ * A sequence rather than a set, because where a mark sits is part of the
+ * proposal. `[alpha](/x) beta → alpha [beta](/x)` moves a link without
+ * adding or dropping one: the two sides hold the same single mark, and a set
+ * comparison calls that unchanged and shows neither side's syntax. The
+ * sequence reads `[link, plain]` against `[plain, link]` and does not.
+ *
+ * Lengths are deliberately absent: the words are free to change under a mark
+ * that stays put, which is exactly the case that should keep reading as
+ * words. Consecutive runs are collapsed so that a side split into two ops by
+ * a node boundary compares equal to the same text in one.
  */
-function markSetOf(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): Set<string> {
-  const out = new Set<string>();
+function markShape(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): string[] {
+  const shape: string[] = [];
   for (const range of entry.ranges) {
-    if (range.kind !== kind) continue;
-    for (const [k, v] of Object.entries(range.attributes)) out.add(`${k}=${JSON.stringify(v)}`);
+    if (range.kind !== kind || range.text === '') continue;
+    const key = Object.entries(range.attributes)
+      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+      .sort()
+      .join(' ');
+    if (shape[shape.length - 1] !== key) shape.push(key);
   }
-  return out;
+  return shape;
 }
 
-/** Do the two sides carry different inline marks? */
+/** Do the two sides carry different inline marks, or the same ones in
+ *  different places? */
 function marksDiffer(entry: SuggestionScanEntry): boolean {
-  const deleted = markSetOf(entry, 'delete');
-  const inserted = markSetOf(entry, 'insert');
-  if (deleted.size !== inserted.size) return true;
-  for (const mark of inserted) if (!deleted.has(mark)) return true;
-  return false;
+  const deleted = markShape(entry, 'delete');
+  const inserted = markShape(entry, 'insert');
+  return deleted.length !== inserted.length || deleted.some((m, i) => m !== inserted[i]);
 }
 
 /**
@@ -280,10 +293,10 @@ function marksDiffer(entry: SuggestionScanEntry): boolean {
  * and one rule covers every mark — a link, a speaker tag, `**bold**` — where
  * a caption would need a vocabulary.
  *
- * Marks EQUAL on both sides keep the raw text, so an ordinary word change
- * reads exactly as it did, and so does one made inside a span that was
- * already linked: nothing about the link is being proposed, so nothing about
- * it belongs on the card.
+ * The same marks in the same places keep the raw text, so an ordinary word
+ * change reads exactly as it did, and so does one made inside a span that
+ * was already linked: nothing about the link is being proposed, so nothing
+ * about it belongs on the card.
  */
 function previewSides(entry: SuggestionScanEntry): { deleted: string; inserted: string } {
   if (!marksDiffer(entry)) {
