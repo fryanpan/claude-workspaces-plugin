@@ -326,24 +326,22 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
     client.speak(7);
     await waitFor(() => client.finals().length === 1, 'the second meeting settled turn');
     schedule.fire();
-    // FIVE, NOT FOUR. A meeting that starts on a doc which ALREADY carries a
-    // `Meeting notes` heading opens its own section before it writes its
-    // first bullet, so its first tick sends two updates: the section, then
-    // the notes. The first meeting in this file starts on a doc with no
-    // section at all and still sends one update per tick. What the extra
-    // write buys is below: without it this meeting's early bullets go under
-    // the FIRST meeting's heading and leave the notes the moment this
-    // meeting's own section appears.
-    await waitFor(() => updates.length === 5, 'the second meeting notes');
+    // FOUR: one update per tick, this meeting's included. It opens no
+    // section of its own — the first meeting has STOPPED, so its section is
+    // the doc's minutes and this recording carries on under them (2026-09-11)
+    // — and a tick with a heading already to write under sends one update.
+    await waitFor(() => updates.length === 4, 'the second meeting notes');
     const md = docMarkdown();
-    // WHAT CHANGED, AND IT IS DELIBERATE. This used to assert ONE section: the
-    // old note-taker replaced a section it recognised by its heading TEXT, so
-    // a second meeting had to be talked out of replacing the first one's
-    // notes, and joining the end of them was the safest available answer.
-    // A meeting now remembers the block ID of the section it opened and never
-    // adopts one it did not, so the second meeting opens its own — which is
-    // also what a reader wants, two meetings being two records.
-    expect(md.split('## Meeting notes').length).toBe(3);
+    // ONE SECTION, AND IT IS DELIBERATE. A stop and a restart is one
+    // conversation carrying on, so the second recording's notes continue
+    // under the heading that is already there rather than opening a second
+    // one at the bottom of the page — where the reader's own section finder
+    // would take the new heading and leave the first meeting's notes out of
+    // the view (2026-09-11). Nothing of the first meeting's is replaced:
+    // every line it wrote is asserted below, and its authorship was released
+    // when this recording started, so an edit naming one arrives as a
+    // suggestion.
+    expect(md.split('## Meeting notes').length).toBe(2);
     // Every note the FIRST meeting wrote is still there, after stop/restart.
     // This is the assertion that mattered, and it did not change.
     expect(md).toContain('So the sync is the bottleneck.');
