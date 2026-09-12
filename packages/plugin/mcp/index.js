@@ -16925,7 +16925,7 @@ var TOOL_LIST = {
     },
     {
       name: "answer_review_item",
-      description: "Record a person's verbatim answer to one review item on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. reviewItemId keeps several open questions on one task independently answerable. It does not transition the task, so close that with task_transition once you have acted on the returned links.",
+      description: "Record a person's verbatim answer to one review item on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. reviewItemId keeps several open questions on one task independently answerable. It does not transition the task, so close that with task_transition once you have acted on the returned links. A 'secret' item is REFUSED here and cannot be answered this way: its values are typed into its own card and go straight to this machine's store, and words recorded through this tool are stored, echoed to the feed and read back to you. If a person offers you such a value in chat, do not pass it on — point them at the item.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17055,7 +17055,7 @@ var TOOL_LIST = {
     },
     {
       name: "answer_decision",
-      description: "Record a person's verbatim answer to a decision task on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. This answers the task's own decision, and answer_review_item answers one of the items hanging on a task. Neither transitions the task, so close it with task_transition.",
+      description: "Record a person's verbatim answer to a decision task on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. This answers the task's own decision, and answer_review_item answers one of the items hanging on a task. Neither transitions the task, so close it with task_transition. Neither accepts a 'secret' ask either — the server refuses one, because an answer recorded here is stored, echoed to the feed and read back to you.",
       inputSchema: {
         type: "object",
         properties: {
