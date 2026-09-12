@@ -232,7 +232,7 @@ describe('a secret ask, answered by the board owner', () => {
     // which is why this assertion reads the error and not just the status.
     const before = written.length;
     const res = await postAsVisitor(REGULAR, doorPath(), {
-      author: { id: 'u-harborlight-reviewer', name: 'Harborlight Reviewer', kind: 'human' },
+      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
       secrets: [
         { service: 'saltmarsh-relay-account', value: FIRST_VALUE },
         { service: 'saltmarsh-relay-signer', value: SECOND_VALUE },
@@ -275,7 +275,7 @@ describe('a secret ask, answered by the board owner', () => {
     // is the whole point of sending it rather than deriving it in the client.
     const before = written.length;
     const res = await postAsVisitor(REGULAR, doorPath(), {
-      author: { id: 'u-harborlight-reviewer', name: 'Harborlight Reviewer', kind: 'human' },
+      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
       secrets: [
         { service: 'saltmarsh-relay-account', value: FIRST_VALUE },
         { service: 'saltmarsh-relay-signer', value: SECOND_VALUE },
