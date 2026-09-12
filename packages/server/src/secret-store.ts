@@ -34,47 +34,24 @@
  * given.
  */
 import { isSecretServiceName } from '@claude-workspaces/core';
+import { SECRET_ACCOUNT, storedSecretService } from '@claude-workspaces/core/secret-name';
 
 /**
- * The account every secret this server writes is stored under.
+ * Where a stored secret lands, and the line an agent reads it back with.
  *
- * One constant, not per board and not per person. The Keychain addresses an
- * item by (account, service), the `service` is already the name the item's
- * author chose and the reader saw, and an account derived from a person
- * would put an identity into a store key for no lookup's benefit. It is also
- * what makes the read-back command a single fixed line an agent can be told.
+ * Re-exported rather than declared here: the MCP tool descriptions are built
+ * from the same names, and neither package can import the other, so they live
+ * in `core`. This module is the only thing in the server that turns one of
+ * them into a command argument. Read `core/secret-name.ts` for why the
+ * namespace exists — it is the reason a review item cannot name, and
+ * overwrite, an entry this server reads its own configuration from.
  */
-export const SECRET_ACCOUNT = 'claude-workspaces';
-
-/**
- * The namespace every name a review item asks for is stored under.
- *
- * WITHOUT THIS, TWO DIFFERENT THINGS SHARE ONE FLAT KEYSPACE. The Keychain
- * has no folders: `share/keychain.ts` reads this server's OWN configuration
- * out of it by service name — the Cloudflare token, the transcription keys —
- * and its lookup falls back to "any account" when the operator's own entry is
- * absent. A review item naming `cloudflare-api-token` would therefore write
- * an entry the server later reads as its own configuration, and the write is
- * an update-in-place, so nothing would refuse it. The prefix is what makes
- * that unreachable: a name asked for through an item can only ever land under
- * `claude-workspaces-secret.`, and nothing in this repo reads its own
- * configuration from under that.
- *
- * It is applied HERE, at the one place a name becomes an argument, rather
- * than at the door — a door that prefixed would leave the raw name reachable
- * by any future caller of `storeSecret`. The card, the answer line and the
- * activity feed all keep showing the name the item asked for; the prefix is
- * between this module and the store, and `secretReadCommand` is what tells an
- * agent the full name to read back.
- */
-export const SECRET_SERVICE_PREFIX = 'claude-workspaces-secret.';
-
-/** The name an asked-for secret is actually stored under — see
- *  `SECRET_SERVICE_PREFIX`. One function, so the write, the read-back check
- *  and the command an agent is handed cannot spell it three ways. */
-export function storedSecretService(service: string): string {
-  return `${SECRET_SERVICE_PREFIX}${service}`;
-}
+export {
+  SECRET_ACCOUNT,
+  SECRET_SERVICE_PREFIX,
+  secretReadCommand,
+  storedSecretService,
+} from '@claude-workspaces/core/secret-name';
 
 /** How long either command gets before it is killed. The write is local and
  *  returns in milliseconds; a wait past this is a locked keychain or a
@@ -216,17 +193,4 @@ export async function storeSecret(
     return { ok: false, error: 'verify-failed' };
   }
   return { ok: true };
-}
-
-/**
- * The one line an agent runs to read a value back, once the answer says it
- * was saved.
- *
- * It is a formatter rather than a reader on purpose: this server never reads
- * a stored value for an agent, and a verb that did would be a door with the
- * secret on the wrong side of it. The agent runs this itself, in its own
- * session, against its own Keychain access.
- */
-export function secretReadCommand(service: string): string {
-  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w`;
 }

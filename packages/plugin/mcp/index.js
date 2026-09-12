@@ -15114,6 +15114,16 @@ async function deliverThenCommitMux(frame, deliver, cursors, onGap) {
   }
 }
 
+// packages/core/src/secret-name.ts
+var SECRET_ACCOUNT = "claude-workspaces";
+var SECRET_SERVICE_PREFIX = "claude-workspaces-secret.";
+function storedSecretService(service) {
+  return `${SECRET_SERVICE_PREFIX}${service}`;
+}
+function secretReadCommand(service) {
+  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w`;
+}
+
 // packages/core/src/task-wire.ts
 var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
 
@@ -15176,7 +15186,7 @@ var SECRET_PROPERTIES = {
   },
   secrets: {
     type: "array",
-    description: "For 'secret' only. One to six fields, one per value you need. Secrets on any other shape are refused, and so is a 'secret' item with none. Say in detail WHY each value is needed — the reader is being asked to hand something over. Once the item is answered you read a value back with `security find-generic-password -a claude-workspaces -s claude-workspaces-secret.<service> -w` (the stored name carries that prefix; the card shows the bare one); never put one in a message, a file, a log or a commit.",
+    description: `For 'secret' only. One to six fields, one per value you need. Secrets on any other shape are refused, and so is a 'secret' item with none. Say in detail WHY each value is needed — the reader is being asked to hand something over. Once the item is answered you read a value back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one); never put one in a message, a file, a log or a commit.`,
     items: {
       type: "object",
       properties: {
@@ -16899,7 +16909,7 @@ var TOOL_LIST = {
     },
     {
       name: "add_review_item",
-      description: "Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use `review` on a create_tasks entry. Every item passes the board's quality gate: `held: true` means it is OFF the reader's queue until revise_review_item closes `heldReason`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file `review_type: 'secret'` with one `secrets` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with `security find-generic-password -a claude-workspaces -s claude-workspaces-secret.<service> -w` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere.",
+      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere.`,
       inputSchema: {
         type: "object",
         properties: {

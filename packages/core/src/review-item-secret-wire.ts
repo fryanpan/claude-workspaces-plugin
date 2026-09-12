@@ -9,19 +9,26 @@
  * whole of this shape's reading cost it 103 gzipped bytes against a ceiling it
  * had twenty to spare against.
  *
- * The widget swaps this module for a stand-in that answers "no" to all three
- * (`packages/widget/scripts/shims/core-secret-wire.js`, checked export by
- * export at build time by `assertShimCovers`). What that does to a widget
- * holding a stored secret payload is the part worth reading: `isSecretShape`
- * answers false, so `normalizeReviewType` returns undefined, so
- * `readReviewPayload` returns UNDEFINED — the payload is not read at all. The
- * comment stays an ordinary comment and the dock never sees an ask. There is
- * no state in which the widget renders a secret ask with its owner-only flag
- * missing, because there is no state in which it renders one.
+ * NOTHING IS SWAPPED FOR THIS MODULE. The widget's build deletes the two
+ * lines in `review-item-wire.ts` that reach it — the two guarded by that
+ * file's `READS_SECRET_SHAPE`, removed by `stripSecretShape` in
+ * `packages/widget/scripts/strip-secret-shape.ts` — and with nothing left
+ * referencing this file the bundler drops it whole. A stand-in was tried
+ * first and is not what shipped: it left the calls, and the call sites cost
+ * more than the budget had.
  *
- * That is the only divergence the swap can produce, and it is the safe
- * direction. Everywhere else — the server, the board, the MCP bundle — reads
- * the real thing.
+ * What that does to a widget holding a stored secret payload is the part
+ * worth reading. `normalizeReviewType` no longer answers `'secret'` for
+ * anything, so `readReviewPayload` returns UNDEFINED — the payload is not
+ * read at all. The comment carrying it stays an ordinary comment and the dock
+ * never sees an ask. There is no state in which the widget renders a secret
+ * ask with its owner-only flag missing, because there is no state in which it
+ * renders one.
+ *
+ * That is the only divergence the deletion can produce, and it is the safe
+ * direction. The rewrite throws when either line stops matching, so a rename
+ * cannot quietly put this reader back into every embed. Everywhere else — the
+ * server, the board, the MCP bundle — reads the real thing.
  */
 import type { ReviewPayload, ReviewSecretField, ReviewShape } from './review-item-types.ts';
 
