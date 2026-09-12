@@ -14,7 +14,7 @@
  * that cannot disagree with the gate — a second copy of a limit is how the
  * card ends up showing something the API swore it had refused.
  */
-import { isPlainObject, normalizeReviewType } from './review-item-wire.ts';
+import { isPlainObject, isSecretServiceName, normalizeReviewType } from './review-item-wire.ts';
 import { wordCount } from './word-count.ts';
 
 /**
@@ -80,6 +80,17 @@ export const REVIEW_LIMITS = {
   optionDetailWords: 50,
   minOptions: 2,
   maxOptions: 6,
+  /**
+   * Fields on a `secret` item. ONE is legal, unlike a decision's two options,
+   * and the asymmetry is not an oversight: two options are what make a choice
+   * a choice, while one field is an ordinary ask for one value. Six is the
+   * same ceiling for the same reason — that is what fits a phone screen as
+   * full-width rows.
+   */
+  minSecrets: 1,
+  maxSecrets: 6,
+  /** A field's face still has to fit one line beside its service name. */
+  secretLabelChars: 40,
 } as const;
 
 /**
@@ -101,6 +112,7 @@ export const REVIEW_LIMITS = {
  */
 export type ReviewGap =
   | 'detail'
+  | 'secretLabelLength'
   | 'detailLinkless'
   | 'lookAskLinkless'
   | 'headlineLength'
@@ -241,7 +253,7 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
   const shape = normalizeReviewType(p.review_type ?? p.shape);
   if (shape === undefined) {
     fail(
-      "review.review_type must be 'decision' (a choice between named options) or 'question' (read this and tell me what you think). The legacy spellings — field 'shape', value 'review' — are accepted too.",
+      "review.review_type must be 'decision' (a choice between named options), 'question' (read this and tell me what you think), or 'secret' (ask the board's owner for one or more values you must never see). The legacy spellings — field 'shape', value 'review' — are accepted too.",
     );
   }
 
@@ -321,9 +333,11 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
   if (p.options !== undefined && !Array.isArray(p.options)) {
     fail('review.options must be an array.');
   } else if (options !== undefined) {
-    if (shape === 'review' && options.length > 0) {
+    if (shape !== 'decision' && options.length > 0) {
       fail(
-        "review.options belong to a 'decision'. A 'review' item is answered in the person's own words.",
+        shape === 'secret'
+          ? "review.options belong to a 'decision'. A 'secret' item is answered by filling in review.secrets, which is not a choice between anything."
+          : "review.options belong to a 'decision'. A 'review' item is answered in the person's own words.",
       );
     }
     if (options.length > REVIEW_LIMITS.maxOptions) {
@@ -376,6 +390,72 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
         }
       }
     });
+  }
+
+  /**
+   * The FIELDS of a secret ask.
+   *
+   * Every refusal here is structural in the sense the head of this file
+   * means: without a well-formed field list the card has nothing to draw and
+   * the door has nowhere to put what the reader types, so there is no
+   * thinner-but-filable version of the item to accept with advice. The one
+   * advisory is the label's length, which wraps a row and breaks nothing.
+   *
+   * `service` is refused rather than sanitized. It is the store key AND an
+   * argument to the command that writes the value, so quietly rewriting one
+   * would store a secret under a name the card never showed and the agent
+   * was never told — which is the same defect as losing it.
+   */
+  const secrets: unknown[] | undefined = Array.isArray(p.secrets) ? p.secrets : undefined;
+  if (p.secrets !== undefined && !Array.isArray(p.secrets)) {
+    fail('review.secrets must be an array.');
+  } else if (secrets !== undefined && shape !== 'secret') {
+    fail(
+      "review.secrets belong to a 'secret' item. Set review_type to 'secret' to ask for values, or drop them.",
+    );
+  } else if (secrets !== undefined) {
+    if (secrets.length > REVIEW_LIMITS.maxSecrets) {
+      fail(
+        `review.secrets has ${secrets.length} entries; at most ${REVIEW_LIMITS.maxSecrets} fit a phone screen as full-width fields.`,
+      );
+    }
+    const seenService = new Set<string>();
+    secrets.forEach((raw, i) => {
+      if (!isPlainObject(raw)) {
+        fail(`review.secrets[${i}] must be an object with a label and a service.`);
+        return;
+      }
+      const label = raw.label;
+      if (typeof label !== 'string' || label.trim() === '') {
+        fail(
+          `review.secrets[${i}].label is required — what you are asking them for, in their words.`,
+        );
+      } else if (label.trim().length > REVIEW_LIMITS.lineMaxChars) {
+        fail(
+          `review.secrets[${i}].label is ${label.trim().length} characters; past ${REVIEW_LIMITS.lineMaxChars} it is not a field label. Put the reasoning in review.detail.`,
+        );
+      } else if (label.trim().length > REVIEW_LIMITS.secretLabelChars) {
+        gaps.push('secretLabelLength');
+      }
+      const service = raw.service;
+      if (!isSecretServiceName(service)) {
+        fail(
+          `review.secrets[${i}].service is required — the name the value is stored under, 1 to 64 characters of letters, digits, dot, dash or underscore, and not starting with a dash. It is the only part of this the agent is ever told.`,
+        );
+      } else if (seenService.has(service)) {
+        fail(
+          `review.secrets[${i}].service '${service}' is used twice; two fields storing under one name would overwrite each other.`,
+        );
+      } else {
+        seenService.add(service);
+      }
+    });
+  }
+
+  if (shape === 'secret' && (secrets?.length ?? 0) < REVIEW_LIMITS.minSecrets) {
+    fail(
+      "a 'secret' item needs at least one entry in review.secrets — each one a label and the service name its value is stored under. With none there is nothing for the reader to fill in.",
+    );
   }
 
   if (shape === 'decision' && (options?.length ?? 0) < REVIEW_LIMITS.minOptions) {
@@ -437,6 +517,11 @@ export function reviewGapAdvice(gaps: ReviewGap[]): string | undefined {
   if (gaps.includes('optionLabelLength')) {
     long.push(
       `An option label runs past ${REVIEW_LIMITS.optionLabelWords} words or ${REVIEW_LIMITS.optionLabelChars} characters, so the button wraps — the reasoning belongs in that option's detail.`,
+    );
+  }
+  if (gaps.includes('secretLabelLength')) {
+    long.push(
+      `A secret's label runs past ${REVIEW_LIMITS.secretLabelChars} characters, so it wraps away from the service name beside it.`,
     );
   }
   if (gaps.includes('optionDetailLength')) {

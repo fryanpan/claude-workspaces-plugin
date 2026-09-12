@@ -45,6 +45,7 @@ export {
 export type { ReviewGap, ReviewCheck } from './review-item-check.ts';
 
 export {
+  isSecretServiceName,
   normalizeReviewType,
   readReviewPayload,
   readTaskReviewItem,
@@ -69,6 +70,7 @@ export type {
   ReviewJudgeVerdictKind,
   ReviewOption,
   ReviewPayload,
+  ReviewSecretField,
   ReviewShape,
   TaskReviewItem,
 } from './review-item-types.ts';
