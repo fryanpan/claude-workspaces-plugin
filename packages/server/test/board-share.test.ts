@@ -791,12 +791,17 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
         method: 'GET',
       });
       expect(readSettings.status, await readSettings.clone().text()).toBe(200);
+      // The settings WRITE is the one thing on this list that a Regular User
+      // no longer gets. "Full access to the board" was the model before a
+      // board had levels; the words every ask here is judged against, and the
+      // number that limits every dispatch, are the owner's to set. The read
+      // above is still theirs, and so is everything else in this case.
       const wrote = await pub(`/workspaces/${boardId}/settings`, boardCookie, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ reviewItemCriteria: 'Written by a member.' }),
       });
-      expect(wrote.status, await wrote.clone().text()).toBe(200);
+      expect(wrote.status, await wrote.clone().text()).toBe(403);
       const activity = await pub(`/workspaces/${boardId}/events`, boardCookie, {
         method: 'GET',
       });

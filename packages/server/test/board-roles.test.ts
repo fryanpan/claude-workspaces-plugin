@@ -473,11 +473,10 @@ describe('the level is enforced by the API', () => {
     expect(res.status).toBe(200);
     expect((await boardSettings()).cap).toBe(5);
     // notesHome stays refused even for them — it is not about the board.
-    const home = await putAsVisitor(
-      PROMOTED,
-      `/workspaces/${encodeURIComponent(board)}/settings`,
-      { notesHome: null, author: { id: 'u-pilot', name: 'Pilot', kind: 'human' } },
-    );
+    const home = await putAsVisitor(PROMOTED, `/workspaces/${encodeURIComponent(board)}/settings`, {
+      notesHome: null,
+      author: { id: 'u-pilot', name: 'Pilot', kind: 'human' },
+    });
     expect(home.status).toBe(403);
   });
 

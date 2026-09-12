@@ -780,23 +780,43 @@ describe('share links over HTTP', () => {
       expect(recordText).not.toContain(moverId);
     });
 
-    it('edits the board settings it can see, and is refused the one field it cannot', async () => {
+    it('reads the board settings it can see, and is refused every write of them', async () => {
+      // READ, not write. This used to assert the write and pass: the settings
+      // PUT was ungated, so a Regular User could rewrite the words every ask
+      // on this board is judged against. It is `requireOwner` now — a share
+      // link is no longer a grant of everything the owner can do — and what
+      // survives from the old case is the half that was always right: a
+      // member reads all of it, because a criterion you cannot read is one
+      // your agents are judged against in secret.
+      const before = await local(`/workspaces/${encodeURIComponent(board)}/settings`);
+      const was = ((await before.json()) as { reviewItemCriteria: { value: string } })
+        .reviewItemCriteria.value;
+      const read = await asMember(`/workspaces/${encodeURIComponent(board)}/settings`);
+      expect(read.status, await read.clone().text()).toBe(200);
+      expect(
+        ((await read.json()) as { reviewItemCriteria: { value: string } }).reviewItemCriteria.value,
+      ).toBe(was);
+
       const saved = await asMember(`/workspaces/${encodeURIComponent(board)}/settings`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ reviewItemCriteria: 'Written by a member.' }),
       });
-      expect(saved.status, await saved.clone().text()).toBe(200);
+      expect(saved.status, await saved.clone().text()).toBe(403);
+      expect((await saved.json()) as { error: string }).toMatchObject({ error: 'owner_only' });
       const after = await local(`/workspaces/${encodeURIComponent(board)}/settings`);
       expect(
         ((await after.json()) as { reviewItemCriteria: { value: string } }).reviewItemCriteria
           .value,
-      ).toBe('Written by a member.');
+      ).toBe(was);
 
       // `notesHome` names a path on the owner's machine, and validating one
-      // would answer "does this path exist there" besides. Refused BEFORE
-      // that validation runs, so the refusal is the same for a real path and
-      // an invented one — no oracle either way.
+      // would answer "does this path exist there" besides. The role gate now
+      // stands in front of that validation for a member, so the refusal is
+      // still the same for a real path and an invented one — no oracle either
+      // way. (The refusal that turns on `visitor` rather than on role, which
+      // is what catches a PROMOTED owner on the share hostname, is proven in
+      // `board-roles.test.ts`.)
       for (const repoRoot of [process.cwd(), '/definitely/not/a/checkout']) {
         const r = await asMember(`/workspaces/${encodeURIComponent(board)}/settings`, {
           method: 'PUT',
@@ -804,9 +824,7 @@ describe('share links over HTTP', () => {
           body: JSON.stringify({ notesHome: { repoRoot, branch: 'main', dir: 'docs' } }),
         });
         expect(r.status, repoRoot).toBe(403);
-        expect((await r.json()) as { error: string }).toMatchObject({
-          error: 'not available to share visitors',
-        });
+        expect((await r.json()) as { error: string }).toMatchObject({ error: 'owner_only' });
       }
       // …and the stored value did not move.
       const unchanged = await local(`/workspaces/${encodeURIComponent(board)}/settings`);

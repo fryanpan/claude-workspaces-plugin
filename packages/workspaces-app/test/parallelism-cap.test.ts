@@ -208,7 +208,10 @@ describe('the parallelism cap field', () => {
   });
 
   it('draws the cap as plain text for a reader who may not write it', async () => {
-    const f = mount({ canEdit: false, read: async () => ({ value: 4, isDefault: false, inUse: 2 }) });
+    const f = mount({
+      canEdit: false,
+      read: async () => ({ value: 4, isDefault: false, inUse: 2 }),
+    });
     await f.handle.refresh();
     expect(f.text.textContent).toBe('4');
     expect(f.text.classList.contains('hidden')).toBe(false);
