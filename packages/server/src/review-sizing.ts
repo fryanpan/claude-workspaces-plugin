@@ -12,9 +12,11 @@
  * once in that window rather than on every read.
  */
 import {
+  type DocMeta,
   type ReviewPayload,
   type ReviewSize,
   type ReviewSizeEstimate,
+  attachmentIdOf,
   extractWorkspaceLinks,
   reviewSize,
 } from '@claude-workspaces/core';
@@ -29,6 +31,27 @@ export interface ReviewSizingSource {
   textLength(docId: string): number | null;
   /** Files in an attachment set (a diff review), or 0 when unknown. */
   filesInSet(setId: string): number;
+}
+
+/**
+ * Files in an attachment set, counted the way the set's own file view counts
+ * them. A diff review's files are its `diff` docs; the markdown companions and
+ * context files opened on it later share the set id without being files of
+ * the change, so they add nothing. A folder attachment has no `diff` docs, and
+ * its files are the members with a path.
+ */
+export function filesInSetOf(
+  docs: ReadonlyArray<Pick<DocMeta, 'setId' | 'workspaceId' | 'type' | 'relPath'>>,
+  setId: string,
+): number {
+  let diffs = 0;
+  let paths = 0;
+  for (const d of docs) {
+    if (attachmentIdOf(d) !== setId) continue;
+    if (d.type === 'diff') diffs += 1;
+    else if (d.relPath) paths += 1;
+  }
+  return diffs > 0 ? diffs : paths;
 }
 
 export type SizedReviewItemRow = ReviewItemRow & { minutes: number; size: ReviewSize };

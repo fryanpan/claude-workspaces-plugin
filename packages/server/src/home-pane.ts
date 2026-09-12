@@ -40,7 +40,12 @@ import {
   readerKey,
 } from './home-brief.ts';
 import { type ReviewItemRow, reviewItemRows } from './review-queue.ts';
-import { type ReviewSizer, type SizedReviewItemRow, createReviewSizer } from './review-sizing.ts';
+import {
+  type ReviewSizer,
+  type SizedReviewItemRow,
+  createReviewSizer,
+  filesInSetOf,
+} from './review-sizing.ts';
 import type { ThreadSummarizer } from './summarize.ts';
 import { taskBodyDocId } from './task-projection.ts';
 import {
@@ -108,7 +113,7 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
    *  flow filter by one estimate. See `review-sizing.ts`. */
   const sizer = createReviewSizer({
     textLength: (docId) => docStore.getDocStatus(docId)?.textLength ?? null,
-    filesInSet: (setId) => docStore.list().filter((m) => m.workspaceId === setId).length,
+    filesInSet: (setId) => filesInSetOf(docStore.list(), setId),
   });
 
   /** The review items exactly as GET /review-items ships them.

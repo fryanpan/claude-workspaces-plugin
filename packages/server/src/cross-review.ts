@@ -108,6 +108,7 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
       goal: t.goal,
       order: t.order,
       createdAt: t.createdAt,
+      ...(t.dueAt !== undefined ? { dueAt: t.dueAt } : {}),
     })),
     goalIds: w.goals.map((g) => g.id),
   });

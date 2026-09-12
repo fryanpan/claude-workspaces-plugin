@@ -16,12 +16,18 @@
  * The port exists because the server has to know an item's rank at the
  * moment it is answered, and the client is not there to ask.
  *
+ * Items on one task keep their filing order, and a size filter never shows a
+ * later one before an earlier one: an item's size is at least the size of
+ * every open item filed before it on the same task, so a filter that hides
+ * the first hides the ones behind it too. Agents file a task's asks as a
+ * sequence — the second often assumes the first was answered.
+ *
  * A legacy decision rides as its derived `r-legacy` row, which Home skips
  * only because it draws the same question from the board projection. Here
  * there is no projection, and the row's answer route already delegates to
  * the decision path, so it stays and ranks where Home ranks the decision.
  */
-import type { ReviewSize } from '@claude-workspaces/core';
+import { REVIEW_SIZES, type ReviewSize } from '@claude-workspaces/core';
 import type { RankedProject } from './review-plan.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
 import { LEGACY_REVIEW_ITEM_ID } from './tasks.ts';
@@ -32,6 +38,8 @@ export interface OrderTask {
   goal: string;
   order: number;
   createdAt: number;
+  /** When the work should be finished. Shown on the card; orders nothing. */
+  dueAt?: number;
 }
 
 /** One board's inputs. */
@@ -48,6 +56,8 @@ export type CrossReviewItem = SizedReviewItemRow & {
   project: string;
   /** Stable across reads: `<workspaceId>:<row key>`. */
   key: string;
+  /** The task's due date, when the row is about a task that has one. */
+  dueAt?: number;
 };
 
 export interface CrossReviewQueue {
@@ -192,17 +202,35 @@ export function ranksAhead(
   return compareAsk(ranker(ask), ranker(than)) < 0;
 }
 
+const larger = (a: ReviewSize, b: ReviewSize): ReviewSize =>
+  REVIEW_SIZES.indexOf(a) >= REVIEW_SIZES.indexOf(b) ? a : b;
+
+/** The task a row belongs to for ordering, if any. */
+const taskOfRow = (row: SizedReviewItemRow): string | undefined =>
+  (row.kind === 'task-review' || row.kind === 'task-thread') && row.taskId ? row.taskId : undefined;
+
 /** Every board's rows, top project first. */
 export function crossReviewQueue(boards: BoardQueueInput[]): CrossReviewQueue {
   const ordered = [...boards].sort((a, b) => a.project.rank - b.project.rank);
   const items: CrossReviewItem[] = [];
   for (const board of ordered) {
+    const dueOf = new Map(board.tasks.map((t) => [t.id, t.dueAt]));
+    // The largest size filed so far on each task, in board order — which on
+    // one task is filing order (see the header).
+    const sizeSoFar = new Map<string, ReviewSize>();
     for (const row of boardOrder(board)) {
+      const taskId = taskOfRow(row);
+      const prior = taskId ? sizeSoFar.get(taskId) : undefined;
+      const size = prior ? larger(prior, row.size) : row.size;
+      if (taskId) sizeSoFar.set(taskId, size);
+      const dueAt = taskId ? dueOf.get(taskId) : undefined;
       items.push({
         ...row,
+        size,
         workspaceId: board.project.workspaceId,
         project: board.project.name,
         key: `${board.project.workspaceId}:${rowKey(row)}`,
+        ...(dueAt !== undefined ? { dueAt } : {}),
       });
     }
   }

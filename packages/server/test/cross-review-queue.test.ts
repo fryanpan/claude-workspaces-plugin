@@ -117,6 +117,40 @@ describe('crossReviewQueue', () => {
     ]);
   });
 
+  it('keeps one task’s items in filing order, and never lets a filter show a later one first', () => {
+    const q = crossReviewQueue([
+      {
+        project: project('w-river', 1),
+        rows: [
+          taskItem('t-plan', 'r-3', 30, 'easy'),
+          taskItem('t-other', 'r-8', 5, 'easy'),
+          taskItem('t-plan', 'r-1', 10, 'hard'),
+          taskItem('t-plan', 'r-2', 20, 'easy'),
+        ],
+        tasks: [
+          { id: 't-plan', goal: 'g', order: 0, createdAt: 1, dueAt: 1_800_000_000_000 },
+          { id: 't-other', goal: 'g', order: 1, createdAt: 2 },
+        ],
+        goalIds: ['g'],
+      },
+    ]);
+    expect(q.items.map((i) => [i.reviewItemId, i.size])).toEqual([
+      ['r-1', 'hard'],
+      // Easy on their own, but filed behind a hard one on the same task.
+      ['r-2', 'hard'],
+      ['r-3', 'hard'],
+      // Another task's easy item is not held back by t-plan's.
+      ['r-8', 'easy'],
+    ]);
+    expect(q.items.map((i) => i.minutes)).toEqual([8, 1, 1, 1]);
+    expect(q.items.map((i) => i.dueAt)).toEqual([
+      1_800_000_000_000,
+      1_800_000_000_000,
+      1_800_000_000_000,
+      undefined,
+    ]);
+  });
+
   it('counts sizes cumulatively', () => {
     expect(
       countBySize([{ size: 'easy' }, { size: 'medium' }, { size: 'hard' }, { size: 'easy' }]),

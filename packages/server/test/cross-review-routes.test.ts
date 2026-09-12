@@ -7,12 +7,12 @@
  * Fixtures are invented; the repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ReviewPayload, Thread } from '@claude-workspaces/core';
 import type { CrossReviewQueue } from '../src/cross-review-queue.ts';
-import type { BoardWait } from '../src/review-answer-ledger.ts';
+import type { AnswerRecord, BoardWait } from '../src/review-answer-ledger.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -169,6 +169,51 @@ describe('the cross-board review queue', () => {
       answered: 2,
       inOrder: 1,
     });
+  });
+
+  it('drops a withdrawn item from the queue on the next read', async () => {
+    const item = await ticketItem(harbor, 'Ferry notice wording');
+    const key = `${harbor}:task-review:${item.taskId}:${item.itemId}`;
+    expect((await queue()).items.some((i) => i.key === key)).toBe(true);
+    await jj(
+      await post(
+        `/workspaces/${harbor}/tasks/${item.taskId}/review-items/${item.itemId}/withdraw`,
+        { author: AGENT, reason: 'Answered elsewhere.' },
+      ),
+    );
+    expect((await queue()).items.some((i) => i.key === key)).toBe(false);
+  });
+
+  it('keeps the original ask time through a revision, so the wait is not reset', async () => {
+    const salt = await board('Saltmarsh');
+    const item = await ticketItem(salt, 'Trail map name');
+    const before = (await queue()).items.find((i) => i.reviewItemId === item.itemId);
+    expect(before?.askedAt).toBeGreaterThan(0);
+    await jj(
+      await post(`/workspaces/${salt}/tasks/${item.taskId}/review-items/${item.itemId}/revise`, {
+        detail: 'The harbour gauge is closer; the buoy is steadier. The buoy was serviced in May.',
+        author: AGENT,
+      }),
+    );
+    const after = (await queue()).items.find((i) => i.reviewItemId === item.itemId);
+    expect(after?.kind === 'task-review' ? after.state : undefined).toBe('revised');
+    expect(after?.askedAt).toBe(before?.askedAt);
+    await jj(
+      await post(`/workspaces/${salt}/tasks/${item.taskId}/review-items/${item.itemId}/answer`, {
+        text: 'Offshore buoy.',
+        answeredWith: 'buoy',
+        author: PERSON,
+      }),
+    );
+    const record = await waitFor(() =>
+      readFileSync(join(dataDir, 'review-answers.jsonl'), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as AnswerRecord)
+        .find((r) => r.workspaceId === salt),
+    );
+    expect(record.askedAt).toBe(before?.askedAt ?? -1);
+    expect(record.visibleAt).toBe(before?.askedAt ?? -1);
   });
 
   it('refuses a since that is not epoch milliseconds', async () => {
