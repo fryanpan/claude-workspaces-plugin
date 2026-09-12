@@ -9,7 +9,8 @@
  * frames in the lead's transcript.
  */
 import { describe, expect, it } from 'vitest';
-import { type StallNudgeFrame, StallNudger, type StalledRow } from '../src/stall-nudge.ts';
+import type { StalledRow } from '../src/stall-gate.ts';
+import { type StallNudgeFrame, StallNudger } from '../src/stall-nudge.ts';
 
 const MIN = 60_000;
 

@@ -97,19 +97,20 @@ import type { UngatedUiRow } from './ui-review-gate.ts';
  *
  * Four hours: coarse enough that a lead who has seen the row once is not told
  * a second time inside the span it would take them to act on it, and fine
- * enough that a board abandoned overnight is named several times rather than
- * once. It quantises the silence of the board's OLDEST quiet row — see the
+ * enough that a board left alone is named again every half hour it stays so
+ * (the owner's number, 2026-09-11: "report again in half an hour if still
+ * stalled"). It quantises the silence of the board's OLDEST quiet row — see the
  * header — so nothing here is a timer and nothing needs cancelling.
  *
  * `CW_STALL_REPEAT_HOURS` overrides it, because this is the number that sets
  * what a fleet pays to be told about boards where nothing is changing.
  */
-export const STALL_REPEAT_DEFAULT_MS = 4 * 60 * 60_000;
+export const STALL_REPEAT_DEFAULT_MS = 30 * 60_000;
 
-/** How often the timer looks, when nobody says otherwise. Far below the quiet
- *  window on purpose: the tick is a cheap read over state already in memory,
- *  and the window is what decides when a wake is owed. */
-export const STALL_TICK_DEFAULT_MS = 60_000;
+/** How often the timer looks, when nobody says otherwise. Ten minutes, the
+ *  owner's number (2026-09-11): below the quiet window, so a wake lands within
+ *  a tick of being owed, and the window is what decides when that is. */
+export const STALL_TICK_DEFAULT_MS = 10 * 60_000;
 
 /**
  * How often ONE task may cost the lead a check-in reminder.

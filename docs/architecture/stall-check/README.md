@@ -75,7 +75,7 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    two windows, and they belong to two people. At five minutes
    (`CW_HELD_ITEM_MINUTES`) the FILER is told, once per hold — the filer can
    end it in one call, so the tap goes to them first and to nobody else. At
-   the quiet window (`CW_STALL_NUDGE_MINUTES`, twenty minutes) a hold still
+   the quiet window (`CW_STALL_NUDGE_MINUTES`, thirty minutes) a hold still
    standing is the LEAD's finding: it is named in the lead's stall frame as
    `heldItems`, it arms the board's stamp, and it is counted on the verdict's
    `held` line — one window for the frame and the measurement, so the lead

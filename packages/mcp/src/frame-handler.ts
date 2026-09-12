@@ -85,13 +85,13 @@ async function handleFrame(deps: FrameHandlerDeps, raw: string): Promise<void> {
     const p = (payload ?? {}) as { docId?: string };
     await outsideToolCall(deps, () =>
       deps.notify({
-      method: 'notifications/claude/channel',
-      params: {
-        source: 'claude-workspaces',
-        sent_at: new Date(nowMs(deps)).toISOString(),
-        content: `[replay.gap] events on ${p.docId ?? 'a watched channel'} may have been missed while this session was disconnected — refetch state (get_doc / list_threads / next_tasks) rather than assuming the stream was complete`,
-        meta: { event: 'replay.gap', ...(p.docId ? { doc_id: p.docId } : {}) },
-      },
+        method: 'notifications/claude/channel',
+        params: {
+          source: 'claude-workspaces',
+          sent_at: new Date(nowMs(deps)).toISOString(),
+          content: `[replay.gap] events on ${p.docId ?? 'a watched channel'} may have been missed while this session was disconnected — refetch state (get_doc / list_threads / next_tasks) rather than assuming the stream was complete`,
+          meta: { event: 'replay.gap', ...(p.docId ? { doc_id: p.docId } : {}) },
+        },
       }),
     );
     return;

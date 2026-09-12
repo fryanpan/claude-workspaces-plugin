@@ -67,8 +67,9 @@ import {
  * cannot precede the definition — so shipping the ticket's own number would
  * have surfaced a stall at about thirty-one minutes and missed the goal by
  * construction. Twenty is what makes the goal reachable: the wake fires
- * roughly a minute after the threshold, so a row that goes quiet is named
- * inside thirty minutes of going quiet.
+ * inside a tick of the threshold, so a row that goes quiet is named within
+ * forty minutes of going quiet (the owner's number, 2026-09-11: "anything
+ * that's stalled for more than half an hour").
  *
  * It buys that with false positives, and the trade was made knowing so. This
  * is a decision rather than a finding — see the header for what is and is not
@@ -76,7 +77,7 @@ import {
  * `CW_STALL_NUDGE_MINUTES`, and the one number to reach for first if the wake
  * turns out to be noisy.
  */
-export const STALL_QUIET_DEFAULT_MS = 20 * 60_000;
+export const STALL_QUIET_DEFAULT_MS = 30 * 60_000;
 
 /**
  * How long a DISPATCHED, in-progress row may go without anybody saying

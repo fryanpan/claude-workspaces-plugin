@@ -39,13 +39,13 @@ Every module is named again, with what it owns, under
 
 ## What counts as a finding
 
-The loop runs every 60s and sorts every open task into three lists, one
+The loop runs every 10 minutes and sorts every open task into three lists, one
 frame per board:
 
 | List | Meaning | Gate |
 |---|---|---|
-| `stalled` | todo/in-progress, not dependency-blocked, no pending human review item, quiet ≥ threshold | 20 min quiet (`CW_STALL_NUDGE_MINUTES`) |
-| `unfiled` | waiting on the owner but with NO review item on their queue — an ask that exists nowhere they read; a protocol violation | same 20-min quiet (#411) — a fresh ask gets a grace window for the lead to file it |
+| `stalled` | todo/in-progress, not dependency-blocked, no pending human review item, quiet ≥ threshold | 30 min quiet (`CW_STALL_NUDGE_MINUTES`) |
+| `unfiled` | waiting on the owner but with NO review item on their queue — an ask that exists nowhere they read; a protocol violation | same 30-min quiet (#411) — a fresh ask gets a grace window for the lead to file it |
 | `undetermined` | tasks whose review data could not be read — the one thing that could have explained the silence | none; unreadable is always reported |
 | `checkIn` | in-progress, with a WATCHING dispatch, and nobody has reported on it for the check-in window — somebody is on it and has stopped narrating | 30 min quiet (`CW_CHECK_IN_MINUTES`) |
 
@@ -185,7 +185,7 @@ windows, one per person who can act on it. `stallSnapshot` lists the holds
 older than `CW_HELD_ITEM_MINUTES` (default 5) as `held`, and the nudger
 wakes the FILER once per item per process (`filersTold`) — the filer can end
 the hold in one call. A hold still standing at the quiet window
-(`CW_STALL_NUDGE_MINUTES`, 20) is the LEAD's finding: the nudger's
+(`CW_STALL_NUDGE_MINUTES`, 30) is the LEAD's finding: the nudger's
 `leadHeldMs` is that window, and only the holds past it reach the lead's
 frame as `heldItems`, arm the stamp, or count as told — a board with
 nothing else wrong still wakes on one. The verdict's `held` line counts
@@ -315,7 +315,7 @@ wakes correctly:
   left the stamp: a lead's own dispatch moves a task's classification, and
   that must not read as growth.
 - **The repeat window escalates a board that stays bad**: the oldest quiet
-  task's silence, quantized by `CW_STALL_REPEAT_HOURS` (default 4h), so an
+  task's silence, quantized by `CW_STALL_REPEAT_HOURS` (default 0.5, half an hour), so an
   unchanged board is re-said at most once per window. The default repeat
   floor across a 9-board fleet prices at roughly 43M tokens/day — the knob
   exists because that floor has to be tunable faster than a release.
@@ -463,8 +463,8 @@ grace window that #411 fixed.
 
 | Env (server launch) | Default | Meaning |
 |---|---|---|
-| `CW_STALL_NUDGE_MINUTES` | 20 | quiet time before a task is a finding |
-| `CW_STALL_REPEAT_HOURS` | 4 | how often an unchanged bad board is re-said |
+| `CW_STALL_NUDGE_MINUTES` | 30 | quiet time before a task is a finding |
+| `CW_STALL_REPEAT_HOURS` | 0.5 | how often an unchanged bad board is re-said |
 | `CW_CHECK_IN_MINUTES` | 30 | how long a dispatched, in-progress task may go unreported before its lead is reminded — and how long that reminder silences the next one for that task |
 | `CW_HELD_ITEM_MINUTES` | 5 | how long a held review item may stand before its filer is told; the lead hears at the quiet window (`CW_STALL_NUDGE_MINUTES`) |
 | `CW_STALL_ESCALATE_MINUTES` | 60 | how long a board must be without any live session — no stream, no heartbeat, no agent write — before it files past its lead: to Team Lead first, the reader only if Team Lead is unreachable too |
