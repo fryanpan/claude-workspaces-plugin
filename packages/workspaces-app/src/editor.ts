@@ -103,6 +103,38 @@ export interface CreateEditorOpts {
   editable?: boolean;
 }
 
+/**
+ * One stored anchor's absolute position, or null when it has none right now.
+ *
+ * `relativePositionToAbsolutePosition` walks the Yjs tree and asks the ySync
+ * binding's mapping for the ProseMirror node of every sibling it steps over —
+ * `mapping.get(t).nodeSize`, unguarded. The mapping is rebuilt by the sync
+ * plugin's OWN observer on the prose fragment, so during a remote update that
+ * touches both the threads map and the prose there is a window where a Yjs
+ * element is already in the tree and not yet in the mapping: the threads
+ * observer repaints the panel first, this walk reaches the new element, and
+ * the read throws a TypeError on undefined.
+ *
+ * That throw was never one thread's problem. It escaped the whole collect
+ * pass, so Yjs logged "Caught error while handling a Yjs update" and EVERY
+ * thread on the doc lost its repaint for that update. An anchor the mapping
+ * cannot place is exactly an anchor that does not resolve, so it answers null
+ * and takes the existing orphan path; the sync plugin's own dispatch repaints
+ * a moment later with the mapping complete, and the thread comes back.
+ */
+function absFromRel(
+  ydoc: Y.Doc,
+  type: Y.XmlFragment,
+  rel: Y.RelativePosition,
+  mapping: Parameters<typeof relativePositionToAbsolutePosition>[3],
+): number | null {
+  try {
+    return relativePositionToAbsolutePosition(ydoc, type, rel, mapping);
+  } catch {
+    return null;
+  }
+}
+
 export function createEditor(opts: CreateEditorOpts): EditorHandle {
   // y-prosemirror awareness CURSORS are still a follow-up (once the Tiptap 3
   // cursor extension lands upstream); `awareness` and `user` are accepted now
@@ -299,8 +331,8 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       const startDecoded = anchors.decodeRelativePositionSafe(startRel);
       const endDecoded = anchors.decodeRelativePositionSafe(endRel);
       if (!startDecoded || !endDecoded) return null;
-      const startAbs = relativePositionToAbsolutePosition(opts.ydoc, type, startDecoded, mapping);
-      const endAbs = relativePositionToAbsolutePosition(opts.ydoc, type, endDecoded, mapping);
+      const startAbs = absFromRel(opts.ydoc, type, startDecoded, mapping);
+      const endAbs = absFromRel(opts.ydoc, type, endDecoded, mapping);
       if (startAbs == null || endAbs == null) return null;
       const from = Math.min(startAbs, endAbs);
       const to = Math.max(startAbs, endAbs);
