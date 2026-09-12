@@ -6,6 +6,13 @@ import { attachmentIdOf } from '@claude-workspaces/core';
 import { isReservedDocId } from './doc-ids.ts';
 import { makeDocKey, parseDocKey } from './doc-key.ts';
 import { scanFolderPaths } from './fs-scan.ts';
+import {
+  type LibraryWhere,
+  type Placed,
+  type PlacingContext,
+  placeAll,
+  placedDoc,
+} from './library-location.ts';
 
 /**
  * A board's Library: the meetings and the files a person comes to the board to
@@ -45,18 +52,24 @@ export interface LibraryRow {
    */
   name: string;
   /**
-   * Epoch ms. A meeting: when it started. A file: WHEN ITS BYTES LAST
-   * CHANGED ON DISK, for every row of the list and not only the ones nobody
-   * has opened — the column used to mix that with a doc's last activity,
-   * so two rows of the same list answered two different questions.
+   * Epoch ms — "Last Modified". A file: WHEN ITS BYTES LAST CHANGED ON DISK,
+   * for every row of the list and not only the ones nobody has opened — the
+   * column used to mix that with a doc's last activity, so two rows of the
+   * same list answered two different questions. A meeting: its notes' file
+   * the same way, or the doc's last activity when it has no file to read,
+   * or when it started when neither is known.
    *
    * Absent for a file this server cannot stat: a doc bound to a path that
    * has gone, or to something that is not a file at all. The page says so
    * rather than substituting a clock it does have.
    */
   at?: number;
-  /** How long the meeting ran, for one that has ended. Meetings only. */
-  durationMs?: number;
+  /** Epoch ms — "Created". A file: its birth time on disk. A meeting: when
+   *  it started. Absent when unknown; the page sorts such a row last. */
+  created?: number;
+  /** The key of the location this board doc lives in (`LibraryPayload.where`).
+   *  Absent on a project file no doc holds. */
+  place?: string;
   /** Where the row opens: a doc's page on this board, or a mounted file. */
   href?: string;
   /** A project markdown file with no doc on this board yet: its path from the
@@ -83,6 +96,9 @@ export interface LibraryPayload {
   project: LibraryProject | null;
   meetings: LibraryRow[];
   files: LibraryRow[];
+  /** Where each kind of doc on this board really lives. Absent when the
+   *  caller supplied no `placing`. */
+  where?: LibraryWhere[];
 }
 
 /** One file in the project, as a lister found it. */
@@ -90,6 +106,8 @@ export interface ProjectFile {
   /** POSIX, relative to the repo root. */
   relPath: string;
   mtimeMs: number;
+  /** Birth time, when the filesystem reports one. */
+  createdMs?: number;
 }
 
 /** One file in the project's mounted folders. */
@@ -115,6 +133,10 @@ export interface LibrarySources {
    * ways in one column.
    */
   fileMtime: (docId: string) => number | undefined;
+  /** When the file this doc is bound to was created on disk, if known. */
+  fileBirth?: (docId: string) => number | undefined;
+  /** What `where` is built from; absent, no `where` is built. */
+  placing?: Omit<PlacingContext, 'projectRepoKey' | 'projectVisible'>;
   /** The checkout a project's files are read from, or null when none is left. */
   projectRoot: (repoKey: string) => string | null;
   /** The project's markdown files. */
@@ -304,13 +326,18 @@ interface DocFileRow {
   /** What it reads as when there is no file name to go by. */
   title: string;
   at?: number;
+  created?: number;
   href: string;
+  place?: string;
 }
 
 /** Build the Library for one board. */
 export function buildLibrary(src: LibrarySources): LibraryPayload {
   const meetings: LibraryRow[] = [];
   const docFiles: DocFileRow[] = [];
+  const placed: Placed[] = [];
+  const repoKey = projectRepoKey(src.docs, src.docKeyOf);
+  const root = repoKey ? src.projectRoot(repoKey) : null;
 
   for (const meta of src.docs) {
     // A review's member (a diff file, a folder bind's opened file) belongs to
@@ -339,28 +366,39 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
       // A meeting keeps its TITLE: its file is a huddle note in the data dir,
       // named after nothing a person chose.
       const startedAt = held?.startedAt ?? meta.createdAt;
-      const ended = held?.endedAt ?? null;
-      meetings.push({
+      const row: LibraryRow = {
         name: title,
-        at: startedAt,
+        at: src.fileMtime(meta.docId) ?? meta.lastActivityAt ?? startedAt,
+        created: startedAt,
         href,
-        durationMs: ended !== null && ended > startedAt ? ended - startedAt : undefined,
-      });
+      };
+      meetings.push(row);
+      placed.push({ row, doc: placedDoc(meta, 'meetings', parsed, src.fileMtime(meta.docId)) });
       continue;
     }
     // The Files list's one clock, for a bound doc exactly as for a loose
     // file: the bytes' own mtime.
-    docFiles.push({
+    const fileRow: DocFileRow = {
       repoKey: parsed?.repoKey,
       relPath: keyRel,
       title,
       href,
       at: src.fileMtime(meta.docId),
-    });
+      created: src.fileBirth?.(meta.docId),
+    };
+    docFiles.push(fileRow);
+    const kind = meta.type === 'mockup' ? 'mockups' : 'documents';
+    placed.push({ row: fileRow, doc: placedDoc(meta, kind, parsed, fileRow.at) });
   }
 
-  const repoKey = projectRepoKey(src.docs, src.docKeyOf);
-  const root = repoKey ? src.projectRoot(repoKey) : null;
+  // A hidden project (local-only, off the box) has a key but no root.
+  const where = src.placing
+    ? placeAll(placed, {
+        ...src.placing,
+        projectRepoKey: repoKey,
+        projectVisible: !repoKey || !!root,
+      })
+    : undefined;
   const loose = repoKey && root ? looseFiles(src, repoKey, root) : [];
   const project: LibraryProject | null =
     repoKey && root
@@ -385,24 +423,38 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     }),
     ...loose.map((f) => f.relPath),
   ]);
+  // Optional keys are left off rather than written as undefined.
+  const extra = (d: { created?: number; place?: string }) => ({
+    ...(d.created === undefined ? {} : { created: d.created }),
+    ...(d.place === undefined ? {} : { place: d.place }),
+  });
   const files: LibraryRow[] = docFiles.map((d) => {
     const rel = named(d);
-    if (rel === undefined) return { name: d.title, at: d.at, href: d.href };
-    return { name: names.get(rel) ?? d.title, at: d.at, href: d.href, folder: folderOf(rel) };
+    if (rel === undefined) return { name: d.title, at: d.at, href: d.href, ...extra(d) };
+    const name = names.get(rel) ?? d.title;
+    return { name, at: d.at, href: d.href, folder: folderOf(rel), ...extra(d) };
   });
   for (const f of loose) {
     const name = names.get(f.relPath) ?? f.relPath;
     const folder = folderOf(f.relPath);
-    if (isMarkdownPath(f.relPath)) files.push({ name, at: f.mtimeMs, open: f.relPath, folder });
-    else if (f.fileId) {
+    const born = extra({ created: f.createdMs });
+    if (isMarkdownPath(f.relPath)) {
+      files.push({ name, at: f.mtimeMs, open: f.relPath, folder, ...born });
+    } else if (f.fileId) {
       const href = `/mounts/${encodeURIComponent(f.fileId)}/raw`;
-      files.push({ name, at: f.mtimeMs, href, folder });
+      files.push({ name, at: f.mtimeMs, href, folder, ...born });
     }
   }
 
   meetings.sort(byRecency);
   files.sort(byRecency);
-  return { project, meetings, files };
+  return where ? { project, meetings, files, where } : { project, meetings, files };
+}
+
+/** A stat's birth time, when the filesystem keeps one (0 or less means it
+ *  does not). */
+export function birthOf(st: { birthtimeMs: number }): { createdMs?: number } {
+  return st.birthtimeMs > 0 ? { createdMs: st.birthtimeMs } : {};
 }
 
 /** How long one repo walk is reused. A Library load is a page view, and a
@@ -437,7 +489,7 @@ export function createMarkdownLister(
       } catch {
         continue;
       }
-      if (st?.isFile()) files.push({ relPath, mtimeMs: st.mtimeMs });
+      if (st?.isFile()) files.push({ relPath, mtimeMs: st.mtimeMs, ...birthOf(st) });
     }
     cache.set(root, { at: now(), files });
     return files;
