@@ -59,6 +59,7 @@ import {
   applyNotesBlockEdits,
   readNotesOutline,
 } from './notes-doc-access.ts';
+import { tidyNotesSection } from './notes-section-tidy.ts';
 
 /**
  * The instruction block a cleanup adds to the ordinary note-taking rules.
@@ -176,6 +177,11 @@ export interface NotesCleanupResult {
   touched: number;
   /** Settled turns the pass read. */
   turns: number;
+  /** Blank lines the tidy removed from the section, and repeated topic
+   *  headings it folded into the topic above them. Independent of what the
+   *  model proposed: a pass that proposed nothing still tidies. */
+  blanks: number;
+  merged: number;
   /** One line for the log, and for the route's reply. */
   line: string;
 }
@@ -266,6 +272,8 @@ const refusal = (reason: NotesCleanupRefusal, line: string): NotesCleanupResult 
   failed: 0,
   touched: 0,
   turns: 0,
+  blanks: 0,
+  merged: 0,
   line,
 });
 
@@ -388,6 +396,14 @@ export async function runNotesCleanupPass(
   // reports no counts at all. Reading that as zeros is the honest answer: it
   // changed nothing, which is what the numbers below say.
   const written = kept.length === 0 ? null : applyNotesBlockEdits(docStore, docId, kept);
+  // AND THE PASS LEAVES THE SECTION TIDY, whatever it proposed. This is the
+  // last read of these notes anybody has asked for, and the two shapes it
+  // repairs — a blank line under the heading, the same topic heading twice in
+  // a row — are ones no wording of the prompt above prevents and no block
+  // edit could remove (a delete on an unmarked blank arrives as a redline on
+  // it). It runs even for a pass that proposed nothing: a section can reach
+  // this point already carrying both.
+  const tidied = tidyNotesSection(doc.ydoc, headingId, commentedBlockIds(doc.ydoc));
   const result =
     written !== null && 'applied' in written
       ? { applied: written.applied, suggested: written.suggested, failed: written.failed }
@@ -402,10 +418,14 @@ export async function runNotesCleanupPass(
     failed: result.failed,
     touched,
     turns: turns.length,
+    blanks: tidied.blanks,
+    merged: tidied.merged,
     line:
       `notes cleanup ${docId}/${meetingId}: ${turns.length} turns read, ` +
       `${edits.length} edits proposed, ${refused} refused, ${touched} blocks touched` +
       (result.suggested > 0 ? `, ${result.suggested} offered as suggestions` : '') +
-      (result.failed > 0 ? `, ${result.failed} failed` : ''),
+      (result.failed > 0 ? `, ${result.failed} failed` : '') +
+      (tidied.blanks > 0 ? `, ${tidied.blanks} blank lines removed` : '') +
+      (tidied.merged > 0 ? `, ${tidied.merged} repeated topics merged` : ''),
   };
 }
