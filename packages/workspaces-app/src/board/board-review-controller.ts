@@ -25,6 +25,7 @@ import {
   reviewItemOwner,
   reviewItemQuestionRequest,
   reviewReplyRequest,
+  reviewSecretsRequest,
 } from './board-review-model.ts';
 import { panelAnswerRequest, panelQuestionRequest } from './board-review-render.ts';
 
@@ -459,9 +460,41 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
     return 'answered';
   }
 
+  /**
+   * Hand over the values of a secret item, in one request.
+   *
+   * It is a sibling of `replyToReviewItem` rather than a branch inside it,
+   * and the split is the security property: that function's job is to post
+   * WORDS that get recorded and echoed, and this one's is to post values that
+   * must reach nothing. Nothing typed here is kept on failure either — the
+   * boxes are cleared by the card and the reader types again, because a
+   * retained value is a value sitting in a page for as long as the tab is
+   * open.
+   *
+   * All or nothing, decided by the server: a partial hand-over is refused
+   * rather than recorded, so there is no half-answered state to explain.
+   */
+  async function saveSecretsOnItem(
+    item: ReviewItem,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ): Promise<boolean> {
+    const reqSpec = reviewSecretsRequest(item, values);
+    if (!reqSpec) return false;
+    const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
+    if (!res.ok) {
+      // The message never names a value, and there is nothing of the reader's
+      // to preserve — see above.
+      showToast('Saving failed — nothing was recorded. Try again.');
+      return false;
+    }
+    await loadReviewItems();
+    return true;
+  }
+
   return {
     startWalkthrough,
     openInQueue,
+    saveSecretsOnItem,
     answerDecision,
     answerTaskDecision,
     undoThreadAnswer,

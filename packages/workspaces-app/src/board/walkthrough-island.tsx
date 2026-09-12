@@ -39,7 +39,11 @@
  * be answering about a queue several answers old. Same reasoning as the board
  * island's `knownAgentIds`: what changes per paint travels on the signal.
  */
-import { REVIEW_LIMITS, reviewItemBodyMarkdown } from '@claude-workspaces/core';
+import {
+  REVIEW_LIMITS,
+  type ReviewSecretField,
+  reviewItemBodyMarkdown,
+} from '@claude-workspaces/core';
 import { signal } from '@preact/signals';
 import { Fragment, render } from 'preact';
 import { type MutableRef, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -95,6 +99,16 @@ export interface WalkthroughHandlers {
    *  shape `onAnswer` uses, because a tap and typed words must reach the thread
    *  by one path or the two will drift. */
   onReply: (item: ReviewItem, text: string, optionId?: string) => Promise<boolean>;
+  /** Hand over the values of a SECRET item, all of them, in one request.
+   *
+   *  A separate handler from `onReply` for the reason the route is separate:
+   *  a reply is words that get recorded and echoed, and these must reach
+   *  neither. Resolves to whether the hand-over landed; nothing typed is kept
+   *  either way. */
+  onSaveSecrets: (
+    item: ReviewItem,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ) => Promise<boolean>;
   /** Go to the exact place instead of answering here — the task's discussion at
    *  that thread, the doc anchored on that comment. */
   onOpenItem: (item: ReviewItem) => void;
@@ -135,6 +149,11 @@ export interface WalkthroughView {
   /** Aimed at the item this paint draws — see the note at the top of the file
    *  for why these travel with the data rather than being bound at mount. */
   handlers: WalkthroughHandlers;
+  /** What this reader may DO, as the server reads it. Only one card asks so
+   *  far — a secret item, which a Regular User cannot answer — and it rides
+   *  with the data rather than being read at mount, because a share visitor's
+   *  level arrives with the queue's own read. */
+  viewerRole: 'owner' | 'member';
 }
 
 /** A closed walkthrough answers nothing, which is what the signal holds until
@@ -145,6 +164,7 @@ const IDLE_HANDLERS: WalkthroughHandlers = {
   onAskOnItem: () => Promise.resolve(false),
   onQuestionOnItem: () => Promise.resolve(false),
   onReply: () => Promise.resolve(false),
+  onSaveSecrets: () => Promise.resolve(false),
   onOpenItem: () => {},
   onOpenThread: () => {},
   onStep: () => {},
@@ -158,6 +178,7 @@ export const walkthroughData = signal<WalkthroughView>({
   progress: { cleared: 0, last: null },
   now: 0,
   handlers: IDLE_HANDLERS,
+  viewerRole: 'owner',
 });
 
 function clip(text: string, max = 60): string {
@@ -685,14 +706,127 @@ function WalkAskThread(props: {
  * another item unmounts it, so nothing the last card was holding follows the
  * reader onto the next one.
  */
+/**
+ * The fields of a SECRET item, and the one control that sends them.
+ *
+ * It sits where the options sit on a decision, and it replaces the composer
+ * rather than joining it: there is no free-text box on this card, because a
+ * value typed into one would travel the ordinary answer path into the item,
+ * the feed and the agent's context. That absence is the feature.
+ *
+ * Nothing typed here is kept anywhere but the input nodes. No component
+ * state, no draft store, no `keepKey` — the composer's half-typed-answer
+ * survival is exactly the behaviour a value must not have. Sending clears the
+ * boxes whether the write landed or not, so a failed hand-over leaves nothing
+ * behind for the length of the tab's life; the reader types again, which is
+ * the cost of not holding it.
+ *
+ * The password managers are told to stay out (`data-1p-ignore`,
+ * `data-lpignore`, `autocomplete="off"`): an offer to save is an offer to put
+ * the value somewhere neither this page nor the store chose.
+ */
+function WalkSecrets(props: {
+  fields: readonly ReviewSecretField[];
+  itemKey: string;
+  onSave: (values: Array<{ service: string; value: string }>) => Promise<boolean>;
+}) {
+  const { fields, itemKey } = props;
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (ev: Event): Promise<void> => {
+    ev.preventDefault();
+    const form = formRef.current;
+    if (!form || busy) return;
+    // Read the nodes, send, and clear — in that order, and the clear is in a
+    // `finally` so it happens on a refusal and on a thrown request alike.
+    const values = fields.map((f) => ({
+      service: f.service,
+      value:
+        (form.elements.namedItem(`secret:${f.service}`) as HTMLInputElement | null)?.value ?? '',
+    }));
+    // All or nothing on this side too, so the refusal a reader sees for a
+    // half-filled form is immediate rather than a round trip away.
+    if (values.some((v) => v.value === '')) {
+      const first = form.querySelector<HTMLInputElement>('.board-walk-cred-input[value=""]');
+      (first ?? form.querySelector<HTMLInputElement>('.board-walk-cred-input'))?.focus();
+      return;
+    }
+    setBusy(true);
+    try {
+      await props.onSave(values);
+    } finally {
+      for (const input of Array.from(
+        form.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'),
+      )) {
+        input.value = '';
+      }
+      setBusy(false);
+    }
+  };
+  return (
+    <form class="board-walk-answer board-walk-cred-form" ref={formRef} onSubmit={submit}>
+      <div class="board-walk-creds">
+        {fields.map((f) => (
+          <label key={f.service} class="board-walk-cred" for={`secret:${itemKey}:${f.service}`}>
+            <span class="board-walk-cred-head">
+              <span class="board-walk-cred-label">{f.label}</span>
+              <span class="board-walk-cred-service">{f.service}</span>
+            </span>
+            <input
+              id={`secret:${itemKey}:${f.service}`}
+              name={`secret:${f.service}`}
+              class="board-walk-cred-input"
+              type="password"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck={false}
+              data-1p-ignore
+              data-lpignore="true"
+              enterkeyhint="done"
+            />
+          </label>
+        ))}
+      </div>
+      <button type="submit" class="board-btn board-btn-ink board-walk-cred-send" disabled={busy}>
+        Save Secret
+      </button>
+    </form>
+  );
+}
+
+/**
+ * The same fields with no way to fill them, for a reader who may not.
+ *
+ * A Regular User sees WHAT is being asked for — the workspace is a shared
+ * view and withholding the names would make the card unreadable — and no
+ * inputs, plus the line saying whose ask this is. The server refuses them
+ * regardless; this is so the refusal is not the first they hear of it.
+ */
+function WalkSecretsRefused(props: { fields: readonly ReviewSecretField[] }) {
+  return (
+    <div class="board-walk-creds">
+      {props.fields.map((f) => (
+        <div key={f.service} class="board-walk-cred is-refused">
+          <span class="board-walk-cred-head">
+            <span class="board-walk-cred-label">{f.label}</span>
+            <span class="board-walk-cred-service">{f.service}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function WalkCard(props: {
   item: ReviewItem;
   index: number;
   progress: WalkProgress;
   now: number;
   handlers: WalkthroughHandlers;
+  viewerRole: 'owner' | 'member';
 }) {
-  const { item, index, progress, now, handlers } = props;
+  const { item, index, progress, now, handlers, viewerRole } = props;
   // Both expansions are STATE, not a reading of the DOM. The vanilla renderer
   // snapshotted them off the nodes a line before `replaceChildren` destroyed
   // them, because there was nowhere else to keep them; here the instance is
@@ -742,6 +876,14 @@ function WalkCard(props: {
   // state, surfaced as the detail panel's blocked note.)
   const row = item.decision;
   const review = item.review;
+  // The declared fields of a secret ask. Read through the shape rather than
+  // off the array alone: `secrets` on any other shape is refused by the
+  // server, so honouring one here would be the client offering a hand-over
+  // the API will not take.
+  const secrets =
+    review?.shape === 'secret' && review.secrets && review.secrets.length > 0
+      ? review.secrets
+      : null;
   const skip = (
     <button
       type="button"
@@ -896,16 +1038,37 @@ function WalkCard(props: {
             )}
             {questionBox}
             <div class={answering}>
-              {/* Always present, options or not — the candidates are a
-                shortcut, never a closed set, and a review item with no
-                options only has this. */}
-              <PromptForm
-                className="board-walk-answer"
-                placeholder={review?.options?.length ? '…or answer in your own words' : 'Reply…'}
-                submitLabel="Send"
-                keepKey={`walk-answer:${item.key}`}
-                onSubmit={(text) => handlers.onReply(item, text)}
-              />
+              {secrets ? (
+                // A SECRET item, and the composer is deliberately absent. A
+                // value typed into a free-text box would travel the ordinary
+                // answer path — recorded on the item, echoed into the feed,
+                // read back by the agent — which is the one thing this shape
+                // exists to prevent. The reader who wants to say something
+                // instead still has "I have a question" below.
+                viewerRole === 'owner' ? (
+                  <WalkSecrets
+                    fields={secrets}
+                    itemKey={item.key}
+                    onSave={(values) => handlers.onSaveSecrets(item, values)}
+                  />
+                ) : (
+                  <Fragment>
+                    <WalkSecretsRefused fields={secrets} />
+                    <span class="board-walk-question-note">Only the Owner can answer this.</span>
+                  </Fragment>
+                )
+              ) : (
+                /* Always present, options or not — the candidates are a
+                  shortcut, never a closed set, and a review item with no
+                  options only has this. */
+                <PromptForm
+                  className="board-walk-answer"
+                  placeholder={review?.options?.length ? '…or answer in your own words' : 'Reply…'}
+                  submitLabel="Send"
+                  keepKey={`walk-answer:${item.key}`}
+                  onSubmit={(text) => handlers.onReply(item, text)}
+                />
+              )}
               <div class="board-walk-actions">
                 {questionLink}
                 {skip}
@@ -978,7 +1141,7 @@ function useHostVisibility(host: HTMLElement, closed: boolean): void {
  * shell — rail, topbar — where it was.
  */
 function Walkthrough(props: { host: HTMLElement }) {
-  const { queue, index, progress, now, handlers } = walkthroughData.value;
+  const { queue, index, progress, now, handlers, viewerRole } = walkthroughData.value;
   useHostVisibility(props.host, index < 0);
   if (index < 0) return null;
   const item = queue.items[index] ?? null;
@@ -1017,6 +1180,7 @@ function Walkthrough(props: { host: HTMLElement }) {
             progress={progress}
             now={now}
             handlers={handlers}
+            viewerRole={viewerRole}
           />
         </Fragment>
       )}

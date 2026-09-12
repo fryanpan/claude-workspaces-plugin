@@ -271,11 +271,18 @@ export function applyRefresh<R, V>(current: V, res: R | null, read: (r: R) => V)
  * survives-an-outage behaviour is driven by a test instead of asserted about.
  */
 export async function refreshReviewItems(
-  state: { reviewItems: ReviewThreadItem[] },
-  fetchItems: () => Promise<{ items?: ReviewThreadItem[] } | null>,
+  state: { reviewItems: ReviewThreadItem[]; viewerRole: 'owner' | 'member' },
+  fetchItems: () => Promise<{ items?: ReviewThreadItem[]; you?: { role?: string } } | null>,
 ): Promise<void> {
   const res = await fetchItems();
   state.reviewItems = applyRefresh(state.reviewItems, res, (r) => r.items ?? []);
+  // Under the same guard as the list, for the same reason: a read that never
+  // arrived must not be read as "you are a Regular User now". A payload that
+  // arrived without the field leaves the level alone too — an older server
+  // answering this route is not a demotion.
+  state.viewerRole = applyRefresh(state.viewerRole, res, (r) =>
+    r.you?.role === 'member' ? 'member' : r.you?.role === 'owner' ? 'owner' : state.viewerRole,
+  );
 }
 
 export type ReviewKind = 'decision' | 'task-thread' | 'goal-thread' | 'doc-thread' | 'task-review';
@@ -777,6 +784,30 @@ export function reviewReplyRequest(
 }
 
 /**
+ * Where the values of a SECRET item go — a door of its own, not `/answer`.
+ *
+ * An answer is words: recorded on the item, echoed into the activity feed,
+ * read back by the agent that asked. These values must reach none of that, so
+ * they do not travel the path that carries words. Null when this item is not
+ * a secret ask, or is not ticket-borne — which is every case where there is
+ * no such door to post to.
+ */
+export function reviewSecretsRequest(
+  item: ReviewItem,
+  values: ReadonlyArray<{ service: string; value: string }>,
+): { path: string; body: Record<string, unknown> } | null {
+  if (item.review?.shape !== 'secret') return null;
+  const t = item.thread;
+  if (!t || t.kind !== 'task-review' || !t.taskId || !t.reviewItemId) return null;
+  return {
+    path: api(
+      `tasks/${encodeURIComponent(t.taskId)}/review-items/${encodeURIComponent(t.reviewItemId)}/secrets`,
+    ),
+    body: { secrets: values.map((v) => ({ service: v.service, value: v.value })) },
+  };
+}
+
+/**
  * What a question asked ON a review item anchors to: the item, on its task's
  * doc. A TICKET-borne item has one, and so does a ticket's OWN decision — it
  * anchors as the derived `r-legacy` row, which the server admits since
@@ -1115,6 +1146,11 @@ export function reviewBadge(kind: ReviewKind): { label: string; tone: string } {
 export function reviewItemBadge(item: ReviewItem): { label: string; tone: string } {
   if (item.review?.shape === 'decision') return { label: 'Decision', tone: 'decision' };
   if (item.review?.shape === 'review') return { label: 'Question', tone: 'review' };
+  // The word a person reads is "Secret", everywhere and only (Bryan,
+  // 2026-09-11: *"Build it but just refer to secrets. Not keychain."*). Where
+  // the value is kept is a fact about this machine and belongs to the agent
+  // that reads it back, not to the card.
+  if (item.review?.shape === 'secret') return { label: 'Secret', tone: 'secret' };
   return reviewBadge(item.kind);
 }
 

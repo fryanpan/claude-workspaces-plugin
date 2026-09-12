@@ -39,29 +39,33 @@ describe('applyRefresh', () => {
 
 describe('refreshReviewItems', () => {
   it('replaces the strip when the server answers', async () => {
-    const state = { reviewItems: [item('a')] };
+    const state = { reviewItems: [item('a')], viewerRole: 'owner' as const };
     await refreshReviewItems(state, async () => ({ items: [item('b'), item('c')] }));
     expect(state.reviewItems.map((i) => i.threadId)).toEqual(['b', 'c']);
   });
 
   it('survives a refresh that could not reach the server', async () => {
-    const state = { reviewItems: [item('a'), item('b')] };
+    const state = { reviewItems: [item('a'), item('b')], viewerRole: 'member' as const };
     const fetchItems = vi.fn(async () => null);
 
     await refreshReviewItems(state, fetchItems);
 
     expect(fetchItems).toHaveBeenCalledTimes(1); // the refresh really ran
     expect(state.reviewItems.map((i) => i.threadId)).toEqual(['a', 'b']);
+    // The level survives the outage with the list. A read that never arrived
+    // is not a promotion, which is the reading that would put a control in
+    // front of a reader the server will refuse.
+    expect(state.viewerRole).toBe('member');
   });
 
   it('clears the strip when the server says it is genuinely empty', async () => {
-    const state = { reviewItems: [item('a')] };
+    const state = { reviewItems: [item('a')], viewerRole: 'owner' as const };
     await refreshReviewItems(state, async () => ({ items: [] }));
     expect(state.reviewItems).toEqual([]);
   });
 
   it('treats a payload with no items key as empty, not as a failure', async () => {
-    const state = { reviewItems: [item('a')] };
+    const state = { reviewItems: [item('a')], viewerRole: 'owner' as const };
     await refreshReviewItems(state, async () => ({}));
     expect(state.reviewItems).toEqual([]);
   });

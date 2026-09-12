@@ -25,7 +25,7 @@ export async function handleWorkspaceHome(
     reviewItemsFor,
     resolveWorkspaceForDoc,
   } = ctx;
-  const { req, pathname, scope, url, visitor, authorFor } = rq;
+  const { req, pathname, scope, url, visitor, authorFor, roleFor } = rq;
   /**
    * WHOSE marker this request may move or read.
    *
@@ -121,7 +121,18 @@ export async function handleWorkspaceHome(
     // used to open this block are DELETED rather than left dormant — there
     // is no second copy of "does this board exist" here to drift.
     const { workspaceId, board: workspace } = scope;
-    return j(200, { workspaceId, items: reviewItemsFor(workspace) });
+    // The reader's own level rides along, because the queue is where a card
+    // has to decide whether to offer an act this reader cannot perform. One
+    // read rather than two: a card that asked separately would paint its
+    // controls first and learn afterwards, which is the flicker a person
+    // reads as "it let me, then took it back". `roleFor` is the admission
+    // gate's own verdict, so this cannot disagree with what a write is
+    // refused by.
+    return j(200, {
+      workspaceId,
+      items: reviewItemsFor(workspace),
+      you: { role: roleFor(workspaceId) },
+    });
   }
   // ── Home pane (§ approved home-pane design) ──────────────────────
   // GET: the brief + marker + instructions for ONE person. `user` is

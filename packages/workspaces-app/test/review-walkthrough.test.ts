@@ -131,6 +131,7 @@ function walk(over: Partial<WalkthroughHandlers> = {}): WalkthroughHandlers {
   return {
     onAnswer: vi.fn(),
     onReply: vi.fn(),
+    onSaveSecrets: vi.fn(),
     onAskOnItem: vi.fn(),
     onQuestionOnItem: vi.fn(),
     onOpenItem: vi.fn(),
@@ -163,9 +164,10 @@ function renderReviewWalkthrough(
   handlers: WalkthroughHandlers,
   progress: WalkProgress = { cleared: 0, last: null },
   now: number = NOW,
+  viewerRole: 'owner' | 'member' = 'owner',
 ): void {
   disposeWalk?.();
-  walkthroughData.value = { queue, index, progress, now, handlers };
+  walkthroughData.value = { queue, index, progress, now, handlers, viewerRole };
   disposeWalk = mountWalkthroughIsland(container);
 }
 

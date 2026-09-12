@@ -162,6 +162,17 @@ export interface BoardState {
    * not be a second one. Decisions are derived from `tasks` here.
    */
   reviewItems: ReviewThreadItem[];
+  /**
+   * What this reader may DO on this board, as the server itself reads it.
+   *
+   * Carried on the same read as the queue rather than fetched beside it: a
+   * card that asked separately would paint its controls first and learn
+   * afterwards, and a control that appears and then withdraws reads as the
+   * board changing its mind. 'owner' until a read says otherwise, which is
+   * what the operator's own board is — a wrong guess here costs a refused
+   * write and a message, never a value going somewhere it should not.
+   */
+  viewerRole: 'owner' | 'member';
   /** Position in the review walkthrough; -1 when it is closed. A CACHE of
    *  where `walkKey` resolved on the last render — see `walkPosition`. */
   walkIndex: number;

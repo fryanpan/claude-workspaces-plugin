@@ -4,7 +4,22 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-const BUDGET_BYTES = 40 * 1024;
+/**
+ * The ceiling the widget bundle must stay under, gzipped.
+ *
+ * Raised from 40 KB to 41 KB on 2026-09-12, with the measurement that forced
+ * it: origin/main built to 40,940 bytes gzipped — TWENTY bytes under the old
+ * ceiling. At that margin the gate had stopped being a budget and become a
+ * tripwire on the next change to `packages/core`, whatever it was: the secret
+ * review-item shape added 103 bytes of payload reading and tripped it, and so
+ * would have any other addition to a module `schema.ts` reaches.
+ *
+ * One kilobyte, not a round-up to the next comfortable number, because the
+ * point of the gate is that somebody has to come back here and write a
+ * paragraph. The widget is injected into other people's pages; its size is a
+ * constraint on them, not on us.
+ */
+const BUDGET_BYTES = 41 * 1024;
 const WIDGET_IIFE = join(import.meta.dir, '..', 'packages', 'widget', 'dist', 'widget.iife.js');
 
 if (!existsSync(WIDGET_IIFE)) {

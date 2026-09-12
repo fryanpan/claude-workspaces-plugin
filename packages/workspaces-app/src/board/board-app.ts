@@ -329,6 +329,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     answerDecision,
     askOnReviewItem,
     replyToReviewItem,
+    saveSecretsOnItem,
     commentOnActivity,
     replyOnActivity,
   } = review;
@@ -566,6 +567,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     answerDecision: (task, text, optionId) => answerDecision(task, text, optionId),
     askOnReviewItem: (item, phrase, question) => askOnReviewItem(item, phrase, question),
     replyToReviewItem: (item, text, optionId) => replyToReviewItem(item, text, optionId),
+    saveSecretsOnItem: (item, values) => saveSecretsOnItem(item, values),
     onQueueDrained: () => chainWalkDrain?.(),
   });
   // Destructured rather than wrapped: a local `function renderWalkthrough`

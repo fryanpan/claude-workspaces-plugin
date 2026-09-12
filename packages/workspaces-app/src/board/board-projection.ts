@@ -65,6 +65,7 @@ export function initialBoardState(bootLoc: BoardLocation): BoardState {
     discussion: { loading: false, threads: [] },
     discussionTaskId: null,
     reviewItems: [],
+    viewerRole: 'owner',
     walkIndex: -1,
     walkKey: null,
     walkProgress: { cleared: 0, last: null },

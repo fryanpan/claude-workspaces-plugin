@@ -1148,6 +1148,13 @@ body.board-body {
   color: var(--accent);
   background: var(--accent-wash, rgba(59, 111, 212, 0.07));
 }
+/* A secret ask. The quietest of the three tones on purpose: the badge says
+   what KIND of ask this is, and an ask for a value the reader is being
+   trusted with should not also be shouting. */
+.board-walk-k-secret {
+  color: var(--fg-muted);
+  background: var(--bg-subtle, var(--bg));
+}
 /* The owner revised the item after the reader asked on it — the editor's
    resolved-range green, so "this came back changed" reads the same way a
    resolved doc thread does. Sits beside the kind badge, never instead of it. */
@@ -1255,6 +1262,11 @@ body.board-body {
   display: none;
 }
 @media (max-width: 1100px) {
+  /* Under a thumb the send is the primary gesture, so it takes the width —
+     the same call the composer's Send makes one block below. */
+  .board-walk-cred-send {
+    align-self: stretch;
+  }
   .board-walk-body-clamp {
     /* ~8 lines at 1.55 line-height, then a fade that says "there is more". */
     max-height: 12.4em;
@@ -1413,6 +1425,82 @@ body.board-body {
   font-size: 13px;
   color: var(--fg-muted);
 }
+/* ── Secret fields (approved mock) ────────────────────────────────────────
+   The block that sits where `.board-walk-option` sits, and inherits its
+   measurements: the same 44px floor, the same border and radius, stacked one
+   per field. A reader moving between a decision card and a secret card should
+   feel the same card with a different ask, not a second design. */
+.board-walk-creds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.board-walk-cred {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  font: inherit;
+  text-align: left;
+}
+.board-walk-cred-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.board-walk-cred-label {
+  font-weight: 600;
+}
+/* The name it is stored under, monospace because it is an identifier the
+   reader may have to match against something they are holding. */
+.board-walk-cred-service {
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* Underlined rather than boxed: the field is INSIDE the labelled row, so a
+   second border around it would read as a second control. The letter-spacing
+   is what makes a masked value countable at a glance. */
+.board-walk-cred-input {
+  min-height: 36px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 6px 0 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  letter-spacing: 0.12em;
+  width: 100%;
+}
+.board-walk-cred-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* What a reader who may not answer sees: the same rows, dimmed, with no
+   inputs in them. */
+.board-walk-cred.is-refused {
+  opacity: 0.55;
+}
+/* The fields are a COLUMN, so Save goes under them rather than beside them
+   the way the one-line reply box does. */
+.board-walk-cred-form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.board-walk-cred-send {
+  min-height: 40px;
+  align-self: flex-end;
+}
+
 /* The reply box (mockup `.replybox`): the field and its dark Send side by
    side, stacking under a thumb — see the ≤900px block. */
 .board-walk-answer,
