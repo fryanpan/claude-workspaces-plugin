@@ -35,7 +35,9 @@
  * held line moves nothing above it, so there is nothing to correct. And a
  * scroll by the reader — a wheel, a drag, a `scrollIntoView` from a jump — is
  * the reader choosing a new line, so the hold re-reads which line that is
- * rather than dragging them back.
+ * rather than dragging them back. And a pane sitting at offset 0 is held
+ * there rather than pushed off the top, which is what stops the document's
+ * own arrival from scrolling its title under the bar — see `hold()`.
  */
 import type { MountScope } from './mount-scope.ts';
 
@@ -165,6 +167,26 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
     }
     const dy = live.el.getBoundingClientRect().top - paneTop() - live.y;
     if (Math.abs(dy) < EPSILON_PX) return;
+    // THE TOP OF A DOCUMENT IS NOT A LINE SOMEBODY IS HOLDING. With the pane
+    // at offset 0 the held block IS the document's first block, so the only
+    // thing that can push it down is content arriving BEFORE the start of the
+    // document — and on load that content is the document itself.
+    //
+    // Measured: a doc opens with `#editor` holding ProseMirror's empty
+    // placeholder paragraph, and the hold's first reading is taken against it
+    // ~13ms before the first sync lands the real blocks. The heading goes in
+    // above that paragraph and pushes it down, so this correction scrolled the
+    // pane to keep the placeholder still — 71px at 1180x820, 48px at 430x932,
+    // both of which put the doc's own H1 above the pane's clip box and under
+    // the top bar, on every doc, with nobody having touched anything.
+    //
+    // A reader parked at the very top has asked for the start of this
+    // document, so the start is what they keep when it grows above them. The
+    // reading is re-taken rather than kept: the first block is a new one.
+    if (refScrollTop === 0 && dy > 0) {
+      repick();
+      return;
+    }
     scroller.scrollTop += dy;
     refScrollTop = scroller.scrollTop;
     // What we actually got, not what we asked for: at either end of the
