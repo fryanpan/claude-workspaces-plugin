@@ -19,7 +19,7 @@
  */
 import type { ReviewSecretField } from '@claude-workspaces/core';
 import { Fragment } from 'preact';
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { SecretsGate } from './board-review-model.ts';
 
 /** The eye on a secret field — open when the value is masked (tap to show),
@@ -68,6 +68,36 @@ function SecretFieldsForm(props: {
 }) {
   const { fields, itemKey } = props;
   const formRef = useRef<HTMLFormElement | null>(null);
+  /**
+   * DRAWN CLEAR OF ITS OWN SAVE BAR.
+   *
+   * The send row is sticky, so a form whose foot is below the fold has Save
+   * painted over its own fields — at 1180x820 the second field's last line
+   * hit-tested to the Save row, and on a phone the field was off the bottom
+   * of the panel altogether (UX review, 2026-09-12). `board.css` reserves the
+   * row's band with `scroll-padding-bottom`, which makes this one call enough:
+   * `nearest` does nothing at all when the form already sits inside the
+   * reserved region, and otherwise scrolls the least it can to put the whole
+   * form — last line, eye and Save — above the band.
+   *
+   * Once, when the fields are first drawn, and never again: a reader who
+   * scrolls away mid-paste is not pulled back, and the browser already keeps
+   * the caret in view while they type.
+   */
+  useEffect(() => {
+    const form = formRef.current;
+    // `scrollIntoView` is one of the layout calls a DOM without layout
+    // does not ship, and this effect runs in every unit test that mounts
+    // the card.
+    if (!form || typeof form.scrollIntoView !== 'function') return;
+    const run = (): void => form.scrollIntoView({ block: 'nearest' });
+    if (typeof requestAnimationFrame !== 'function') {
+      run();
+      return;
+    }
+    const frame = requestAnimationFrame(run);
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const [busy, setBusy] = useState(false);
   /**
    * Which field the reader still has to fill, by service — the one line a

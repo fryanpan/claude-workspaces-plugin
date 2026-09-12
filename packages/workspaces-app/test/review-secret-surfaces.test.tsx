@@ -11,7 +11,14 @@
  *    reader reaches next, and Home is where Bryan lands first;
  *  - the ask was echoed into the comment history with a comment box under it
  *    and no line saying that a comment is the one place it cannot be answered;
- *  - on the iPad the Save sat below the fold and did not stick.
+ *  - on the iPad the Save sat below the fold.
+ *
+ * Reaching Save is no longer one of them. It was a sticky row here, asserted
+ * as a computed `position`, until a second walk found the sticky row painting
+ * itself over the fields it belongs to. What replaced it — the scroll
+ * reserving the row's height — is a used-geometry property that only a real
+ * browser can answer, so it is pinned in `secret-save-bar.test.ts` instead of
+ * restated here as a declaration nobody can read a behaviour off.
  *
  * All fixtures are synthetic: invented names, invented service names, and
  * placeholder values that are deliberately not token-shaped.
@@ -22,7 +29,7 @@ import type { BoardReviewItem } from '../src/board/board-model.ts';
 import { initialBoardState } from '../src/board/board-projection.ts';
 import { createBoardReviewController } from '../src/board/board-review-controller.ts';
 import { reviewItemRow } from '../src/board/board-review-render.ts';
-import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
+import { IPAD, installSheets, setViewport, styleOf } from './css-harness.ts';
 import { resetBoardServer, server } from './support/board-drive.ts';
 
 const NOW = 1_700_000_000_000;
@@ -166,29 +173,6 @@ describe('the weight the badge carries, read off the page', () => {
       // CONTROL: the bare chip is still the muted one, so the assertion above
       // is the secret rule applying rather than every chip having gone amber.
       expect(secret.color).not.toBe(plain.color);
-    } finally {
-      done();
-    }
-  });
-});
-
-describe('reaching Save', () => {
-  it('sticks the send row at the tablet tier, not only under a thumb', () => {
-    // On the iPad's task panel Save drew 9px below the fold on a two-field
-    // ask and did not stick, so the reader had to scroll a panel they had no
-    // reason to think scrolled. The phone had the sticky row already; the
-    // rule is out of the phone block now, because a sticky row with nothing
-    // to scroll past behaves exactly like a static one.
-    const done = installSheets('board.css', 'styles.css');
-    try {
-      for (const width of [IPAD, PHONE]) {
-        setViewport(width);
-        document.body.replaceChildren();
-        const row = document.createElement('div');
-        row.className = 'board-walk-cred-send-row';
-        document.body.append(row);
-        expect(styleOf(row).position).toBe('sticky');
-      }
     } finally {
       done();
     }

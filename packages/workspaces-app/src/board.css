@@ -1593,25 +1593,51 @@ body.board-body {
 }
 /* Save, and the one line a half-filled form answers with, on one row — the
    message to the left of the control it is about, so a reader who pressed
-   Save and went nowhere reads WHY beside the button they pressed. */
-/* SAVE STAYS ON SCREEN. At 430 the software keyboard takes about half the
-   viewport and Save sat under it; on the iPad's task panel Save drew 9px
-   below the fold on a two-field ask and was not reachable without scrolling a
-   panel the reader had no reason to think scrolled. Sticking the row to the
-   bottom of the card's scroll answers both, so the rule is not in the phone
-   block — a sticky row with nothing to scroll past behaves exactly like a
-   static one. The panel colour keeps the field it overlaps readable as it
-   passes under. */
+   Save and went nowhere reads WHY beside the button they pressed.
+
+   SAVE STAYS ON SCREEN, AND NEVER ON TOP OF A FIELD. The row used to be
+   sticky: at 430 the keyboard takes half the viewport and Save sat under it,
+   and on the iPad's task panel Save drew 9px below the fold. But a sticky box
+   rises as far as the top of its containing block, which here is the form, so
+   the row went on to paint itself — opaque, in the panel's own colour —
+   across the fields it belongs to. Measured at 1180x820 with the panel at its
+   top: a hit test at the second field's last line answered "Save row" (UX
+   review, 2026-09-12).
+
+   So the row is ordinary again and the scroll carries the room instead; the
+   rule below is what keeps Save reachable. Measured both ways, at both
+   widths, with the keyboard up and down: with the room reserved, Save is on
+   screen whenever a field is focused whether the row sticks or not — so
+   sticking it bought nothing and cost the field underneath. */
 .board-walk-cred-send-row {
-  position: sticky;
-  bottom: calc(8px + var(--safe-bottom, 0px));
-  background: var(--bg-panel);
   padding: 6px 0 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+/* SAVE'S OWN ROOM IN THE SCROLL — what replaced sticking the row down.
+   Tapping a field scrolls it into view, and the browser stops as soon as the
+   field itself is inside the scrollport, which leaves Save just past the
+   bottom edge. Reserving the row's own height at the foot of the scrollport
+   makes that same scroll carry Save with the field, so the control and the
+   box it belongs to arrive together — and nothing is ever painted over
+   anything.
+
+   92px: the 44px button, the row's 6px of padding, the 24px of bottom padding
+   the panel carries, and enough over to survive a line of the half-filled
+   form's message wrapping beside it. `--safe-bottom` because the phone's
+   scroller ends above the home indicator.
+
+   Two scrollers, because the form has two homes: the task panel's box and the
+   page itself on Home. One number for both — Home's scroller has no bottom
+   padding of its own, so this over-reserves there by the panel's 24px, which
+   costs a focused field a little more room above the fold and nothing else.
+   `:has()` keeps the reservation to the pages actually showing a form, so no
+   other surface's scroll-into-view moves. */
+:where(.board-detail-panel, body.board-body):has(.board-walk-cred-form) {
+  scroll-padding-bottom: calc(92px + var(--safe-bottom, 0px));
 }
 .board-walk-cred-miss {
   font-size: 13px;
