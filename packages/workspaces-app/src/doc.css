@@ -571,6 +571,33 @@ body.has-set .doc-switcher-caret {
     padding-left: 12px;
     padding-right: 12px;
   }
+  /* ONE LINE, AND MUCH SHORTER (Bryan, 2026-09-11, recording from his phone:
+     "Make plan and Review are much shorter and lose their subtitles"). The
+     subtitle is what makes a press predictable on a screen with room to read
+     it; on a phone held in a meeting it is a second line of small type over
+     the transcript, and the two pills were 71px of the 932 the reader has.
+     The label alone says what the press does, and the height falls to the
+     44px design-mobile.md asks of a control a thumb has to hit — which is now
+     the whole of the pill, the padding having stopped setting it.
+
+     THE TWO FACES THAT ASK, AND ONLY THOSE. A receipt's second line is not
+     an explanation of a press, it is the answer to "did that go anywhere":
+     who asked, and whether anybody is listening — the line added after Bryan
+     pressed Review with the seat empty and the float read "waiting for your
+     agent" as if one were coming. Approve Plan's is the consequence of a
+     press that creates tickets. Neither is decoration, so neither is
+     shortened here; both are states a phone reaches rarely and reads
+     carefully. */
+  .plan-float--make,
+  .review-float--ask {
+    gap: 0;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .plan-float--make .plan-float-sub,
+  .review-float--ask .plan-float-sub {
+    display: none;
+  }
 }
 /* The refusal reason for a failed Approve press — only ever appears in
    answer to one, floating just above the button it answers. */
@@ -2230,6 +2257,32 @@ body.has-set .doc-switcher-caret {
   .meeting-strip::before {
     right: 60px;
   }
+  /* NO BAR OF ITS OWN ON A PHONE (Bryan, 2026-09-11, recording from his
+     phone: "no white status bar under the recording bar; the recording
+     indicator blinks in the top right and nothing else is dedicated to it").
+     Every job the row does has somewhere better to be at this width: the
+     words are the live zone at the end of the doc, the state and the clock
+     are the Record button's own face, and the blink moves to that button's
+     dot below. What is left is 36px of pale panel across the top of a 932px
+     screen, under a bar that already says Recording.
+
+     EXCEPT WHEN IT IS CARRYING A SENTENCE. A refused microphone, a lost
+     stream and the one-tap-to-start note are all `.meeting-note` in the feed
+     (meeting-feed.ts `showNote`, and the alarm carries the same class), and
+     none of them has anywhere else to be said. Those states keep the bar.
+     edit-viewport.ts refuses to yield a RECORDING strip to `hidden` because
+     "a live mic with no indicator is not a thing to ship" — the indicator is
+     the blinking dot, which this rule moves rather than removes. */
+  .meeting-strip:not(:has(.meeting-note)) {
+    display: none;
+  }
+  /* The blink the strip's own `.meeting-blinker` was doing, on the control
+     that is still on screen. meeting-strip.ts unhides `.meeting-record-dot`
+     only while recording, so this is the live indicator and the one animated
+     thing in the top bar. */
+  .meeting-record.is-live .meeting-record-dot {
+    animation: meeting-blink 1.2s ease-in-out infinite;
+  }
   /* The popovers become an edge-to-edge sheet under the bar. */
   .meeting-pop,
   .meeting-sheet {
@@ -2271,6 +2324,7 @@ body.has-set .doc-switcher-caret {
 }
 @media (prefers-reduced-motion: reduce) {
   .meeting-blinker,
+  .meeting-record-dot,
   .meeting-caption-line .w.is-fixed {
     animation: none;
   }
@@ -2329,9 +2383,34 @@ body.has-set .doc-switcher-caret {
 /* No click-to-type runway under the transcript while it is showing: its last
    line sits against the bottom of the pane, not a screen above it. The base
    rule's 160px is what put it there. The keyboard inset stays — on a phone
-   that runway is the only thing keeping the last line off the keyboard. */
+   that runway is the only thing keeping the last line off the keyboard.
+   `--lz-runway` is the one exception, and it is zero on every doc that has no
+   float dock over that pane — see below. */
 #editor:has(> .live-zone:not([hidden])) {
-  padding-bottom: calc(var(--safe-bottom) + max(8px, var(--kb-bottom, 0px)));
+  padding-bottom: calc(var(--safe-bottom) + var(--lz-runway, 0px) + max(8px, var(--kb-bottom, 0px)));
+}
+/* THE DOCK IS OVER THE LAST LINE, so the scroller has to be able to push the
+   transcript past it (Bryan, 2026-09-11, recording from his phone: "the
+   transcript scrolls and stays above the Make plan and Review buttons; today
+   it collides with them and will not scroll up").
+
+   The floats (float-dock.ts) are pinned to #editor-pane, not to the prose, so
+   they lie OVER the bottom of the scroller; with 8px of padding under the
+   words the scroll ended with the last lines behind Make Plan and Review and
+   nothing left to scroll. This is the dock's own footprint given back as
+   runway: the words clear the buttons at maximum scroll, and at rest the
+   transcript still hugs the last line of the doc rather than sitting a screen
+   below it.
+
+   Only where the dock is actually OVER the prose. Two conditions, and both
+   are load-bearing: a dock holding a visible float (an ordinary doc has
+   none), and a dock that has not been seated in the comment column —
+   `.doc-floats.is-floating` (new-indicator.ts) moves the row into the
+   balloon margin beside the text on a layout wide enough to have one, where
+   it covers nothing and this runway would be 104px of dead surface under an
+   iPad's transcript. */
+#editor-pane:has(> .doc-floats:not(.is-floating) > .plan-float:not([hidden])) #editor {
+  --lz-runway: 104px;
 }
 body.is-reading-width #editor > .live-zone {
   max-width: 36rem;
