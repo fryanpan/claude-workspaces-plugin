@@ -118,6 +118,7 @@ import {
 } from './routes/tasks.ts';
 import { createUpgradeStream } from './routes/upgrade-stream.ts';
 import { type LibraryRoutesContext, handleLibraryRoutes } from './routes/workspace-library.ts';
+import { handleWorkspaceNotFound } from './routes/workspace-not-found.ts';
 import {
   type MeetingHomeResolution,
   type WorkspaceRoutesContext,
@@ -2735,6 +2736,18 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // `/api` in front is told the address without it.
       const wrongPrefix = handleWrongPrefix(pathname);
       if (wrongPrefix) return wrongPrefix;
+
+      // ── The board's own not-found page ── see routes/workspace-not-found.ts.
+      // The last thing tried, so it shadows nothing: a browser that asked for
+      // an address under a board nothing serves gets a PAGE saying the link is
+      // wrong and linking back to the board, rather than the bodyless 404
+      // below — which Chrome paints as ERR_INVALID_RESPONSE, indistinguishable
+      // from the server being down.
+      const wsNotFound = handleWorkspaceNotFound(
+        { boardExists: (id) => taskStore.getWorkspace(id) !== undefined },
+        { pathname, method: req.method, url },
+      );
+      if (wsNotFound) return wsNotFound;
 
       return new Response('not found', { status: 404 });
     }
