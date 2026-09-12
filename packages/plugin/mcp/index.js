@@ -19461,7 +19461,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.216";
+var PLUGIN_VERSION = "0.1.217";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
