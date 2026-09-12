@@ -1,9 +1,9 @@
 /**
- * The two edits the note-taker must never be allowed to make to its own
+ * The three edits the note-taker must never be allowed to make to its own
  * section, refused in the applier rather than argued for in the prompt.
  *
- * WHY NOT THE PROMPT. Both rules below are already in the prompt, in capitals,
- * and both were broken in a measured run. A prompt rule is a request; this is
+ * WHY NOT THE PROMPT. The rules below are already in the prompt, in capitals,
+ * and every one of them was broken in a measured run. A prompt rule is a request; this is
  * the answer to "what happens when the model does it anyway", and the answer
  * has to be that the notes survive.
  *
@@ -48,6 +48,31 @@
  * bullets where the model meant one. That is the safe direction: a duplicate
  * is visible, is counted in the per-meeting summary, and the end-of-meeting
  * cleanup pass exists to merge one. A destroyed note is none of those things.
+ *
+ * RULE 3 — A BULLET WITH NO WORDS IN IT IS NOT A NOTE. Markdown reading `- `
+ * parses to a real list item holding nothing, and `applyBlockEdits` applies
+ * it: the core refusal is for markdown that parses to NO BLOCKS, and this
+ * parses to one. So the tick counts as a write, the turns it was answering
+ * are marked composed and never offered again, and what the reader gets is a
+ * blank line carrying the fresh-note tint — the blue bar on nothing.
+ * Measured in production on 2026-09-11: a meeting's section opened with one
+ * empty bullet, the first thing said never reached the notes at all, and the
+ * blank line stood for the rest of the recording, because
+ * `notes-section-tidy.ts` removes empty PARAGRAPHS and an empty bullet is a
+ * list item.
+ *
+ * So a wordless bullet is stripped out of the markdown it rides in, and if
+ * stripping it leaves an edit with no words at all, that edit is refused.
+ * When the batch's ONLY note was wordless — the shape above, a section
+ * heading opening beside an empty bullet — the whole batch is refused, which
+ * is the half of this rule that saves the words: a refused write carries its
+ * turns into the next tick, so the first thing said is composed again with a
+ * section already open, instead of being counted as written up.
+ *
+ * REFUSED RATHER THAN CONVERTED, unlike RULE 2, because there is nothing to
+ * keep. RULE 2 converts because both notes are real; here one of them is a
+ * blank line, and the only thing worth saving is the speech it failed to
+ * write up.
  *
  * WHAT IS DELIBERATELY NOT HERE: A DELETE-COVERAGE RULE. The obvious second
  * rule is to refuse a `delete_block` whose content no other edit in the batch
@@ -127,6 +152,61 @@ function keepsItsWords(was: string, now: string): boolean {
   return hits >= Math.max(2, Math.ceil(had.length * IDEA_CARRIED_SHARE));
 }
 
+/** Any letter or digit at all — what tells a note from a list marker. */
+const WORD = /[\p{L}\p{N}]/u;
+
+/** A line that is a list marker and nothing else: `- `, `*`, `1.`, `2)`. */
+const BARE_MARKER = /^\s*(?:[-*+]|\d+[.)])\s*$/;
+
+/** A line that opens a heading, whether or not it carries words after the
+ *  hashes. */
+const HEADING_LINE = /^\s*#{1,6}(?:\s|$)/;
+
+/**
+ * The same markdown with its wordless bullets taken out.
+ *
+ * Line by line, because a bullet with no words occupies exactly one line and
+ * everything around it — the section heading the model opened beside it, the
+ * bullets that did carry words — has to survive untouched.
+ *
+ * A MARKER LINE WHOSE WORDS ARE INDENTED UNDER IT IS NOT EMPTY. `- ` followed
+ * by an indented line is a wrapped bullet or a nested list, and dropping the
+ * marker would orphan whatever hangs off it. Only a marker with nothing
+ * indented after it is a blank line pretending to be a note.
+ */
+export function stripWordlessBullets(markdown: string): { markdown: string; stripped: number } {
+  const lines = markdown.split('\n');
+  const keep: string[] = [];
+  let stripped = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const next = lines[i + 1];
+    if (BARE_MARKER.test(line) && !(next !== undefined && /^\s+\S/.test(next))) {
+      stripped++;
+      continue;
+    }
+    keep.push(line);
+  }
+  return { markdown: keep.join('\n'), stripped };
+}
+
+/**
+ * Does this markdown put a NOTE in the doc — words that are not a heading?
+ *
+ * The heading lines are dropped before the question is asked, because opening
+ * `## Meeting notes` is structure the next tick would open again anyway. A
+ * batch that carries nothing else wrote no note, however many blocks it
+ * added.
+ */
+function writesANote(markdown: string): boolean {
+  return WORD.test(
+    markdown
+      .split('\n')
+      .filter((l) => !HEADING_LINE.test(l))
+      .join('\n'),
+  );
+}
+
 /**
  * Filter a tick's edits down to the ones that cannot destroy the section.
  *
@@ -148,7 +228,29 @@ export function guardNotesEdits(
   // section for all of them, and an edit before this one cannot move it.
   const section =
     outline !== undefined && headingId !== undefined ? sectionIds(outline, headingId) : undefined;
+  // RULE 3, first half: every wordless bullet leaves the batch before any
+  // other rule looks at it, so a replace judged below is judged on the words
+  // it will actually write.
+  let strippedBullets = 0;
+  const worded: prose.BlockEdit[] = [];
   for (const edit of edits) {
+    if (!('markdown' in edit)) {
+      worded.push(edit);
+      continue;
+    }
+    const { markdown, stripped } = stripWordlessBullets(edit.markdown);
+    strippedBullets += stripped;
+    if (stripped === 0) {
+      worded.push(edit);
+      continue;
+    }
+    if (!WORD.test(markdown)) {
+      refused.push(`${edit.op} carrying nothing but an empty bullet`);
+      continue;
+    }
+    worded.push({ ...edit, markdown });
+  }
+  for (const edit of worded) {
     if (edit.op !== 'replace_block' && edit.op !== 'delete_block') {
       out.push(edit);
       continue;
@@ -189,6 +291,16 @@ export function guardNotesEdits(
       continue;
     }
     out.push(edit);
+  }
+  // RULE 3, second half. A tick that took a blank line out of its own batch
+  // and has no note left in it did not write this tick's speech up, however
+  // much structure it added. Refusing the rest is what carries the words to
+  // the next tick — applying the heading alone would mark them composed and
+  // the first thing said would be gone.
+  if (strippedBullets > 0 && !out.some((e) => 'markdown' in e && writesANote(e.markdown))) {
+    for (const edit of out)
+      refused.push(`${edit.op} in a batch whose only note was an empty bullet`);
+    return { edits: [], refused, kept };
   }
   return { edits: out, refused, kept };
 }
