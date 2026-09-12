@@ -164,11 +164,17 @@ export interface AskedBackRowPayload {
 
 /** A row an agent filed that reads as UI work and is being built with no
  *  answered review item on it — the UI gate's breach (`ui-review-gate.ts`
- *  on the server). `keyword` is the word that made it read as UI work, so
- *  the lead can dismiss a false positive without re-reading the ticket. */
+ *  on the server). `file` is the changed file that made it UI work, and it
+ *  is the finding's evidence: the gate reads the builder's diff, not the
+ *  ticket's prose. `keyword` is the word in the row's own words that agrees,
+ *  when there is one — carried so the lead can weigh the finding without
+ *  re-reading the ticket, and absent on the rows a word list could never
+ *  have caught. Both are absent from a server older than this, whose frames
+ *  named a row and a keyword alone. */
 export interface UngatedUiRowPayload {
   id: string;
   title?: string;
+  file?: string;
   keyword?: string;
 }
 
@@ -630,8 +636,9 @@ export function stalledLine(p: StallPayload): string {
   if (ungated.length > 0) {
     const noun = ungated.length === 1 ? 'UI task is' : 'UI tasks are';
     parts.push(
-      `${ungated.length} ${noun} being built past the review gate — an agent filed it, it reads as ` +
-        `UI work, and nobody answered a review item on it — ${ungatedRowsClause(ungated)}. ` +
+      `${ungated.length} ${noun} being built past the review gate — an agent filed it, its builder ` +
+        'has changed a file a person looks at, and nobody answered a review item on it — ' +
+        `${ungatedRowsClause(ungated)}. ` +
         'Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.',
     );
   }
@@ -746,13 +753,16 @@ function askedBackRowsClause(rows: readonly AskedBackRowPayload[]): string {
   return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
 }
 
-/** One row past the UI gate: title, id, and the word that made it UI work,
- *  so a false positive ("page" in prose about a page of notes) is dismissable
- *  from the line. */
+/** One row past the UI gate: title, id, the changed file that made it UI
+ *  work, and — when the row's own words agree — the matched word too. The
+ *  file is what makes the finding checkable from the line itself; the word
+ *  is what made dismissing the old prose-only false positives cheap, and it
+ *  costs four characters to keep. */
 function ungatedRowClause(row: UngatedUiRowPayload): string {
   const title = row.title ? `"${row.title}" ` : '';
+  const file = row.file ? `, changed: ${row.file}` : '';
   const word = row.keyword ? `, matched: ${row.keyword}` : '';
-  return `${title}(${row.id}${word})`;
+  return `${title}(${row.id}${file}${word})`;
 }
 
 function ungatedRowsClause(rows: readonly UngatedUiRowPayload[]): string {

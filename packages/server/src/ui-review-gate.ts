@@ -14,31 +14,51 @@
  * agent had filed along the way, with no review item and nobody asked. The
  * work was fine; the fact that nothing anywhere could have noticed is not.
  *
- * WHAT IT DECIDES, AND FROM WHAT. Three of the four reads are explicit state
- * the store already holds — who filed the row, whether it is in flight,
- * whether any review item on it has been answered. The fourth, "is this a UI
- * change", is read out of the row's own words, and there is no honest way
- * around that: nothing on a task declares which surface it touches.
+ * WHAT IT DECIDES, AND FROM WHAT. Four reads, all of them explicit state:
+ * who filed the row, whether it is in flight, **which files its builder has
+ * changed**, and whether any review item on it has been answered.
  *
- * So the keyword set below is deliberately SMALL and deliberately loose about
- * missing things. A miss costs what the board costs today — nothing noticed —
- * while a false positive costs the lead a wake about a row that never needed
- * the gate, and a class of finding that cries wolf is a class of finding
- * people learn to skip. The limits are written down in
- * `docs/architecture/stall-check/criteria.md`; the short version is that this
- * catches rows that SAY they are about a screen, and misses every row that
- * changes one without saying so.
+ * THE FOURTH READ USED TO BE THE ROW'S PROSE, AND THAT IS THE DEFECT THIS
+ * MODULE WAS REWRITTEN TO FIX. A thirteen-word list run over the title and
+ * body flagged six rows across three boards in two days and was wrong every
+ * time: "layout" out of the skill name `project-docs-layout`; "button" out of
+ * a sentence saying which board control the filer had used; "panel" out of a
+ * market-research note about respondent panels. One row was named six times,
+ * the last of them after its work had merged and deployed, when there was no
+ * build left to hold. The cost is not the minutes. It is that a flag which is
+ * usually wrong stops being read, and the one real ungated UI row then
+ * arrives in the same list as the noise.
+ *
+ * So the question is asked of the WORK. A row in flight with a registered
+ * dispatch has a worktree, a worktree has a changed-file list, and a
+ * changed-file list answers "does this touch a screen" as a fact rather than
+ * as a reading of somebody's paragraph. Judging files also catches the miss
+ * the word list could never catch by construction: a row that changes a
+ * screen without saying so.
+ *
+ * AND WHEN THERE IS NO DIFF, IT SAYS NOTHING. A row nobody registered a
+ * dispatch for, a worktree that is not a git repo, a builder that has written
+ * nothing yet — the gate has no evidence, and the previous behaviour (guess
+ * from the prose) is the behaviour with the measured 0-for-6 record. Silence
+ * here is not a miss being accepted quietly: it is the module declining to
+ * assert a fact it cannot see. The reasoning, and the two alternatives that
+ * were weighed against it, are in
+ * `docs/architecture/stall-check/criteria.md`.
+ *
+ * The prose match SURVIVES as colour, never as the verdict. A finding names
+ * the changed file that made it one, and the word in the row's own prose that
+ * agrees, when there is one — because the lead who could dismiss a false
+ * positive in a second was the lead who had been told which token matched.
  */
 
 /**
- * The words that make a row read as UI work. Whole words only, case folded,
- * with a small suffix set (`s`, `es`, `ing`) so a plural or a gerund is the
- * same word.
+ * The words that make a row's prose READ as UI work. Whole words only, case
+ * folded, with a small suffix set (`s`, `es`, `ing`) so a plural or a gerund
+ * is the same word.
  *
- * Every entry earns its place by naming a thing on a screen or the act of
- * touching one. Deliberately absent: "design", "view", "render", "style" and
- * "component", each of which is at least as common in server prose as in UI
- * prose on this board.
+ * No longer a verdict — see the header. It rides a finding the changed files
+ * already decided, so that the line the lead reads says both what the builder
+ * touched and what the row claimed to be about.
  */
 export const UI_KEYWORDS: readonly string[] = [
   'button',
@@ -60,21 +80,107 @@ const UI_WORD_RE = new RegExp(`\\b(${UI_KEYWORDS.join('|')})(?:s|es|ing)?\\b`, '
 
 /**
  * The first UI word in a row's text, or `undefined`. Returned rather than a
- * boolean so a finding can say WHICH word made it one — a lead reading
- * "matched: page" can dismiss a false positive in a second, where a bare
- * flag makes them re-read the ticket to guess.
+ * boolean so a finding can say WHICH word agreed with the diff — a lead
+ * reading "matched: page" can weigh a finding in a second, where a bare flag
+ * makes them re-read the ticket to guess.
  */
 export function uiKeywordIn(text: string): string | undefined {
   const hit = UI_WORD_RE.exec(text);
   return hit?.[1]?.toLowerCase();
 }
 
+/**
+ * Extensions that exist only to be seen. A change to one of these is a change
+ * to a screen in every layout this has to read, which is why the list is the
+ * strong half of the rule and the path list below is the weak half.
+ */
+export const UI_FILE_EXTENSIONS: readonly string[] = [
+  '.css',
+  '.scss',
+  '.sass',
+  '.less',
+  '.html',
+  '.htm',
+  '.svg',
+  '.tsx',
+  '.jsx',
+  '.vue',
+  '.svelte',
+];
+
+/**
+ * Directory names that name a client surface. Weaker than an extension — a
+ * `.ts` file says nothing about itself — so a hit here is carried into the
+ * finding by name, exactly like a matched keyword, and dismissible the same
+ * way.
+ */
+export const UI_PATH_SEGMENTS: readonly string[] = [
+  'ui',
+  'client',
+  'frontend',
+  'web',
+  'components',
+  'views',
+  'pages',
+  'styles',
+  'public',
+  'static',
+  'templates',
+  'widget',
+];
+
+/**
+ * …and a package or directory named THIS way is the client of something.
+ * `packages/workspaces-app/src/board/board-cards.ts` is a screen and carries
+ * no other signal: no UI extension, no bare `app` segment. A convention, and
+ * the weakest rule here, which is why it is a short closed list.
+ */
+export const UI_PACKAGE_SUFFIXES: readonly string[] = [
+  '-app',
+  '-ui',
+  '-web',
+  '-client',
+  '-frontend',
+];
+
+/**
+ * A test is not a screen. Without this the `-app` rule reads every file under
+ * a client package's `test/` as a UI change — measured as the ONLY
+ * disagreement between this classifier and the repo's own client packages
+ * over 150 merged commits, and five of five of them were a client test.
+ */
+const TEST_PATH_SEGMENTS: readonly string[] = ['test', 'tests', '__tests__', 'spec', 'fixtures'];
+const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+
+/** Is this one changed path a change to something a person looks at? */
+export function isUiFile(path: string): boolean {
+  const lower = path.toLowerCase();
+  const segments = lower.split('/');
+  const dirs = segments.slice(0, -1);
+  const base = segments[segments.length - 1] ?? '';
+  if (dirs.some((d) => TEST_PATH_SEGMENTS.includes(d)) || TEST_FILE_RE.test(base)) return false;
+  if (UI_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext))) return true;
+  return dirs.some(
+    (d) => UI_PATH_SEGMENTS.includes(d) || UI_PACKAGE_SUFFIXES.some((suf) => d.endsWith(suf)),
+  );
+}
+
+/**
+ * The first changed file that makes a change a UI change, or `undefined`.
+ * The path rather than a boolean, for the reason `uiKeywordIn` returns the
+ * word: the finding has to carry its own evidence.
+ */
+export function uiFileIn(files: readonly string[]): string | undefined {
+  return files.find((f) => isUiFile(f));
+}
+
 /** One row, as the gate needs to read it. Every field is explicit state the
- *  caller resolved; this module reads no store. */
+ *  caller resolved; this module reads no store and shells out to nothing. */
 export interface UiGateRow {
   id: string;
   title: string;
-  /** The description snapshot. Absent is the same as empty. */
+  /** The description snapshot. Absent is the same as empty. Colour only —
+   *  nothing here is decided from it. */
   body?: string;
   /** The row's creator is POSITIVELY placed as an agent by the roster or by
    *  a declared actor kind. An unplaceable creator is not an agent: this
@@ -84,6 +190,15 @@ export interface UiGateRow {
   /** In flight: in-progress with a registered dispatch, or an in-progress
    *  transition on the row. */
   dispatched: boolean;
+  /**
+   * Every file the row's builder has changed since leaving the default
+   * branch, or `undefined` when nobody could answer — no registered
+   * dispatch, a worktree that is gone or is not a git repo, a git that
+   * failed. `undefined` and `[]` are NOT the same: the first is no evidence
+   * and the row goes unjudged, the second is a readable worktree that has
+   * changed nothing, which is evidence of no UI change.
+   */
+  changedFiles?: readonly string[];
   /** Any review item on the row or its thread carries an answer. One is
    *  enough — the gate asks that somebody was asked and answered, not that
    *  every item on the row is closed. */
@@ -94,21 +209,34 @@ export interface UiGateRow {
 export interface UngatedUiRow {
   id: string;
   title: string;
-  /** The word that made it read as UI work. */
-  keyword: string;
+  /** The changed file that made it UI work — the finding's evidence. */
+  file: string;
+  /** The word in the row's own prose that agrees, when there is one. Absent
+   *  on the rows the word list could never have caught, which is most of the
+   *  reason the gate now reads files. */
+  keyword?: string;
 }
 
 /**
- * The rows in flight that an agent filed, that read as UI work, and that
- * nobody answered a review item on. Board order in, board order out.
+ * The rows in flight that an agent filed, whose builder has touched a screen,
+ * and that nobody answered a review item on. Board order in, board order out.
+ *
+ * A row with no `changedFiles` is skipped in silence — see the header.
  */
 export function ungatedUiRows(rows: readonly UiGateRow[]): UngatedUiRow[] {
   const out: UngatedUiRow[] = [];
   for (const row of rows) {
     if (!row.filedByAgent || !row.dispatched || row.answeredReviewItem) continue;
+    if (row.changedFiles === undefined) continue;
+    const file = uiFileIn(row.changedFiles);
+    if (file === undefined) continue;
     const keyword = uiKeywordIn(`${row.title}\n${row.body ?? ''}`);
-    if (keyword === undefined) continue;
-    out.push({ id: row.id, title: row.title, keyword });
+    out.push({
+      id: row.id,
+      title: row.title,
+      file,
+      ...(keyword !== undefined ? { keyword } : {}),
+    });
   }
   return out;
 }
@@ -135,6 +263,14 @@ export interface UiGateReads {
    * blank all read as "not an agent" — which is the safe direction here.
    */
   isAgentName: (name: string) => boolean;
+  /**
+   * What has this row's builder changed? `undefined` for a row with no
+   * readable worktree. The intended answer is the dispatch registry's
+   * worktree path through `changedFilesInWorktree` in `git-diff.ts`; it
+   * shells out to git, so the gate asks it only of rows the two boolean
+   * reads have already kept.
+   */
+  changedFiles: (taskId: string) => readonly string[] | undefined;
   /** Has any review item on this row, on either surface, been answered? */
   answeredReviewItem: (taskId: string) => boolean;
 }
@@ -147,6 +283,12 @@ export interface UiGateReads {
  * transition is the record that the move happened. A board that also keeps a
  * dispatch registry adds nothing here — a registered dispatch always writes
  * the transition it is registered against.
+ *
+ * The two expensive reads are asked LAST and only of a row the cheap ones
+ * have not already cleared. `changedFiles` spawns a git process and
+ * `answeredReviewItem` walks a doc's threads; doing either on every
+ * in-progress row of every board on every stall tick, to learn something
+ * about rows that were never candidates, is a cost with no reader.
  */
 export function collectUngatedUiRows(
   tasks: readonly UiGateTask[],
@@ -160,20 +302,17 @@ export function collectUngatedUiRows(
       (filer !== '' && reads.isAgentName(filer)) ||
       (task.createdBy === undefined && task.transitions[0]?.by?.kind === 'agent');
     const dispatched = task.transitions.some((t) => t.to === 'in-progress');
+    const candidate = filedByAgent && dispatched;
+    const changedFiles = candidate ? reads.changedFiles(task.id) : undefined;
+    const touchesUi = changedFiles !== undefined && uiFileIn(changedFiles) !== undefined;
     rows.push({
       id: task.id,
       title: task.title,
       ...(task.body !== undefined ? { body: task.body } : {}),
       filedByAgent,
       dispatched,
-      // Asked LAST and only of a row the three cheap reads have not already
-      // cleared: the answer lives in a doc's threads, and walking every
-      // in-progress row's body doc on every stall tick to learn something
-      // about rows that were never candidates is a cost with no reader.
-      answeredReviewItem:
-        filedByAgent && dispatched && uiKeywordIn(`${task.title}\n${task.body ?? ''}`) !== undefined
-          ? reads.answeredReviewItem(task.id)
-          : false,
+      ...(changedFiles !== undefined ? { changedFiles } : {}),
+      answeredReviewItem: touchesUi ? reads.answeredReviewItem(task.id) : false,
     });
   }
   return ungatedUiRows(rows);

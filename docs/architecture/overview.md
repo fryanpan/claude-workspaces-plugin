@@ -167,7 +167,10 @@ instead of waiting: the two board wakes in the Keep-moving group (the
 stall tick also records `keep-moving-verdict.ts`, the PASS/FAIL measurement
 of that group, off the same snapshot the wake reads, and reads
 `ui-review-gate.ts` — the one finding in the group about a task that is
-MOVING, an agent-filed UI task being built with nobody's answer on it —
+MOVING, an agent-filed UI task being built with nobody's answer on it. It
+stays a pure module while judging real work: the changed-file list comes in
+as an injected read, which `stall-wiring.ts` builds from the dispatch
+registry's worktree path and `git-diff.ts` —
 [stall-check/](stall-check/README.md); the ready-work wake's idle clock —
 which of the two halves counts which events — is `board-activity.ts`, read by
 both `ready-nudge.ts` in memory and the store's emit choke point on disk, and
