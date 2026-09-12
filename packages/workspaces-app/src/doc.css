@@ -565,11 +565,22 @@ body.has-set .doc-switcher-caret {
     bottom: calc(14px + var(--safe-bottom));
     gap: 8px;
   }
+  /* ONE LINE, AND MUCH SHORTER (Bryan, 2026-09-11, recording from his phone:
+     "Make plan and Review are much shorter and lose their subtitles"). The
+     subtitle is what makes a press predictable on a screen with room to read
+     it; on a phone held in a meeting it is a second line of small type over
+     the transcript, and the two pills were 71px of the 932 the reader has.
+     The label alone says what the press does, and the height falls to the
+     44px design-mobile.md asks of a control a thumb has to hit — which is now
+     the whole of the pill, the padding having stopped setting it. */
   .plan-float {
     flex: 1 1 0;
     min-width: 0;
-    padding-left: 12px;
-    padding-right: 12px;
+    gap: 0;
+    padding: 8px 12px;
+  }
+  .plan-float-sub {
+    display: none;
   }
 }
 /* The refusal reason for a failed Approve press — only ever appears in
@@ -2430,7 +2441,6 @@ body.has-set .doc-switcher-caret {
 #editor-pane:has(> .doc-floats:not(.is-floating) > .plan-float:not([hidden])) #editor {
   --lz-runway: 104px;
 }
-
 body.is-reading-width #editor > .live-zone {
   max-width: 36rem;
 }
