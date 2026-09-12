@@ -5306,6 +5306,15 @@ label.board-sched-chip:hover {
   color: var(--accent);
   background: var(--accent-wash, rgba(59, 111, 212, 0.07));
 }
+/* A SECRET ask, at DECISION's weight and not a grey of its own. Both are asks
+   only one person can answer; the panel badged this one QUESTION in the
+   accent blue, which made the ask that must never be answered in words the
+   quieter of the two (UX review, 2026-09-12). Same tokens as
+   `.board-decide-k-decision`, deliberately — a third amber would drift. */
+.board-decide-k-secret {
+  color: var(--warn-fg, #b25e09);
+  background: var(--warn-wash, #fff4e5);
+}
 /* The owner revised the item after the reader asked on it — the same
    resolved-range green as `.board-walk-k-revised`, beside the kind badge. */
 .board-decide-k-revised {
@@ -5916,6 +5925,13 @@ label.board-sched-chip:hover {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--accent, #2e7dd7);
+}
+
+/* The same secret ask, on a comment row in the discussion: amber, for the
+   reason `.board-decide-k-secret` is. The row has no background of its own,
+   so the weight is carried by the colour alone. */
+.board-comment-review-k.is-secret {
+  color: var(--warn-fg, #b25e09);
 }
 
 /* A retracted ask in the board's comment stream. It stays in the history, and

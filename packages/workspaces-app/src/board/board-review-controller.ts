@@ -26,6 +26,7 @@ import {
   reviewItemQuestionRequest,
   reviewReplyRequest,
   reviewSecretsRequest,
+  secretsRequestFor,
 } from './board-review-model.ts';
 import { panelAnswerRequest, panelQuestionRequest } from './board-review-render.ts';
 
@@ -480,6 +481,33 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
   ): Promise<boolean> {
     const reqSpec = reviewSecretsRequest(item, values);
     if (!reqSpec) return false;
+    return sendSecrets(reqSpec, values.length);
+  }
+
+  /**
+   * The same hand-over from the TASK panel's card, which holds the ticket and
+   * the row id rather than a queue item.
+   *
+   * Both surfaces post to the item's own secrets route and neither can post
+   * words: the panel used to have no secrets verb at all, so its card fell
+   * through to the ordinary answer composer and a typed value was recorded on
+   * the item (UX review, 2026-09-12).
+   */
+  async function saveSecretsOnTaskItem(
+    taskId: string,
+    reviewItemId: string,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ): Promise<boolean> {
+    return sendSecrets(secretsRequestFor(taskId, reviewItemId, values), values.length);
+  }
+
+  /** The one POST, so the refusal and the reload read the same on both
+   *  surfaces. `count` is only ever a number of FIELDS. */
+  async function sendSecrets(
+    reqSpec: { path: string; body: Record<string, unknown> },
+    count: number,
+  ): Promise<boolean> {
+    if (count === 0) return false;
     const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
     if (!res.ok) {
       // The message never names a value, and there is nothing of the reader's
@@ -495,6 +523,7 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
     startWalkthrough,
     openInQueue,
     saveSecretsOnItem,
+    saveSecretsOnTaskItem,
     answerDecision,
     answerTaskDecision,
     undoThreadAnswer,

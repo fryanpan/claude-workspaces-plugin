@@ -232,6 +232,10 @@ export function panelReviewQueue(
         headline: r.headline,
         ...(r.detail !== undefined ? { detail: r.detail } : {}),
         ...(r.options ? { options: r.options } : {}),
+        // Carried so the card can draw the SECRET form. Without it the panel
+        // had the shape but not the fields, so it fell through to the
+        // ordinary answer furniture and offered a verbatim box for a value.
+        ...(r.secrets ? { secrets: r.secrets } : {}),
         askedBy: a.askedBy,
         since: a.askedAt ?? a.since,
         ...(a.direct !== undefined ? { direct: a.direct } : {}),
@@ -265,6 +269,10 @@ export function panelReviewQueue(
       headline: r?.headline ?? a.ask,
       ...(r?.detail !== undefined ? { detail: r.detail } : {}),
       ...(r?.options ? { options: r.options } : {}),
+      // Nothing files a secret ask on a thread today, and the card refuses to
+      // render a form it has no route for — but a shape that reaches this
+      // surface must reach it WITH its fields, or the fallback is the box.
+      ...(r?.secrets ? { secrets: r.secrets } : {}),
       askedBy: a.askedBy,
       since: a.askedAt ?? a.since,
       ...(a.direct !== undefined ? { direct: a.direct } : {}),

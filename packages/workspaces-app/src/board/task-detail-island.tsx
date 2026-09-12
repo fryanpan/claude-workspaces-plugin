@@ -84,15 +84,18 @@ import {
 import { type ActivityEvent, taskActivity } from './board-presence-model.ts';
 import { wireInPlaceTitle } from './board-render.ts';
 import {
+  type SecretsGate,
   answeredByLine,
   askedMetaLine,
   blockedNoteLine,
   heldMetaLine,
+  reviewShapeBadge,
 } from './board-review-model.ts';
 import { panelReviewQueue } from './board-review-render.ts';
 import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
 import { DoneWhenList } from './done-when-list.tsx';
 import { markPhrase } from './review-item-phrase.ts';
+import { ReviewSecretBlock } from './review-secret-form.tsx';
 import { ScheduleEditor } from './schedule-editor.tsx';
 import { selectWordAtPoint, useSelectionPill } from './selection-pill.ts';
 import { NOBODY, type OpenComment, ThreadCard, draftThread } from './thread-card.tsx';
@@ -314,6 +317,16 @@ function ReviewCard(props: {
   // nothing at all.
   const echoesTitle = item.headline.trim() === task.title.trim();
 
+  const badge = reviewShapeBadge(item.shape) ?? { label: 'Question', tone: 'review' };
+  // The fields of a SECRET ask, and only when this surface can actually take
+  // them somewhere. A surface that wired no handler renders the fields with
+  // no inputs and the "answered on the machine the board runs on" line — the
+  // one thing it must NOT do is fall through to the verbatim box.
+  const secrets = item.shape === 'secret' ? item.secrets : undefined;
+  const secretsGate: SecretsGate = handlers.onSaveSecrets
+    ? (handlers.secretsGate ?? 'off-machine')
+    : 'off-machine';
+
   const classes = ['board-decide-card'];
   if (busy) classes.push('is-busy');
   if (!shown) classes.push('hidden');
@@ -331,12 +344,12 @@ function ReviewCard(props: {
           body. */}
       <div class="board-decide-card-head">
         {/* New UI text says Question; the class token stays `review` — stored
-            vocabulary and tone classes are unchanged by the rename. */}
-        <span
-          class={`board-decide-k board-decide-k-${item.shape === 'decision' ? 'decision' : 'review'}`}
-        >
-          {item.shape === 'decision' ? 'Decision' : 'Question'}
-        </span>
+            vocabulary and tone classes are unchanged by the rename. The words
+            and the tone come from `reviewShapeBadge`, the one mapping the
+            Home queue and the discussion row also name a shape through: this
+            card used to spell its own, which is how a SECRET ask came to be
+            badged Question here and Secret there. */}
+        <span class={`board-decide-k board-decide-k-${badge.tone}`}>{badge.label}</span>
         {/* The owner revised the words after the reader asked on them: the
             item is back in the queue and says so, beside its kind rather than
             instead of it — the walkthrough's own treatment. */}
@@ -400,45 +413,73 @@ function ReviewCard(props: {
             </div>
           )}
           <div class={asking ? 'board-decide-answering hidden' : 'board-decide-answering'}>
-            {item.options && item.options.length > 0 && (
-              <DecideOptions
-                options={item.options}
-                busy={busy}
-                onPick={(o) => {
-                  setBusy(true);
-                  void Promise.resolve(answer(o.label, o.id)).finally(() => setBusy(false));
-                }}
+            {secrets ? (
+              // A SECRET item, and both the options and the composer are
+              // deliberately absent — the same block the Home walkthrough
+              // draws, from the same module, so the two surfaces cannot
+              // disagree about this shape again.
+              //
+              // They did. This card drew the ordinary furniture over a secret
+              // ask: a reviewer one tap from the walkthrough's own Task link
+              // was offered "Record your answer, verbatim…", typed a value in,
+              // and it was recorded on the item, written to the store on disk,
+              // echoed into the events log and read back by the agent (UX
+              // review, 2026-09-12). The route refuses that answer outright
+              // now; this is the half that never asks for it.
+              <ReviewSecretBlock
+                fields={secrets}
+                itemKey={`${task.id}:${item.id}`}
+                gate={secretsGate}
+                onSave={(values) =>
+                  handlers.onSaveSecrets?.(task, item, values) ?? Promise.resolve(false)
+                }
               />
+            ) : (
+              <Fragment>
+                {item.options && item.options.length > 0 && (
+                  <DecideOptions
+                    options={item.options}
+                    busy={busy}
+                    onPick={(o) => {
+                      setBusy(true);
+                      void Promise.resolve(answer(o.label, o.id)).finally(() => setBusy(false));
+                    }}
+                  />
+                )}
+                {/* Always present, options or not: the candidates are a
+                  shortcut, never a closed set. */}
+                <ComposerForm
+                  className="board-answer-form board-decide-form"
+                  // Says which of the two this box is. With options above it and no
+                  // line between, the box read as a required second step rather than
+                  // as an alternative.
+                  hint={
+                    item.options && item.options.length > 0
+                      ? 'Or answer in your own words'
+                      : 'Answer in your own words'
+                  }
+                  placeholder="Record your answer, verbatim…"
+                  submitLabel="Record answer"
+                  submitClass="board-btn board-btn-primary"
+                  rows={3}
+                  emptyMessage="Write an answer first"
+                  // Keyed by ITEM, so walking to the next question and back does not
+                  // hand the reader the answer they were drafting for a different
+                  // one.
+                  keepKey={`answer:${task.id}:${item.id}`}
+                  onSubmit={(text) => answer(text)}
+                  // Only an explicit `false` is a refusal. A handler that returns
+                  // nothing has said nothing about success, and reading that as
+                  // failure would put a "your words are still in the box" story over
+                  // a write that landed.
+                  refused={(ok) => ok === false}
+                  onBusy={setBusy}
+                />
+              </Fragment>
             )}
-            {/* Always present, options or not: the candidates are a shortcut,
-              never a closed set. */}
-            <ComposerForm
-              className="board-answer-form board-decide-form"
-              // Says which of the two this box is. With options above it and no
-              // line between, the box read as a required second step rather than
-              // as an alternative.
-              hint={
-                item.options && item.options.length > 0
-                  ? 'Or answer in your own words'
-                  : 'Answer in your own words'
-              }
-              placeholder="Record your answer, verbatim…"
-              submitLabel="Record answer"
-              submitClass="board-btn board-btn-primary"
-              rows={3}
-              emptyMessage="Write an answer first"
-              // Keyed by ITEM, so walking to the next question and back does not
-              // hand the reader the answer they were drafting for a different
-              // one.
-              keepKey={`answer:${task.id}:${item.id}`}
-              onSubmit={(text) => answer(text)}
-              // Only an explicit `false` is a refusal. A handler that returns
-              // nothing has said nothing about success, and reading that as
-              // failure would put a "your words are still in the box" story over
-              // a write that landed.
-              refused={(ok) => ok === false}
-              onBusy={setBusy}
-            />
+            {/* Outside the branch: "I have a question" is the way out of BOTH,
+                and it is the only thing a reader of a secret ask can say in
+                words. */}
             {canAsk && (
               // The way to ask instead of answer. A link under the answer box,
               // where the reader who has a question rather than an answer is

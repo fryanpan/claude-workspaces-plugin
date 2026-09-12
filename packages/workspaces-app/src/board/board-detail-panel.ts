@@ -174,6 +174,7 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
     undoTaskAnswer,
     releaseHeldReviewItem,
     undoThreadAnswer,
+    saveSecretsOnTaskItem,
     commentOnActivity,
     replyOnActivity,
   } = deps.review;
@@ -477,6 +478,14 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
         onUndoAnswer: (t) => undoTaskAnswer(t),
         onReleaseHeld: (t, item) => releaseHeldReviewItem(t, item),
         onUndoThreadAnswer: (t, item) => undoThreadAnswer(t, item),
+        // The secret hand-over, and the gate the Home walkthrough reads. Both
+        // or neither: the card renders the fields with no inputs when the
+        // handler is absent, and never falls back to the answer composer.
+        onSaveSecrets: (_t, item, values) =>
+          item.reviewItemId === undefined
+            ? Promise.resolve(false)
+            : saveSecretsOnTaskItem(_t.id, item.reviewItemId, values),
+        secretsGate: state.secretsGate,
         // So the answered record can say "Answered by you" for the reader's
         // own answer — the record compares display names, same as answer.by.
         selfName: author.name,

@@ -1,4 +1,4 @@
-import type { ReviewPayload } from '@claude-workspaces/core';
+import type { ReviewPayload, ReviewShape } from '@claude-workspaces/core';
 /**
  * The review queue and the walkthrough that walks it: everything waiting on a
  * person, in one list, plus the wording each row and card wears (plan §3.9).
@@ -810,9 +810,27 @@ export function reviewSecretsRequest(
   if (item.review?.shape !== 'secret') return null;
   const t = item.thread;
   if (!t || t.kind !== 'task-review' || !t.taskId || !t.reviewItemId) return null;
+  return secretsRequestFor(t.taskId, t.reviewItemId, values);
+}
+
+/**
+ * The same request addressed by ids alone, for the surface that holds the row
+ * rather than the queue item — the task panel's card.
+ *
+ * One spelling of the route for both, because the property that matters here
+ * is WHICH DOOR the values go through: the secrets route stores them and
+ * records only that the ask was answered, and every other door on this item
+ * records words. A second spelling is a second chance to address the wrong
+ * one.
+ */
+export function secretsRequestFor(
+  taskId: string,
+  reviewItemId: string,
+  values: ReadonlyArray<{ service: string; value: string }>,
+): { path: string; body: Record<string, unknown> } {
   return {
     path: api(
-      `tasks/${encodeURIComponent(t.taskId)}/review-items/${encodeURIComponent(t.reviewItemId)}/secrets`,
+      `tasks/${encodeURIComponent(taskId)}/review-items/${encodeURIComponent(reviewItemId)}/secrets`,
     ),
     body: { secrets: values.map((v) => ({ service: v.service, value: v.value })) },
   };
@@ -1155,14 +1173,53 @@ export function reviewBadge(kind: ReviewKind): { label: string; tone: string } {
  * fifteen-minute doc read.
  */
 export function reviewItemBadge(item: ReviewItem): { label: string; tone: string } {
-  if (item.review?.shape === 'decision') return { label: 'Decision', tone: 'decision' };
-  if (item.review?.shape === 'review') return { label: 'Question', tone: 'review' };
-  // The word a person reads is "Secret", everywhere and only (Bryan,
-  // 2026-09-11: *"Build it but just refer to secrets. Not keychain."*). Where
-  // the value is kept is a fact about this machine and belongs to the agent
-  // that reads it back, not to the card.
-  if (item.review?.shape === 'secret') return { label: 'Secret', tone: 'secret' };
-  return reviewBadge(item.kind);
+  const byShape = reviewShapeBadge(item.review?.shape);
+  return byShape ?? reviewBadge(item.kind);
+}
+
+/**
+ * Who may hand a SECRET item's values over from where the reader is standing.
+ *
+ * `open` — the board's owner, on the machine the board runs on.
+ * `not-owner` — a member: they may never answer this one.
+ * `off-machine` — the owner, but reading through a share hostname, where the
+ * door that takes the values is not reachable. Two refusals, two sentences:
+ * one is told no, the other is told where.
+ *
+ * Lives here, in the module with no DOM in it, because both the surfaces that
+ * render the shape and the plain-TypeScript row shapes they are handed have
+ * to name it.
+ */
+export type SecretsGate = 'open' | 'not-owner' | 'off-machine';
+
+/**
+ * What a review SHAPE is called and toned, for every surface that names one.
+ *
+ * One mapping, because three of them disagreed. The Home queue read a secret
+ * ask as "Secret"; the task panel badged the same item "Question" both before
+ * and after it was answered, and the comment row in the discussion did too —
+ * so the shape whose entire point is that its value never becomes words was
+ * announced, on two of three surfaces, as an ordinary question (UX review,
+ * 2026-09-12). A `shape` this does not know returns undefined, and the caller
+ * falls back to whatever it said before.
+ *
+ * The word a person reads is "Secret", everywhere and only (Bryan,
+ * 2026-09-11: *"Build it but just refer to secrets. Not keychain."*). Where
+ * the value is kept is a fact about this machine and belongs to the agent
+ * that reads it back, not to the card.
+ *
+ * `secret` carries DECISION's weight rather than a grey of its own: both are
+ * asks only one person can answer and neither can be guessed at, and a
+ * quieter chip made the one that must not be answered in words the quieter of
+ * the two.
+ */
+export function reviewShapeBadge(
+  shape: ReviewShape | undefined,
+): { label: string; tone: string } | undefined {
+  if (shape === 'decision') return { label: 'Decision', tone: 'decision' };
+  if (shape === 'review') return { label: 'Question', tone: 'review' };
+  if (shape === 'secret') return { label: 'Secret', tone: 'secret' };
+  return undefined;
 }
 
 /**
