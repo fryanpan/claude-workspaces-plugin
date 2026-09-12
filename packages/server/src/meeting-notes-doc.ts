@@ -385,11 +385,15 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
   // that outlives the recording, and it is what says whether the next one is
   // continuing a finished meeting's notes or writing beside a live one's.
   const claimedByDoc = new Map<string, Map<string, NotesSectionClaim>>();
+  // A CLAIM IS ALWAYS RECORDED LIVE, INCLUDING OVER A FINISHED ONE. The
+  // meeting claiming the heading is recording right now, and the heading it
+  // takes over is its section until IT stops — otherwise a third recording
+  // would read the previous meeting's stop, find the section continuable, and
+  // write into a section a meeting is live in.
   const claim = (docId: string, headingId: string): void => {
     const held = claimedByDoc.get(docId);
-    if (held) {
-      if (!held.has(headingId)) held.set(headingId, { headingId });
-    } else claimedByDoc.set(docId, new Map([[headingId, { headingId }]]));
+    if (held) held.set(headingId, { headingId });
+    else claimedByDoc.set(docId, new Map([[headingId, { headingId }]]));
   };
   // What each meeting found in the section it adopted, by meeting key. Only a
   // meeting that CONTINUED somebody's section has an entry.
@@ -449,20 +453,34 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
       } else if (held !== undefined) forget(ids);
     },
     claimsIn(docId) {
-      const out = new Map(claimedByDoc.get(docId) ?? []);
-      for (const claim of store?.claimsIn?.(docId) ?? []) {
-        // The RECORD wins where the two disagree, because it is the half that
-        // carries a stop: this process may have watched a meeting open a
-        // section and never watched it end (it ended under an earlier
-        // process, or this one adopted the memory from the store).
+      const out = new Map<string, NotesSectionClaim>();
+      // SEVERAL MEETINGS CAN HAVE CLAIMED ONE HEADING — that is what
+      // continuing a section means — so the claims on it are folded into one
+      // answer, and the fold is not "the last record wins".
+      //
+      // A heading is LIVE if ANY claimant has recorded no stop: one meeting
+      // still recording under it is enough to make it that meeting's, and the
+      // meeting it continued having stopped says nothing. Where they have all
+      // stopped, the LATEST stop is the one the window is measured from,
+      // because that is when the conversation this section holds last had
+      // somebody in it.
+      const add = (claim: NotesSectionClaim): void => {
         const held = out.get(claim.headingId);
+        if (held === undefined) {
+          out.set(claim.headingId, claim);
+          return;
+        }
+        if (claim.endedAt === undefined || held.endedAt === undefined) {
+          out.set(claim.headingId, { headingId: claim.headingId });
+          return;
+        }
         out.set(claim.headingId, {
-          ...claim,
-          ...(claim.endedAt === undefined && held?.endedAt !== undefined
-            ? { endedAt: held.endedAt }
-            : {}),
+          headingId: claim.headingId,
+          endedAt: Math.max(held.endedAt, claim.endedAt),
         });
-      }
+      };
+      for (const held of claimedByDoc.get(docId)?.values() ?? []) add(held);
+      for (const stored of store?.claimsIn?.(docId) ?? []) add(stored);
       return out;
     },
     endMeeting(ids, at = Date.now()) {

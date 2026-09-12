@@ -190,6 +190,34 @@ describe('a second recording on a doc whose meeting is over', () => {
     expect(sections(ydoc)).toHaveLength(2);
   });
 
+  it('a THIRD recording during the continuation opens its own section', async () => {
+    // The trap in continuing somebody's section: the meeting that continued
+    // it is now live under a heading whose other claimant has stopped. A
+    // third recording that read only that stop would write into a section
+    // two meetings are already sharing, one of them still running.
+    const { ydoc, dataDir, opened } = await meetingThenCleanup();
+    const second = createNotesTickHarness({
+      ydoc,
+      dataDir,
+      docId: DOC,
+      meetingId: SECOND,
+      compose: (input) => addNotes(input, '- and the winter crew stays on Kestrel Lane'),
+    });
+    await second.speak('and the winter crew stays on Kestrel Lane');
+    expect(sections(ydoc)).toEqual([opened]);
+
+    // A third room, while the second is still recording.
+    const third = createNotesTickHarness({
+      ydoc,
+      dataDir,
+      docId: DOC,
+      meetingId: 'm-1760001800000',
+      compose: (input) => addNotes(input, '- a different conversation entirely'),
+    });
+    await third.speak('a different conversation entirely');
+    expect(sections(ydoc)).toHaveLength(2);
+  });
+
   it('records the stop where a restarted server reads it', async () => {
     // The continuation survives a deploy: the stop is beside the meeting's
     // own transcript, not in a map that dies with the process.
