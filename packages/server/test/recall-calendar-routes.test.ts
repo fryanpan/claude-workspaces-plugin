@@ -213,15 +213,11 @@ describe('calendar routes', () => {
     });
   });
 
-  it('events answers an empty 204 until a calendar exists, while join still refuses', async () => {
-    // A board with no calendar is ordinary, and its every load asks this
-    // route. 204 is what keeps that out of the browser's error reporter —
-    // a 404 was a failed request on every load (CLAUDE-WORKSPACES-E).
+  it('events answers an empty 204 until a calendar exists; join still refuses', async () => {
+    // Every board load asks this route; joining ACTS on a connection.
     const events = await fetch(`${base}/api/calendar/events`);
     expect(events.status).toBe(204);
     expect(await events.text()).toBe('');
-    // Joining is an act ON a connection, so its absence really is the
-    // failure: that one still answers 404 `not_connected`.
     const joinRes = await fetch(`${base}/workspaces/${WS}/calendar/events/evt-1/join`, {
       method: 'POST',
     });
