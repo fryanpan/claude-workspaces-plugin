@@ -106,11 +106,7 @@ describe('the Library front page', () => {
     expect(first.querySelector('.library-when')?.textContent).toBe('just now');
   });
 
-  /**
-   * Ten recent files, not five (Bryan, 2026-09-12). The files list is the one a
-   * reader scans for the doc they were just in, and five ran out inside a day.
-   * Meetings keep their five: the ask named files.
-   */
+  /** Ten recent files, not five; meetings keep their five (library-model.ts). */
   it('shows ten of fourteen files, newest first, and "See all files" for the rest', async () => {
     const many: LibraryPayload = { ...PAYLOAD, files: rows('Saltmarsh plan', 14) };
     const { page, root } = drive({ payload: many });
@@ -126,13 +122,13 @@ describe('the Library front page', () => {
     expect(names(root)).toHaveLength(14);
   });
 
-  it('shows every file when there are fewer than ten, with no filler and no "See all"', async () => {
-    const few: LibraryPayload = { ...PAYLOAD, files: rows('Saltmarsh plan', 9) };
+  it.each([9, 10])('shows all %i files, with no filler and no "See all"', async (n) => {
+    const few: LibraryPayload = { ...PAYLOAD, files: rows('Saltmarsh plan', n) };
     const { page, root } = drive({ payload: few });
     await page.open();
     const files = root.querySelectorAll('.library-tbl')[1] as Element;
     expect(names(files)).toEqual(few.files.map((r) => r.name));
-    expect(files.querySelectorAll('.library-row')).toHaveLength(9);
+    expect(files.querySelectorAll('.library-row')).toHaveLength(n);
     expect(files.querySelector('.library-empty')).toBeNull();
     expect(root.querySelector('.library-more[data-list=files]')).toBeNull();
   });

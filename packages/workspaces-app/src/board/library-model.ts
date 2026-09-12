@@ -35,8 +35,8 @@ export type LibraryList = 'main' | 'meetings' | 'files';
 
 /**
  * How many of each list the front page shows before "See all". Files show
- * ten: that is the list a reader scans for the doc they were just in, and five
- * ran out inside a day (Bryan, 2026-09-12).
+ * ten (Bryan, 2026-09-12: "Increase recent files list default from 5 to 10
+ * items"); meetings keep five, because the ask named files.
  */
 export const LIBRARY_RECENT: Record<'meetings' | 'files', number> = { meetings: 5, files: 10 };
 
