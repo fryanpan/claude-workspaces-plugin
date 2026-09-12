@@ -20,83 +20,12 @@ import { join } from 'node:path';
 import { READY_IDLE_EVENT, REVIEW_ANSWERED_EVENT } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedGoalsOverHttp } from './goal-seed.ts';
+import { type Frame, listenFrames, waitForFrames } from './sse-frames.ts';
 
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
-type Frame = { event: string; data?: Record<string, unknown> };
-
-/** Read a workspace stream, keeping every frame's event name and payload. */
-function listenFrames(res: Response): { frames: Frame[]; stop: () => Promise<void> } {
-  const frames: Frame[] = [];
-  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
-  const decoder = new TextDecoder();
-  let stopped = false;
-  let buf = '';
-  const pump = (async () => {
-    try {
-      while (!stopped) {
-        const { done, value } = await reader.read();
-        if (done) return;
-        buf += decoder.decode(value, { stream: true });
-        let sep = buf.indexOf('\n\n');
-        while (sep >= 0) {
-          const raw = buf.slice(0, sep);
-          buf = buf.slice(sep + 2);
-          sep = buf.indexOf('\n\n');
-          const frame: Frame = { event: 'message' };
-          for (const line of raw.split('\n')) {
-            if (line.startsWith(':')) continue;
-            if (line.startsWith('event:')) frame.event = line.slice(6).trim();
-            else if (line.startsWith('data:')) {
-              try {
-                frame.data = JSON.parse(line.slice(5).trimStart()) as Record<string, unknown>;
-              } catch {}
-            }
-          }
-          if (frame.event !== 'message') frames.push(frame);
-        }
-      }
-    } catch {}
-  })();
-  return {
-    frames,
-    stop: async () => {
-      stopped = true;
-      await reader.cancel().catch(() => {});
-      await pump;
-    },
-  };
-}
-
 const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Wait until at least `n` frames of `event` have arrived, or give up.
- *
- * A fixed `settle(60)` is a bet that this machine delivers an SSE frame inside
- * 60ms, and under a full-suite load it does not — which shows up as a wake
- * test failing on a branch that never touched the wake. Polling asserts the
- * same thing without the bet. It cannot make a silence test pass by accident:
- * the tests below that expect silence still wait a fixed window and then look.
- */
-async function waitForFrames(
-  frames: Frame[],
-  event: string,
-  n: number,
-  // Generous, because a poll costs nothing when the answer is already there —
-  // it returns on the first pass. The number is sized for this machine under
-  // a full parallel agent load (measured load average 12–19), where an HTTP
-  // round trip that normally takes 3ms has been seen to take seconds.
-  timeoutMs = 15_000,
-): Promise<Frame[]> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const got = frames.filter((f) => f.event === event);
-    if (got.length >= n || Date.now() > deadline) return got;
-    await settle(20);
-  }
-}
 
 describe('the board wakes its lead over the wire', () => {
   let handle: ServerHandle;
@@ -178,11 +107,20 @@ describe('the board wakes its lead over the wire', () => {
     );
     // Vetted, because the lead FILED it and an agent's own row starts in
     // `triage` — which no dispatch read returns, so an unvetted row is not
-    // ready work and correctly produces no wake. This is the real flow in two
-    // lines: the agent proposes, a person agrees, and only then is it queued.
+    // ready work and correctly produces no wake.
+    //
+    // Vetted BY THE LEAD, and that is load-bearing for this whole file: a
+    // PERSON moving a row to `todo` now wakes the lead in that tick, with no
+    // window (`personQueuedTask`). That is a different event from the timed
+    // pass every test below is about, and letting it fire here would put a
+    // frame on the stream before the test had done anything. An agent's
+    // identical move deliberately fires nothing, so the board these helpers
+    // hand back is one whose only wake can come from the tick — which also
+    // makes every test in this file a standing control for that rule. The
+    // person's path is `ready-nudge-person-queued.test.ts`.
     await post(`/workspaces/${workspaceId}/tasks/${task.id}/transition`, {
       to: 'todo',
-      author: PERSON,
+      author: LEAD,
       workspaceId,
     });
     await settle();
@@ -198,8 +136,11 @@ describe('the board wakes its lead over the wire', () => {
    * A gate that suppressed every row would satisfy "the held row was not
    * named" perfectly, so each test proves the same pass that stayed silent
    * about the held row still names an unheld one, and still reports what it
-   * held. Filed by the lead and vetted by Jordan, the real two-step: an
-   * agent's own row starts in `triage`, which no dispatch read returns.
+   * held. Filed AND vetted by the lead: an
+   * agent's own row starts in `triage`, which no dispatch read returns, and
+   * the vetting move is the lead's for the reason `boardWithReadyWork` gives
+   * — a person's move to `todo` is an immediate wake of its own, and these
+   * tests are about the timed pass.
    */
   async function addReadyRow(workspaceId: string, title: string): Promise<string> {
     const { task } = await jj<{ task: { id: string } }>(
@@ -214,7 +155,7 @@ describe('the board wakes its lead over the wire', () => {
     await jj(
       await post(`/workspaces/${workspaceId}/tasks/${task.id}/transition`, {
         to: 'todo',
-        author: PERSON,
+        author: LEAD,
         workspaceId,
       }),
     );
@@ -943,9 +884,12 @@ describe('the board wakes its lead over the wire', () => {
           author: LEAD,
         }),
       );
+      // The lead's move, like every other vetting move in this file — see
+      // `boardWithReadyWork`. A person's would wake the lead about this row
+      // before the cap had anything to hold.
       await post(`/workspaces/${workspaceId}/tasks/${busy.id}/transition`, {
         to: 'todo',
-        author: PERSON,
+        author: LEAD,
         workspaceId,
       });
       await post(`/workspaces/${workspaceId}/tasks/${busy.id}/transition`, {

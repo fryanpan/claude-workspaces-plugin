@@ -146,6 +146,19 @@ export interface ReadyWorkSnapshot {
    * matching every other absent-means-zero count on this snapshot.
    */
   capacityHeld?: number;
+  /**
+   * The rows `capacityHeld` counts — ready by the dependency gate, cut out of
+   * `ready` by the cap alone, in the same priority order.
+   *
+   * The count is what goes on the wire, and every reader of the idle pass
+   * wants only the count. This carries the ROWS because one reader asks a
+   * different question: `personQueuedTask` has to say whether one named row
+   * became dispatchable, and `ready` cannot answer it — a board at its cap
+   * has an empty `ready` and a row that is perfectly ready. Reading the
+   * trimmed set as "not ready" would gate a person's deliberate move on free
+   * capacity, which is the one thing that wake must not do.
+   */
+  capacityTrimmed?: readonly ReadyRow[];
   /** The cap itself and its last move, for the wake to name beside
    *  `capacityHeld`. Absent from a caller that does not read it. */
   parallelismCap?: ParallelismCapSummary;
@@ -472,25 +485,79 @@ export class ReadyWorkNudger {
   taskReady(input: { workspaceId: string; taskId: string; taskTitle: string }): void {
     const ts = this.now();
     this.noteActivity(input.workspaceId, ts);
+    const board = this.liveBoard(input.workspaceId);
+    if (!board) return;
+    this.wakeLeadNow(board, ts, input.taskId, input.taskTitle);
+  }
+
+  /**
+   * A PERSON moved a row to `todo`, and the move made it dispatchable.
+   *
+   * This is the spec in Bryan's own words (2026-09-12): *"I moved the ticket
+   * to Todo after editing and expected immediate pickup since the workspace
+   * had capacity."* The trigger he named is the deliberate transition, not a
+   * quiet window — so this is not a shorter idle clock, it is a different
+   * event, and the idle clock stays the backstop for everything else.
+   *
+   * Three things it deliberately does NOT do, and the narrowness is the whole
+   * design:
+   *
+   *  - **An agent's identical move fires nothing.** The caller classifies the
+   *    actor; a builder moving its own rows would wake the lead every turn,
+   *    which is precisely the noise the idle window exists to suppress.
+   *  - **A move that leaves the row HELD fires nothing.** Behind an `after`
+   *    edge, or under a goal still in triage, the row has not become
+   *    dispatchable and there is nothing to say. The ready set is the judge,
+   *    so this can never disagree with what the lead would be told.
+   *  - **It is not gated on free capacity.** He mentioned capacity because it
+   *    was what he believed governed pickup, not as a condition he asked for.
+   *    A wake suppressed because the cap was full is a wake nobody ever
+   *    learns was owed; the lead reads the cap itself and queues. Hence
+   *    `capacityTrimmed` — a row the cap cut out of `ready` is still a row
+   *    that just became ready.
+   *
+   * The title comes off the snapshot rather than the caller: the row a wake
+   * names has to be the row the board would name, and the caller's copy is
+   * one read older.
+   */
+  personQueuedTask(input: { workspaceId: string; taskId: string }): void {
+    const ts = this.now();
+    this.noteActivity(input.workspaceId, ts);
+    const board = this.liveBoard(input.workspaceId);
+    if (!board) return;
+    const row =
+      board.ready.find((r) => r.id === input.taskId) ??
+      (board.capacityTrimmed ?? []).find((r) => r.id === input.taskId);
+    if (!row) return;
+    this.wakeLeadNow(board, ts, row.id, row.title);
+  }
+
+  /** One board, or nothing — a retired board and a lookup that threw are the
+   *  same answer to every immediate path. */
+  private liveBoard(workspaceId: string): ReadyWorkSnapshot | undefined {
     let board: ReadyWorkSnapshot | undefined;
     try {
-      board = this.opts.lookup(input.workspaceId);
+      board = this.opts.lookup(workspaceId);
     } catch {
-      return;
+      return undefined;
     }
-    if (!board || board.retired) return;
+    return board && !board.retired ? board : undefined;
+  }
+
+  /** Send one addressed wake about one row, now, and spend the board's
+   *  arming on it so the timer does not follow with a second frame over the
+   *  same fact. It re-arms on the next real activity. */
+  private wakeLeadNow(board: ReadyWorkSnapshot, ts: number, taskId: string, title: string): void {
     const lead = board.leadAgentId;
     if (lead === undefined) return;
-    // This wake IS the stamp's nudge: spend it so the timer does not follow
-    // with a second frame over the same fact. It re-arms on real activity.
-    this.armed.set(input.workspaceId, this.stampFor(board, ts));
+    this.armed.set(board.workspaceId, this.stampFor(board, ts));
     this.saveStamps();
     if (!this.reachable(board.workspaceId, lead)) return;
     this.emit(board.workspaceId, lead, {
       event: READY_IDLE_EVENT,
       workspaceId: board.workspaceId,
-      taskId: input.taskId,
-      title: input.taskTitle,
+      taskId,
+      title,
       ts,
     });
   }

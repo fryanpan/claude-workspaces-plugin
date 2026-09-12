@@ -304,7 +304,11 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     const capView = parallelismCapView(workspace.id);
     const available = capView?.free ?? DEFAULT_PARALLELISM_CAP;
     const ready = verdict.ready.slice(0, available);
-    const capacityHeld = verdict.ready.length - ready.length;
+    // The rows the cap cut, not just how many: the immediate person-wake asks
+    // whether ONE named row became dispatchable, and a board at its cap has an
+    // empty `ready` and a perfectly ready row. See `capacityTrimmed`.
+    const capacityTrimmed = verdict.ready.slice(available);
+    const capacityHeld = capacityTrimmed.length;
     return {
       workspaceId: workspace.id,
       ...(workspace.leadAgentId !== undefined ? { leadAgentId: workspace.leadAgentId } : {}),
@@ -312,7 +316,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ready,
       considered: verdict.considered,
       held: verdict.held,
-      ...(capacityHeld > 0 ? { capacityHeld } : {}),
+      ...(capacityHeld > 0 ? { capacityHeld, capacityTrimmed } : {}),
       ...(capView ? { parallelismCap: capSummary(capView) } : {}),
       undetermined: verdict.undetermined,
       // The store's durable half of the idle clock. Survives a restart, which
