@@ -77,7 +77,7 @@ function suggestionAuthor(): { id: string; name: string; color: string } {
  * bundle than the deploy source would install. A second literal would be a
  * fourth version site, and this file's history is that version sites drift.
  */
-const PLUGIN_VERSION = '0.1.217';
+const PLUGIN_VERSION = '0.1.218';
 
 /**
  * One nonce per PROCESS, minted at module load and sent on every attach.
@@ -340,6 +340,9 @@ const handleFrame = createFrameHandler({
   emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),
   http: (method, path, body) => http(method, path, body),
   shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload),
+  // Every channel write waits for the in-flight tool call to answer first —
+  // see `defer` in frame-handler.ts for the measured loss this closes.
+  defer: (fn) => deferredEmits.emitOutsideToolCall(fn),
 });
 
 /**

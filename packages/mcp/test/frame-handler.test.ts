@@ -184,3 +184,37 @@ describe('a replay gap is its own line, not a garbled comment', () => {
     });
   });
 });
+
+describe('a frame that lands during a tool call waits for it', () => {
+  // The session never sees a channel notification written between a
+  // `tools/call` request and its response (deferred-emit.ts). With `defer`
+  // wired, the handler hands the write to that queue instead of writing
+  // through; the queue's own timing is deferred-emit.test.ts's business.
+  it('hands the channel write to the deferrer and writes nothing itself', async () => {
+    const queued: Array<() => Promise<unknown>> = [];
+    const { emitted, handle } = harness({ defer: (fn) => queued.push(fn) });
+    await handle(frame('workspace.stalled', { workspaceId: 'w-riverbend', stalledCount: 1 }));
+    await handle(frame('thread.replied', { docId: 'plan', threadId: 't1' }));
+    expect(emitted).toEqual([]);
+    expect(queued).toHaveLength(2);
+    for (const fn of queued) await fn();
+    expect(emitted.map((e) => e.event)).toEqual(['workspace.stalled', 'thread.replied']);
+  });
+
+  it('defers the replay-gap notice the same way', async () => {
+    const queued: Array<() => Promise<unknown>> = [];
+    const { notified, handle } = harness({ defer: (fn) => queued.push(fn) });
+    await handle(frame('replay.gap', { docId: 'plan' }));
+    expect(notified).toEqual([]);
+    for (const fn of queued) await fn();
+    expect(notified).toHaveLength(1);
+  });
+
+  it('still acknowledges a durable comment row before the deferred write runs', async () => {
+    const queued: Array<() => Promise<unknown>> = [];
+    const { sent, emitted, handle } = harness({ defer: (fn) => queued.push(fn) });
+    await handle(frame('thread.replied', { workspaceId: 'w-1', commentQueueId: 'q-9' }));
+    expect(sent.map((s) => s.path)).toEqual(['/workspaces/w-1/comment-queue/q-9/ack']);
+    expect(emitted).toEqual([]);
+  });
+});
