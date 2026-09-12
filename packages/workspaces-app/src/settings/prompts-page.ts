@@ -125,16 +125,23 @@ function chrome(route: PromptsRoute): string {
   );
 }
 
-/** One row. The whole row is the target — a name and a purpose are not two
- *  places to aim at. */
-function listRow(route: PromptsRoute, row: PromptRow): string {
+/**
+ * One row. The whole row is the target — a name and a purpose are not two
+ * places to aim at.
+ *
+ * Exported because the board's settings page draws the same list inside its
+ * own Prompts pane, where the address is the pane's own state rather than a
+ * URL. Two copies of this markup would drift the first time a row grew
+ * anything, and the CSS behind it is one rule set either way.
+ */
+export function promptRow(row: PromptRow, href: string): string {
   // EVERY row goes to the same place. Two of the seven keep their words on
   // the board rather than on the server, and one of them also has a field in
   // the board's own settings panel — but a row that looks like its siblings
   // and lands somewhere else is the wrong-target surprise, so which request
   // carries the words is `prompts-api.ts`'s business and not the row's.
   return (
-    `<a class="prompt-row" href="${promptHref(route, row.id)}" data-prompt-id="${escapeHtml(row.id)}">` +
+    `<a class="prompt-row" href="${href}" data-prompt-id="${escapeHtml(row.id)}">` +
     `<span class="prompt-text">` +
     `<span class="prompt-name">${escapeHtml(row.name)}</span>` +
     `<span class="prompt-purpose">${escapeHtml(row.purpose)}</span>` +
@@ -186,7 +193,7 @@ export function mountPromptsPage(root: HTMLElement, env: PromptsPageEnv): Prompt
       main.innerHTML = '<div class="prompt-list"><p>Could not read the prompts.</p></div>';
       return;
     }
-    main.innerHTML = `<div class="prompt-list">${rows.map((r) => listRow(route, r)).join('')}</div>`;
+    main.innerHTML = `<div class="prompt-list">${rows.map((r) => promptRow(r, promptHref(route, r.id))).join('')}</div>`;
   }
 
   async function paint(): Promise<void> {

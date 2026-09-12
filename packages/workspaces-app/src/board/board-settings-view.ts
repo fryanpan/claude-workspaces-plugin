@@ -9,11 +9,12 @@
  * the two halves of the product's settings read as one place rather than as
  * two designs that happen to share a word.
  *
- * Three types, and only two of them are panes here: Board and Notifications
- * are this board's own, and Prompts is the page next door, because five of
- * the seven prompts belong to the SERVER rather than to any one board. The
- * link leaves; it does not open a third pane that would have to fetch what
- * that page already fetches.
+ * Three types and three panes: Board, Notifications and Prompts. Prompts was
+ * a link out to `/settings/prompts` in the first cut and that was a dead end
+ * — a type in this nav has to be a place inside this page, or choosing it
+ * strands the reader on a surface whose own nav cannot get back. Where the
+ * words are STORED is unchanged and still `prompts-api.ts`'s business; the
+ * pane's own two levels are `board-prompts-pane.ts`'s.
  *
  * Two navs, one choice: the subnav column is the tablet/desktop one and the
  * row list is the phone's, `settings.css` hiding whichever the band does not
@@ -30,7 +31,14 @@ import type { BoardNav } from './board-presence-model.ts';
 
 /** Which kind of setting is showing. `null` is the phone's list of the three
  *  — a state the wide band never holds, because its subnav is always there. */
-export type SettingsType = 'board' | 'notifications' | null;
+export type SettingsType = 'board' | 'notifications' | 'prompts' | null;
+
+const TYPES: readonly string[] = ['board', 'notifications', 'prompts'];
+
+/** A nav item's `data-type`, or Board — the type every band opens on. */
+function asType(value: string | undefined): Exclude<SettingsType, null> {
+  return TYPES.includes(value ?? '') ? (value as Exclude<SettingsType, null>) : 'board';
+}
 
 const CHEV =
   '<svg class="prompt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>';
@@ -70,10 +78,9 @@ function rail(): string {
  * moving a control's HOME is not a reason to make its wiring look for a new
  * name.
  */
-export function buildSettingsView(workspaceId: string): string {
-  const promptsHref = `/settings/prompts?ws=${encodeURIComponent(workspaceId)}`;
-  const typeRow = (type: string, label: string): string =>
-    `<a class="prompt-row" href="#" data-type="${type}">` +
+export function buildSettingsView(): string {
+  const typeRow = (type: string, label: string, id = ''): string =>
+    `<a class="prompt-row" ${id && `id="${id}" `}href="#" data-type="${type}">` +
     `<span class="prompt-text"><span class="prompt-name">${escapeHtml(label)}</span></span>${CHEV}</a>`;
   return `<div id="board-settings-view" class="settings-shell board-settings-view hidden" role="region" aria-label="Settings">
       ${rail()}
@@ -86,16 +93,18 @@ export function buildSettingsView(workspaceId: string): string {
           <nav class="settings-subnav" aria-label="Settings sections">
             <a href="#" data-type="board" aria-current="page">Board</a>
             <a href="#" data-type="notifications">Notifications</a>
-            <!-- The way out to /settings/prompts. A link and not a pane: five
-                 of the seven prompts belong to the SERVER rather than to this
-                 board, so they cannot live under a per-board section. -->
-            <a id="board-prompts-link" href="${promptsHref}">Prompts</a>
+            <!-- A pane like its two neighbours, so choosing it keeps this
+                 nav. Five of the seven prompts belong to the SERVER rather
+                 than to this board; that is a fact about storage, which
+                 prompts-api.ts hides, and never was a reason for the third
+                 section to be somewhere else. -->
+            <a id="board-prompts-link" href="#" data-type="prompts">Prompts</a>
           </nav>
           <div class="settings-main"><div class="settings-main-inner">
             <div class="prompt-list settings-type-list" id="board-settings-types">
               ${typeRow('board', 'Board')}
               ${typeRow('notifications', 'Notifications')}
-              <a class="prompt-row" id="board-prompts-row" href="${promptsHref}"><span class="prompt-text"><span class="prompt-name">Prompts</span></span>${CHEV}</a>
+              ${typeRow('prompts', 'Prompts', 'board-prompts-row')}
             </div>
             <div id="board-settings-panel" class="board-settings-panel" data-pane="board">
               <div id="board-drift" class="board-presence hidden"></div>
@@ -166,6 +175,10 @@ export function buildSettingsView(workspaceId: string): string {
                 <input type="checkbox" id="board-push-toggle" class="board-check" aria-describedby="board-push-note" />
               </label>
             </div>
+            <!-- Painted by board-prompts-pane.ts once the board has an api
+                 to read them with. Empty in the markup: this file paints no
+                 data, and a placeholder row would be a seventh prompt. -->
+            <div id="board-settings-prompts" class="board-settings-prompts hidden" data-pane="prompts"></div>
           </div></div>
         </div>
       </div>
@@ -223,6 +236,22 @@ export function focusBoardNav(document: Document, nav: BoardNav): void {
   focusSettingsOpener(document);
 }
 
+/**
+ * The Prompts pane's own level, as the page needs to read it.
+ *
+ * An interface rather than the pane's module, so this file neither imports it
+ * nor can be imported by it: the pane fetches and the page paints, and the
+ * only thing the page has to know is whether a prompt is open.
+ */
+export interface SettingsPromptsPane {
+  /** Show the list of prompts. */
+  showList(): void;
+  /** The prompt open in the pane, or null at the list. */
+  openPrompt(): string | null;
+  /** One step up inside the pane. False at the list. */
+  back(): boolean;
+}
+
 export interface SettingsViewEnv {
   document: Document;
   /** True in the band where the subnav is hidden and the list is the nav.
@@ -232,6 +261,9 @@ export interface SettingsViewEnv {
   onClose(): void;
   /** Leave settings for one of the board's own pages. */
   onNav(nav: BoardNav): void;
+  /** The Prompts pane, when the board mounted one. Absent in a test that
+   *  drives only the two panes the page paints itself. */
+  prompts?: SettingsPromptsPane;
 }
 
 export interface SettingsViewHandle {
@@ -249,10 +281,11 @@ export interface SettingsViewHandle {
 const TYPE_LABEL: Record<Exclude<SettingsType, null>, string> = {
   board: 'Board',
   notifications: 'Notifications',
+  prompts: 'Prompts',
 };
 
 export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle {
-  const { document, narrow, onClose, onNav } = env;
+  const { document, narrow, onClose, onNav, prompts } = env;
   const view = document.getElementById('board-settings-view');
   const back = document.getElementById('board-settings-back');
   const backLabel = document.getElementById('board-settings-back-label');
@@ -271,13 +304,27 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
     // back arrow says where it goes, which is not the same answer from the
     // list as from a pane under it.
     document.getElementById('board-settings-types')?.classList.toggle('hidden', type !== null);
-    if (backLabel) backLabel.textContent = type === null ? 'Board' : 'Settings';
+    // One prompt open is a level below the pane, so the arrow goes to the
+    // pane's list — and it is drawn on BOTH bands for that reason, the way
+    // `/settings/prompts` draws its own: the rail beside it goes to the
+    // board, which is a different journey.
+    const editing = type === 'prompts' && prompts?.openPrompt() != null;
+    back?.classList.toggle('settings-back--up', editing);
+    if (backLabel) {
+      backLabel.textContent = editing ? 'Prompts' : type === null ? 'Board' : 'Settings';
+    }
     // On the phone the pane IS the page — the reader drilled into it from the
     // list, and the arrow beside the heading already says "Settings". A
     // heading that says it a second time tells them nothing about where they
     // landed. On the wide band the subnav is beside the heading saying which
     // pane is current, so the heading names the place: Settings.
-    if (title) title.textContent = type !== null && narrow() ? TYPE_LABEL[type] : 'Settings';
+    if (title) {
+      title.textContent =
+        editing || (type !== null && narrow()) ? TYPE_LABEL[type ?? 'board'] : 'Settings';
+      // The arrow already says "Prompts" and the h2 below names the prompt.
+      // `settings.css` drops this heading on the phone for that reason.
+      title.classList.toggle('settings-title--editing', editing);
+    }
     // The rail is the board's rail, so it wears the board's width. Read off
     // the live class rather than storage: the reader can collapse it and walk
     // in here in the same breath, and storage is written by the same toggle.
@@ -291,6 +338,10 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
 
   function setType(next: SettingsType): void {
     type = next;
+    // Entering Prompts is entering it at its list, whatever was open in it
+    // when the reader last left. The read is the pane's; the level it resets
+    // to is settled before `paint` asks for it.
+    if (next === 'prompts') prompts?.showList();
     paint();
   }
 
@@ -307,7 +358,7 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
     const typed = target?.closest?.('[data-type]') as HTMLElement | null;
     if (typed) {
       ev.preventDefault();
-      setType(typed.dataset.type === 'notifications' ? 'notifications' : 'board');
+      setType(asType(typed.dataset.type));
       return;
     }
     const navBtn = target?.closest?.('[data-nav]') as HTMLElement | null;
@@ -315,12 +366,22 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
       const nav = navBtn.dataset.nav as BoardNav;
       onNav(nav);
       focusBoardNav(document, nav);
+      return;
     }
+    // A row inside the Prompts pane has just opened a prompt under this
+    // handler. The arrow and the heading above it belong to the page, not to
+    // the pane, so the page repaints them.
+    if (type === 'prompts') paint();
   });
 
   back?.addEventListener('click', () => {
-    // One step up each press: a pane goes back to the list the phone chose it
-    // from, and the list goes back to the board.
+    // One step up each press: an open prompt goes back to the pane's list, a
+    // pane goes back to the list the phone chose it from, and that list goes
+    // back to the board.
+    if (prompts?.back() === true) {
+      paint();
+      return;
+    }
     if (type !== null && narrow()) {
       setType(null);
       return;

@@ -23,6 +23,7 @@ import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
 import { wireKeyboardInset } from '../keyboard-inset.ts';
 import { pageSentry } from '../sentry-page.ts';
+import { createPromptsApi } from '../settings/prompts-api.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from '../signin/write-gate.ts';
 import { installStaleClientNotice } from '../stale-client.ts';
 import {
@@ -50,6 +51,7 @@ import {
 } from './board-model.ts';
 import { type BoardNav, paneForNav } from './board-presence-model.ts';
 import { createBoardProjection, initialBoardState } from './board-projection.ts';
+import { mountBoardPromptsPane } from './board-prompts-pane.ts';
 import { createBoardQueueOpeners } from './board-queue-open.ts';
 import { createBoardRegion } from './board-region.ts';
 import { renderQuickActions } from './board-render.ts';
@@ -750,8 +752,26 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // an EventTarget a test can hand in: the query belongs to the document that
   // is being painted, and a test document without one answers the wide band.
   const narrowBand = document.defaultView?.matchMedia('(max-width: 1100px)') ?? null;
+  // The third pane: the seven prompts, read and written where the other two
+  // types are rather than on a page whose own nav cannot get back here.
+  // `send` is adapted rather than shared — the board calls the parsed body
+  // `data` and the prompts api calls it `body`.
+  const promptsPane = mountBoardPromptsPane({
+    host: el('board-settings-prompts'),
+    api: createPromptsApi({
+      workspaceId,
+      author,
+      fetchJson,
+      send: async (path, method, body) => {
+        const res = await send(path, method, body);
+        return { ok: res.ok, status: res.status, body: res.data };
+      },
+    }),
+    toast: showToast,
+  });
   const settingsView = mountBoardSettingsView({
     document,
+    prompts: promptsPane,
     narrow: () => narrowBand?.matches === true,
     onClose: () => {
       state.settingsOpen = false;

@@ -156,7 +156,7 @@ export function buildShell(
       </div>
     </div>
     <div id="board-toast" class="board-toast hidden"></div>
-    ${buildSettingsView(workspaceId)}`;
+    ${buildSettingsView()}`;
   const doneSelect = document.getElementById('board-done-filter') as HTMLSelectElement;
   for (const w of DONE_WINDOWS) {
     const opt = document.createElement('option');
