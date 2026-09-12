@@ -17,6 +17,7 @@
  * `BoardState` it actually lives on.
  */
 import { type BoardMembersView, type BoardRole, mountBoardMembers } from './board-members.ts';
+import { focusSettingsOpener } from './board-settings-view.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
 import { mountReviewCriteria } from './review-criteria.ts';
@@ -274,8 +275,8 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !deps.isOpen()) return;
     deps.setOpen(false);
+    focusSettingsOpener(deps.document);
     deps.renderSettingsPanel();
-    el('board-settings').focus();
   });
   el('board-share').addEventListener('click', () => {
     void navigator.clipboard?.writeText(deps.href()).then(

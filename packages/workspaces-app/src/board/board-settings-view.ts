@@ -167,6 +167,24 @@ export function buildSettingsView(workspaceId: string): string {
     </div>`;
 }
 
+/**
+ * Put focus back on the button that is actually drawn.
+ *
+ * Two openers, one per band, and the hidden one is not a place to leave a
+ * caret: focusing it drops a keyboard reader at the top of the document with
+ * the page they just left still under them. Read as computed `display` rather
+ * than `offsetParent`, which is null for everything inside a fixed ancestor.
+ */
+export function focusSettingsOpener(document: Document): void {
+  for (const id of ['board-nav-settings', 'board-settings']) {
+    const btn = document.getElementById(id);
+    if (btn && document.defaultView?.getComputedStyle(btn).display !== 'none') {
+      btn.focus();
+      return;
+    }
+  }
+}
+
 export interface SettingsViewEnv {
   document: Document;
   /** True in the band where the subnav is hidden and the list is the nav.
@@ -235,6 +253,9 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
       setType(null);
       return;
     }
+    // Focus leaves before the page does. `onClose` hides the whole view, and
+    // the button under this handler is inside it.
+    focusSettingsOpener(document);
     onClose();
   });
 
