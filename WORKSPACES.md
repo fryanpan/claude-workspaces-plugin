@@ -18,6 +18,7 @@ the folder and add its row below in the same change.
 | `docs/process/` | Delivery, retros, the learnings archive | Committed |
 | `docs/proposals/` | A change being argued for, before it is agreed | Committed |
 | `docs/research/` | A dated question somebody dug into | Ignored by default — see below |
+| `docs/superpowers/specs/` | Dated design specs for a feature | Committed |
 | `docs/meetings/` | Meeting notes and their records | Ignored |
 
 ## Plans and research are written in the open, not committed by default
@@ -46,5 +47,6 @@ room is not something to push by accident.
 ## Mockups never enter the repo
 
 Write the HTML outside the working tree and serve it with `attach_mockup`.
-`demos/` ships two directories only, `demos/dev-server/` and `demos/mockup/`;
-everything else at its top level is ignored.
+`.gitignore` holds `demos/*` and re-includes `demos/dev-server/` and
+`demos/mockup/`, so a new page dropped at the top level of `demos/` stays out
+of git. The few already tracked there predate the pattern and stay visible.

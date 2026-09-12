@@ -19,7 +19,7 @@ If you are in a workspace, stop using harness' tools.
 
 Do not use `TaskCreate` / `TaskUpdate` / `TaskList` (formerly `TodoWrite`) and `EnterPlanMode` / `ExitPlanMode`. A task or plan in harness becomes invisible and confusing to workspace users.
 
-Before you write any new doc — a plan, a meeting note, an attachment — call `read_project_conventions(path)` and put the file under a root its index names; `claude-workspaces:project-docs-layout` covers what to do when no index exists yet.
+Before you write any new doc — a plan, a meeting note, an attachment — call `read_project_conventions(<any absolute path inside the repo>)` and put the file under a root its index names; `claude-workspaces:project-docs-layout` covers what to do when no index exists yet.
 
 ### Use the Workspace, Do Not Use Chat
 
