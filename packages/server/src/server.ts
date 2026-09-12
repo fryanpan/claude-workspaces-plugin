@@ -2421,6 +2421,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           visitor,
           authorFor,
           refuseCategoryAuthor,
+          requireOwner,
           metaFor,
           withTaskChips,
         });
@@ -2496,6 +2497,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           visitor,
           authorFor,
           refuseCategoryAuthor,
+          requireOwner,
           metaFor,
           withTaskChips,
         });
@@ -2671,6 +2673,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           visitor,
           authorFor,
           refuseCategoryAuthor,
+          requireOwner,
           metaFor,
           withTaskChips,
         });

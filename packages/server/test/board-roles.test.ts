@@ -16,7 +16,7 @@
  * Every name here is invented. The repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
@@ -290,6 +290,119 @@ describe('the level is enforced by the API', () => {
     const answered = (await itemsOnTask()).find((i) => i.id === openItem);
     expect(answered?.answer?.text).toBe('Leave it');
   });
+
+  it('refuses a Regular User’s other writes onto an owner-only ask', async () => {
+    // Answering is not the only way to drive an ask. A revision rewrites the
+    // question the owner acts on, a withdrawal takes it off their queue, a
+    // question posted where the answer goes files on its thread, and a release
+    // overrules the gate holding it. Every one of those is the owner's.
+    const at = (verb: string) =>
+      `/workspaces/${encodeURIComponent(board)}/tasks/${taskId}/review-items/${gatedItem}/${verb}`;
+    const refusals = await Promise.all([
+      postAsVisitor(REGULAR, at('more-info'), { question: 'Which index?' }),
+      postAsVisitor(REGULAR, at('revise'), { headline: 'Reworded by a Regular User' }),
+      postAsVisitor(REGULAR, at('release'), {}),
+      postAsVisitor(REGULAR, at('withdraw'), { reason: 'not mine' }),
+    ]);
+    expect(refusals.map((r) => r.status)).toEqual([403, 403, 403, 403]);
+    // Status codes are half of it: a refusal that still wrote is a 403 on a
+    // board that changed. The ask is word-for-word the one the agent filed,
+    // and it is still on the owner's queue.
+    const still = await jj<{
+      tasks: Array<{
+        id: string;
+        reviews?: Array<{ id: string; review?: { headline?: string; withdrawnAt?: number } }>;
+      }>;
+    }>(await local(`/workspaces/${encodeURIComponent(board)}/tasks?format=json`));
+    const item = still.tasks.find((t) => t.id === taskId)?.reviews?.find((r) => r.id === gatedItem);
+    expect(item?.review?.headline).toBe('Run the reindex command on this machine?');
+    expect(item?.review?.withdrawnAt).toBeUndefined();
+  });
+
+  it('refuses a Regular User’s answer to an owner-only ask raised on a DOC THREAD', async () => {
+    // The flag belongs to the ASK, not to the surface it was filed on. The
+    // same question reaches a person as a row on a ticket or as a thread on a
+    // doc, and the doc thread has its own answer door.
+    const dir = mkdtempSync(join(tmpdir(), 'board-roles-doc-'));
+    const file = join(dir, 'relay-plan.md');
+    writeFileSync(file, '# Relay plan\n\nThe nightly reindex runs on the operator machine.\n');
+    const docId = 'relay-plan';
+    expect(
+      (
+        await postLocal(`/workspaces/${encodeURIComponent(board)}/docs`, {
+          docId,
+          type: 'markdown',
+          sourceUrl: file,
+          owner: dir,
+          title: 'Relay plan',
+        })
+      ).status,
+    ).toBe(200);
+    const thread = await jj<{
+      thread: { id: string; comments: Array<{ id: string }> };
+    }>(
+      await postLocal(
+        `/workspaces/${encodeURIComponent(board)}/docs/${encodeURIComponent(docId)}/threads/by_find`,
+        {
+          author: { id: 'a-relay', name: 'Relay Bot', kind: 'agent' },
+          find: 'nightly reindex',
+          text: 'Shall I run the reindex command on this machine?',
+          review: {
+            shape: 'decision',
+            headline: 'Run the reindex command on this machine?',
+            detail: 'It rewrites the index in place on the operator machine.',
+            options: [
+              { id: 'o-yes', label: 'Go ahead' },
+              { id: 'o-no', label: 'Leave it' },
+            ],
+            ownerOnly: true,
+          },
+        },
+      ),
+    );
+    const threadId = thread.thread.id;
+    const commentId = thread.thread.comments[0]?.id ?? '';
+    const answerPath = `/workspaces/${encodeURIComponent(board)}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/answer`;
+    expect(
+      (
+        await postAsVisitor(REGULAR, answerPath, {
+          text: 'Go ahead',
+          optionId: 'o-yes',
+          commentId,
+        })
+      ).status,
+    ).toBe(403);
+    // A plain reply is the other answer door — it folds into the answer when
+    // it lands on a pending ask — so it takes the same gate.
+    expect(
+      (
+        await postAsVisitor(
+          REGULAR,
+          `/workspaces/${encodeURIComponent(board)}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`,
+          { text: 'Go ahead' },
+        )
+      ).status,
+    ).toBe(403);
+    const after = await jj<{
+      thread: { comments: Array<{ review?: { answeredAt?: number } }> };
+    }>(
+      await local(
+        `/workspaces/${encodeURIComponent(board)}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}`,
+      ),
+    );
+    expect(after.thread.comments[0]?.review?.answeredAt).toBeUndefined();
+    // And the Owner's answer lands on the same door.
+    expect(
+      (
+        await postAsVisitor(PROMOTED, answerPath, {
+          text: 'Go ahead',
+          optionId: 'o-yes',
+          commentId,
+        })
+      ).status,
+    ).toBe(200);
+    rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
 
   it('lets an Owner answer the owner-only ask', async () => {
     const res = await postAsVisitor(

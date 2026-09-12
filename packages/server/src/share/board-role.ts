@@ -46,3 +46,36 @@ export const DEFAULT_BOARD_ROLE: BoardRole = 'member';
 export function normalizeBoardRole(value: unknown): BoardRole | undefined {
   return value === 'owner' || value === 'member' ? value : undefined;
 }
+
+/**
+ * The gate on a WRITE onto an owner-only ask — one check, called from every
+ * door that can reach one.
+ *
+ * An ask whose answer the owner's own machine then acts on — running a
+ * command, handing over a credential — carries `review.ownerOnly`, and the
+ * whole point of the flag is that a Regular User cannot drive it. "Cannot
+ * drive it" is not "cannot answer it": a revision rewrites the question the
+ * owner will act on, a withdrawal takes it off their queue, a question posted
+ * where the answer goes files on its thread. Every one of those is a write on
+ * an ask the owner is expected to act on, so every one of them is the owner's.
+ *
+ * It lives here, beside the vocabulary, because two route families reach it —
+ * a task's review items and a doc thread's — and a second copy is how the two
+ * spellings of "only the owner" drift. A route under `routes/` may not import
+ * another, so the shared name lives with the service (`.claude/rules/
+ * code-health.md`).
+ *
+ * `workspaceId` may be the empty string when a caller's path named no board:
+ * that fails CLOSED rather than open, because `boardRoleOf` reads a share
+ * visitor's row on a board that holds nobody and answers `member`, while the
+ * operator — who is the owner of every board on their own machine — is
+ * admitted by a rung that never looks at the id.
+ */
+export function refuseOwnerOnlyWrite(
+  review: { ownerOnly?: true } | undefined,
+  workspaceId: string,
+  requireOwner: (workspaceId: string) => Response | null,
+): Response | null {
+  if (review?.ownerOnly !== true) return null;
+  return requireOwner(workspaceId);
+}

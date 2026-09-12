@@ -13,6 +13,7 @@ import { classifyActor } from '../actor-identity.ts';
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
+import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -36,6 +37,29 @@ export async function handleTaskReviewItems(
     judgeTaskDecision,
   } = ctx;
   const { req, scope, visitor, authorFor, refuseCategoryAuthor, requireOwner } = rq;
+
+  /**
+   * OWNER-ONLY ITEMS. An ask whose answer the owner's own machine then acts
+   * on — running a command, handing over a credential — carries
+   * `review.ownerOnly`, and every write onto it is the owner's: answering it,
+   * rewording it, taking it off their queue, asking a question where the
+   * answer goes. `refuseOwnerOnlyWrite` is the one reading of that rule, and
+   * the doc-thread family calls the same function.
+   *
+   * The board comes off the SCOPE, not off the task record: the path is the
+   * argument, and `middleware/workspace-scope.ts` has already refused a task
+   * filed on a different board. Every route below matched through
+   * `matchRest(scope, …)`, which matches nothing without a scope, so the
+   * `?? ''` is a narrowing the compiler cannot see — and it fails CLOSED if
+   * that ever stops being true (see `refuseOwnerOnlyWrite`).
+   */
+  const workspaceId = scope?.workspaceId ?? '';
+  const ownerOnlyDenial = (taskId: string, reviewItemId: string): Response | null =>
+    refuseOwnerOnlyWrite(
+      taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId)?.review,
+      workspaceId,
+      requireOwner,
+    );
   // ── A ticket's review items: 0..n, several possibly open at once ────
   //
   // The two routes ABOVE are untouched and stay that way. They are the
@@ -100,29 +124,13 @@ export async function handleTaskReviewItems(
     if (answeredWith !== undefined && typeof answeredWith !== 'string') {
       return j(400, { error: 'answeredWith must be a string' });
     }
-    /**
-     * OWNER-ONLY ITEMS. An ask whose answer the owner's own machine then acts
-     * on — running a command, handing over a credential — carries
-     * `review.ownerOnly`, and only the board's owner may answer it.
-     *
-     * Checked HERE, before any write and before the ask-back conversion below,
-     * because the conversion is itself a write on the item: a Regular User's
-     * question would otherwise land on the thread of an ask they may not
-     * touch, and the refusal would arrive after the board had already changed.
-     *
-     * The board comes off the SCOPE, not off the task record: the path is the
-     * argument, and `middleware/workspace-scope.ts` has already refused a task
-     * filed on a different board. One reading of "which board", one reading of
-     * "is this its owner" (`requireOwner`).
-     */
-    if (scope) {
-      const gated = taskStore
-        .listReviewItems(taskId)
-        .find((r) => r.id === reviewItemId && r.review.ownerOnly === true);
-      if (gated) {
-        const denied = requireOwner(scope.workspaceId);
-        if (denied) return denied;
-      }
+    // Checked HERE, before any write and before the ask-back conversion below,
+    // because the conversion is itself a write on the item: a Regular User's
+    // question would otherwise land on the thread of an ask they may not
+    // touch, and the refusal would arrive after the board had already changed.
+    {
+      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      if (denied) return denied;
     }
     // A question typed where the answer goes is an ASK BACK, not a
     // decision. Recording it as the answer closed the item and left
@@ -185,6 +193,10 @@ export async function handleTaskReviewItems(
   if (taskReviewInfoMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskReviewInfoMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewInfoMatch[2] ?? '');
+    {
+      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      if (denied) return denied;
+    }
     const body = await safeJson(req);
     const question = typeof body?.question === 'string' ? body.question.trim() : '';
     if (question.length === 0) return j(400, { error: 'question required' });
@@ -222,6 +234,10 @@ export async function handleTaskReviewItems(
   if (taskReviewReleaseMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskReviewReleaseMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewReleaseMatch[2] ?? '');
+    {
+      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      if (denied) return denied;
+    }
     const body = await safeJson(req);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
@@ -263,6 +279,10 @@ export async function handleTaskReviewItems(
   if (taskReviewReviseMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskReviewReviseMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewReviseMatch[2] ?? '');
+    {
+      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      if (denied) return denied;
+    }
     const body = await safeJson(req);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
@@ -386,6 +406,10 @@ export async function handleTaskReviewItems(
     // the workspace this member holds.
     const taskId = decodeURIComponent(taskReviewWithdrawMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewWithdrawMatch[2] ?? '');
+    {
+      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      if (denied) return denied;
+    }
     const undo = taskReviewWithdrawMatch[3] !== undefined;
     const body = await safeJson(req);
     const author = authorFor(body?.author);
