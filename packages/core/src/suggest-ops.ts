@@ -6,7 +6,7 @@ import * as Y from 'yjs';
 import { resolveSingleFind } from './prose-blocks.ts';
 import { type TextSlice, coveringInlineMarks, insertTextWithMarks } from './prose-edit.ts';
 import { getProseFragment, resolveRelativePositionRaw, walkProse } from './prose-fragment.ts';
-import { serializeBlockToMarkdown } from './prose-markdown.ts';
+import { inlineMarkdownFromDelta, serializeBlockToMarkdown } from './prose-markdown.ts';
 import {
   SUGGEST_DELETE_MARK,
   SUGGEST_INSERT_MARK,
@@ -74,6 +74,11 @@ export interface SuggestionRange {
   text: string;
   /** Innermost block the range lives inside (walkProse's notion). */
   block: Y.XmlElement | null;
+  /** The range's own inline marks (link, bold, italic, code, strike), with
+   *  the suggestion bookkeeping stripped out. Load-bearing for the preview:
+   *  a proposal that only wraps words in a link has the SAME characters on
+   *  both sides, and this is the only place the difference exists. */
+  attributes: Record<string, unknown>;
   /** Start offset in the flattened doc text — stable ordering key. */
   docOffset: number;
 }
@@ -91,12 +96,21 @@ export interface SuggestionSummary {
   /** Human-readable preview: inserted text, deleted text, or `old → new`
    *  (truncated, single joined string — agent/MCP-facing). */
   snippet: string;
-  /** Full (untruncated) inserted text — '' for a pure delete. UI chrome that
-   *  needs to render struck-old / underlined-new as separate spans reads
-   *  this and `deletedText` rather than re-parsing `snippet`. */
+  /** Full (untruncated) inserted CHARACTERS — '' for a pure delete. The
+   *  plain text of the offered run and nothing else: a proposal whose
+   *  markdown parsed into marks reads `@Speaker A` here, one that did not
+   *  reads `[@Speaker A](speaker:A)`, and that difference is what pins the
+   *  parse. Render a card from `insertedPreview` instead. */
   insertedText: string;
-  /** Full (untruncated) deleted text — '' for a pure insert. */
+  /** Full (untruncated) deleted characters — '' for a pure insert. */
   deletedText: string;
+  /** The inserted side as a card should SHOW it — `insertedText`, except
+   *  when a mark rather than a character is what changed. See
+   *  {@link previewSides}. UI chrome rendering struck-old / underlined-new
+   *  as separate spans reads this and `deletedPreview`. */
+  insertedPreview: string;
+  /** The deleted side as a card should show it. */
+  deletedPreview: string;
   /** Accepted-state preview of the containing block. */
   blockContext: string;
   /** Creation time, epoch ms. */
@@ -116,6 +130,22 @@ export type SuggestReplaceResult =
 export type SuggestRewriteRangeResult =
   | { ok: true; sid: string }
   | { ok: false; error: 'anchor-orphaned' | 'cross-block' };
+
+/**
+ * An op's attributes with the two suggestion marks (and any null-valued
+ * leftovers) removed — what is left is the text's REAL inline marks.
+ */
+function withoutSuggestionMarks(
+  attrs: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(attrs ?? {})) {
+    if (k === SUGGEST_INSERT_MARK || k === SUGGEST_DELETE_MARK) continue;
+    if (v == null) continue;
+    out[k] = v;
+  }
+  return out;
+}
 
 /**
  * Scan the fragment for suggestion marks, grouped by sid. Ranges come back
@@ -151,6 +181,7 @@ export function scanSuggestions(fragment: Y.XmlFragment): Map<string, Suggestion
           length,
           kind: insAttrs ? 'insert' : 'delete',
           text: op.insert,
+          attributes: withoutSuggestionMarks(op.attributes),
           block: seg.block,
           docOffset: seg.docOffset + offset,
         });
@@ -192,14 +223,57 @@ function joinedText(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): stri
     .join('');
 }
 
+/** One kind's ranges re-emitted as markdown — the spelling the .md file will
+ *  hold once the proposal is answered. */
+function markedText(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): string {
+  return inlineMarkdownFromDelta(
+    entry.ranges
+      .filter((r) => r.kind === kind)
+      .map((r) => ({ insert: r.text, attributes: r.attributes })),
+  );
+}
+
+/**
+ * The two sides as a card should SHOW them.
+ *
+ * Plain text, except when the plain text cannot tell the sides apart. A
+ * proposal that only wraps existing words in a link — or tags them with a
+ * speaker, or bolds them — changes a MARK and not a character, so both sides
+ * read "the survey is late" and a reader working from the card alone is told
+ * nothing. There the sides are spelled in the doc's own markdown instead:
+ * `the survey is late → [the survey is late](/docs/survey)`.
+ *
+ * Markdown rather than a caption, and that is the deliberate half. It needs
+ * no word like "link:" to say what it is, it is exactly the text the .md file
+ * will carry once the proposal is accepted (so a reader can check the file),
+ * and one rule covers every mark — a link, a speaker tag, `**bold**` — where
+ * a caption would need a vocabulary.
+ *
+ * Only when the two sides' characters are EQUAL, so an ordinary word change
+ * reads exactly as it did; and only when the marks actually differ, so a
+ * no-op proposal does not sprout syntax.
+ */
+function previewSides(entry: SuggestionScanEntry): { deleted: string; inserted: string } {
+  const deleted = joinedText(entry, 'delete');
+  const inserted = joinedText(entry, 'insert');
+  if (kindOf(entry) !== 'replace' || deleted === '' || deleted !== inserted) {
+    return { deleted, inserted };
+  }
+  const mdDeleted = markedText(entry, 'delete');
+  const mdInserted = markedText(entry, 'insert');
+  if (mdDeleted === mdInserted) return { deleted, inserted };
+  return { deleted: mdDeleted, inserted: mdInserted };
+}
+
 function snippetOf(entry: SuggestionScanEntry): string {
+  const { deleted, inserted } = previewSides(entry);
   switch (kindOf(entry)) {
     case 'insert':
-      return truncate(joinedText(entry, 'insert'));
+      return truncate(inserted);
     case 'delete':
-      return truncate(joinedText(entry, 'delete'));
+      return truncate(deleted);
     case 'replace':
-      return `${truncate(joinedText(entry, 'delete'), 40)} → ${truncate(joinedText(entry, 'insert'), 40)}`;
+      return `${truncate(deleted, 40)} → ${truncate(inserted, 40)}`;
   }
 }
 
@@ -209,6 +283,7 @@ export function listSuggestions(doc: Y.Doc): SuggestionSummary[] {
   const summaries: Array<SuggestionSummary & { order: number }> = [];
   for (const [sid, entry] of scan) {
     const first = entry.ranges[0];
+    const preview = previewSides(entry);
     summaries.push({
       sid,
       author: {
@@ -220,6 +295,8 @@ export function listSuggestions(doc: Y.Doc): SuggestionSummary[] {
       snippet: snippetOf(entry),
       insertedText: joinedText(entry, 'insert'),
       deletedText: joinedText(entry, 'delete'),
+      insertedPreview: preview.inserted,
+      deletedPreview: preview.deleted,
       blockContext: blockContextOf(first),
       ts: entry.attrs.ts,
       order: first?.docOffset ?? 0,
@@ -380,15 +457,7 @@ function markedAttrsForSlices(
  * left-inheritance Yjs would have applied to an unattributed insert.
  */
 function inlineAttrsAt(node: Y.XmlText, offset: number): Record<string, unknown> {
-  const strip = (attrs: Record<string, unknown> | undefined): Record<string, unknown> => {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(attrs ?? {})) {
-      if (k === SUGGEST_INSERT_MARK || k === SUGGEST_DELETE_MARK) continue;
-      if (v == null) continue;
-      out[k] = v;
-    }
-    return out;
-  };
+  const strip = withoutSuggestionMarks;
   const delta = node.toDelta() as Array<{
     insert?: string;
     attributes?: Record<string, unknown>;

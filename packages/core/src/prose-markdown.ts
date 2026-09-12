@@ -971,10 +971,28 @@ export function textContent(node: Y.XmlElement): string {
  * wrapped in the appropriate syntax.
  */
 function textWithMarks(xmlText: Y.XmlText): string {
-  const delta = xmlText.toDelta() as Array<{
-    insert?: string;
-    attributes?: Record<string, unknown>;
-  }>;
+  return inlineMarkdownFromDelta(
+    xmlText.toDelta() as Array<{ insert?: string; attributes?: Record<string, unknown> }>,
+  );
+}
+
+/**
+ * The same re-emission over a delta the caller assembled itself, rather than
+ * over a whole Y.XmlText.
+ *
+ * `textWithMarks` walks a node; a SUGGESTION is a set of runs scattered
+ * across one or more nodes, selected by which mark they carry. Both need the
+ * identical answer — a proposal's preview has to spell a link the way the
+ * .md file will hold it — so the walk lives here once and takes ops.
+ *
+ * Ops carrying a `suggestInsert` attribute are dropped on the way through
+ * (the serializer rule — see `expelEmphasisWhitespace`), so a caller
+ * previewing a proposal's OWN inserted runs strips the suggestion
+ * bookkeeping from each op's attributes before handing them over.
+ */
+export function inlineMarkdownFromDelta(
+  delta: Array<{ insert?: string; attributes?: Record<string, unknown> }>,
+): string {
   let out = '';
   // Marks currently open, outermost first. A Yjs delta is a flat sequence of
   // ops each carrying a SET of marks — it has no notion of which mark is

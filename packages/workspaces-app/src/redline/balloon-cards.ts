@@ -70,17 +70,21 @@ export function createBalloonCards({ resolveSuggestion }: BalloonCardDeps): Ball
     preview.className = 'cw-balloon-text cw-suggest-preview';
     // Old struck / new underlined — plain textContent on each span, never
     // innerHTML interpolation (both are untrusted doc/agent content).
+    // The PREVIEW fields, not the raw characters: a proposal that only wraps
+    // words in a link has the same characters on both sides, and core spells
+    // those two sides in markdown so the card names the change (suggest-ops
+    // `previewSides`).
     if (s.kind === 'delete' || s.kind === 'replace') {
       const oldEl = document.createElement('span');
       oldEl.className = 'cw-suggest-old';
-      oldEl.textContent = s.deletedText;
+      oldEl.textContent = s.deletedPreview;
       preview.appendChild(oldEl);
     }
     if (s.kind === 'insert' || s.kind === 'replace') {
       if (s.kind === 'replace') preview.appendChild(document.createTextNode(' → '));
       const newEl = document.createElement('span');
       newEl.className = 'cw-suggest-new';
-      newEl.textContent = s.insertedText;
+      newEl.textContent = s.insertedPreview;
       preview.appendChild(newEl);
     }
     el.appendChild(preview);
@@ -135,19 +139,20 @@ export function createBalloonCards({ resolveSuggestion }: BalloonCardDeps): Ball
     collapsedIdentity(el, s.author.name, s.author.color);
     const preview = document.createElement('span');
     preview.className = 'cw-collapsed-preview';
-    // Same old-struck / new-underlined classes as the full card — plain
-    // textContent on each span, never innerHTML (untrusted content).
+    // Same old-struck / new-underlined classes and the same preview fields
+    // as the full card — plain textContent on each span, never innerHTML
+    // (untrusted content).
     if (s.kind === 'delete' || s.kind === 'replace') {
       const oldEl = document.createElement('span');
       oldEl.className = 'cw-suggest-old';
-      oldEl.textContent = s.deletedText;
+      oldEl.textContent = s.deletedPreview;
       preview.appendChild(oldEl);
     }
     if (s.kind === 'insert' || s.kind === 'replace') {
       if (s.kind === 'replace') preview.appendChild(document.createTextNode(' → '));
       const newEl = document.createElement('span');
       newEl.className = 'cw-suggest-new';
-      newEl.textContent = s.insertedText;
+      newEl.textContent = s.insertedPreview;
       preview.appendChild(newEl);
     }
     el.appendChild(preview);
