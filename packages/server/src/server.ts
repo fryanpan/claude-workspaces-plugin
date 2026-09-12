@@ -76,6 +76,7 @@ import {
 } from './review-archive.ts';
 import { createReviewGate } from './review-gate.ts';
 import type { ReviewThreadItem } from './review-queue.ts';
+import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
 import {
   type AgentIdentityRoutesContext,
@@ -1851,9 +1852,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const reviewQueueRoutesCtx: ReviewQueueRoutesContext = {
     crossReview,
     boardName: (id) => taskStore.getWorkspace(id)?.name,
+    sizePrefs: new ReviewSizePrefs(dataDir),
+    sessionIdentityId: (req) => sessionIdentityFor(req)?.id ?? null,
     renderPage: () => renderReviewsShell(browserSentry, readAppAssetManifest(markdownAppDist)),
     pageHeaders: HTML_SHELL_HEADERS,
     j,
+    safeJson,
   };
 
   /**
@@ -2749,7 +2753,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // ./routes/review-queue.ts. Top-level for the prompts' reason: it is
       // about every board, not one.
       {
-        const handled = handleReviewQueueRoutes(reviewQueueRoutesCtx, {
+        const handled = await handleReviewQueueRoutes(reviewQueueRoutesCtx, {
           req,
           pathname,
           url,
