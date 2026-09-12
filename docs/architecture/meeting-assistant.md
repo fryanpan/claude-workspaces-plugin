@@ -2206,6 +2206,34 @@ three for the same reason it is the most likely to misfire: most of its rule
 is the line separating a correction from somebody changing their mind. Output
 is unchanged on the ticks that carry none of them, which is most of them.
 
+## A meeting's title (`meeting-namer.ts`, `meeting-titler.ts`)
+
+A meeting is called what it is about, not when it started. A new one is
+"Meeting" ("Planning Meeting" for a plan), and the page shows that title as
+its heading, muted while it is still the default, with the doc's created and
+last-changed dates under it from the server's record.
+
+**When it is named.** Once, early, the first time a notes write leaves the
+doc holding about three bullets, and again when the recording stops, from the
+whole meeting. One Haiku call each, about 1.5k tokens in and 20 out.
+
+**Whose title wins.** `titleSource` on the doc's meta says who chose the
+title: `default` and `auto` may be replaced, `given` (a calendar event's name)
+and `person` (a rename anywhere) never are. The store reads the source and
+writes the title in one synchronous step after the model call returns
+(`DocStore.setAutoTitle`), so a rename that lands while the call is out wins.
+A doc from before the field existed has no source and is never renamed by a
+meeting.
+
+**The old clock titles.** `POST /api/meetings/retitle` (loopback only, never
+through the edge, never a browser) renames every meeting whose title is still
+exactly a minted clock title — "Meeting notes 2026-09-03 10:15", "Plan …" —
+and carries no source: its topic when it has notes, else the default. It
+answers `{renamed, skipped}` and nothing else. A doc with notes and no usable
+topic is skipped so a later run can name it; a second run finds nothing.
+
+`CW_MEETING_TITLES=0` turns naming off.
+
 ## One more read, when the meeting is over (`notes-cleanup-pass.ts`)
 
 Bryan already does this by hand: when a meeting finishes he asks for another

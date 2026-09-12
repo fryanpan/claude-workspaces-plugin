@@ -525,6 +525,15 @@ decision a test reads and a reviewer checks, not a number buried in a
 `setTimeout`. No state, no `Request`, nothing to schedule: the relay owns the
 timer, this owns only how long it runs.
 
+`meeting-namer.ts` and `meeting-titler.ts` join the same family and change
+nothing in the picture: a meeting starts as "Meeting" and is renamed to its
+topic from its own notes, only while nobody has named it. The namer is the
+adapter (prompt, parser, one Haiku call, built only in `server-deps.ts`); the
+titler decides when it runs and holds the guard, and `meeting-notes-doc.ts`
+calls it from the sinks it already wraps. The one-time rename of the old clock
+titles is `retitleClockTitles` in the titler, reached through the loopback
+`POST /api/meetings/retitle` in `routes/ops.ts`.
+
 `notes-invented-links.ts` sits in the Meetings box beside `notes-edit-guard.ts`
 and is the second deterministic refusal on the applier path: the guard says
 which edits may touch the section, this says which links inside them the tick
