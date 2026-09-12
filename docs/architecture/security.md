@@ -26,7 +26,7 @@ Claude Workspaces runs on one person's computer. That person is the owner. There
 - Any name that happens to point at this machine other than `localhost`: a Tailscale name, a local-network alias. These are refused outright.
 - Web pages running on other local ports. A dev server on this machine is not the owner, even though the owner's browser session would travel with its requests.
 
-It is a vulnerability if anyone outside the boundary can read or change a workspace they were not given, or reach the machine's files, secrets, or deploy controls. Something a member does inside a board they were given is not one, because for now everyone in a workspace has everything.
+It is a vulnerability if anyone outside the boundary can read or change a workspace they were not given, or reach the machine's files, secrets, or deploy controls. It is also one if a Regular User on a board does something only that board's Owner may do: change who has access, or answer an ask whose answer this machine then acts on. Everything else a member does inside a board they were given is not, because on a board everyone shares the work.
 
 ## The layers
 
@@ -71,19 +71,23 @@ An email gets a workspace in one of two ways:
 
 The gate runs on every request, against the workspace named in that request's own path. A request that names no workspace is refused rather than answered, so an admitted stranger learns nothing about what else exists. A link that is revoked, expired, or never existed shows one page, the same page in all three cases, naming no workspace and no owner.
 
-Two verbs end access, and only these two. Revoking a link stops new redemptions but leaves existing members; a link is usually revoked for having been passed around, not to remove the people who used it. Removing a member ends that person's access at once, including any live connection they already had open. Neither destroys anything: a revoked link keeps its record of who redeemed it and when.
+Two verbs end access, and only these two. Revoking a link stops new redemptions but leaves existing members; a link is usually revoked for having been passed around, not to remove the people who used it. Removing a member ends that person's access at once, including any live connection they already had open — the same act whether it is asked for from this machine or from the board's own settings by an Owner. Neither destroys anything: a revoked link keeps its record of who redeemed it and when.
 
 Retiring a board is not one of them. A retired board is still a board, so its members keep reaching it; retirement stands work down, it does not take anyone's access away. To remove somebody, remove the member.
 
 Above all of this is a master switch. Off, every outside hostname is refused before any sign-in check runs and every visitor's open connection is dropped. Only a program on this machine can throw it.
 
-### Layer 3: inside a workspace, everyone has everything
+### Layer 3: inside a workspace, an Owner and Regular Users
 
 A member is a participant, not a reader. They can file and edit tasks, move status, answer review items and decisions, comment anywhere, edit any document filed on the board, file onto the board a document they can already open on it, start and join a meeting on it, name and rank the goal bands, open and change the board's settings, read its activity log and the roster of agents working it, and turn a comment into a task. Every write is attributed to the email Cloudflare confirmed; whatever the request claims about its author is ignored.
 
+Every membership carries a level: Owner, or Regular User. Redeeming a link makes a Regular User unless the link was minted as an Owner's, and the person whose machine this is is an Owner of every board on it without holding a membership record at all — so demoting everyone on the list still leaves the board an owner, and nobody let in from outside can take the board away from the person who made it.
+
+An Owner can do two things a Regular User cannot. They can change who has access and at what level. And they can answer an ask flagged owner-only: the asks whose answer this machine then acts on, running a command or handing over a credential. Both refusals are the server's — a 403 on the route, decided from the level the request's own email holds on the board its path names — never a control the page happened not to draw. Everything else on the board is still everyone's, including reading the list of who has access, because a person who cannot see who else is here cannot know who reads what they write.
+
 Filing a document onto the board is what makes it readable there, so a member may file only what they can already open. Pulling one in from elsewhere would be a read of another board dressed as a write.
 
-"Everything" means everything on that board. What is outside the board is refused in the same words a guessed id gets: other boards, the list of boards, share administration (minting or revoking links, reading the member list, the master switch), the board's own lifecycle, the seats on it that belong to the owner's agents, and anything that names a path on the owner's machine or acts on the machine itself. Each route a member may call is written out by name, so a route added later is closed until someone opens it. A request reached through a task or goal id is resolved to its own board first, and the gate is asked about that board and no other. The files a phone fetches to put the board on its Home Screen are on the list too: the product's icons, and a manifest of the board's own that starts on the board rather than on the root page a member may not see. An installed app carries none of the browser's cookies, so its first open is a sign-in, once.
+"Everything" means everything on that board. What is outside the board is refused in the same words a guessed id gets: other boards, the list of boards, share administration (minting or revoking links, reading the links themselves, the master switch), the board's own lifecycle, the seats on it that belong to the owner's agents, and anything that names a path on the owner's machine or acts on the machine itself. Each route a member may call is written out by name, so a route added later is closed until someone opens it. A request reached through a task or goal id is resolved to its own board first, and the gate is asked about that board and no other. The files a phone fetches to put the board on its Home Screen are on the list too: the product's icons, and a manifest of the board's own that starts on the board rather than on the root page a member may not see. An installed app carries none of the browser's cookies, so its first open is a sign-in, once.
 
 Two things on the board itself are still the owner's alone, and both spend the owner's machine rather than working the board: sending a meeting bot into a call somewhere else, and routing a spoken request to the owner's agents.
 
@@ -157,6 +161,7 @@ Every hostname below is a placeholder; the real ones live in the launchd configu
 | Collaboration hostname `collab.<domain>` | `collabScope`                                                | `CF_ACCESS_TUNNEL_HOSTS`, same Access application as the owner's |
 | Share hostname `share.<domain>`          | `isShareLinkHost`, `shareScopeAllows`                        | `CW_SHARE_LINK_HOSTS`, `CF_ACCESS_SHARE_AUD` (its own audience) |
 | Member route tables                      | `memberRouteAllows`, `host-guard.ts`                         | none                                                         |
+| Owner vs. Regular User on a board        | `boardRoleOf`, `board-membership.ts`; `requireOwner`, `request-admission.ts` | none                                          |
 | Every route and its gate                 | `routes/route-table-rows.ts`, rendered to [routes.md](routes.md) | none                                                     |
 | Master switch                            | `share/sharing-gate.ts`                                      | set from an agent, not from a browser                        |
 | Meeting-bot hostname `recall.<domain>`   | `middleware/recall-callback-gate.ts`                         | `CW_RECALL_CALLBACK_HOST`, `RECALL_WEBHOOK_SECRET`           |

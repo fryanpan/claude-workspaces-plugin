@@ -128,6 +128,10 @@ run for a request whatever path it named. `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
+The board-roles work added `routes/workspace-members.ts` — who has access and
+at what level — inside a directory this picture already draws, so the picture
+does not move; what a board's Owner may do that a Regular User may not is
+decided in `request-admission.ts`, beside the rest of admission.
 
 **And every one of those paths is written down once.** `routes/route-table.ts`
 holds the vocabulary — a gate is `trusted-local`, `loopback-only`,
