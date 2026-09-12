@@ -450,6 +450,22 @@ body.board-body {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* A board-wide setting as it reads to somebody who may not change it: the
+   value where the editor was, in the panel's own body text, with no box, no
+   buttons and no caption explaining the absence. It takes the textarea's line
+   height and wrapping so the criteria read as the same paragraphs either way,
+   and no border — a bordered box with nothing to type in is the control this
+   row exists to stop drawing. */
+.board-settings-readonly {
+  margin: 0;
+  max-height: 34vh;
+  overflow: auto;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 /* `.board-btn`'s own floor is 36px, which is a mouse target. These two are read
    and pressed on a phone at 430px, so they take the 44px touch floor the rest
    of the touch chrome uses. */

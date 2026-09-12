@@ -33,7 +33,8 @@ function dom() {
         <small id="board-parallelism-cap-note" class="board-settings-note"></small>
       </label>
       <input type="number" id="board-parallelism-cap" class="board-cap-input" />
-      <div class="board-criteria-actions">
+      <p id="board-parallelism-cap-text" class="board-settings-readonly hidden"></p>
+      <div id="board-parallelism-cap-actions" class="board-criteria-actions">
         <button type="button" id="board-parallelism-cap-save" class="board-btn"></button>
         <button type="button" id="board-parallelism-cap-default" class="board-btn"></button>
       </div>
@@ -43,6 +44,8 @@ function dom() {
     note: document.getElementById('board-parallelism-cap-note') as HTMLElement,
     save: document.getElementById('board-parallelism-cap-save') as HTMLButtonElement,
     useDefault: document.getElementById('board-parallelism-cap-default') as HTMLButtonElement,
+    text: document.getElementById('board-parallelism-cap-text') as HTMLElement,
+    actions: document.getElementById('board-parallelism-cap-actions') as HTMLElement,
   };
 }
 
@@ -50,6 +53,7 @@ function mount(
   opts: {
     read?: () => Promise<ParallelismCap | null>;
     write?: (value: number | null) => Promise<boolean>;
+    canEdit?: boolean;
   } = {},
 ) {
   const els = dom();
@@ -60,6 +64,7 @@ function mount(
     read: opts.read ?? (async () => ({ value: 2, isDefault: true, inUse: 0 })),
     write,
     toast: (m) => toasts.push(m),
+    canEdit: () => opts.canEdit !== false,
   });
   return { ...els, handle, toasts, write };
 }
@@ -200,6 +205,18 @@ describe('the parallelism cap field', () => {
     await f.handle.settled();
     expect(f.box.value).toBe('7');
     expect(f.toasts).toEqual(['Could not save the parallelism cap']);
+  });
+
+  it('draws the cap as plain text for a reader who may not write it', async () => {
+    const f = mount({ canEdit: false, read: async () => ({ value: 4, isDefault: false, inUse: 2 }) });
+    await f.handle.refresh();
+    expect(f.text.textContent).toBe('4');
+    expect(f.text.classList.contains('hidden')).toBe(false);
+    expect(f.box.classList.contains('hidden')).toBe(true);
+    expect(f.actions.classList.contains('hidden')).toBe(true);
+    // The note ends by saying what editing the number would do, so it goes
+    // with the editor — see `review-criteria.test.ts` for the same rule.
+    expect(f.note.textContent).toBe('');
   });
 });
 

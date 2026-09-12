@@ -26,6 +26,16 @@ export interface ReviewCriteriaDeps {
   note: HTMLElement;
   save: HTMLButtonElement;
   useDefault: HTMLButtonElement;
+  /** Where the criteria are drawn for a reader who may not change them. It
+   *  and the editor are never up together — see `showEditor`. */
+  text: HTMLElement;
+  /** The Save / Use-the-default pair, as one element: hiding the two buttons
+   *  individually would leave their flex row's gap behind. */
+  actions: HTMLElement;
+  /** May this reader write the criteria? Read on every refresh rather than
+   *  captured, because the panel learns the role from the same members read
+   *  that draws "Who has access" and that read happens on every open. */
+  canEdit: () => boolean;
   /** Read the board's criteria. `null` is a failed read, never empty text. */
   read: () => Promise<ReviewCriteria | null>;
   /** Write them. `null` restores the shipped default. Resolves false when the
@@ -54,7 +64,27 @@ export function criteriaNote(criteria: ReviewCriteria): string {
 export function mountReviewCriteria(deps: ReviewCriteriaDeps): ReviewCriteriaHandle {
   let inFlight: Promise<void> | null = null;
 
+  /**
+   * Put up the editor or the plain text, and say which is now up.
+   *
+   * A Regular User's PUT on this board's settings is refused by the server
+   * (`requireOwner`, `routes/workspace-settings.ts`), so drawing them a
+   * textarea and a Save is drawing a control that fails when used. The
+   * missing control is not the enforcement — the refusal is the server's, as
+   * it is for the members list next door — but a panel that shows what a
+   * reader may do is the difference between a board that reads honestly and
+   * one that lies until you press something.
+   */
+  function showEditor(): boolean {
+    const editable = deps.canEdit();
+    deps.box.classList.toggle('hidden', !editable);
+    deps.actions.classList.toggle('hidden', !editable);
+    deps.text.classList.toggle('hidden', editable);
+    return editable;
+  }
+
   async function refresh(): Promise<void> {
+    const editable = showEditor();
     const criteria = await deps.read();
     if (!criteria) {
       // Disabled, not empty. An empty box that a reader then saves would
@@ -63,6 +93,7 @@ export function mountReviewCriteria(deps: ReviewCriteriaDeps): ReviewCriteriaHan
       deps.box.disabled = true;
       deps.save.disabled = true;
       deps.useDefault.disabled = true;
+      deps.text.textContent = '';
       deps.note.textContent = 'Could not read the criteria — reopen this panel to try again.';
       return;
     }
@@ -70,7 +101,11 @@ export function mountReviewCriteria(deps: ReviewCriteriaDeps): ReviewCriteriaHan
     deps.save.disabled = false;
     deps.useDefault.disabled = false;
     deps.box.value = criteria.value;
-    deps.note.textContent = criteriaNote(criteria);
+    deps.text.textContent = criteria.value;
+    // The note tells a reader what editing these words would do, so it goes
+    // with the editor. Nothing takes its place: a read-only field is the
+    // value where the control was, and not a sentence about who may change it.
+    deps.note.textContent = editable ? criteriaNote(criteria) : '';
   }
 
   async function write(value: string | null): Promise<void> {

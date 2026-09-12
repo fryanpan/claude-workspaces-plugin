@@ -16,7 +16,7 @@
  * and the open flag arrives as a two-thunk accessor rather than as the
  * `BoardState` it actually lives on.
  */
-import { type BoardMembersView, mountBoardMembers } from './board-members.ts';
+import { type BoardMembersView, type BoardRole, mountBoardMembers } from './board-members.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
 import { mountReviewCriteria } from './review-criteria.ts';
@@ -56,6 +56,20 @@ export interface BoardSettingsPanelDeps {
  */
 export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
   const { document, el, workspaceId, author, user, fetchJson, send, showToast } = deps;
+  /**
+   * What this reader may CHANGE here, as of the last members read.
+   *
+   * Three of this panel's rows are board-wide configuration and the server
+   * refuses a Regular User's write of all three — the criteria and the cap
+   * through `requireOwner` on `PUT /workspaces/<id>/settings`, the prompts
+   * page because it is trusted-local and no share visitor reaches it at all.
+   * So the panel draws them as what they are for this reader.
+   *
+   * FALSE UNTIL PROVEN, including after a failed read: the cost of guessing
+   * wrong downward is an owner who reopens the panel, and of guessing wrong
+   * upward is exactly the control-that-fails this exists to remove.
+   */
+  let canEdit = false;
   // Notifications for THIS device. Mounted once; its state is read from the
   // browser rather than held here, because the browser is where it actually
   // lives — a permission revoked in site settings has to show up on the row
@@ -76,6 +90,9 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     note: el('board-review-criteria-note'),
     save: el('board-review-criteria-save') as HTMLButtonElement,
     useDefault: el('board-review-criteria-default') as HTMLButtonElement,
+    text: el('board-review-criteria-text'),
+    actions: el('board-review-criteria-actions'),
+    canEdit: () => canEdit,
     read: async () => {
       const data = await fetchJson<{
         reviewItemCriteria?: { value?: string; isDefault?: boolean };
@@ -105,6 +122,9 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     note: el('board-parallelism-cap-note'),
     save: el('board-parallelism-cap-save') as HTMLButtonElement,
     useDefault: el('board-parallelism-cap-default') as HTMLButtonElement,
+    text: el('board-parallelism-cap-text'),
+    actions: el('board-parallelism-cap-actions'),
+    canEdit: () => canEdit,
     read: async () => {
       const data = await fetchJson<{
         parallelismCap?: {
@@ -174,7 +194,28 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
       return res.ok;
     },
     toast: showToast,
+    onRole: (role: BoardRole | null) => {
+      canEdit = role === 'owner';
+      // A page address, not a control, and still the same bug: the prompts
+      // page is trusted-local, so for a Regular User this row is a link that
+      // leads to a refusal. It goes rather than greys out — there is nothing
+      // to read there that they could have read.
+      el('board-prompts-link').classList.toggle('hidden', !canEdit);
+    },
   });
+
+  /**
+   * Re-read who you are, THEN what the rest of the panel shows.
+   *
+   * Ordered rather than fanned out with the others: the criteria and the cap
+   * draw differently for an Owner than for a Regular User, so a read that
+   * landed first would paint an editor and swap it for text a turn later —
+   * the flicker being a control the reader may have already reached for.
+   */
+  async function refreshRoleAndBoardSettings(): Promise<void> {
+    await members.refresh();
+    await Promise.all([reviewCriteria.refresh(), parallelismCap.refresh()]);
+  }
 
   el('board-settings').addEventListener('click', () => {
     deps.setOpen(!deps.isOpen());
@@ -184,9 +225,7 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     // Same reason for the criteria, which an agent can rewrite from a tool.
     if (deps.isOpen()) {
       void pushToggle.refresh();
-      void reviewCriteria.refresh();
-      void parallelismCap.refresh();
-      void members.refresh();
+      void refreshRoleAndBoardSettings();
     }
   });
   // A popover that only closes by hitting the same small button again is one
