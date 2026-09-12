@@ -11,18 +11,21 @@
  *
  * Two questions, one file, because they are asked together:
  *
- *  - **Which board is the plan.** An owner setting (`review-plan.json`), and
- *    when that is unset the board whose lead seat is held by the server's
- *    spawner agent (Team Lead) — the most recently active one if the seat
- *    holds more than one board.
- *  - **Which project a goal names.** A goal names a board by linking to it
- *    (`/workspaces/<id>` in its prose or its links) or by a title that starts
- *    with the board's name and a colon ("Riverbend: ship the digest"). The
- *    first goal in band order that names a board ranks it; a goal may name
- *    several. A board no goal names ranks after every named one, newest
+ *  - **Which board is the plan.** The owner's hand-edited
+ *    `review-plan.json` (`{"planWorkspaceId": "<id>"}`), read on every
+ *    queue read so an edit lands without a restart. No route writes it: one
+ *    file the owner edits is less surface than a verb somebody could call.
+ *    When it is unset, or names no live board, the plan is the board whose
+ *    lead seat the server's spawner agent (Team Lead) holds — the most
+ *    recently active one if the seat holds more than one.
+ *  - **Which project a goal names.** A structured link to the board
+ *    (`/workspaces/<id>`) in the goal's links or its body. Never the goal's
+ *    title: a title prefix breaks silently the day a board is renamed. A goal
+ *    may name several boards, and each takes the best (earliest) goal that
+ *    names it. A board no goal names ranks after every named one, newest
  *    activity first, so an unplanned board is late rather than missing.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type WorkspaceLink,
@@ -33,36 +36,27 @@ import type { GoalRow, WorkspaceGoal } from './tasks.ts';
 
 const FILENAME = 'review-plan.json';
 
-/** The owner's choice of plan board, persisted. Absent means "derive it". */
+/** The owner's choice of plan board, as they last wrote the file. */
 export class ReviewPlanStore {
   private readonly path: string;
-  private planWorkspaceId: string | undefined;
 
   constructor(dataDir: string) {
     this.path = join(dataDir, FILENAME);
-    if (!existsSync(this.path)) return;
+  }
+
+  /** The named board id, or undefined for "derive it". */
+  get(): string | undefined {
+    if (!existsSync(this.path)) return undefined;
     try {
       const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as { planWorkspaceId?: unknown };
-      if (typeof parsed.planWorkspaceId === 'string' && parsed.planWorkspaceId) {
-        this.planWorkspaceId = parsed.planWorkspaceId;
-      }
+      return typeof parsed.planWorkspaceId === 'string' && parsed.planWorkspaceId
+        ? parsed.planWorkspaceId
+        : undefined;
     } catch {
       // A corrupt file falls back to the derived plan board. Unlike a gate on
       // external reach, getting this wrong reorders a list and hides nothing.
+      return undefined;
     }
-  }
-
-  get(): string | undefined {
-    return this.planWorkspaceId;
-  }
-
-  /** `null` clears the setting, handing the choice back to the derivation. */
-  set(workspaceId: string | null): void {
-    this.planWorkspaceId = workspaceId ?? undefined;
-    mkdirSync(join(this.path, '..'), { recursive: true });
-    const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify({ planWorkspaceId: workspaceId ?? null })}\n`);
-    renameSync(tmp, this.path);
   }
 }
 
@@ -97,10 +91,10 @@ function linkedBoard(link: WorkspaceLink): string | undefined {
   return link.kind === 'workspace' ? link.workspaceId : undefined;
 }
 
-/** The board ids one goal names. */
+/** The board ids one goal links to. */
 export function boardsNamedBy(
-  goal: Pick<GoalRow, 'title' | 'body' | 'links'>,
-  boards: readonly Pick<PlanBoardInput, 'id' | 'name'>[],
+  goal: Pick<GoalRow, 'body' | 'links'>,
+  boards: readonly Pick<PlanBoardInput, 'id'>[],
 ): string[] {
   const named = new Set<string>();
   const known = new Set(boards.map((b) => b.id));
@@ -113,11 +107,6 @@ export function boardsNamedBy(
     const link = parseWorkspaceLink(ref.url);
     const id = link ? linkedBoard(link) : undefined;
     if (id && known.has(id)) named.add(id);
-  }
-  const title = goal.title.trim().toLowerCase();
-  for (const b of boards) {
-    const name = b.name.trim().toLowerCase();
-    if (name && title.startsWith(`${name}:`)) named.add(b.id);
   }
   return [...named];
 }
@@ -133,8 +122,8 @@ export interface RankedProject {
 }
 
 /**
- * Every board in project order: named boards by the first plan goal that
- * names them, then the rest by recency. The plan board's goals are read in
+ * Every board in project order: named boards by the best (earliest) plan goal
+ * that links to them, then the rest by recency. The plan board's goals are read in
  * the order of `goals` (band order); archived bands are not in `goalRows`.
  */
 export function rankProjects(
