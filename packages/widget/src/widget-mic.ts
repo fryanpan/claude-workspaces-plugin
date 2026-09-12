@@ -1,6 +1,17 @@
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
+ * What a refused write says, re-exported here rather than from `widget.ts`.
+ *
+ * The host that mounts a mic is the one that needs it: its readout holds a
+ * spoken comment the workspace would not take, and it must say what the typed
+ * composer says about a typed one. Routed through THIS entry because
+ * `widget.ts` is the budgeted bundle and a re-export there is bytes on every
+ * mock page, for a name only a page with a mic ever reads.
+ */
+export { SIGN_IN_NOTE } from './widget-auth.ts';
+
+/**
  * A microphone on the widget, for a host that has one to hand it.
  *
  * The widget has no voice capture of its own and gets none here. The board
@@ -51,8 +62,37 @@ const MIC_CSS = [
   '.fab-mic.voice-unavailable{color:#8c959f}',
   // Said on hover, at once, rather than in a `title` that takes a second to
   // appear. Beside the button, toward the page.
-  '[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:56px;top:50%;transform:translateY(-50%);white-space:nowrap;background:#1b1f23;color:#fff;font-size:12px;line-height:1.3;padding:6px 10px;border-radius:6px;pointer-events:none}',
+  //
+  // One line where there is room, and WRAPPED where there is not. The host's
+  // words are the host's — the board's run to seventy-odd characters, because
+  // each one says whose feedback the button takes — and one unbreakable line
+  // of those ran off the left edge of a 430-wide screen by 43px for the mic
+  // and 92px for the list. The bound is the screen: the buttons sit ~76px in
+  // from the right, so a label no wider than `100vw - 88px` keeps its left
+  // edge on screen at every width, and nothing narrows a label that already
+  // fits.
+  //
+  // Three declarations do that one job, and dropping any of them loses it:
+  //
+  // - `width:max-content`, because this box is positioned against the BUTTON,
+  //   44px wide, so shrink-to-fit would size it from 44px minus the 56px
+  //   offset. That is why the old rule needed `nowrap` to be readable at all,
+  //   and why a max-width alone wrapped every label to its longest word.
+  // - `box-sizing:border-box`, because the sheet's own `*` rule does not
+  //   reach a pseudo-element: without it the cap bounds the TEXT and the 20px
+  //   of side padding hangs off the end of it, which is 20px back off-screen.
+  // - the cap itself.
+  '[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:56px;top:50%;transform:translateY(-50%);box-sizing:border-box;width:max-content;max-width:calc(100vw - 88px);background:#1b1f23;color:#fff;font-size:12px;line-height:1.3;padding:6px 10px;border-radius:6px;pointer-events:none}',
   '.readout{position:fixed;right:78px;bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px,calc(env(safe-area-inset-bottom) + 74px)));max-width:min(320px,calc(100vw - 110px));background:#1b1f23;color:#fff;border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.4;z-index:2147483647}',
+  // Both of them above the phone face's bottom panel, whose height
+  // `placeCards` measures into --cw-quick-h every frame. AFTER the two rules
+  // that set their slots, because it is the same property at the same
+  // specificity and the last one is the one that counts.
+  //
+  // `max` rather than a sum, so neither drifts upward on a page with no panel
+  // at all: with nothing docked the 74px slot still wins, and a panel only
+  // ever pushes them further up.
+  '.fab-mic,.readout{bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px,calc(env(safe-area-inset-bottom) + 74px),calc(var(--cw-quick-h, 0px) + 12px)))}',
   // The capture's own states. `createVoiceCapture` puts a spinner in the
   // readout while a post is in flight and takes the long form for a
   // paragraph-length answer; the app's rules for both are in
@@ -68,6 +108,42 @@ const MIC_CSS = [
   // Last, so a hidden readout stays hidden however the capture has classed it.
   '.readout.hidden{display:none}',
 ].join('');
+
+/**
+ * How tall the phone face's bottom panel is right now, published as
+ * `--cw-quick-h` so the mic and its readout can say in CSS that they stay
+ * above it.
+ *
+ * The panel's height is its contents': the mode's prompt is one row, the
+ * composer is a row that grows to four lines as you type, and a workspace
+ * that wants a signature adds a line of news and a button under that. A fixed
+ * 74px slot cleared the short form by ten pixels and disappeared under the
+ * tall one — painted, on screen, and under the reviewer's thumb at the same
+ * moment as the field they are typing in.
+ *
+ * Every `.quick` in the shadow root, not the first: the prompt stays in the
+ * DOM while the composer stands in front of it, and a hidden element measures
+ * zero, so the tallest is the one on screen.
+ *
+ * It lives HERE, on a frame loop of its own, for two reasons that agree. The
+ * widget's own bundle is on a byte budget and this module is not in it — a
+ * mock page loads the budgeted `widget.iife.js` and has no mic — and a page
+ * with no mic has nothing this measurement would move, so a hook in the
+ * widget's loop would be bytes every mock page pays for a button it does not
+ * have. The loop stops with the button: a mic off the page schedules no
+ * further frame.
+ */
+function reserveQuickPanel(el: FeedbackWidgetEl): void {
+  let h = 0;
+  for (const p of el.shadow.querySelectorAll('.quick')) {
+    h = Math.max(h, Math.round(p.getBoundingClientRect().height));
+  }
+  const next = `${h}px`;
+  // Written only when it moved: this runs every frame.
+  if (el.style.getPropertyValue('--cw-quick-h') !== next) {
+    el.style.setProperty('--cw-quick-h', next);
+  }
+}
 
 /**
  * Put the mic on this widget. Idempotent: a second call hands back the
@@ -103,5 +179,11 @@ export function addMic(el: FeedbackWidgetEl, labels: MicLabels): WidgetMic {
     b.setAttribute('aria-label', tip);
   }
   s.append(style, button, readout);
+  const tick = (): void => {
+    if (!button.isConnected) return;
+    reserveQuickPanel(el);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
   return { button, readout };
 }

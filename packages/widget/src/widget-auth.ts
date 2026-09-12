@@ -254,6 +254,14 @@ export async function authedPost(
 }
 
 /**
+ * What a refused write says, wherever the words that were refused are being
+ * held. The composer keeps a typed draft in its field; the mic's readout says
+ * the same sentence about a spoken one, so the promise a person reads is one
+ * promise rather than two that happen to agree today.
+ */
+export const SIGN_IN_NOTE = 'Sign in to post. Your draft is kept.';
+
+/**
  * Say, inside the composer and beside the draft it blocks, that posting
  * needs a signed-in person — and arm the retry, so signing in finishes the
  * post rather than asking for a second click.
@@ -278,7 +286,7 @@ export function composerSignIn(
   btn.className = 'auth-signin';
   btn.textContent = 'Sign in';
   btn.addEventListener('click', () => startSignIn(el));
-  composerNote(composer, 'Sign in to post. Your draft is kept. ').appendChild(btn);
+  composerNote(composer, `${SIGN_IN_NOTE} `).appendChild(btn);
   el.retryAfterSignIn = () => {
     if (composer.isConnected) submit.click();
   };

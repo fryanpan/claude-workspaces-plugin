@@ -32,7 +32,10 @@ function fakeWidget(): FeedbackWidgetEl {
   fab.title = 'Give feedback — click anything to comment';
   shadow.append(list, fab);
   document.body.append(host);
-  return { shadow } as unknown as FeedbackWidgetEl;
+  // The host element itself, not an object holding its shadow root: the real
+  // `FeedbackWidgetEl` IS the element, and the mic writes the height it
+  // measures into that element's own inline style.
+  return Object.assign(host, { shadow }) as unknown as FeedbackWidgetEl;
 }
 
 describe('the mic a host adds to the widget', () => {

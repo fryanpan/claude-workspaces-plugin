@@ -434,7 +434,13 @@ export const widgetStyles = `
 }
 .picker-banner.quick > :first-child { flex: 1; }
 .picker-banner.quick .picker-cancel { color: #1b1f23; border-color: #d1d5da; }
-.picker-banner:has(~ .quick), .fab:has(~ .quick), .fab-list:has(~ .quick) { display: none; }
+/* The mic is the exception, and .fab-mic is how it says so. It wears
+   .fab-list for its look and its slot, which folded it away with the thread
+   list — so the one width where speaking instead of typing helps most was the
+   one width with no mic in the mode at all. It stands clear of the panel (its
+   slot starts 74px up, the panel is ~64px tall), so nothing has to move for
+   it to stay. */
+.picker-banner:has(~ .quick), .fab:has(~ .quick), .fab-list:not(.fab-mic):has(~ .quick) { display: none; }
 /* One row, shaped like the doc page's composer — a small × for Cancel at the
    far end from Post, the field as a pill, Post as a round arrow. The words
    stay in the buttons for a screen reader; only the glyphs are drawn. */
