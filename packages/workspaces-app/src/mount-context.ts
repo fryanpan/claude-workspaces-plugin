@@ -29,6 +29,9 @@ export interface DocMeta {
    *  "Meeting notes". Absent on docs from before the split, which read as
    *  meeting notes. */
   huddleKind?: HuddleKind;
+  /** When the doc last changed, by the server's record (the `.ydoc` mtime).
+   *  Not in the synced meta on purpose, so it is read here, once. */
+  lastActivityAt?: number;
 }
 
 /**

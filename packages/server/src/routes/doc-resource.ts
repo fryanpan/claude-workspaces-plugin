@@ -149,7 +149,9 @@ export async function handleDocResourceCore(
     // already a display name everywhere the board shows one.
     const lead = boardWs ? taskStore.getWorkspace(boardWs)?.leadAgentId : undefined;
     return j(200, {
-      meta: metaFor(doc.meta),
+      // `lastActivityAt` is derived (the `.ydoc` mtime), never stored on the
+      // meta, so the read stamps it the way the listings do.
+      meta: metaFor({ ...doc.meta, lastActivityAt: docStore.activityAt(docId) }),
       ...(taskRefs.length > 0 ? { tasks: taskRefs } : {}),
       ...(boardWs ? { hubWorkspaceId: boardWs } : {}),
       ...(lead !== undefined ? { leadAgentId: lead } : {}),

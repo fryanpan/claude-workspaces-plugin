@@ -628,7 +628,9 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     // either way.
     //
     // Only ahead of the minted clock, so a doc somebody RENAMED to "Plan the
-    // offsite" keeps its first word.
+    // offsite" keeps its first word. New meetings are no longer titled by the
+    // clock ("Meeting", then their topic), so this only reaches a doc the
+    // one-time retitle has not renamed yet.
     const shown =
       m.huddle === true
         ? full.replace(/^(?:Plan|Meeting notes) (?=\d{4}-\d{2}-\d{2} \d{2}:\d{2}$)/, '')
@@ -783,9 +785,8 @@ export function docLabel(opts: {
 }): string {
   return (
     (opts.type === 'diff' ? opts.relPath : undefined) ??
-    // A live doc is named by its kind and the clock — "Plan 2026-09-01
-    // 14:40" — and its
-    // file is a generated path under the data dir that nobody chose, so the
+    // A live doc is named by its title — "Meeting" until its notes name it —
+    // and its file is a generated path under the data dir that nobody chose, so the
     // title is the name and the path is plumbing. Every other file-backed
     // doc keeps the path: there the file IS what the person opened.
     (opts.huddle === true ? opts.title : undefined) ??
