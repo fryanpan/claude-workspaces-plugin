@@ -16,6 +16,7 @@
  * and the open flag arrives as a two-thunk accessor rather than as the
  * `BoardState` it actually lives on.
  */
+import { type BoardMembersView, mountBoardMembers } from './board-members.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
 import { mountReviewCriteria } from './review-criteria.ts';
@@ -141,6 +142,40 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     toast: showToast,
   });
 
+  // Who can reach this board, and at what level. Read on every open like the
+  // two above, and for a sharper reason: the list is what a person checks
+  // BEFORE deciding something is safe to put here, so a stale one is worse
+  // than none. The controls are drawn only for an Owner; the routes behind
+  // them refuse a Regular User server-side either way.
+  const members = mountBoardMembers({
+    list: el('board-members-list'),
+    note: el('board-members-note'),
+    read: async () => {
+      const data = await fetchJson<BoardMembersView>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/members`,
+      );
+      if (!data || typeof data.you?.role !== 'string' || !Array.isArray(data.members)) return null;
+      return data;
+    },
+    setRole: async (email, role) => {
+      const res = await send(
+        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}/role`,
+        'POST',
+        { role },
+      );
+      return res.ok;
+    },
+    remove: async (email) => {
+      const res = await send(
+        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}`,
+        'DELETE',
+        {},
+      );
+      return res.ok;
+    },
+    toast: showToast,
+  });
+
   el('board-settings').addEventListener('click', () => {
     deps.setOpen(!deps.isOpen());
     deps.renderSettingsPanel();
@@ -151,6 +186,7 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
       void pushToggle.refresh();
       void reviewCriteria.refresh();
       void parallelismCap.refresh();
+      void members.refresh();
     }
   });
   // A popover that only closes by hitting the same small button again is one
