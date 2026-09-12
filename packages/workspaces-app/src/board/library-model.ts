@@ -33,8 +33,12 @@ export interface LibraryPayload {
 /** Which of the page's three states is showing. */
 export type LibraryList = 'main' | 'meetings' | 'files';
 
-/** The front page shows this many of each list, then "See all". */
-export const LIBRARY_RECENT = 5;
+/**
+ * How many of each list the front page shows before "See all". Files show
+ * ten: that is the list a reader scans for the doc they were just in, and five
+ * ran out inside a day (Bryan, 2026-09-12).
+ */
+export const LIBRARY_RECENT: Record<'meetings' | 'files', number> = { meetings: 5, files: 10 };
 
 /**
  * "12m ago", "2h ago", "3d ago", "2w ago", "1mo ago", "2y ago" — the mock's
