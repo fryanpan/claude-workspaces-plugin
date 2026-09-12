@@ -24,9 +24,17 @@
  * the outline omits list containers, so a block that is really there reads as
  * missing and a correct edit would be turned into a duplicate note. Reading
  * the applier's own verdicts needs no prediction: an edit that failed is one
- * that did nothing, and re-addressing it can only add what the doc does not
- * have. It also costs nothing on the overwhelmingly common path, because a
+ * that did nothing, so the words it carried are not in the doc under that
+ * edit. It also costs nothing on the overwhelmingly common path, because a
  * batch with no failures produces no repair.
+ *
+ * The one place that is not the whole story is a `replace_block` whose block
+ * is gone because a reparse RE-KEYED it: the old wording is still in the doc
+ * under a new id, so recovering the rewrite puts the revised bullet beside
+ * the stale one instead of over it. A visible duplicate the cleanup pass can
+ * fold, against a correction the meeting never sees — the same trade RULE 2
+ * of `notes-edit-guard.ts` already makes, and the reason this is worth
+ * saying out loud rather than filing as an edge case.
  *
  * WHICH FAILURES ARE THIS MODULE'S. Only the ones that are about the ADDRESS:
  *

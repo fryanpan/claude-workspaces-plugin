@@ -139,6 +139,57 @@ describe('the doc says when the note-taker has stopped taking words', () => {
     expect(seen.slice(raised)).toEqual(seen.slice(raised).map(() => true));
   });
 
+  // THE SAME HOLE, THROUGH THE OTHER DOOR. A batch of nothing but moves is
+  // not empty, so `edits.length > 0` read it as a write — and it answers
+  // `null` whether the moves land or not, by design. A regroup is not a note.
+  test('leaves it standing through a tick that only regrouped', async () => {
+    const h = createNotesTickHarness({
+      doc: '# Harborlight survey\n',
+      compose: (input) => {
+        const markdown = input.tick.turns.map((t) => `- ${t.text}`).join('\n');
+        if (markdown.length === 0) return [];
+        if (input.outline.some((e) => e.text.includes(NOTES_NOT_WRITTEN_MARK))) {
+          const lead = input.outline.find((e) => e.kind === 'listItem');
+          return [{ op: 'nest_blocks', leadBlockId: lead?.id ?? 'b-1', blockIds: ['b-gone'] }];
+        }
+        const section = input.outline.find(
+          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+        );
+        return section === undefined
+          ? addNotes(input, markdown)
+          : [{ op: 'replace_block', blockId: section.id, markdown: `## ${markdown}` }];
+      },
+    });
+    const seen: boolean[] = [];
+    for (const line of ['one', 'two', 'three', 'four', 'five', 'six']) {
+      seen.push(carriesNotice((await h.speak(line)).markdown));
+    }
+    await h.end();
+    seen.push(carriesNotice(h.markdown()));
+    const raised = seen.indexOf(true);
+    expect(raised).toBeGreaterThanOrEqual(0);
+    expect(seen.slice(raised)).toEqual(seen.slice(raised).map(() => true));
+  });
+
+  // PINS THE THRESHOLD FROM ABOVE, where the first test pins it from below.
+  // It has to read the SNAPSHOT of the tick that is the second failure, not
+  // the end of the meeting: the final pass at `end()` is a failing tick too,
+  // so by then even a threshold of three has been met and the assertion
+  // passes on the wrong number — measured, by setting it to three and
+  // watching an end-state version of this test stay green.
+  test('two failures are enough — it does not wait for a third', async () => {
+    const h = stalling(2);
+    const seen: boolean[] = [];
+    // Tick 1 writes; ticks 2 and 3 are refused, so the third line is the
+    // tick at which the room is owed the sentence.
+    for (const line of ['the survey starts on the first', 'the pier needs a permit', 'so noted']) {
+      seen.push(carriesNotice((await h.speak(line)).markdown));
+    }
+    await h.end();
+    expect(seen[1]).toBe(false);
+    expect(seen[2]).toBe(true);
+  });
+
   test('takes it away again when a tick writes', async () => {
     // Refused for ticks 2-4, then the composer goes back to writing notes.
     const h = createNotesTickHarness({

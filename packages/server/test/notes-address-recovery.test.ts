@@ -96,10 +96,12 @@ describe('a tick whose note is addressed to a block the doc cannot honour', () =
     for (const line of SPOKEN) expect(doc).toContain(line);
   });
 
-  // THE NOTES STAY ONE SECTION. A recovered note is written under the
-  // meeting's own heading, so recovering one must never be the thing that
-  // opens a second `Meeting notes` — which is the failure mode that strands
-  // everything written before it (`notes-edit-guard.ts` RULE 1).
+  // THE NOTES STAY ONE SECTION, and the WORDS are the half of this doing the
+  // work. The repair emits no heading of its own, so the section count is a
+  // standing invariant rather than something this code can break today — it
+  // is here to fail the day somebody makes the repair open a section when it
+  // cannot find one, which is the failure mode that strands everything
+  // written before it (`notes-edit-guard.ts` RULE 1).
   test('writes the recovered note under the meeting’s existing section', async () => {
     const h = createNotesTickHarness({
       doc: '# Harborlight survey\n',

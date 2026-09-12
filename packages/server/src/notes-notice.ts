@@ -72,7 +72,7 @@ function isOurNotice(entry: NoticeOutlineEntry, kind: NoticeKind): boolean {
 /** Live for one notes session. `open` is true only while the doc is KNOWN to
  *  be carrying the notice — set when a write is accepted, cleared when a
  *  deletion is accepted, and never on the strength of an attempt. */
-export interface QuotaNoticeState {
+export interface NoticeState {
   open: boolean;
 }
 
@@ -125,13 +125,9 @@ export const NOTES_NOT_WRITTEN_NOTICE: NoticeKind = {
  */
 export const NOTES_NOT_WRITTEN_AFTER = 2;
 
-export function createQuotaNoticeState(): QuotaNoticeState {
+export function createNoticeState(): NoticeState {
   return { open: false };
 }
-
-/** A notice state, for a kind that is not the quota one. Same shape; named
- *  without the `Quota` so a reader is not told the wrong thing. */
-export const createNoticeState = createQuotaNoticeState;
 
 /**
  * How this module puts words in the doc: it hands over edits and is told
@@ -154,7 +150,7 @@ export type NoticeWriter = (edits: readonly prose.BlockEdit[]) => boolean;
  */
 export function announceNotice(
   kind: NoticeKind,
-  state: QuotaNoticeState,
+  state: NoticeState,
   outline: readonly NoticeOutlineEntry[],
   notesHeadingId: string | undefined,
   write: NoticeWriter,
@@ -175,7 +171,7 @@ export function announceNotice(
 
 /** The quota outage, announced. The kind this module was written for. */
 export function announceQuotaOutage(
-  state: QuotaNoticeState,
+  state: NoticeState,
   outline: readonly NoticeOutlineEntry[],
   notesHeadingId: string | undefined,
   write: NoticeWriter,
@@ -199,7 +195,7 @@ export function announceQuotaOutage(
  */
 export function retractNotice(
   kind: NoticeKind,
-  state: QuotaNoticeState,
+  state: NoticeState,
   outline: readonly NoticeOutlineEntry[],
   write: NoticeWriter,
 ): void {
@@ -216,7 +212,7 @@ export function retractNotice(
 
 /** The quota outage, taken away. */
 export function retractQuotaNotice(
-  state: QuotaNoticeState,
+  state: NoticeState,
   outline: readonly NoticeOutlineEntry[],
   write: NoticeWriter,
 ): void {

@@ -73,7 +73,6 @@ import {
   announceNotice,
   announceQuotaOutage,
   createNoticeState,
-  createQuotaNoticeState,
   retractNotice,
   retractQuotaNotice,
 } from './notes-notice.ts';
@@ -1290,7 +1289,7 @@ export function beginNotesSession(
 
   /** Whether the doc is currently carrying "notes are paused" — one notice
    *  per outage, taken away by the first tick that composes again. */
-  const quotaNotice = createQuotaNoticeState();
+  const quotaNotice = createNoticeState();
 
   /**
    * Whether the doc is currently carrying "some of what was just said could
@@ -1948,16 +1947,21 @@ export function beginNotesSession(
           if (answer !== 'refused') retryAfterFailure(tick);
           return;
         }
-        // A TICK THAT SAID NOTHING IS NOT A TICK THAT WROTE. An empty compose
-        // answers `null` before the guard ever sees it, so it arrives here as
-        // a success — and it is one, for everything below. It is not one for
-        // the notice: no words reached the doc, so a sentence saying words are
-        // not reaching the doc is still true, and clearing the streak on it
+        // A TICK THAT PUT NO WORDS IN IS NOT A TICK THAT WROTE. Two batches
+        // reach here as successes while the doc takes none of the room's
+        // words: an empty compose, which answers `null` before the guard ever
+        // sees it, and a batch of nothing but moves and deletes, which answers
+        // `null` whether the moves landed or not (`failedCarryingWords` — a
+        // regroup that did not happen is not a note that did not arrive).
+        // Both are successes for everything below. Neither is one for the
+        // notice: no words reached the doc, so a sentence saying words are not
+        // reaching the doc is still true, and clearing the streak on either
         // would let a meeting alternate refusal and silence while the room is
-        // told nothing. The quota notice retracts unconditionally a few lines
-        // down for the opposite reason — the API answered, which is the whole
-        // of what that sentence claims.
-        const wroteWords = edits.length > 0;
+        // told nothing. So the test is whether any edit CARRIED WORDS, not
+        // whether the batch had edits in it. The quota notice retracts
+        // unconditionally a few lines down for the opposite reason — the API
+        // answered, which is the whole of what that sentence claims.
+        const wroteWords = edits.some((e) => 'markdown' in e);
         if (wroteWords) writesFailedInARow = 0;
         // A question is only asked once, and it is asked once it has LANDED.
         // Marking them offered before the write meant a refused write lost
@@ -2012,7 +2016,7 @@ export function beginNotesSession(
         // A quota refusal is the one failure the room has to be told about:
         // it will refuse the next tick too, and the notes simply stopping is
         // indistinguishable from a quiet meeting. Once per outage — see
-        // `notes-quota-notice.ts`.
+        // `notes-notice.ts`.
         if (isQuotaFailure(reason)) {
           announceQuotaOutage(quotaNotice, outline, notesHeadingId, writeNotice);
         }
