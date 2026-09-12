@@ -96,6 +96,19 @@ export interface NudgePayload {
    * a quiet board — which is a message it does not send at all.
    */
   undetermined?: { count?: number; reasons?: string[] };
+  /**
+   * Rows a PERSON's single act just freed — a goal band agreed, a blocker
+   * closed. `count` is every row released; `rows` is the first few of them in
+   * the board's priority order.
+   *
+   * Its PRESENCE is what makes this a different sentence: the server sets it
+   * only on the release path, so a frame carrying it is one where somebody was
+   * at the board seconds ago and work that was held is now dispatchable. Absent
+   * on the timed pass and from a server older than the field, in which case the
+   * line renders exactly as it did — off `taskId`/`title`, which the server
+   * sets to the first freed row for that reason.
+   */
+  freed?: { count?: number; rows?: Array<{ id?: string; title?: string }> };
   /** How long the board had stood still. Idle nudges only. */
   idleMs?: number;
   /** The cap that held rows, with who moved it and when. Sent only beside a
@@ -331,6 +344,54 @@ function denominatorClause(p: NudgePayload): string {
 }
 
 /**
+ * The freed rows as a list, with the overflow said rather than dropped.
+ *
+ * A band agreement can release forty rows and the wake is still one message,
+ * so the frame names the first few and carries the true total. "and 35 more"
+ * is the part that stops the named few from reading as the whole release —
+ * which would send the lead back to the board believing they had seen it all.
+ */
+function freedList(rows: Array<{ id?: string; title?: string }>, total: number): string {
+  const named = rows
+    .map((r) => {
+      const title = r.title ? `"${truncate(r.title, 60)}"` : null;
+      if (title && r.id) return `${title} (${r.id})`;
+      return title ?? r.id ?? null;
+    })
+    .filter((s): s is string => s !== null);
+  if (named.length === 0) return '';
+  const more = total - named.length;
+  return `${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
+}
+
+/**
+ * Render the RELEASE wake — a person's single act made held work dispatchable.
+ *
+ * A different sentence from the idle one rather than the same with different
+ * numbers, because the reader's question is different. The idle line answers
+ * "has this been sitting here"; this one answers "what just changed", and the
+ * answer is that somebody agreed a band or closed a blocker moments ago. Told
+ * in the past tense with no duration, because there is none — nothing here has
+ * been waiting.
+ *
+ * The rows are named rather than counted alone. One gesture can release ten,
+ * and a wake that said only "10 tasks became ready" would make the lead open
+ * the board to find out whether it was their band or somebody else's.
+ */
+function releasedLine(p: NudgePayload, freed: NonNullable<NudgePayload['freed']>): string {
+  const rows = freed.rows ?? [];
+  const total = freed.count ?? rows.length;
+  const one = total === 1;
+  const list = freedList(rows, total);
+  // The list can be empty only if a server sent a count with no rows. Fall back
+  // to whatever the frame names the top row as, rather than to a colon with
+  // nothing after it.
+  const named = list || namedTask(p);
+  const subject = `${total} ${one ? 'task' : 'tasks'} just became ready`;
+  return `[workspace.ready_idle] ${subject}${named ? `: ${named}` : ''} — held work a person released just now. Take ${one ? 'it' : 'them'} in priority order with next_tasks / task_transition.`;
+}
+
+/**
  * Render `workspace.ready_idle` — ready work nobody has picked up, or the one
  * case where the board could not tell whether there is any.
  *
@@ -347,6 +408,10 @@ function denominatorClause(p: NudgePayload): string {
  * them, correctly, that the wake carries no information.
  */
 export function readyIdleLine(p: NudgePayload): string {
+  // The release wake first: it is the one frame here that is not about elapsed
+  // time at all, so none of the idle line's clauses apply to it.
+  const freed = p.freed;
+  if (freed && (freed.count ?? freed.rows?.length ?? 0) > 0) return releasedLine(p, freed);
   const count = p.readyCount;
   const unread = undeterminedCount(p);
   if (count === 0 && unread > 0) {

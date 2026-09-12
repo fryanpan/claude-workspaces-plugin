@@ -74,6 +74,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { HoldReason, UndeterminedRow } from './ready-gate.ts';
+import { type ReadyMark, freedRows, readyMark } from './ready-release.ts';
 import type { ParallelismCapChange } from './tasks.ts';
 
 /**
@@ -98,6 +99,17 @@ export const READY_IDLE_DEFAULT_MS = 15 * 60_000;
  *  below the idle window on purpose: the tick is a cheap read, and the
  *  window is what decides when a nudge is owed. */
 export const READY_TICK_DEFAULT_MS = 60_000;
+
+/**
+ * How many freed rows one release wake NAMES.
+ *
+ * A goal agreement can release a whole band, and the wake is one message
+ * whatever the size — so beyond this the frame carries the count and the top
+ * of the list rather than the list. Five because the reader's next act is
+ * `next_tasks`, which hands them the full ranked queue; what the wake owes
+ * them is enough to recognise the release, not a copy of the queue.
+ */
+export const FREED_ROWS_NAMED = 5;
 
 /** The two things a nudge can be about. Separate EVENT NAMES rather than one
  *  name with a reason field, because the plugin renders an unrecognised board
@@ -220,6 +232,23 @@ export interface NudgeFrame {
    * same silence.
    */
   undetermined?: { count: number; reasons: readonly string[] };
+  /**
+   * Rows a PERSON's single act just freed — a goal band agreed, a blocker
+   * closed — with the true total beside the ones the frame names.
+   *
+   * Its PRESENCE is what tells the reader this is a release rather than the
+   * timer: the field is only ever set by `personFreedWork`, so a frame
+   * carrying it is one where somebody was at the board seconds ago. `count`
+   * is every row freed; `rows` is the first `FREED_ROWS_NAMED` of them in the
+   * board's own priority order, because a band of forty is one wake and not a
+   * forty-line one.
+   *
+   * Absent on the timed pass and on both other immediate wakes, which is why
+   * an older plugin that has never heard of it still renders those unchanged
+   * — and renders this one off `taskId`/`title`, which are set to the first
+   * freed row for exactly that reason.
+   */
+  freed?: { count: number; rows: readonly ReadyRow[] };
   /** How long the board had stood still. Idle nudges only. */
   idleMs?: number;
   /** The answered row's own links — the propagation checklist the answered
@@ -487,7 +516,7 @@ export class ReadyWorkNudger {
     this.noteActivity(input.workspaceId, ts);
     const board = this.liveBoard(input.workspaceId);
     if (!board) return;
-    this.wakeLeadNow(board, ts, input.taskId, input.taskTitle);
+    this.wakeLeadNow(board, ts, { taskId: input.taskId, title: input.taskTitle });
   }
 
   /**
@@ -529,7 +558,71 @@ export class ReadyWorkNudger {
       board.ready.find((r) => r.id === input.taskId) ??
       (board.capacityTrimmed ?? []).find((r) => r.id === input.taskId);
     if (!row) return;
-    this.wakeLeadNow(board, ts, row.id, row.title);
+    this.wakeLeadNow(board, ts, { taskId: row.id, title: row.title });
+  }
+
+  /**
+   * The board's dispatchable rows as they stand — taken BEFORE a write, so
+   * `personFreedWork` can say afterwards which rows that write freed.
+   *
+   * Split from the wake rather than folded into it because the two readings
+   * have to straddle the store write, and nothing else on this object does.
+   * A board nobody could read marks as UNREADABLE rather than as empty, and
+   * the two are not interchangeable: the diff subtracts this reading from the
+   * one after the write, so an empty stand-in would report every ready row on
+   * the board as just released. See `ReadyMark`.
+   */
+  markReady(workspaceId: string): ReadyMark {
+    return readyMark(this.liveBoard(workspaceId));
+  }
+
+  /**
+   * A PERSON's single act freed rows that were held — ONE wake, naming them.
+   *
+   * The sibling of `personQueuedTask` and the same contract, for the moves
+   * that make work dispatchable without transitioning the work: agreeing a
+   * goal band releases every row under it, closing a blocker releases what was
+   * waiting on the `after` edge. Neither is a transition on the row that
+   * became ready, so the row-watching wake above sees nothing and the board
+   * falls back to the fifteen-minute window. Measured before this was written:
+   * a goal agreement that made two rows ready delivered zero frames.
+   *
+   * The three rules, each the same one `personQueuedTask` keeps:
+   *
+   *  - **One wake per release, never one per row.** A band of ten is one
+   *    frame carrying ten; ten frames would cost ten turns for one gesture and
+   *    teach the lead to skim the channel, which is the failure every arming
+   *    rule in this file is written against.
+   *  - **Person only.** The caller classifies the actor before it marks, so an
+   *    agent closing its own blocker fires nothing.
+   *  - **Really freed, or silent.** The judge is the board's own ready set on
+   *    both sides (see `ready-release.ts`), so a row still held by a second
+   *    `after` edge is not named, and a release that frees nothing sends
+   *    nothing and spends no arming.
+   *
+   * `except` is the row the act itself named. A person moving a row to `todo`
+   * is announced by `personQueuedTask`; without this the same move would put a
+   * second frame on the channel about the row that frame already named.
+   */
+  personFreedWork(input: { workspaceId: string; before: ReadyMark; except?: string }): void {
+    const ts = this.now();
+    this.noteActivity(input.workspaceId, ts);
+    const board = this.liveBoard(input.workspaceId);
+    if (!board) return;
+    const freed = freedRows(input.before, board, input.except);
+    const top = freed[0];
+    // Nothing became dispatchable. Silent, and — through `wakeLeadNow` not
+    // being reached — no arming spent, so the idle backstop still owes
+    // whatever it owed before this act.
+    if (!top) return;
+    this.wakeLeadNow(board, ts, {
+      // The first freed row in the board's own priority order, so a plugin
+      // older than `freed` still names the row the lead should start with
+      // rather than falling through to a wake with no subject.
+      taskId: top.id,
+      title: top.title,
+      freed: { count: freed.length, rows: freed.slice(0, FREED_ROWS_NAMED) },
+    });
   }
 
   /** One board, or nothing — a retired board and a lookup that threw are the
@@ -563,15 +656,20 @@ export class ReadyWorkNudger {
    * for exactly the state that produces an unattached lead: a restart, a
    * plugin update, a session that has not come back yet.
    */
-  private wakeLeadNow(board: ReadyWorkSnapshot, ts: number, taskId: string, title: string): void {
+  private wakeLeadNow(
+    board: ReadyWorkSnapshot,
+    ts: number,
+    about: { taskId: string; title: string; freed?: NudgeFrame['freed'] },
+  ): void {
     const lead = board.leadAgentId;
     if (lead === undefined) return;
     if (!this.reachable(board.workspaceId, lead)) return;
     const reached = this.emit(board.workspaceId, lead, {
       event: READY_IDLE_EVENT,
       workspaceId: board.workspaceId,
-      taskId,
-      title,
+      taskId: about.taskId,
+      title: about.title,
+      ...(about.freed ? { freed: about.freed } : {}),
       ts,
     });
     // The DELIVERY, not the attempt. `canReach` and the send are two reads of

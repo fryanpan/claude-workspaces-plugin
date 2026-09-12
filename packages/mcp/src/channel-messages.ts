@@ -159,6 +159,11 @@ export interface BoardEventPayload {
   consideredCount?: number;
   held?: Record<string, number>;
   undetermined?: { count?: number; reasons?: string[] };
+  /** `workspace.ready_idle` only, and only on the RELEASE wake: the rows a
+   *  person's single act just freed — a goal band agreed, a blocker closed.
+   *  Its presence is what makes that a different line; absent on the timed
+   *  pass and from a server older than the field. See nudge-line.ts. */
+  freed?: { count?: number; rows?: Array<{ id?: string; title?: string }> };
   /** `workspace.stalled` only: how many rows have stopped moving, the rows
    *  themselves, and the rows waiting on a person nobody has actually asked.
    *  See stall-nudge.ts and nudge-line.ts. */
