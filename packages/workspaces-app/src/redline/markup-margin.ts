@@ -1,7 +1,12 @@
 import { type Thread, suggestOps, threadRenderKey } from '@claude-workspaces/core';
 import type { EditorView } from '@tiptap/pm/view';
 import { balloonMarginVisible } from '../card-placement.ts';
-import { keptComposerFocus, restoreComposerFocus } from '../composer-keep.ts';
+import {
+  keptAnswerFields,
+  keptComposerFocus,
+  restoreAnswerFields,
+  restoreComposerFocus,
+} from '../composer-keep.ts';
 import { api } from '../doc-path.ts';
 import { showToast } from '../doc/chrome-dom.ts';
 import { COMPOSER_MOUNTED_EVENT } from '../md-composer.ts';
@@ -425,6 +430,9 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     // every balloon, and losing focus mid-word dismisses the iPad keyboard
     // and yanks the viewport with it.
     const keptFocus = keptComposerFocus(marginEl);
+    // …and a folded question's answer field, which is an input, not a reply
+    // textarea, so neither snapshot above reaches it.
+    const keptAnswers = keptAnswerFields(marginEl);
 
     // Only the balloons go — the off-screen hints live in this column too
     // and must survive every rebuild.
@@ -467,6 +475,7 @@ export function mountMarkupMargin(opts: MarkupMarginOpts): MarkupMarginHandle {
     // off the cards, or every comment balloon stacks as a header and a footer.
     sizeThreadSlots(marginEl);
     if (keptFocus) restoreComposerFocus(marginEl, keptFocus);
+    restoreAnswerFields(marginEl, keptAnswers);
   }
 
   /** Y of a client-rect top in the editor's scrolled content space. */

@@ -1,4 +1,5 @@
 import { type Thread, threadRenderKey } from '@claude-workspaces/core';
+import { type KeptAnswerField, keptAnswerFields, restoreAnswerFields } from './composer-keep.ts';
 import { anchoredThreads } from './doc/resolved-visibility.ts';
 import type { InlineThreadCard, ReviewSurface } from './review-surface.ts';
 import { prefersReducedMotion, sizeThreadSlots } from './thread-morph.ts';
@@ -137,6 +138,9 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     const list = opts.inlineVisible() ? inlineThreads() : [];
     const cards: InlineThreadCard[] = [];
     const seen = new Set<string>();
+    // Answer fields carried out of cards rebuilt below; focus can only go back
+    // once the new card is in the document, after `setInlineCards`.
+    const keptAnswers: Array<{ el: HTMLElement; kept: KeptAnswerField[] }> = [];
     for (const t of list) {
       const r = opts.resolveRange(t.id);
       if (!r) continue;
@@ -148,7 +152,9 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
         // drawer and the balloon margin use, and needed here for the same
         // reason: someone else's reply must not wipe what you were typing.
         const draft = entry?.el.querySelector<HTMLTextAreaElement>('textarea')?.value;
+        const answers = entry ? keptAnswerFields(entry.el) : [];
         const el = opts.renderCard(t, draft || undefined);
+        if (answers.length > 0) keptAnswers.push({ el, kept: answers });
         el.classList.add('cw-inline-card');
         // A widget decoration is outside the document's content model, but
         // nothing stops native editing INSIDE the injected DOM unless the
@@ -161,6 +167,7 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     }
     for (const id of Array.from(built.keys())) if (!seen.has(id)) built.delete(id);
     opts.surface.setInlineCards?.(cards);
+    for (const { el, kept } of keptAnswers) restoreAnswerFields(el, kept);
     // A card's folding slots hold a height we MEASURE — do it now the nodes
     // are actually in the document, or every inline card renders as a header
     // and a footer with nothing between them.

@@ -110,3 +110,66 @@ export function keptScrollTops(from: Element): Array<{ el: Element; top: number 
 export function restoreScrollTops(kept: Array<{ el: Element; top: number }>): void {
   for (const { el, top } of kept) el.scrollTop = top;
 }
+
+/** A folded question's one-line answer field, as the reader left it. */
+export interface KeptAnswerField {
+  threadId: string;
+  value: string;
+  /** Held focus at snapshot time — only then is the caret put back. */
+  focused: boolean;
+  start: number | null;
+  end: number | null;
+  dir: 'forward' | 'backward' | 'none';
+}
+
+const ANSWER_FIELD = '.thread-answer-input';
+
+/**
+ * The words in every folded question's answer field under `root`.
+ *
+ * The reply box is not the only thing a reader types into on a card: a pending
+ * question carries a one-line `<input>` on its folded face, and it is an
+ * input, not a textarea — so the reply-draft snapshot every surface takes and
+ * `keptComposerFocus` above both walked past it. A peer's reply on another
+ * thread rebuilt the margin and emptied the field mid-answer. Empty, unfocused
+ * fields are not kept: there is nothing of the reader's to carry.
+ */
+export function keptAnswerFields(root: ParentNode): KeptAnswerField[] {
+  const active = document.activeElement;
+  const kept: KeptAnswerField[] = [];
+  for (const input of Array.from(root.querySelectorAll<HTMLInputElement>(ANSWER_FIELD))) {
+    const focused = input === active;
+    if (!input.value && !focused) continue;
+    const threadId = input.closest<HTMLElement>('.thread')?.getAttribute('data-thread-id');
+    if (!threadId) continue;
+    kept.push({
+      threadId,
+      value: input.value,
+      focused,
+      start: input.selectionStart,
+      end: input.selectionEnd,
+      dir: (input.selectionDirection ?? 'none') as 'forward' | 'backward' | 'none',
+    });
+  }
+  return kept;
+}
+
+/**
+ * Put the answers back into the rebuilt cards, and the caret into the one the
+ * reader was typing in. A field the rebuild did not draw — the question was
+ * answered elsewhere meanwhile — has nowhere to go and is dropped. A field
+ * that already holds words is left alone rather than overwritten.
+ */
+export function restoreAnswerFields(root: ParentNode, kept: readonly KeptAnswerField[]): void {
+  for (const k of kept) {
+    const sel = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(k.threadId) : k.threadId;
+    const input = root.querySelector<HTMLInputElement>(
+      `.thread[data-thread-id="${sel}"] ${ANSWER_FIELD}`,
+    );
+    if (!input) continue;
+    if (!input.value) input.value = k.value;
+    if (!k.focused || !input.isConnected) continue;
+    input.focus({ preventScroll: true });
+    if (k.start != null && k.end != null) input.setSelectionRange(k.start, k.end, k.dir);
+  }
+}

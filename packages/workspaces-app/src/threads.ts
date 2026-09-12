@@ -1,7 +1,9 @@
 import { type Thread, type User, threadRenderKey } from '@claude-workspaces/core';
 import {
+  keptAnswerFields,
   keptComposerFocus,
   keptScrollTops,
+  restoreAnswerFields,
   restoreComposerFocus,
   restoreScrollTops,
 } from './composer-keep.ts';
@@ -346,6 +348,7 @@ export class ThreadPanel {
     // rebuild below would otherwise drop focus to body and let the emptied
     // pane clamp its scrollTop to 0 under whoever is typing.
     const keptFocus = keptComposerFocus(c);
+    const keptAnswers = keptAnswerFields(c);
     const keptScroll = keptScrollTops(c);
 
     c.innerHTML = '';
@@ -396,6 +399,7 @@ export class ThreadPanel {
     }
     sizeThreadSlots(c);
     if (keptFocus) restoreComposerFocus(c, keptFocus);
+    restoreAnswerFields(c, keptAnswers);
     restoreScrollTops(keptScroll);
     this.lastRenderKey = key;
   }
