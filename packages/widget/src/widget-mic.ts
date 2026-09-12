@@ -140,13 +140,10 @@ const MIC_CSS = [
  * DOM while the composer stands in front of it, and a hidden element measures
  * zero, so the tallest is the one on screen.
  *
- * It lives HERE, on a frame loop of its own, for two reasons that agree. The
- * widget's own bundle is on a byte budget and this module is not in it — a
- * mock page loads the budgeted `widget.iife.js` and has no mic — and a page
- * with no mic has nothing this measurement would move, so a hook in the
- * widget's loop would be bytes every mock page pays for a button it does not
- * have. The loop stops with the button: a mic off the page schedules no
- * further frame.
+ * It lives HERE rather than in the widget's own frame loop because this
+ * module is not in the budgeted bundle and a page with no mic has nothing
+ * this measurement would move: a hook over there would be bytes every mock
+ * page pays for a button it does not have.
  */
 function reserveQuickPanel(el: FeedbackWidgetEl): void {
   let h = 0;
@@ -202,6 +199,50 @@ function shareRetrySlot(el: FeedbackWidgetEl): void {
 }
 
 /**
+ * Measure the panel every frame while there IS one, and not one frame more.
+ *
+ * The height has to be read per frame while the panel is up: it grows as the
+ * composer's field fills, and a sampler that runs after the frame puts the
+ * mic a frame behind the thing it is dodging. But a widget sitting idle on a
+ * board has no panel, and a rAF loop that never ends is layout work and
+ * battery for nothing — on the phone this change is FOR, which is the surface
+ * least able to afford it.
+ *
+ * So a MutationObserver, which costs nothing while the shadow root is still,
+ * starts the loop when a panel appears, and the loop stops itself on the
+ * first frame after the last one goes — having written the 0 that puts the
+ * mic back in its plain slot. The panel can arrive either as a new node or as
+ * a class on a node already there, so both are watched. The whole thing ends
+ * with the button: a mic off the page schedules no further frame.
+ */
+function watchQuickPanel(el: FeedbackWidgetEl, button: HTMLElement): void {
+  let running = false;
+  const tick = (): void => {
+    if (!button.isConnected) {
+      running = false;
+      return;
+    }
+    // Before the test, so the frame that loses the panel is the frame that
+    // gives the mic its slot back.
+    reserveQuickPanel(el);
+    if (el.shadow.querySelector('.quick')) requestAnimationFrame(tick);
+    else running = false;
+  };
+  const start = (): void => {
+    if (running || !el.shadow.querySelector('.quick')) return;
+    running = true;
+    requestAnimationFrame(tick);
+  };
+  new MutationObserver(start).observe(el.shadow, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+  start();
+}
+
+/**
  * Put the mic on this widget. Idempotent: a second call hands back the
  * first mic rather than a second one, since a capture is wired to exactly one.
  */
@@ -236,11 +277,6 @@ export function addMic(el: FeedbackWidgetEl, labels: MicLabels): WidgetMic {
   }
   s.append(style, button, readout);
   shareRetrySlot(el);
-  const tick = (): void => {
-    if (!button.isConnected) return;
-    reserveQuickPanel(el);
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  watchQuickPanel(el, button);
   return { button, readout };
 }

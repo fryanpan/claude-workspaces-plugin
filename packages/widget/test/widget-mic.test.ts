@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addMic } from '../src/widget-mic.ts';
 import type { FeedbackWidgetEl } from '../src/widget.ts';
 
@@ -100,6 +100,39 @@ describe('the mic a host adds to the widget', () => {
     // And hidden still wins: a readout the capture has cleared stays gone.
     readout.classList.add('hidden');
     expect(getComputedStyle(readout).display).toBe('none');
+  });
+
+  describe('measuring the bottom panel the mic has to clear', () => {
+    it('runs only while a panel is up, and gives the slot back on the way out', async () => {
+      // The height must be read per frame while the panel is there, because
+      // it grows as the field fills. With nothing there it must read nothing:
+      // a widget idling on a board would otherwise pay layout and battery
+      // every frame for a panel that does not exist, on the phone this whole
+      // change is for.
+      const frames: FrameRequestCallback[] = [];
+      const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+        frames.push(cb);
+        return frames.length;
+      });
+      const el = fakeWidget();
+      addMic(el, LABELS);
+      expect(frames, 'no panel, no frames').toHaveLength(0);
+
+      const panel = document.createElement('div');
+      panel.className = 'composer quick';
+      el.shadow.append(panel);
+      await Promise.resolve();
+      expect(frames.length, 'a panel starts it').toBeGreaterThan(0);
+      frames.shift()?.(0);
+      expect(frames.length, 'and it keeps going while the panel is there').toBeGreaterThan(0);
+
+      panel.remove();
+      frames.shift()?.(0);
+      await Promise.resolve();
+      expect(frames, 'the panel goes and so does the loop').toHaveLength(0);
+      expect(el.style.getPropertyValue('--cw-quick-h'), 'slot given back').toBe('0px');
+      raf.mockRestore();
+    });
   });
 
   describe('the sign-in retry slot, once a mic shares it', () => {
