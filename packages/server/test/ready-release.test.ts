@@ -8,7 +8,7 @@
  * every HTTP test on an uncapped board stayed green.
  */
 import { describe, expect, it } from 'bun:test';
-import { NO_READY_MARK, freedRows, readyMark } from '../src/ready-release.ts';
+import { UNREADABLE_MARK, freedRows, readyMark } from '../src/ready-release.ts';
 
 const rank = { id: 't-rank', title: 'Rank results by recency' };
 const facets = { id: 't-facets', title: 'Cache the facet counts' };
@@ -20,15 +20,20 @@ describe('readyMark', () => {
     // `ready` would report a row as newly freed when all that happened was a
     // builder finishing and a slot opening.
     const mark = readyMark({ ready: [rank], capacityTrimmed: [facets] });
-    expect(Array.from(mark).sort()).toEqual([facets.id, rank.id]);
+    expect(Array.from(mark.ids).sort()).toEqual([facets.id, rank.id]);
+    expect(mark.readable).toBe(true);
   });
 
-  it('marks an absent board as empty rather than throwing', () => {
-    // A retired board, or a lookup that threw. Empty is the safe direction:
-    // the release then frees nothing it can name, where the alternative is
-    // announcing every ready row on the board as just released.
-    expect(readyMark(undefined)).toBe(NO_READY_MARK);
-    expect(readyMark(undefined).size).toBe(0);
+  it('marks an absent board UNREADABLE, not empty', () => {
+    // A retired board, or a lookup that threw. The two spellings give the same
+    // empty id set and mean opposite things: the diff subtracts `before` from
+    // `after`, so recording an unreadable board as empty would make every ready
+    // row come back as newly freed.
+    expect(readyMark(undefined)).toBe(UNREADABLE_MARK);
+    expect(readyMark(undefined).readable).toBe(false);
+    // And a board that really is empty is readable — the silence below has to
+    // come from the reading having failed, not from there being no rows.
+    expect(readyMark({ ready: [] }).readable).toBe(true);
   });
 });
 
@@ -82,5 +87,12 @@ describe('freedRows', () => {
 
   it('frees nothing when the board cannot be read after the act', () => {
     expect(freedRows(readyMark({ ready: [] }), undefined)).toEqual([]);
+  });
+
+  it('frees nothing when the board could not be read BEFORE the act', () => {
+    // The lookup threw mid-hydrate and the one after it succeeded. Every ready
+    // row would otherwise read as newly released — a wake naming work nobody
+    // released, which is worse than the missed wake it would be replacing.
+    expect(freedRows(readyMark(undefined), { ready: [rank, facets] })).toEqual([]);
   });
 });

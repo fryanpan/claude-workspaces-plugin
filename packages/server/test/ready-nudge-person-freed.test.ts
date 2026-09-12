@@ -432,10 +432,17 @@ describe('the release wake spends nothing it did not deliver', () => {
     expect(freed.rows.map((r) => r.id)).toEqual(band.slice(0, FREED_ROWS_NAMED).map((r) => r.id));
   });
 
-  it('marks an empty set for a board it cannot read, and then frees nothing', () => {
-    const { nudger, frames } = harness(emptyBoard(), { lookup: () => undefined });
+  it('marks a board it cannot read UNREADABLE, and then frees nothing', () => {
+    // The pre-write lookup threw and the post-write one succeeds. An empty mark
+    // would make every ready row read as just released; an unreadable one says
+    // nothing, which is the only honest answer.
+    const board = emptyBoard();
+    let readable = false;
+    const { nudger, frames } = harness(board, { lookup: () => (readable ? board : undefined) });
     const before = nudger.markReady('w-search');
-    expect(before.size).toBe(0);
+    expect(before.readable).toBe(false);
+    board.ready = [rank, facets];
+    readable = true;
     nudger.personFreedWork({ workspaceId: 'w-search', before });
     expect(frames).toHaveLength(0);
   });
@@ -443,7 +450,10 @@ describe('the release wake spends nothing it did not deliver', () => {
   it('never wakes a retired board', () => {
     const board = { ...emptyBoard(), retired: true, ready: [rank] };
     const { nudger, frames } = harness(board);
-    nudger.personFreedWork({ workspaceId: 'w-search', before: new Set<string>() });
+    nudger.personFreedWork({
+      workspaceId: 'w-search',
+      before: { readable: true, ids: new Set<string>() },
+    });
     expect(frames).toHaveLength(0);
   });
 });

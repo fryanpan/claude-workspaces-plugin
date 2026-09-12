@@ -66,21 +66,34 @@ export interface ReleasableBoard {
  *
  * Ids only: the diff asks which rows are new, and a title that changed in the
  * same write must not make an already-ready row look freed.
+ *
+ * `readable` is the field that keeps "the board had nothing dispatchable" from
+ * being spelled the same way as "I could not read the board". Both give an
+ * empty id set, and the diff subtracts `before` from `after` — so an
+ * unreadable reading recorded as empty would make EVERY ready row on the board
+ * come back as newly freed, and one lookup that threw mid-hydrate would wake
+ * the lead with a release naming work nobody released. The distinction is not
+ * a nicety; it is the difference between a silence and a false wake.
  */
-export type ReadyMark = ReadonlySet<string>;
+export interface ReadyMark {
+  /** False when the board could not be read at all — a lookup that threw, a
+   *  retired board, an id that names nothing. `freedRows` then answers with
+   *  nothing rather than guessing what changed. */
+  readonly readable: boolean;
+  readonly ids: ReadonlySet<string>;
+}
 
-/** The empty reading — what an absent or unreadable board marks as. Exported
- *  so a caller can say "I could not look" without inventing a set, and so the
- *  two sites that need it cannot drift into two different empties. */
-export const NO_READY_MARK: ReadyMark = new Set<string>();
+/** What a board nobody could read marks as. Exported so the two sites that
+ *  need it cannot drift into two different spellings of "I could not look". */
+export const UNREADABLE_MARK: ReadyMark = { readable: false, ids: new Set<string>() };
 
 /** Read the board's dispatchable rows. Call this BEFORE the write. */
 export function readyMark(board: ReleasableBoard | undefined): ReadyMark {
-  if (!board) return NO_READY_MARK;
+  if (!board) return UNREADABLE_MARK;
   const ids = new Set<string>();
   for (const row of board.ready) ids.add(row.id);
   for (const row of board.capacityTrimmed ?? []) ids.add(row.id);
-  return ids;
+  return { readable: true, ids };
 }
 
 /**
@@ -102,12 +115,17 @@ export function freedRows(
   after: ReleasableBoard | undefined,
   except?: string,
 ): ReleasableRow[] {
+  // Nothing to compare against, so nothing can be said to have changed. A
+  // reading that failed must not be subtracted as if it had succeeded — that
+  // turns one unreadable moment into a wake naming every ready row on the
+  // board as just released.
+  if (!before.readable) return [];
   if (!after) return [];
   const freed: ReleasableRow[] = [];
   const seen = new Set<string>();
   for (const row of [...after.ready, ...(after.capacityTrimmed ?? [])]) {
     if (row.id === except) continue;
-    if (before.has(row.id)) continue;
+    if (before.ids.has(row.id)) continue;
     // A row cannot be freed twice. `ready` and `capacityTrimmed` are disjoint
     // slices of one list today; the guard costs nothing and means a future
     // snapshot that overlaps them cannot name a row to the lead twice.
