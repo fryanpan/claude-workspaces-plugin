@@ -257,8 +257,7 @@ export class TaskLifecycleStore {
     // moving backwards, parking and a goal band's own close are untouched, a
     // row with no lines is refused by nothing, and the auto-close passes by
     // construction since it fires only once every line is met.
-    const openLine =
-      isGoalRow(task) || to !== 'done' ? undefined : doneWhenRefusal(task.title, task.doneWhen);
+    const openLine = isGoalRow(task) || to !== 'done' ? undefined : doneWhenRefusal(task.doneWhen);
     if (openLine !== undefined) {
       return { ok: false, error: 'done-when-open', message: openLine };
     }

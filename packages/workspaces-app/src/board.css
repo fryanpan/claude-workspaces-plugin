@@ -4491,21 +4491,24 @@ a.board-link-chip:hover {
   grid-row: 1;
   min-width: 0;
 }
-/* The words, the chip and the × on one line, wrapping rather than scrolling:
-   at 430px a long criterion plus "Not verified" does not fit, and the chip
-   dropping to its own line is the only outcome that keeps the panel inside
-   the viewport. */
+/* The words, the chip and the × on ONE row, always. A grid rather than a
+   wrapping flex row: the words are the only cell that may shrink, so a long
+   criterion at 430px wraps its own text and the two controls stay beside it.
+   Wrapping put the × on a row of its own under the words, 26px from the line
+   it removes and 24px from the next one — a control nearer the wrong line
+   than its own is worse than a narrow one. Either trailing column collapses to zero
+   when its child is absent, and the 1fr keeps what remains at the right
+   edge. */
 .dw-body {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
   gap: 6px;
 }
 .dw-text {
   font-size: 14px;
   line-height: 1.45;
   min-width: 0;
-  flex: 1 1 auto;
   /* Vertical padding the reader cannot see until the outline appears, pulled
      back out by the negative margin so an un-hovered line sits on the panel's
      rhythm rather than on the edit affordance's. The BREATHING ROOM sideways
@@ -4544,8 +4547,7 @@ a.board-link-chip:hover {
 /* One chip per line, and only after the builder has reported. The four
    verdicts get four colours and no icons — the word is the label. */
 .dw-verdict-tag {
-  flex: none;
-  align-self: flex-start;
+  align-self: start;
   margin-top: 1px;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
@@ -4576,12 +4578,9 @@ a.board-link-chip:hover {
    with a thumb, pulled back vertically so it does not stretch the row it sits
    on past the words' own height. */
 .dw-line-x {
-  flex: none;
-  /* On a line narrow enough that the chip pushed the × onto its own row, the
-     auto margin keeps it at the right edge where it belongs, rather than
-     leaving a stray glyph under the first word. It does nothing on a line
-     that fits, where the words already take the slack. */
-  margin-left: auto;
+  /* Its own grid cell on the line's own row, so it is always beside the words
+     it removes. The flexible first column takes the slack, which is what
+     holds it at the right edge with or without a chip between. */
   min-width: 36px;
   min-height: 36px;
   margin-block: -8px;

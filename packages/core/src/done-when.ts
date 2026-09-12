@@ -128,14 +128,15 @@ export function doneWhenChipLabel(verdict: DoneWhenVerdict): string {
  * server's gate and anything else that has to explain the refusal cannot
  * drift into two wordings. It NAMES the line: "it has open criteria" sends a
  * reader back to count them, and this sends them to the one that is not met.
+ *
+ * It does NOT name the task. The sentence is read in place beside the status
+ * control of the task it is about, where repeating the title is a quarter of
+ * the message spent telling the reader where they already are.
  */
-export function doneWhenRefusal(
-  title: string,
-  lines: readonly DoneWhenLine[] | undefined,
-): string | undefined {
+export function doneWhenRefusal(lines: readonly DoneWhenLine[] | undefined): string | undefined {
   const open = firstOpenDoneWhen(lines);
   if (!open) return undefined;
-  return `"${title}" still has a done-when line that is not met: "${open.text}". Report it met with proof, or remove the line if it is no longer what done means.`;
+  return `Not done yet: "${open.text}" is not met. Report it met with proof, or remove the line if it is no longer what done means.`;
 }
 
 export const DONE_WHEN_TEXT_MAX = 500;

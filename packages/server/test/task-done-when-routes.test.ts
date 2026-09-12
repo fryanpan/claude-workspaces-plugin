@@ -220,6 +220,31 @@ describe('done-when lines on a task', () => {
     expect((await detail(task.id)).status).toBe('done');
   });
 
+  it('refuses the report route the same owner line the check route refuses an agent', async () => {
+    const task = await mkTask('Bryan can keep the line the builder gave him', [
+      { text: 'the wording reads right to a person' },
+    ]);
+    const lineId = (await detail(task.id)).doneWhen?.[0]?.id as string;
+    await post(`/workspaces/${ws}/tasks/${task.id}/done-when/report`, {
+      author: AGENT,
+      lines: [{ id: lineId, verdict: 'owner' }],
+    });
+
+    // The check route already refuses this actor on this line. The report
+    // route is the same question asked through the other door, and it has to
+    // give the same answer — otherwise the agent simply asks twice.
+    const reported = await post(`/workspaces/${ws}/tasks/${task.id}/done-when/report`, {
+      author: AGENT,
+      lines: [{ id: lineId, verdict: 'met', proof: [{ text: 'I read it back' }] }],
+    });
+    expect(reported.status).toBe(400);
+    expect(((await reported.json()) as { error?: string }).error).toBe('not-yours');
+
+    const after = await detail(task.id);
+    expect(after.doneWhen?.[0]?.verdict).toBe('owner');
+    expect(after.status).not.toBe('done');
+  });
+
   it('refuses a manual move to done while a line is open, and names the first open line', async () => {
     const task = await mkTask('Agent cannot close over an open line', [
       { text: 'the first outcome is proved' },

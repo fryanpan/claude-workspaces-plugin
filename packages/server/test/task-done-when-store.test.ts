@@ -222,6 +222,43 @@ describe('TaskDoneWhenStore.report', () => {
     expect(proof[2]?.url).toBe('https://example.test/run');
   });
 
+  it('refuses an agent that reports its own owner line met, however good its proof', () => {
+    const task = makeTask([
+      { id: 'd-0', text: 'the wording reads right to a person', verdict: 'owner' },
+    ]);
+    const { store, moves } = fake(task);
+
+    const res = store.report(
+      task.id,
+      [{ id: 'd-0', verdict: 'met', proof: [{ text: 'I read it back and it seemed fine' }] }],
+      AGENT,
+    );
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe('not-yours');
+      expect(res.message).toContain('the wording reads right to a person');
+    }
+    // Nothing written, nothing closed: delegation that an agent can take back
+    // is no delegation, and the auto-close would have finished the task on a
+    // verdict its own builder awarded itself.
+    expect(task.doneWhen?.[0]?.verdict).toBe('owner');
+    expect(task.doneWhen?.[0]?.proof).toBeUndefined();
+    expect(moves).toEqual([]);
+  });
+
+  it('lets a builder report an owner line broken, because that is news the owner needs', () => {
+    const task = makeTask([{ id: 'd-0', text: 'only a person can say', verdict: 'owner' }]);
+    const { store } = fake(task);
+
+    for (const verdict of ['not-met', 'unchecked'] as const) {
+      const res = store.report(task.id, [{ id: 'd-0', verdict }], AGENT);
+      expect(res.ok).toBe(true);
+      expect(task.doneWhen?.[0]?.verdict).toBe(verdict);
+      task.doneWhen = [{ id: 'd-0', text: 'only a person can say', verdict: 'owner' }];
+    }
+  });
+
   it('refuses a line the task does not carry, and a report on a task with no list', () => {
     const withLines = makeTask(lines('an outcome'));
     const unknown = fake(withLines).store.report(

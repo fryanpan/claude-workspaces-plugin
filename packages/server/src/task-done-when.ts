@@ -310,6 +310,24 @@ export class TaskDoneWhenStore {
           message: `verdict must be one of ${DONE_WHEN_VERDICTS.join(', ')}`,
         };
       }
+      // A line the builder HANDED OVER stays the person's to meet. Without
+      // this the delegation is decorative: the same agent that wrote `owner`
+      // could report the line met with proof of its own and the task would
+      // close itself with a Verified chip, which is the proof rule and the
+      // person's judgement both gone in one call. `not-met` and `unchecked`
+      // are still reportable — a builder that later finds the line broken
+      // should say so rather than leave it waiting on somebody.
+      if (
+        line.verdict === 'owner' &&
+        entry.verdict === 'met' &&
+        classifyActor(actor) !== 'person'
+      ) {
+        return {
+          ok: false,
+          error: 'not-yours',
+          message: `"${line.text}" is waiting on the owner — you marked it theirs, so their Looks right is what meets it`,
+        };
+      }
       const proof = readProof(entry.proof);
       if (entry.verdict === 'met' && proof === undefined && (line.proof ?? []).length === 0) {
         return {
