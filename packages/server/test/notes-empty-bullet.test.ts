@@ -107,6 +107,22 @@ describe('a bullet with no words in it is not a note', () => {
     expect((guarded.edits[0] as { markdown: string }).markdown).toBe(regroup);
   });
 
+  test('a blank line between the marker and its nested points changes nothing', () => {
+    // `- \n\n  - point` parses to the same nested list as `- \n  - point`
+    // (measured), so a rule that read only the NEXT line dropped the parent
+    // and handed its child back as a top-level bullet.
+    const spaced = '- \n\n  - the ferry timetable slips a week';
+    const guarded = guardNotesEdits([{ op: 'insert_at_end', markdown: spaced }], {});
+    expect(guarded.edits).toHaveLength(1);
+    expect((guarded.edits[0] as { markdown: string }).markdown).toBe(spaced);
+
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(prose.getProseFragment(doc), '# Survey planning\n');
+    prose.applyBlockEdits(doc, [...guarded.edits], WHO);
+    const nested = prose.readOutline(doc).find((e) => e.text.includes('ferry timetable'));
+    expect(nested?.depth).toBe(1);
+  });
+
   test('an ordinary batch of real notes is untouched', () => {
     // The mutation control for the rule itself: a guard that refused every
     // insert would pass every test above and fail this one.

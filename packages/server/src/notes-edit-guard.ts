@@ -173,6 +173,12 @@ const HEADING_LINE = /^\s*#{1,6}(?:\s|$)/;
  * by an indented line is a wrapped bullet or a nested list, and dropping the
  * marker would orphan whatever hangs off it. Only a marker with nothing
  * indented after it is a blank line pretending to be a note.
+ *
+ * AND BLANK LINES BETWEEN THEM CHANGE NOTHING. `- \n\n  - point` parses to
+ * exactly the same nested list as `- \n  - point` — measured — so the search
+ * for indented content looks past however many blank lines the model put in.
+ * Reading only the next line flattened that hierarchy: the parent went, and
+ * its child came back as a top-level bullet.
  */
 export function stripWordlessBullets(markdown: string): { markdown: string; stripped: number } {
   const lines = markdown.split('\n');
@@ -180,14 +186,24 @@ export function stripWordlessBullets(markdown: string): { markdown: string; stri
   let stripped = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
-    const next = lines[i + 1];
-    if (BARE_MARKER.test(line) && !(next !== undefined && /^\s+\S/.test(next))) {
+    if (BARE_MARKER.test(line) && !hasIndentedContent(lines, i + 1)) {
       stripped++;
       continue;
     }
     keep.push(line);
   }
   return { markdown: keep.join('\n'), stripped };
+}
+
+/** Whether the next non-blank line at or after `from` is indented — the words
+ *  a bare marker is carrying, wrapped or nested under it. */
+function hasIndentedContent(lines: readonly string[], from: number): boolean {
+  for (let i = from; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (line.trim().length === 0) continue;
+    return /^\s+\S/.test(line);
+  }
+  return false;
 }
 
 /**
