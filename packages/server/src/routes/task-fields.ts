@@ -18,6 +18,12 @@ import {
 } from '../task-owner.ts';
 import { taskBodyDocId } from '../task-projection.ts';
 import { setTaskSchedule } from '../task-scheduler.ts';
+import {
+  EXTERNAL_WAIT_MAX_MS,
+  EXTERNAL_WAIT_WHAT_MAX,
+  clearExternalWait,
+  setExternalWait,
+} from '../task-wait.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -266,6 +272,49 @@ export async function handleTaskFields(
     if (!res.ok) return j(404, res);
     taskProjection.ensureWorkspace(res.task.workspaceId);
     return j(200, res);
+  }
+  // Declare, renew or clear what a row is waiting on when the board cannot
+  // see the thing (`task-wait.ts` holds the design and every number). The
+  // route does argument shape only; the module owns the cap, the default and
+  // what a renewal preserves, so there is one place either can change.
+  const taskWaitMatch = matchRest(scope, /^tasks\/([^/]+)\/wait$/);
+  if (taskWaitMatch && req.method === 'POST') {
+    const taskId = decodeURIComponent(taskWaitMatch[1] ?? '');
+    const body = await safeJson(req);
+    const author = authorFor(body?.author);
+    if (!author) return j(400, { error: 'author required' });
+    if (body?.clear === true) {
+      const cleared = clearExternalWait(taskStore, taskId);
+      if (!cleared.ok) return j(404, cleared);
+      taskProjection.ensureWorkspace(cleared.task.workspaceId);
+      return j(200, { ok: true, task: cleared.task, changed: cleared.changed });
+    }
+    // Refused rather than defaulted: a caller that sent an `hours` we cannot
+    // read meant a duration, and giving them the default would leave them
+    // believing a number they never got.
+    const hours = body?.hours;
+    if (hours !== undefined && (typeof hours !== 'number' || !Number.isFinite(hours)))
+      return j(400, { error: 'hours must be a number' });
+    const res = setExternalWait(taskStore, taskId, {
+      what: typeof body?.what === 'string' ? body.what : '',
+      by: author.name,
+      now: Date.now(),
+      ...(hours !== undefined ? { durationMs: (hours as number) * 60 * 60_000 } : {}),
+    });
+    if (!res.ok) {
+      if (res.error === 'not-found') return j(404, res);
+      return j(400, {
+        ...res,
+        message:
+          res.error === 'bad-duration'
+            ? `hours must be above 0 and no more than ${EXTERNAL_WAIT_MAX_MS / 3_600_000}`
+            : res.error === 'what-too-long'
+              ? `what must be ${EXTERNAL_WAIT_WHAT_MAX} characters or fewer`
+              : 'what is required: say, in a reader’s words, what this task is waiting on',
+      });
+    }
+    taskProjection.ensureWorkspace(res.task.workspaceId);
+    return j(200, { ok: true, task: res.task, wait: res.wait });
   }
   // Block a row on another ticket — and, on its old payload, park it.
   //

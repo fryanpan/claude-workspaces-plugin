@@ -58,6 +58,7 @@ import {
   type TaskRow,
   classifyOpenTasks,
 } from './keep-moving.ts';
+import { externalWaitActive } from './task-wait.ts';
 
 /**
  * Twenty minutes (Bryan, 2026-08-27: "Detect at 20 minutes").
@@ -171,6 +172,38 @@ export interface WaitingRow {
   waitingOn: FiledItemAddress[];
 }
 
+/**
+ * A wait an agent DECLARED on a row, for a thing the board cannot see
+ * (`task-wait.ts`). Named on the frame in the declarer's own words, so the
+ * lead reads "waiting on the fleet restart" rather than being told a second
+ * time that a row is quiet.
+ *
+ * Emitted for every NAMED row carrying a declaration — stalled or unfiled —
+ * because the point is that nothing is hidden; which of those the clock
+ * actually stops for is `stall-nudge.ts`'s `clockRows`, and it is only ever
+ * the stalled ones.
+ */
+export interface DeclaredWaitRow {
+  id: string;
+  title: string;
+  /** What it waits on, verbatim. */
+  what: string;
+  /** When the wait first started — surviving renewals of the same words, so a
+   *  wait that has been rolling over all day reads as one. */
+  since: number;
+  /** When the declaration lapses. */
+  until: number;
+  /** Who declared it. */
+  by: string;
+  /**
+   * `until` has passed. Present rather than absent-and-false so a reader
+   * cannot mistake an old server's silence for "still standing": a lapsed
+   * wait is the one that has to be SAID, because the row is loud again and
+   * the lead needs to know the sentence they wrote has run out.
+   */
+  lapsed?: true;
+}
+
 /** A row the gate could not evaluate. */
 export interface StallUndeterminedRow {
   id: string;
@@ -185,6 +218,12 @@ export interface StallVerdict {
   /** Rows waiting on a person WITH the question filed — by address. Listed
    *  so the wait is checkable, not so anyone is woken. */
   waiting: WaitingRow[];
+  /**
+   * Declared waits on rows this pass NAMED — what an agent said the row is
+   * waiting on that the board cannot see (`DeclaredWaitRow`). Lapsed ones
+   * included: the lapse is the finding.
+   */
+  declaredWaits: DeclaredWaitRow[];
   /** THE DENOMINATOR: how many open rows were examined. Stated so an empty
    *  `stalled` reads as "nine rows, all accounted for" rather than as an
    *  empty board. */
@@ -318,6 +357,15 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     }
   }
 
+  // The declarations, by row, for the named lists below to draw on. Read off
+  // the tasks the caller already handed over rather than through a second
+  // input, so there is nothing for a parallel map to disagree with.
+  const declared = new Map(
+    input.tasks
+      .filter((t) => t.externalWait !== undefined)
+      .map((t) => [t.id, t.externalWait as NonNullable<TaskRow['externalWait']>] as const),
+  );
+  const declaredWaits: DeclaredWaitRow[] = [];
   const checkInMs = input.checkInMs ?? CHECK_IN_DEFAULT_MS;
   const stalled: StalledRow[] = [];
   const checkIn: StalledRow[] = [];
@@ -402,12 +450,31 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     )
       checkIn.push({ ...named, bucket: CHECK_IN_BUCKET });
   }
+  // Every NAMED row's declaration, after the lists are settled: a wait is an
+  // annotation on a finding, never a finding of its own, so a row nothing
+  // named contributes nothing here. Longest-standing first, matching the
+  // order the lists themselves carry.
+  for (const row of [...stalled, ...unfiled]) {
+    const wait = declared.get(row.id);
+    if (wait === undefined) continue;
+    declaredWaits.push({
+      id: row.id,
+      title: row.title,
+      what: wait.what,
+      since: wait.since,
+      until: wait.until,
+      by: wait.by,
+      ...(externalWaitActive(wait, input.now) ? {} : { lapsed: true as const }),
+    });
+  }
+  declaredWaits.sort((a, b) => a.since - b.since);
   // `classifyOpenTasks` already sorts by silence, longest first, and both
   // lists inherit that order — the row at the top is the one to start with.
   return {
     stalled,
     unfiled,
     waiting,
+    declaredWaits,
     considered: rows.length,
     undetermined,
     checkIn,

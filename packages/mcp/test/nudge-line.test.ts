@@ -35,7 +35,7 @@ describe('readyIdleLine', () => {
       parallelismCap: {
         value: 1,
         lastChange: {
-          actor: { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' },
+          actor: { id: 'agent-lead', name: 'Team Lead', kind: 'agent' },
           ts: 9 * 60 * 60_000 + 15 * 60_000,
           from: 4,
           to: 1,
@@ -43,7 +43,7 @@ describe('readyIdleLine', () => {
       },
     });
     expect(line).toContain(
-      '3 open tasks checked; held: 1 claimed, 2 parallelism-cap (cap 1, set by Cartographer 45m ago, was 4)',
+      '3 open tasks checked; held: 1 claimed, 2 parallelism-cap (cap 1, set by Team Lead 45m ago, was 4)',
     );
   });
 
@@ -578,10 +578,10 @@ const HELD_ROW = {
 
 describe('stalledLine tells a stand-in why it, and not the lead, was woken', () => {
   it('leads with the unmanned seat, then still says what is stuck', () => {
-    const line = stalledLine({ ...STALL, escalatedFrom: 'agent-cartographer' });
+    const line = stalledLine({ ...STALL, escalatedFrom: 'agent-lead' });
     // The reader's first question is why this arrived at all.
     expect(line.indexOf('not this board')).toBeLessThan(line.indexOf('stopped moving'));
-    expect(line).toContain('agent-cartographer');
+    expect(line).toContain('agent-lead');
     expect(line).toContain('attach_agent');
     // …and the wake is still the wake: the rows survive the preamble.
     expect(line).toContain('Rank results by recency');
@@ -728,4 +728,52 @@ describe('reviewItemHeldLine — the filer’s own wake', () => {
       await h?.stop();
     }
   }, 60_000);
+});
+
+/**
+ * A wait an agent declared on a row, for a thing the board cannot see. The
+ * line's job here is to replace a repetition with an explanation, so what is
+ * asserted is that the DECLARER'S WORDS survive to the reader — a clause that
+ * said only "this task has a declared wait" would be the silence it is
+ * supposed to explain, wearing a new sentence.
+ */
+const DECLARED_WAIT = {
+  id: 't-b1',
+  title: 'Rank results by recency',
+  what: 'the index rebuild finishing on the other board',
+  since: 95 * 60_000,
+  until: 400 * 60_000,
+  by: 'Team Lead',
+};
+
+describe('stalledLine explains a row that was declared to be waiting', () => {
+  it("carries the declarer's own words, and says the row is not being escalated", () => {
+    const line = stalledLine({ ...STALL, ts: 200 * 60_000, declaredWaits: [DECLARED_WAIT] });
+    expect(line).toContain('waiting on something off the board');
+    expect(line).toContain('the index rebuild finishing on the other board');
+    expect(line).toContain('t-b1');
+    // How long the wait has been standing, from `since` — the number that
+    // makes a wait renewed all day readable as one.
+    expect(line).toContain('1h 45m');
+    expect(line).toContain('Not escalated while the wait stands');
+  });
+
+  it('says LOUDLY when a declaration has lapsed, and offers both next moves', () => {
+    const line = stalledLine({
+      ...STALL,
+      ts: 500 * 60_000,
+      declaredWaits: [{ ...DECLARED_WAIT, lapsed: true }],
+    });
+    expect(line).toContain('LAPSED');
+    expect(line).toContain('back on the escalation clock');
+    expect(line).toContain('declaring again');
+    // The standing sentence is the other case and must not appear too — the
+    // reader would be told both that the row is held and that it is not.
+    expect(line).not.toContain('Not escalated while the wait stands');
+  });
+
+  it('the control: a frame with no declared waits says nothing about one', () => {
+    expect(stalledLine(STALL)).not.toContain('off the board');
+    expect(stalledLine(STALL)).not.toContain('LAPSED');
+  });
 });

@@ -159,7 +159,27 @@ export interface UngatedUiRowPayload {
   keyword?: string;
 }
 
-/** What `workspace.stalled` carries. Seven lists, because the lead's next act
+/**
+ * One wait an agent DECLARED on a row, for something the board cannot see —
+ * `stall-nudge.ts`'s `declaredWaits`. Not a finding: it explains a row the
+ * frame already names, which is what makes the wake say something new instead
+ * of repeating a silence.
+ */
+export interface DeclaredWaitPayload {
+  id?: string;
+  title?: string;
+  /** What the declarer said it waits on, verbatim. */
+  what?: string;
+  /** When the wait first started, surviving renewals of the same words. */
+  since?: number;
+  /** When it lapses. */
+  until?: number;
+  by?: string;
+  /** `until` has passed — the row is back on the escalation clock. */
+  lapsed?: boolean;
+}
+
+/** What `workspace.stalled` carries. Eight lists, because the lead's next act
  *  differs for each — see `stalledLine`. */
 export interface StallPayload {
   taskId?: string;
@@ -181,6 +201,8 @@ export interface StallPayload {
   /** Runnable rows past the board's parallelism cap, which the pass did not
    *  judge — idle by rule, not healthy. Absent when none. */
   beyondCapacity?: number;
+  /** What the named rows were declared to be waiting on, off the board. */
+  declaredWaits?: DeclaredWaitPayload[];
   /** What is new since this board's last wake — see `changedClause`. Absent
    *  on a first wake, and on any frame from a server older than it. */
   changed?: {
@@ -381,6 +403,19 @@ function stalledRowClause(row: StalledRowPayload): string {
   return row.quietMs === undefined ? named : `${named} quiet ${humanDuration(row.quietMs)}`;
 }
 
+/** One declared wait as the line names it: the row, the words the declarer
+ *  wrote, and how long the wait has been standing. The words are what stop
+ *  this being a second way of saying the row is quiet. */
+function declaredWaitClause(wait: DeclaredWaitPayload, now: number | undefined): string {
+  const named = wait.title ? `"${truncate(wait.title, 50)}" (${wait.id})` : (wait.id ?? 'a task');
+  const what = wait.what ? ` on ${truncate(wait.what, 80)}` : '';
+  const held =
+    now !== undefined && wait.since !== undefined
+      ? `, ${humanDuration(now - wait.since)} so far`
+      : '';
+  return `${named}${what}${held}`;
+}
+
 /** The named rows, then a count of whatever did not fit. */
 function stalledRowsClause(rows: readonly StalledRowPayload[]): string {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(stalledRowClause);
@@ -470,6 +505,30 @@ export function stalledLine(p: StallPayload): string {
     parts.push(
       `${unfiled.length} ${noun} waiting on a person with NO question filed — ` +
         `${stalledRowsClause(unfiled)}. File the ask where they will see it, or the wait is invisible.`,
+    );
+  }
+  // The declared waits, in two sentences rather than one, because the reader's
+  // move differs. A standing wait is why a row above is named and not being
+  // escalated — information, said once. A LAPSED one is a sentence the reader
+  // wrote that has run out, and the row is loud again because of it; that is
+  // the half they have to act on, so it is said separately and last.
+  const waits = p.declaredWaits ?? [];
+  const standing = waits.filter((w) => w.lapsed !== true);
+  const lapsed = waits.filter((w) => w.lapsed === true);
+  if (standing.length > 0) {
+    const noun = standing.length === 1 ? 'task is' : 'tasks are';
+    parts.push(
+      `${standing.length} ${noun} declared to be waiting on something off the board — ` +
+        `${standing.map((w) => declaredWaitClause(w, p.ts)).join('; ')}. ` +
+        'Not escalated while the wait stands; clear it with declare_wait(clear: true) when the thing arrives.',
+    );
+  }
+  if (lapsed.length > 0) {
+    const noun = lapsed.length === 1 ? 'declared wait has' : 'declared waits have';
+    parts.push(
+      `${lapsed.length} ${noun} LAPSED and the task(s) are back on the escalation clock — ` +
+        `${lapsed.map((w) => declaredWaitClause(w, p.ts)).join('; ')}. ` +
+        'Either the wait is over and the work is yours to drive, or it is still real and needs declaring again.',
     );
   }
   const unread = p.undetermined?.count ?? p.undetermined?.reasons?.length ?? 0;

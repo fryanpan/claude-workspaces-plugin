@@ -495,6 +495,40 @@ export async function handleTaskTool(
         changed: res.changed,
       });
     }
+    case 'declare_wait': {
+      const { taskId, waitingOn, hours, clear } = a as {
+        taskId: string;
+        waitingOn?: string;
+        hours?: number;
+        clear?: boolean;
+      };
+      if (clear !== true && (typeof waitingOn !== 'string' || waitingOn.trim() === '')) {
+        return err(
+          'waitingOn is required: say what this task is waiting on, in words a reader understands — or pass clear: true to end the wait',
+        );
+      }
+      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/wait`, {
+        ...(clear === true
+          ? { clear: true }
+          : { what: waitingOn, ...(hours !== undefined ? { hours } : {}) }),
+        author: AUTHOR,
+      })) as {
+        task: TaskPayload;
+        changed?: boolean;
+        wait?: { what: string; since: number; until: number };
+      };
+      if (clear === true) return ok({ taskId, cleared: true, changed: res.changed ?? false });
+      // The lapse time is echoed because it is the half the caller did not
+      // choose: they said how long, the server said until when, and a wait
+      // whose end nobody can see is the mute button this verb refuses to be.
+      return ok({
+        taskId,
+        waitingOn: res.wait?.what,
+        until: res.wait?.until,
+        waitingSince: res.wait?.since,
+        status: res.task.status,
+      });
+    }
     /* REMOVED 2026-09-03: `park_task`, replaced by `block_task` above.
        "Not now" is spelled by naming what the task is waiting for, and triage
        goes back to meaning "nobody has vetted this".

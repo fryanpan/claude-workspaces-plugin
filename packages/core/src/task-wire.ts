@@ -348,6 +348,29 @@ export interface StoredReviewItem extends TaskReviewItem {
   filedBy?: TaskActor;
 }
 
+/**
+ * A wait on something the board cannot see — see `Task.externalWait`.
+ *
+ * Four of the five fields exist so the wake can say it in a sentence the lead
+ * reads without a lookup. The fifth, `since`, is the audit: it survives a
+ * renewal of the same wait, so a wait that has been re-declared all day reads
+ * as nine hours rather than as a fresh hour.
+ */
+export interface ExternalWait {
+  /** What it waits on, in a reader's words — "Team Lead restarting the
+   *  fleet", never a token. This is what goes in the lead's frame. */
+  what: string;
+  /** When this wait was FIRST declared. Preserved across a renewal that does
+   *  not change `what`; reset when the wait becomes a different wait. */
+  since: number;
+  /** When the current declaration was made. */
+  declaredAt: number;
+  /** When it lapses. Past this the row is back on the escalation clock. */
+  until: number;
+  /** Who declared it, by display name. */
+  by: string;
+}
+
 export interface Task {
   /** `t-<crypto-random>`. */
   id: string;
@@ -486,6 +509,28 @@ export interface Task {
    * row without either meaning the other.
    */
   schedule?: TaskSchedule;
+  /**
+   * What this row is waiting on when the thing it waits on is NOT on the
+   * board — a peer restarting the fleet, a review somebody owes elsewhere, a
+   * queue that has to drain first. Declared by the agent holding the row and
+   * read by exactly one reader, the stall wake (`stall-gate.ts`), which stops
+   * escalating a row whose silence has already been explained.
+   *
+   * Deliberately NOT a status and NOT an `after` edge. `block_task` says a row
+   * waits on another TASK, which the board can see close; a status says what
+   * kind of thing the row is. This says the board cannot see the thing at all,
+   * which is the one case neither of those can spell.
+   *
+   * It EXPIRES (`until`), and that is the whole design rather than a detail:
+   * a declaration with no end is a mute button on the check that exists
+   * because leads let work go dark. Past `until` the row re-enters the
+   * escalation clock carrying its full accumulated silence, so the wake it
+   * bought is deferred rather than cancelled.
+   *
+   * Absent means nothing has been declared, which is every row written before
+   * the field.
+   */
+  externalWait?: ExternalWait;
   /**
    * The recurrence mark: this row is one OCCURRENCE of a scheduled rule, not
    * a row somebody filed. Present iff the scheduler created it.
