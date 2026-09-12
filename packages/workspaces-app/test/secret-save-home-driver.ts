@@ -19,12 +19,13 @@
  * answering the runner's RPC, and because the profile cleanup has to run even
  * when a case throws.
  *
- * audit: no-text
- *
  * The two stylesheet reads below put the sheets in the PAGE. Nothing here
  * asserts on their text, and nothing this module exports is one: every export
- * is a type.
+ * is a type. The marker that claims that exemption is the line comment under
+ * this block — inside a block comment it is prose, and the audit is right not
+ * to believe prose.
  */
+// audit: no-text
 import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

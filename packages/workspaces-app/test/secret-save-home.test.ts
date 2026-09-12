@@ -39,8 +39,10 @@
  *    Home a real overflow box fails here rather than silently measuring the
  *    wrong element's reserve.
  *
- * audit: not-source — nothing below reads a file; every value asserted on is
- * a rectangle or the name of the element painted at a point.
+ * Nothing below reads a file: every value asserted on is a rectangle or the
+ * name of the element painted at a point. The driver reads the two
+ * stylesheets, to put them in the page, and carries the audit's marker for
+ * it.
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
