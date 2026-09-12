@@ -14,6 +14,7 @@ import {
   type Comment,
   type DocMeta,
   type DocOriginRepo,
+  type DocTitleSource,
   type DocType,
   type ReviewItemJudgement,
   type ReviewPayload,
@@ -27,6 +28,7 @@ import {
   readDocMeta,
   setThreadSummary,
   suggestOps,
+  titleIsUnnamed,
 } from '@claude-workspaces/core';
 import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
@@ -1932,6 +1934,8 @@ export class DocStore {
       huddle?: boolean;
       /** Which entry flow made it — see `DocMeta.huddleKind`. */
       huddleKind?: 'plan' | 'discussion';
+      /** Who chose `title` — see `DocMeta.titleSource`. */
+      titleSource?: DocTitleSource;
     },
     /**
      * Who is asking. Defaults to `caller`, which is what closes the two
@@ -2018,6 +2022,7 @@ export class DocStore {
         alias: init?.alias,
         ...(init?.huddle ? { huddle: true } : {}),
         ...(init?.huddleKind ? { huddleKind: init.huddleKind } : {}),
+        ...(init?.titleSource ? { titleSource: init.titleSource } : {}),
         createdAt: Date.now(),
       };
       initDocMeta(ydoc, now);
@@ -3520,6 +3525,9 @@ export class DocStore {
   setTitle(
     docId: string,
     title: string,
+    /** Who is naming it. A rename is a name somebody chose, so the default
+     *  is `person`, and after it the meeting namer never writes this title. */
+    source: DocTitleSource = 'person',
   ):
     | { ok: true; docId: string; title: string }
     | { ok: false; error: 'not-found' | 'empty-title' } {
@@ -3528,10 +3536,47 @@ export class DocStore {
     const next = title.trim().replace(/\s+/g, ' ');
     if (next.length === 0) return { ok: false, error: 'empty-title' };
     doc.ydoc.transact(() => {
-      doc.ydoc.getMap('meta').set('title', next);
+      const m = doc.ydoc.getMap('meta');
+      m.set('title', next);
+      m.set('titleSource', source);
     }, CONTENT_REVISION_ORIGIN);
     doc.meta.title = next;
+    doc.meta.titleSource = source;
     return { ok: true, docId: doc.docId, title: next };
+  }
+
+  /**
+   * The meeting namer's write: a title nobody chose, replaced only while
+   * nobody has chosen one.
+   *
+   * The check and the write are one synchronous step, and that is the whole
+   * race guard. The namer reads the notes, AWAITS a model call, and only then
+   * lands here — so a person who renames the doc while the call is out has
+   * already set `titleSource: 'person'`, and this refuses. Nothing is held
+   * across the await.
+   *
+   * `replacing` is the one-time retitle's way in: a doc from before
+   * `titleSource` existed carries none, and may be retitled only while its
+   * title is still exactly the clock string that retitle read.
+   */
+  setAutoTitle(
+    docId: string,
+    title: string,
+    source: 'auto' | 'default',
+    opts: { replacing?: string } = {},
+  ): { ok: true; changed: boolean } | { ok: false; error: 'not-found' | 'named' | 'empty-title' } {
+    const doc = this.get(docId);
+    if (!doc) return { ok: false, error: 'not-found' };
+    const { titleSource, title: current } = doc.meta;
+    const unnamed =
+      titleIsUnnamed(titleSource) ||
+      (titleSource === undefined && opts.replacing !== undefined && current === opts.replacing);
+    if (!unnamed) return { ok: false, error: 'named' };
+    const next = title.trim().replace(/\s+/g, ' ');
+    if (next.length === 0) return { ok: false, error: 'empty-title' };
+    if (next === current && titleSource === source) return { ok: true, changed: false };
+    this.setTitle(doc.docId, next, source);
+    return { ok: true, changed: true };
   }
 
   noteHumanEdit(docId: string, at: number = Date.now()): void {

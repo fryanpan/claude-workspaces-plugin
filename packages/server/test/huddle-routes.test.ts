@@ -3,7 +3,7 @@
  *
  * A huddle is a live conversation over a doc, before there is a task. The
  * Board starts one with a single call and gets back a doc it can open at
- * once: a workspace-tied markdown doc, titled by the clock, empty (or headed
+ * once: a workspace-tied markdown doc, called "Meeting", empty (or headed
  * by the topic when one was given), filed on the board exactly like every
  * other board doc — so `list_docs` and the board's docs list see it with no
  * new verb — and MARKED as a huddle, so the board can dress it as one.
@@ -30,13 +30,12 @@ import { type AccessHarness, accessHarness, mintAccessShare } from './access-sha
 
 const PERSON: User = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
 /**
- * The doc's KIND, then the clock to the minute in local time — "Meeting notes
- * 2026-08-29 14:05" / "Plan 2026-08-29 14:05". The word is what a person
- * reads, so the two kinds are asserted apart: a plan titled "Meeting notes"
- * is the bug this pair exists to catch.
+ * "Meeting" / "Planning Meeting", and nothing else — no clock (Bryan,
+ * 2026-09-12). The two kinds are asserted apart: a plan titled "Meeting" is
+ * the bug this pair exists to catch.
  */
-const MEETING_TITLE = /^Meeting notes \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
-const PLAN_TITLE = /^Plan \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+const MEETING_TITLE = /^Meeting$/;
+const PLAN_TITLE = /^Planning Meeting$/;
 
 interface HuddleResponse {
   docId: string;
@@ -49,6 +48,7 @@ interface HuddleResponse {
     type?: string;
     huddle?: boolean;
     huddleKind?: 'plan' | 'discussion';
+    titleSource?: string;
   };
 }
 
@@ -116,7 +116,7 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
   });
 
   describe('starting a huddle', () => {
-    it('creates an empty, clock-titled doc on the board, flagged as a huddle', async () => {
+    it('creates an empty doc called Meeting on the board, flagged as a huddle', async () => {
       const r = await jj<HuddleResponse>(await startHuddle(workspaceId));
       expect(r.docId).toMatch(/^d-[A-Za-z0-9_-]{12}$/);
       expect(r.hubWorkspaceId).toBe(workspaceId);
@@ -132,6 +132,17 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
       );
       expect(doc.blocks).toHaveLength(0);
       expect(doc.plainText.trim()).toBe('');
+
+      // The doc read the page mounts from carries the server's dates for the
+      // heading: created on the meta, last activity stamped by the read.
+      const read = await jj<{
+        meta: { createdAt?: number; lastActivityAt?: number; titleSource?: string };
+      }>(await local(`/workspaces/${workspaceId}/docs/${r.docId}?format=json`));
+      expect(read.meta.titleSource).toBe('default');
+      expect(typeof read.meta.createdAt).toBe('number');
+      expect(read.meta.lastActivityAt).toBeGreaterThanOrEqual(
+        read.meta.createdAt ?? Number.POSITIVE_INFINITY,
+      );
     });
 
     it('started for a task, links the doc onto that task — and refuses a task from elsewhere', async () => {
@@ -202,7 +213,7 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
       expect(doc.blocks[0]?.headingLevel).toBe(1);
       // Block text is rendered markdown, so the heading keeps its marker.
       expect(doc.blocks[0]?.text).toBe('# Onboarding flow');
-      // The title is still the clock — the topic is content, not a name.
+      // The title is still the default — the topic is content, not a name.
       expect(r.meta.title).toMatch(MEETING_TITLE);
     });
 
@@ -215,6 +226,8 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
       expect(r.meta.huddleKind).toBe('plan');
       expect(r.meta.huddle).toBe(true);
       expect(r.meta.title).toMatch(PLAN_TITLE);
+      // Minted, not chosen: the meeting namer may still replace it.
+      expect(r.meta.titleSource).toBe('default');
       const doc = await jj<{
         blocks: Array<{ type: string | null; headingLevel?: number; text: string }>;
       }>(await local(`/workspaces/${workspaceId}/docs/${r.docId}/content`));

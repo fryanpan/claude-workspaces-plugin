@@ -1,7 +1,8 @@
 /**
- * Rename the doc from its own title in the topbar.
+ * Rename the doc from its own title — the topbar crumb, and a meeting's page
+ * heading (`doc-heading.ts`).
  *
- * A meeting's title is the clock it started at, and until now nothing on any
+ * A meeting's title used to be the clock it started at, and nothing on any
  * screen could change it — so a project's meetings list was a column of
  * timestamps a week later. The affordance is the title itself: click it, type,
  * press Enter. No button, no menu, no pencil beside it, because the thing a
