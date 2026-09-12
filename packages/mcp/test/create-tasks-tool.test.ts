@@ -156,3 +156,77 @@ describe('create_task is removed from the surface peers load', () => {
     expect(res.sent).toEqual([]);
   });
 });
+
+/**
+ * Where the schema tells an agent to write the completion criteria.
+ *
+ * The criteria are a FIELD. The board counts `doneWhen`, draws one entry per
+ * line, and refuses a move to done while an entry is open. Prose under a
+ * "Done when" heading in the description does none of that — and the schema
+ * is what an agent reads in the second it decides where to put them, while
+ * the skill that says the same thing is three screens away. `create_tasks`
+ * body used to read 'plus "done when" criteria …' and `rewrite_task` body
+ * 'state a falsifiable done-when', so both tools were steering the author
+ * into the description the field exists to replace.
+ *
+ * `rewrite_task` rides in this file rather than in one of its own because it
+ * is the other verb that writes a task body, and the bundle the harness runs
+ * already serves it — a second harness would pay another process spawn to
+ * read the same declaration list.
+ */
+describe('the task-writing verbs point completion criteria at the field', () => {
+  /** A field's `description`, from a tool's top-level schema. */
+  const field = (tool: string, name: string): string =>
+    mcp.tool(tool)?.inputSchema?.properties?.[name]?.description ?? '';
+
+  /** A field's `description`, from a `create_tasks` row. */
+  const rowField = (name: string): string => {
+    const tasks = mcp.tool('create_tasks')?.inputSchema?.properties?.tasks as
+      | { items?: { properties?: Record<string, { description?: string }> } }
+      | undefined;
+    return tasks?.items?.properties?.[name]?.description ?? '';
+  };
+
+  /**
+   * Text that asks the author to put criteria in the field it describes: the
+   * two shapes that shipped ("plus … criteria", "state a … done-when"), and
+   * the ones a future edit is likeliest to reach for. A redirect reads
+   * "criteria … go in `doneWhen`" and matches none of them.
+   */
+  const ASKS_FOR_CRITERIA_HERE =
+    /\b(plus|state a|include the|add the)\b[^.]*?(done.when|criteria)/i;
+
+  it('POSITIVE CONTROL: the running bundle serves both verbs with described bodies', () => {
+    expect(mcp.tool('rewrite_task')).toBeDefined();
+    expect(rowField('body').length).toBeGreaterThan(40);
+    expect(field('rewrite_task', 'body').length).toBeGreaterThan(40);
+  });
+
+  it('create_tasks sends the author to `doneWhen`, not to the body', () => {
+    const body = rowField('body');
+    expect(body).not.toMatch(ASKS_FOR_CRITERIA_HERE);
+    // The redirect has to be in the body field's OWN text. A correction that
+    // lives only in the doneWhen field is not read by an agent who has
+    // already decided the description is where criteria go.
+    expect(body).toMatch(/criteria[^.]*`doneWhen`/);
+  });
+
+  it('rewrite_task sends the author to `doneWhen`, not to the body', () => {
+    const body = field('rewrite_task', 'body');
+    expect(body).not.toMatch(ASKS_FOR_CRITERIA_HERE);
+    expect(body).toMatch(/criteria[^.]*`doneWhen`/);
+  });
+
+  it('describes `doneWhen` on both verbs as the field, written at filing time', () => {
+    const created = rowField('doneWhen');
+    // It exists and says what it is for: one outcome per entry, and the
+    // moment to write it.
+    expect(created).toMatch(/one outcome per entry/i);
+    expect(created).toMatch(/when you file the task/i);
+    expect(created).toMatch(/refuses a move to done/i);
+
+    const rewritten = field('rewrite_task', 'doneWhen');
+    expect(rewritten).toMatch(/one outcome per entry/i);
+    expect(rewritten).toMatch(/not in the body/i);
+  });
+});
