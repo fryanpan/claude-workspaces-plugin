@@ -7,6 +7,14 @@ import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-
  * yields its grid row while an editor has focus, and a RECORDING strip stays
  * on screen rather than disappearing.
  *
+ * WHAT "ON SCREEN" MEANS AT PHONE WIDTH CHANGED on 2026-09-11. The bar under
+ * the top bar is gone there — the recording indicator is the blinking dot on
+ * the Record button, and nothing else is dedicated to it
+ * (meeting-phone-layout-css.test.ts). So every phone reading below is taken on
+ * a strip carrying a SENTENCE, which is the one state that still earns the
+ * row; otherwise the yield would read as working on a bar that was already
+ * gone.
+ *
  * Both halves are read off the cascade here rather than out of `styles.css`'s
  * text. The old version searched the ≤720px block for a
  * `body[data-edit-viewport="hidden"] .meeting-strip { display: none }`
@@ -55,32 +63,66 @@ afterEach(() => {
 /** The strip's display at `vp` under a given yield mode, taken on the spot —
  *  happy-dom's computed style is live, so a held declaration re-answers after
  *  a viewport or attribute change. */
-function stripDisplay(vp: { width: number; height: number }, mode: string | null): string {
+function stripDisplay(
+  vp: { width: number; height: number },
+  mode: string | null,
+  opts: { note?: boolean } = {},
+): string {
   setViewport(vp);
   if (mode === null) document.body.removeAttribute('data-edit-viewport');
   else document.body.dataset.editViewport = mode;
-  return styleOf(attach('meeting-strip')).display;
+  const el = attach('meeting-strip');
+  // A strip with a sentence in it is the one a phone still shows at all — see
+  // the note on the recording case below. Without this, every phone reading
+  // here is `none` before the yield has said anything.
+  if (opts.note) {
+    const line = document.createElement('div');
+    line.className = 'meeting-feed-inner meeting-caption-line';
+    const note = document.createElement('span');
+    note.className = 'meeting-note';
+    note.textContent = 'Asking for the microphone…';
+    line.append(note);
+    el.append(line);
+  }
+  return styleOf(el).display;
 }
 
 describe('the voice strip yields while an editor has focus', () => {
   it('hides an idle strip only under the phone breakpoint', () => {
-    expect(stripDisplay(PHONE, 'hidden')).toBe('none');
+    // Measured on a strip carrying a sentence, because that is the only strip
+    // a phone shows at all since 2026-09-11 — otherwise the yield would read
+    // as working on a bar that was already gone.
+    expect(stripDisplay(PHONE, 'hidden', { note: true })).toBe('none');
+    expect(stripDisplay(PHONE, null, { note: true })).toBe('flex');
     // Above the breakpoint the same attribute buys nothing: the complaint is a
     // phone complaint and the iPad pays for its 36px bar once.
     expect(stripDisplay(IPAD, 'hidden')).toBe('flex');
   });
 
-  it('keeps a RECORDING strip on screen whole', () => {
-    // `stripYield` publishes `compact` for a live strip, and since the top-bar
-    // overhaul no rule consumes it: the strip is one 36px line fused under the
-    // topbar, clear of the keyboard, and a live mic with no indicator is not a
-    // thing to ship. Only `hidden` — the idle strip's yield — may reach
-    // `display: none`.
-    expect(stripDisplay(PHONE, 'compact')).toBe('flex');
-    // Positive control, at the width and in the mode that DOES hide, so the
-    // read above is discriminating rather than an empty stylesheet.
-    expect(stripDisplay(PHONE, 'hidden')).toBe('none');
-    expect(stripDisplay(PHONE, null)).toBe('flex');
+  it('keeps a RECORDING strip on screen whole — above the phone tier', () => {
+    // `stripYield` publishes `compact` for a live strip, and no rule consumes
+    // it: a live mic with no indicator is not a thing to ship. Only `hidden` —
+    // the idle strip's yield — may reach `display: none`.
+    expect(stripDisplay(IPAD, 'compact')).toBe('flex');
+    expect(stripDisplay(PHONE, 'compact', { note: true })).toBe('flex');
+    // Positive control, in the mode that DOES hide, so the reads above are
+    // discriminating rather than an empty stylesheet.
+    expect(stripDisplay(PHONE, 'hidden', { note: true })).toBe('none');
+  });
+
+  it('on a phone the recording indicator is the button’s dot, so the bar itself goes', () => {
+    // Bryan, 2026-09-11, recording from his phone: "no white status bar under
+    // the recording bar; the recording indicator blinks in the top right and
+    // nothing else is dedicated to it". A strip with only words to show gives
+    // up its row at this width in EVERY yield mode — the invariant the case
+    // above protects is met by the blinking dot on the Record button, which
+    // meeting-phone-layout-css.test.ts owns.
+    for (const mode of ['compact', 'hidden', null]) {
+      expect(stripDisplay(PHONE, mode)).toBe('none');
+    }
+    // And not because the sheet reaches nothing: the same strip at iPad width
+    // is the 36px row it always was.
+    expect(stripDisplay(IPAD, 'compact')).toBe('flex');
   });
 
   it('yields in layout only — never by unmounting the strip or setting [hidden]', () => {
@@ -94,6 +136,15 @@ describe('the voice strip yields while an editor has focus', () => {
     Object.defineProperty(prose, 'isContentEditable', { value: true });
     prose.tabIndex = 0;
     const strip = attach('meeting-strip');
+    // With a sentence in it, so `display: none` below is the YIELD's doing and
+    // not the phone tier's own rule (see the case above).
+    const noteLine = document.createElement('div');
+    noteLine.className = 'meeting-feed-inner meeting-caption-line';
+    const note = document.createElement('span');
+    note.className = 'meeting-note';
+    note.textContent = 'Asking for the microphone…';
+    noteLine.append(note);
+    strip.append(noteLine);
     // Something is covering the bottom of the window — `keyboardInset` reads
     // the difference between the layout and the visual viewport.
     Object.defineProperty(window, 'visualViewport', {

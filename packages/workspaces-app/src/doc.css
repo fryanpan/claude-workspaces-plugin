@@ -2275,6 +2275,32 @@ body.has-set .doc-switcher-caret {
   .meeting-strip::before {
     right: 60px;
   }
+  /* NO BAR OF ITS OWN ON A PHONE (Bryan, 2026-09-11, recording from his
+     phone: "no white status bar under the recording bar; the recording
+     indicator blinks in the top right and nothing else is dedicated to it").
+     Every job the row does has somewhere better to be at this width: the
+     words are the live zone at the end of the doc, the state and the clock
+     are the Record button's own face, and the blink moves to that button's
+     dot below. What is left is 36px of pale panel across the top of a 932px
+     screen, under a bar that already says Recording.
+
+     EXCEPT WHEN IT IS CARRYING A SENTENCE. A refused microphone, a lost
+     stream and the one-tap-to-start note are all `.meeting-note` in the feed
+     (meeting-feed.ts `showNote`, and the alarm carries the same class), and
+     none of them has anywhere else to be said. Those states keep the bar.
+     edit-viewport.ts refuses to yield a RECORDING strip to `hidden` because
+     "a live mic with no indicator is not a thing to ship" — the indicator is
+     the blinking dot, which this rule moves rather than removes. */
+  .meeting-strip:not(:has(.meeting-note)) {
+    display: none;
+  }
+  /* The blink the strip's own `.meeting-blinker` was doing, on the control
+     that is still on screen. meeting-strip.ts unhides `.meeting-record-dot`
+     only while recording, so this is the live indicator and the one animated
+     thing in the top bar. */
+  .meeting-record.is-live .meeting-record-dot {
+    animation: meeting-blink 1.2s ease-in-out infinite;
+  }
   /* The popovers become an edge-to-edge sheet under the bar. */
   .meeting-pop,
   .meeting-sheet {
@@ -2316,6 +2342,7 @@ body.has-set .doc-switcher-caret {
 }
 @media (prefers-reduced-motion: reduce) {
   .meeting-blinker,
+  .meeting-record-dot,
   .meeting-caption-line .w.is-fixed {
     animation: none;
   }
