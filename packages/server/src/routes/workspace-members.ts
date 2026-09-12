@@ -41,6 +41,7 @@ import { normalizeEmail } from '@claude-workspaces/core';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { normalizeBoardRole } from '../share/board-role.ts';
 import { shareMemberKey } from '../share/share-links.ts';
+import { safeDecodeSegment } from '../workspace-path.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -86,7 +87,10 @@ export async function handleWorkspaceMembers(
   if (roleMatch && req.method === 'POST') {
     const denied = requireOwner(workspaceId);
     if (denied) return denied;
-    const email = decodeURIComponent(roleMatch[1] ?? '');
+    // `safeDecodeSegment`, not the bare decoder: one stray `%` in the segment
+    // throws a `URIError`, and an address this server has never heard of would
+    // come back as a 500 rather than as the 404 it is.
+    const email = safeDecodeSegment(roleMatch[1] ?? '');
     const body = await safeJson(req);
     // Undefined rather than a fallback: `normalizeBoardRole` refuses anything
     // that is not one of the two words, so a typo'd "Owner" is a 400 and never
@@ -111,7 +115,7 @@ export async function handleWorkspaceMembers(
   if (removeMatch && req.method === 'DELETE') {
     const denied = requireOwner(workspaceId);
     if (denied) return denied;
-    const email = decodeURIComponent(removeMatch[1] ?? '');
+    const email = safeDecodeSegment(removeMatch[1] ?? '');
     if (!shareLinks.removeMember(workspaceId, email)) {
       return j(404, { error: 'not a member', workspaceId });
     }
