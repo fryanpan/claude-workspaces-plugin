@@ -161,7 +161,7 @@ afterAll(() => {
   }
 });
 
-describe("the label the renderer hands a phone", () => {
+describe('the label the renderer hands a phone', () => {
   it('leaves a name whole, so the stylesheet decides where it is cut', () => {
     expect(mobileLabel(LONG_TITLE)).toBe(LONG_TITLE);
   });
