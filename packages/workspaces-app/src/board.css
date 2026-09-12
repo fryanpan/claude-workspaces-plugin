@@ -330,34 +330,82 @@ body.board-body {
   color: var(--red);
 }
 
-/* ################# BOARD · SETTINGS PANEL #################
+/* ################# BOARD · SETTINGS PAGE #################
    The surfaces that are not the task list.
 
-   A true popover, anchored to the header's bottom-right under the settings
-   button (Bryan, 2026-08-18: "Settings should be a popover, not a thing that
-   shifts the whole page"). It overlays the board — opening it moves nothing.
-   This reverses the earlier in-flow decision; the "modal in everything but
-   name" worry that argued for in-flow is answered by width `min(560px, 100%)`
-   (100% of the header, so it never exceeds the content column at 430px) and
-   its own max-height + scroll, so the textarea and selects keep their room.
-   z-index 65: over the board, under the full-screen detail/walkthrough
-   overlays (70) that cover the whole header anyway. */
+   A PAGE over the board, reached from the rail's own foot (Bryan,
+   2026-09-11: settings "from a bottom-left button in the nav bar", "so that
+   settings never crowd the main tabs or the top bar"). It replaced a popover
+   anchored under the header's gear, which had room for three controls and
+   was holding six by the end — a criteria textarea, a members list and two
+   Save pairs inside `min(560px, 100%)` with its own scrollbar.
+
+   It wears `settings.css`'s chrome, which the board shell now links: the
+   rail, the topbar, the subnav and the main column are the same elements
+   `/settings/prompts` paints, so the two halves of settings are one design
+   rather than two. What belongs HERE is only what the board adds — where the
+   page sits, and the rows inside it.
+
+   z-index 70, with the full-screen detail and walkthrough overlays: it
+   covers the header too, so there is nothing below it for it to sit under. */
+.board-settings-view {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: var(--bg);
+}
+/* The rail's glyphs, sized like `settings.css`'s own: the board's icons are
+   24×24 `<svg>` in a span rather than the rail-icon class that file styles. */
+.settings-rail-glyph {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.settings-rail-glyph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* The rail carries the width the reader left the board at. Collapsing is a
+   choice about the whole workspace, not about the task list — a rail that
+   sprang back open on the way into settings and shut again on the way out
+   read as the page having lost it (UX review of PR 947). Same 58px the
+   board's own rail collapses to, so nothing moves sideways at the boundary.
+
+   Compound, because `settings.css` loads AFTER this file and its own
+   `.settings-rail` sets the 148px: a single class here loses that
+   equal-specificity tie to the later rule, and the walk found exactly that —
+   the labels went and the rail stayed 148px wide. */
+.settings-rail.settings-rail--collapsed {
+  width: 58px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.settings-rail--collapsed .settings-rail-item {
+  justify-content: center;
+}
+.settings-rail--collapsed .settings-rail-label {
+  display: none;
+}
+/* The type list is the PHONE's second-level nav and the subnav column is the
+   wide band's — `settings.css` already hides the subnav under 1100, so this
+   is the other half of that swap. */
+.settings-type-list {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .settings-type-list {
+    display: flex;
+  }
+}
+/* A pane of the page, in flow. Nothing anchored, nothing scrolling on its
+   own: `.settings-main` is the scroll container now, which is what lets the
+   criteria textarea and the members list have the height they were cropped
+   to inside the popover. */
 .board-settings-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 65;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  width: min(560px, 100%);
-  max-height: min(70vh, 560px);
-  overflow-y: auto;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
 }
 .board-settings-row {
   display: flex;
@@ -768,9 +816,9 @@ body.board-body {
 }
 
 /* --- board controls (inside the board column — §3.9) ---
-   The `.board-controls` row (All / My Tasks tabs, the board/activity toggle, the
-   Done-window select) is gone: the tabs are top-level nav, the toggle is the
-   Activity tab, and the select moved into settings. `.board-tab` survives it —
+   The `.board-controls` row (the board/activity toggle and the Done-window
+   select) is gone: the toggle is the Activity tab and the select moved into
+   settings. `.board-tab` survives it —
    the Activity view's own All / Decisions filter still uses it. */
 .board-tab {
   min-height: 32px;
@@ -1605,9 +1653,36 @@ body.board-body {
 /* The collapse toggle sits at the rail's foot, visually quieter than the
    nav items above it. Hidden in the strip/bottom-bar bands — a row of tabs
    has nothing to collapse. */
-.board-nav-collapse {
+/* The settings seat takes the auto margin the collapse toggle used to own,
+   so the pair sits at the rail's foot with the four tabs pushed clear above
+   them. Quiet — the muted weight of an inactive tab — because it is not a
+   fifth page of the workspace. */
+.board-nav-item.board-nav-settings {
   margin-top: auto;
   font-weight: 500;
+}
+.board-nav-collapse {
+  margin-top: 0;
+  font-weight: 500;
+}
+/* The two bands hold ONE of these, never both (Bryan, 2026-09-11: on mobile
+   "leave it up top right"). Above 1100 the rail has the room and the top bar
+   does not; at or below it the nav is a strip and then a bottom bar with four
+   tabs and a mic already in it, so the gear stays where a thumb has always
+   found it. */
+/* Compound selectors, because `board.css` loads BEFORE `styles.css`: a single
+   class here loses an equal-specificity tie to `.board-icon-btn`'s own
+   `display`, which is the later rule. */
+.board-icon-btn.board-topbar-settings {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .board-icon-btn.board-topbar-settings {
+    display: inline-flex;
+  }
+  .board-nav-item.board-nav-settings {
+    display: none;
+  }
 }
 .board-nav-item {
   display: flex;

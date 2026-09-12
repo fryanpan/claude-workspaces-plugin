@@ -10,7 +10,7 @@
  * and splitting them would put that clock behind an import in three places.
  */
 import { tabTitle } from '../tab-title.ts';
-import { type BoardTab, fmtDuration } from './board-model.ts';
+import { fmtDuration } from './board-model.ts';
 
 // ── Activity view (exactly two filters — §3.9) ─────────────────────────────
 
@@ -897,17 +897,16 @@ export function panePath(workspaceId: string, pane: BoardPane): string {
 }
 
 /**
- * What the top-level nav offers. Four destinations, not two panes and a
- * filter: "My Tasks" and the activity feed were both reachable only from
- * controls INSIDE the board — a segmented tab and a button that swapped the
- * board out — so neither had a URL, neither survived a reload, and the one
- * that answers "what is mine" read as a filter on somebody else's list.
+ * What the top-level nav offers. Four destinations, not panes and toggles:
+ * the library and the activity feed were both reachable only from controls
+ * INSIDE the board — a button that swapped the board out — so neither had a
+ * URL and neither survived a reload.
  *
- * `pane` and `tab` remain the state the render path is written against; this
- * is the single thing the URL and the nav agree on, and both of those are
- * derived from it. One source, so a deep link and a click cannot disagree.
+ * `pane` remains the state the render path is written against; this is the
+ * single thing the URL and the nav agree on, and it is derived from it. One
+ * source, so a deep link and a click cannot disagree.
  */
-export type BoardNav = 'home' | 'tasks' | 'mine' | 'library' | 'activity';
+export type BoardNav = 'home' | 'tasks' | 'library' | 'activity';
 
 /** `/workspaces/<id>` stays Tasks, for the reason `paneFromPath` gives: every
  *  link already in the field points there. The other three are suffixes. */
@@ -915,7 +914,6 @@ export function navFromPath(pathname: string): BoardNav {
   const m = pathname.match(/^\/workspaces\/[^/?#]+\/([^/?#]+)\/?$/);
   const suffix = m?.[1];
   if (suffix === 'home') return 'home';
-  if (suffix === 'mine') return 'mine';
   if (suffix === 'activity') return 'activity';
   if (suffix === 'library') return 'library';
   return 'tasks';
@@ -930,19 +928,11 @@ export function paneForNav(nav: BoardNav): BoardPane {
   return nav === 'home' ? 'home' : 'board';
 }
 
-/** Activity keeps whichever task filter was showing; it renders no rows of
- *  its own, so answering `'all'` there would silently reset the filter on the
- *  way back. */
-export function tabForNav(nav: BoardNav): BoardTab | undefined {
-  return nav === 'mine' ? 'mine' : nav === 'tasks' ? 'all' : undefined;
-}
-
 /** What each destination adds to the browser tab. Tasks adds nothing: it is
  *  the board itself, so its title is just the workspace's name. */
 const NAV_TAB_LABEL: Record<BoardNav, string> = {
   home: 'Home',
   tasks: '',
-  mine: 'My Tasks',
   library: 'Library',
   activity: 'Activity',
 };

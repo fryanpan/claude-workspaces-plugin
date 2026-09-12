@@ -92,7 +92,7 @@ export function safeDecodeSegment(segment: string): string {
  * make every collection added later a page too, so adding one would be an
  * accident rather than a decision.
  */
-const BOARD_PAGE_TABS: readonly string[] = ['', 'home', 'tasks', 'mine', 'activity', 'library'];
+const BOARD_PAGE_TABS: readonly string[] = ['', 'home', 'tasks', 'activity', 'library'];
 
 /**
  * `/workspaces/<id>` and its named tabs, as the matcher that SERVES

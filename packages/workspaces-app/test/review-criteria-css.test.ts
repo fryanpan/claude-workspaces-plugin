@@ -15,11 +15,11 @@ import { IPAD, attach, installSheets, setViewport, styleOf } from './css-harness
  * — 1180x820 (iPad landscape, where HEIGHT is the scarce axis, ~750px usable)
  * and 430px (phone, where width is).
  *
- * Two things the text version asserted are gone and are named where they
- * were: the panel's own `width: min(560px, 100%)`, which happy-dom will not
- * compute (a `width` built from `min()`/`calc()`/`var()` comes back empty),
- * and the override's `:hover` / `:focus-visible` / `:active` inversion, which
- * has no pointer to enter it. Both are `bun run ui:shot` checks.
+ * One thing the text version asserted is gone and is named where it was: the
+ * override's `:hover` / `:focus-visible` / `:active` inversion, which has no
+ * pointer to enter it. That one is a `bun run ui:shot` check. The panel's own
+ * `width: min(560px, 100%)` is gone for a different reason — the popover it
+ * belonged to is a page now, and the column's `max-width` holds the measure.
  */
 
 /** The phone this project verifies, at the iPad's height — so a comparison
@@ -29,44 +29,46 @@ const NARROW = { width: 430, height: 820 } as const;
 let cleanup = () => {};
 beforeEach(() => {
   // The board's real cascade order — `renderBoardShell`, packages/server/src/
-  // shells.ts loads board.css BEFORE styles.css. tokens.css is left out on
-  // purpose: the served /app/tokens.css is the vendored Open Props subset
-  // concatenated with src/tokens.css, and installing the mapping layer alone
-  // resolves its `var(--gray-9)` chain to nothing, which would blank every
-  // colour compared below.
-  cleanup = installSheets('board.css', 'styles.css');
+  // shells.ts loads board.css BEFORE styles.css, then settings.css, which is
+  // where the settings PAGE's column and its scrolling live now that the
+  // criteria field sits on a page rather than in a popover. tokens.css is
+  // left out on purpose: the served /app/tokens.css is the vendored Open
+  // Props subset concatenated with src/tokens.css, and installing the mapping
+  // layer alone resolves its `var(--gray-9)` chain to nothing, which would
+  // blank every colour compared below.
+  cleanup = installSheets('board.css', 'styles.css', 'settings.css');
 });
 afterEach(() => {
   cleanup();
   document.body.replaceChildren();
 });
 
-/** The number a `min(a, b)` computed value settles on. happy-dom substitutes
- *  `vh` against the current viewport but leaves the comparison unevaluated. */
-function px(value: string): number {
-  const inner = /^min\((.*)\)$/.exec(value.trim());
-  const terms = inner?.[1] ? inner[1].split(',') : [value];
-  return Math.min(...terms.map((t) => Number.parseFloat(t)));
-}
-
-/** The settings panel, its criteria row, the field and the two buttons — the
- *  chain `renderSettingsPanel` emits. */
+/** The settings page down to the criteria row, the field and the two buttons
+ *  — the chain `buildSettingsView` emits. The ancestors are not decoration:
+ *  the column that scrolls and the shell that pins the page to the viewport
+ *  are what turn the field's cap into a cap on something bounded. */
 function panel(viewport: { width: number; height: number }) {
   setViewport(viewport);
-  const box = attach('board-settings-panel');
+  const view = attach('settings-shell board-settings-view');
+  const page = attach('settings-page', { parent: view });
+  const bodyRow = attach('settings-body-row', { parent: page });
+  const column = attach('settings-main', { parent: bodyRow });
+  const box = attach('board-settings-panel', {
+    parent: attach('settings-main-inner', { parent: column }),
+  });
   const row = attach('board-settings-row board-settings-row--criteria', { parent: box });
   const field = attach('board-criteria', { tag: 'textarea', parent: row });
   const actions = attach('board-criteria-actions', { parent: row });
   const button = attach('board-btn', { tag: 'button', parent: actions });
-  return { box, row, field, actions, button };
+  return { view, bodyRow, column, box, row, field, actions, button };
 }
 
 describe('the criteria field at 1180x820 and at 430px', () => {
   it('never lets one field eat the panel’s height', () => {
-    const { box, field } = panel(IPAD);
-    // The panel itself is capped and scrolls; the field inside it has to be
-    // capped too, or the six-line default pushes the buttons below the fold
-    // on the iPad, where the panel gets ~560px in total.
+    const { view, bodyRow, column, field } = panel(IPAD);
+    // The column the panel sits in is capped and scrolls; the field inside it
+    // has to be capped too, or the six-line default pushes the buttons below
+    // the fold on the iPad, where the page gets ~750px of usable height.
     const cap = Number.parseFloat(styleOf(field).maxHeight);
     expect(cap).toBeGreaterThan(0);
     expect(cap).toBeLessThan(IPAD.height);
@@ -82,11 +84,14 @@ describe('the criteria field at 1180x820 and at 430px', () => {
     // happy-dom does no layout; the 110px was measured in a real browser.
     expect(Number.parseFloat(styleOf(field).minHeight)).toBeGreaterThanOrEqual(160);
     expect(styleOf(field).overflow).toBe('auto');
-    // The panel is what scrolls, and it already says so.
-    expect(styleOf(box).overflowY).toBe('auto');
-    const panelCap = px(styleOf(box).maxHeight);
-    expect(panelCap).toBeGreaterThan(0);
-    expect(panelCap).toBeLessThan(IPAD.height);
+    // …and the box the cap is a cap INSIDE is bounded, or capping the field
+    // buys nothing. Settings is a page now, not a popover, so the ceiling is
+    // the viewport the shell is pinned to rather than a `max-height` on the
+    // panel: the shell is fixed, the row between it and the column may shrink
+    // below its content, and the column is what scrolls.
+    expect(styleOf(view).position).toBe('fixed');
+    expect(Number.parseFloat(styleOf(bodyRow).minHeight)).toBe(0);
+    expect(styleOf(column).overflowY).toBe('auto');
   });
 
   it('fits the panel’s width at 430px instead of overflowing it', () => {
@@ -95,9 +100,9 @@ describe('the criteria field at 1180x820 and at 430px', () => {
     // Without this the padding and border are added OUTSIDE the 100%, and the
     // field is wider than the panel on the narrowest screen.
     expect(styleOf(field).boxSizing).toBe('border-box');
-    // NOT asserted, and dropped from the text version: the panel's own
-    // `width: min(560px, 100%)`. happy-dom returns '' for any `width` built
-    // from `min()`/`calc()`/`var()`, so there is nothing here to read.
+    // NOT asserted: the column's own `max-width`, which is settings.css's
+    // business rather than this field's, and which no longer narrows at 430
+    // because the whole page is the column there.
   });
 
   it('stacks the row, so the words get the full column', () => {

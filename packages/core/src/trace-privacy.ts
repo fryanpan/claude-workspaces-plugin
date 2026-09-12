@@ -266,7 +266,6 @@ const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'home', 'instructions'],
   ['workspaces', ':id', 'tasks'],
   ['workspaces', ':id', 'tasks', 'batch'],
-  ['workspaces', ':id', 'mine'],
   ['workspaces', ':id', 'activity'],
   ['workspaces', ':id', 'mockups', ':id'],
   ['workspaces', ':id', 'review-items'],

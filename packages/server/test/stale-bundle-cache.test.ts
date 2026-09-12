@@ -88,6 +88,11 @@ describe('a reload cannot return the old bundle', () => {
     'signin.js': `export const signin = ${n};\n`,
     'styles.css': `body{--v:${n}}\n`,
     'board.css': `.board{--v:${n}}\n`,
+    // The board shell links this one too, now that settings is a page inside
+    // the board app wearing the settings page's own chrome. A sheet a shell
+    // names and the dist does not carry falls back to its permanent url,
+    // which is the exact defect this file exists to catch.
+    'settings.css': `.settings-shell{--v:${n}}\n`,
     'signin.css': `.signin-card{--v:${n}}\n`,
     'tokens.css': `:root{--t:${n}}\n`,
   });

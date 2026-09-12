@@ -118,7 +118,7 @@ describe('createBoardChromeRegion', () => {
     expect(el('board-settings').getAttribute('aria-label')).toContain('needs a look');
   });
 
-  it('shows and hides the panel from state, and tells a reader which it is', () => {
+  it('shows and hides the settings page from state', () => {
     const state = boardState();
     const chrome = createBoardChromeRegion({
       state,
@@ -128,11 +128,9 @@ describe('createBoardChromeRegion', () => {
       awareness: fakeAwareness([]),
     });
     chrome.renderSettingsPanel();
-    expect(el('board-settings-panel').classList.contains('hidden')).toBe(true);
-    expect(el('board-settings').getAttribute('aria-expanded')).toBe('false');
+    expect(el('board-settings-view').classList.contains('hidden')).toBe(true);
     state.settingsOpen = true;
     chrome.renderSettingsPanel();
-    expect(el('board-settings-panel').classList.contains('hidden')).toBe(false);
-    expect(el('board-settings').getAttribute('aria-expanded')).toBe('true');
+    expect(el('board-settings-view').classList.contains('hidden')).toBe(false);
   });
 });

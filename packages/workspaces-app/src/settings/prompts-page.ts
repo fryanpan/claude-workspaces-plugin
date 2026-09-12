@@ -62,7 +62,6 @@ export function listHref(route: PromptsRoute): string {
 const ICONS = {
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
   tasks: '<path d="M4 6h16M4 12h16M4 18h16"/>',
-  mine: '<path d="M20 6L9 17l-5-5"/>',
   activity: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
@@ -89,7 +88,6 @@ function rail(route: PromptsRoute): string {
     `<nav class="settings-rail" aria-label="Workspace">` +
     item(`/workspaces/${ws}/home`, 'home', 'Home') +
     item(`/workspaces/${ws}/tasks`, 'tasks', 'Tasks') +
-    item(`/workspaces/${ws}/mine`, 'mine', 'My Tasks') +
     item(`/workspaces/${ws}/activity`, 'activity', 'Activity') +
     `<div class="settings-rail-spacer"></div>` +
     `<a class="settings-rail-item" href="${listHref(route)}" aria-current="page">` +
@@ -127,16 +125,23 @@ function chrome(route: PromptsRoute): string {
   );
 }
 
-/** One row. The whole row is the target — a name and a purpose are not two
- *  places to aim at. */
-function listRow(route: PromptsRoute, row: PromptRow): string {
+/**
+ * One row. The whole row is the target — a name and a purpose are not two
+ * places to aim at.
+ *
+ * Exported because the board's settings page draws the same list inside its
+ * own Prompts pane, where the address is the pane's own state rather than a
+ * URL. Two copies of this markup would drift the first time a row grew
+ * anything, and the CSS behind it is one rule set either way.
+ */
+export function promptRow(row: PromptRow, href: string): string {
   // EVERY row goes to the same place. Two of the seven keep their words on
   // the board rather than on the server, and one of them also has a field in
   // the board's own settings panel — but a row that looks like its siblings
   // and lands somewhere else is the wrong-target surprise, so which request
   // carries the words is `prompts-api.ts`'s business and not the row's.
   return (
-    `<a class="prompt-row" href="${promptHref(route, row.id)}" data-prompt-id="${escapeHtml(row.id)}">` +
+    `<a class="prompt-row" href="${href}" data-prompt-id="${escapeHtml(row.id)}">` +
     `<span class="prompt-text">` +
     `<span class="prompt-name">${escapeHtml(row.name)}</span>` +
     `<span class="prompt-purpose">${escapeHtml(row.purpose)}</span>` +
@@ -188,7 +193,7 @@ export function mountPromptsPage(root: HTMLElement, env: PromptsPageEnv): Prompt
       main.innerHTML = '<div class="prompt-list"><p>Could not read the prompts.</p></div>';
       return;
     }
-    main.innerHTML = `<div class="prompt-list">${rows.map((r) => listRow(route, r)).join('')}</div>`;
+    main.innerHTML = `<div class="prompt-list">${rows.map((r) => promptRow(r, promptHref(route, r.id))).join('')}</div>`;
   }
 
   async function paint(): Promise<void> {

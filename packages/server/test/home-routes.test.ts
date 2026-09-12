@@ -195,9 +195,9 @@ describe('home routes — deterministic server (no summarizer)', () => {
     // `navPath` mints all four of these and `setNav` pushes them into history,
     // so a suffix the server does not serve costs nothing until somebody
     // reloads or pastes the URL — at which point the product's own link 404s.
-    // Measured that way: /home answered 200 while /tasks, /mine and /activity
-    // all 404'd.
-    for (const suffix of ['', '/home', '/tasks', '/mine', '/activity']) {
+    // Measured that way: /home answered 200 while /tasks and /activity both
+    // 404'd.
+    for (const suffix of ['', '/home', '/tasks', '/library', '/activity']) {
       const page = await h.local(`/workspaces/${ws}${suffix}`);
       expect({ suffix, status: page.status }).toEqual({ suffix, status: 200 });
       expect(await page.text()).toContain('board-root');

@@ -68,8 +68,6 @@ const GOALS: BoardGoal[] = [
 ];
 
 const filters: BoardFilters = {
-  tab: 'all',
-  userName: 'Jordan',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
 };

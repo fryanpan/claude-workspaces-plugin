@@ -64,8 +64,6 @@ function task(overrides: Partial<BoardTask> = {}): BoardTask {
 const GOALS: BoardGoal[] = [{ id: 'g-pr', title: '1. Get the PR out' }];
 
 const filters: BoardFilters = {
-  tab: 'all',
-  userName: 'Jordan',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
 };

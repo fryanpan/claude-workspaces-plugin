@@ -23,6 +23,7 @@ import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
 import { wireKeyboardInset } from '../keyboard-inset.ts';
 import { pageSentry } from '../sentry-page.ts';
+import { createPromptsApi } from '../settings/prompts-api.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from '../signin/write-gate.ts';
 import { installStaleClientNotice } from '../stale-client.ts';
 import {
@@ -48,14 +49,16 @@ import {
   type DoneWindow,
   isTaskArchived,
 } from './board-model.ts';
-import { type BoardNav, paneForNav, tabForNav } from './board-presence-model.ts';
+import { type BoardNav, paneForNav } from './board-presence-model.ts';
 import { createBoardProjection, initialBoardState } from './board-projection.ts';
+import { mountBoardPromptsPane } from './board-prompts-pane.ts';
 import { createBoardQueueOpeners } from './board-queue-open.ts';
 import { createBoardRegion } from './board-region.ts';
 import { renderQuickActions } from './board-render.ts';
 import { createBoardReviewController } from './board-review-controller.ts';
 import { type WalkSources, reviewQueue } from './board-review-model.ts';
 import { wireBoardSettingsPanel } from './board-settings-panel.ts';
+import { mountBoardSettingsView } from './board-settings-view.ts';
 import { buildShell, wireNavCollapse } from './board-shell.ts';
 import { wireBoardShortcuts } from './board-shortcuts.ts';
 import { createTaskDetailLoads } from './board-task-detail.ts';
@@ -344,7 +347,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     renderActivityRegion,
   } = createBoardRegion({
     state,
-    user,
     el,
     actions,
     taskList,
@@ -473,14 +475,10 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   if (state.nav === 'library') void library.open();
 
   /**
-   * The one writer of `nav`, `pane`, `tab` and `view`. Four destinations that
-   * used to be a pane switch, a segmented filter and a toggle button, each
-   * setting its own piece of state — so "My Tasks" had no URL and a reload
-   * dropped you back on All.
-   *
-   * `tab` is left alone for Home and Activity (`tabForNav` answers undefined):
-   * neither renders task rows, so resetting the filter there would silently
-   * undo the reader's choice on the way back.
+   * The one writer of `nav`, `pane` and `view`. Four destinations that used to
+   * be a pane switch and a toggle button, each setting its own piece of state
+   * — so the library and the activity feed had no URL and a reload dropped
+   * you back on the board.
    */
   function setNav(nav: BoardNav, push = true): void {
     state.nav = nav;
@@ -490,8 +488,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     // with no memory of having asked.
     if (state.showArchived) setShowArchived(false);
     state.view = nav === 'activity' || nav === 'library' ? nav : 'board';
-    const tab = tabForNav(nav);
-    if (tab !== undefined) state.tab = tab;
     // Arriving at Home means arriving at the TOP of Home: `/workspaces/<id>/home`
     // names the Home page, and the walkthrough's own address is that page plus
     // `?item=`. Unconditional — tapping Home while already on Home is exactly
@@ -723,8 +719,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   });
 
   // Controls.
-  // Home / Tasks / My Tasks / Library / Activity — pushState every way, and
-  // the back button honours all five.
+  // Home / Tasks / Library / Activity — pushState every way, and the back
+  // button honours all four.
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.board-nav-item[data-nav]')) {
     btn.addEventListener('click', () => setNav((btn.dataset.nav as BoardNav) ?? 'tasks'));
   }
@@ -750,6 +746,47 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // the share button beside it. `board-settings-panel.ts`, called here so the
   // document-level click and keydown listeners register in the same order
   // relative to the ones around them.
+  // The settings PAGE — its second-level nav and the two bands' different
+  // ways of choosing a type. Mounted before the panel below, which opens it.
+  // Through the DOM's own view rather than the injected `window`, which is
+  // an EventTarget a test can hand in: the query belongs to the document that
+  // is being painted, and a test document without one answers the wide band.
+  const narrowBand = document.defaultView?.matchMedia('(max-width: 1100px)') ?? null;
+  // The third pane: the seven prompts, read and written where the other two
+  // types are rather than on a page whose own nav cannot get back here.
+  // `send` is adapted rather than shared — the board calls the parsed body
+  // `data` and the prompts api calls it `body`.
+  const promptsPane = mountBoardPromptsPane({
+    host: el('board-settings-prompts'),
+    api: createPromptsApi({
+      workspaceId,
+      author,
+      fetchJson,
+      send: async (path, method, body) => {
+        const res = await send(path, method, body);
+        return { ok: res.ok, status: res.status, body: res.data };
+      },
+    }),
+    toast: showToast,
+  });
+  const settingsView = mountBoardSettingsView({
+    document,
+    prompts: promptsPane,
+    narrow: () => narrowBand?.matches === true,
+    onClose: () => {
+      state.settingsOpen = false;
+      renderSettingsPanel();
+    },
+    onNav: (nav) => {
+      state.settingsOpen = false;
+      renderSettingsPanel();
+      setNav(nav);
+    },
+  });
+  // A width change between the two bands must not strand a reader on a pane
+  // whose nav has just gone — the subnav is drawn on one band and the row
+  // list on the other.
+  narrowBand?.addEventListener('change', () => settingsView.bandChanged());
   wireBoardSettingsPanel({
     document,
     el,
@@ -764,6 +801,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       state.settingsOpen = open;
     },
     renderSettingsPanel,
+    onOpen: () => settingsView.open(),
     href: () => location.href,
   });
 

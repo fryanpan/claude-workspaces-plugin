@@ -28,7 +28,6 @@ import { HUDDLE_MODE_PARAM } from '../huddle-entry.ts';
 import type { RelatedEntry, TaskDiscussion } from './board-detail-render.ts';
 import {
   type BoardSection,
-  type BoardTab,
   type BoardTask,
   type BoardWorkspaceInfo,
   type DoneWindow,
@@ -84,7 +83,6 @@ export interface BoardState {
   homeSettled: Map<string, ReviewItem>;
   /** When the current generating-poll run started; 0 when not polling. */
   homePollStarted: number;
-  tab: BoardTab;
   doneWindow: DoneWindow;
   view: 'board' | 'activity' | 'library';
   /**
