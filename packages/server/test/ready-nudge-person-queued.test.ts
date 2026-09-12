@@ -32,14 +32,13 @@ import { READY_IDLE_EVENT, ReadyWorkNudger } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedGoalsOverHttp } from './goal-seed.ts';
 import { type Frame, listenFrames, waitForFrames } from './sse-frames.ts';
+import { waitFor } from './wait-for.ts';
 
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 /** The production window. Nothing in this file may wait it out. */
 const IDLE_MS = 15 * 60_000;
-
-const settle = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 
 describe('a person queueing a row wakes the lead in that tick', () => {
   let handle: ServerHandle;
@@ -97,15 +96,30 @@ describe('a person queueing a row wakes the lead in that tick', () => {
       workspaceId,
     });
 
-  /** A timed pass that must find nothing: proof the window really is shut,
-   *  so every frame this file sees came from the immediate path. */
-  async function expectWindowStillShut(): Promise<void> {
+  /**
+   * Move a row a person's move must NOT have announced, then queue a free row
+   * and wait for the wake that one is owed — and assert the stream holds only
+   * that second wake.
+   *
+   * Ordering rather than a sleep, and it is a stronger assertion than one.
+   * Both moves run on one SSE stream, the first route call returns before the
+   * second is sent, and a `nudgeReadyWork()` pass in between is synchronous —
+   * so anything the first move or that pass would have delivered is already
+   * on the stream by the time the second move's frame lands. A fixed window
+   * bets on a delivery time; this waits for an observable that can only
+   * arrive later.
+   */
+  async function expectOnlyTheSecondWake(silentId: string, freeTitle: string): Promise<void> {
+    // A timed pass in the gap: proof the fifteen-minute window really is shut,
+    // so the frame below came from the immediate path and nowhere else.
     handle.nudgeReadyWork();
-    await settle();
+    const free = await triageRow(freeTitle);
+    await jj(await moveToTodo(free, PERSON));
+    const got = await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
     expect(
-      nudges(lead.frames).map((f) => f.data?.taskId),
-      'the idle window should not have elapsed',
-    ).toEqual([]);
+      got.map((f) => f.data?.taskId),
+      `${silentId} should not have been announced`,
+    ).toEqual([free]);
   }
 
   beforeEach(async () => {
@@ -149,9 +163,12 @@ describe('a person queueing a row wakes the lead in that tick', () => {
 
   it('names the row he queued, with no window and only to him', async () => {
     const taskId = await triageRow('Rank results by recency');
-    // Agreeing the band is a person's transition too, and it fired nothing:
-    // a goal row is owned by nobody, so it is never ready work.
-    await expectWindowStillShut();
+    // A timed pass first: the window is fifteen minutes and the board was
+    // built seconds ago, so this finds nothing and every frame below came
+    // from the immediate path. Agreeing the band in `beforeEach` was a
+    // person's transition too, and it fired nothing — a goal row is owned by
+    // nobody, so it is never ready work.
+    handle.nudgeReadyWork();
 
     await jj(await moveToTodo(taskId, PERSON));
     const got = await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
@@ -164,28 +181,22 @@ describe('a person queueing a row wakes the lead in that tick', () => {
     // long the board stood still, and this one never stood still at all.
     expect(got[0]?.data?.idleMs).toBeUndefined();
     // Addressed. The tab is on the same channel and heard the row change —
-    // the positive control that says it was listening at all.
-    await settle();
+    // waited for, so "the tab got no wake" cannot be satisfied by a tab that
+    // had not yet received anything at all.
+    await waitFor(() => tab.frames.length > 0, { describe: 'the tab to hear the board move' });
     expect(nudges(tab.frames)).toHaveLength(0);
-    expect(tab.frames.length).toBeGreaterThan(0);
   }, 60_000);
 
   it('stays silent when an agent makes the same move, and still fires for his', async () => {
     const agentMoved = await triageRow('Cache the facet counts');
+    // Ready after this, and deliberately unannounced: a builder moving its own
+    // rows must not wake the lead once per transition.
     await jj(await moveToTodo(agentMoved, LEAD));
-    await settle(400);
-    // Ready, and deliberately unannounced: a builder moving its own rows must
-    // not wake the lead once per transition.
-    await expectWindowStillShut();
 
-    const hisMove = await triageRow('Rank results by recency');
-    await jj(await moveToTodo(hisMove, PERSON));
-    const got = await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
-    expect(got).toHaveLength(1);
-    // His row, not the one the agent queued first — the wake names what he
-    // just did, and the silence above was about the actor rather than about a
-    // board that could not be woken.
-    expect(got[0]?.data?.taskId).toBe(hisMove);
+    // The same person's verb on an equally ready row DOES wake him, so the
+    // silence was about the actor rather than about a board nothing could
+    // wake.
+    await expectOnlyTheSecondWake(agentMoved, 'Rank results by recency');
   }, 60_000);
 
   it('stays silent when his move leaves the row held behind an open dependency', async () => {
@@ -203,19 +214,10 @@ describe('a person queueing a row wakes the lead in that tick', () => {
     );
 
     await jj(await moveToTodo(held, PERSON));
-    await settle(400);
-    expect(
-      nudges(lead.frames).map((f) => f.data?.taskId),
-      'a held row was announced as ready',
-    ).toEqual([]);
 
-    // Same person, same verb, a row nothing holds: the silence above was the
-    // hold, not a wake that had stopped working.
-    const free = await triageRow('Cache the facet counts');
-    await jj(await moveToTodo(free, PERSON));
-    const got = await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
-    expect(got).toHaveLength(1);
-    expect(got[0]?.data?.taskId).toBe(free);
+    // Same person, same verb, a row nothing holds: the silence is the hold,
+    // not a wake that had stopped working.
+    await expectOnlyTheSecondWake(held, 'Cache the facet counts');
   }, 60_000);
 
   it('stays silent when his move leaves the row under a band still in triage', async () => {
@@ -236,17 +238,10 @@ describe('a person queueing a row wakes the lead in that tick', () => {
 
     const held = await triageRow('Rank results by recency', { goal: pending.later });
     await jj(await moveToTodo(held, PERSON));
-    await settle(400);
-    expect(
-      nudges(lead.frames).map((f) => f.data?.taskId),
-      'a row under a triage band was announced as ready',
-    ).toEqual([]);
 
-    const free = await triageRow('Cache the facet counts', { goal: pending.rank });
-    await jj(await moveToTodo(free, PERSON));
-    const got = await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
-    expect(got).toHaveLength(1);
-    expect(got[0]?.data?.taskId).toBe(free);
+    // `triageRow` files into `goals.rank`, which the line above re-agreed —
+    // so the free row lands in the band that dispatches.
+    await expectOnlyTheSecondWake(held, 'Cache the facet counts');
   }, 60_000);
 });
 
