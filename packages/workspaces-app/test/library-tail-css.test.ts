@@ -15,8 +15,12 @@
  * 24px, plus the fixed nav bar on a phone. The two `env(safe-area-inset-
  * bottom)` terms cancel, one on each side, which is why neither appears.
  *
- *   1180: 170 - 24 - 0  = 146px
- *    430: 170 - 24 - 58 =  88px
+ * And 12px of daylight on top, because a reservation of exactly 170 ended the
+ * last row's box ON the topmost button's top edge, with its count badge
+ * (`top: -4px`) reaching into the row.
+ *
+ *   1180: 170 + 12 - 24 - 0  = 158px
+ *    430: 170 + 12 - 24 - 58 = 100px
  *
  * happy-dom runs the cascade but no layout engine, so this reads the
  * reservation rather than the geometry it buys; the geometry is re-measured
@@ -33,6 +37,8 @@ import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.
 const FLOAT_STACK_PX = 170;
 /** What `#board-root` ends its own content above, before any bar. */
 const BOARD_ROOT_SLACK_PX = 24;
+/** Room between the last row and that edge, clearing the button's badge. */
+const DAYLIGHT_PX = 12;
 
 /** Add up a px-only `calc()` the cascade left unevaluated. */
 function pxSum(value: string): number {
@@ -68,12 +74,14 @@ describe('the Library tail', () => {
     // reservation that came out right did so because the rule applied rather
     // than because the media query missed and the numbers happened to agree.
     expect(styleOf(document.body).getPropertyValue('--board-bottom-bar')).toBe(`${bar}px`);
-    expect(pxSum(styleOf(body()).paddingBottom)).toBe(FLOAT_STACK_PX - BOARD_ROOT_SLACK_PX - bar);
+    expect(pxSum(styleOf(body()).paddingBottom)).toBe(
+      FLOAT_STACK_PX + DAYLIGHT_PX - BOARD_ROOT_SLACK_PX - bar,
+    );
   });
 
   it('reserves the whole block, not just the bubble nearest the corner', () => {
     setViewport(PHONE);
     const reserved = pxSum(styleOf(body()).paddingBottom) + BOARD_ROOT_SLACK_PX + 58;
-    expect(reserved).toBeGreaterThanOrEqual(FLOAT_STACK_PX);
+    expect(reserved).toBeGreaterThanOrEqual(FLOAT_STACK_PX + DAYLIGHT_PX);
   });
 });
