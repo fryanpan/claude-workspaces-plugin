@@ -140,12 +140,49 @@ describe('declaring a wait', () => {
     expect(s.task.externalWait).toBeUndefined();
   });
 
+  it('does NOT count as the row moving — the silence it explains is kept', () => {
+    // codex review, P1. The stall loop turns each row's `updatedAt` into an
+    // activity tick (`stall-wiring.ts`), so a declaration that stamped it
+    // would un-stall the row it is about for a whole quiet window — the very
+    // wake that should carry the declaration would not name the row at all —
+    // and a CLEAR that stamped it would hand the row a fresh window every
+    // time, making declare-clear-declare an unbounded mute with extra steps.
+    //
+    // Driven through the gate the way the wiring feeds it, rather than
+    // asserted on the field, so a later writer that moves the clock some
+    // other way still fails this.
+    const judge = (task: Task) =>
+      evaluateStalls({
+        tasks: [row({ id: task.id, updatedAt: task.updatedAt })],
+        events:
+          typeof task.updatedAt === 'number' && task.updatedAt > 0
+            ? [{ taskId: task.id, ts: task.updatedAt }]
+            : [],
+        reviewItems: [],
+        bands,
+        now: NOW,
+      });
+    const s = store({ id: 't-rollout', updatedAt: NOW - 300 * MIN });
+    const before = judge(s.task);
+    expect(before.stalled).toHaveLength(1);
+
+    setExternalWait(s, 't-rollout', { what: 'the fleet restart', by: 'C', now: NOW });
+    expect(judge(s.task).stalled.map((r) => r.quietMs)).toEqual(
+      before.stalled.map((r) => r.quietMs),
+    );
+
+    clearExternalWait(s, 't-rollout');
+    expect(judge(s.task).stalled.map((r) => r.quietMs)).toEqual(
+      before.stalled.map((r) => r.quietMs),
+    );
+  });
+
   it('clears, and says so when there was nothing to clear', () => {
     const s = store({ id: 't-rollout' });
     setExternalWait(s, 't-rollout', { what: 'the fleet restart', by: 'C', now: NOW });
 
-    const first = clearExternalWait(s, 't-rollout', NOW + MIN);
-    const second = clearExternalWait(s, 't-rollout', NOW + 2 * MIN);
+    const first = clearExternalWait(s, 't-rollout');
+    const second = clearExternalWait(s, 't-rollout');
 
     expect(first.ok && first.changed).toBe(true);
     expect(second.ok && second.changed).toBe(false);

@@ -284,7 +284,7 @@ export async function handleTaskFields(
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     if (body?.clear === true) {
-      const cleared = clearExternalWait(taskStore, taskId, Date.now());
+      const cleared = clearExternalWait(taskStore, taskId);
       if (!cleared.ok) return j(404, cleared);
       taskProjection.ensureWorkspace(cleared.task.workspaceId);
       return j(200, { ok: true, task: cleared.task, changed: cleared.changed });

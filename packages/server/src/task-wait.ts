@@ -147,8 +147,15 @@ export function setExternalWait(
     until: input.now + requested,
     by: input.by,
   };
+  // `updatedAt` is deliberately NOT advanced, and this is load-bearing rather
+  // than an omission. `keep-moving.ts` reads that field as ACTIVITY, so
+  // stamping it would make the verb un-stall the very row it is about: the
+  // row would drop out of the verdict for a whole quiet window, its
+  // declaration would not be named on the wake that should carry it, and the
+  // silence the lapse is supposed to hand back would have been thrown away.
+  // A declaration is a statement that nothing is moving; recording it as
+  // movement is the one thing it must not do (found by codex review).
   task.externalWait = wait;
-  task.updatedAt = input.now;
   store.scheduleSave(task.workspaceId);
   return { ok: true, task, wait };
 }
@@ -157,17 +164,21 @@ export function setExternalWait(
  * End a declared wait now. `changed: false` when there was none — a caller
  * clearing twice has not failed at anything, and a 404 here would send them
  * hunting for a task that is fine.
+ *
+ * Leaves the activity clock alone for the reason `setExternalWait` does, and
+ * here it is the sharper of the two: a clear that counted as movement would
+ * hand the row a fresh quiet window, so declare-then-clear-then-declare would
+ * be an unbounded mute with extra steps — exactly what the cap exists to stop
+ * (codex review).
  */
 export function clearExternalWait(
   store: ExternalWaitStore,
   taskId: string,
-  now: number,
 ): ClearExternalWaitResult {
   const task = store.getTask(taskId);
   if (!task) return { ok: false, error: 'not-found' };
   if (task.externalWait === undefined) return { ok: true, task, changed: false };
   task.externalWait = undefined;
-  task.updatedAt = now;
   store.scheduleSave(task.workspaceId);
   return { ok: true, task, changed: true };
 }
