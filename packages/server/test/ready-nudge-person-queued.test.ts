@@ -220,6 +220,50 @@ describe('a person queueing a row wakes the lead in that tick', () => {
     await expectOnlyTheSecondWake(held, 'Cache the facet counts');
   }, 60_000);
 
+  it('fires for a row the cap is holding, on a board really at its cap', async () => {
+    // The unit test below proves the nudger reads `capacityTrimmed`. This
+    // proves the SERVER puts it there: `readyWorkSnapshot` trims `ready` to
+    // the free slots, so if the field stopped being attached the feature
+    // would quietly become the capacity gate it exists not to be, and the
+    // unit test would stay green over a fabricated snapshot.
+    await jj(
+      await fetch(`${base}/workspaces/${workspaceId}/settings`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ author: LEAD, parallelismCap: 1 }),
+      }),
+    );
+    // Spend the one slot. The agent's own moves, so nothing here wakes anyone.
+    const busy = await triageRow('Migrate the search index');
+    await jj(await moveToTodo(busy, LEAD));
+    await jj(
+      await post(`/workspaces/${workspaceId}/tasks/${busy}/transition`, {
+        to: 'in-progress',
+        author: LEAD,
+        workspaceId,
+      }),
+    );
+    const worktree = mkdtempSync(join(tmpdir(), 'wt-cap-'));
+    try {
+      await jj(
+        await post(`/workspaces/${workspaceId}/dispatches`, {
+          taskId: busy,
+          worktreePath: worktree,
+        }),
+      );
+
+      const queued = await triageRow('Rank results by recency');
+      await jj(await moveToTodo(queued, PERSON));
+      const got = await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
+      // There is nowhere to put it, and he is told anyway: the lead reads the
+      // cap itself and queues. A wake suppressed by a full cap is a wake
+      // nobody ever learns was owed.
+      expect(got.map((f) => f.data?.taskId)).toEqual([queued]);
+    } finally {
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('stays silent when his move leaves the row under a band still in triage', async () => {
     const pending = await seedGoalsOverHttp(
       base,
@@ -294,6 +338,54 @@ describe('the immediate wake is not gated on free capacity', () => {
     nudger.personQueuedTask({ workspaceId: 'w-search', taskId: row.id });
     expect(frames).toHaveLength(1);
     expect(frames[0]).toMatchObject({ event: READY_IDLE_EVENT, taskId: row.id, title: row.title });
+  });
+
+  /**
+   * The lead is not holding a stream — a restart, a plugin update, a session
+   * that has not come back. The wake cannot be delivered, and the thing that
+   * must not happen is for it to be spent anyway: this path moves the idle
+   * clock through `noteActivity`, so an arming recorded here matches the very
+   * stamp the next tick computes and the fifteen-minute BACKSTOP goes with
+   * it. Before this branch that move would have nudged at the window.
+   */
+  it('leaves the wake owed when the lead is holding no stream', () => {
+    let now = 1_000_000;
+    let reachable = false;
+    const frames: Array<Record<string, unknown>> = [];
+    const board = {
+      workspaceId: 'w-search',
+      leadAgentId: LEAD.id,
+      retired: false,
+      ready: [row],
+      considered: 1,
+      held: {},
+      undetermined: [],
+      lastActivityAt: 0,
+    };
+    const nudger = new ReadyWorkNudger({
+      snapshot: () => [board] as never,
+      lookup: () => board as never,
+      canReach: () => reachable,
+      send: (_workspaceId, _agentId, frame) => {
+        frames.push(frame as unknown as Record<string, unknown>);
+        return 1;
+      },
+      now: () => now,
+      idleMs: IDLE_MS,
+      report: () => {},
+    });
+
+    nudger.personQueuedTask({ workspaceId: 'w-search', taskId: row.id });
+    expect(frames, 'there was nobody to tell').toHaveLength(0);
+
+    // He comes back, and the window elapses. The board still owes him this.
+    reachable = true;
+    now += IDLE_MS + 1;
+    nudger.tick();
+    expect(frames).toHaveLength(1);
+    // The timed frame, not a replay of the immediate one — it carries the
+    // denominator, which the immediate path never sends.
+    expect(frames[0]).toMatchObject({ taskId: row.id, readyCount: 1, consideredCount: 1 });
   });
 
   it('still fires nothing for a row in neither list', () => {
