@@ -1372,6 +1372,47 @@ describe('mountMarkupMargin — suggestion balloons', () => {
     expect(balloon.innerHTML).not.toContain('<script');
   });
 
+  it('a link-only proposal names the target on the card, collapsed and expanded', async () => {
+    const { parent, editor, ydoc, chrome, scope } = mountPlainWithChrome(
+      'the survey is late and nobody has chased it.\n',
+    );
+    await tick();
+    // Only a MARK changes: the characters are identical on both sides, so a
+    // card built from the raw text would read "the survey is late → the
+    // survey is late" and name nothing.
+    suggestOps.suggestReplace(ydoc, {
+      find: 'the survey is late',
+      replace: '[the survey is late](/docs/survey)',
+      author: suggestAuthor,
+    });
+    await tick();
+
+    const margin = mountMarkupMargin({
+      editorEl: parent,
+      view: editor.editor.view,
+      getDeletions: () => [],
+      threads: () => chrome.collectThreads(),
+      chrome,
+      getSuggestions: () => suggestOps.listSuggestions(ydoc),
+      docId: 'd1',
+      scope,
+    });
+    margin.relayout();
+
+    let balloon = parent.querySelector('.cw-balloon.cw-balloon-suggestion') as HTMLElement;
+    expect(balloon.classList.contains('cw-balloon-collapsed')).toBe(true);
+    expect(balloon.querySelector('.cw-suggest-new')?.textContent).toBe(
+      '[the survey is late](/docs/survey)',
+    );
+
+    clickToExpand(balloon);
+    balloon = parent.querySelector('.cw-balloon.cw-balloon-suggestion') as HTMLElement;
+    expect(balloon.querySelector('.cw-suggest-old')?.textContent).toBe('the survey is late');
+    expect(balloon.querySelector('.cw-suggest-new')?.textContent).toBe(
+      '[the survey is late](/docs/survey)',
+    );
+  });
+
   it('Accept posts to the accept endpoint and removes the card', async () => {
     const { parent, editor, ydoc, chrome, scope } = mountPlainWithChrome('Alpha bravo gamma.\n');
     await tick();
