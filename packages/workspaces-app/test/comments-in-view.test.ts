@@ -372,6 +372,41 @@ describe.skipIf(CHROME === null)('the page holds still while the meeting writes'
   }
 });
 
+describe.skipIf(CHROME === null)('a doc opens with its own title on screen', () => {
+  for (const preset of ['ipad', 'phone'] as const) {
+    const width = preset === 'ipad' ? '1180x820' : '430';
+    it(
+      `leaves the first heading below the top of the pane at ${width}`,
+      async () => {
+        const { opened } = await probeFor(preset);
+
+        // THE CONTROLS. The hold really did take its reading against an editor
+        // with no document — one empty paragraph, and a pane with nothing to
+        // scroll — and the document really did arrive afterwards and fill more
+        // than a screen. Without these a pane that never got a document, or
+        // one that was full before the hold mounted, would read as a pass.
+        expect(opened.blocksAtMount).toBe(1);
+        expect(opened.blocksAfter).toBeGreaterThan(10);
+        expect(opened.scrollHeightAfter).toBeGreaterThan(opened.scrollHeightBefore);
+        expect(opened.scrollHeightAfter).toBeGreaterThan(opened.clientHeight);
+        expect(opened.headingText).not.toBe('');
+
+        // THE FAULT, as the reader meets it: the doc's own H1 above the pane's
+        // clip box and under the top bar. WHOLLY inside the pane is the bar,
+        // not merely overlapping it — the pane's top edge is where the top bar
+        // ends.
+        expect(opened.headingTop).toBeGreaterThanOrEqual(opened.paneTop);
+        expect(opened.headingBottom).toBeGreaterThan(opened.headingTop);
+        // …and the same fault as the pane reports it: it scrolled itself with
+        // nobody having touched it. 70 here and 47 at 430 on the pre-fix code;
+        // 71 and 48 against a real doc on the live server.
+        expect(opened.scrollTop).toBe(0);
+      },
+      BROWSER_CASE_MS,
+    );
+  }
+});
+
 describe.skipIf(CHROME === null)('a rewriting tick keeps the cards it does not touch', () => {
   for (const preset of ['ipad', 'phone'] as const) {
     const width = preset === 'ipad' ? '1180x820' : '430';
