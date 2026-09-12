@@ -1121,12 +1121,13 @@ export async function handleTaskTool(
       // the route's own words. `rule: null` clears; an absent rule is an
       // error rather than a clear, for the reason the route gives: a rule
       // the caller mistyped must not silently delete the one that was there.
-      const { taskId, rule, timezone, until, onMissed } = a as {
+      const { taskId, rule, timezone, until, onMissed, output } = a as {
         taskId: string;
         rule?: unknown;
         timezone?: string;
         until?: number;
         onMissed?: string;
+        output?: unknown;
       };
       if (rule === undefined) {
         return err('rule required — a rule object to set, or null to clear the schedule.');
@@ -1136,6 +1137,7 @@ export async function handleTaskTool(
         ...(timezone !== undefined ? { timezone } : {}),
         ...(until !== undefined ? { until } : {}),
         ...(onMissed !== undefined ? { onMissed } : {}),
+        ...(output !== undefined ? { output } : {}),
         author: AUTHOR,
       })) as { task: TaskPayload & { schedule?: TaskSchedule } };
       const schedule = res.task.schedule ?? null;
