@@ -37,6 +37,27 @@ import { waitFor } from './wait-for.ts';
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
+/**
+ * The two author shapes the CLIENT actually sends — and `PERSON` above is
+ * neither of them.
+ *
+ * `identityFor` (core/src/identity.ts) emits exactly `kind: 'known'` for a
+ * signed-in or named browser and `kind: 'anon'` for an unnamed guest. It never
+ * emits `kind: 'person'`; that spelling is the actor axis a REST caller may
+ * declare, and it is a shape only a test constructs.
+ *
+ * The distinction is a branch, not a nicety. `classifyActor` answers `person`
+ * for `kind: 'person'` at its explicit arm, and for BOTH shapes below only at
+ * the final fallthrough — one line past `if (a.kind == null) return 'agent'`.
+ * That neighbouring line carries an argument the module makes out loud, that
+ * an author declaring nothing is safest read as an agent; the next person to
+ * extend it tightens the fallthrough, and a suite that only ever drove
+ * `kind: 'person'` would stay entirely green while Bryan's browser stopped
+ * waking anyone.
+ */
+const SIGNED_IN_BROWSER = { id: 'known-jordan', name: 'Jordan', kind: 'known' };
+const GUEST_BROWSER = { id: 'anon-9f2', name: 'Guest Otter', kind: 'anon' };
+
 /** The production window. Nothing in this file may wait it out. */
 const IDLE_MS = 15 * 60_000;
 
@@ -218,6 +239,21 @@ describe('a person queueing a row wakes the lead in that tick', () => {
     // Same person, same verb, a row nothing holds: the silence is the hold,
     // not a wake that had stopped working.
     await expectOnlyTheSecondWake(held, 'Cache the facet counts');
+  }, 60_000);
+
+  it('fires for the author shapes a real browser sends, not just the test one', async () => {
+    // Signed in, or named with no session: `kind: 'known'`.
+    const queued = await triageRow('Rank results by recency');
+    await jj(await moveToTodo(queued, SIGNED_IN_BROWSER));
+    const first = await waitForFrames(lead.frames, READY_IDLE_EVENT, 1);
+    expect(first.map((f) => f.data?.taskId)).toEqual([queued]);
+
+    // An unnamed guest on a shared link: `kind: 'anon'`. Still a person, and
+    // still moving a row on a board they can already write to.
+    const second = await triageRow('Cache the facet counts');
+    await jj(await moveToTodo(second, GUEST_BROWSER));
+    const both = await waitForFrames(lead.frames, READY_IDLE_EVENT, 2);
+    expect(both.map((f) => f.data?.taskId)).toEqual([queued, second]);
   }, 60_000);
 
   it('fires for a row the cap is holding, on a board really at its cap', async () => {
