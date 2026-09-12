@@ -3445,6 +3445,37 @@ export class DocStore {
     return { ok: true, docId: doc.docId, changed: true };
   }
 
+  /**
+   * Rename a doc — the title a person and every list knows it by.
+   *
+   * The CRDT meta map, like every other title write, so a page already open
+   * sees the new name without a reload and a share visitor rendering the doc
+   * reads the same string the board does. The title is not the FILE's name:
+   * a bound doc keeps the path it is bound to, because the address is what
+   * comments hang off and a rename must never move it.
+   *
+   * Refuses a title that is only whitespace. An untitled doc is a real state
+   * — the list falls back to its file name or its id — but a title made of
+   * spaces renders as an empty row nobody can click, and "clear the title"
+   * is not what anybody typing spaces meant.
+   */
+  setTitle(
+    docId: string,
+    title: string,
+  ):
+    | { ok: true; docId: string; title: string }
+    | { ok: false; error: 'not-found' | 'empty-title' } {
+    const doc = this.get(docId);
+    if (!doc) return { ok: false, error: 'not-found' };
+    const next = title.trim().replace(/\s+/g, ' ');
+    if (next.length === 0) return { ok: false, error: 'empty-title' };
+    doc.ydoc.transact(() => {
+      doc.ydoc.getMap('meta').set('title', next);
+    }, CONTENT_REVISION_ORIGIN);
+    doc.meta.title = next;
+    return { ok: true, docId: doc.docId, title: next };
+  }
+
   noteHumanEdit(docId: string, at: number = Date.now()): void {
     const doc = this.get(docId);
     if (doc) doc.lastHumanEditAt = at;

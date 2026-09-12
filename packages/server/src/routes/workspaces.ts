@@ -35,6 +35,7 @@ import { handleWorkspaceSettings } from './workspace-settings.ts';
 import { handleWorkspaceCreateRead } from './workspaces-create-read.ts';
 
 export type {
+  MeetingHomeResolution,
   WorkspaceDeleteRequest,
   WorkspaceRouteRequest,
   WorkspaceRoutesContext,

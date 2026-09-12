@@ -49,6 +49,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/mounts` | GET, POST, DELETE | `routes/mounts.ts` | loopback-only |  |
 | `/api/mounts/conventions` | GET, PUT | `routes/mounts.ts` | loopback-only |  |
 | `/api/mounts/files` | GET | `routes/mounts.ts` | loopback-only |  |
+| `/api/mounts/meetings` | GET, PUT | `routes/mounts.ts` | loopback-only |  |
 | `/api/mounts/privacy` | PUT | `routes/mounts.ts` | loopback-only |  |
 | `/api/next` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/next/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
@@ -197,6 +198,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/docs/:docId/threads/:threadId/withdraw` | POST | `routes/doc-threads-routes.ts` | owner-in-handler | the guard admits `threads/*`; `doc-threads-routes.ts` refuses a visitor itself |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/withdraw/undo` | POST | `routes/doc-threads-routes.ts` | owner-in-handler | the guard admits `threads/*`; `doc-threads-routes.ts` refuses a visitor itself |
 | `/workspaces/:ws/docs/:docId/threads/by_find` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
+| `/workspaces/:ws/docs/:docId/title` | PUT | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/unarchive` | POST | `routes/archive.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/y` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/events` | GET | `routes/workspace-next.ts` | share-scope |  |

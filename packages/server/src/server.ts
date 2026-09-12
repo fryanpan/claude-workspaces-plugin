@@ -27,6 +27,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { maybeCompress, maybeNotModified } from './compress.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
+import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { taskDeepLink } from './home-brief.ts';
@@ -34,7 +35,8 @@ import { createHomePane } from './home-pane.ts';
 import { spokenReviewComment } from './huddle.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
-import { createMarkdownLister } from './library.ts';
+import { createMarkdownLister, projectRepoKey } from './library.ts';
+import { meetingFilingFor } from './meeting-home.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
@@ -117,6 +119,7 @@ import {
 import { createUpgradeStream } from './routes/upgrade-stream.ts';
 import { type LibraryRoutesContext, handleLibraryRoutes } from './routes/workspace-library.ts';
 import {
+  type MeetingHomeResolution,
   type WorkspaceRoutesContext,
   handleWorkspaceAttachmentRoutes,
   handleWorkspaceDeleteRoute,
@@ -378,6 +381,29 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const path = docStore.boundPathOf(docId);
       const title = docStore.peekMeta(docId)?.title;
       return { ...(path ? { path } : {}), ...(title ? { title } : {}) };
+    },
+    /**
+     * What the doc's project keeps, asked once as each meeting starts.
+     *
+     * The PROJECT's answer, found two ways because a meeting reaches its
+     * project by two roads: the filing record names it for a meeting this
+     * server opened, and the doc's own identity key names it for a recording
+     * made over an ordinary bound project file. Neither, and the meeting
+     * keeps everything — the default a project that has never been asked has
+     * always had.
+     *
+     * The project's CURRENT choice rather than the one stamped on the filing:
+     * a project that turned transcripts off means the meeting starting now,
+     * and a snapshot taken the day the doc was created would keep writing
+     * words it has since said it does not want.
+     */
+    retention: (docId) => {
+      const filed = meetingFilingFor(dataDir, docId)?.repoKey;
+      const own = docStore.repos.primaryKeyFor(docId);
+      const repoKey = filed ?? (own ? parseDocKey(own)?.repoKey : undefined);
+      return (
+        (repoKey ? mountStore.meetingsOf(repoKey)?.retention : undefined) ?? 'transcripts-and-audio'
+      );
     },
   });
   const meetingRelay = new MeetingRelay({
@@ -1823,6 +1849,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
   };
 
+  /**
+   * Where a board's meetings file: its project, and what that project chose.
+   *
+   * The project is read the same way the Library reads it — the repo holding
+   * most of this board's own docs — rather than stored beside the board,
+   * because a board has no repo field and a second answer to "which project
+   * is this" is a second answer that can drift from the first.
+   */
+  const meetingHomeFor = (workspaceId: string): MeetingHomeResolution | null => {
+    const board = taskStore.getWorkspace(workspaceId);
+    if (!board) return null;
+    const ids = new Set(board.docIds);
+    const repoKey = projectRepoKey(
+      docStore.list().filter((m) => ids.has(m.docId)),
+      (docId) => docStore.repos.primaryKeyFor(docId),
+    );
+    if (!repoKey) return null;
+    const home = mountStore.meetingHome(repoKey);
+    return home ? { repoKey, ...home } : null;
+  };
+
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
   const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
 
@@ -2036,6 +2083,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspacesOfDoc: shareWorkspacesOf,
     watchKeyExists,
     keepMovingVerdicts: stallWiring.keepMoving,
+    meetingHomeFor,
   };
 
   /**
