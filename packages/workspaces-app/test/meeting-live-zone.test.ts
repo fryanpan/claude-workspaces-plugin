@@ -214,10 +214,10 @@ describe('the provisional live zone', () => {
     expect(turns()).toEqual(['carried words.']);
   });
 
-  it('an empty tick returns its words to the stream — no note carries them', () => {
-    // The tick composed nothing, so nothing was written up. The words are
-    // not carried either (that is `failed`), but they have still never
-    // reached the notes, so they stay where the reader can see them.
+  it('an empty tick drops the chunk it was lifted into — no note landed in it', () => {
+    // The chunk goes with no settle, exactly as a failed tick's does: the
+    // settle is the animation that means a note arrived, and none did. The
+    // words themselves then leave the stream, which is the case below.
     const zone = createMeetingLiveZone({ parent, now });
     zone.begin(now());
     zone.onTurn({ turn: 0, text: 'nothing worth noting.', final: true });
@@ -545,5 +545,110 @@ describe('the live zone never moves the page', () => {
     zone2.begin(now());
     zone2.onTurn({ turn: 0, text: 'hello', final: false });
     expect(zoneEl().style.width).toBe('678px');
+  });
+});
+
+/**
+ * The live transcript must not keep words the note-taker is finished with.
+ *
+ * WHAT A MEETING REPORTED. In a five-minute recording, phrases from early in
+ * the meeting sat in the live transcript for the rest of it while later
+ * phrases faded out around them — so the zone read as a backlog that was
+ * never going to clear, and the reader could not tell which of the words in
+ * front of them were still on their way into the notes.
+ *
+ * THE TWO PHASES ARE NOT THE SAME PROMISE, and that is the whole of it. A
+ * `failed` tick's words really are still coming: the session carries them
+ * into the next tick and composes them again. An `empty` tick's are not —
+ * the session marks those turns composed and never looks at them again — so
+ * leaving them on screen says something about them that will never become
+ * true.
+ */
+describe('words the note-taker is finished with leave the live transcript', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('an empty tick’s words go, and are not left behind by a later written tick', () => {
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'the early phrase.', final: true });
+    zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
+    zone.onProgress({ tick: 1, phase: 'empty', turns: [0] });
+    // A second tick, which does write a note, and whose words leave the way
+    // they always have. This is the pairing the report was about.
+    zone.onTurn({ turn: 1, text: 'the later phrase.', final: true });
+    zone.onProgress({ tick: 2, phase: 'composing', turns: [1] });
+    zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS + COLLAPSE_MS);
+    expect(stream()).not.toContain('the later phrase.');
+    // The one that used to stay for the rest of the meeting.
+    expect(stream()).not.toContain('the early phrase.');
+    expect(turns()).toEqual([]);
+  });
+
+  it('an empty tick’s words wait for no note that is not coming', () => {
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'nothing worth noting.', final: true });
+    zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
+    zone.onProgress({ tick: 1, phase: 'empty', turns: [0] });
+    // Still there at the moment the frame lands: the fade is an animation,
+    // not a cut, so the words do not blink out from under the reader.
+    expect(stream()).toContain('nothing worth noting.');
+    // And gone one fade later — without the `NOTE_LAND_MS` beat that exists
+    // to let an arriving note settle first, because none is arriving.
+    vi.advanceTimersByTime(FADE_MS + 1);
+    expect(stream()).not.toContain('nothing worth noting.');
+  });
+
+  it('a failed tick’s words stay: the next tick composes them again', () => {
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    zone.onTurn({ turn: 0, text: 'carried words.', final: true });
+    zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
+    zone.onProgress({ tick: 1, phase: 'failed', turns: [0] });
+    vi.advanceTimersByTime(NOTE_LAND_MS + FADE_MS + COLLAPSE_MS);
+    expect(turns()).toEqual(['carried words.']);
+  });
+
+  it('an empty tick does not cut short the beat a written one’s words are waiting out', () => {
+    // Every in-place settle over one run is ONE batch on one clock, so a
+    // frame arriving mid-beat joins whatever is already leaving. An empty
+    // frame asks for no beat at all, and the words already in the batch are
+    // waiting out the pause that lets the note they went into land. The
+    // shorter ask must not win: those words would blink out from under a
+    // reader mid-sentence.
+    const advance = (ms: number): void => {
+      clock += ms;
+      vi.advanceTimersByTime(ms);
+    };
+    const zone = createMeetingLiveZone({ parent, now });
+    zone.begin(now());
+    // A carried turn ahead of the composing one, so the words cannot be
+    // lifted into a chunk and their note settles in place.
+    zone.onTurn({ turn: 0, text: 'the carried phrase.', final: true });
+    zone.onProgress({ tick: 1, phase: 'composing', turns: [0] });
+    zone.onProgress({ tick: 1, phase: 'failed', turns: [0] });
+    zone.onTurn({ turn: 1, text: 'the phrase a note carried.', final: true });
+    zone.onProgress({ tick: 2, phase: 'composing', turns: [1] });
+    zone.onProgress({ tick: 2, phase: 'written', turns: [1] });
+
+    advance(Math.floor(NOTE_LAND_MS / 2));
+    zone.onTurn({ turn: 2, text: 'nothing worth noting.', final: true });
+    zone.onProgress({ tick: 3, phase: 'composing', turns: [2] });
+    zone.onProgress({ tick: 3, phase: 'empty', turns: [2] });
+
+    // Past a whole fade measured from the join: a batch whose beat had been
+    // cut to zero would be off the page by now.
+    advance(FADE_MS + 1);
+    expect(stream()).toContain('the phrase a note carried.');
+
+    // It still leaves, on the clock it started with.
+    advance(NOTE_LAND_MS + FADE_MS);
+    expect(turns()).toEqual(['the carried phrase.']);
   });
 });

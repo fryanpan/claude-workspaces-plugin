@@ -91,13 +91,25 @@ export interface DriveResult {
   /** Note-writes that actually reported `written`. */
   written: number;
   /**
-   * Turns an `empty` tick handed back to the stream, which the server's carry
-   * then dropped — so no later tick ever names them again and they sit at the
-   * head of the stream for the rest of the meeting. This is the state the
-   * smear needs, counted from the frames driven rather than from the DOM: a
-   * count of what is on screen is every streaming turn and proves nothing.
+   * Turns a FAILED tick carried into a later one. The session puts them back
+   * in `carry` and composes them again, but `composeTick` announces
+   * `composing` for that tick's OWN turns only — so nothing names the carried
+   * ones while the next compose runs and they sit at the head of the stream
+   * in front of it. This is the state the smear needs, counted from the frames
+   * driven rather than from the DOM: a count of what is on screen is every
+   * streaming turn and proves nothing.
+   *
+   * It used to be an `empty` tick's words instead, which stayed for the whole
+   * meeting. The zone now takes those away itself, so the survivor is the
+   * carried turn — the route that is still real.
    */
   stranded: number;
+  /**
+   * `composing` frames issued while a carried turn was in front of them — the
+   * split that cannot lift, driven rather than hoped for. Zero means the smear
+   * readings below are about a stream that never had a survivor in it.
+   */
+  surviving: number;
   /** Turns left in the stream at the end, stranded ones included. */
   streaming: number;
   /**
@@ -319,8 +331,12 @@ async function drive(o: DriveOptions): Promise<string> {
 
   let nextId = 0;
   let unwritten: number[] = [];
+  /** What a failed tick handed to the session's carry: composed again by the
+   *  next tick, but not named by its `composing` frame. */
+  let carried: number[] = [];
   let written = 0;
   let stranded = 0;
+  let surviving = 0;
 
   /** One utterance: partial, partial, final — under one id, as the engine does. */
   async function utter(words: number): Promise<void> {
@@ -359,6 +375,7 @@ async function drive(o: DriveOptions): Promise<string> {
     const ids = unwritten.slice();
     at(`composing-${i}`);
     zone.onProgress({ tick: i, phase: 'composing', turns: ids });
+    if (carried.length > 0) surviving++;
     sample();
     // Words keep arriving while the tick composes.
     await utter(5);
@@ -382,17 +399,21 @@ async function drive(o: DriveOptions): Promise<string> {
       at(`${empty ? 'empty' : 'failed'}-${i}`);
       zone.onProgress({ tick: i, phase: empty ? 'empty' : 'failed', turns: ids });
       sample();
-      // An empty tick's words are dropped by the server and stay in the
-      // stream; a failed tick's carry into the next tick.
-      if (empty) {
-        clear(ids);
-        stranded += ids.length;
-      }
+      // An empty tick's words are dropped by the session AND taken off the
+      // zone by the zone itself, so nothing here has to remember them. A
+      // failed tick's go into the carry: composed again by the next tick, but
+      // not named by its `composing` frame, which is where the survivor comes
+      // from.
+      clear(ids);
+      if (failed) carried = [...carried, ...ids];
     } else {
       at(`written-${i}`);
       note(i);
-      zone.onProgress({ tick: i, phase: 'written', turns: ids });
+      // What the session reports written is `[...carry, ...tick.turns]`.
+      zone.onProgress({ tick: i, phase: 'written', turns: [...carried, ...ids] });
       sample();
+      stranded += carried.length;
+      carried = [];
       clear(ids);
       written++;
     }
@@ -425,7 +446,16 @@ async function drive(o: DriveOptions): Promise<string> {
   sampling = false;
   const streaming = document.querySelectorAll('.lz-lines .lz-turn').length;
   zone.destroy();
-  const result: DriveResult = { samples, compared, worst, written, stranded, streaming, pills };
+  const result: DriveResult = {
+    samples,
+    compared,
+    worst,
+    written,
+    stranded,
+    surviving,
+    streaming,
+    pills,
+  };
   return JSON.stringify(result);
 }
 

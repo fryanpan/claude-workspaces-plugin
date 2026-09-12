@@ -44,6 +44,12 @@
 body.board-body {
   overflow: auto;
   font-size: 16px;
+  /* How much of the viewport's bottom the app's own bar owns. Zero at every
+     width but the phone's, where the ≤900px block re-declares it as the
+     fixed nav bar's height. Published HERE, unconditionally, so a page
+     reserving its own tail can subtract it with `var()` and no fallback —
+     a declaration whose `calc()` names an unset variable is dropped whole. */
+  --board-bottom-bar: 0px;
 }
 /* 1500px, not 1280. The board is a LIST OF SENTENCES and the page's width is
    the only thing that decides how much of one a row shows: at 1280 the board
@@ -3510,8 +3516,19 @@ body.board-body {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-subtle);
 }
+/* The tail clears the widget's floating buttons — MEASURED, not guessed.
+   Three of them stack in the viewport's bottom-right corner at every width
+   (the comment bubble, the mic, the thread-list button; packages/widget/src
+   styles.ts and widget-mic.ts), and the topmost one's TOP edge sits 170px
+   above the viewport bottom: a 126px offset plus its own 44px. `#board-root`
+   already ends its content `24px + --board-bottom-bar` above that bottom, so
+   what the list still owes is the difference. At 430px the last row used to
+   end 822px down a 932px viewport with that button spanning 762-806 — half
+   the row covered, and its right end, where the time is, not tappable.
+   The two `env(safe-area-inset-bottom)` terms cancel: the buttons add one and
+   `--safe-bottom` adds the other, so neither appears here. */
 .library-body {
-  padding: 4px 0 28px;
+  padding: 4px 0 calc(146px - var(--board-bottom-bar));
   max-width: 1100px;
 }
 .library-body h2 {
@@ -3545,12 +3562,30 @@ body.board-body {
 .library-row:active {
   background: var(--bg-hover);
 }
+/* Name and whatever identifies it further share the first column and stay on
+   one line together: the name gives way to an ellipsis, the label beside it
+   does not, because a secondary line that vanishes at 430px is exactly where
+   two identically-titled meetings needed telling apart. */
+.library-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
 .library-name {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.library-sub {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .library-when {
   flex: 0 0 auto;
@@ -3561,11 +3596,12 @@ body.board-body {
   font-variant-numeric: tabular-nums;
 }
 /* The two tables: one grid line per row, the time in a fixed right column
-   under its own header. */
+   under its own header. 104px, not 84: the header now NAMES its clock
+   ("File modified"), and a header that ellipsizes says nothing at all. */
 .library-cols,
 .library-tbl .library-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px;
+  grid-template-columns: minmax(0, 1fr) 104px;
   column-gap: 16px;
   align-items: center;
 }

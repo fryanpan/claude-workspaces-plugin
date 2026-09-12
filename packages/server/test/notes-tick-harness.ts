@@ -25,6 +25,8 @@ import { type NotesHeadingMemory, withServerNotesSinks } from '../src/meeting-no
 import {
   type NotesComposeInput,
   type NotesMeetingSummary,
+  type NotesRelabel,
+  type NotesTickLifecycle,
   type TickScheduler,
   beginNotesSession,
 } from '../src/meeting-notes.ts';
@@ -145,6 +147,26 @@ export interface NotesTickHarnessOptions {
   /** Share a heading memory across two harnesses to model a second meeting on
    *  one doc. */
   heading?: NotesHeadingMemory;
+  /**
+   * A caller's own rename sink, run after the doc's — the seam
+   * `withServerNotesSinks` offers as `onRelabel`, and the only one a script
+   * can make throw. It is here so a test can ask what a THROWING step on the
+   * compose chain does to the ticks behind it.
+   */
+  onRelabel?: (relabel: NotesRelabel) => void;
+  /**
+   * A caller's own lifecycle sink, run after the harness's own bookkeeping —
+   * the seam a browser's `notes_progress` frames come off. It is here so a
+   * test can ask what a throw from an observer does to the tick that was
+   * telling it, `written` included.
+   */
+  onLifecycle?: (event: NotesTickLifecycle) => void;
+  /**
+   * Make the error sink itself throw, after recording. `onError` is a
+   * caller's own function, so a test needs to be able to ask what happens
+   * when the reporting step is the one that fails.
+   */
+  errorSinkThrows?: boolean;
   /** A doc a second harness is already driving, so two meetings can run over
    *  one `Y.Doc`. */
   ydoc?: Y.Doc;
@@ -199,6 +221,8 @@ export interface NotesTickHarnessOptions {
 export interface NotesTickHarness {
   /** Settle these utterances as turns. Nothing is written until `tick()`. */
   say(...utterances: Utterance[]): void;
+  /** Name a voice mid-meeting, the way a tap on a speaker pill does. */
+  nameSpeaker(label: string, name: string): void;
   /** Let the room fall quiet: fire the pause tick and wait for its write. */
   tick(): Promise<TickSnapshot>;
   /** `say` then `tick` — the ordinary unit of a script. */
@@ -304,15 +328,20 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
       cadenceMs: Number.POSITIVE_INFINITY,
       schedule,
       openTiming: () => timing,
-      onError: (message) => errors.push(message),
+      onError: (message) => {
+        errors.push(message);
+        if (opts.errorSinkThrows) throw new Error('the error sink threw');
+      },
       onMeetingSummary: (s) => {
         summary = s;
       },
+      ...(opts.onRelabel ? { onRelabel: opts.onRelabel } : {}),
       onTickLifecycle: (event) => {
         // Every terminal phase, `empty` included: this set is what `tick()`
         // waits on, and a tick that composed nothing is as finished as one
         // that wrote a bullet. Leaving it out hangs the wait.
         if (event.phase !== 'composing') done.add(event.tick);
+        opts.onLifecycle?.(event);
       },
     },
     {
@@ -398,6 +427,9 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     async speak(...utterances) {
       harness.say(...utterances);
       return harness.tick();
+    },
+    nameSpeaker(label, name) {
+      session.nameSpeaker(label, name);
     },
     sayPartial(text, speaker) {
       const turn = turnNo++;
