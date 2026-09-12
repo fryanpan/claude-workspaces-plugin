@@ -39,20 +39,25 @@ const BACK =
 
 /** The board's own rail, so this page sits where the board was rather than
  *  looking like a different product. Same four destinations as the board's
- *  nav, and the Settings seat at its foot is where you already are. */
+ *  nav, and the Settings seat at its foot is where you already are.
+ *
+ *  Every label is a span of its own because the rail collapses: the board's
+ *  rail does, this one mirrors it, and a bare text node cannot be hidden. */
 function rail(): string {
+  const seat = (label: string, glyph: string, attrs: string): string =>
+    `<button type="button" class="settings-rail-item" title="${escapeHtml(label)}" ${attrs}>` +
+    `<span class="settings-rail-glyph" aria-hidden="true">${glyph}</span>` +
+    `<span class="settings-rail-label">${escapeHtml(label)}</span></button>`;
   const item = (nav: BoardNav, label: string): string =>
-    `<button type="button" class="settings-rail-item" data-nav="${nav}">` +
-    `<span class="settings-rail-glyph" aria-hidden="true">${NAV_ICONS[nav]}</span>${escapeHtml(label)}</button>`;
+    seat(label, NAV_ICONS[nav], `data-nav="${nav}"`);
   return (
-    '<nav class="settings-rail" aria-label="Workspace">' +
+    '<nav id="board-settings-rail" class="settings-rail" aria-label="Workspace">' +
     item('home', 'Home') +
     item('tasks', 'Tasks') +
     item('library', 'Library') +
     item('activity', 'Activity') +
     '<div class="settings-rail-spacer"></div>' +
-    '<button type="button" class="settings-rail-item" aria-current="page" disabled>' +
-    `<span class="settings-rail-glyph" aria-hidden="true">${NAV_ICONS.settings}</span>Settings</button>` +
+    seat('Settings', NAV_ICONS.settings, 'aria-current="page" disabled') +
     '</nav>'
   );
 }
@@ -75,7 +80,7 @@ export function buildSettingsView(workspaceId: string): string {
       <div class="settings-page">
         <header class="settings-topbar">
           <button type="button" class="settings-back" id="board-settings-back">${BACK}<span id="board-settings-back-label">Board</span></button>
-          <h1>Settings</h1>
+          <h1 id="board-settings-title">Settings</h1>
         </header>
         <div class="settings-body-row">
           <nav class="settings-subnav" aria-label="Settings sections">
@@ -168,21 +173,54 @@ export function buildSettingsView(workspaceId: string): string {
 }
 
 /**
+ * Is this element painted, ancestors included?
+ *
+ * Walked upward rather than read off the element alone: a nav that a band
+ * hides hides its buttons with it, and each button's own computed `display`
+ * still reads `flex`. `offsetParent` would answer in one step and is null for
+ * everything inside a `position: fixed` ancestor, which this page is.
+ */
+function drawn(document: Document, el: Element): boolean {
+  const view = document.defaultView;
+  if (!view) return true;
+  for (let n: Element | null = el; n; n = n.parentElement) {
+    if (view.getComputedStyle(n).display === 'none') return false;
+  }
+  return true;
+}
+
+/**
  * Put focus back on the button that is actually drawn.
  *
  * Two openers, one per band, and the hidden one is not a place to leave a
  * caret: focusing it drops a keyboard reader at the top of the document with
- * the page they just left still under them. Read as computed `display` rather
- * than `offsetParent`, which is null for everything inside a fixed ancestor.
+ * the page they just left still under them.
  */
 export function focusSettingsOpener(document: Document): void {
   for (const id of ['board-nav-settings', 'board-settings']) {
     const btn = document.getElementById(id);
-    if (btn && document.defaultView?.getComputedStyle(btn).display !== 'none') {
+    if (btn && drawn(document, btn)) {
       btn.focus();
       return;
     }
   }
+}
+
+/**
+ * Leaving settings for one of the board's own pages lands the caret on that
+ * page's seat in the board's nav — where the reader now is, rather than on
+ * the button that opens the page they just left.
+ *
+ * The settings opener is the fallback, not the answer: on a band whose nav is
+ * drawn the seat exists, and on one where it does not the opener still does.
+ */
+export function focusBoardNav(document: Document, nav: BoardNav): void {
+  const seat = document.querySelector(`#board-nav [data-nav="${nav}"]`);
+  if (seat instanceof HTMLElement && drawn(document, seat)) {
+    seat.focus();
+    return;
+  }
+  focusSettingsOpener(document);
 }
 
 export interface SettingsViewEnv {
@@ -207,11 +245,18 @@ export interface SettingsViewHandle {
   bandChanged(): void;
 }
 
+/** What the topbar calls each pane, on the band that names one. */
+const TYPE_LABEL: Record<Exclude<SettingsType, null>, string> = {
+  board: 'Board',
+  notifications: 'Notifications',
+};
+
 export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle {
   const { document, narrow, onClose, onNav } = env;
   const view = document.getElementById('board-settings-view');
   const back = document.getElementById('board-settings-back');
   const backLabel = document.getElementById('board-settings-back-label');
+  const title = document.getElementById('board-settings-title');
   let type: SettingsType = 'board';
 
   function paint(): void {
@@ -227,11 +272,34 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
     // list as from a pane under it.
     document.getElementById('board-settings-types')?.classList.toggle('hidden', type !== null);
     if (backLabel) backLabel.textContent = type === null ? 'Board' : 'Settings';
+    // On the phone the pane IS the page — the reader drilled into it from the
+    // list, and the arrow beside the heading already says "Settings". A
+    // heading that says it a second time tells them nothing about where they
+    // landed. On the wide band the subnav is beside the heading saying which
+    // pane is current, so the heading names the place: Settings.
+    if (title) title.textContent = type !== null && narrow() ? TYPE_LABEL[type] : 'Settings';
+    // The rail is the board's rail, so it wears the board's width. Read off
+    // the live class rather than storage: the reader can collapse it and walk
+    // in here in the same breath, and storage is written by the same toggle.
+    document
+      .getElementById('board-settings-rail')
+      ?.classList.toggle(
+        'settings-rail--collapsed',
+        document.getElementById('board-nav')?.classList.contains('board-nav--collapsed') === true,
+      );
   }
 
   function setType(next: SettingsType): void {
     type = next;
     paint();
+  }
+
+  /** Leave for the board itself. The page goes first so the caret lands on a
+   *  button that is on screen by the time it gets there — focus set while
+   *  this view still covers it would be focus on something nobody can see. */
+  function leave(): void {
+    onClose();
+    focusSettingsOpener(document);
   }
 
   view?.addEventListener('click', (ev) => {
@@ -243,7 +311,11 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
       return;
     }
     const navBtn = target?.closest?.('[data-nav]') as HTMLElement | null;
-    if (navBtn?.dataset.nav) onNav(navBtn.dataset.nav as BoardNav);
+    if (navBtn?.dataset.nav) {
+      const nav = navBtn.dataset.nav as BoardNav;
+      onNav(nav);
+      focusBoardNav(document, nav);
+    }
   });
 
   back?.addEventListener('click', () => {
@@ -253,10 +325,7 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
       setType(null);
       return;
     }
-    // Focus leaves before the page does. `onClose` hides the whole view, and
-    // the button under this handler is inside it.
-    focusSettingsOpener(document);
-    onClose();
+    leave();
   });
 
   return {

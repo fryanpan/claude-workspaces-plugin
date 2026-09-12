@@ -271,12 +271,14 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
   el('board-nav-settings').addEventListener('click', openSettings);
   // Escape leaves the page, the way it closed the popover this replaced.
   // Focus goes back to the button that opened it, so a keyboard user is not
-  // dropped at the top of the document.
+  // dropped at the top of the document — and it goes there AFTER the repaint
+  // that hides the page, because which opener is on screen is a question only
+  // the painted document can answer.
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !deps.isOpen()) return;
     deps.setOpen(false);
-    focusSettingsOpener(deps.document);
     deps.renderSettingsPanel();
+    focusSettingsOpener(deps.document);
   });
   el('board-share').addEventListener('click', () => {
     void navigator.clipboard?.writeText(deps.href()).then(

@@ -366,6 +366,22 @@ body.board-body {
   width: 100%;
   height: 100%;
 }
+/* The rail carries the width the reader left the board at. Collapsing is a
+   choice about the whole workspace, not about the task list — a rail that
+   sprang back open on the way into settings and shut again on the way out
+   read as the page having lost it (UX review of PR 947). Same 58px the
+   board's own rail collapses to, so nothing moves sideways at the boundary. */
+.settings-rail--collapsed {
+  width: 58px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.settings-rail--collapsed .settings-rail-item {
+  justify-content: center;
+}
+.settings-rail--collapsed .settings-rail-label {
+  display: none;
+}
 /* The type list is the PHONE's second-level nav and the subnav column is the
    wide band's — `settings.css` already hides the subnav under 1100, so this
    is the other half of that swap. */
