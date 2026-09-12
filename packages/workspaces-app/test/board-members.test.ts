@@ -68,6 +68,14 @@ const text = (row: Element) => row.querySelector('.board-member-who')?.textConte
 const buttonSaying = (row: Element, label: string) =>
   Array.from(row.querySelectorAll('button')).find((b) => b.textContent === label);
 
+/**
+ * One turn of the event loop. The Remove and Cancel presses repaint on a later
+ * turn on purpose — painting inside the click detaches the button the event is
+ * still travelling from, which closed the whole settings panel
+ * (`board-settings-members-panel.test.ts`).
+ */
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe('who has access', () => {
   it('names each person and the level in Bryan’s words', async () => {
     const m = mount();
@@ -123,10 +131,12 @@ describe('who has access', () => {
     await m.handle.refresh();
     const row = rows(m.list).find((r) => text(r) === KEEPER) as HTMLElement;
     (buttonSaying(row, 'Remove') as HTMLButtonElement).click();
+    await tick();
     // The confirmation names who, in the row it is about.
     const asking = rows(m.list).find((r) => text(r) === `Remove ${KEEPER}?`);
     expect(asking).toBeTruthy();
     (buttonSaying(asking as Element, 'Cancel') as HTMLButtonElement).click();
+    await tick();
     expect(m.remove).not.toHaveBeenCalled();
     expect(rows(m.list).map(text)).toEqual(['You', KEEPER, PILOT]);
   });
@@ -136,6 +146,7 @@ describe('who has access', () => {
     await m.handle.refresh();
     const row = rows(m.list).find((r) => text(r) === KEEPER) as HTMLElement;
     (buttonSaying(row, 'Remove') as HTMLButtonElement).click();
+    await tick();
     const asking = rows(m.list).find((r) => text(r) === `Remove ${KEEPER}?`) as Element;
     (buttonSaying(asking, 'Remove') as HTMLButtonElement).click();
     await m.handle.settled();

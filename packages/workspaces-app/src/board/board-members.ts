@@ -72,6 +72,24 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
    *  repaint. Held here rather than in the DOM so a re-read wipes it. */
   let confirming: string | null = null;
 
+  /**
+   * Repaint on a LATER TURN, never inside the click that asked for it.
+   *
+   * `paint` replaces every row, so painting from a click handler detaches the
+   * button the event is still travelling up from. The settings panel closes
+   * itself when a click lands outside it, and it reads "outside" off the tree
+   * as it is by the time the event reaches `document` — so a synchronous
+   * repaint here closed the whole panel on the tap that opened this
+   * confirmation. A turn later the event is over and the tree it read is the
+   * one the person is looking at.
+   *
+   * The writes below need no such care: they repaint after awaiting the
+   * server, which is already several turns away.
+   */
+  function repaintSoon(): void {
+    setTimeout(paint, 0);
+  }
+
   function clear(): void {
     while (deps.list.firstChild) deps.list.removeChild(deps.list.firstChild);
   }
@@ -142,7 +160,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     const cancel = button('Cancel', 'board-member-cancel');
     cancel.addEventListener('click', () => {
       confirming = null;
-      paint();
+      repaintSoon();
     });
     row.appendChild(go);
     row.appendChild(cancel);
@@ -171,7 +189,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     const remove = button('Remove', 'board-member-remove');
     remove.addEventListener('click', () => {
       confirming = entry.email;
-      paint();
+      repaintSoon();
     });
     row.appendChild(remove);
     return row;
@@ -205,12 +223,12 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     for (const entry of view.members) {
       deps.list.appendChild(memberRow(entry, canEdit, entry.email === yours));
     }
+    // The empty state and nothing else. A line saying what the controls do
+    // explains something already on the screen, and a line saying an Owner is
+    // needed explains something deliberately absent (Bryan: no explanatory
+    // text — the affordance is the message).
     deps.note.textContent =
-      view.members.length === 0
-        ? 'Nobody else has been given access yet.'
-        : canEdit
-          ? 'Change a level or end someone’s access.'
-          : 'Only an Owner can change these.';
+      view.members.length === 0 ? 'Nobody else has been given access yet.' : '';
   }
 
   async function refresh(): Promise<void> {

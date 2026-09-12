@@ -108,6 +108,19 @@ export function buildShell(
           </span>
           <input type="checkbox" id="board-push-toggle" class="board-check" aria-describedby="board-push-note" />
         </label>
+        <!-- Who can reach this board, and at what level (Bryan, 2026-09-11:
+             "share a board with someone who can read and comment but cannot
+             act as him"). Everyone in the workspace can read the list — a
+             person who cannot see who else is here cannot know who reads what
+             they write — and the controls are drawn for an Owner only. The
+             enforcement is the API's: the routes behind these controls refuse
+             a Regular User with a 403 whether or not the page drew them. -->
+        <div class="board-settings-row board-settings-row--members">
+          <span class="board-settings-label">Who has access
+            <small id="board-members-note" class="board-settings-note"></small>
+          </span>
+          <div id="board-members-list" class="board-members"></div>
+        </div>
         <!-- What the quality gate judges an agent's ask against, in the
              owner's own words (Bryan, 2026-08-29: "Something we can change in
              the settings. It's a natural language prompt."). A textarea and
@@ -147,18 +160,6 @@ export function buildShell(
             <button type="button" id="board-parallelism-cap-default" class="board-btn">Use the default</button>
           </div>
         </div>
-        <!-- Who can reach this board, and at what level (Bryan, 2026-09-11:
-             "share a board with someone who can read and comment but cannot
-             act as him"). Everyone in the workspace can read the list — a
-             person who cannot see who else is here cannot know who reads what
-             they write — and the controls are drawn for an Owner only. The
-             enforcement is the API's: the routes behind these controls refuse
-             a Regular User with a 403 whether or not the page drew them. -->
-        <div class="board-settings-row board-settings-row--members">
-          <span class="board-settings-label">Who has access
-            <small id="board-members-note" class="board-settings-note"></small>
-          </span>
-          <div id="board-members-list" class="board-members"></div>
         </div>
       </div>
     </header>

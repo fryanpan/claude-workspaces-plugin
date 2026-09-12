@@ -195,6 +195,13 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): void {
     if (!deps.isOpen()) return;
     const t = ev.target as Node | null;
     if (!t) return;
+    // Reads the tree as it is NOW, which is after every handler inside the
+    // panel has run. A control that repaints its own section from a click
+    // handler has detached the button by this point, and the click that
+    // started inside the panel would test as one outside it and close the
+    // whole panel under the person who tapped. That is why the members list
+    // repaints on a later turn (`board-members.ts`), and why a new control in
+    // here must not repaint synchronously either.
     if (el('board-settings-panel').contains(t) || el('board-settings').contains(t)) return;
     deps.setOpen(false);
     deps.renderSettingsPanel();
