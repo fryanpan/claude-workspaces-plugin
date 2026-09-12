@@ -171,6 +171,44 @@ describe('the cross-board review queue', () => {
     });
   });
 
+  it('records an ask nobody declared when a person’s ordinary reply answers it', async () => {
+    const salt = await board('Saltmarsh');
+    const { task } = await jj<{ task: { id: string } }>(
+      await post(`/workspaces/${salt}/tasks`, {
+        title: 'Flood map',
+        body: 'Agent can draw the flood map so that walkers plan.',
+        author: AGENT,
+      }),
+    );
+    const threads = `/workspaces/${salt}/docs/task:${task.id}/threads`;
+    // The person speaks first, which is what puts their name on the roster.
+    const { thread } = await jj<{ thread: Thread }>(
+      await post(threads, {
+        anchor: { kind: 'subject' },
+        text: 'How is the flood map going?',
+        author: PERSON,
+      }),
+    );
+    await jj(
+      await post(`${threads}/${thread.id}/comments`, {
+        text: 'Owner — should the map show the old levee line?',
+        author: AGENT,
+      }),
+    );
+    const asked = (await queue()).items.find((i) => i.workspaceId === salt);
+    expect(asked).toMatchObject({ kind: 'task-thread', band: 'unreplied' });
+
+    await jj(
+      await post(`${threads}/${thread.id}/comments`, { text: 'Yes, dashed.', author: PERSON }),
+    );
+    const boards = await waitFor(async () => {
+      const b = await wait();
+      return b.some((x) => x.workspaceId === salt) ? b : undefined;
+    });
+    expect(boards.find((x) => x.workspaceId === salt)).toMatchObject({ answered: 1, inOrder: 1 });
+    expect((await queue()).items.some((i) => i.workspaceId === salt)).toBe(false);
+  });
+
   it('drops a withdrawn item from the queue on the next read', async () => {
     const item = await ticketItem(harbor, 'Ferry notice wording');
     const key = `${harbor}:task-review:${item.taskId}:${item.itemId}`;

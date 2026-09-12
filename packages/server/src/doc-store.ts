@@ -11,6 +11,7 @@ import {
 import { join } from 'node:path';
 import {
   type Anchor,
+  type Comment,
   type DocMeta,
   type DocOriginRepo,
   type DocType,
@@ -553,6 +554,15 @@ export class DocStore {
   private readonly docThreads = new DocThreads(this.docThreadPersistence());
   private readonly reviewAnsweredListeners = new Set<
     (event: { docId: string; threadId: string; commentId: string; ts: number }) => void
+  >();
+  private readonly commentPostedListeners = new Set<
+    (event: {
+      docId: string;
+      threadId: string;
+      commentId: string;
+      author: User;
+      ts: number;
+    }) => void
   >();
 
   private docThreadPersistence(): DocThreadPersistence {
@@ -2499,7 +2509,36 @@ export class DocStore {
       review?: ReviewPayload;
     },
   ): Promise<Thread | null> {
-    return this.docThreads.postComment(docId, threadId, author, text, anchor, opts);
+    const thread = await this.docThreads.postComment(docId, threadId, author, text, anchor, opts);
+    const posted = thread?.comments
+      .filter((c) => c.author.id === author.id)
+      .reduce<Comment | undefined>(
+        (newest, c) => (newest && newest.ts > c.ts ? newest : c),
+        undefined,
+      );
+    if (thread && posted) {
+      for (const listener of this.commentPostedListeners) {
+        listener({ docId, threadId: thread.id, commentId: posted.id, author, ts: posted.ts });
+      }
+    }
+    return thread;
+  }
+
+  /** Every comment posted through `postComment` — the ordinary reply path,
+   *  which is how a person answers an ask that was never declared. An answer
+   *  to a declared item goes through `answerReviewItem` and is not repeated
+   *  here. Returns the unsubscribe. */
+  onCommentPosted(
+    listener: (event: {
+      docId: string;
+      threadId: string;
+      commentId: string;
+      author: User;
+      ts: number;
+    }) => void,
+  ): () => void {
+    this.commentPostedListeners.add(listener);
+    return () => this.commentPostedListeners.delete(listener);
   }
 
   async answerReviewItem(

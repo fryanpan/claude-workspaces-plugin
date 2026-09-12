@@ -23,7 +23,7 @@
  * internal: nothing outside this module reached them inside `createServer`
  * either, and the in-flight set is only correct if exactly one thing owns it.
  */
-import { reviewItemState } from '@claude-workspaces/core';
+import { type Thread, reviewItemState } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import {
   type BriefCoverage,
@@ -87,13 +87,20 @@ export interface HomePayload {
   generating: boolean;
 }
 
+/** One posted comment, by where it sits. */
+export interface PostedComment {
+  docId: string;
+  commentId: string;
+}
+
 /** What `createServer` keeps a handle on. */
 export interface HomePane {
   /** The read-marker + stored-brief store, also read by the Home routes. */
   homeBriefs: HomeBriefStore;
   /** The review items exactly as `GET /review-items` ships them, each with
-   *  its estimated minutes and size. */
-  reviewItemsFor: (workspace: BoardWorkspace) => SizedReviewItemRow[];
+   *  its estimated minutes and size. `without` reads the threads as they
+   *  stood before that one comment was posted. */
+  reviewItemsFor: (workspace: BoardWorkspace, without?: PostedComment) => SizedReviewItemRow[];
   /** The same estimate for one item, answered or not. */
   sizer: ReviewSizer;
   /** How many items the Home queue holds right now, over those items. */
@@ -119,8 +126,18 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
   /** The review items exactly as GET /review-items ships them.
    *  ONE builder for that route and for the brief's queue count, so the
    *  number the brief prints cannot drift from the queue rendered under it. */
-  const reviewItemsFor = (workspace: BoardWorkspace): SizedReviewItemRow[] =>
-    sizer.rows(
+  const reviewItemsFor = (
+    workspace: BoardWorkspace,
+    without?: PostedComment,
+  ): SizedReviewItemRow[] => {
+    const threads = (list: Thread[], docId: string): Thread[] =>
+      without && docId === without.docId
+        ? list.map((t) => ({
+            ...t,
+            comments: t.comments.filter((c) => c.id !== without.commentId),
+          }))
+        : list;
+    return sizer.rows(
       reviewItemRows({
         tasks: taskStore.listTasks(workspace.id).map((t) => ({
           id: t.id,
@@ -163,13 +180,14 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
           };
         }),
         source: {
-          threadsOf: (docId) => docStore.listThreads(docId, { status: 'open' }),
+          threadsOf: (docId) => threads(docStore.listThreads(docId, { status: 'open' }), docId),
           // Unfiltered, and only for the roster: who counts as a person
           // here must not depend on whether their thread is still open.
-          allThreadsOf: (docId) => docStore.listThreads(docId),
+          allThreadsOf: (docId) => threads(docStore.listThreads(docId), docId),
         },
       }),
     );
+  };
 
   /**
    * How many items the Home queue holds right now. Feeds only the brief's

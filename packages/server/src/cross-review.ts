@@ -13,10 +13,12 @@
  * no reason to wait for, and a failure in it must never fail an answer that
  * was recorded.
  */
+import { classifyActor } from './actor-identity.ts';
 import {
   type AskShape,
   type BoardQueueInput,
   type CrossReviewQueue,
+  askShapeOf,
   crossReviewQueue,
 } from './cross-review-queue.ts';
 import type { DocStore } from './doc-store.ts';
@@ -39,7 +41,11 @@ export interface CrossReviewContext {
   dataDir: string;
   taskStore: TaskStore;
   docStore: DocStore;
-  reviewItemsFor: (workspace: BoardWorkspace) => SizedReviewItemRow[];
+  /** A board's rows; `without` reads them as they stood before that comment. */
+  reviewItemsFor: (
+    workspace: BoardWorkspace,
+    without?: { docId: string; commentId: string },
+  ) => SizedReviewItemRow[];
   sizer: ReviewSizer;
   /** Newest real activity per board, the landing page's own reading. */
   lastActivityOf: (workspace: BoardWorkspace) => number;
@@ -208,6 +214,24 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     });
   });
 
+  /** The board a thread's doc sits on, and which kind of row its threads make. */
+  const threadHome = (docId: string) => {
+    const rowId = docId.startsWith('task:') ? docId.slice('task:'.length) : undefined;
+    const task = rowId ? taskStore.getTask(rowId) : undefined;
+    const goal = rowId && !task ? taskStore.getGoalRow(rowId) : undefined;
+    const workspaceId =
+      task?.workspaceId ??
+      goal?.workspaceId ??
+      taskStore.listWorkspaces().find((w) => w.docIds.includes(docId))?.id;
+    if (!workspaceId) return null;
+    const kind: 'task-thread' | 'goal-thread' | 'doc-thread' = task
+      ? 'task-thread'
+      : goal
+        ? 'goal-thread'
+        : 'doc-thread';
+    return { workspaceId, kind, task };
+  };
+
   const offDoc = docStore.onReviewAnswered((event) => {
     later(() => {
       const comment = docStore
@@ -216,15 +240,9 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
         ?.comments.find((c) => c.id === event.commentId);
       const review = comment?.review;
       if (!comment || !review) return;
-      const rowId = event.docId.startsWith('task:') ? event.docId.slice('task:'.length) : undefined;
-      const task = rowId ? taskStore.getTask(rowId) : undefined;
-      const goal = rowId && !task ? taskStore.getGoalRow(rowId) : undefined;
-      const workspaceId =
-        task?.workspaceId ??
-        goal?.workspaceId ??
-        taskStore.listWorkspaces().find((w) => w.docIds.includes(event.docId))?.id;
-      if (!workspaceId) return;
-      const kind = task ? 'task-thread' : goal ? 'goal-thread' : 'doc-thread';
+      const home = threadHome(event.docId);
+      if (!home) return;
+      const { workspaceId, kind, task } = home;
       recordAnswer({
         workspaceId,
         ask: {
@@ -243,6 +261,38 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     });
   });
 
+  // An ask nobody declared is answered by an ordinary reply: the person's
+  // comment ends the agent's run and the row is gone. So the row is read as
+  // the thread stood without that comment, and each one the comment retired
+  // is recorded the way a declared answer is.
+  const offComment = docStore.onCommentPosted((event) => {
+    if (classifyActor(event.author) === 'agent') return;
+    later(() => {
+      const home = threadHome(event.docId);
+      const w = home && taskStore.listWorkspaces().find((b) => b.id === home.workspaceId);
+      if (!home || !w || isRetired(w)) return;
+      const onThread = (r: SizedReviewItemRow) =>
+        r.kind !== 'task-review' && r.docId === event.docId && r.threadId === event.threadId;
+      const still = new Set(
+        reviewItemsFor(w)
+          .filter(onThread)
+          .map((r) => r.band),
+      );
+      for (const row of reviewItemsFor(w, event).filter(onThread)) {
+        if (row.kind === 'task-review' || row.band !== 'unreplied' || still.has(row.band)) continue;
+        recordAnswer({
+          workspaceId: w.id,
+          ask: askShapeOf(row),
+          key: `${row.kind}:${row.docId}:${row.threadId}`,
+          askedAt: row.askedAt ?? row.since,
+          visibleAt: row.askedAt ?? row.since,
+          answeredAt: event.ts,
+          size: { minutes: row.minutes, size: row.size },
+        });
+      }
+    });
+  });
+
   return {
     plan,
     projects: () => projectsOf(liveBoards()),
@@ -252,6 +302,7 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     dispose: () => {
       offTask();
       offDoc();
+      offComment();
     },
   };
 }
