@@ -135,6 +135,11 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/api/prompts', 'GET'],
     ['trusted-local', '/api/prompts/:id', 'GET PUT'],
   ]),
+  ...family('routes/review-queue.ts', [
+    ['trusted-local', '/api/review-queue', 'GET'],
+    ['trusted-local', '/api/review-wait', 'GET'],
+    ['trusted-local', '/reviews', 'GET'],
+  ]),
 
   ...family('routes/agent-identity.ts', [
     ['trusted-local', '/api/agents/:agentId/token', 'GET'],

@@ -189,9 +189,8 @@ describe('attachments stay reachable without leaking back onto /', () => {
   });
 });
 
-describe('the landing page says which workspaces are waiting on the owner', () => {
+describe('the landing page offers every waiting item across boards, sized', () => {
   let waitingId: string;
-  let quietId: string;
 
   async function makeDecision(wsId: string, title: string): Promise<void> {
     await j(
@@ -210,100 +209,55 @@ describe('the landing page says which workspaces are waiting on the owner', () =
     );
   }
 
-  it('a row with open review items carries a counted chip into the queue; a quiet row carries none', async () => {
+  /** The sizes the page hands its script, one [size, minutes] per item. */
+  const sizesOf = (html: string): Array<[string, number]> => {
+    const m = html.match(/<script type="application\/json" id="review-sizes">([^<]*)<\/script>/);
+    return m?.[1] ? (JSON.parse(m[1]) as Array<[string, number]>) : [];
+  };
+
+  it('sizes every item into one bar, starting on Hard, with one way in and no counts', async () => {
     waitingId = await makeWorkspace('Waiting board');
-    quietId = await makeWorkspace('Quiet board');
     await makeDecision(waitingId, 'Pick a door');
     await makeDecision(waitingId, 'Pick another door');
 
     const html = await landing();
-    // The chip: count + the word, linking into the workspace's own
-    // walkthrough — the existing queue, not a second implementation.
-    const chip = new RegExp(
-      `href="/workspaces/${encodeURIComponent(waitingId)}/home\\?walk=1"[^>]*>` +
-        `<span class="n">2</span>`,
+    const sizes = sizesOf(html);
+    expect(sizes.length).toBeGreaterThanOrEqual(2);
+    const total = sizes.reduce((n, [, m]) => n + m, 0);
+    expect(html).toContain('Review Items for You');
+    expect(html).toContain('Choose what you have time for:');
+    expect(html).toContain(
+      `Total estimated time: <span class="est-n" id="est">${total}</span> min`,
     );
-    expect(html).toMatch(chip);
-    // The quiet board renders NO review affordance — and its row is still
-    // there (positive control that the row itself rendered).
-    expect(html).toContain('Quiet board');
-    expect(html).not.toMatch(
-      new RegExp(`href="/workspaces/${encodeURIComponent(quietId)}/home\\?walk=1"`),
-    );
-  });
-
-  it('the top bar totals every waiting workspace and Review all chains them', async () => {
-    const html = await landing();
-    expect(html).toContain('waiting on you');
-    // One waiting workspace so far: the bar links straight into it, with no
-    // handoff list.
-    expect(html).toMatch(
-      new RegExp(`class="allgo" href="/workspaces/${encodeURIComponent(waitingId)}/home\\?walk=1"`),
-    );
-
-    // A second waiting workspace joins the chain: Review all starts at the
-    // most recently active one and hands off to the rest via `then`.
-    await tick();
-    await makeDecision(quietId, 'Quiet board wakes up');
-    const html2 = await landing();
-    expect(html2).toContain('across 2 workspaces');
-    const walkAll = new RegExp(
-      `class="allgo" href="/workspaces/${encodeURIComponent(quietId)}/home\\?walk=1&amp;then=${encodeURIComponent(waitingId)}"`,
-    );
-    expect(html2).toMatch(walkAll);
-  });
-
-  it('with nothing waiting anywhere, no bar renders at all', async () => {
-    // A fresh server state is not available mid-file; assert the negative on
-    // the first landing read of this file instead: before any decision
-    // existed, earlier tests read the page repeatedly and the bar's classes
-    // never appeared. Here, assert the structural half: the bar renders only
-    // once, not per workspace.
-    const html = await landing();
+    expect(html).toContain('class="board-tab filled board-tab-active" data-size="hard"');
+    expect(html).toContain('class="allgo" href="/reviews">Start review ›</a>');
+    // The removed counts: no per-row chip, no "N waiting" sentence.
+    expect(html).not.toContain('for you</a>');
+    expect(html).not.toContain('waiting on you');
     expect(html.split('class="allbar"').length - 1).toBe(1);
   });
 
-  it('retiring a workspace takes it out of the bar and the chain', async () => {
-    // Retiring is the owner saying "get this out of my way" — the bar
-    // steering Review all through a retired board contradicts the act.
-    // The retired row itself still renders, in its own fold.
+  it('numbers the projects, and a retired board leaves the bar', async () => {
+    const html = await landing();
+    expect(html).toContain('Prioritized Projects');
+    expect(html).toMatch(/<span class="rank">1<\/span>/);
+    const before = sizesOf(html).length;
+
     await fetch(`${base}/workspaces/${encodeURIComponent(waitingId)}/retired`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ retired: true, author: AGENT, reason: 'superseded in test' }),
     });
-    const html = await landing();
-    // Only the quiet-turned-waiting board remains: no "across N", no chain.
-    expect(html).not.toContain('across 2 workspaces');
-    expect(html).toMatch(
-      new RegExp(`class="allgo" href="/workspaces/${encodeURIComponent(quietId)}/home\\?walk=1"`),
-    );
-    expect(html).not.toContain(`then=${encodeURIComponent(waitingId)}`);
-  });
+    const retired = await landing();
+    expect(sizesOf(retired).length).toBe(before - 2);
+    // Still readable in its fold.
+    expect(retired).toContain('Waiting board');
 
-  it('a retired row contributes no review items — the chip is gone until un-retired', async () => {
-    // Same act, same consequence: the "N for you" chip on the retired row
-    // launches the walkthrough into a board its owner stood down. The row
-    // stays readable inside the retired fold; the chip must not render.
-    const html = await landing();
-    expect(html).toContain('Waiting board');
-    expect(html).not.toMatch(
-      new RegExp(`href="/workspaces/${encodeURIComponent(waitingId)}/home\\?walk=1"`),
-    );
-
-    // Un-retiring brings the items back: the chip, the bar total, the chain.
     await fetch(`${base}/workspaces/${encodeURIComponent(waitingId)}/retired`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ retired: false, author: AGENT }),
     });
-    const restored = await landing();
-    expect(restored).toContain('across 2 workspaces');
-    expect(restored).toMatch(
-      new RegExp(
-        `href="/workspaces/${encodeURIComponent(waitingId)}/home\\?walk=1"[^>]*>` +
-          `<span class="n">2</span>`,
-      ),
-    );
+    expect(sizesOf(await landing()).length).toBe(before);
   });
 });
