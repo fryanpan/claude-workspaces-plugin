@@ -22,6 +22,7 @@ export function boardState(over: Partial<BoardState> = {}): BoardState {
   return {
     seat: null,
     chatAudit: null,
+    doneWhenRefusal: null,
     info: null,
     tasks: new Map(),
     taskDetail: new Map(),

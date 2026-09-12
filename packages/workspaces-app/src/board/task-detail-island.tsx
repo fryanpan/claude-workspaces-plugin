@@ -91,6 +91,7 @@ import {
 } from './board-review-model.ts';
 import { panelReviewQueue } from './board-review-render.ts';
 import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
+import { DoneWhenList } from './done-when-list.tsx';
 import { markPhrase } from './review-item-phrase.ts';
 import { ScheduleEditor } from './schedule-editor.tsx';
 import { selectWordAtPoint, useSelectionPill } from './selection-pill.ts';
@@ -1362,6 +1363,15 @@ function TaskDetailPanel(props: {
           spent the entire first screen on facts identical across every task. */}
       <dl ref={fieldsRef} class="board-detail-fields" />
 
+      {/* Why the last move to Done was refused, beside the control that was
+          refused. A toast would be gone before the reader had found the line
+          it named — and the line it named is on this same screen. */}
+      {handlers.doneWhenRefusal && (
+        <p class="dw-refusal">
+          <b>This cannot move to Done yet.</b> {handlers.doneWhenRefusal.message}
+        </p>
+      )}
+
       {/* WHEN this row's work starts, as a sentence and as chips — one rule,
           two views. It sits with the facts rather than below the description
           because a schedule is a property of the row, like Due next to it,
@@ -1441,6 +1451,23 @@ function TaskDetailPanel(props: {
           appearing directly under the answer buttons. */}
       <h3 class="board-detail-subhead board-detail-body-head">Description</h3>
       <div ref={slotRef} class="board-detail-body-slot" data-task-id={task.id} />
+
+      {/* What has to be true before this is finished — under the description,
+          because the criteria are what the description promises rather than a
+          fact about the row like Due or Goal. Keyed on the task so moving to
+          another ticket drops any half-typed line with the panel's other
+          per-task state. */}
+      <DoneWhenList
+        key={task.id}
+        task={task}
+        handlers={{
+          ...(handlers.onDoneWhenLines ? { onLines: handlers.onDoneWhenLines } : {}),
+          ...(handlers.onDoneWhenCheck ? { onCheck: handlers.onDoneWhenCheck } : {}),
+        }}
+        {...(handlers.doneWhenRefusal?.lineId !== undefined
+          ? { refusedLineId: handlers.doneWhenRefusal.lineId }
+          : {})}
+      />
 
       <div ref={tabsRef} class="board-detail-tabs" role="tablist">
         {DETAIL_TABS.map((t) => (
