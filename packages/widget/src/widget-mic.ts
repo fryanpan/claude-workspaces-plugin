@@ -1,15 +1,18 @@
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
- * What a refused write says, re-exported here rather than from `widget.ts`.
+ * What a refused write says — the sentence the typed composer has always put
+ * in its own note, spelled again here for the host that must say it about a
+ * SPOKEN comment the workspace would not take.
  *
- * The host that mounts a mic is the one that needs it: its readout holds a
- * spoken comment the workspace would not take, and it must say what the typed
- * composer says about a typed one. Routed through THIS entry because
- * `widget.ts` is the budgeted bundle and a re-export there is bytes on every
- * mock page, for a name only a page with a mic ever reads.
+ * Spelled, not imported. `widget-auth.ts` is in the budgeted bundle, and
+ * turning its inline literal into an exported name costs every mock page
+ * bytes for a string only a page with a microphone ever reads. The copy is
+ * safe because it is not trusted: a case in `widget-auth.test.ts` opens the
+ * real composer against a workspace that wants a signature and asserts the
+ * note it renders begins with this, so the two cannot drift apart quietly.
  */
-export { SIGN_IN_NOTE } from './widget-auth.ts';
+export const SIGN_IN_NOTE = 'Sign in to post. Your draft is kept.';
 
 /**
  * A microphone on the widget, for a host that has one to hand it.
@@ -57,6 +60,18 @@ export interface WidgetMic {
  */
 const MIC_CSS = [
   '.side{bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(126px,calc(env(safe-area-inset-bottom) + 126px)))}',
+  // The phone face folds the floating buttons away under its bottom panel,
+  // and the mic wears .fab-list for its look and its slot, so it folded with
+  // the thread list — leaving the one width where speaking beats typing with
+  // no mic in the mode at all. The mic is the exception, and it says so HERE
+  // rather than in the widget's own sheet: the widget ships to every mock
+  // page under a gzip budget, and none of those pages has a mic to except.
+  // Two classes beats the fold rule's one class plus its :has() on equal
+  // terms, and this sheet is appended after the widget's, so it wins the tie.
+  // It needs nothing to move for it: the slot starts 74px up and the panel is
+  // about 64px tall in its short form. The tall form is what --cw-quick-h is
+  // for, below.
+  '.fab-list.fab-mic{display:flex}',
   '.fab-mic svg{width:20px;height:20px}',
   '.fab-mic.voice-active{background:#d1242f;border-color:#d1242f;color:#fff}',
   '.fab-mic.voice-unavailable{color:#8c959f}',
@@ -146,6 +161,47 @@ function reserveQuickPanel(el: FeedbackWidgetEl): void {
 }
 
 /**
+ * Make the widget's one sign-in retry slot hold everything put in it, instead
+ * of only the last thing.
+ *
+ * `retryAfterSignIn` is a single field, and until a host could park something
+ * in it that was safe: the typed composer was the only writer and it re-armed
+ * on each refusal. A mic makes it shared. Two people are then told "your
+ * draft is kept" — the one who spoke and the one who typed — and a plain
+ * assignment keeps whichever was written last and silently drops the other,
+ * which is the sentence-losing bug the mic exists to end, rebuilt one layer
+ * up.
+ *
+ * Done as a property on the instance rather than by asking both writers to
+ * chain, for the same reason the sentence above is spelled twice: the typed
+ * composer lives in the budgeted bundle, and a page with no mic has no
+ * sharing to arrange. Assignment appends, reading hands back one function
+ * that runs the queue oldest first, and `= null` — which the widget does
+ * immediately after running it — empties the queue. So the widget's own two
+ * lines work unchanged and know nothing about this.
+ */
+function shareRetrySlot(el: FeedbackWidgetEl): void {
+  let queue: Array<() => void> = [];
+  Object.defineProperty(el, 'retryAfterSignIn', {
+    configurable: true,
+    get: () =>
+      queue.length === 0
+        ? null
+        : () => {
+            // Taken before running: a retry refused a second time re-arms the
+            // slot, and that belongs to the next sign-in, not this pass.
+            const holding = queue;
+            queue = [];
+            for (const run of holding) run();
+          },
+    set: (next: (() => void) | null) => {
+      if (next === null) queue = [];
+      else queue.push(next);
+    },
+  });
+}
+
+/**
  * Put the mic on this widget. Idempotent: a second call hands back the
  * first mic rather than a second one, since a capture is wired to exactly one.
  */
@@ -179,6 +235,7 @@ export function addMic(el: FeedbackWidgetEl, labels: MicLabels): WidgetMic {
     b.setAttribute('aria-label', tip);
   }
   s.append(style, button, readout);
+  shareRetrySlot(el);
   const tick = (): void => {
     if (!button.isConnected) return;
     reserveQuickPanel(el);

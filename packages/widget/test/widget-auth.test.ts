@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { SIGN_IN_NOTE } from '../src/widget-mic.ts';
 
 /**
  * The widget half of the popup-token handshake.
@@ -508,22 +509,20 @@ describe('a workspace that requires a signed-in writer', () => {
     expect(el.shadowRoot!.querySelector('.pick-btn')).toBeTruthy();
   });
 
-  it('does not drop a retry a host armed before the composer offered one', async () => {
-    // One retry slot, and a host can be holding something in it: the board's
-    // mic parks a spoken comment there when the workspace refuses the post.
-    // Opening the composer used to assign straight over that, so two drafts
-    // were promised back and the older one was gone.
+  it('says the sentence the mic entry hands to a host, word for word', async () => {
+    // The mic entry spells this sentence again rather than importing it,
+    // because naming it here would cost the budgeted bundle bytes on every
+    // mock page. This is what makes the copy safe: the words a host puts in
+    // its readout for a REFUSED SPOKEN comment are the words the composer
+    // renders for a typed one, or a spoken comment is answered in a language
+    // of its own.
     const mod = await importWidget();
     fetchResponder = (url) => (url.includes('/api/auth/session') ? required() : json({}));
-    const el = mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-req-chain' });
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-req-wording' });
     await flush();
-    const ran: string[] = [];
-    const host = el as unknown as { retryAfterSignIn: (() => void) | null };
-    host.retryAfterSignIn = () => ran.push('what the host was holding');
-    const composer = openComposer(el);
-    expect(composer.querySelector('.auth-signin'), 'CONTROL: the offer is up').toBeTruthy();
-    host.retryAfterSignIn?.();
-    expect(ran).toEqual(['what the host was holding']);
+    const note = openComposer(el).querySelector('.composer-err');
+    expect(note?.textContent, 'CONTROL: the composer really did say something').toBeTruthy();
+    expect(note?.textContent?.startsWith(SIGN_IN_NOTE), SIGN_IN_NOTE).toBe(true);
   });
 
   it('keeps the draft on refusal and posts it once the person signs in', async () => {
