@@ -85,7 +85,7 @@ import {
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
 import { meetingTimingPath } from './meetings.ts';
-import { sectionIds } from './notes-cleanup-scope.ts';
+import { commentedBlockIds, sectionIds } from './notes-cleanup-scope.ts';
 import { recordMeetingCost } from './notes-cost-store.ts';
 import {
   NOTES_AUTHOR_ID,
@@ -113,6 +113,7 @@ import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import { resolveSchemeLinks } from './notes-scheme-links.ts';
 import { lastNotesHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
+import { tidyNotesSection } from './notes-section-tidy.ts';
 import {
   reattributeNotesSection,
   relabelNotesSection,
@@ -686,11 +687,32 @@ export function applyNotesUpdate(
   const res = applyNotesBlockEdits(docStore, update.docId, linked.edits);
   if (!res.ok) return 'store-refused';
   opts.onOutcomes?.(res.outcomes);
-  heading.learn(
-    { docId: update.docId, meetingId: update.meetingId },
-    before,
-    readNotesOutline(docStore, update.docId, { headingsOnly: true }),
-  );
+  const ids = { docId: update.docId, meetingId: update.meetingId };
+  const after = readNotesOutline(docStore, update.docId, { headingsOnly: true });
+  heading.learn(ids, before, after);
+  // A TOPIC OPENED TWICE IS FOLDED IN THE TICK THAT OPENED IT. A tick is
+  // shown a slice of the doc, so it can open a `### ` heading the section
+  // already carries a little further up — which is what put `Note-taker
+  // performance` in Bryan's doc twice on 2026-09-11, while the meeting was
+  // still running. Dropping the repeat leaves this tick's bullets under the
+  // topic they were already about, and only a repeat of the topic DIRECTLY
+  // above it is touched (`notes-section-tidy.ts`).
+  //
+  // Blank lines are left to the cleanup pass: a person typing in the notes
+  // section has an empty paragraph under their cursor for as long as it
+  // takes them to type, and a live meeting is exactly when that is true.
+  const section = heading.headingId(ids, after);
+  if (section !== undefined) {
+    const tidied = tidyNotesSection(doc.ydoc, section, () => commentedBlockIds(doc.ydoc), {
+      blanks: false,
+    });
+    if (tidied.merged > 0) {
+      console.log(
+        `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
+          `${tidied.merged} repeated topic heading folded into the topic above it`,
+      );
+    }
+  }
   // A batch every one of whose edits failed wrote nothing, and saying so is
   // what reports the skip. A batch that landed some of its edits is a
   // success: the rest reported `unknown-block`, which is the ordinary answer

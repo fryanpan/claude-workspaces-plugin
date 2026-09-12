@@ -88,8 +88,19 @@ function textOf(el: Y.XmlElement): string {
 export function tidyNotesSection(
   ydoc: Y.Doc,
   headingId: string,
-  commented: ReadonlySet<string> = new Set(),
+  commented: ReadonlySet<string> | (() => ReadonlySet<string>) = new Set(),
+  opts: { blanks?: boolean } = {},
 ): NotesSectionTidyResult {
+  // READ ONLY IF SOMETHING IS ABOUT TO BE DROPPED. Finding the comments means
+  // walking the whole document's text, and this runs after every tick of
+  // every meeting, where the ordinary answer is that there is nothing to
+  // repair at all.
+  let threads: ReadonlySet<string> | undefined;
+  const commentedNow = (): ReadonlySet<string> => {
+    if (threads === undefined) threads = typeof commented === 'function' ? commented() : commented;
+    return threads;
+  };
+  const dropBlanks = opts.blanks ?? true;
   let top: Y.XmlElement[];
   try {
     top = prose.getProseFragment(ydoc).toArray() as Y.XmlElement[];
@@ -111,16 +122,13 @@ export function tidyNotesSection(
     const level = levelOf(el);
     if (level !== undefined && level <= openLevel) break;
     const id = prose.readBlockId(el);
-    if (id !== undefined && commented.has(id)) {
-      if (level !== undefined) lastTopic = topicKey(textOf(el));
-      continue;
-    }
+    const commentedHere = (): boolean => id !== undefined && commentedNow().has(id);
     if (level !== undefined) {
       const key = topicKey(textOf(el));
       // An empty heading is not a topic and not a repeat of one either; it
       // falls through to the blank check below.
       if (key.length > 0) {
-        if (key === lastTopic) {
+        if (key === lastTopic && !commentedHere()) {
           drop.push(i);
           merged++;
           continue;
@@ -129,7 +137,7 @@ export function tidyNotesSection(
         continue;
       }
     }
-    if (textOf(el).length === 0) {
+    if (dropBlanks && textOf(el).length === 0 && !commentedHere()) {
       drop.push(i);
       blanks++;
     }

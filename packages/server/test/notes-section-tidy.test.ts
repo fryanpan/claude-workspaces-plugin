@@ -30,6 +30,7 @@ import {
   stubComposer,
   writeTranscript,
 } from './notes-cleanup-fixture.ts';
+import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 afterEach(dropFreshDirs);
 
@@ -219,5 +220,55 @@ describe('the same topic heading twice under one Meeting notes section', () => {
     const result = await cleanup(store, idOf(store, 'Meeting notes'));
     expect(result.merged).toBe(0);
     expect(headings(ydoc).filter((h) => h === 'Note-taker performance')).toHaveLength(2);
+  });
+});
+
+/**
+ * THE SAME REPAIR, IN THE TICK THAT MAKES THE MESS.
+ *
+ * A tick is shown a slice of the doc, so it opens a `### ` heading the
+ * section already carries further up — which is how `Note-taker performance`
+ * appeared twice in his doc while the meeting was still running, before any
+ * cleanup pass had been asked for.
+ */
+describe('a tick that opens a topic the section already has', () => {
+  it('leaves one heading and both ticks’ bullets', async () => {
+    const harness = createNotesTickHarness({
+      compose: (input, tick) =>
+        addNotes(
+          input,
+          tick === 1
+            ? '### Ferry timetable\n\n- the harbour run moves to the half hour'
+            : '### Ferry timetable\n\n- and the last sailing is at seven',
+        ),
+    });
+    await harness.speak('the harbour run moves to the half hour');
+    const second = await harness.speak('and the last sailing is at seven');
+
+    expect(second.headings.filter((h) => h === 'Ferry timetable')).toHaveLength(1);
+    expect(bullets(harness.ydoc)).toEqual([
+      'the harbour run moves to the half hour',
+      'and the last sailing is at seven',
+    ]);
+  });
+
+  it('CONTROL: a tick opening a topic that is genuinely new keeps it', async () => {
+    const harness = createNotesTickHarness({
+      compose: (input, tick) =>
+        addNotes(
+          input,
+          tick === 1
+            ? '### Ferry timetable\n\n- the harbour run moves to the half hour'
+            : '### Slipway costs\n\n- the winter haul-out quote is in',
+        ),
+    });
+    await harness.speak('the harbour run moves to the half hour');
+    await harness.speak('the winter haul-out quote is in');
+    const topics = prose
+      .readOutline(harness.ydoc)
+      .filter((e) => e.kind === 'heading' && e.level === 3)
+      .map((e) => e.text);
+    expect(topics).toEqual(['Ferry timetable', 'Slipway costs']);
+    expect(bullets(harness.ydoc)).toHaveLength(2);
   });
 });
