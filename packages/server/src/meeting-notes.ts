@@ -1948,7 +1948,17 @@ export function beginNotesSession(
           if (answer !== 'refused') retryAfterFailure(tick);
           return;
         }
-        writesFailedInARow = 0;
+        // A TICK THAT SAID NOTHING IS NOT A TICK THAT WROTE. An empty compose
+        // answers `null` before the guard ever sees it, so it arrives here as
+        // a success — and it is one, for everything below. It is not one for
+        // the notice: no words reached the doc, so a sentence saying words are
+        // not reaching the doc is still true, and clearing the streak on it
+        // would let a meeting alternate refusal and silence while the room is
+        // told nothing. The quota notice retracts unconditionally a few lines
+        // down for the opposite reason — the API answered, which is the whole
+        // of what that sentence claims.
+        const wroteWords = edits.length > 0;
+        if (wroteWords) writesFailedInARow = 0;
         // A question is only asked once, and it is asked once it has LANDED.
         // Marking them offered before the write meant a refused write lost
         // the questions outright — the retry composed without them.
@@ -1977,10 +1987,11 @@ export function beginNotesSession(
         // a session that started mid-outage remembers nothing, and the doc
         // would go on claiming an outage that ended before it began.
         retractQuotaNotice(quotaNotice, outline, writeNotice);
-        // And the same for the write-failure notice: the doc has just taken a
-        // tick's words, so a line saying it could not is the stale claim the
-        // retraction rule exists for.
-        retractNotice(NOTES_NOT_WRITTEN_NOTICE, notWrittenNotice, outline, writeNotice);
+        // And the same for the write-failure notice, but only for a tick that
+        // actually put words in: see `wroteWords` above.
+        if (wroteWords) {
+          retractNotice(NOTES_NOT_WRITTEN_NOTICE, notWrittenNotice, outline, writeNotice);
+        }
       } catch (err) {
         carry = [...raw, ...carry];
         // Same reason as the refused-write path: an idea whose second look

@@ -102,6 +102,43 @@ describe('the doc says when the note-taker has stopped taking words', () => {
     expect(said).toHaveLength(1);
   });
 
+  // A TICK THAT SAID NOTHING MUST NOT READ AS RECOVERY. An empty compose
+  // reaches the write path as a success — there is nothing to refuse — so it
+  // used to clear the streak and pull the notice down while the doc was still
+  // taking none of the room's words. Found by an independent review of this
+  // branch, not by a test that existed.
+  test('leaves it standing through a tick the composer answered with nothing', async () => {
+    // The silent tick is the one right after the notice goes up, which is the
+    // only place the bug is reachable — so the script finds it by READING the
+    // doc rather than by counting ticks, whose numbering a retry can move.
+    const h = createNotesTickHarness({
+      doc: '# Harborlight survey\n',
+      compose: (input) => {
+        const markdown = input.tick.turns.map((t) => `- ${t.text}`).join('\n');
+        if (markdown.length === 0) return [];
+        if (input.outline.some((e) => e.text.includes(NOTES_NOT_WRITTEN_MARK))) return [];
+        const section = input.outline.find(
+          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+        );
+        return section === undefined
+          ? addNotes(input, markdown)
+          : [{ op: 'replace_block', blockId: section.id, markdown: `## ${markdown}` }];
+      },
+    });
+    const seen: boolean[] = [];
+    for (const line of ['one', 'two', 'three', 'four', 'five', 'six']) {
+      seen.push(carriesNotice((await h.speak(line)).markdown));
+    }
+    await h.end();
+    seen.push(carriesNotice(h.markdown()));
+    // MONOTONIC, not an end state: nothing in this meeting ever writes, so
+    // once the notice is up it must never come back down. A retraction by the
+    // silent tick shows up as a `false` after a `true`.
+    const raised = seen.indexOf(true);
+    expect(raised).toBeGreaterThanOrEqual(0);
+    expect(seen.slice(raised)).toEqual(seen.slice(raised).map(() => true));
+  });
+
   test('takes it away again when a tick writes', async () => {
     // Refused for ticks 2-4, then the composer goes back to writing notes.
     const h = createNotesTickHarness({
