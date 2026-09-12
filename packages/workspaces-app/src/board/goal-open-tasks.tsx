@@ -32,6 +32,10 @@ import { statusLabel } from './board-model.ts';
  * different question — what goes if this goal is archived — and the archive
  * cascade takes every task filed under the goal, rules included, so a list
  * that left them out would undercount exactly the rows the ask is about.
+ *
+ * The rules go after the band's rows rather than sorted in among them: on the
+ * board a rule is ordered within Scheduled, not within the band, so there is
+ * no band position to restore, and the work itself reads first.
  */
 export function goalPanelSection(
   sections: BoardSection[],
