@@ -184,7 +184,11 @@ due ([scheduled-tasks](scheduled-tasks.md)) and, on the same pass, has
 and filing one review item when a rule has gone stale — and
 `task-scheduled-wake.ts` get somebody onto the instance: an addressed frame
 to an attached owner, one spawn request to the fleet's spawner for a detached
-one, bounded retries, then a review item. What the loop reads — every rule
+one, bounded retries, then a review item. `task-run-output.ts` runs on the
+same pass: a run that wrote files into the rule's declared output folder
+files ONE review item linking them, replaced by the next run. It reads the
+project's files through the Library's listing, which `server.ts` hands it from
+`routes/workspace-library.ts`, so the scheduler never imports a route. What the loop reads — every rule
 task with its cursor resolved, including the last change of the doc or task an
 on-change rule watches — is `task-scheduler-rows.ts`. All of them join the
 Board group under its `task-*.ts` glob rather than changing the picture — they
@@ -204,11 +208,12 @@ new module sits beside the store rather than inside the group that consumes
 it. Nothing about dispatch changes: a declared wait alters what the wake
 SAYS, and `block_task` remains the verb for a blocker the board can verify.
 
-**A schedule rule has one spelling.** `core` holds nine modules for it and no
+**A schedule rule has one spelling.** `core` holds ten modules for it and no
 other package holds any: `task-schedule.ts` (the rule type and the occurrence
 arithmetic), `schedule-trigger.ts` (the kind that runs on a doc or task
 change, and its quiet window), `schedule-parse.ts` (a rule read off the
-wire), `schedule-timezone.ts` (instant ⇄ wall clock),
+wire), `schedule-output.ts` (the folder a rule writes into, and which of a
+project's files are one run's output), `schedule-timezone.ts` (instant ⇄ wall clock),
 `schedule-missed.ts` (what a rule wants done about an occurrence the server
 missed — catch up, skip, or fold into the open catch-up that is the lock),
 `schedule-run-record.ts` (what the task says about its last run, and when a

@@ -180,6 +180,53 @@ took it. The run record reads that back: an open instance says `Waiting 5m`
 while a wake is owed, `Unanswered 2h` in red once the board has given up,
 and `Running` only when somebody has it.
 
+## A run's output reaches Home
+
+A rule that writes files (a daily digest is the case that asked for it)
+declares where they land: `output: { folder }`, relative to the board's
+project root. A reader was finding digests only by going to the Library. With
+the folder declared, each run that writes something there puts **one** item
+on Home that opens it.
+
+**One run is one instance, not a burst of files.** The run's output is every
+file in the folder whose mtime falls between the instance's creation and its
+close, plus a minute of slack. A measured daily digest run wrote its sources in
+one burst and its digest four minutes later. The Library's 60-second burst rule
+would split that run in two, and it would merge unrelated writes. A folder
+named like a digest would be a guess, and paths in the instance's prose are
+content. The rule saying where its output goes is the only reading that is not
+a guess.
+
+**One item per rule, replaced rather than stacked.** The item is a question-shaped
+review item on the rule task. It is filed by the scheduler, like the stale
+item, with one link per file to `/workspaces/<id>/library?open=<path>`. The
+Library page hands that path to its open verb. The next run files its item
+first and withdraws the old one after, carrying the old item's unopened files
+(seven links at most). An unread digest does not turn into a card a day, and it
+does not quietly drop off either.
+
+- **Read.** The item is withdrawn once every file it links that was unopened
+  when it was filed is held by a doc of the board, which is what opening a file
+  does from the item and from the Library alike. A run that rewrites a file
+  already open (a `latest.md`) still files an item, but opening that file again
+  is no sign it was read, so such an item stands until it is answered or the
+  next run replaces it. Answering closes it, and the next run carries nothing
+  from an answered item.
+- **Once per run.** The rule's state remembers the success it looked at
+  (`state.output.forSuccessAt`), so no later tick lists the project again for
+  the same run.
+- **The Library is unchanged.** Items are built from the Library's own
+  listing, the files it offers and the files the board's docs hold, so a file
+  the item links is a file the Library shows.
+- **Not covered.** A local-only project's files are never named in an item,
+  because an item is readable by the board's share visitors. Files that arrive
+  by `git pull` from a job the board did not run belong to no instance, so they
+  file nothing.
+
+A write that does not mention `output` keeps the stored folder, and `null`
+clears it. The phrase editor rewrites the rule without knowing about outputs,
+so a chip edit must not be what stops a digest reaching Home.
+
 ## Restart safety
 
 The guarantee is that a rule **neither loses an occurrence nor fires one

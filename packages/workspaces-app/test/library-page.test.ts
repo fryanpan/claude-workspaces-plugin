@@ -44,6 +44,7 @@ function drive(
   opts: {
     payload?: LibraryPayload | null | (LibraryPayload | null)[];
     openAnswer?: { ok: boolean; status: number; data: Record<string, unknown> | null };
+    requestedOpen?: string;
   } = {},
 ): Driven {
   document.body.innerHTML = '<div id="board-library"></div>';
@@ -73,6 +74,11 @@ function drive(
     navigate: (href) => navigated.push(href),
     history,
     here: () => `https://board.test/workspaces/${WS}/library`,
+    takeRequestedOpen: () => {
+      const wanted = opts.requestedOpen ?? null;
+      opts.requestedOpen = undefined;
+      return wanted;
+    },
     now: () => NOW,
   });
   return { page, root, history, sent, navigated };
@@ -331,6 +337,35 @@ describe('the Library front page', () => {
     );
   });
 
+  it('opens the file its address asks for, once, the way a tap on its row would', async () => {
+    const { page, sent, navigated } = drive({ requestedOpen: 'digests/ferry-roundup.md' });
+    await page.open();
+    expect(sent).toEqual([
+      {
+        path: `/workspaces/${WS}/library/open`,
+        method: 'POST',
+        body: { path: 'digests/ferry-roundup.md' },
+      },
+    ]);
+    expect(navigated).toEqual([`/workspaces/${WS}/docs/library-x`]);
+    // Coming back to the Library asks nothing: the request was taken.
+    await page.open();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('keeps the refusal on screen when the requested file cannot be opened', async () => {
+    const { page, root, navigated } = drive({
+      requestedOpen: 'digests/gone.md',
+      openAnswer: { ok: false, status: 404, data: { error: 'not-listed' } },
+    });
+    await page.open();
+    expect(navigated).toEqual([]);
+    expect(root.querySelector('.library-error')?.textContent).toBe(
+      'That file could not be opened.',
+    );
+    expect(names(root)).toContain('Tide gauge notes');
+  });
+
   it('a doc the board holds is a plain link to its page', async () => {
     const { page, root } = drive();
     await page.open();
@@ -390,6 +425,23 @@ describe('the Library on the board', () => {
     expect(el('board-quick').classList.contains('board-hidden-by-view')).toBe(true);
     expect(el('board-library').querySelector('.library-proj')?.textContent).toBe('riverbend');
     expect(document.querySelector('[data-nav=library]')?.textContent?.trim()).toBe('Library');
+  });
+
+  it('an address naming a file opens it, and drops the ask from the address', async () => {
+    server.on(`/workspaces/${WS}/library/open`, {
+      docId: 'library-y',
+      href: `/workspaces/${WS}/docs/library-y`,
+    });
+    const board = await bootTestBoard({
+      url: `https://board.test/workspaces/${WS}/library?open=${encodeURIComponent('digests/ferry-roundup.md')}`,
+    });
+    await settle();
+    const posts = server.calls.filter(
+      (c) => c.method === 'POST' && c.url.includes('/library/open'),
+    );
+    expect(posts.map((c) => c.body)).toEqual([{ path: 'digests/ferry-roundup.md' }]);
+    expect(board.location.navigations).toEqual([`/workspaces/${WS}/docs/library-y`]);
+    expect(board.history.url()).toBe(`/workspaces/${WS}/library`);
   });
 
   it('the nav item goes to the Library and back to Tasks, each with an address', async () => {

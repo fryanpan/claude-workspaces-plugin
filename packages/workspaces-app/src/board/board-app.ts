@@ -472,6 +472,14 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     navigate: (href) => location.assign(href),
     history,
     here: () => location.href,
+    takeRequestedOpen: () => {
+      const url = new URL(location.href);
+      const wanted = url.searchParams.get('open');
+      if (wanted === null) return null;
+      url.searchParams.delete('open');
+      history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+      return wanted;
+    },
   });
   if (state.nav === 'library') void library.open();
 

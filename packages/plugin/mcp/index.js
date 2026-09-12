@@ -17197,6 +17197,9 @@ var TOOL_LIST = {
             type: "string",
             enum: ["catch-up", "skip"],
             description: "What to do about an occurrence the server missed while down. Absent is catch-up: fire it late. 'skip' waits for the next one."
+          },
+          output: {
+            description: "The folder the rule's runs write into, as {folder} relative to the board's project root, e.g. {folder:'digests'}. Each run that writes files there files ONE review item on the rule linking them, which the next run replaces. Absent keeps the stored folder; null clears it."
           }
         },
         required: ["workspaceId", "taskId", "rule"]
@@ -18950,7 +18953,7 @@ async function handleTaskTool(name, a, ctx) {
       });
     }
     case "set_task_schedule": {
-      const { taskId, rule, timezone, until, onMissed } = a;
+      const { taskId, rule, timezone, until, onMissed, output } = a;
       if (rule === undefined) {
         return err2("rule required — a rule object to set, or null to clear the schedule.");
       }
@@ -18959,6 +18962,7 @@ async function handleTaskTool(name, a, ctx) {
         ...timezone !== undefined ? { timezone } : {},
         ...until !== undefined ? { until } : {},
         ...onMissed !== undefined ? { onMissed } : {},
+        ...output !== undefined ? { output } : {},
         author: AUTHOR
       });
       const schedule = res.task.schedule ?? null;
@@ -19742,7 +19746,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.225";
+var PLUGIN_VERSION = "0.1.226";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

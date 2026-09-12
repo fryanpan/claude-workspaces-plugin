@@ -5,6 +5,7 @@
  * the arithmetic and the validation were always two subjects.
  */
 import { MISSED_RUN_POLICIES, type MissedRunPolicy } from './schedule-missed.ts';
+import { type ScheduleOutput, parseScheduleOutput } from './schedule-output.ts';
 import { isKnownTimezone } from './schedule-timezone.ts';
 import { parseOnChangeRule } from './schedule-trigger.ts';
 import {
@@ -21,6 +22,8 @@ export type ScheduleParse =
       timezone?: string;
       until?: number;
       onMissed?: MissedRunPolicy;
+      /** Absent: the caller said nothing, keep what is stored. `null` clears. */
+      output?: ScheduleOutput | null;
     }
   | { ok: false; error: string };
 
@@ -55,7 +58,7 @@ function parseWeekdays(raw: unknown): { ok: true; weekdays?: Weekday[] } | { ok:
  */
 export function parseSchedule(raw: unknown): ScheduleParse {
   const body = raw as
-    | { rule?: unknown; timezone?: unknown; until?: unknown; onMissed?: unknown }
+    | { rule?: unknown; timezone?: unknown; until?: unknown; onMissed?: unknown; output?: unknown }
     | null
     | undefined;
   const input = body?.rule as Record<string, unknown> | undefined;
@@ -81,10 +84,13 @@ export function parseSchedule(raw: unknown): ScheduleParse {
   if (onMissed !== undefined && !(MISSED_RUN_POLICIES as readonly unknown[]).includes(onMissed)) {
     return { ok: false, error: `onMissed must be one of ${MISSED_RUN_POLICIES.join(' | ')}` };
   }
+  const output = parseScheduleOutput(body?.output);
+  if (!output.ok) return output;
   const tail = {
     ...(timezone !== undefined ? { timezone } : {}),
     ...(until !== undefined ? { until } : {}),
     ...(onMissed !== undefined ? { onMissed } : {}),
+    ...(output.output !== undefined ? { output: output.output } : {}),
   };
   switch (kind) {
     case 'once': {
