@@ -454,6 +454,23 @@ export function hydrateTasksFromDisk(store: TaskPersistenceHost): void {
           if (cascadedGoals.has(task.goal)) task.archivedWithGoal = task.goal;
         }
       }
+      // Seed the board's durable activity clock ONCE, here, from the reading
+      // it replaces. Leaving it absent and waiting for the first admitted
+      // event looks equivalent and is not: the boards this clock was fixed
+      // for are the ones whose only traffic is turn-end notes, and a note is
+      // exactly what never stamps the field. Such a board would sit on the
+      // note-contaminated fallback for as long as it kept being worked —
+      // which is the whole defect, surviving the fix on every board that
+      // already exists. Seeded in memory like the migrations around it; the
+      // next save writes it, and re-running it on an unsaved record gives the
+      // same answer. See `board-activity.ts`.
+      if (workspace.lastBoardActivityAt === undefined) {
+        let seed = 0;
+        for (const task of tasks.values()) {
+          seed = Math.max(seed, task.updatedAt, task.createdAt);
+        }
+        if (seed > 0) workspace.lastBoardActivityAt = seed;
+      }
       store.workspaces.set(workspace.id, {
         workspace,
         tasks,

@@ -323,6 +323,23 @@ export interface BoardWorkspace {
   /** When the current lead took the seat. */
   leadAgentSince?: number;
   /**
+   * When this board last MOVED — stamped at the store's emit choke point for
+   * the events `isBoardActivity` admits, and read back by the ready-work wake
+   * as the half of its idle clock that survives a restart.
+   *
+   * Optional because a board written before the field existed has none, and
+   * the absence has to be representable rather than guessed at: the reader
+   * (`lastBoardActivityAt`, board-activity.ts) falls back to the reduce over
+   * task `updatedAt` it replaces, which is the old — contaminated — reading
+   * and therefore never less conservative than what shipped before it.
+   *
+   * NOT derived from `task.updatedAt`, and that is the whole point. A turn-end
+   * note bumps `updatedAt` (task-notes.ts) while `task.noted` is deliberately
+   * excluded from board activity, so the derived reading counted the one event
+   * the rule exists to ignore and kept the wake silent on every busy board.
+   */
+  lastBoardActivityAt?: number;
+  /**
    * When this board was RETIRED — present iff it is. A retired board stops
    * ranking on the workspace list, refuses new tasks, and says so to any
    * agent that reads or attaches to it. Everything it holds survives
@@ -1911,6 +1928,7 @@ export class TaskStore {
     getTask: (taskId) => this.getTask(taskId),
     scheduleSave: (workspaceId) => this.scheduleSave(workspaceId),
     emit: (event) => this.emit(event),
+    now: () => this.clock(),
   });
 
   /** The board registry, and this store seen through the contract it needs.
@@ -1924,6 +1942,17 @@ export class TaskStore {
     attachmentsFor: (workspaceId) => this.workspaces.get(workspaceId)?.attachments,
     noteAgentToolCall: (workspaceId, agentId, at) =>
       this.noteAgentToolCall(workspaceId, agentId, at),
+    noteBoardActivity: (workspaceId, at) => {
+      const workspace = this.workspaces.get(workspaceId)?.workspace;
+      if (!workspace) return;
+      // Monotonic: an event carrying an older timestamp than one already
+      // stamped must not walk the clock backwards and hand the board a wake
+      // it is not owed. Saved through the same debounced sidecar write every
+      // other board field uses — the stamp rides the mutation's own save.
+      if (at <= (workspace.lastBoardActivityAt ?? 0)) return;
+      workspace.lastBoardActivityAt = at;
+      this.scheduleSave(workspaceId);
+    },
   });
 
   setDocRevisionReader(reader: ((docId: string) => number | undefined) | undefined): void {

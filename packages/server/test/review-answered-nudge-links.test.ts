@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { type NudgePayload, reviewAnsweredLine } from '../../mcp/src/nudge-line.ts';
 import { REVIEW_ANSWERED_EVENT } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { type Frame, listenFrames } from './sse-frames.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
@@ -30,53 +31,6 @@ const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 const CLAUSE = 'walk its links as the propagation checklist';
-
-type Frame = { event: string; data?: Record<string, unknown> };
-
-/** Read a workspace stream, keeping every frame's event name and payload.
- *  Same reader as `ready-nudge-routes.test.ts` — a nudge is addressed, so
- *  nothing short of a real stream can observe one. */
-function listenFrames(res: Response): { frames: Frame[]; stop: () => Promise<void> } {
-  const frames: Frame[] = [];
-  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
-  const decoder = new TextDecoder();
-  let stopped = false;
-  let buf = '';
-  const pump = (async () => {
-    try {
-      while (!stopped) {
-        const { done, value } = await reader.read();
-        if (done) return;
-        buf += decoder.decode(value, { stream: true });
-        let sep = buf.indexOf('\n\n');
-        while (sep >= 0) {
-          const raw = buf.slice(0, sep);
-          buf = buf.slice(sep + 2);
-          sep = buf.indexOf('\n\n');
-          const frame: Frame = { event: 'message' };
-          for (const line of raw.split('\n')) {
-            if (line.startsWith(':')) continue;
-            if (line.startsWith('event:')) frame.event = line.slice(6).trim();
-            else if (line.startsWith('data:')) {
-              try {
-                frame.data = JSON.parse(line.slice(5).trimStart()) as Record<string, unknown>;
-              } catch {}
-            }
-          }
-          if (frame.event !== 'message') frames.push(frame);
-        }
-      }
-    } catch {}
-  })();
-  return {
-    frames,
-    stop: async () => {
-      stopped = true;
-      await reader.cancel().catch(() => {});
-      await pump;
-    },
-  };
-}
 
 const settle = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 
