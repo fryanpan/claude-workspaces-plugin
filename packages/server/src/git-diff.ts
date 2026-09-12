@@ -205,3 +205,52 @@ export function textLooksBinary(text: string): boolean {
   }
   return false;
 }
+
+/**
+ * The ref a builder's branch is a departure FROM: the upstream default
+ * branch, asked of the repo rather than assumed.
+ *
+ * `origin/HEAD` is the answer when the clone has one — it is the symbolic ref
+ * git writes at clone time naming the remote's default branch, so it is right
+ * on a repo whose trunk is `master`, `trunk` or anything else. A clone made
+ * with `--single-branch`, or one whose `origin/HEAD` was never fetched, has
+ * none; the two fallbacks cover the overwhelming majority of those, and a
+ * repo past all three reads as "cannot tell", which every caller here treats
+ * as no evidence rather than as a verdict.
+ */
+export function defaultBaseRef(repo: string): string | null {
+  const head = git(repo, ['rev-parse', '--abbrev-ref', 'origin/HEAD']);
+  const named = head.stdout.trim();
+  if (head.ok && named.length > 0 && isSafeRef(named)) return named;
+  for (const ref of ['origin/main', 'origin/master']) {
+    if (resolveCommit(repo, ref) !== null) return ref;
+  }
+  return null;
+}
+
+/**
+ * Every file a worktree has changed since it left the default branch —
+ * committed and uncommitted alike, untracked files included.
+ *
+ * The base is the MERGE BASE, not the branch tip: a builder whose worktree is
+ * a hundred commits behind main must not be told it changed every file main
+ * moved on meanwhile. Reading to the working tree rather than to HEAD is the
+ * other half of the same instinct — a builder is judged on what it has
+ * written, not on what it has got round to committing.
+ *
+ * `null` means the question could not be answered — not a repo, no default
+ * branch, no merge base, a git that failed. It is deliberately a different
+ * value from `[]` ("a readable worktree that has changed nothing"), because
+ * a caller that folded the two together would be asserting a fact about work
+ * it could not see.
+ */
+export function changedFilesInWorktree(repo: string): string[] | null {
+  const base = defaultBaseRef(repo);
+  if (base === null) return null;
+  const mb = git(repo, ['merge-base', 'HEAD', base]);
+  const mergeBase = mb.stdout.trim();
+  if (!mb.ok || !/^[0-9a-f]{40}$/.test(mergeBase)) return null;
+  const diff = diffFiles(repo, mergeBase, null);
+  if (!diff.ok) return null;
+  return diff.files.map((f) => f.relPath);
+}
