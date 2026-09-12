@@ -247,6 +247,50 @@ describe("a scheduled run's output, end to end", () => {
       'New in roundups: tide-note-0302.md',
     );
   });
+
+  it('names no file of a local-only project, not even one a board doc already holds', async () => {
+    const G = await seedGoalsOverHttp(base, ws, [{ key: 'g1', title: '1. Lamps' }], PERSON);
+    const { task: rule } = (await (
+      await post(`/workspaces/${ws}/tasks`, {
+        author: PERSON,
+        title: 'Write the tide note',
+        goal: G.g1,
+      })
+    ).json()) as { task: { id: string } };
+    expect(
+      (
+        await post(`/workspaces/${ws}/tasks/${rule.id}/schedule`, {
+          author: PERSON,
+          rule: { kind: 'every', everyMs: DAY },
+          output: { folder: 'roundups' },
+        })
+      ).status,
+    ).toBe(200);
+    // A roundup somebody opened, so a doc of the board holds it.
+    writeAt(repo, 'roundups/tide-note-0301.md', Date.now() - DAY);
+    expect(
+      (await post(`/workspaces/${ws}/library/open`, { path: 'roundups/tide-note-0301.md' })).status,
+    ).toBe(200);
+    const priv = await fetch(`${base}/api/mounts/privacy`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', host: `localhost:${handle.port}` },
+      body: JSON.stringify({ path: repo, privacy: 'local-only' }),
+    });
+    expect(priv.status).toBe(200);
+
+    now = Date.now() + DAY + MIN;
+    expect(handle.runScheduler()).toHaveLength(1);
+    const [instance] = instancesOf(handle.tasks, ws, rule.id);
+    if (!instance) throw new Error('no instance');
+    writeAt(repo, 'roundups/tide-note-0301.md', instance.createdAt + 1_000);
+    writeAt(repo, 'roundups/tide-note-0302.md', instance.createdAt + 2_000);
+    expect(handle.tasks.transition(instance.id, 'done', { actor: OWNER }).ok).toBe(true);
+
+    handle.runScheduler();
+    expect(
+      handle.tasks.listReviewItems(rule.id).filter((i) => i.review.headline?.startsWith('New in')),
+    ).toEqual([]);
+  });
 });
 
 describe('the run-output pass on a real store', () => {
