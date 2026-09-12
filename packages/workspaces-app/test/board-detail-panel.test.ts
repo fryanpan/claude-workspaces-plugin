@@ -176,6 +176,22 @@ describe('createBoardDetailPanel', () => {
     expect(goalDetailData.value.section).toBeNull();
   });
 
+  it('lists the goal’s schedule rules in its panel, since archiving the goal takes them too', () => {
+    const p = panel();
+    const rule = {
+      rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [1, 2, 3, 4, 5] },
+      armedAt: Date.now(),
+    } as const;
+    p.state.tasks.set('t-rule', task('t-rule', { goal: 'g-1', schedule: rule }));
+    p.state.tasks.set('t-other', task('t-other', { goal: 'g-2', schedule: rule }));
+    p.state.detailGoalId = 'g-1';
+    p.renderDetail();
+    const ids = goalDetailData.value.section?.tasks.map((t) => t.id);
+    expect(ids).toContain('t-rule');
+    // Another goal's rule stays out: the rows come back by goal, not wholesale.
+    expect(ids).not.toContain('t-other');
+  });
+
   it('opens an ARCHIVED band, because the panel is where its Restore lives', () => {
     // An archived goal is in no board section at all; a link somebody sent
     // last week still has to open it.

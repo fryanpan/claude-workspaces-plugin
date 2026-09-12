@@ -25,7 +25,25 @@
 import type { BoardSection, BoardTask } from './board-model.ts';
 import { statusLabel } from './board-model.ts';
 
-/** The band's rows that are not finished, in the band's order. */
+/**
+ * The goal's band as the goal panel reads it: the band's rows plus the goal's
+ * RULE rows, which `boardSections` moves out to Scheduled (a rule is not the
+ * work, so the board lists it once, there). The panel is answering a
+ * different question — what goes if this goal is archived — and the archive
+ * cascade takes every task filed under the goal, rules included, so a list
+ * that left them out would undercount exactly the rows the ask is about.
+ */
+export function goalPanelSection(
+  sections: BoardSection[],
+  goalId: string,
+): BoardSection | undefined {
+  const band = sections.find((s) => s.id === goalId);
+  if (!band) return undefined;
+  const rules = sections.find((s) => s.isScheduled)?.tasks.filter((t) => t.goal === goalId) ?? [];
+  return rules.length === 0 ? band : { ...band, tasks: [...band.tasks, ...rules] };
+}
+
+/** The section's rows that are not finished, in the order it holds them. */
 export function openBandTasks(section: BoardSection): BoardTask[] {
   return section.tasks.filter((t) => t.status !== 'done');
 }
