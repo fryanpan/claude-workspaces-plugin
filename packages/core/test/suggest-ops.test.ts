@@ -569,3 +569,99 @@ describe('suggestion insertions preserve surrounding inline marks', () => {
     expect(serialize(doc)).toBe('See [the docs](https://example.com) here.\n');
   });
 });
+
+/**
+ * A proposal that changes a MARK and not a character.
+ *
+ * `parseInlineMarks` defaults to true, so an agent wrapping existing words in
+ * a link writes the same characters back: both sides of the card read "the
+ * survey is late", the body redline shows the difference and a reader working
+ * from the card alone is told nothing. The preview fields spell such a
+ * proposal in the doc's own markdown instead — the text the .md file will
+ * hold once it is accepted.
+ *
+ * `insertedText` / `deletedText` stay the raw characters throughout: a
+ * proposal whose markdown did NOT parse reads `[label](url)` there, and that
+ * difference is what pins the parse for the route tests.
+ */
+describe('a proposal whose change is a mark', () => {
+  const previewOf = (doc: Y.Doc) => {
+    const s = listSuggestions(doc)[0]!;
+    return { del: s.deletedPreview, ins: s.insertedPreview, snippet: s.snippet };
+  };
+
+  it('names the link target when only a link mark was added', () => {
+    const doc = docFrom('the survey is late and nobody has chased it.\n');
+    const res = suggestReplace(doc, {
+      find: 'the survey is late',
+      replace: '[the survey is late](/docs/survey)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    expect(previewOf(doc)).toEqual({
+      del: 'the survey is late',
+      ins: '[the survey is late](/docs/survey)',
+      snippet: 'the survey is late → [the survey is late](/docs/survey)',
+    });
+    // The raw characters are untouched — the parse is still readable there.
+    const s = listSuggestions(doc)[0]!;
+    expect(s.deletedText).toBe('the survey is late');
+    expect(s.insertedText).toBe('the survey is late');
+  });
+
+  it('names the tag when only a speaker tag was added', () => {
+    const doc = docFrom('@Devi wants the deploy gate moved before merge.\n');
+    const res = suggestReplace(doc, {
+      find: '@Devi',
+      replace: '[@Devi](speaker:B)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    expect(previewOf(doc)).toEqual({
+      del: '@Devi',
+      ins: '[@Devi](speaker:B)',
+      snippet: '@Devi → [@Devi](speaker:B)',
+    });
+  });
+
+  it('names both voices when a tag is reassigned to another speaker', () => {
+    const doc = docFrom('[@Devi](speaker:B) wants the gate moved.\n');
+    const res = suggestReplace(doc, {
+      find: '@Devi',
+      replace: '[@Devi](speaker:C)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    expect(previewOf(doc)).toEqual({
+      del: '[@Devi](speaker:B)',
+      ins: '[@Devi](speaker:C)',
+      snippet: '[@Devi](speaker:B) → [@Devi](speaker:C)',
+    });
+  });
+
+  it('a word change reads exactly as before — plain text, no syntax', () => {
+    const doc = docFrom('The harbour run stays hourly until April.\n');
+    const res = suggestReplace(doc, { find: 'hourly', replace: 'half-hourly', author });
+    expect(res.ok).toBe(true);
+    expect(previewOf(doc)).toEqual({
+      del: 'hourly',
+      ins: 'half-hourly',
+      snippet: 'hourly → half-hourly',
+    });
+  });
+
+  it('a word change that also adds a link still reads as the words', () => {
+    const doc = docFrom('See the docs here.\n');
+    const res = suggestReplace(doc, {
+      find: 'the docs',
+      replace: '[the manual](https://example.com)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    expect(previewOf(doc)).toEqual({
+      del: 'the docs',
+      ins: 'the manual',
+      snippet: 'the docs → the manual',
+    });
+  });
+});
