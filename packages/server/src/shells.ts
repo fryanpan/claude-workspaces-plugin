@@ -185,16 +185,19 @@ export function serveStatic(p: string, cacheControl?: string): Response | null {
 }
 
 export function renderMockupNotFound(docId: string): string {
-  const safe = escape(docId);
-  return `<!doctype html><meta charset="utf-8"><title>Mockup not found · Workspaces</title>
-<style>body{font:15px/1.55 system-ui, sans-serif;margin:60px auto;max-width:560px;color:#222;padding:0 20px}
-h1{font-size:22px}code{background:#f3f3f3;padding:1px 5px;border-radius:3px;font-size:90%}
-small{color:#777}</style>
-<h1>Mockup not found</h1>
-<p>No mockup is bound to <code>${safe}</code>, or its source file isn't readable.
-Mockups are bound by an agent calling <code>attach_mockup</code> with an absolute path
-to an HTML file. Once bound, the file is served here without any symlink dance.</p>
-<p>Ask the agent who shared this URL to call <code>attach_mockup(docId, sourceHtmlPath)</code>, then refresh.</p>`;
+  const safe = escape(shortAddress(docId));
+  return renderNotFoundPage({
+    title: 'Mockup not found',
+    heading: 'Mockup not found',
+    body: `${SERVER_IS_UP}
+      <p>No mockup is bound to <code>${safe}</code>. Its source file can also
+      be unreadable. An agent binds a mockup with
+      <code>attach_mockup</code> and an absolute path to an HTML file.</p>
+      <p>Ask the agent who sent this link to call
+      <code>attach_mockup(docId, sourceHtmlPath)</code>. Then refresh this
+      page.</p>
+      <p class="quiet"><a href="/">All workspaces</a>.</p>`,
+  });
 }
 
 /**
@@ -402,17 +405,106 @@ export function renderSettingsShell(
 </html>`;
 }
 
+/**
+ * The page shell every not-found page in this file renders into.
+ *
+ * ONE shell rather than four near-copies, because the four are one message:
+ * the server answered, and the address did not. A reader who cannot tell
+ * those apart reports the wrong fault — Chrome renders a bodyless 404 as
+ * ERR_INVALID_RESPONSE, which reads as the server being down, and the whole
+ * point of this page is that it does not.
+ *
+ * It links the app's own stylesheets AND carries a complete `<style>` of its
+ * own, in that order. The links give the page the product's palette and type
+ * so it reads as part of the app; the inline block comes after them and wins
+ * every rule that matters, which is what keeps this page readable when the
+ * client bundle has not been built (a staging box, a fresh clone) and the two
+ * links 404. `styles.css` is an app-SHELL stylesheet — it pins `body` to the
+ * viewport with `overflow: hidden` — so the block below restates the page
+ * box rather than inheriting it, or a phone-width reader could not scroll to
+ * the link out.
+ *
+ * The plain asset names are deliberate: an unhashed `/app/styles.css` is
+ * still emitted by the build, and a not-found page has no manifest to read.
+ */
+function renderNotFoundPage(opts: {
+  /** The `<title>`, without the product suffix. */
+  title: string;
+  /** The `<h1>`. */
+  heading: string;
+  /** The body, already escaped. */
+  body: string;
+}): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>${escape(opts.title)} · Workspaces</title>
+    <link rel="stylesheet" href="/app/styles.css" />
+    <link rel="stylesheet" href="/app/tokens.css" />
+    <style>
+      body.notfound-body {
+        margin: 0;
+        padding: 48px 20px;
+        height: auto;
+        overflow: auto;
+        background: var(--bg, #ffffff);
+        color: var(--fg, #1b1f23);
+        font-family: var(--sans, -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
+        font-size: 15px;
+        line-height: 1.55;
+      }
+      .notfound-body main { max-width: 34rem; margin: 0 auto; }
+      .notfound-body h1 { font-size: 22px; margin: 0 0 16px; }
+      .notfound-body p { margin: 0 0 12px; }
+      .notfound-body a { color: var(--accent, #2e7dd7); }
+      .notfound-body code {
+        background: var(--code-bg, rgba(127, 127, 127, 0.14));
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-size: 90%;
+        word-break: break-all;
+      }
+      .notfound-body .quiet { color: var(--fg-muted, #6e7781); font-size: 13px; }
+    </style>
+  </head>
+  <body class="notfound-body">
+    <main>
+      <h1>${escape(opts.heading)}</h1>
+${opts.body}
+    </main>
+  </body>
+</html>`;
+}
+
+/**
+ * The sentence every one of these pages leads with.
+ *
+ * It is the task: a reader must be able to tell a wrong link from a dead
+ * server, so the page says which one this is before it says anything else.
+ */
+const SERVER_IS_UP = '<p>The server is running. The address in this link is wrong.</p>';
+
+/** How long an echoed address may be. A link is pasted, not typed, and a very
+ *  long one would push the way out off the page — the link back is the point
+ *  of the page. Escaped either way; this only bounds the length. */
+function shortAddress(raw: string): string {
+  return raw.length > 120 ? `${raw.slice(0, 120)}…` : raw;
+}
+
 export function renderBoardNotFound(workspaceId: string): string {
-  const safe = escape(workspaceId);
-  return `<!doctype html><meta charset="utf-8"><title>Workspace not found · Workspaces</title>
-<style>body{font:15px/1.55 system-ui, sans-serif;margin:60px auto;max-width:560px;color:#222;padding:0 20px}
-h1{font-size:22px}code{background:#f3f3f3;padding:1px 5px;border-radius:3px;font-size:90%}
-small{color:#777}</style>
-<h1>Workspace not found</h1>
-<p>No board workspace exists for <code>${safe}</code>. Board workspaces are
-created by an agent calling <code>create_workspace</code> (or
-<code>POST /workspaces</code> with a name).</p>
-<p><small><a href="/">all docs</a></small></p>`;
+  const safe = escape(shortAddress(workspaceId));
+  return renderNotFoundPage({
+    title: 'Workspace not found',
+    heading: 'Workspace not found',
+    body: `${SERVER_IS_UP}
+      <p>No board answers to <code>${safe}</code>. The board may be deleted.
+      The link may name the wrong board.</p>
+      <p><a href="/">Go to the workspace list</a> and open the board from
+      there.</p>
+      <p class="quiet">Report this link to the person who sent it.</p>`,
+  });
 }
 
 /**
@@ -426,32 +518,35 @@ created by an agent calling <code>create_workspace</code> (or
  * root sends them back through a list to find a board they were already on.
  */
 export function renderBoardMemberNotFound(workspaceId: string, rest: string): string {
-  const board = escape(workspaceId);
+  const board = escape(shortAddress(workspaceId));
   const href = escape(`/workspaces/${encodeURIComponent(workspaceId)}`);
-  return `<!doctype html><meta charset="utf-8"><title>Not found · Workspaces</title>
-<style>body{font:15px/1.55 system-ui, sans-serif;margin:60px auto;max-width:560px;color:#222;padding:0 20px}
-h1{font-size:22px}code{background:#f3f3f3;padding:1px 5px;border-radius:3px;font-size:90%}
-small{color:#777}</style>
-<h1>Not found</h1>
-<p>Nothing on this board answers to <code>${escape(rest)}</code>. It may have
-been archived, or it may belong to a different board.</p>
-<p><a href="${href}">Open the board</a> (<code>${board}</code>) and look for it
-there.</p>
-<p><small><a href="/">all workspaces</a></small></p>`;
+  return renderNotFoundPage({
+    title: 'Page not found',
+    heading: 'Page not found',
+    body: `${SERVER_IS_UP}
+      <p>Nothing on this board answers to
+      <code>${escape(shortAddress(rest))}</code>. The page may be archived. It
+      may belong to a different board.</p>
+      <p><a href="${href}">Open the board</a> (<code>${board}</code>) and look
+      for the page there.</p>
+      <p class="quiet">Report this link to the person who sent it.
+      <a href="/">All workspaces</a>.</p>`,
+  });
 }
 
 export function renderReviewNotFound(docId: string): string {
-  const safe = escape(docId);
-  return `<!doctype html><meta charset="utf-8"><title>Doc not found · Workspaces</title>
-<style>body{font:15px/1.55 system-ui, sans-serif;margin:60px auto;max-width:560px;color:#222;padding:0 20px}
-h1{font-size:22px}code{background:#f3f3f3;padding:1px 5px;border-radius:3px;font-size:90%}
-small{color:#777}</style>
-<h1>Doc not found</h1>
-<p>No attachment exists for <code>${safe}</code>. Markdown attachments are
-created by an agent calling <code>POST /workspaces/&lt;ws&gt;/docs</code> with a
-<code>sourceUrl</code> pointing at a markdown file on disk.</p>
-<p>Ask the agent who shared this URL to create the doc, then refresh this page.</p>
-<p><small><a href="/">all docs</a></small></p>`;
+  const safe = escape(shortAddress(docId));
+  return renderNotFoundPage({
+    title: 'Doc not found',
+    heading: 'Doc not found',
+    body: `${SERVER_IS_UP}
+      <p>No attachment exists for <code>${safe}</code>. An agent creates a
+      markdown attachment with <code>POST /workspaces/&lt;ws&gt;/docs</code>
+      and a <code>sourceUrl</code> that points at a markdown file on disk.</p>
+      <p>Ask the agent who sent this link to create the doc. Then refresh this
+      page.</p>
+      <p class="quiet"><a href="/">All workspaces</a>.</p>`,
+  });
 }
 
 // --- Landing page: active workspaces; per-project artifact pages on demand ---
