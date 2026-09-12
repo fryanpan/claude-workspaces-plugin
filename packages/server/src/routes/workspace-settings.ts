@@ -35,7 +35,7 @@ export async function handleWorkspaceSettings(
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
   const { taskStore, taskProjection, voiceRouter, j, safeJson, parallelismCapView } = ctx;
-  const { req, pathname, scope, authorFor, visitor } = rq;
+  const { req, pathname, scope, authorFor, visitor, requireOwner } = rq;
   // The workspace-level TEXT goal is GONE — the ordered goal LIST is
   // the one goal system now. This route stays because it is on the
   // SHARED server: plugin bundles built before the removal still call
@@ -157,6 +157,29 @@ export async function handleWorkspaceSettings(
   if (wsSettingsMatch && (req.method === 'GET' || req.method === 'PUT')) {
     const workspaceId = decodeURIComponent(wsSettingsMatch[1] ?? '');
     if (req.method === 'PUT') {
+      /**
+       * THE WRITE IS THE OWNER'S; the read is everyone's.
+       *
+       * Every field this PUT can move is board-wide configuration — what the
+       * quality gate judges an agent's ask against, what the effort scorer
+       * weighs, how many builders a dispatch may run at once, where notes are
+       * filed. A Regular User is invited to WORK a board, not to retune the
+       * rules the board's own agents are then judged by, and one guest
+       * rewriting the criteria changes what every other member's asks have to
+       * clear. The GET stays a member's, because a criterion you cannot read
+       * is one your agents are judged against in secret.
+       *
+       * Refused BEFORE the body is parsed, for the reason the `notesHome`
+       * refusal below gives in its own case: validation here asks the
+       * filesystem questions, and a 400 is an answer.
+       *
+       * The `notesHome` refusal stays even so, and is not made redundant by
+       * this one: it turns on `visitor`, not on role, so it still refuses a
+       * PROMOTED owner reaching the board through the share hostname — that
+       * field is a path on the operator's machine, which no guest owns.
+       */
+      const denied = requireOwner(workspaceId);
+      if (denied) return denied;
       const body = await safeJson(req);
       const author = authorFor(body?.author);
       if (!author) return j(400, { error: 'author required' });

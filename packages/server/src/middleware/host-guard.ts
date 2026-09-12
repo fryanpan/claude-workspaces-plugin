@@ -600,6 +600,12 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   // and the parallelism cap. `notesHome` is withheld from a member's read and
   // refused on a member's write — it is a checkout path on the owner's
   // machine, and validating one would answer "does this path exist" besides.
+  //
+  // THE PUT IS ADMITTED HERE AND REFUSED BY ROLE, the same split as
+  // MEMBER_ADMIN_ROUTES below: every field it writes is board-wide
+  // configuration, so `requireOwner` inside `workspace-settings.ts` is what
+  // says no. Keeping the path a member route is what lets a PROMOTED owner
+  // retune their own board from the share hostname.
   settings: ['GET', 'PUT'],
   // The Activity tab. Rows are passed through the same visitor redaction the
   // board's live event stream uses, so actor ids do not arrive here by the
