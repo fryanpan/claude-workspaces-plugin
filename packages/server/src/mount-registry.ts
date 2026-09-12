@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
+import type { MeetingHomeChoice } from './meeting-home.ts';
 import {
   DEFAULT_CONVENTIONS_PATH,
   type FileEntry,
@@ -227,6 +228,23 @@ export class MountRegistry {
   setConventionsPath(repoKey: string, relPath: string): ProjectRecord {
     const project = this.ensureProject(repoKey);
     project.conventionsPath = relPath;
+    this.persist();
+    return project;
+  }
+
+  /**
+   * What this project decided about its meetings, or undefined when nobody
+   * has decided. The absence is the answer callers need — it is what tells
+   * the huddle route to keep filing under the data dir — so it is NOT
+   * softened into a default here.
+   */
+  meetingsOf(repoKey: string): MeetingHomeChoice | undefined {
+    return this.projectFor(repoKey)?.meetings;
+  }
+
+  setMeetings(repoKey: string, choice: MeetingHomeChoice): ProjectRecord {
+    const project = this.ensureProject(repoKey);
+    project.meetings = { ...choice };
     this.persist();
     return project;
   }

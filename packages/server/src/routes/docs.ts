@@ -80,6 +80,7 @@ import { clipToWordBoundary } from '../task-title.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
+import { handleDocTitleRoute } from './doc-title.ts';
 import type {
   DocResourceRouteRequest,
   DocRouteRequest,
@@ -625,6 +626,7 @@ export async function handleDocResourceRoutes(
   const docRq: DocResourceRouteRequest = { ...rq, docId, doc, rest };
   return (
     (await handleDocResourceCore(ctx, docRq)) ??
+    (await handleDocTitleRoute(ctx, docRq)) ??
     (await handleDocThreadRoutes(ctx, docRq)) ??
     (await handleDocEditRoutes(ctx, docRq))
   );
