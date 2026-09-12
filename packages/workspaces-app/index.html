@@ -66,28 +66,6 @@
         <div class="toolbar">
           <button
             type="button"
-            id="toggle-edit-mode"
-            class="icon-btn"
-            data-write-control
-            title="Tap to switch to edit mode"
-            aria-pressed="false"
-            aria-label="Currently viewing — tap to switch to edit mode"
-          >
-            ✏️
-          </button>
-          <button
-            type="button"
-            id="toggle-suggest-mode"
-            class="icon-btn"
-            data-write-control
-            title="Tap to switch to Suggesting — edits become proposals"
-            aria-pressed="false"
-            aria-label="Suggesting off — tap to propose edits instead of making them"
-          >
-            ✍️
-          </button>
-          <button
-            type="button"
             id="toggle-format"
             class="icon-btn"
             title="Show formatting (⌘⇧F)"
@@ -95,28 +73,6 @@
             aria-label="Toggle formatting"
           >
             Aa
-          </button>
-          <!-- Walk the comments that render inline in the doc/source, in
-               document order. Phone-only (the desktop margin/drawer shows
-               them all at once), and deliberately to the LEFT of the badge
-               below: the badge opens the whole list, these step through it. -->
-          <button
-            type="button"
-            id="prev-comment"
-            class="icon-btn comment-nav"
-            title="Previous comment"
-            aria-label="Previous comment"
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            id="next-comment"
-            class="icon-btn comment-nav"
-            title="Next comment"
-            aria-label="Next comment"
-          >
-            ›
           </button>
           <button
             type="button"
@@ -129,48 +85,21 @@
             💬
             <span id="threads-count" class="badge">0</span>
           </button>
-          <!-- Where comment cards sit: in the flow under the phrase they are
-               about, in the right margin beside it, or — where there is room
-               for neither — in a sheet over the doc. A stored per-device
-               choice, not a width rule: page zoom moves the width, so it can
-               never say what device this is. card-placement.ts owns the
-               state and wireCardPlacementToggle paints the glyph and both
-               labels for the surface in force.
-
-               The static markup names the CONTROL and not a surface, because
-               only script can know which surface this device resolved to. -->
-          <button
-            type="button"
-            id="toggle-cards"
-            class="icon-btn"
-            title="Where comment cards sit"
-            aria-label="Change where comment cards sit"
-          >
-            ▤
-          </button>
-          <!-- Settled comments are off the page by default: their cards and
-               their anchor tints both go, so what is left on screen is what
-               still needs an answer. Nothing is deleted — the thread stays in
-               the store and in the drawer's list — and this brings every one
-               of them back, muted, beside the sentence it was left on.
-               Hidden until the doc actually has one; doc/resolved-visibility.ts
-               owns the state and paints the count. -->
-          <button
-            type="button"
-            id="toggle-resolved"
-            class="icon-btn resolved-toggle"
-            aria-pressed="false"
-            hidden
-          ></button>
           <!-- Doc-level pending-suggestions affordance (redline-suggestions
                Phase 2). Hidden by default; mountSuggestionsSummary shows it
                once the doc has ≥1 pending proposal. Per-suggestion
                Accept/Reject lives on the balloon/chip card instead — this
-               is Accept all / Reject all across every author. -->
+               is Accept all / Reject all across every author.
+
+               Marked `data-write-control`: accepting or rejecting a proposal
+               writes the document, so a browser the server refuses gets it
+               disabled with the rest. It is the only write control left in
+               this bar now the two mode toggles have gone. -->
           <button
             type="button"
             id="toggle-suggestions"
             class="icon-btn suggestions-toggle hidden"
+            data-write-control
             title="Pending suggestions"
             aria-haspopup="true"
             aria-expanded="false"

@@ -15,9 +15,11 @@ import { prefersReducedMotion, sizeThreadSlots } from './thread-morph.ts';
  *     Grouped Open / Orphaned / Resolved. This is the ONLY place an orphaned
  *     or resolved thread appears, because neither has an anchor to sit under.
  *
- * `‹ ›` in the app bar, to the LEFT of the badge, walk the inline cards in
- * document order. A thread with no inline position cannot be walked — the
- * buttons go disabled rather than landing the reader on nothing.
+ * There is no third surface and no stepper. `‹ ›` in the app bar used to walk
+ * the inline cards in document order; they went with the rest of the top
+ * bar's furniture, because a comment is reached by tapping the mark on the
+ * sentence it was left on or by opening the list, and a pair of arrows that
+ * only ever worked on a phone was a third way to do what two already did.
  *
  * Expand state is SHARED between a thread's inline copy and its sheet copy:
  * this module never touches a card's expansion directly, it goes through the
@@ -47,20 +49,6 @@ export function centreScrollTop(m: CentreMetrics): number {
   return Math.max(0, Math.min(max, wanted));
 }
 
-/**
- * The next index when walking a wrapping list. `current` starts at -1 (nothing
- * visited yet), so the first "next" lands on 0 and the first "previous" on the
- * last item. Tolerates a `current` left over from a longer list.
- */
-export function stepIndex(current: number, dir: number, length: number): number {
-  if (length <= 0) return -1;
-  // Nothing visited yet: forward starts at the top of the doc, backward at
-  // the bottom. Wrapping the arithmetic instead would land the first
-  // "previous" on the second-to-last card for no reason a reader could name.
-  if (current < 0) return dir < 0 ? length - 1 : 0;
-  return (((current + dir) % length) + length) % length;
-}
-
 /** How long the target card stays highlighted after the nav jumps to it. */
 export const NAV_FLASH_MS = 900;
 
@@ -81,21 +69,11 @@ export interface MobileReviewOpts {
   surface: Pick<ReviewSurface, 'setInlineCards' | 'scrollToPos'>;
   /** Expand state, shared with every other copy of the card. */
   setActive: (id: string | null) => void;
-  getActive: () => string | null;
   /** Scroll the sheet's own copy of a thread into view once the sheet is up. */
   revealInSheet: (id: string) => void;
   openSheet: () => void;
   closeSheet: () => void;
   isSheetOpen: () => boolean;
-  /**
-   * Are resolved threads drawn on the page right now
-   * (`doc/resolved-visibility.ts`)? The inline card is the phone's copy of
-   * the balloon margin, so it answers the same question the highlights do —
-   * a settled comment that stayed in the flow here while its tint left the
-   * sentence would be the worst of both.
-   */
-  showResolved: () => boolean;
-  listen: (t: EventTarget, type: string, h: EventListenerOrEventListenerObject) => void;
   onCleanup?: (fn: () => void) => void;
 }
 
@@ -104,8 +82,6 @@ export interface MobileReview {
    *  nothing a card displays has changed: card nodes are REUSED, which is
    *  what lets an expanded card survive an unrelated thread's new reply. */
   refresh: () => void;
-  /** Walk to the next (+1) / previous (-1) inline comment. */
-  step: (dir: number) => void;
   /** Focus one thread the mobile way. Returns true when it had an inline
    *  card to jump to, false when the sheet was opened instead. */
   showThread: (id: string) => boolean;
@@ -140,23 +116,14 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
   /** One live node per inline thread, keyed by thread id. Kept across
    *  refreshes so an expanded card is not rebuilt out from under its morph. */
   const built = new Map<string, { key: string; el: HTMLElement }>();
-  let navIdx = -1;
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const prevBtn = document.getElementById('prev-comment') as HTMLButtonElement | null;
-  const nextBtn = document.getElementById('next-comment') as HTMLButtonElement | null;
-  const navBtns = [prevBtn, nextBtn].filter((b): b is HTMLButtonElement => b != null);
-  const navTitles = new Map<HTMLButtonElement, string>();
-  for (const b of navBtns) navTitles.set(b, b.title);
-  if (prevBtn) opts.listen(prevBtn, 'click', () => step(-1));
-  if (nextBtn) opts.listen(nextBtn, 'click', () => step(1));
 
   function inlineThreads(): Thread[] {
     const withPos: Array<{ t: Thread; from: number }> = [];
-    for (const t of anchoredThreads(opts.threads(), opts.showResolved())) {
+    for (const t of anchoredThreads(opts.threads())) {
       // An orphaned thread has no anchor at all — it lives in the sheet and
-      // only there. A settled one is off the page unless the reader has asked
-      // for it back, and then it is the same muted card it always was.
+      // only there, and so does a settled one: neither has a line to sit
+      // beside.
       if (t.anchor.kind !== 'text-range') continue;
       const r = opts.resolveRange(t.id);
       if (!r) continue;
@@ -164,16 +131,6 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     }
     withPos.sort((a, b) => a.from - b.from);
     return withPos.map((x) => x.t);
-  }
-
-  function syncNavButtons(count: number): void {
-    for (const b of navBtns) {
-      b.disabled = count === 0;
-      b.title =
-        count === 0
-          ? 'No comments anchored in this file — open the comment list'
-          : (navTitles.get(b) ?? b.title);
-    }
   }
 
   function refresh(): void {
@@ -208,14 +165,6 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     // are actually in the document, or every inline card renders as a header
     // and a footer with nothing between them.
     for (const c of cards) if (c.el.isConnected) sizeThreadSlots(c.el);
-    // Count the ANCHORED THREADS, not the cards built. The two used to be the
-    // same number; they stop being the same the moment a reader picks
-    // balloons on a screen too narrow to hold a margin, where no inline card
-    // is built and the sheet is the comment surface. Counting cards there
-    // disabled ‹ › on a doc full of comments — and stepping is exactly how
-    // you reach a thread whose only copy is in the sheet, which `showThread`
-    // already opens for it.
-    syncNavButtons(inlineThreads().length);
   }
 
   function flash(el: HTMLElement): void {
@@ -281,26 +230,11 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     return false;
   }
 
-  function step(dir: number): void {
-    const list = inlineThreads();
-    // Nothing to walk. The buttons are disabled in this state; bail anyway
-    // rather than wrap onto an empty list and land the reader on nothing.
-    if (list.length === 0) return;
-    // Pick up wherever the reader already is, so ‹ › continue from the card
-    // they tapped rather than from wherever the nav last stopped.
-    const active = opts.getActive();
-    const activeIdx = active ? list.findIndex((t) => t.id === active) : -1;
-    if (activeIdx >= 0) navIdx = activeIdx;
-    navIdx = stepIndex(navIdx, dir, list.length);
-    const target = list[navIdx];
-    if (target) showThread(target.id);
-  }
-
   opts.onCleanup?.(() => {
     if (flashTimer) clearTimeout(flashTimer);
     built.clear();
     opts.surface.setInlineCards?.([]);
   });
 
-  return { refresh, step, showThread, inlineThreads };
+  return { refresh, showThread, inlineThreads };
 }

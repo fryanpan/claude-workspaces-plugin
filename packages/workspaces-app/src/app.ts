@@ -193,18 +193,13 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   const huddle = ctx.huddle === true;
   const formatBar = el<HTMLElement>('format-bar');
   const toggleFormat = el<HTMLButtonElement>('toggle-format');
-  const toggleEditMode = el<HTMLButtonElement>('toggle-edit-mode');
-  // Declared beside the edit toggle, not down in the Suggesting section
-  // that wires it: the write gate locks BOTH, and it runs first.
-  const toggleSuggestMode = el<HTMLButtonElement>('toggle-suggest-mode');
   /**
    * Whether the server will accept writes from this browser.
    *
-   * One flag, read by BOTH toggles — either one of them makes the document
-   * editable and it only takes one to lose a person's writing — and by the
-   * chrome that describes what this surface IS. Declared this high because
-   * the save-state chip reads it, and that renders long before the toggles
-   * are wired.
+   * The one flag that decides whether this document mounts editable, and the
+   * one the chrome that describes what this surface IS reads. Declared this
+   * high because the save-state chip reads it, and that renders long before
+   * the gates are wired.
    *
    * The server's answer, carried in on the MountContext — not a hopeful
    * `true` narrowed later. It used to start `true` and be corrected one
@@ -482,16 +477,8 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   // "Reconnecting…", and the teardown that blanks it for the next document.
   mountDocSaveState({ client, ydoc, canWrite, scope });
 
-  // Last, because it speaks for the whole surface: the format bar, the
-  // view/edit and Suggesting interlock, and the read-only lock that overrides
-  // both when the server will not accept writes.
-  wireDocGates({
-    editor,
-    scope,
-    els: { toggleEditMode, toggleSuggestMode, formatBar, toggleFormat },
-    docId,
-    user,
-    canWrite,
-    justStarted: startedHuddleHere,
-  });
+  // Last, because it speaks for the whole surface: the format bar, and
+  // whether this browser may write at all — which is the only thing that
+  // decides whether the document mounts editable.
+  wireDocGates({ editor, scope, els: { formatBar, toggleFormat }, canWrite });
 }

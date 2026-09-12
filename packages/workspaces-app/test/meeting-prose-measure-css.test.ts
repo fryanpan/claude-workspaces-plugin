@@ -30,7 +30,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { RUN_ID_ENV, profilesOfRun, resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
-import { BALLOON_ROOM_QUERY, BALLOON_SHEET_QUERY } from '../src/card-placement.ts';
+import { BALLOON_ROOM_QUERY } from '../src/card-placement.ts';
 
 /**
  * Is there a browser to launch — asked the way `ui-shot.ts` itself asks.
@@ -91,13 +91,12 @@ function page(): string {
 
 /** What the page runs: the meeting, in three steps, measured at each one. */
 const PROBE = `(() => {
-  // The placement the app would publish at this width, by its own two
-  // queries (card-placement.ts) — nothing is stored in a throwaway profile,
-  // so this is the DEFAULT path a first-time reader takes.
-  const placement = matchMedia(${JSON.stringify(BALLOON_ROOM_QUERY)}).matches ? 'balloon' : 'inline';
-  const noRoomAtAll = matchMedia(${JSON.stringify(BALLOON_SHEET_QUERY)}).matches;
-  document.body.dataset.cards =
-    placement === 'inline' ? 'inline' : noRoomAtAll ? 'sheet' : 'balloon';
+  // The placement the app would publish at this width, by its own query
+  // (card-placement.ts) — the width is the whole policy, so this is what
+  // every reader at this width gets.
+  document.body.dataset.cards = matchMedia(${JSON.stringify(BALLOON_ROOM_QUERY)}).matches
+    ? 'balloon'
+    : 'inline';
 
   const prose = document.querySelector('.ProseMirror');
   const zone = document.querySelector('.live-zone');

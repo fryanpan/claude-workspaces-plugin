@@ -85,7 +85,14 @@ interface SuggestInputMeta {
 
 export const suggestInputKey = new PluginKey<SuggestInputState>('lfSuggestInput');
 
-/** Toggle Suggesting mode on a live editor view (identity travels with it). */
+/**
+ * Toggle Suggesting mode on a live editor view (identity travels with it).
+ *
+ * There is no longer a control in the top bar that calls this: a person edits
+ * the doc directly, and an agent proposes through the MCP suggestion tools,
+ * which write the marks into the ydoc rather than typing. The plugin stays
+ * because the marks it understands are what those proposals are made of.
+ */
 export function setSuggesting(
   view: EditorView,
   opts: { on: boolean; author?: SuggestAuthor | null },
@@ -95,26 +102,6 @@ export function setSuggesting(
 
 export function isSuggesting(state: EditorState): boolean {
   return suggestInputKey.getState(state)?.on ?? false;
-}
-
-// --- per-doc persistence (localStorage is already per-browser = per-user) ---
-
-const PREF_KEY = (docId: string) => `lf:suggest-mode:${docId}`;
-
-export function readSuggestModePref(docId: string): boolean {
-  try {
-    return localStorage.getItem(PREF_KEY(docId)) === 'on';
-  } catch {
-    return false;
-  }
-}
-
-export function writeSuggestModePref(docId: string, on: boolean): void {
-  try {
-    localStorage.setItem(PREF_KEY(docId), on ? 'on' : 'off');
-  } catch {
-    // localStorage disabled (private mode) — the toggle still works in-session.
-  }
 }
 
 // --- sid + attrs ---

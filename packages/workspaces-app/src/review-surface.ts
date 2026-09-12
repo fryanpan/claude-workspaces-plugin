@@ -56,5 +56,18 @@ export interface ReviewSurface {
    *  the mark with null. Optional: a surface without it shows the selection
    *  it has, for as long as it has it. */
   markPending?: (range: { from: number; to: number } | null) => void;
+  /**
+   * Adopt the caret the browser just put at these viewport coordinates.
+   *
+   * A click handler that repaints decorations runs BEFORE the editor has
+   * observed the caret the same click created — the browser reports a new
+   * selection asynchronously, and a repaint in between writes the editor's
+   * stale selection back over it. Surfaces that own a caret implement this so
+   * a handler can hand the position across first; the ones that do not (a
+   * read-only or line-oriented surface) omit it and nothing is moved.
+   *
+   * Answers whether a caret was placed.
+   */
+  placeCaretAtPoint?: (clientX: number, clientY: number) => boolean;
   destroy: () => void;
 }

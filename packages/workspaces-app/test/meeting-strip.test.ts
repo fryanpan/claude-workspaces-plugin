@@ -29,6 +29,7 @@ import {
   formatElapsed,
   mountMeetingStrip,
 } from '../src/meeting-strip.ts';
+import { lockDocToReading } from '../src/signin/write-gate.ts';
 import type { DocSpeakers } from '../src/speaker-voices.ts';
 
 /**
@@ -2951,5 +2952,54 @@ describe('two note-taker picks over a live meeting, answered out of step', () =>
     h.pick('Ledger · Opus');
     h.sockets[0]?.serve({ type: 'notes_method', method: 'ledger-opus', recorded: false });
     expect(shows(h)).toEqual({ head: 'Original', checked: 'original' });
+  });
+});
+
+/**
+ * Recording is a WRITE, so a reader who cannot write the doc is not offered it.
+ *
+ * Every minute of a recording lands in this doc: the transcript, and the notes
+ * the meeting mints as it runs. A visitor who cannot write was still shown a
+ * live Record Audio button, and found out at the server. The doc's write gate
+ * already disables every control carrying `data-write-control`, and `app.ts`
+ * mounts the meeting before it runs that gate, so the two buttons only have to
+ * carry the attribute to arrive disabled.
+ */
+describe('Record Audio under the doc write gate', () => {
+  /** The strip docked in a bar, as the doc mount docks it in the top bar. */
+  function docked() {
+    const bar = document.createElement('div');
+    document.body.append(bar);
+    const h = mount(undefined, { dock: bar });
+    return {
+      h,
+      bar,
+      record: () => bar.querySelector('.meeting-record') as HTMLButtonElement,
+      options: () => bar.querySelector('.meeting-record-options') as HTMLButtonElement,
+    };
+  }
+
+  it('offers both buttons to somebody who can write', () => {
+    const d = docked();
+    expect(d.record().disabled).toBe(false);
+    expect(d.options().disabled).toBe(false);
+  });
+
+  it('disables both once the doc is locked to reading', () => {
+    const d = docked();
+    lockDocToReading({ root: d.bar });
+    expect(d.record().disabled).toBe(true);
+    expect(d.options().disabled).toBe(true);
+    expect(d.record().getAttribute('aria-label')).toBe('Sign in to edit this doc');
+  });
+
+  /** THE CONTROL: the gate reaches only what claims to be a write control, so
+   *  a neighbouring button in the same bar is left alone. */
+  it('leaves a control that is not a write control enabled', () => {
+    const d = docked();
+    const other = document.createElement('button');
+    d.bar.append(other);
+    lockDocToReading({ root: d.bar });
+    expect(other.disabled).toBe(false);
   });
 });
