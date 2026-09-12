@@ -20,6 +20,7 @@ function store(): { notes: TaskNotesStore; fake: FakeStore } {
     getTask: (id) => fake.getTask(id),
     scheduleSave: (id) => fake.scheduleSave(id),
     emit: (e) => fake.emit(e),
+    now: () => Date.now(),
   });
   return { notes, fake };
 }

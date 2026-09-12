@@ -66,6 +66,7 @@ describe('TaskEventBus', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'task-event-bus-'));
     dirs.push(dataDir);
     const observedCalls: Array<{ workspaceId: string; agentId: string; at?: number }> = [];
+    const boardActivity: Array<{ workspaceId: string; at: number }> = [];
     const p: TaskEventBusPersistence = {
       dataDir: () => dataDir,
       attachmentsFor: (workspaceId) =>
@@ -74,8 +75,11 @@ describe('TaskEventBus', () => {
         observedCalls.push({ workspaceId, agentId, at });
         return true;
       },
+      noteBoardActivity: (workspaceId, at) => {
+        boardActivity.push({ workspaceId, at });
+      },
     };
-    return { bus: new TaskEventBus(p), dataDir, observedCalls };
+    return { bus: new TaskEventBus(p), dataDir, observedCalls, boardActivity };
   }
 
   it('eventsLogPath names the per-workspace audit file', () => {

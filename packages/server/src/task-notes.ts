@@ -32,6 +32,10 @@ export interface TaskNotesPersistence {
   getTask(taskId: string): Task | undefined;
   scheduleSave(workspaceId: string): void;
   emit(event: TaskNotedEvent): void;
+  /** The store's clock. `appendNote` read `Date.now()` directly while every
+   *  sibling verb read the injected one, which made a note the one write a
+   *  test could not place in time. */
+  now(): number;
 }
 
 /** The quiet records. One per `TaskStore`, holding no state of its own. */
@@ -66,7 +70,12 @@ export class TaskNotesStore {
     notes.push(note);
     if (notes.length > TASK_NOTES_STORE_CAP) notes.splice(0, notes.length - TASK_NOTES_STORE_CAP);
     task.notes = notes;
-    const now = Date.now();
+    const now = this.p.now();
+    // Deliberate, and the exception this file's header names: a note moves the
+    // ACTOR's work clock. What it must not move is the board's — see
+    // `board-activity.ts`. `task.noted` is excluded from board activity, and
+    // the durable half of that clock is stamped from the same predicate rather
+    // than derived from this field, so the two cannot disagree again.
     task.updatedAt = now;
     this.p.scheduleSave(task.workspaceId);
     this.p.emit({

@@ -19,6 +19,7 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentIdCandidates } from '@claude-workspaces/core';
+import { isBoardActivity } from './board-activity.ts';
 import type { AgentAttachment, TaskStoreEvent } from './tasks.ts';
 
 /** Where a workspace's append-only event audit log lives (plan §3.6: "the
@@ -34,6 +35,11 @@ export interface TaskEventBusPersistence {
   dataDir(): string;
   attachmentsFor(workspaceId: string): Map<string, AgentAttachment> | undefined;
   noteAgentToolCall(workspaceId: string, agentId: string, at?: number): boolean;
+  /** Stamp the board's durable "it moved" clock. Called for the events
+   *  `isBoardActivity` admits and no others — see `board-activity.ts` for what
+   *  reads it and why the filter has to be the same one the ready-work nudger
+   *  applies in memory. */
+  noteBoardActivity(workspaceId: string, at: number): void;
 }
 
 /** One store's event bus: the listener set `onEvent` subscribes into, plus
@@ -56,6 +62,21 @@ export class TaskEventBus {
     // can never disagree with what subscribers saw.
     this.appendAudit(event);
     this.noteObservedWork(event);
+    // The DURABLE half of the ready-work idle clock, stamped here because
+    // this is the one place every store mutation passes and therefore the
+    // only place the filter can be applied once. Before this the durable
+    // reading was `max(task.updatedAt)`, which a turn-end note moves — so the
+    // one event kind the filter exists to exclude was the one that kept the
+    // wake silent. See `board-activity.ts`.
+    if (isBoardActivity(event.type)) {
+      try {
+        this.p.noteBoardActivity(event.workspaceId, event.ts);
+      } catch (err) {
+        // Bookkeeping must never cost a delivery — the same rule the audit
+        // append above follows.
+        console.error('[tasks] board-activity stamp failed:', err);
+      }
+    }
     for (const listener of this.eventListeners) {
       try {
         listener(event);

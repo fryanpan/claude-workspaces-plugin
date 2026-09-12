@@ -1,10 +1,11 @@
-import { linkTitlesFor } from '../link-titles.ts';
 /**
  * A row's status, its evidence, its cross-references and its goal placement.
  *
  * Lifted verbatim out of `createServer`'s request closure; the handlers
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
+import { classifyActor } from '../actor-identity.ts';
+import { linkTitlesFor } from '../link-titles.ts';
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
 import { runRefsBackfill } from '../refs-backfill.ts';
 import {
@@ -83,6 +84,21 @@ export async function handleTaskStatusAndLinks(
           ? { message: 'This task is held by work on another board.' }
           : {}),
       });
+    }
+    // A PERSON queued this row, and if the move made it dispatchable the lead
+    // hears so in this tick rather than after the idle window — Bryan, on the
+    // ticket this came from: "I moved the ticket to Todo after editing and
+    // expected immediate pickup since the workspace had capacity."
+    //
+    // Only `todo`, only a person, and only when the row really is ready: the
+    // nudger checks the last of those against the board's own ready set (see
+    // `personQueuedTask`), so a move that leaves the row held behind an
+    // `after` edge or under a triage goal stays silent. The actor read is the
+    // one the store just attributed the transition to, and `classifyActor`
+    // resolves an undeclared author to `agent` — the safe direction here,
+    // where a misread would wake the lead on every builder's own transition.
+    if (to === 'todo' && classifyActor(author) === 'person') {
+      ctx.readyNudger.personQueuedTask({ workspaceId: res.task.workspaceId, taskId: res.task.id });
     }
     // The success arm carries the NON-enforcing blockers as warnings, which
     // is the same report and the same cut.

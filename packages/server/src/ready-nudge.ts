@@ -106,16 +106,12 @@ export const READY_TICK_DEFAULT_MS = 60_000;
 export const READY_IDLE_EVENT = 'workspace.ready_idle';
 
 /**
- * Whether a store event counts as THE BOARD MOVING — what restarts a
- * board's idle clock. Liveness does not: `agent.*` (attached / detached /
- * heartbeat) is the session being there, and `task.noted` is the session
- * ending a turn — one per turn from any agent holding a row, so counting it
- * would suppress the wake for exactly as long as a builder keeps talking
- * without moving anything, which is the state the wake exists to catch.
+ * Re-exported, not defined here any more. The rule now has TWO readers — this
+ * module's in-process clock and the durable one stamped at the store's emit
+ * choke point — and the two disagreeing is the defect `board-activity.ts`
+ * exists to close, so the predicate lives with that reasoning.
  */
-export function isBoardActivity(type: string): boolean {
-  return !type.startsWith('agent.') && type !== 'task.noted';
-}
+export { isBoardActivity } from './board-activity.ts';
 export const REVIEW_ANSWERED_EVENT = 'workspace.review_answered';
 
 /** A ready row, reduced to what a wake needs to say. */
@@ -150,6 +146,19 @@ export interface ReadyWorkSnapshot {
    * matching every other absent-means-zero count on this snapshot.
    */
   capacityHeld?: number;
+  /**
+   * The rows `capacityHeld` counts — ready by the dependency gate, cut out of
+   * `ready` by the cap alone, in the same priority order.
+   *
+   * The count is what goes on the wire, and every reader of the idle pass
+   * wants only the count. This carries the ROWS because one reader asks a
+   * different question: `personQueuedTask` has to say whether one named row
+   * became dispatchable, and `ready` cannot answer it — a board at its cap
+   * has an empty `ready` and a row that is perfectly ready. Reading the
+   * trimmed set as "not ready" would gate a person's deliberate move on free
+   * capacity, which is the one thing that wake must not do.
+   */
+  capacityTrimmed?: readonly ReadyRow[];
   /** The cap itself and its last move, for the wake to name beside
    *  `capacityHeld`. Absent from a caller that does not read it. */
   parallelismCap?: ParallelismCapSummary;
@@ -476,27 +485,102 @@ export class ReadyWorkNudger {
   taskReady(input: { workspaceId: string; taskId: string; taskTitle: string }): void {
     const ts = this.now();
     this.noteActivity(input.workspaceId, ts);
+    const board = this.liveBoard(input.workspaceId);
+    if (!board) return;
+    this.wakeLeadNow(board, ts, input.taskId, input.taskTitle);
+  }
+
+  /**
+   * A PERSON moved a row to `todo`, and the move made it dispatchable.
+   *
+   * This is the spec in Bryan's own words (2026-09-12): *"I moved the ticket
+   * to Todo after editing and expected immediate pickup since the workspace
+   * had capacity."* The trigger he named is the deliberate transition, not a
+   * quiet window — so this is not a shorter idle clock, it is a different
+   * event, and the idle clock stays the backstop for everything else.
+   *
+   * Three things it deliberately does NOT do, and the narrowness is the whole
+   * design:
+   *
+   *  - **An agent's identical move fires nothing.** The caller classifies the
+   *    actor; a builder moving its own rows would wake the lead every turn,
+   *    which is precisely the noise the idle window exists to suppress.
+   *  - **A move that leaves the row HELD fires nothing.** Behind an `after`
+   *    edge, or under a goal still in triage, the row has not become
+   *    dispatchable and there is nothing to say. The ready set is the judge,
+   *    so this can never disagree with what the lead would be told.
+   *  - **It is not gated on free capacity.** He mentioned capacity because it
+   *    was what he believed governed pickup, not as a condition he asked for.
+   *    A wake suppressed because the cap was full is a wake nobody ever
+   *    learns was owed; the lead reads the cap itself and queues. Hence
+   *    `capacityTrimmed` — a row the cap cut out of `ready` is still a row
+   *    that just became ready.
+   *
+   * The title comes off the snapshot rather than the caller: the row a wake
+   * names has to be the row the board would name, and the caller's copy is
+   * one read older.
+   */
+  personQueuedTask(input: { workspaceId: string; taskId: string }): void {
+    const ts = this.now();
+    this.noteActivity(input.workspaceId, ts);
+    const board = this.liveBoard(input.workspaceId);
+    if (!board) return;
+    const row =
+      board.ready.find((r) => r.id === input.taskId) ??
+      (board.capacityTrimmed ?? []).find((r) => r.id === input.taskId);
+    if (!row) return;
+    this.wakeLeadNow(board, ts, row.id, row.title);
+  }
+
+  /** One board, or nothing — a retired board and a lookup that threw are the
+   *  same answer to every immediate path. */
+  private liveBoard(workspaceId: string): ReadyWorkSnapshot | undefined {
     let board: ReadyWorkSnapshot | undefined;
     try {
-      board = this.opts.lookup(input.workspaceId);
+      board = this.opts.lookup(workspaceId);
     } catch {
-      return;
+      return undefined;
     }
-    if (!board || board.retired) return;
+    return board && !board.retired ? board : undefined;
+  }
+
+  /**
+   * Send one addressed wake about one row, now.
+   *
+   * A DELIVERED wake spends the board's arming, so the timer does not follow
+   * with a second frame over the same fact; it re-arms on the next real
+   * activity. An undelivered one spends nothing, which is the same rule the
+   * timed pass keeps and for the same reason: a nudge that reached nobody
+   * must stay owed, or the lead returns to a board that has already decided
+   * it told them. Delivered means the send REPORTED a sink: the reachability
+   * probe and the send are two reads of a socket that can close between them.
+   *
+   * Getting that order wrong is worse here than on the timed pass, because
+   * this path also moves the clock. `noteActivity` has already pushed the
+   * board's idle reading to `ts`, so an arming recorded for a lead holding no
+   * stream would match the very stamp the next tick computes — the immediate
+   * wake would be dropped AND the fifteen-minute backstop disarmed with it,
+   * for exactly the state that produces an unattached lead: a restart, a
+   * plugin update, a session that has not come back yet.
+   */
+  private wakeLeadNow(board: ReadyWorkSnapshot, ts: number, taskId: string, title: string): void {
     const lead = board.leadAgentId;
     if (lead === undefined) return;
-    // This wake IS the stamp's nudge: spend it so the timer does not follow
-    // with a second frame over the same fact. It re-arms on real activity.
-    this.armed.set(input.workspaceId, this.stampFor(board, ts));
-    this.saveStamps();
     if (!this.reachable(board.workspaceId, lead)) return;
-    this.emit(board.workspaceId, lead, {
+    const reached = this.emit(board.workspaceId, lead, {
       event: READY_IDLE_EVENT,
       workspaceId: board.workspaceId,
-      taskId: input.taskId,
-      title: input.taskTitle,
+      taskId,
+      title,
       ts,
     });
+    // The DELIVERY, not the attempt. `canReach` and the send are two reads of
+    // a socket that can close between them, and a sink that fails throws —
+    // both come back here as zero, and arming on either would spend a wake
+    // the lead never saw.
+    if (reached === 0) return;
+    this.armed.set(board.workspaceId, this.stampFor(board, ts));
+    this.saveStamps();
   }
 
   /** One pass over every board. Never throws — this runs on a timer. */
@@ -838,11 +922,15 @@ export class ReadyWorkNudger {
     }
   }
 
-  private emit(workspaceId: string, agentId: string, frame: NudgeFrame): void {
+  /** How many sinks the frame reached. A throw is zero — a send that failed
+   *  delivered nothing, and the one caller that spends an arming on delivery
+   *  must not be able to tell the two apart. */
+  private emit(workspaceId: string, agentId: string, frame: NudgeFrame): number {
     try {
-      this.opts.send(workspaceId, agentId, frame);
+      return this.opts.send(workspaceId, agentId, frame);
     } catch (err) {
       console.error('[nudge] send failed:', err);
+      return 0;
     }
   }
 }
