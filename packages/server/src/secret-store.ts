@@ -46,6 +46,36 @@ import { isSecretServiceName } from '@claude-workspaces/core';
  */
 export const SECRET_ACCOUNT = 'claude-workspaces';
 
+/**
+ * The namespace every name a review item asks for is stored under.
+ *
+ * WITHOUT THIS, TWO DIFFERENT THINGS SHARE ONE FLAT KEYSPACE. The Keychain
+ * has no folders: `share/keychain.ts` reads this server's OWN configuration
+ * out of it by service name — the Cloudflare token, the transcription keys —
+ * and its lookup falls back to "any account" when the operator's own entry is
+ * absent. A review item naming `cloudflare-api-token` would therefore write
+ * an entry the server later reads as its own configuration, and the write is
+ * an update-in-place, so nothing would refuse it. The prefix is what makes
+ * that unreachable: a name asked for through an item can only ever land under
+ * `claude-workspaces-secret.`, and nothing in this repo reads its own
+ * configuration from under that.
+ *
+ * It is applied HERE, at the one place a name becomes an argument, rather
+ * than at the door — a door that prefixed would leave the raw name reachable
+ * by any future caller of `storeSecret`. The card, the answer line and the
+ * activity feed all keep showing the name the item asked for; the prefix is
+ * between this module and the store, and `secretReadCommand` is what tells an
+ * agent the full name to read back.
+ */
+export const SECRET_SERVICE_PREFIX = 'claude-workspaces-secret.';
+
+/** The name an asked-for secret is actually stored under — see
+ *  `SECRET_SERVICE_PREFIX`. One function, so the write, the read-back check
+ *  and the command an agent is handed cannot spell it three ways. */
+export function storedSecretService(service: string): string {
+  return `${SECRET_SERVICE_PREFIX}${service}`;
+}
+
 /** How long either command gets before it is killed. The write is local and
  *  returns in milliseconds; a wait past this is a locked keychain or a
  *  consent dialog, and a request must not hang on one. */
@@ -111,7 +141,7 @@ export type SecretWriter = (service: string, value: string) => Promise<SecretWri
  * The practical consequence is a limit worth stating: a multi-line secret (a
  * PEM block) cannot be handed over this way today.
  */
-function isStorableValue(value: unknown): value is string {
+export function isStorableSecretValue(value: unknown): value is string {
   return typeof value === 'string' && value !== '' && !/[\r\n\0]/.test(value);
 }
 
@@ -160,15 +190,16 @@ export async function storeSecret(
   if (typeof value === 'string' && value.length > SECRET_VALUE_MAX_CHARS) {
     return { ok: false, error: 'value-too-long' };
   }
-  if (!isStorableValue(value)) return { ok: false, error: 'bad-value' };
+  if (!isStorableSecretValue(value)) return { ok: false, error: 'bad-value' };
 
   // `-w` LAST, with nothing after it: that is what makes `security` prompt,
   // and prompting is what makes it read from stdin. Given an argument it
   // would take the value on argv, which is the one thing this module exists
   // to prevent — and a trailing keychain path would be eaten by the flag.
+  const stored = storedSecretService(service);
   const wrote = await run(
     'security',
-    ['add-generic-password', '-U', '-a', SECRET_ACCOUNT, '-s', service, '-w'],
+    ['add-generic-password', '-U', '-a', SECRET_ACCOUNT, '-s', stored, '-w'],
     // Twice: the prompt asks, then asks again to confirm. See the note above
     // for what a single line does.
     `${value}\n${value}\n`,
@@ -177,7 +208,7 @@ export async function storeSecret(
 
   const readBack = await run(
     'security',
-    ['find-generic-password', '-a', SECRET_ACCOUNT, '-s', service, '-w'],
+    ['find-generic-password', '-a', SECRET_ACCOUNT, '-s', stored, '-w'],
     '',
   );
   // `-w` prints the value and a newline, and nothing else.
@@ -197,5 +228,5 @@ export async function storeSecret(
  * session, against its own Keychain access.
  */
 export function secretReadCommand(service: string): string {
-  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${service} -w`;
+  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w`;
 }

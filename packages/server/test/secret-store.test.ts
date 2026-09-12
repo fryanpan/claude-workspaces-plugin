@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   SECRET_ACCOUNT,
+  SECRET_SERVICE_PREFIX,
   SECRET_VALUE_MAX_CHARS,
   type SecretRunResult,
   type SecretRunner,
@@ -77,7 +78,7 @@ describe('the value goes on stdin and nowhere else', () => {
       '-a',
       SECRET_ACCOUNT,
       '-s',
-      'riverbend-weather-key',
+      `${SECRET_SERVICE_PREFIX}riverbend-weather-key`,
       '-w',
     ]);
     expect(args[args.length - 1]).toBe('-w');
@@ -156,7 +157,39 @@ describe('saved means read back, not exit 0', () => {
 describe('the read-back command handed to an agent', () => {
   test('names the account and the service and asks for nothing else', () => {
     expect(secretReadCommand('riverbend-weather-key')).toBe(
-      `security find-generic-password -a ${SECRET_ACCOUNT} -s riverbend-weather-key -w`,
+      `security find-generic-password -a ${SECRET_ACCOUNT} -s ${SECRET_SERVICE_PREFIX}riverbend-weather-key -w`,
+    );
+  });
+});
+
+describe('the namespace a stored name lands in', () => {
+  /**
+   * THE KEYCHAIN HAS NO FOLDERS. `share/keychain.ts` reads this server's own
+   * configuration out of the same store by service name, and its lookup falls
+   * back to any account — so an item asking for `cloudflare-api-token` would
+   * otherwise write the entry the server later reads as its own. The prefix is
+   * what makes that unreachable, and these cases are about the name that
+   * actually reaches the command rather than the one the card showed.
+   */
+  test('a name that collides with the server\'s own configuration is stored elsewhere', async () => {
+    const fake = fakeSecurity();
+    await storeSecret('cloudflare-api-token', PLACEHOLDER, fake.run);
+    const written = fake.calls[0]?.args ?? [];
+    expect(written).toContain(`${SECRET_SERVICE_PREFIX}cloudflare-api-token`);
+    // The bare name reaches no argument of either command, on its own.
+    expect(written).not.toContain('cloudflare-api-token');
+    expect(fake.calls[1]?.args ?? []).not.toContain('cloudflare-api-token');
+  });
+
+  test('the read-back reads the same entry the write wrote', async () => {
+    const fake = fakeSecurity();
+    await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run);
+    const wroteAt = (fake.calls[0]?.args ?? []).indexOf('-s');
+    const readAt = (fake.calls[1]?.args ?? []).indexOf('-s');
+    expect(fake.calls[0]?.args[wroteAt + 1]).toBe(fake.calls[1]?.args[readAt + 1] ?? '');
+    // And it is the namespaced one, not the bare name, on both.
+    expect(fake.calls[0]?.args[wroteAt + 1]).toBe(
+      `${SECRET_SERVICE_PREFIX}riverbend-weather-key`,
     );
   });
 });
