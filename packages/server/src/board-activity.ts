@@ -52,11 +52,17 @@ export function isBoardActivity(type: string): boolean {
  * survives a restart can tell.
  *
  * `lastBoardActivityAt` is the stamped answer and is authoritative whenever it
- * is present. The reduce behind it is the floor for a board whose record
- * predates the field — the reading this function replaces, kept exactly as it
- * was so the first boot after the deploy is no LESS conservative than the last
- * boot before it. It is contaminated by turn-end notes, which is the whole
- * defect; it stops being consulted the moment the board emits anything.
+ * is present, which after a hydrate is always: `hydrateTasksFromDisk` seeds a
+ * board record that predates the field from this same reduce, once, before
+ * anything can land on it.
+ *
+ * The reduce survives here as the floor for the one case that seeding cannot
+ * reach — a board with no tasks at all, whose reduce is 0 anyway. It is the
+ * reading this function replaces and it is contaminated by turn-end notes,
+ * which is the whole defect; the seed is what stops an existing board from
+ * living on it. Waiting instead for the first admitted event would have left
+ * exactly the boards this was fixed for — the ones whose only traffic is
+ * notes — on the broken reading indefinitely.
  */
 export function lastBoardActivityAt(workspace: BoardWorkspace, tasks: readonly Task[]): number {
   if (workspace.lastBoardActivityAt !== undefined) return workspace.lastBoardActivityAt;

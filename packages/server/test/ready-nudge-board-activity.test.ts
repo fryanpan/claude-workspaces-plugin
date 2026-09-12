@@ -27,7 +27,7 @@
  * register. The repo is public.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { lastBoardActivityAt } from '../src/board-activity.ts';
@@ -39,6 +39,7 @@ import {
   isBoardActivity,
 } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { tasksSidecarPath } from '../src/task-persistence.ts';
 import { buildQueue } from '../src/task-queue.ts';
 import { TaskStore } from '../src/tasks.ts';
 import { seedGoals, seedGoalsOverHttp } from './goal-seed.ts';
@@ -321,6 +322,77 @@ describe('the durable idle clock', () => {
     expect(reopened.getWorkspace(workspaceId), 'the board should hydrate').toBeDefined();
     expect(reopened.getTask(heldId)?.updatedAt, 'the note should be on disk too').toBe(noteAt);
     expect(reading(reopened)).toBe(afterEdit);
+    reopened.stop();
+  });
+
+  /**
+   * The board that already exists — the one this was fixed for.
+   *
+   * Its sidecar was written before the field, and its only traffic is
+   * turn-end notes, which never stamp it. So the seed has to happen at
+   * hydrate: a board left to wait for its first admitted event would sit on
+   * the contaminated reading for as long as somebody kept working it, which
+   * is the defect surviving the fix on every board on disk.
+   */
+  it('seeds a pre-field board at hydrate, so notes cannot move it afterwards', () => {
+    const dataDir = tmp('nudge-legacy-');
+    let clock = Date.now();
+    const { store, workspaceId, heldId } = board(dataDir, () => clock);
+    store.flush();
+    store.stop();
+
+    // The sidecar as it was written before this field existed.
+    const sidecar = tasksSidecarPath(dataDir, workspaceId);
+    const saved = JSON.parse(readFileSync(sidecar, 'utf8')) as {
+      workspace: Record<string, unknown>;
+    };
+    // `undefined` rather than `delete`: JSON.stringify drops the key either
+    // way, and the assertion below reads the file back rather than trusting
+    // that it did.
+    saved.workspace.lastBoardActivityAt = undefined;
+    writeFileSync(sidecar, `${JSON.stringify(saved, null, 2)}\n`);
+    expect(
+      Object.hasOwn(
+        (JSON.parse(readFileSync(sidecar, 'utf8')) as { workspace: object }).workspace,
+        'lastBoardActivityAt',
+      ),
+      'the fixture must be a sidecar written before the field',
+    ).toBe(false);
+
+    clock += 60_000;
+    const reopened = new TaskStore({ dataDir, debounceMs: 5, now: () => clock });
+    const workspace = reopened.getWorkspace(workspaceId);
+    expect(workspace?.lastBoardActivityAt, 'hydrate should have seeded it').toBeGreaterThan(0);
+    const seeded = lastBoardActivityAt(
+      workspace ??
+        (() => {
+          throw new Error('no workspace');
+        })(),
+      reopened.listTasks(workspaceId),
+    );
+
+    // Now the only thing that happens to this board is somebody's turn ending.
+    for (let turn = 0; turn < 5; turn++) {
+      clock += 5 * 60_000;
+      expect(
+        reopened.appendNote(heldId, {
+          kind: 'status',
+          text: 'still on the crawler queue',
+          agent: LEAD.name,
+          ts: clock,
+        }).ok,
+      ).toBe(true);
+    }
+    expect(reopened.getTask(heldId)?.updatedAt).toBe(clock);
+    expect(
+      lastBoardActivityAt(
+        reopened.getWorkspace(workspaceId) ??
+          (() => {
+            throw new Error('no workspace');
+          })(),
+        reopened.listTasks(workspaceId),
+      ),
+    ).toBe(seeded);
     reopened.stop();
   });
 });
