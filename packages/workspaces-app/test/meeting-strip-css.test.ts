@@ -342,6 +342,13 @@ describe('motion', () => {
     expect(styleOf(attach('meeting-blinker', { parent: live })).background).not.toBe(
       token('--border-strong'),
     );
+    // And the case that makes `:not(.is-live)` load-bearing rather than tidy:
+    // the MICROPHONE is idle for the whole of a bot meeting, and that strip is
+    // live and must go on saying so.
+    const bot = attach('meeting-strip is-bot is-live', { attrs: { 'data-state': 'idle' } });
+    expect(styleOf(attach('meeting-blinker', { parent: bot })).animation).toContain(
+      'meeting-blink',
+    );
   });
 
   it('flashes only the word the model rewrote', () => {

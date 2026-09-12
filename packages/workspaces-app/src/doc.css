@@ -1338,10 +1338,14 @@ body.has-set .doc-switcher-caret {
 .meeting-strip[data-state="error"] .meeting-blinker,
 /* And idle, which is now a state the strip can be SEEN in: a recording that
    timed itself out leaves its sentence on an idle line. A red dot beside
-   "Recording stopped" is the same lie in a louder voice. The bot rule above
-   out-specifies this one, so a strip idle under a live bot keeps its
-   orange. */
-  .meeting-strip[data-state="idle"]
+   "Recording stopped" is the same lie in a louder voice.
+
+   `:not(.is-live)` is load-bearing rather than tidy: the MICROPHONE is idle
+   for the whole of a bot meeting, so that strip carries data-state="idle"
+   while a meeting really is running, and its dot must go on saying so. The
+   bot rule above does not cover it — that one is itself scoped to a bot that
+   is NOT live. */
+  .meeting-strip[data-state="idle"]:not(.is-live)
   .meeting-blinker {
   background: var(--border-strong);
   animation: none;
