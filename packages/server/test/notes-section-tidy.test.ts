@@ -66,6 +66,22 @@ function blankAfter(ydoc: Y.Doc, after: string): void {
   prose.getProseFragment(ydoc).insert(at + 1, [new Y.XmlElement('paragraph')]);
 }
 
+/**
+ * An EMPTY HEADING, inserted straight after the block holding `after`.
+ *
+ * Also unsayable in markdown: `###` with nothing after it parses as a
+ * paragraph. In a live doc it is what somebody typing a new topic has on
+ * screen for a second before they type its name.
+ */
+function emptyHeadingAfter(ydoc: Y.Doc, after: string, level: number): void {
+  const top = prose.getProseFragment(ydoc).toArray() as Y.XmlElement[];
+  const at = top.findIndex((el) => prose.serializeBlockToMarkdown(el).includes(after));
+  expect(at).toBeGreaterThanOrEqual(0);
+  const el = new Y.XmlElement('heading');
+  el.setAttribute('level', String(level));
+  prose.getProseFragment(ydoc).insert(at + 1, [el]);
+}
+
 /** Run a real cleanup pass whose model proposes nothing. */
 async function cleanup(store: NotesDocStore, headingId: string) {
   const dataDir = freshDir();
@@ -111,6 +127,19 @@ describe('empty paragraphs under a Meeting notes heading', () => {
     const result = await cleanup(store, idOf(store, 'Meeting notes'));
     expect(result.blanks).toBe(0);
     expect(prose.readOutline(ydoc).filter((e) => e.text.length === 0)).toHaveLength(1);
+  });
+
+  it('CONTROL: an empty HEADING is structure, and stays', async () => {
+    // Deleting it would move the words below it up under the topic above,
+    // which files them under a subject the person did not choose. The repair
+    // is for blank paragraphs only.
+    const { store, ydoc } = docStoreFrom(NOTES_WITH_BLANKS, ['## Meeting notes']);
+    emptyHeadingAfter(ydoc, '## Meeting notes', 3);
+    const before = prose.readOutline(ydoc).filter((e) => e.kind === 'heading').length;
+
+    const result = await cleanup(store, idOf(store, 'Meeting notes'));
+    expect(result.blanks).toBe(0);
+    expect(prose.readOutline(ydoc).filter((e) => e.kind === 'heading')).toHaveLength(before);
   });
 
   it('CONTROL: a line that only LOOKS blank keeps its words', async () => {
@@ -173,6 +202,20 @@ describe('the same topic heading twice under one Meeting notes section', () => {
     const result = await cleanup(store, idOf(store, 'Meeting notes'));
     expect(result.merged).toBe(0);
     expect(headings(ydoc)).toHaveLength(4);
+  });
+
+  it('CONTROL: the same words one level DEEPER is a sub-topic, and stays', async () => {
+    // `### Ferry timetable` then `#### Ferry timetable` is a nesting somebody
+    // made, not a topic opened twice; dropping the deeper one flattens it.
+    const doc = NOTES_WITH_TWIN.replace(
+      '### Note-taker performance\n\n- Two of them',
+      '#### Note-taker performance\n\n- Two of them',
+    );
+    const { store, ydoc } = docStoreFrom(doc, ['## Meeting notes']);
+    const result = await cleanup(store, idOf(store, 'Meeting notes'));
+    expect(result.merged).toBe(0);
+    expect(headings(ydoc).filter((h) => h === 'Note-taker performance')).toHaveLength(2);
+    expect(bullets(ydoc)).toHaveLength(2);
   });
 
   it('CONTROL: a repeat with another topic between them is left alone', async () => {

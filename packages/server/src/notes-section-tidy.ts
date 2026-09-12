@@ -114,9 +114,10 @@ export function tidyNotesSection(
   const drop: number[] = [];
   let blanks = 0;
   let merged = 0;
-  // The last topic heading kept, so a repeat is compared with the heading it
-  // would be folded into rather than with any earlier one.
-  let lastTopic: string | undefined;
+  // The last topic heading kept — its words and its level — so a repeat is
+  // compared with the heading it would be folded into rather than with any
+  // earlier one.
+  let lastTopic: { key: string; level: number } | undefined;
   for (let i = start + 1; i < top.length; i++) {
     const el = top[i] as Y.XmlElement;
     const level = levelOf(el);
@@ -125,19 +126,25 @@ export function tidyNotesSection(
     const commentedHere = (): boolean => id !== undefined && commentedNow().has(id);
     if (level !== undefined) {
       const key = topicKey(textOf(el));
-      // An empty heading is not a topic and not a repeat of one either; it
-      // falls through to the blank check below.
-      if (key.length > 0) {
-        if (key === lastTopic && !commentedHere()) {
+      // AND AT THE SAME LEVEL. `### Ferry timetable` followed by `#### Ferry
+      // timetable` is a sub-topic somebody nested, not a topic opened twice,
+      // and dropping the deeper one flattens a hierarchy rather than folding
+      // a repeat.
+      if (key.length > 0 && key === lastTopic?.key && level === lastTopic.level) {
+        if (!commentedHere()) {
           drop.push(i);
           merged++;
           continue;
         }
-        lastTopic = key;
-        continue;
       }
+      // An empty heading is a heading, and this repair removes only empty
+      // PARAGRAPHS: a heading somebody has not finished typing is structure
+      // they put there, and deleting it moves their words under the topic
+      // above.
+      lastTopic = { key, level };
+      continue;
     }
-    if (dropBlanks && textOf(el).length === 0 && !commentedHere()) {
+    if (dropBlanks && el.nodeName === 'paragraph' && textOf(el).length === 0 && !commentedHere()) {
       drop.push(i);
       blanks++;
     }
