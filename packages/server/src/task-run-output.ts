@@ -18,9 +18,11 @@
  *    withdrawn after, carrying the old item's unopened files, so an unread
  *    digest never piles up into a card per day and never silently drops off.
  *
- * An item is withdrawn when every file it links has been opened on the board,
- * which is a doc of the board holding that path: opening a file from the item
- * or from the Library is the same bind. Answering the item closes it too.
+ * An item is withdrawn when every file it links that was unopened when it
+ * was filed has been opened on the board, which is a doc of the board holding
+ * that path: opening a file from the item or from the Library is the same
+ * bind. A file already open when its run rewrote it gives no such signal, so
+ * an item linking only those stands until it is answered or replaced.
  *
  * Writes go through the store as the scheduler's actor, past the quality
  * judge, for the reason the stale item gives: words generated from board
@@ -57,11 +59,12 @@ export interface RunOutputStore {
 /** What this module reads about the board's project files. */
 export interface RunOutputSource {
   /**
-   * The project markdown files the board's Library offers to open — the ones
-   * no doc of the board holds yet — with their mtimes. `null` when the board
-   * has no project this server can list.
+   * The project's markdown files as the board's Library lists them, with
+   * their mtimes — the ones it offers to open and the ones a doc of the board
+   * already holds, since a run may rewrite a file somebody opened. `null`
+   * when the board has no project this server can list.
    */
-  unopenedFiles(workspaceId: string): readonly { relPath: string; at?: number }[] | null;
+  files(workspaceId: string): readonly { relPath: string; at?: number }[] | null;
   /** Does a doc of this board hold the project file at this path? */
   opened(workspaceId: string, relPath: string): boolean;
 }
@@ -127,17 +130,20 @@ export function observeRunOutput(
     };
 
     // The standing item: gone once a person answered or withdrew it, and
-    // withdrawn here once every file it links has been opened.
+    // withdrawn here once every file it was waiting on has been opened.
     const standing = state.output?.item;
     if (state.output && standing) {
       const item = store.listReviewItems(rule.id).find((i) => i.id === standing.id);
       if (!item || !isReviewItemOpen(item) || reviewWithdrawn(item.review)) {
         state.output = { forSuccessAt: state.output.forSuccessAt };
         changed = true;
-      } else if (standing.paths.every((p) => source.opened(ws, p))) {
+      } else if (
+        standing.waitingOn.length > 0 &&
+        standing.waitingOn.every((p) => source.opened(ws, p))
+      ) {
         const res = store.withdrawReviewItem(rule.id, standing.id, {
           actor,
-          reason: 'every file it links was opened',
+          reason: 'every new file it links was opened',
         });
         if (res.ok) {
           state.output = { forSuccessAt: state.output.forSuccessAt };
@@ -160,7 +166,7 @@ export function observeRunOutput(
     const carriedItem = state.output?.item;
     state.output = { forSuccessAt: successAt, ...(carriedItem ? { item: carriedItem } : {}) };
     changed = true;
-    const files = source.unopenedFiles(ws);
+    const files = source.files(ws);
     if (files === null) {
       report(`[scheduler] ${rule.id} declares output but its board has no project to list`);
       return save();
@@ -194,7 +200,8 @@ export function observeRunOutput(
       });
       if (!gone.ok) report(`[scheduler] ${rule.id} replaced item withdraw refused: ${gone.error}`);
     }
-    state.output = { forSuccessAt: successAt, item: { id: res.item.id, paths } };
+    const waitingOn = paths.filter((p) => !source.opened(ws, p));
+    state.output = { forSuccessAt: successAt, item: { id: res.item.id, paths, waitingOn } };
     report(`[scheduler] ${rule.id} run output: filed review item ${res.item.id}`);
     return save();
   };

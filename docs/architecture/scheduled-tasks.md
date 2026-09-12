@@ -205,15 +205,19 @@ first and withdraws the old one after, carrying the old item's unopened files
 (seven links at most). An unread digest does not turn into a card a day, and it
 does not quietly drop off either.
 
-- **Read.** The item is withdrawn once every file it links is held by a doc of
-  the board, which is what opening a file does from the item and from the
-  Library alike. Answering it closes it too, and the next run carries nothing
+- **Read.** The item is withdrawn once every file it links that was unopened
+  when it was filed is held by a doc of the board, which is what opening a file
+  does from the item and from the Library alike. A run that rewrites a file
+  already open (a `latest.md`) still files an item, but opening that file again
+  is no sign it was read, so such an item stands until it is answered or the
+  next run replaces it. Answering closes it, and the next run carries nothing
   from an answered item.
 - **Once per run.** The rule's state remembers the success it looked at
   (`state.output.forSuccessAt`), so no later tick lists the project again for
   the same run.
 - **The Library is unchanged.** Items are built from the Library's own
-  listing, so a file the item links is a file the Library offers.
+  listing, the files it offers and the files the board's docs hold, so a file
+  the item links is a file the Library shows.
 - **Not covered.** A local-only project's files are never named in an item,
   because an item is readable by the board's share visitors. Files that arrive
   by `git pull` from a job the board did not run belong to no instance, so they

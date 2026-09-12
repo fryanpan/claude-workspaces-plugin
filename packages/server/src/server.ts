@@ -1126,7 +1126,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // `schedulerNow` is a seam for the same reason `stallNudgeQuietMs` is one:
   // the feature IS a comparison against a clock, so a test that could not move
   // the clock would have to burn real minutes to assert anything.
-  let runOutputSource = (): RunOutputSource => ({ unopenedFiles: () => null, opened: () => false });
+  let runOutputSource = (): RunOutputSource => ({ files: () => null, opened: () => false });
   const taskScheduler = createTaskScheduler(taskStore, {
     ...(opts.schedulerNow !== undefined ? { now: opts.schedulerNow } : {}),
     observers: [
@@ -1148,7 +1148,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       observeRunOutput(
         taskStore,
         {
-          unopenedFiles: (ws) => runOutputSource().unopenedFiles(ws),
+          files: (ws) => runOutputSource().files(ws),
           opened: (ws, relPath) => runOutputSource().opened(ws, relPath),
         },
         SCHEDULER_ACTOR,

@@ -7,8 +7,9 @@
  * folder, two roundups in the declared one, an older roundup that is not this
  * run's. What is asserted is what a person meets: ONE item on the board's
  * review queue linking the run's files, the files still in the Library, the
- * link opening through the Library's own verb, and the item leaving once every
- * file it links has been opened.
+ * link opening through the Library's own verb, the item leaving once every
+ * file it links has been opened, and the next run that rewrites an opened
+ * file still filing one.
  *
  * The second block drives the observer on a real store with instants set on
  * the rows, because replacement is about two runs a day apart and a wall
@@ -189,6 +190,26 @@ describe("a scheduled run's output, end to end", () => {
     handle.runScheduler();
     expect(openOn(handle.tasks.listReviewItems(rule.id))).toHaveLength(0);
     expect(handle.tasks.listReviewItems(rule.id)).toHaveLength(1);
+
+    // The next run rewrites a file somebody already opened. That is still
+    // news, and opening it again is no sign it was read, so the item stands.
+    // The rows are dated ten minutes on, because the store stamps real time
+    // and the first run's files would otherwise sit inside this run too.
+    now += DAY;
+    expect(handle.runScheduler()).toHaveLength(1);
+    const next = instancesOf(handle.tasks, ws, rule.id).at(-1);
+    if (!next || next.id === instance.id) throw new Error('no second instance');
+    next.createdAt = c + 10 * MIN;
+    writeAt(repo, 'roundups/tide-tables-0302.md', c + 11 * MIN);
+    expect(handle.tasks.transition(next.id, 'done', { actor: OWNER }).ok).toBe(true);
+    const closing = next.transitions?.at(-1);
+    if (closing) closing.ts = c + 12 * MIN;
+    handle.runScheduler();
+    handle.runScheduler();
+    const news = openOn(handle.tasks.listReviewItems(rule.id)).filter((i) =>
+      i.review.headline?.startsWith('New in'),
+    );
+    expect(news.map((i) => i.review.headline)).toEqual(['New in roundups: tide-tables-0302.md']);
   });
 });
 
@@ -230,10 +251,7 @@ describe('the run-output pass on a real store', () => {
         observeRunOutput(
           store,
           {
-            unopenedFiles: () =>
-              lister(repo)
-                .filter((f) => !opened.has(f.relPath))
-                .map((f) => ({ relPath: f.relPath, at: f.mtimeMs })),
+            files: () => lister(repo).map((f) => ({ relPath: f.relPath, at: f.mtimeMs })),
             opened: (_ws, relPath) => opened.has(relPath),
           },
           SCHEDULER_ACTOR,

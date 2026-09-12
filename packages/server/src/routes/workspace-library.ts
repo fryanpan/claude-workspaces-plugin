@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeDocKey } from '../doc-key.ts';
+import { makeDocKey, parseDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
 import {
   type LibrarySources,
@@ -261,7 +261,8 @@ function heldOnBoard(
 
 /**
  * The Library's listing as the scheduler reads it, for a run's output
- * (`task-run-output.ts`): the files this board would offer to open, and
+ * (`task-run-output.ts`): the project's markdown files with their mtimes,
+ * the ones this board would offer to open and the ones its docs hold, and
  * whether one has been opened. Read as a member on the box sees it, because
  * the item lands on the board's own queue — except that a local-only
  * project's files are never offered, so their names never reach an item a
@@ -276,17 +277,21 @@ export function libraryRunOutputSource(
     return board ? { workspaceId, board } : undefined;
   };
   return {
-    unopenedFiles: (workspaceId) => {
+    files: (workspaceId) => {
       const scope = scopeOf(workspaceId);
       if (!scope) return null;
       const src = sourcesFor(ctx, scope, false);
       const repoKey = projectRepoKey(src.docs, src.docKeyOf);
       if (!repoKey || !src.projectRoot(repoKey)) return null;
-      return buildLibrary(src).files.flatMap((f) =>
-        f.open === undefined
-          ? []
-          : [{ relPath: f.open, ...(f.at !== undefined ? { at: f.at } : {}) }],
-      );
+      const byPath = new Map<string, number | undefined>();
+      for (const meta of src.docs) {
+        const key = parseDocKey(src.docKeyOf(meta.docId) ?? '');
+        if (key?.repoKey === repoKey && key.relPath.toLowerCase().endsWith('.md')) {
+          byPath.set(key.relPath, src.fileMtime(meta.docId));
+        }
+      }
+      for (const f of buildLibrary(src).files) if (f.open !== undefined) byPath.set(f.open, f.at);
+      return [...byPath].map(([relPath, at]) => ({ relPath, ...(at !== undefined ? { at } : {}) }));
     },
     opened: (workspaceId, relPath) => {
       const scope = scopeOf(workspaceId);
