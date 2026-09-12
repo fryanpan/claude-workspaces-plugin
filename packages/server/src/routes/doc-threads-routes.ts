@@ -37,6 +37,7 @@ import {
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
+import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import {
   type DocResourceRouteRequest,
@@ -148,6 +149,28 @@ export async function handleDocThreadRoutes(
     parseRevisedRange,
   } = ctx;
   const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, withTaskChips } = rq;
+
+  /**
+   * OWNER-ONLY ITEMS, on the doc surface. The flag is the ask's, not the
+   * surface's: `add_review_item` files one on a ticket and `create_thread`
+   * files the same ask on a doc thread, and both end up as an ask whose
+   * answer the owner's own machine acts on. So the same rule and the same
+   * function as the task family (`refuseOwnerOnlyWrite`), reading the payload
+   * off the comment the write names.
+   *
+   * The board: this path's scope when it had one, else the board the doc is
+   * filed on. A doc reachable through no board at all leaves the empty
+   * string, which refuses a share visitor and admits the operator — see
+   * `refuseOwnerOnlyWrite`, and `boardRoleOf` for why that is not a hole.
+   */
+  const ownerOnlyDenial = (threadId: string, commentId: string): Response | null => {
+    const comment = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
+    return refuseOwnerOnlyWrite(
+      comment?.review,
+      rq.scope?.workspaceId ?? resolveWorkspaceForDoc(docId) ?? '',
+      rq.requireOwner,
+    );
+  };
   const threadIdMatch = rest.match(/^threads\/([^/]+)(\/.*)?$/);
   if (threadIdMatch) {
     const threadId = decodeURIComponent(threadIdMatch[1] ?? '');
@@ -189,6 +212,13 @@ export async function handleDocThreadRoutes(
           : null;
       let t: Thread | null = null;
       if (pending && folded) {
+        // A plain reply that FOLDS INTO AN ANSWER is an answer, and an
+        // owner-only ask takes the same gate here as at `/answer`. Refused
+        // before the write, so the reply does not land either: a Regular
+        // User's words on this thread would otherwise read as the answer the
+        // owner's machine acts on.
+        const denied = ownerOnlyDenial(threadId, pending.id);
+        if (denied) return denied;
         // The whole answer path, exactly as the explicit route uses
         // it — the stamps, the displaced-answer history, the reply,
         // the events. A second writer here is how the two spellings
@@ -265,6 +295,12 @@ export async function handleDocThreadRoutes(
       const commentId = body?.commentId as string | undefined;
       if (!user || !text || !commentId) {
         return j(400, { error: 'author + text + commentId required' });
+      }
+      // Before the ask-back conversion below, for the reason the task route
+      // gives: the conversion is itself a write on the ask.
+      {
+        const denied = ownerOnlyDenial(threadId, commentId);
+        if (denied) return denied;
       }
       // A person's question is not the answer, here either — same
       // conversion as the task review-item route. It posts as an
@@ -359,6 +395,10 @@ export async function handleDocThreadRoutes(
       const commentId = body?.commentId as string | undefined;
       if (!user || !commentId) return j(400, { error: 'author + commentId required' });
       if (isCategoryAuthor(user)) return refuseCategoryAuthor();
+      {
+        const denied = ownerOnlyDenial(threadId, commentId);
+        if (denied) return denied;
+      }
       const parsed = parseRevisedRange(body?.revisedRange);
       if (!parsed.ok) return j(400, { error: parsed.error });
       const res = docStore.reviseCommentReview(
@@ -458,6 +498,10 @@ export async function handleDocThreadRoutes(
       const user = authorFor(body?.author);
       const commentId = body?.commentId as string | undefined;
       if (!user || !commentId) return j(400, { error: 'author + commentId required' });
+      {
+        const denied = ownerOnlyDenial(threadId, commentId);
+        if (denied) return denied;
+      }
       const res = docStore.undoReviewItemAnswer(docId, threadId, commentId, user, {
         generate: !visitor,
       });

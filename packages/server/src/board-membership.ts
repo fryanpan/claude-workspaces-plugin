@@ -39,8 +39,9 @@
 import { type DocMeta, attachmentIdOf, normalizeEmail } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
+import { type BoardRole, DEFAULT_BOARD_ROLE } from './share/board-role.ts';
 import { renderShareLinkUnavailable } from './share/share-link-page.ts';
-import type { ShareLinks } from './share/share-links.ts';
+import type { ShareLinkMember, ShareLinks } from './share/share-links.ts';
 import { type Shares, audienceEntryAdmits } from './share/shares.ts';
 import type { Share } from './share/types.ts';
 import type { TaskProjection } from './task-projection.ts';
@@ -194,6 +195,10 @@ export interface BoardMembership {
   shareLinkMemberOf: (workspaceId: string, email: string | null) => boolean;
   /** `GET /s/<id>`: turn a verified email into a member. */
   redeemShareLink: (linkId: string, email: string | null) => Response;
+  /** What this caller may DO on this board — see the implementation. */
+  boardRoleOf: (workspaceId: string, email: string | null, isVisitor: boolean) => BoardRole;
+  /** Who has access to this board, and at what level. */
+  boardMembersOf: (workspaceId: string) => ShareLinkMember[];
   /** Every board a doc's discussion actually reaches. */
   boardsForDoc: (docId: string) => Set<string>;
   /** One pass over the workspaces, for a whole listing. */
@@ -450,6 +455,56 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
       },
     });
   };
+
+  /**
+   * WHAT THIS CALLER MAY DO on this board: `owner`, or `member`.
+   *
+   * One function, read by every owner-only route through `requireOwner` in
+   * `request-admission.ts`, because two readings of "is this person the owner"
+   * would agree today and the one that drifts open is the breach — the same
+   * reason `shareWorkspacesOf` is one resolver for both membership predicates.
+   *
+   * Three rungs, and each is a different KIND of answer:
+   *
+   *  1. **Not a visitor at all** — loopback, the tailnet, the LAN, and the
+   *     agents' own MCP calls. This is the machine the board lives on, and the
+   *     board was created from it; there is no identity to look up and no
+   *     record that could say otherwise. Owner.
+   *  2. **An address in the operator's own allowlist**, arriving through the
+   *     tunnel on a share or collaboration hostname. Same person as rung 1,
+   *     reaching their own board from a phone. Owner — without it, Bryan on
+   *     his own board through Cloudflare would be a Regular User there.
+   *  3. **Everybody else**: the membership row, whose absent role reads as
+   *     `member`. A stranger with no row lands here too and reads `member`,
+   *     which is safe because reaching this function at all means the
+   *     membership gate above has already admitted them to this board.
+   *
+   * Never `null`: this answers what a caller MAY DO, not whether they are in.
+   * "Are they in" is `shareLinkMemberOf` / `collabMemberOf`, and it has already
+   * been asked by the time any route calls this.
+   */
+  const boardRoleOf = (
+    workspaceId: string,
+    email: string | null,
+    isVisitor: boolean,
+  ): BoardRole => {
+    if (!isVisitor) return 'owner';
+    const who = email ? normalizeEmail(email) : '';
+    if (who !== '' && proxiedTrustedEmails.has(who)) return 'owner';
+    return shareLinks.roleOf(workspaceId, who) ?? DEFAULT_BOARD_ROLE;
+  };
+
+  /**
+   * Who has access to this board, and at what level — the rows behind the
+   * Settings panel's "Who has access".
+   *
+   * The membership ROWS only, which is exactly what the list is for: these are
+   * the people invited through a share link, and they are the ones an owner can
+   * promote, demote and remove. The operator's own seat is not a row (see
+   * `BoardRole`), so it is not listed and cannot be edited away.
+   */
+  const boardMembersOf = (workspaceId: string): ShareLinkMember[] =>
+    shareLinks.membersOf(workspaceId);
 
   /**
    * Every board a DOC's discussion actually reaches — the boards holding
@@ -813,6 +868,8 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     collabMemberOf,
     shareLinkMemberOf,
     redeemShareLink,
+    boardRoleOf,
+    boardMembersOf,
     boardsForDoc,
     boardIndexForListing,
     boardsForDocIndexed,

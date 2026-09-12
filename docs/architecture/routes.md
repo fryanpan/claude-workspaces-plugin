@@ -224,6 +224,9 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/links:titles` | POST | `routes/task-status-links.ts` | trusted-local |  |
 | `/workspaces/:ws/load-reports` | GET, POST | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/manifest.webmanifest` | GET | `routes/workspace-manifest.ts` | share-scope |  |
+| `/workspaces/:ws/members` | GET | `routes/workspace-members.ts` | share-scope |  |
+| `/workspaces/:ws/members/:email` | DELETE | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself |
+| `/workspaces/:ws/members/:email/role` | POST | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself |
 | `/workspaces/:ws/mine` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/workspaces/:ws/mockups/:docId` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/workspaces/:ws/next` | GET | `routes/workspace-next.ts` | trusted-local |  |

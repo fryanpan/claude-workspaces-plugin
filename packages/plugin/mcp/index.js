@@ -16200,7 +16200,7 @@ var TOOL_LIST = {
     },
     {
       name: "share_workspace",
-      description: "Mint a share link for a board. Anyone you send it to signs in once with their email, and is a member of that board from then on. A board is the unit of sharing, and a review id is refused. Everything filed on the board travels with the share, so check what else is there. Returns a share.<domain>/s/<id> URL.",
+      description: "Mint a share link for a board. Anyone you send it to signs in once with their email, and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Returns a share.<domain>/s/<id> URL.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16217,6 +16217,11 @@ var TOOL_LIST = {
             type: "array",
             items: { type: "string" },
             description: "Accepted and IGNORED, so that an older caller is not refused. Anyone who opens the link and signs in becomes a member."
+          },
+          role: {
+            type: "string",
+            enum: ["owner", "member"],
+            description: "What everyone who opens this link becomes. Omit for 'member' (a Regular User), which is the default."
           }
         },
         required: ["workspaceId"]
@@ -16235,6 +16240,23 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "set_share_member_role",
+      description: "Change what someone may do on a board they joined through a share link. An Owner can change who has access and their role, and can answer asks that run a command on the machine; a Regular User can do everything else. Takes effect on their next request.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: { type: "string", description: "The board they are a member of." },
+          email: { type: "string", description: "The address to change, as list_shares shows it." },
+          role: {
+            type: "string",
+            enum: ["owner", "member"],
+            description: "'owner' promotes them; 'member' puts them back to a Regular User."
+          }
+        },
+        required: ["workspaceId", "email", "role"]
+      }
+    },
+    {
       name: "set_share_ttl",
       description: "Extend or shorten a live share. `ttlSeconds` is measured from now, so 3600 expires the link one hour from this call. It takes effect immediately, and an open browser is refused on its next request once the share lapses.",
       inputSchema: {
@@ -16248,7 +16270,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_shares",
-      description: "List every share of every board: the links, who redeemed each one and when, and whether each one is live, revoked or expired.",
+      description: "List every share of every board: the links, who redeemed each one and when, whether each one is live, revoked or expired, and every member with the role they hold — Owner or Regular User.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -18020,6 +18042,13 @@ async function handleDocsTool(name, a, ctx) {
     case "remove_share_member": {
       const { workspaceId, email: email2 } = a;
       const res = await http("POST", "/api/share/member/remove", { workspaceId, email: email2 });
+      return ok2(res);
+    }
+    case "set_share_member_role": {
+      const { email: email2, role } = a;
+      const res = await http("POST", `${board()}/members/${encodeURIComponent(email2)}/role`, {
+        role
+      });
       return ok2(res);
     }
     case "set_share_ttl": {

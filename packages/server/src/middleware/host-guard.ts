@@ -608,6 +608,13 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   // The board client's own boot report — one line per page load, written by
   // the page that just painted and read back on the same tab.
   'load-reports': ['GET', 'POST'],
+  // Who has access to this board, and at what level — the Settings panel's
+  // "Who has access". A READ for everyone in the workspace, because everything
+  // in a workspace is available to everyone in it
+  // (`.claude/rules/workspace-board.md`), and the list is how a Regular User
+  // learns who else can see what they write. The two verbs that CHANGE it are
+  // in MEMBER_ADMIN_ROUTES below, admitted as paths and refused by role.
+  members: ['GET'],
   // The presence strip's read. It was `attachments: ['GET']` here until the
   // roster moved to `agents`, and it is in the TABLE rather than admitted by
   // name beside the pages because there is now one prefix and one table: the
@@ -665,6 +672,24 @@ const GOAL_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   cascade: ['GET'],
   archive: ['POST'],
   restore: ['POST'],
+};
+
+/**
+ * The per-member verbs, under `/workspaces/<id>/members/<email>/`.
+ *
+ * ADMITTED HERE, REFUSED BY ROLE. These two are the owner's, and the check
+ * that says so is `requireOwner` inside the route — not this table. The
+ * difference matters both ways: a table refusal would leave a PROMOTED owner
+ * reaching their own board through the share hostname unable to manage it at
+ * all, and a route with no check would be a page-level hide rather than a
+ * server-side rule. So the path is a member route and the act is an owner's.
+ *
+ * `''` is the bare `DELETE /workspaces/<id>/members/<email>` — ending one
+ * person's access. `role` is the promotion or demotion.
+ */
+const MEMBER_ADMIN_ROUTES: Readonly<Record<string, readonly string[]>> = {
+  '': ['DELETE'],
+  role: ['POST'],
 };
 
 /**
@@ -974,6 +999,16 @@ export function shareScopeAllows(
               insideSharedWorkspace(`task:${memberId}`) &&
               memberRouteAllows(GOAL_MEMBER_ROUTES, verb, method)
             );
+          /**
+           * A person on this board's access list. The member id is an EMAIL
+           * rather than a doc or row id, so there is no `insideSharedWorkspace`
+           * question to ask about it: the board segment above already settled
+           * which board is being administered, and the list belongs to that
+           * board. What the caller may DO with the two verbs is the role check
+           * in the route, which this table deliberately does not duplicate.
+           */
+          case 'members':
+            return memberRouteAllows(MEMBER_ADMIN_ROUTES, verb, method);
           /**
            * A review — a diff review or a bound folder — filed on this board.
            *

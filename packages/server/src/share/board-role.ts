@@ -1,0 +1,81 @@
+/**
+ * The two levels a board has, and the one reader of a level off the wire.
+ *
+ * Its own module rather than a corner of `share-links.ts`, because the store
+ * is not the only thing that needs the word: the admission gate decides
+ * `requireOwner` from it, two route context modules type a request by it, and
+ * the share mint validates one out of a body. A vocabulary three layers spell
+ * has no business living inside the one that persists it.
+ */
+/**
+ * What a person may DO on a board they are a member of.
+ *
+ * Two roles, and the split is the one Bryan asked for on 2026-09-11: a share
+ * link stops being a grant of everything he can do. `owner` is the seat that
+ * changes who else is in and at what level, and answers the review items that
+ * run a command on his machine; `member` — "Regular User" wherever a person
+ * reads it — is everything else a board is worked with, which is already
+ * generous (see BOARD_MEMBER_ROUTES in `middleware/host-guard.ts`).
+ *
+ * The BOARD'S OWN OWNER is not a row here at all, and that is the structural
+ * half of "a board always has an owner". A board is created from the local
+ * surface, by the operator or by their agents, and the operator reaches it as
+ * `visitor === null` (loopback, tailnet, LAN) or as an address in
+ * `proxiedTrustedEmails` on their own hostname — both of which resolve to
+ * `owner` in `boardRoleOf` without any record being written. So the rows here
+ * are the people INVITED to a board, and demoting every one of them still
+ * leaves the board an owner. Nothing can lock the operator out of their own
+ * machine's board, because nothing here is what lets them in.
+ *
+ * Absent on a record written before roles existed, and absent reads as
+ * `member`: the narrower of the two, which is the only safe direction for a
+ * field a migration can miss.
+ */
+export type BoardRole = 'owner' | 'member';
+
+/** The default for a membership that names no role — see `BoardRole`. */
+export const DEFAULT_BOARD_ROLE: BoardRole = 'member';
+
+/**
+ * A caller-supplied role, or `undefined` when it is not one of the two.
+ *
+ * Undefined rather than a fallback to `member`, so a route can tell "they did
+ * not say" from "they said something we do not understand" and refuse the
+ * second. A silent fallback would turn a typo'd `"Owner"` into a demotion.
+ */
+export function normalizeBoardRole(value: unknown): BoardRole | undefined {
+  return value === 'owner' || value === 'member' ? value : undefined;
+}
+
+/**
+ * The gate on a WRITE onto an owner-only ask — one check, called from every
+ * door that can reach one.
+ *
+ * An ask whose answer the owner's own machine then acts on — running a
+ * command, handing over a credential — carries `review.ownerOnly`, and the
+ * whole point of the flag is that a Regular User cannot drive it. "Cannot
+ * drive it" is not "cannot answer it": a revision rewrites the question the
+ * owner will act on, a withdrawal takes it off their queue, a question posted
+ * where the answer goes files on its thread. Every one of those is a write on
+ * an ask the owner is expected to act on, so every one of them is the owner's.
+ *
+ * It lives here, beside the vocabulary, because two route families reach it —
+ * a task's review items and a doc thread's — and a second copy is how the two
+ * spellings of "only the owner" drift. A route under `routes/` may not import
+ * another, so the shared name lives with the service (`.claude/rules/
+ * code-health.md`).
+ *
+ * `workspaceId` may be the empty string when a caller's path named no board:
+ * that fails CLOSED rather than open, because `boardRoleOf` reads a share
+ * visitor's row on a board that holds nobody and answers `member`, while the
+ * operator — who is the owner of every board on their own machine — is
+ * admitted by a rung that never looks at the id.
+ */
+export function refuseOwnerOnlyWrite(
+  review: { ownerOnly?: true } | undefined,
+  workspaceId: string,
+  requireOwner: (workspaceId: string) => Response | null,
+): Response | null {
+  if (review?.ownerOnly !== true) return null;
+  return requireOwner(workspaceId);
+}
