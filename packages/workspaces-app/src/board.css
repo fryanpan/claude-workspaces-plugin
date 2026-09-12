@@ -1530,7 +1530,7 @@ body.board-body {
   height: 18px;
 }
 .board-walk-cred-eye:hover,
-.board-walk-cred-eye[aria-pressed='true'] {
+.board-walk-cred-eye[aria-pressed="true"] {
   color: var(--fg);
 }
 /* What a reader who may not answer sees: the same rows, dimmed, with no

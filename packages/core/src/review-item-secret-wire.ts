@@ -25,7 +25,6 @@
  */
 import type { ReviewPayload, ReviewSecretField, ReviewShape } from './review-item-types.ts';
 
-
 /**
  * The alphabet a stored-secret name may use, and the one place it is written.
  *

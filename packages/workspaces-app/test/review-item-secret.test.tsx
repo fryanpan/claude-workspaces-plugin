@@ -197,7 +197,12 @@ describe('the card, laid out', () => {
     const box = root.querySelector<HTMLElement>('.board-walk-cred-box');
     const save = root.querySelector<HTMLElement>('.board-walk-cred-send');
     if (!box || !save) throw new Error('the secret form did not render');
-    for (const side of ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'] as const) {
+    for (const side of [
+      'borderTopWidth',
+      'borderRightWidth',
+      'borderBottomWidth',
+      'borderLeftWidth',
+    ] as const) {
       expect(styleOf(box)[side]).toBe('1px');
     }
     expect(styleOf(save).minHeight).toBe('44px');
@@ -353,7 +358,10 @@ describe('the card', () => {
     // CONTROL: the same submission against a save that SUCCEEDS does clear
     // them, so the assertion above is about the failure and not about the
     // clear never happening.
-    mountWalk(reviewQueue([], [secretRow()], NOW), walk({ onSaveSecrets: vi.fn(async () => true) }));
+    mountWalk(
+      reviewQueue([], [secretRow()], NOW),
+      walk({ onSaveSecrets: vi.fn(async () => true) }),
+    );
     await tick();
     const second = Array.from(root.querySelectorAll<HTMLInputElement>('.board-walk-cred-input'));
     second[0]!.value = FIRST_VALUE;

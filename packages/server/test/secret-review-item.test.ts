@@ -471,11 +471,10 @@ describe('a secret ask, answered by the board owner', () => {
       secrets: [{ label: 'Relay account name', service: 'saltmarsh-visitor-account' }],
     };
 
-    const onATask = await postAsVisitor(
-      REGULAR,
-      `${scope()}/tasks/${taskId}/review-items`,
-      { review: secretAsk, author: { id: 'u-regular', name: 'Regular User', kind: 'human' } },
-    );
+    const onATask = await postAsVisitor(REGULAR, `${scope()}/tasks/${taskId}/review-items`, {
+      review: secretAsk,
+      author: { id: 'u-regular', name: 'Regular User', kind: 'human' },
+    });
     expect(onATask.status).toBe(403);
     expect(((await onATask.json()) as { error?: string }).error).toBe('share-visitor');
 

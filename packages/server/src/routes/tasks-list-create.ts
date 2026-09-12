@@ -1,3 +1,4 @@
+import { SECRET_FILING_DENIAL, asksForSecret } from '../share/board-role.ts';
 /**
  * The board's task list and the single-row create.
  *
@@ -5,7 +6,6 @@
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { OUT_OF_SHARE_SCOPE, firstRefOutOfScope, refInVisitorScope } from '../share/ref-scope.ts';
-import { SECRET_FILING_DENIAL, asksForSecret } from '../share/board-role.ts';
 import { createdVisibility, parseTaskCreate } from '../task-create.ts';
 import { placeableGoals } from '../task-queue.ts';
 import { type TaskStatus, isRetired, retiredRefusal } from '../tasks.ts';

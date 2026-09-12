@@ -19,9 +19,9 @@
  */
 import { describe, expect, it } from 'bun:test';
 import type { TaskReviewItem, User } from '@claude-workspaces/core';
-import type { SecretWriteResult } from '../src/secret-store.ts';
-import { handleTaskSecrets } from '../src/routes/task-secrets.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from '../src/routes/task-routes-context.ts';
+import { handleTaskSecrets } from '../src/routes/task-secrets.ts';
+import type { SecretWriteResult } from '../src/secret-store.ts';
 
 const AGENT: User = { id: 'a-riverbend', name: 'Riverbend Bot', kind: 'known', color: '#888888' };
 const TASK = 't-nightly';
@@ -154,10 +154,8 @@ describe('a value the store cannot hold is refused before anything is written', 
     expect(ok.written.map((w) => w.service)).toEqual([SERVICE, 'saltmarsh-relay-signer']);
   });
 
-  it('refuses a value past the store\'s ceiling, and stores nothing', async () => {
-    const denied = await drive(secretAsk, [
-      { service: SERVICE, value: 'x'.repeat(4097) },
-    ]);
+  it("refuses a value past the store's ceiling, and stores nothing", async () => {
+    const denied = await drive(secretAsk, [{ service: SERVICE, value: 'x'.repeat(4097) }]);
     expect(denied.res.status).toBe(400);
     expect(denied.body.error).toBe('unstorable-value');
     // The refusal says nothing about what was sent — no value, no length.

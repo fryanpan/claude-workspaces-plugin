@@ -34,7 +34,10 @@ describe('taking the secret shape out of the widget copy of the reader', () => {
   });
 
   it('refuses a reader it cannot find the line in, naming the line', () => {
-    const renamed = reader.replace('applySecretShape(out, shape, value)', 'applySecret(out, value)');
+    const renamed = reader.replace(
+      'applySecretShape(out, shape, value)',
+      'applySecret(out, value)',
+    );
     expect(() => stripSecretShape(renamed, 'reader.ts')).toThrow(/applySecretShape/);
     // Control: the SAME rewrite over the same reader unrenamed does not throw,
     // so the refusal above is the missing line and not a rewrite that always

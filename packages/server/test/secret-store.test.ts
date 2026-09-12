@@ -171,7 +171,7 @@ describe('the namespace a stored name lands in', () => {
    * what makes that unreachable, and these cases are about the name that
    * actually reaches the command rather than the one the card showed.
    */
-  test('a name that collides with the server\'s own configuration is stored elsewhere', async () => {
+  test("a name that collides with the server's own configuration is stored elsewhere", async () => {
     const fake = fakeSecurity();
     await storeSecret('cloudflare-api-token', PLACEHOLDER, fake.run);
     const written = fake.calls[0]?.args ?? [];
@@ -188,8 +188,6 @@ describe('the namespace a stored name lands in', () => {
     const readAt = (fake.calls[1]?.args ?? []).indexOf('-s');
     expect(fake.calls[0]?.args[wroteAt + 1]).toBe(fake.calls[1]?.args[readAt + 1] ?? '');
     // And it is the namespaced one, not the bare name, on both.
-    expect(fake.calls[0]?.args[wroteAt + 1]).toBe(
-      `${SECRET_SERVICE_PREFIX}riverbend-weather-key`,
-    );
+    expect(fake.calls[0]?.args[wroteAt + 1]).toBe(`${SECRET_SERVICE_PREFIX}riverbend-weather-key`);
   });
 });

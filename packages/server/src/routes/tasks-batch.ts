@@ -1,4 +1,5 @@
 import { type TaskReviewItem, type User } from '@claude-workspaces/core';
+import { SECRET_FILING_DENIAL, asksForSecret } from '../share/board-role.ts';
 /**
  * Batch capture: a burst of rows in one call, each landing owned and placed.
  *
@@ -6,7 +7,6 @@ import { type TaskReviewItem, type User } from '@claude-workspaces/core';
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { indexBatchKeys, resolveRowRefs } from '../task-batch-refs.ts';
-import { SECRET_FILING_DENIAL, asksForSecret } from '../share/board-role.ts';
 import { createdVisibility, parseTaskCreate } from '../task-create.ts';
 import { placeableGoals } from '../task-queue.ts';
 import { LEGACY_REVIEW_ITEM_ID, type Task, isRetired, retiredRefusal } from '../tasks.ts';

@@ -867,9 +867,12 @@ function WalkSecrets(props: {
       </div>
       <div class="board-walk-cred-send-row">
         {missing !== null ? (
-          <span class="board-walk-cred-miss" role="status">
+          // `output`, not a span with a role: it IS the live region, so a
+          // reader on a screen reader is told which field is still empty
+          // without the markup having to claim it.
+          <output class="board-walk-cred-miss">
             {fields.find((f) => f.service === missing)?.label ?? 'One field'} is still empty.
-          </span>
+          </output>
         ) : null}
         <button type="submit" class="board-btn board-btn-ink board-walk-cred-send" disabled={busy}>
           Save Secret
