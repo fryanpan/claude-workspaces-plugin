@@ -24,8 +24,10 @@ import { timeAgo } from './board-presence-model.ts';
 import { type ReviewItem, reviewRowTitle } from './board-review-model.ts';
 
 /** Only movement inside this window is activity; a task quiet for longer
- *  than a day is not "recent" whatever it did before. */
-export const ACTIVITY_WINDOW_MS = 24 * 60 * 60_000;
+ *  than this is not "recent" whatever it did before. Three hours (Bryan,
+ *  2026-09-11): a day of history made the pane a log, and the question it
+ *  answers is what is happening NOW. */
+export const ACTIVITY_WINDOW_MS = 3 * 60 * 60_000;
 /** How many task groups the pane shows — the newest eight, never a scroll. */
 export const ACTIVITY_GROUP_CAP = 8;
 /** Lines shown per group before the muted "+N more". */
@@ -34,6 +36,18 @@ export const ACTIVITY_NOTE_CAP = 3;
  *  `dark` — the keep-moving protocol's stall, keyed on the task's own
  *  evidence (notes and transitions), never on the wall clock alone. */
 export const DARK_AFTER_MS = 45 * 60_000;
+/** How quiet an IN-PROGRESS task may be before its pill reads as a warning,
+ *  and then as an error (Bryan, 2026-09-11). The keep-moving protocol asks
+ *  every session holding a task to say something every half hour, so thirty
+ *  minutes of silence is the first missed check-in and an hour is two.
+ *
+ *  A different clock from `DARK_AFTER_MS` on purpose, and from the server's
+ *  quiet window too: `dark` is the stall model's flag and the server wakes a
+ *  lead on `STALL_QUIET_DEFAULT_MS`, while these two are what the READER sees
+ *  on the pill. Changing either of those to match would move a wake, which is
+ *  not what this asks for. */
+export const QUIET_WARN_MS = 30 * 60_000;
+export const QUIET_ERROR_MS = 60 * 60_000;
 /** The newest note text repeated this many times in a row reads as `stale`:
  *  the agent is reporting the same wait turn after turn. */
 export const STALE_REPEATS = 3;
@@ -70,11 +84,31 @@ export interface ActivityNote {
   kind: ActivityNoteKind;
 }
 
+/**
+ * How loudly the group's quiet pill reads. `warn` and `error` are only ever
+ * reached by an IN-PROGRESS task: a `todo` row nobody has picked up and a
+ * `done` one nobody will touch again are both quiet by design, and tinting
+ * them would spend the one colour this pane has on rows that are fine.
+ */
+export type QuietLevel = 'neutral' | 'warn' | 'error';
+
+/** The pill on the group's title line: how long since this task's newest
+ *  activity, and whether that is a finding. */
+export interface ActivityQuiet {
+  /** Bare age — "4m", "38m", "2h" — the same `ageShort` the lines use, so
+   *  the pill and the top line can never disagree about a unit boundary. */
+  age: string;
+  level: QuietLevel;
+}
+
 export interface ActivityGroup {
   taskId: string;
   title: string;
   status: TaskStatus;
   flag?: ActivityFlag;
+  /** Always present: every group has a newest line, so every group has an
+   *  age. Absence would be a third state the reader would have to learn. */
+  quiet: ActivityQuiet;
   /** Newest first, at most `ACTIVITY_NOTE_CAP`. */
   notes: ActivityNote[];
   /** How many more lines fell inside the window but off the cap. */
@@ -234,6 +268,21 @@ function stale(shown: ActivityNote[]): boolean {
   return true;
 }
 
+/**
+ * The pill for one group: the age of its newest line, and the level that age
+ * earns. Only an in-progress task can reach `warn` or `error` — see
+ * `QuietLevel` — and the thresholds are crossed, never touched: a task quiet
+ * for exactly thirty minutes is still inside its window.
+ */
+export function quietOf(status: TaskStatus, newestAt: number, now: number): ActivityQuiet {
+  const age = ageShort(newestAt, now);
+  if (status !== 'in-progress') return { age, level: 'neutral' };
+  const quietMs = now - newestAt;
+  if (quietMs > QUIET_ERROR_MS) return { age, level: 'error' };
+  if (quietMs > QUIET_WARN_MS) return { age, level: 'warn' };
+  return { age, level: 'neutral' };
+}
+
 function flagOf(
   task: BoardTask,
   lines: ActivityNote[],
@@ -284,6 +333,7 @@ export function homeActivity(input: ActivityInput): ActivityGroup[] {
         title: task.title,
         status: task.status,
         ...(flag ? { flag } : {}),
+        quiet: quietOf(task.status, newestAt, now),
         notes: lines.slice(0, ACTIVITY_NOTE_CAP).map((l) => ({ ...l, age: ageShort(l.at, now) })),
         more: Math.max(0, lines.length - ACTIVITY_NOTE_CAP),
       },

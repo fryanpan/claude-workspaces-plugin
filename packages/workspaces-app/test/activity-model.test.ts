@@ -6,6 +6,8 @@ import {
   type ActivityGroup,
   DARK_AFTER_MS,
   NOTE_LINE_CAP,
+  QUIET_ERROR_MS,
+  QUIET_WARN_MS,
   activityCommentRequest,
   asksOf,
   firstLine,
@@ -119,13 +121,17 @@ describe('homeActivity', () => {
     expect(g.more).toBe(2);
   });
 
-  it('keeps only activity from the last 24h, and drops a task with nothing inside the window', () => {
-    expect(ACTIVITY_WINDOW_MS).toBe(24 * HOUR);
-    const fresh = task({ notes: [note(1 * HOUR, 'recent'), note(25 * HOUR, 'yesterday')] });
-    const old = task({ notes: [note(26 * HOUR, 'long ago')] });
+  it('keeps only activity from the last 3h, and drops a task with nothing inside the window', () => {
+    expect(ACTIVITY_WINDOW_MS).toBe(3 * HOUR);
+    // Either side of the cut, by a minute, so the boundary is the thing under
+    // test rather than the distance.
+    const fresh = task({
+      notes: [note(2 * HOUR + 59 * MIN, 'just inside'), note(3 * HOUR + 1 * MIN, 'just outside')],
+    });
+    const old = task({ notes: [note(3 * HOUR + 1 * MIN, 'long ago')] });
     const out = groups([fresh, old]);
     expect(out.map((g) => g.taskId)).toEqual([fresh.id]);
-    expect(out[0]?.notes.map((n) => n.text)).toEqual(['recent']);
+    expect(out[0]?.notes.map((n) => n.text)).toEqual(['just inside']);
     expect(out[0]?.more).toBe(0);
   });
 
@@ -212,13 +218,13 @@ describe('homeActivity', () => {
       expect(groups([t])[0]?.flag).toBe('stale');
     });
 
-    it('stale reads only notes inside the window: yesterday’s repeats do not flag today’s move', () => {
+    it('stale reads only notes inside the window: repeats from before it do not flag today’s move', () => {
       const t = task({
         status: 'in-progress',
         notes: [
-          note(28 * HOUR, 'Still waiting on login'),
-          note(29 * HOUR, 'Still waiting on login'),
-          note(30 * HOUR, 'Still waiting on login'),
+          note(4 * HOUR, 'Still waiting on login'),
+          note(5 * HOUR, 'Still waiting on login'),
+          note(6 * HOUR, 'Still waiting on login'),
         ],
         transitions: [
           {
@@ -297,6 +303,50 @@ describe('homeActivity', () => {
       });
       expect(groups([all])[0]?.flag).toBe('dark');
       expect(groups([staleOffBand])[0]?.flag).toBe('stale');
+    });
+  });
+
+  describe('the quiet pill', () => {
+    it('carries the age of the task’s newest line, in the same form the lines use', () => {
+      const t = task({ notes: [note(4 * MIN, 'newest'), note(40 * MIN, 'older')] });
+      const g = groups([t])[0] as ActivityGroup;
+      expect(g.quiet.age).toBe('4m');
+      expect(g.quiet.age).toBe(g.notes[0]?.age);
+      // A transition newer than every note is the newest line, so it is what
+      // the pill reads — the pill and the top line never disagree.
+      const moved = task({
+        notes: [note(40 * MIN, 'older')],
+        transitions: [
+          { ts: NOW - 2 * MIN, from: 'todo', to: 'in-progress', by: { name: 'Beacon Bot', kind: 'agent' } },
+        ],
+      });
+      expect((groups([moved])[0] as ActivityGroup).quiet.age).toBe('2m');
+    });
+
+    it('crosses to warn past 30 minutes and to error past 60, on an in-progress task', () => {
+      expect(QUIET_WARN_MS).toBe(30 * MIN);
+      expect(QUIET_ERROR_MS).toBe(60 * MIN);
+      const at = (agoMs: number) =>
+        (groups([task({ status: 'in-progress', notes: [note(agoMs, 'x')] })])[0] as ActivityGroup)
+          .quiet.level;
+      // Each threshold read on BOTH sides, one second apart: a level that
+      // moved would have to move the boundary with it.
+      expect(at(30 * MIN)).toBe('neutral');
+      expect(at(30 * MIN + 1_000)).toBe('warn');
+      expect(at(60 * MIN)).toBe('warn');
+      expect(at(60 * MIN + 1_000)).toBe('error');
+      expect(at(1 * MIN)).toBe('neutral');
+    });
+
+    it('stays neutral for every status but in-progress, however quiet', () => {
+      for (const status of ['todo', 'triage', 'done'] as const) {
+        const g = groups([task({ status, notes: [note(90 * MIN, 'x')] })])[0] as ActivityGroup;
+        expect(g.quiet, `a ${status} task at 90m`).toEqual({ age: '2h', level: 'neutral' });
+      }
+      // Positive control: the same 90 minutes in-progress IS an error, so the
+      // reading above is the status and not a dead threshold.
+      const live = groups([task({ status: 'in-progress', notes: [note(90 * MIN, 'x')] })])[0];
+      expect(live?.quiet.level).toBe('error');
     });
   });
 

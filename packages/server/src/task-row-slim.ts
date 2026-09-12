@@ -32,7 +32,7 @@
  *   - **`notes` go from rows that have not moved in `DETAIL_FRESH_MS`.**
  *     Home's Recent activity renders the notes of anything that moved inside
  *     `ACTIVITY_WINDOW_MS`, straight off this projection, so that window is
- *     the gate and the two constants are deliberately equal.
+ *     the gate and this one has to COVER it.
  *   - **A transition keeps its four list keys and loses its prose**, on every
  *     row. `doneAt`, the effort model's closed-at / first-seen / wall-clock
  *     readings and the recurrence run records read `ts`/`from`/`to`/`by`;
@@ -64,9 +64,13 @@ export type ProjectedTaskRow = Record<string, unknown>;
 /**
  * How recently a row must have moved to keep its notes.
  *
- * One day, chosen to equal the board client's own activity window
- * (`ACTIVITY_WINDOW_MS` in `activity-model.ts`) rather than to be round: the
- * rows Home draws notes from are exactly the rows this must not trim.
+ * One day, and the invariant is that it is never SHORTER than the board
+ * client's own activity window (`ACTIVITY_WINDOW_MS` in `activity-model.ts`):
+ * the rows Home draws notes from are exactly the rows this must not trim.
+ * The two were equal until the pane narrowed to three hours (2026-09-11);
+ * this one stayed a day because the task panel's Activity tab reads the same
+ * projected notes and a shorter window here would trim what it draws, while a
+ * longer one costs only wire that Home ignores.
  */
 export const DETAIL_FRESH_MS = 24 * 60 * 60 * 1000;
 
