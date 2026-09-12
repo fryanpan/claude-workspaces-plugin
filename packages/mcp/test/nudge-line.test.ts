@@ -429,7 +429,7 @@ describe('stalledLine', () => {
     expect(stalledLine(STALL)).toContain('Cache the facet counts');
   });
 
-  it('asks for a line from the holder of a row that owes a check-in, and names the window', () => {
+  it("asks for a line from the holder, and quotes the protocol's window rather than the server's", () => {
     const due = [
       {
         id: 't-b9',
@@ -440,14 +440,20 @@ describe('stalledLine', () => {
     ];
     const line = stalledLine({ ...STALL, checkIn: due });
     expect(line).toContain('Fold the CSV writer into the exporter');
-    expect(line).toContain('not reported for over half an hour');
-    // The remedy is the protocol's own words, so the reader can quote it.
+    // The silence is the ROW's own number, not the server's window: the
+    // window moves with `CW_CHECK_IN_MINUTES` and a stated one would be
+    // false on a board configured shorter.
+    expect(line).toContain('quiet 34m');
+    expect(line).not.toContain('half an hour');
+    // The remedy is the protocol's own words, so the reader can quote it —
+    // and 30 minutes is what the skills ask for and what Home's pill draws,
+    // wherever the server's knob is set.
     expect(line).toContain('every 30 minutes');
     // Its own sentence, beside the stall rather than inside it: the acts
     // differ, and a merged count would ask for the wrong one.
     expect(line).toContain('stopped moving');
     // And nothing about a check-in on a frame that carries none.
-    expect(stalledLine(STALL)).not.toContain('half an hour');
+    expect(stalledLine(STALL)).not.toContain('check-in window');
   });
 
   it('a frame carrying only a check-in is still a real wake', () => {

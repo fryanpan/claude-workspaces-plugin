@@ -14155,7 +14155,7 @@ function stalledLine(p) {
   const checkIn = p.checkIn ?? [];
   if (checkIn.length > 0) {
     const noun = checkIn.length === 1 ? "task has" : "tasks have";
-    parts.push(`${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? "it" : "them"} who has not ` + `reported for over half an hour — ${stalledRowsClause(checkIn)}. Ask each holder for a ` + "line now: the protocol is an activity update every 30 minutes, even if it is " + '"still on X, next Y".');
+    parts.push(`${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? "it" : "them"} who has gone ` + `quiet past the check-in window — ${stalledRowsClause(checkIn)}. Ask each holder for a ` + "line now: the protocol is an activity update every 30 minutes, even if it is " + '"still on X, next Y".');
   }
   const changed = changedClause(p.changed);
   if (changed)

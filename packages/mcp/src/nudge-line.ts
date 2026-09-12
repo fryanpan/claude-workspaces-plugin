@@ -513,14 +513,23 @@ export function stalledLine(p: StallPayload): string {
   }
   // The one finding here about a row that has somebody on it and is not yet
   // stalled. Its remedy is a message to that somebody, which no other sentence
-  // in this line asks for — so it is its own sentence and says the window out
-  // loud, because the reader's next act is to quote it at the builder.
+  // in this line asks for, so it is its own sentence.
+  //
+  // What it does NOT do is name the server's window. `CW_CHECK_IN_MINUTES`
+  // moves when this finding fires, and a sentence that said "over half an
+  // hour" would be false on a board configured shorter — while every row
+  // here already carries its own `quietMs`, which `stalledRowClause` renders
+  // as "quiet 47m". So the observation is the rows' own numbers and nothing
+  // else. The one duration stated out loud is the PROTOCOL's, which is 30
+  // minutes wherever the plugin ships it: the skills ask for it and Home's
+  // quiet pill draws it. That is the number the reader quotes at the holder,
+  // and it does not move with the server's knob.
   const checkIn = p.checkIn ?? [];
   if (checkIn.length > 0) {
     const noun = checkIn.length === 1 ? 'task has' : 'tasks have';
     parts.push(
-      `${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? 'it' : 'them'} who has not ` +
-        `reported for over half an hour — ${stalledRowsClause(checkIn)}. Ask each holder for a ` +
+      `${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? 'it' : 'them'} who has gone ` +
+        `quiet past the check-in window — ${stalledRowsClause(checkIn)}. Ask each holder for a ` +
         'line now: the protocol is an activity update every 30 minutes, even if it is ' +
         '"still on X, next Y".',
     );
