@@ -397,13 +397,15 @@ export async function runNotesCleanupPass(
   // changed nothing, which is what the numbers below say.
   const written = kept.length === 0 ? null : applyNotesBlockEdits(docStore, docId, kept);
   // AND THE PASS LEAVES THE SECTION TIDY, whatever it proposed. This is the
-  // last read of these notes anybody has asked for, and the two shapes it
+  // last read of these notes anybody has asked for, and the three shapes it
   // repairs — a blank line under the heading, the same topic heading twice in
-  // a row — are ones no wording of the prompt above prevents and no block
-  // edit could remove (a delete on an unmarked blank arrives as a redline on
-  // it). It runs even for a pass that proposed nothing: a section can reach
+  // a row, an empty bullet of the note-taker's own — are ones no wording of
+  // the prompt above prevents and no block edit could remove (a delete on an
+  // unmarked blank arrives as a redline on it). It runs even for a pass that proposed nothing: a section can reach
   // this point already carrying both.
-  const tidied = tidyNotesSection(doc.ydoc, headingId, commentedBlockIds(doc.ydoc));
+  const tidied = tidyNotesSection(doc.ydoc, headingId, commentedBlockIds(doc.ydoc), {
+    bulletsAuthoredBy: NOTES_AUTHOR_ID,
+  });
   const result =
     written !== null && 'applied' in written
       ? { applied: written.applied, suggested: written.suggested, failed: written.failed }

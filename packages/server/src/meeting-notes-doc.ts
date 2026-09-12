@@ -719,15 +719,30 @@ export function applyNotesUpdate(
   // Blank lines are left to the cleanup pass: a person typing in the notes
   // section has an empty paragraph under their cursor for as long as it
   // takes them to type, and a live meeting is exactly when that is true.
+  //
+  // AN EMPTY BULLET OF THE NOTE-TAKER'S OWN IS NOT LEFT, and the reason the
+  // same argument does not apply is authorship: a person's half-typed bullet
+  // carries no author, so naming one here is what keeps this off their line
+  // while clearing a blank the note-taker wrote. Cleared in the tick after
+  // the one that wrote it rather than at the end of the meeting, because
+  // what the reader sees meanwhile is a blank line wearing the fresh-note
+  // tint (2026-09-11).
   const section = heading.headingId(ids, after);
   if (section !== undefined) {
     const tidied = tidyNotesSection(doc.ydoc, section, () => commentedBlockIds(doc.ydoc), {
       blanks: false,
+      bulletsAuthoredBy: NOTES_AUTHOR_ID,
     });
     if (tidied.merged > 0) {
       console.log(
         `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
           `${tidied.merged} repeated topic heading folded into the topic above it`,
+      );
+    }
+    if (tidied.bullets > 0) {
+      console.log(
+        `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
+          `${tidied.bullets} empty bullet removed from the section`,
       );
     }
   }
@@ -781,7 +796,10 @@ export function notesWriteSkipDetail(
   if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
   if (skip === 'store-refused') return 'the store refused the batch outright';
   if (skip === 'guard-refused') {
-    return 'every edit touched the meeting’s own notes heading, which the guard never lets through';
+    return (
+      'the guard let no edit through — every one touched the meeting’s own notes ' +
+      'heading, or the batch’s only note was a bullet with no words in it'
+    );
   }
   if (outcomes === undefined || outcomes.length === 0) {
     return 'every edit named a block that is no longer in the doc';
