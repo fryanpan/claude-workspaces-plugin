@@ -2372,7 +2372,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
                 { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } },
               ),
           },
-          { pathname, method: req.method, url },
+          { pathname, method: req.method, url, accept: req.headers.get('accept') },
         );
         if (scoped.kind === 'refused') return scoped.response;
         if (scoped.kind === 'scope') scope = scoped.scope;
@@ -2743,10 +2743,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // wrong and linking back to the board, rather than the bodyless 404
       // below — which Chrome paints as ERR_INVALID_RESPONSE, indistinguishable
       // from the server being down.
-      const wsNotFound = handleWorkspaceNotFound(
-        { boardExists: (id) => taskStore.getWorkspace(id) !== undefined },
-        { pathname, method: req.method, url },
-      );
+      const wsNotFound = handleWorkspaceNotFound({ pathname, method: req.method, url });
       if (wsNotFound) return wsNotFound;
 
       return new Response('not found', { status: 404 });

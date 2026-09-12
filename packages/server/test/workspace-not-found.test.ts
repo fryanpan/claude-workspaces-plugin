@@ -97,6 +97,30 @@ describe('a wrong address under a board answers a readable page', () => {
     expect(got.body).toContain(`href="${boardHref()}"`);
   });
 
+  it('sends a browser to the workspace list when the board itself is gone', async () => {
+    // The deep link is the shape a pasted URL actually has, and it used to
+    // answer a tab with a JSON body. Offering to open a board that does not
+    // exist would be a second dead end, so the way out is the list.
+    for (const path of ['/workspaces/w-nope/review/d-nope', '/workspaces/w-nope/whatever']) {
+      const r = await local(path, { headers: { accept: 'text/html,application/xhtml+xml' } });
+      expect(r.status).toBe(404);
+      expect(r.headers.get('content-type')).toBe('text/html; charset=utf-8');
+      const body = await r.text();
+      expect(body).toContain('The server is running');
+      expect(body).toContain('href="/"');
+      expect(body).not.toContain('href="/workspaces/w-nope"');
+    }
+  });
+
+  it('still answers a tool with JSON on the same gone-board addresses', async () => {
+    // Only the Accept header decides the shape. A tool sends the wildcard
+    // type, and what it parses is unchanged.
+    const got = await probe('/workspaces/w-nope/review/d-nope');
+    expect(got.status).toBe(404);
+    expect(got.type).not.toContain('text/html');
+    expect(JSON.parse(got.body)).toHaveProperty('error');
+  });
+
   it('sends an unknown board to the workspace list, not to a board that is not there', async () => {
     const got = await probe('/workspaces/w-nope');
     expect(got.status).toBe(404);
