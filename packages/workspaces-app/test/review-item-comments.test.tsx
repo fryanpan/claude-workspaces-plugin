@@ -149,7 +149,7 @@ function mountWalk(
     progress: { cleared: 0, last: null },
     now: NOW,
     handlers,
-    viewerRole: 'owner',
+    secretsGate: 'open',
     ...patch,
   };
   dispose = mountWalkthroughIsland(root);

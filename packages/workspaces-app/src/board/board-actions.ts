@@ -168,11 +168,19 @@ export interface BoardState {
    * Carried on the same read as the queue rather than fetched beside it: a
    * card that asked separately would paint its controls first and learn
    * afterwards, and a control that appears and then withdraws reads as the
-   * board changing its mind. 'owner' until a read says otherwise, which is
+   * board changing its mind. `'open'` until a read says otherwise, which is
    * what the operator's own board is — a wrong guess here costs a refused
    * write and a message, never a value going somewhere it should not.
+   *
+   * Three states rather than a role, because two different things close the
+   * form and they are not the same sentence to a reader. `'not-owner'` is a
+   * Regular User, who may never answer this. `'off-machine'` is the board's
+   * OWNER reading through a share hostname: the secrets door is
+   * `trusted-local`, so their submission is refused in admission whatever
+   * their role is, and offering them a control that cannot succeed is the
+   * bug this field's earlier shape had.
    */
-  viewerRole: 'owner' | 'member';
+  secretsGate: 'open' | 'not-owner' | 'off-machine';
   /** Position in the review walkthrough; -1 when it is closed. A CACHE of
    *  where `walkKey` resolved on the last render — see `walkPosition`. */
   walkIndex: number;

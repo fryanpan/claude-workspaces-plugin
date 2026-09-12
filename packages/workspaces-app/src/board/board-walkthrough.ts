@@ -188,7 +188,7 @@ export function createBoardWalkthrough(deps: BoardWalkthroughDeps): BoardWalkthr
       index,
       progress: state.walkProgress,
       now: Date.now(),
-      viewerRole: state.viewerRole,
+      secretsGate: state.secretsGate,
       handlers: {
         // `current` rather than a lookup by task id: it is the item this
         // render drew, so the key that gets advanced past cannot be a

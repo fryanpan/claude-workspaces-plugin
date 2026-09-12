@@ -246,6 +246,62 @@ describe('a secret ask, answered by the board owner', () => {
     expect(await taskJson()).not.toContain('Secrets saved');
   });
 
+  it('tells the queue whether the door is reachable, not just who is reading', async () => {
+    // The card has to decide whether to OFFER the form, and the role alone is
+    // the wrong input. An independent review found the case: an INVITED owner
+    // — a share member promoted to the owner seat — reads `role: 'owner'` and
+    // would have been shown an active form, while the door stays
+    // `trusted-local` and refuses them in admission. A control that can never
+    // succeed.
+    //
+    // Promoted through the board's own members route, so the fixture is the
+    // product's way of making an owner rather than a hand-written record.
+    expect(
+      (await postLocal(`${scope()}/members/${encodeURIComponent(REGULAR)}/role`, { role: 'owner' }))
+        .status,
+    ).toBe(200);
+
+    const asInvitedOwner = await jj<{ you: { role: string; canAnswerSecrets: boolean } }>(
+      await req(`${scope()}/review-items`, SHARE_HOST, {
+        headers: { ...CF_RAY, 'cf-access-jwt-assertion': await signJwt(SHARE_AUD, REGULAR) },
+      }),
+    );
+    // The role really did move — without this the case below would pass on a
+    // reader who was never an owner, which is the vacuous form of it.
+    expect(asInvitedOwner.you.role).toBe('owner');
+    expect(asInvitedOwner.you.canAnswerSecrets).toBe(false);
+
+    // …and the field agrees with what the door actually does to them, which
+    // is the whole point of sending it rather than deriving it in the client.
+    const before = written.length;
+    const res = await postAsVisitor(REGULAR, doorPath(), {
+      author: { id: 'u-keeper', name: 'Keeper', kind: 'human' },
+      secrets: [
+        { service: 'saltmarsh-relay-account', value: FIRST_VALUE },
+        { service: 'saltmarsh-relay-signer', value: SECOND_VALUE },
+      ],
+    });
+    expect(res.status).toBe(403);
+    expect(written).toHaveLength(before);
+
+    // The operator, on the same board, is told the opposite — so the
+    // assertion above is a difference and not a field that reads false for
+    // everybody.
+    const asOperator = await jj<{ you: { role: string; canAnswerSecrets: boolean } }>(
+      await local(`${scope()}/review-items`),
+    );
+    expect(asOperator.you).toEqual({ role: 'owner', canAnswerSecrets: true });
+
+    // Put the seat back, so the ordering of these cases cannot matter.
+    expect(
+      (
+        await postLocal(`${scope()}/members/${encodeURIComponent(REGULAR)}/role`, {
+          role: 'member',
+        })
+      ).status,
+    ).toBe(200);
+  });
+
   it('refuses a body naming a service the item never asked for', async () => {
     const before = written.length;
     const res = await postLocal(doorPath(), {

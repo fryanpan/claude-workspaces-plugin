@@ -164,10 +164,10 @@ function renderReviewWalkthrough(
   handlers: WalkthroughHandlers,
   progress: WalkProgress = { cleared: 0, last: null },
   now: number = NOW,
-  viewerRole: 'owner' | 'member' = 'owner',
+  secretsGate: 'open' | 'not-owner' | 'off-machine' = 'open',
 ): void {
   disposeWalk?.();
-  walkthroughData.value = { queue, index, progress, now, handlers, viewerRole };
+  walkthroughData.value = { queue, index, progress, now, handlers, secretsGate };
   disposeWalk = mountWalkthroughIsland(container);
 }
 

@@ -271,18 +271,29 @@ export function applyRefresh<R, V>(current: V, res: R | null, read: (r: R) => V)
  * survives-an-outage behaviour is driven by a test instead of asserted about.
  */
 export async function refreshReviewItems(
-  state: { reviewItems: ReviewThreadItem[]; viewerRole: 'owner' | 'member' },
-  fetchItems: () => Promise<{ items?: ReviewThreadItem[]; you?: { role?: string } } | null>,
+  state: { reviewItems: ReviewThreadItem[]; secretsGate: 'open' | 'not-owner' | 'off-machine' },
+  fetchItems: () => Promise<{
+    items?: ReviewThreadItem[];
+    you?: { role?: string; canAnswerSecrets?: boolean };
+  } | null>,
 ): Promise<void> {
   const res = await fetchItems();
   state.reviewItems = applyRefresh(state.reviewItems, res, (r) => r.items ?? []);
   // Under the same guard as the list, for the same reason: a read that never
   // arrived must not be read as "you are a Regular User now". A payload that
-  // arrived without the field leaves the level alone too — an older server
+  // arrived without the fields leaves the gate alone too — an older server
   // answering this route is not a demotion.
-  state.viewerRole = applyRefresh(state.viewerRole, res, (r) =>
-    r.you?.role === 'member' ? 'member' : r.you?.role === 'owner' ? 'owner' : state.viewerRole,
-  );
+  //
+  // Two fields, read in the order that keeps the WORDING honest. `role` says
+  // whether this reader may ever answer; `canAnswerSecrets` says whether the
+  // door is reachable from where they are. A Regular User is told it is not
+  // theirs; an owner reading through a share hostname is told where it can be
+  // done, which is a different sentence and a true one.
+  state.secretsGate = applyRefresh(state.secretsGate, res, (r) => {
+    if (r.you?.role === 'member') return 'not-owner';
+    if (r.you?.role !== 'owner') return state.secretsGate;
+    return r.you?.canAnswerSecrets === false ? 'off-machine' : 'open';
+  });
 }
 
 export type ReviewKind = 'decision' | 'task-thread' | 'goal-thread' | 'doc-thread' | 'task-review';

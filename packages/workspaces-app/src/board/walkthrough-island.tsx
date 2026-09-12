@@ -149,11 +149,10 @@ export interface WalkthroughView {
   /** Aimed at the item this paint draws — see the note at the top of the file
    *  for why these travel with the data rather than being bound at mount. */
   handlers: WalkthroughHandlers;
-  /** What this reader may DO, as the server reads it. Only one card asks so
-   *  far — a secret item, which a Regular User cannot answer — and it rides
-   *  with the data rather than being read at mount, because a share visitor's
-   *  level arrives with the queue's own read. */
-  viewerRole: 'owner' | 'member';
+  /** Whether the secret card may offer its form, and if not, which of the two
+   *  reasons to say. Rides with the data rather than being read at mount,
+   *  because a visitor's level arrives with the queue's own read. */
+  secretsGate: 'open' | 'not-owner' | 'off-machine';
 }
 
 /** A closed walkthrough answers nothing, which is what the signal holds until
@@ -178,7 +177,7 @@ export const walkthroughData = signal<WalkthroughView>({
   progress: { cleared: 0, last: null },
   now: 0,
   handlers: IDLE_HANDLERS,
-  viewerRole: 'owner',
+  secretsGate: 'open',
 });
 
 function clip(text: string, max = 60): string {
@@ -824,9 +823,9 @@ function WalkCard(props: {
   progress: WalkProgress;
   now: number;
   handlers: WalkthroughHandlers;
-  viewerRole: 'owner' | 'member';
+  secretsGate: 'open' | 'not-owner' | 'off-machine';
 }) {
-  const { item, index, progress, now, handlers, viewerRole } = props;
+  const { item, index, progress, now, handlers, secretsGate } = props;
   // Both expansions are STATE, not a reading of the DOM. The vanilla renderer
   // snapshotted them off the nodes a line before `replaceChildren` destroyed
   // them, because there was nowhere else to keep them; here the instance is
@@ -1045,7 +1044,13 @@ function WalkCard(props: {
                 // read back by the agent — which is the one thing this shape
                 // exists to prevent. The reader who wants to say something
                 // instead still has "I have a question" below.
-                viewerRole === 'owner' ? (
+                // Two ways to be refused, and they are not the same
+                // sentence. A Regular User may never answer this one. The
+                // board's own owner reading through a share hostname MAY —
+                // just not from there, because the door that takes the values
+                // is reachable only on the machine the board runs on — so
+                // they are told where rather than told no.
+                secretsGate === 'open' ? (
                   <WalkSecrets
                     fields={secrets}
                     itemKey={item.key}
@@ -1054,7 +1059,11 @@ function WalkCard(props: {
                 ) : (
                   <Fragment>
                     <WalkSecretsRefused fields={secrets} />
-                    <span class="board-walk-question-note">Only the Owner can answer this.</span>
+                    <span class="board-walk-question-note">
+                      {secretsGate === 'not-owner'
+                        ? 'Only the Owner can answer this.'
+                        : 'This one is answered on the machine the board runs on.'}
+                    </span>
                   </Fragment>
                 )
               ) : (
@@ -1141,7 +1150,7 @@ function useHostVisibility(host: HTMLElement, closed: boolean): void {
  * shell — rail, topbar — where it was.
  */
 function Walkthrough(props: { host: HTMLElement }) {
-  const { queue, index, progress, now, handlers, viewerRole } = walkthroughData.value;
+  const { queue, index, progress, now, handlers, secretsGate } = walkthroughData.value;
   useHostVisibility(props.host, index < 0);
   if (index < 0) return null;
   const item = queue.items[index] ?? null;
@@ -1180,7 +1189,7 @@ function Walkthrough(props: { host: HTMLElement }) {
             progress={progress}
             now={now}
             handlers={handlers}
-            viewerRole={viewerRole}
+            secretsGate={secretsGate}
           />
         </Fragment>
       )}

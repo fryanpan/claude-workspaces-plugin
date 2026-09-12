@@ -104,7 +104,7 @@ function mountWalk(
     progress: { cleared: 0, last: null },
     now: NOW,
     handlers,
-    viewerRole: 'owner',
+    secretsGate: 'open',
     ...patch,
   };
   dispose = mountWalkthroughIsland(root);
@@ -276,7 +276,7 @@ describe('the card', () => {
   });
 
   it('shows a Regular User the fields with no way to fill them', async () => {
-    mountWalk(reviewQueue([], [secretRow()], NOW), walk(), { viewerRole: 'member' });
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk(), { secretsGate: 'not-owner' });
     await tick();
     // They still read WHAT is being asked for — a workspace is a shared view —
     // and there is nothing to type into.
@@ -284,5 +284,20 @@ describe('the card', () => {
     expect(root.querySelectorAll('.board-walk-cred-input')).toHaveLength(0);
     expect(root.querySelector('.board-walk-cred-send')).toBeNull();
     expect(root.textContent).toContain('Only the Owner can answer this.');
+  });
+
+  it('tells the board owner reading from elsewhere where it can be done', async () => {
+    // The case an independent review found: the door is `trusted-local`, so
+    // an owner on a share hostname is refused in ADMISSION whatever their
+    // role says. Offering them the form would be offering a control that can
+    // never succeed — and telling them it is not theirs would be false.
+    mountWalk(reviewQueue([], [secretRow()], NOW), walk(), { secretsGate: 'off-machine' });
+    await tick();
+    expect(root.querySelectorAll('.board-walk-cred-input')).toHaveLength(0);
+    expect(root.querySelector('.board-walk-cred-send')).toBeNull();
+    expect(root.textContent).toContain('answered on the machine the board runs on');
+    // …and NOT the Regular User's sentence, which is the half a single
+    // boolean got wrong.
+    expect(root.textContent).not.toContain('Only the Owner can answer this.');
   });
 });
