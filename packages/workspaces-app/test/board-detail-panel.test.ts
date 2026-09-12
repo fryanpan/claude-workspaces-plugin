@@ -162,6 +162,20 @@ describe('createBoardDetailPanel', () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it('a task tapped in the goal panel’s list opens the task panel in its place', () => {
+    const p = panel();
+    p.state.tasks.set('t-live', task('t-live', { goal: 'g-1', status: 'in-progress' }));
+    p.state.detailGoalId = 'g-1';
+    p.renderDetail();
+    const listed = goalDetailData.value.section?.tasks.find((t) => t.id === 't-live');
+    if (!listed) throw new Error('the open task is not in the panel’s section');
+    goalDetailData.value.handlers.onOpenTask?.(listed);
+    expect(p.state.detailTaskId).toBe('t-live');
+    expect(p.state.detailGoalId).toBeNull();
+    expect(taskDetailData.value.task?.id).toBe('t-live');
+    expect(goalDetailData.value.section).toBeNull();
+  });
+
   it('opens an ARCHIVED band, because the panel is where its Restore lives', () => {
     // An archived goal is in no board section at all; a link somebody sent
     // last week still has to open it.

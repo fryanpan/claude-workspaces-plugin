@@ -80,6 +80,7 @@ import {
 } from './board-model.ts';
 import { type GoalDetailHandlers, wireInPlaceTitle } from './board-render.ts';
 import { Discussion, useFill } from './detail-parts.tsx';
+import { GoalOpenTasks, openBandTasks } from './goal-open-tasks.tsx';
 
 export interface GoalDetailView {
   /** The band on screen, or null for "nothing is open". */
@@ -118,15 +119,21 @@ export interface GoalCascade {
  * `null` is the answer not yet in: the bar still says what is about to happen
  * in the vaguest honest terms, and the panel withholds the button until a
  * number arrives.
+ *
+ * `open` is how many of those tasks are unfinished — the rows the panel lists
+ * under Tasks. A bare total cannot tell a band of forty finished tickets from
+ * one with three builders running, and that is the difference a reader is
+ * deciding on (2026-09-12: a band with work in flight was archived as empty).
  */
-export function archiveConfirmLine(title: string, cascade: GoalCascade | null): string {
+export function archiveConfirmLine(title: string, cascade: GoalCascade | null, open = 0): string {
   const name = `“${title}”`;
   if (cascade === null) return `Archive ${name} and everything under it?`;
   const { tasks } = cascade;
   if (tasks === 0) return `Archive ${name}? Nothing else is under it.`;
   // Shared with the toast that follows this confirmation, so the two cannot
   // describe the same archive differently.
-  return `Archive ${name} and its ${cascadePhrase(tasks)}?`;
+  const still = open > 0 ? `, ${Math.min(open, tasks)} of them still open` : '';
+  return `Archive ${name} and its ${cascadePhrase(tasks)}${still}?`;
 }
 
 /** One `<dt>/<dd>` pair. Built here rather than as JSX so the fields row can go
@@ -474,7 +481,7 @@ function GoalDetailPanel(props: {
           <p class="board-goal-archive-ask">
             {countFailed
               ? `Could not work out what is under “${section.title}”. Nothing has been archived — try again in a moment.`
-              : archiveConfirmLine(section.title, cascade)}
+              : archiveConfirmLine(section.title, cascade, openBandTasks(section).length)}
           </p>
           <p class="board-goal-archive-note">
             Everything goes together and comes back together — restoring the goal brings its tasks
@@ -545,6 +552,15 @@ function GoalDetailPanel(props: {
           spent two lines restating a rule nothing enforced. */}
       {doneNote !== null && <p class="board-goal-done-note">{doneNote}</p>}
       {triageNote !== null && <p class="board-goal-triage-note">{triageNote}</p>}
+
+      {/* The band's unfinished rows, above the description: this panel covers
+          the band on a tablet and is the only place a goal can be archived,
+          so it is where work in flight has to be visible. See
+          `goal-open-tasks.tsx`. */}
+      <GoalOpenTasks
+        section={section}
+        {...(handlers.onOpenTask ? { onOpenTask: handlers.onOpenTask } : {})}
+      />
 
       {/* The prose the whole ticket is about: *"the most important object on
           the board is the only one you cannot explain"*. Drawn unconditionally,

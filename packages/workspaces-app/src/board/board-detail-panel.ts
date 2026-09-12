@@ -297,9 +297,9 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
     // is "show me this task".
     if (state.detailTaskId) state.detailGoalId = null;
     if (state.detailGoalId) {
-      // Unfiltered on purpose: the panel's counts and advisory are facts
-      // about the GOAL ("what would a done declaration leave open"), not
-      // about whatever tab or done-window the board happens to be on.
+      // Unfiltered on purpose: the panel's Tasks list is a fact about the
+      // GOAL (what is still open under it), not about whatever done-window
+      // the board happens to be on.
       const section =
         boardSections(state.info?.goals ?? [], taskList(), {
           doneWindow: 'all',
@@ -365,6 +365,15 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
             onCascadeCount: (goalId) => goalCascadeCount(goalId),
             onArchive: (s) => void archiveGoal(s),
             onRestore: (s) => void restoreGoal(s),
+            // A row in the panel's Tasks list opens the way a board row does:
+            // the task panel replaces this one, on its comments.
+            onOpenTask: (task) => {
+              state.detailTaskId = task.id;
+              state.detailTab = 'comments';
+              state.detailGoalId = null;
+              state.detailThreadId = null;
+              renderDetail();
+            },
             workspaceId,
             ...(state.detailThreadId ? { focusThreadId: state.detailThreadId } : {}),
             now: Date.now(),
