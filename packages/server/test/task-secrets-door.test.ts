@@ -136,12 +136,12 @@ describe('the secrets door refuses by SHAPE, not only by the owner-only flag', (
 });
 
 describe('a value the store cannot hold is refused before anything is written', () => {
-  it('refuses a multi-line value, and stores neither field', async () => {
-    // A newline cannot survive the store's line-based prompt, and the writer
-    // refuses it — but the writer refuses it one field at a time, so a bad
-    // SECOND value used to arrive with the first already stored. Two fields
-    // here, the good one first, so the assertion is about ordering and not
-    // only about the refusal.
+  it('takes a MULTI-LINE value whole, and refuses an unstorable one first', async () => {
+    // A three-line paste — an SSH key, a service-account file — used to be
+    // refused here, and then not even reach the refusal: the browser input
+    // stripped the breaks first, so it arrived as one joined line and was
+    // stored silently wrong (UX review, 2026-09-12). The store encodes now,
+    // so the door takes it and the writer receives every line.
     const twoFields = storedItem({
       shape: 'secret',
       headline: 'Paste the two relay values',
@@ -150,22 +150,30 @@ describe('a value the store cannot hold is refused before anything is written', 
         { label: 'Relay signing value', service: 'saltmarsh-relay-signer' },
       ],
     });
+    const multi = 'aaa-not-real-1\nbbb-not-real-2\nccc-not-real-3';
+    const took = await drive(twoFields, [
+      { service: SERVICE, value: 'not-a-real-value-1' },
+      { service: 'saltmarsh-relay-signer', value: multi },
+    ]);
+    expect(took.res.status).toBe(200);
+    expect(took.written.map((w) => w.service)).toEqual([SERVICE, 'saltmarsh-relay-signer']);
+    // Whole, not joined: the writer was handed all three lines.
+    expect(took.written[1]?.value).toBe(multi);
+    expect(took.written[1]?.value.split('\n')).toHaveLength(3);
+
+    // The one-at-a-time property this case used to carry is still asserted,
+    // on a value that IS unstorable: the writer refuses field by field, so a
+    // bad SECOND value once arrived with the first already in the store.
+    // Nothing can roll a Keychain write back, so every refusable value is
+    // spent before the first write.
     const denied = await drive(twoFields, [
       { service: SERVICE, value: 'not-a-real-value-1' },
-      { service: 'saltmarsh-relay-signer', value: 'not-a-real\nvalue-2' },
+      { service: 'saltmarsh-relay-signer', value: 'not-a-real\u0000value-2' },
     ]);
     expect(denied.res.status).toBe(400);
     expect(denied.body.error).toBe('unstorable-value');
     expect(denied.written).toEqual([]);
     expect(denied.answered).toEqual([]);
-
-    // CONTROL: the same pair with a one-line second value stores both.
-    const ok = await drive(twoFields, [
-      { service: SERVICE, value: 'not-a-real-value-1' },
-      { service: 'saltmarsh-relay-signer', value: 'not-a-real-value-2' },
-    ]);
-    expect(ok.res.status).toBe(200);
-    expect(ok.written.map((w) => w.service)).toEqual([SERVICE, 'saltmarsh-relay-signer']);
   });
 
   it("refuses a value past the store's ceiling, and stores nothing", async () => {

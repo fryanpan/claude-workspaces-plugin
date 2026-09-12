@@ -105,21 +105,38 @@ export type SecretWriteResult = { ok: true } | { ok: false; error: SecretWriteFa
 export type SecretWriter = (service: string, value: string) => Promise<SecretWriteResult>;
 
 /**
- * Is this something the line-based store can hold?
+ * Is this something the store can hold?
  *
- * `security` reads the value from a PROMPT, which is line-based: it takes one
- * line, then asks for it again to confirm. So a value carrying a newline
- * cannot go down this path — the second line would be read as the
- * confirmation, the two would differ, and (this is the part worth knowing)
- * the command RETRIES and then exits 0 having stored an empty password.
- * Measured, not assumed. Refusing here is how that is never reachable; the
- * read-back below is what catches it if it ever is.
+ * NEWLINES ARE FINE NOW, AND THAT IS THE POINT. `security` reads the value
+ * from a PROMPT, which is line-based: one line, then the same line again to
+ * confirm. A raw multi-line value therefore cannot go down that path at all —
+ * measured on macOS 26.2, where a three-line value printed "passwords don't
+ * match" three times and exited 1 with nothing stored. Which meant a reader
+ * pasting an SSH key or a service-account file was refused by this function,
+ * and — worse, and what the UX walk found — a browser `input` had already
+ * stripped the newlines before the value ever reached here, so a three-line
+ * paste arrived as one joined line, passed this check, and was stored
+ * silently wrong under the name the reader thought held their key.
  *
- * The practical consequence is a limit worth stating: a multi-line secret (a
- * PEM block) cannot be handed over this way today.
+ * `encodeSecretValue` is the fix: every value goes to the prompt base64, so
+ * every value is one line and the newlines survive. What this function still
+ * refuses is a NUL and an empty string — a NUL survives the encoding, but it
+ * cannot survive the shell pipeline an agent reads the value back through, so
+ * storing one would be storing something nobody can use.
  */
 export function isStorableSecretValue(value: unknown): value is string {
-  return typeof value === 'string' && value !== '' && !/[\r\n\0]/.test(value);
+  return typeof value === 'string' && value !== '' && !value.includes('\u0000');
+}
+
+/**
+ * The value as it goes to the prompt, and comes back from it.
+ *
+ * One format for every value — see `SECRET_STORED_ENCODING` in core for why
+ * it is not conditional on the value having a newline in it, and for what is
+ * and is not being claimed by encoding.
+ */
+export function encodeSecretValue(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64');
 }
 
 /** The default runner: spawn the binary, write stdin, read both pipes, and
@@ -174,12 +191,16 @@ export async function storeSecret(
   // would take the value on argv, which is the one thing this module exists
   // to prevent — and a trailing keychain path would be eaten by the flag.
   const stored = storedSecretService(service);
+  // ENCODED, so the prompt sees one line whatever the reader pasted. A
+  // multi-line value sent raw does not half-work: it fails the confirm read
+  // and stores nothing.
+  const encoded = encodeSecretValue(value);
   const wrote = await run(
     'security',
     ['add-generic-password', '-U', '-a', SECRET_ACCOUNT, '-s', stored, '-w'],
     // Twice: the prompt asks, then asks again to confirm. See the note above
     // for what a single line does.
-    `${value}\n${value}\n`,
+    `${encoded}\n${encoded}\n`,
   );
   if (wrote.code !== 0) return { ok: false, error: 'write-failed' };
 
@@ -188,8 +209,10 @@ export async function storeSecret(
     ['find-generic-password', '-a', SECRET_ACCOUNT, '-s', stored, '-w'],
     '',
   );
-  // `-w` prints the value and a newline, and nothing else.
-  if (readBack.code !== 0 || readBack.stdout.replace(/\n$/, '') !== value) {
+  // `-w` prints what is stored and a newline, and nothing else. Compared in
+  // the ENCODED form: byte-for-byte equality there is equality of the value,
+  // and it keeps the decoded value from being materialised a second time.
+  if (readBack.code !== 0 || readBack.stdout.replace(/\n$/, '') !== encoded) {
     return { ok: false, error: 'verify-failed' };
   }
   return { ok: true };

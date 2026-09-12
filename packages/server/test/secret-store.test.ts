@@ -6,6 +6,7 @@ import {
   type SecretRunResult,
   type SecretRunner,
   type SecretWriteFailure,
+  encodeSecretValue,
   secretReadCommand,
   storeSecret,
 } from '../src/secret-store.ts';
@@ -59,13 +60,48 @@ describe('the value goes on stdin and nowhere else', () => {
     }
     // …and it did travel, so the assertion above is not passing vacuously on
     // a value that never reached the runner at all.
-    expect(fake.calls[0]?.stdin).toContain(PLACEHOLDER);
+    expect(fake.calls[0]?.stdin).toContain(encodeSecretValue(PLACEHOLDER));
   });
 
   test('is written twice, because one line stores an empty password', async () => {
     const fake = fakeSecurity();
     await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run);
-    expect(fake.calls[0]?.stdin).toBe(`${PLACEHOLDER}\n${PLACEHOLDER}\n`);
+    const encoded = encodeSecretValue(PLACEHOLDER);
+    expect(fake.calls[0]?.stdin).toBe(`${encoded}\n${encoded}\n`);
+  });
+
+  test('sends a MULTI-LINE value as one line, and stores it whole', async () => {
+    // The blocker the UX walk found (2026-09-12): a three-line paste — an SSH
+    // key, a service-account file — arrived joined into one 52-character line
+    // and the item said "Secrets saved". The browser input had stripped the
+    // breaks before the server's newline refusal could fire.
+    //
+    // The value is encoded now, so the prompt sees one line whatever the
+    // reader pasted. Measured on macOS 26.2 first: the raw three-line attempt
+    // printed "passwords don't match" three times and exited 1 with nothing
+    // stored, so joining was never the alternative to refusing — it was the
+    // alternative to working.
+    const threeLines = 'aaa-not-real-1\nbbb-not-real-2\nccc-not-real-3';
+    const fake = fakeSecurity();
+    expect(await storeSecret('riverbend-weather-key', threeLines, fake.run)).toEqual({ ok: true });
+    // One line to the prompt, twice — the confirm read sees the same thing.
+    const stdin = fake.calls[0]?.stdin ?? '';
+    expect(stdin.split('\n').filter((l) => l !== '')).toHaveLength(2);
+    // …and what went down it decodes back to every line the reader typed. The
+    // read-back inside `storeSecret` already compared it; this says the value
+    // survived rather than that two equal wrong things were compared.
+    const sent = stdin.split('\n')[0] ?? '';
+    expect(Buffer.from(sent, 'base64').toString('utf8')).toBe(threeLines);
+    expect(Buffer.from(sent, 'base64').toString('utf8').split('\n')).toHaveLength(3);
+
+    // CONTROL: the same runner with a store that hands back something else
+    // refuses, so the pass above is the read-back agreeing and not the check
+    // being absent.
+    const wrong = fakeSecurity({ readStdout: 'c29tZXRoaW5nLWVsc2U=\n' });
+    expect(await storeSecret('riverbend-weather-key', threeLines, wrong.run)).toEqual({
+      ok: false,
+      error: 'verify-failed',
+    });
   });
 
   test('passes -w last and with no argument, so the command prompts', async () => {
@@ -97,8 +133,10 @@ describe('what it refuses before running anything', () => {
 
   test.each([
     ['an empty value', '', 'bad-value'],
-    ['a value carrying a newline', 'line-one\nline-two', 'bad-value'],
-    ['a value carrying a carriage return', 'line-one\rline-two', 'bad-value'],
+    // A NUL is still refused, and for a reason that is not the prompt's: it
+    // cannot survive the shell pipeline an agent reads the value back
+    // through, so storing one would be storing something nobody can use.
+    ['a value carrying a NUL', 'line-one\u0000line-two', 'bad-value'],
   ] as Array<[string, string, SecretWriteFailure]>)('refuses %s', async (_why, value, error) => {
     const fake = fakeSecurity();
     expect(await storeSecret('riverbend-weather-key', value, fake.run)).toEqual({
@@ -155,10 +193,20 @@ describe('saved means read back, not exit 0', () => {
 });
 
 describe('the read-back command handed to an agent', () => {
-  test('names the account and the service and asks for nothing else', () => {
+  test('names the account and the service and decodes what it gets', () => {
     expect(secretReadCommand('riverbend-weather-key')).toBe(
-      `security find-generic-password -a ${SECRET_ACCOUNT} -s ${SECRET_SERVICE_PREFIX}riverbend-weather-key -w`,
+      `security find-generic-password -a ${SECRET_ACCOUNT} -s ${SECRET_SERVICE_PREFIX}riverbend-weather-key -w | base64 --decode`,
     );
+  });
+
+  test('decodes exactly what the writer would have stored', () => {
+    // The two halves have to agree or an agent reads a value that is not the
+    // one the reader typed — which is the failure encoding could introduce if
+    // only one end knew about it. Run the command's own decode over the
+    // writer's own encode, on a value with newlines in it.
+    const threeLines = 'aaa-not-real-1\nbbb-not-real-2\nccc-not-real-3';
+    expect(secretReadCommand('riverbend-weather-key')).toContain('base64 --decode');
+    expect(Buffer.from(encodeSecretValue(threeLines), 'base64').toString('utf8')).toBe(threeLines);
   });
 });
 

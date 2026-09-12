@@ -15121,7 +15121,7 @@ function storedSecretService(service) {
   return `${SECRET_SERVICE_PREFIX}${service}`;
 }
 function secretReadCommand(service) {
-  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w`;
+  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w | base64 --decode`;
 }
 
 // packages/core/src/task-wire.ts

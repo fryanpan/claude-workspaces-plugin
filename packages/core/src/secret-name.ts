@@ -66,5 +66,28 @@ export function storedSecretService(service: string): string {
  * prefix is added here.
  */
 export function secretReadCommand(service: string): string {
-  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w`;
+  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w | base64 --decode`;
 }
+
+/**
+ * Why the command ends in a decode.
+ *
+ * `security` takes a value from a PROMPT, which is line-based: one line, then
+ * the same line again to confirm. A value carrying a newline cannot go down
+ * that path at all — measured on macOS 26.2, where the three-line attempt
+ * printed "passwords don't match" three times and exited 1 with nothing
+ * stored. So a reader pasting an SSH key or a service-account file had a
+ * value the store could not take.
+ *
+ * Encoding is what makes it one line. Every value is base64 on the way in,
+ * whether or not it has a newline in it — one format, so no reader has to
+ * know which kind of value they pasted and no agent has to guess which of two
+ * commands to run. `base64 --decode` is spelled the same on macOS and on GNU
+ * coreutils, both verified here.
+ *
+ * The consequence worth stating: what sits in the Keychain is the ENCODING,
+ * not the value. Encoding is not protection and is not claimed as any — the
+ * protection is the Keychain — but anything reading the entry without the
+ * decode gets base64 rather than the secret.
+ */
+export const SECRET_STORED_ENCODING = 'base64' as const;

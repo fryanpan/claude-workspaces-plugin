@@ -123,17 +123,18 @@ export async function handleTaskSecrets(
       }
       // EVERY VALUE IS JUDGED BEFORE THE FIRST ONE IS WRITTEN, against the
       // store's own rules rather than a looser copy of them. The writer
-      // refuses an empty value, a value carrying a newline (the prompt it
-      // feeds is line-based) and a value over `SECRET_VALUE_MAX_CHARS` — and
-      // it refuses them one at a time, mid-loop, which is how the second
-      // field of a pair could be refused with the first already in the
-      // store. Nothing here can roll a Keychain write back, so the fix is
-      // that the refusable cases are all spent before any write happens.
-      // The value is never echoed, and neither is its length.
+      // refuses an empty value, a value carrying a NUL and a value over
+      // `SECRET_VALUE_MAX_CHARS` — and it refuses them one at a time,
+      // mid-loop, which is how the second field of a pair could be refused
+      // with the first already in the store. Nothing here can roll a Keychain
+      // write back, so the fix is that the refusable cases are all spent
+      // before any write happens. The value is never echoed, and neither is
+      // its length. A multi-line value is NOT refused: it is encoded on the
+      // way into the store and comes back whole.
       if (!isStorableSecretValue(value) || value.length > SECRET_VALUE_MAX_CHARS) {
         return j(400, {
           error: 'unstorable-value',
-          message: `each value is one line of text, not empty, and at most ${SECRET_VALUE_MAX_CHARS} characters`,
+          message: `each value is text, not empty, and at most ${SECRET_VALUE_MAX_CHARS} characters`,
         });
       }
       if (sent.has(service)) return j(400, { error: 'one entry per service' });
