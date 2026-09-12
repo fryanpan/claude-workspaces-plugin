@@ -228,6 +228,11 @@ export function defaultBaseRef(repo: string): string | null {
   return null;
 }
 
+/** Is `a` an ancestor of `b` (or the same commit)? */
+function isAncestor(repo: string, a: string, b: string): boolean {
+  return git(repo, ['merge-base', '--is-ancestor', a, b]).ok;
+}
+
 /**
  * Every file a worktree has changed since it left the default branch —
  * committed and uncommitted alike, untracked files included.
@@ -238,19 +243,34 @@ export function defaultBaseRef(repo: string): string | null {
  * other half of the same instinct — a builder is judged on what it has
  * written, not on what it has got round to committing.
  *
+ * `since` narrows it to one stretch of that branch's life: pass the commit a
+ * worktree was sitting on when its CURRENT occupant took it, and the read
+ * stops attributing the previous occupant's work to this one. It is used only
+ * when it is both a descendant of the merge base and an ancestor of HEAD —
+ * so a recorded commit that has been rebased away, or that belongs to a
+ * branch this worktree has since left, falls back to the merge base rather
+ * than producing a diff about nothing.
+ *
  * `null` means the question could not be answered — not a repo, no default
  * branch, no merge base, a git that failed. It is deliberately a different
  * value from `[]` ("a readable worktree that has changed nothing"), because
  * a caller that folded the two together would be asserting a fact about work
  * it could not see.
  */
-export function changedFilesInWorktree(repo: string): string[] | null {
-  const base = defaultBaseRef(repo);
-  if (base === null) return null;
-  const mb = git(repo, ['merge-base', 'HEAD', base]);
+export function changedFilesInWorktree(repo: string, since?: string): string[] | null {
+  const ref = defaultBaseRef(repo);
+  if (ref === null) return null;
+  const mb = git(repo, ['merge-base', 'HEAD', ref]);
   const mergeBase = mb.stdout.trim();
   if (!mb.ok || !/^[0-9a-f]{40}$/.test(mergeBase)) return null;
-  const diff = diffFiles(repo, mergeBase, null);
+  const pinned =
+    since !== undefined &&
+    resolveCommit(repo, since) !== null &&
+    isAncestor(repo, mergeBase, since) &&
+    isAncestor(repo, since, 'HEAD')
+      ? since
+      : mergeBase;
+  const diff = diffFiles(repo, pinned, null);
   if (!diff.ok) return null;
   return diff.files.map((f) => f.relPath);
 }

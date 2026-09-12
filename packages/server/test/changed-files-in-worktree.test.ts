@@ -77,6 +77,36 @@ describe('what the read returns', () => {
     expect(files).not.toBeNull();
   });
 
+  it('starts from a recorded baseline, so a reused worktree is not one history', () => {
+    // The worktree finished one task and was handed to another. Everything
+    // the first occupant committed is still on the branch; only what the
+    // second has written is this dispatch's work.
+    const wt = worktree({ 'packages/app/src/board.css': '.first{}\n' });
+    wt.commit('the previous occupant');
+    const baseline = execFileSync('git', ['-C', wt.path, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+    wt.edit({ 'packages/server/src/clock.ts': 'export const t = 1;\n' });
+
+    expect(changedFilesInWorktree(wt.path)?.sort()).toEqual([
+      'packages/app/src/board.css',
+      'packages/server/src/clock.ts',
+    ]);
+    expect(changedFilesInWorktree(wt.path, baseline)).toEqual(['packages/server/src/clock.ts']);
+  });
+
+  it('ignores a baseline that is not in this branch’s history', () => {
+    const other = worktree({ 'src/elsewhere.ts': 'x\n' });
+    other.commit();
+    const stranger = execFileSync('git', ['-C', other.path, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+    const wt = worktree({ 'src/mine.ts': 'mine\n' });
+    // A commit this repo has never heard of falls back to the merge base
+    // rather than failing the read or reporting a diff about nothing.
+    expect(changedFilesInWorktree(wt.path, stranger)).toEqual(['src/mine.ts']);
+  });
+
   it('does not blame the builder for what the default branch moved on', () => {
     // The base is the MERGE BASE, so a branch left behind by main must not
     // read as having changed every file main touched since.

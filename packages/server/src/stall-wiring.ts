@@ -838,24 +838,35 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * registered a dispatch for answers `undefined` — no evidence, and the UI
    * gate then says nothing about it rather than guessing from its prose.
    *
-   * Memoised per worktree for the life of ONE pass. Two rows can share a
-   * worktree (a builder re-dispatched onto a second row), and the read
-   * spawns git; the map is thrown away with the pass, so the next tick sees
-   * whatever the builder has written since.
+   * Each dispatch is read from its own BASELINE — the commit its worktree
+   * sat on when it was registered — so a worktree reused for a second task
+   * does not hand the first task's files to the second. The registry records
+   * that at registration; a dispatch with none falls back to the default
+   * branch's merge base.
+   *
+   * Memoised per worktree-and-baseline for the life of ONE pass, because the
+   * read spawns git. The map is thrown away with the pass, so the next tick
+   * sees whatever the builder has written since.
    */
   function changedFilesReader(): (taskId: string) => readonly string[] | undefined {
-    const worktreeOf = new Map(dispatches.list().map((d) => [d.taskId, d.worktreePath]));
+    const worktreeOf = new Map(
+      dispatches.list().map((d) => [d.taskId, { path: d.worktreePath, since: d.baseCommit }]),
+    );
     const byWorktree = new Map<string, readonly string[] | undefined>();
     return (taskId) => {
-      const path = worktreeOf.get(taskId);
-      if (path === undefined) return undefined;
+      const dispatch = worktreeOf.get(taskId);
+      if (dispatch === undefined) return undefined;
+      const { path: worktreePath, since } = dispatch;
+      // Two dispatches on one worktree with different starting lines are two
+      // different questions, so the baseline is part of the key.
+      const path = `${worktreePath}\u0000${since ?? ''}`;
       if (!byWorktree.has(path)) {
         // A worktree that has vanished, is not a repo, or whose git fails
         // reads as no evidence — never as "changed nothing". Throwing here
         // would take the whole stall pass down over one builder's checkout.
         let files: readonly string[] | undefined;
         try {
-          files = changedFilesInWorktree(path) ?? undefined;
+          files = changedFilesInWorktree(worktreePath, since) ?? undefined;
         } catch {
           files = undefined;
         }

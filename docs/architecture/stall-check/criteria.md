@@ -150,6 +150,17 @@ agreed with "did this commit touch `workspaces-app/src` or `widget/src`" on
 travel; a repo that keeps its screens somewhere else reads as no UI change,
 which is the cheap direction.
 
+**A worktree outlives a dispatch, so the read starts from a baseline.** The
+dispatch registry records the commit a checkout was sitting on when the
+dispatch was registered (`baseCommit`), and `changedFilesInWorktree` reads
+from there when it is both a descendant of the default-branch merge base and
+an ancestor of HEAD. Without it, a worktree handed to a second task carries
+the first task's commits, and the second row is convicted on a stylesheet
+somebody else wrote — the same false positive in a new spelling. A dispatch
+with no baseline (a path git cannot answer for, a record persisted before the
+field existed) falls back to the merge base; the reader degrades, it never
+refuses.
+
 **And when there is no diff, the gate says nothing.** No registered dispatch,
 a worktree that has gone, a directory that is not a repo: the changed-file
 read answers "cannot tell", and the task goes unjudged. Two alternatives were

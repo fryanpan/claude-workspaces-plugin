@@ -85,17 +85,25 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     return stream;
   }
 
-  /** Give this row a builder, working in a checkout that holds `work`. */
+  /**
+   * Give this row a builder, working in a checkout that holds `work`.
+   *
+   * `inherited` is whatever a PREVIOUS occupant of that checkout had already
+   * committed before this dispatch was registered — the reuse case.
+   */
   async function dispatch(
     workspaceId: string,
     taskId: string,
     work: Record<string, string>,
+    inherited?: Record<string, string>,
   ): Promise<void> {
-    const wt = makeBuilderWorktree(work);
+    const wt = makeBuilderWorktree(inherited ?? {});
     worktrees.push(wt);
+    if (inherited) wt.commit('the previous occupant');
     await jj(
       await post(`/workspaces/${workspaceId}/dispatches`, { taskId, worktreePath: wt.path }),
     );
+    wt.edit(work);
   }
 
   /** A board, and one row the FILER agent filed and then took. */
@@ -210,6 +218,19 @@ describe('a row built past the UI gate is the lead’s finding', () => {
         'and the store defaults to chores. The fix is the idle clock.',
     );
     await dispatch(workspaceId, taskId, SERVER_WORK);
+    const lead = await agentStream(workspaceId, LEAD);
+    await expectSilence(lead, workspaceId);
+  }, 20_000);
+
+  it('says nothing about a builder inheriting a finished task’s UI work', async () => {
+    // A worktree outlives a dispatch. Everything the previous occupant
+    // committed is still on the branch, and attributing it to this row would
+    // be the same false positive in a new spelling.
+    const { workspaceId, taskId } = await boardWithRow(
+      'Agent can be told when a task becomes ready',
+      'The fix is the idle clock.',
+    );
+    await dispatch(workspaceId, taskId, SERVER_WORK, UI_WORK);
     const lead = await agentStream(workspaceId, LEAD);
     await expectSilence(lead, workspaceId);
   }, 20_000);
