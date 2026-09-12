@@ -118,6 +118,10 @@ describe('a wrong address under a board answers a readable page', () => {
     // that into a page would answer a caller something it cannot parse.
     for (const path of [
       '/workspaces/w-nope/review/d-nope?format=json',
+      // A page address on a board that is gone — the one the security probe
+      // caught, because `docs/<id>` is a page and the header rule read it
+      // before the query string did.
+      '/workspaces/w-nope/docs/d-x?format=json',
       `${boardHref()}/docs/d-nope?format=json`,
     ]) {
       const r = await local(path, { headers: { accept: 'text/html,application/xhtml+xml' } });
@@ -125,6 +129,14 @@ describe('a wrong address under a board answers a readable page', () => {
       expect(r.headers.get('content-type') ?? '').not.toContain('text/html');
       expect(JSON.parse(await r.text())).toHaveProperty('error');
     }
+
+    // The control: the same address WITHOUT the query string is a page, so a
+    // pass here would be vacuous if the route had simply stopped answering.
+    const page = await local('/workspaces/w-nope/docs/d-x', {
+      headers: { accept: 'text/html,application/xhtml+xml' },
+    });
+    expect(page.status).toBe(404);
+    expect(page.headers.get('content-type')).toBe('text/html; charset=utf-8');
   });
 
   it('still answers a tool with JSON on the same gone-board addresses', async () => {
