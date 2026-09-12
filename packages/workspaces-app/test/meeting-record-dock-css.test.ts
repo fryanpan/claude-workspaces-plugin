@@ -21,11 +21,12 @@
  * same whichever parent the button sits in. Only a measured rectangle can,
  * which is what testing standard 1 asks for.
  *
- * THE CASE CARRIES ITS OWN CONTROL. After measuring, the probe puts the dock
- * back inside `.toolbar` — the pre-fix arrangement, in the same page, at the
- * same width — and measures again. A run at some future width where
- * everything fits anyway fails on that control rather than passing the real
- * assertions vacuously.
+ * THE CASE CARRIES ITS OWN CONTROL. After measuring, the probe refills the
+ * toolbar with the six controls that were taken out of it and puts the dock
+ * back inside — the pre-fix arrangement, in the same page, at the same width —
+ * and measures again. The slimmer bar now fits at 430 on its own, so without
+ * that rebuild the real assertions would pass on a bar with room to spare;
+ * the control is what keeps them meaning something.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -119,8 +120,18 @@ const PROBE = `(() => {
   out.chevronHidden = getComputedStyle(options).display;
   options.hidden = false;
 
-  // The control: the pre-fix arrangement, same page, same width — the pair
-  // appended to the end of the scrolling toolbar.
+  // The control: the bar as it stood BEFORE this branch, same page, same
+  // width — the six controls that came out of the toolbar put back, and the
+  // pair appended to the end of that scroll container where it used to live.
+  // The slimmer bar fits on its own now, so without this the assertions above
+  // would pass on a bar with room to spare and prove nothing about the dock.
+  for (let i = 0; i < 6; i++) {
+    const filler = document.createElement('button');
+    filler.type = 'button';
+    filler.className = 'icon-btn';
+    filler.textContent = 'A';
+    toolbar.append(filler);
+  }
   toolbar.append(dock);
   out.inToolbar = reading();
   return JSON.stringify(out);
@@ -204,11 +215,11 @@ describe.skipIf(CHROME === null)('the Record button on a phone', () => {
       const m = measure('phone');
       expect(m.width).toBe(430);
 
-      // The scenario is live: the bar really is over-full at this width, and
-      // the toolbar really is the scroll container it was built to be. Without
-      // this, a bar with room to spare would satisfy everything below while
-      // proving nothing.
-      expect(m.docked.toolbarScrolls).toBe(true);
+      // The bar no longer runs out of room at this width: six controls came
+      // out of the toolbar, so the scroll container it was built to be has
+      // nothing left to scroll. The live over-full scenario moved to the
+      // control at the bottom of this case, which rebuilds it.
+      expect(m.docked.toolbarScrolls).toBe(false);
 
       // Nothing is scrolled — this is the bar as it is first painted.
       expect(m.docked.toolbarScrollLeft).toBe(0);
@@ -249,8 +260,10 @@ describe.skipIf(CHROME === null)('the Record button on a phone', () => {
       expect(m.chevronShown).not.toBe('none');
       expect(m.chevronHidden).toBe('none');
 
-      // THE CONTROL: put the pair back at the end of the scrolling toolbar,
-      // which is where it lived, and the chevron leaves the window again.
+      // THE CONTROL: refill the toolbar to the width it had before this
+      // branch and put the pair back at the end of it, which is where it
+      // lived. The bar is over-full again, and the chevron leaves the window.
+      expect(m.inToolbar.toolbarScrolls).toBe(true);
       expect(m.inToolbar.options.right).toBeGreaterThan(m.width);
     },
     BROWSER_CASE_MS,

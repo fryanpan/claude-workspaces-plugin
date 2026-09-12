@@ -21,19 +21,23 @@ import type { ReviewSurface } from '../src/review-surface.ts';
 
 const bob = { id: 'u2', name: 'Bob', kind: 'known' as const, color: '#c0392b' };
 
-/** happy-dom's viewport width drives `window.matchMedia`, which is the same
- *  1100px query the stylesheet uses. Default is 1024px — BELOW it — so any
- *  test about the desktop treatment has to widen it first. */
-/** Move the window, and let the media queries the app listens to fire. The
- *  bare `setInnerWidth` moves `innerWidth` without telling any
- *  `MediaQueryList`, which is how a case could cross a breakpoint and see
- *  nothing react. */
+/**
+ * Move the window. happy-dom's width drives `window.matchMedia`, which is the
+ * same breakpoint the stylesheet uses. Default is 1024px — inside the phone
+ * tier — so any case about the desktop treatment has to widen it first.
+ *
+ * A `MediaQueryList` listener in happy-dom starts believing the query does NOT
+ * match, whatever the width was when it was registered, and only fires once
+ * the computed value disagrees with that belief. So a `min-width` query
+ * registered on a wide window is silent on the FIRST narrowing: it has to be
+ * seen matching once before a change reads as a change. A case that wants the
+ * app to react to a breakpoint therefore starts narrow and widens, rather than
+ * opening at the wide width and dropping straight to the phone.
+ */
 function setViewportWidth(w: number): void {
   (
-    window as unknown as {
-      happyDOM: { setViewport: (v: { width: number; height: number }) => void };
-    }
-  ).happyDOM.setViewport({ width: w, height: 820 });
+    window as unknown as { happyDOM: { setInnerWidth: (w: number) => void } }
+  ).happyDOM.setInnerWidth(w);
 }
 
 function mountChromeDom(): void {
@@ -258,8 +262,13 @@ describe('narrow viewports keep the surface they already have', () => {
   });
 
   it('closes an open modal when the viewport crosses down into the phone tier', () => {
-    setViewportWidth(1180);
+    // The journey a reviewer actually takes: the page is mounted on the phone,
+    // the window (or the zoom) widens, a long thread opens in the dialog, and
+    // then it narrows again. Leaving the dialog up over the inline card and
+    // the sheet would stack two dismissable layers on one conversation.
+    setViewportWidth(430);
     harness({ text: words(LONG_THREAD_WORDS + 20) });
+    setViewportWidth(1180);
     tapCard();
     expect(modalOpen()).toBe(true);
     setViewportWidth(430);
