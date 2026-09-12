@@ -26,7 +26,9 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 - Edit only blocks marked "yours". An edit to a "theirs" block becomes a suggestion to the person. Do this only to correct an error.
 - Write one edit for each idea in the new speech. There is no maximum. Do not change notes that the new speech did not touch.
 - Put a note under the heading of its topic. If no heading covers the topic, add a "### " heading under the notes heading of this meeting. Do not make a second heading for a topic that has one.
-- If the new speech corrects one of your notes, replace that note. Do not add a second note that disagrees.
+- If the new speech CONTINUES something you already noted, write a NEW note for it. Most new speech continues something.
+- Replace a note only when the new speech CORRECTS it. Do not add a second note that disagrees.
+- A replacement is still one point of the same length. Never grow one note into a summary of the meeting so far.
 
 ### Notes
 

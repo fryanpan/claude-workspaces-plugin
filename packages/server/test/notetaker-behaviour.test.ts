@@ -162,8 +162,17 @@ describe('the notetaking instructions', () => {
   it('let the note-taker revise its OWN bullet rather than contradict it', () => {
     // The rule that shipped before this said the opposite — new material at
     // the end, "never to restructure notes the new speech does not touch".
-    expect(system).toContain('If the new speech corrects one of your notes, replace that note.');
+    expect(system).toMatch(/Replace a note only when the new speech CORRECTS it/);
     expect(system).not.toMatch(/never to restructure/);
+  });
+
+  it('ask for a NEW note when the speech continues one, and bound a replacement', () => {
+    // Without these two the only rule in earshot of a tick carrying one short
+    // turn is the one about correcting, and a meeting of short turns ends as
+    // one bullet — measured in production on 2026-09-11, and reproduced in
+    // `notes-sparse-meeting.test.ts`.
+    expect(system).toMatch(/CONTINUES something you already noted, write a NEW note/);
+    expect(system).toMatch(/Never grow one note into a summary of the meeting so far/);
   });
 
   it("say that a person's block may be proposed to, never rewritten", () => {
