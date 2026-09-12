@@ -37,8 +37,9 @@ import { panelAnswerRequest, panelQuestionRequest } from './board-review-render.
 export interface BoardReviewControllerDeps {
   /** Who the write is attributed to. */
   author: Pick<User, 'id' | 'name' | 'kind' | 'color'>;
-  /** The projection the walkthrough's aim and tally live on. */
-  state: BoardState;
+  /** The walkthrough's aim and tally — all this reads of the projection, so
+   *  the cross-board review can drive the same verbs without a board. */
+  state: Pick<BoardState, 'walkProgress' | 'walkIndex' | 'walkKey'>;
   /** The queue as it stands right now, re-derived rather than stored. */
   currentQueue: () => ReviewQueue;
   /** Repaint the walkthrough card. */

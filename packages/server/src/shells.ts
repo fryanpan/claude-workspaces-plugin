@@ -443,7 +443,14 @@ export function renderReviewsShell(
     <link rel="stylesheet" href="${assetHref(assets, 'tokens.css')}" />
   </head>
   <body class="board-body reviews-body">
-    <div id="reviews-root"></div>
+    <div id="board-root">
+      <header class="board-topbar">
+        <a class="back-link" href="/" title="All workspaces" aria-label="All workspaces">←</a>
+        <span class="board-ws-name"><span class="board-ws-name-text" id="board-ws-name-text">Workspaces</span></span>
+      </header>
+      <main class="reviews-main"><div id="board-walkthrough" class="board-walkthrough"></div></main>
+    </div>
+    <div id="board-toast" class="board-toast hidden"></div>
     <script type="module" src="${assetHref(assets, 'reviews.js')}"></script>
   </body>
 </html>`;

@@ -176,6 +176,10 @@ export interface ReviewThreadItem {
    * resolves to no task at all.
    */
   kind: 'task-thread' | 'goal-thread' | 'doc-thread' | 'task-review';
+  /** The board this row lives on, when the page showing it is not that
+   *  board — the cross-board review (`/reviews`). Every write below is
+   *  addressed to it; absent means the board in the address. */
+  workspaceId?: string;
   /** Which row on the ticket, on a `task-review` item — an answer is stamped
    *  back at this id. */
   reviewItemId?: string;
@@ -774,6 +778,7 @@ export function reviewReplyRequest(
     return {
       path: api(
         `tasks/${encodeURIComponent(t.taskId)}/review-items/${encodeURIComponent(t.reviewItemId)}/answer`,
+        t.workspaceId,
       ),
       body: { text, ...(optionId !== undefined ? { answeredWith: optionId } : {}) },
     };
@@ -784,14 +789,14 @@ export function reviewReplyRequest(
   const declared = item.review !== undefined && t.commentId !== undefined;
   return declared
     ? {
-        path: api(`docs/${doc}/threads/${thread}/answer`),
+        path: api(`docs/${doc}/threads/${thread}/answer`, t.workspaceId),
         body: {
           text,
           commentId: t.commentId,
           ...(optionId !== undefined ? { optionId } : {}),
         },
       }
-    : { path: api(`docs/${doc}/threads/${thread}/comments`), body: { text } };
+    : { path: api(`docs/${doc}/threads/${thread}/comments`, t.workspaceId), body: { text } };
 }
 
 /**
@@ -810,7 +815,7 @@ export function reviewSecretsRequest(
   if (item.review?.shape !== 'secret') return null;
   const t = item.thread;
   if (!t || t.kind !== 'task-review' || !t.taskId || !t.reviewItemId) return null;
-  return secretsRequestFor(t.taskId, t.reviewItemId, values);
+  return secretsRequestFor(t.taskId, t.reviewItemId, values, t.workspaceId);
 }
 
 /**
@@ -827,10 +832,12 @@ export function secretsRequestFor(
   taskId: string,
   reviewItemId: string,
   values: ReadonlyArray<{ service: string; value: string }>,
+  workspaceId?: string,
 ): { path: string; body: Record<string, unknown> } {
   return {
     path: api(
       `tasks/${encodeURIComponent(taskId)}/review-items/${encodeURIComponent(reviewItemId)}/secrets`,
+      workspaceId,
     ),
     body: { secrets: values.map((v) => ({ service: v.service, value: v.value })) },
   };
@@ -846,7 +853,7 @@ export function secretsRequestFor(
  */
 export function reviewItemAnchorTarget(
   item: ReviewItem,
-): { docId: string; taskId: string; reviewItemId: string } | null {
+): { docId: string; taskId: string; reviewItemId: string; workspaceId?: string } | null {
   if (item.decision) {
     const taskId = item.decision.task.id;
     return { docId: `task:${taskId}`, taskId, reviewItemId: LEGACY_REVIEW_ITEM_ID };
@@ -854,7 +861,12 @@ export function reviewItemAnchorTarget(
   const t = item.thread;
   if (!t || t.kind !== 'task-review' || !t.taskId || !t.reviewItemId) return null;
   if (t.reviewItemId === LEGACY_REVIEW_ITEM_ID) return null;
-  return { docId: `task:${t.taskId}`, taskId: t.taskId, reviewItemId: t.reviewItemId };
+  return {
+    docId: `task:${t.taskId}`,
+    taskId: t.taskId,
+    reviewItemId: t.reviewItemId,
+    ...(t.workspaceId !== undefined ? { workspaceId: t.workspaceId } : {}),
+  };
 }
 
 /** Who a question on this item goes to — the item's asker, or for a
@@ -880,12 +892,12 @@ export function reviewItemOwner(item: ReviewItem): string | undefined {
  * agent-side "tell me more" that deliberately leaves the item on the queue.
  */
 export function reviewItemThreadRequest(
-  target: { taskId: string; reviewItemId: string },
+  target: { taskId: string; reviewItemId: string; workspaceId?: string },
   phrase: string,
   question: string,
 ): { path: string; body: Record<string, unknown> } {
   return {
-    path: api(`docs/${encodeURIComponent(`task:${target.taskId}`)}/threads`),
+    path: api(`docs/${encodeURIComponent(`task:${target.taskId}`)}/threads`, target.workspaceId),
     body: {
       text: question,
       anchor: { kind: 'review-item', reviewItemId: target.reviewItemId, snippet: { text: phrase } },

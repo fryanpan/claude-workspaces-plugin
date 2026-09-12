@@ -1050,6 +1050,70 @@ body.board-body {
 .board-walk-home {
   padding-left: 0;
 }
+/* The size bar shares the top line with the way out (the cross-board review,
+   `/reviews`). One colour for every stop up to the chosen one, no knob — the
+   same bar the all-workspaces page draws. */
+.board-walk-topline:has(.review-sizes) {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.board-walk-topline .review-sizes {
+  display: flex;
+  gap: 0;
+  flex: 0 1 320px;
+  min-width: 0;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: #eef0f2;
+}
+.board-walk-topline .review-sizes .board-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.board-walk-topline .review-sizes .board-tab small {
+  font-size: 11px;
+  font-weight: 400;
+  color: inherit;
+  opacity: 0.8;
+}
+.board-walk-topline .review-sizes .board-tab.filled {
+  background: #d9803a;
+  color: #fff;
+}
+.board-walk-topline .review-sizes .board-tab.filled:first-child {
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+}
+.board-walk-topline .review-sizes .board-tab.board-tab-active {
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+}
+.board-walk-topline .review-sizes .board-tab.board-tab-active:first-child {
+  border-radius: var(--radius-pill);
+}
+/* The cross-board review's page: the walkthrough alone under the top bar, at
+   Home's column width. */
+.reviews-main {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 16px 16px 24px;
+  box-sizing: border-box;
+}
 .board-walk-head {
   display: flex;
   align-items: center;

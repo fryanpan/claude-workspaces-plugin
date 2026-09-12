@@ -155,6 +155,12 @@ its own visitor refusal lives.
 Answer heading 1 of the security-review checklist from that table, and add the
 row in the same pull request as the route.
 
+The cross-board review reads every board at once, so its three paths —
+`/reviews`, `/api/review-queue` and `/api/review-wait` — are `trusted-local`
+and GET-only. No member allowlist names them, and the handler refuses a visitor
+again behind admission. The page writes nothing itself: each answer goes to
+the owning board's existing route and meets that route's gate.
+
 ## Where to look
 
 Every hostname below is a placeholder; the real ones live in the launchd configuration, not in this repository.
