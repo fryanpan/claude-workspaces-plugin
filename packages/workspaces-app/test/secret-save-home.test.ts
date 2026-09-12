@@ -44,10 +44,15 @@
  *    to put Save back under the dock at every size, or the reserve is not
  *    what is holding Save up.
  *  - `draggable` is the same settled form with every field's height forced to
- *    the cap, which is what a resize grip's whole travel does. It has to take
- *    Save down by what the fields gained, and at the shortest phone onto the
- *    dock — otherwise the grip case below is reading a form that could not
- *    have failed either way.
+ *    the cap, which is what a resize grip's whole travel does. Save has to
+ *    take the whole of that growth while the scroll and the reserve both sit
+ *    still, and the growth has to exceed the entire band the reserve sets
+ *    aside — otherwise the grip case below is reading a form that could not
+ *    have failed either way. It asserts no hit test: whether that growth
+ *    reaches the dock depends on the slack the card's prose left after
+ *    wrapping, which is a font metric that differs between this machine and
+ *    CI, and the first version of this control was green here and red there
+ *    for exactly that reason.
  *  - `pageScrolls`, `navPosition` and the viewport list say the fixture still
  *    reproduces: a page that fits on screen, or one whose dock is not fixed,
  *    would pass every case below with the fix reverted.
@@ -192,37 +197,59 @@ describe.skipIf(CHROME === null)('the Save button on Home, at phone heights', ()
     }
   });
 
-  it('CONTROL: a field the reader can grow takes Save down with it', () => {
+  it('CONTROL: a field the reader can grow takes Save down, and nothing follows it', () => {
     // The forced drag is the page with a grip on it. If the height could not
     // move, or moving it moved nothing else, the case below would be reading
     // a form that had no way to fail. Its baseline is its OWN `saveBefore`,
     // not the no-grip reading: a control that borrows the reading it vouches
     // for goes red with it, and says nothing about which of the two broke.
+    //
+    // WHAT THIS DOES NOT ASSERT, AND WHY. An earlier version ended with a hit
+    // test — Save lands on `board-nav-item` at 430x560 — and it was green here
+    // and RED ON CI. The growth is fixed at the cap, but how much clearance
+    // the settled page has below Save is not: it is whatever slack the card's
+    // prose left after wrapping, which is a font metric, and CI's fonts are
+    // not this machine's. Measured here, that room is 49px at 430x560 and
+    // 220px at the other three, so only one size reached the dock even
+    // locally. The outcome was the machine's; the mechanism below is the
+    // geometry's, and it is what makes the fault inevitable wherever the
+    // clearance runs out.
     for (const size of SIZES) {
       const r = at(size);
-      const grew = r.draggable.after.map((h, i) => h - (r.draggable.before[i] ?? 0));
+      const g = r.draggable;
+      const grew = g.after.map((h, i) => h - (g.before[i] ?? 0));
+      const total = grew.reduce((a, b) => a + b, 0);
       expect(
         grew.every((d) => d > 0),
-        `${size}: every field grew`,
+        `${size}: every field grew — ${g.before.join(',')} → ${g.after.join(',')}`,
       ).toBe(true);
       expect(
-        r.draggable.look.save.top - r.draggable.saveBefore.top,
-        `${size}: Save moved down by exactly what the fields gained`,
-      ).toBe(grew.reduce((a, b) => a + b, 0));
+        g.look.save.top - g.saveBefore.top,
+        `${size}: Save moved down by exactly what the fields gained (${total})`,
+      ).toBe(total);
+      // Nothing compensated. A drag is not a scroll, so the page never moved
+      // and the reserve was never consulted — which is the whole reason no
+      // value of it could have covered this.
+      expect(
+        g.scrollAfter,
+        `${size}: the drag scrolled nothing (${g.scrollBefore} → ${g.scrollAfter})`,
+      ).toBe(g.scrollBefore);
+      expect(
+        g.reserveAfter,
+        `${size}: the reserve did not change (${g.reserveBefore} → ${g.reserveAfter})`,
+      ).toBe(g.reserveBefore);
+      // And the growth outruns the WHOLE band the reserve sets aside. The
+      // reserve's guarantee is its own height minus the dock's — that is the
+      // most clearance Save can ever have when the clearance scroll has had
+      // to run — so a gain larger than that wipes the guarantee out at any
+      // viewport, whatever slack the page happened to start with.
+      const dock = g.look.nav.bottom - g.look.nav.top;
+      const guaranteed = Number.parseFloat(g.reserveBefore) - dock;
+      expect(
+        total,
+        `${size}: the fields gain ${total}px against a reserve of ${g.reserveBefore} over a ${dock}px dock — ${guaranteed}px of guaranteed clearance`,
+      ).toBeGreaterThan(guaranteed);
     }
-    // And where the form's foot already sits against the reserve, that much
-    // growth is more room than the page has left to give: Save lands on the
-    // dock, which is the fault itself. A scroll reserve cannot save it —
-    // `scroll-padding` is read when something SCROLLS, and a drag scrolls
-    // nothing.
-    const short = at('430x560');
-    expect(onTheDock(short.draggable.look), 'Save is under the dock once a field is grown').toBe(
-      true,
-    );
-    expect(
-      short.draggable.look.hits.filter((h) => h.includes(SAVE)),
-      'no point of Save answers for itself once a field is grown',
-    ).toEqual([]);
   });
 
   it('draws no grip on a masked field, so its height is not the reader’s to set', () => {
@@ -230,18 +257,20 @@ describe.skipIf(CHROME === null)('the Save button on Home, at phone heights', ()
       const r = at(size);
       // The property the cascade decides, read off the field itself.
       expect(r.dragged.resize, `${size}: computed resize on a cred field`).toBe('none');
-      expect(r.dragged.after, `${size}: pulling on the corner moves nothing`).toEqual(
-        r.dragged.before,
-      );
+      expect(
+        r.dragged.after,
+        `${size}: pulling on the corner moves nothing — ${r.dragged.before.join(',')}`,
+      ).toEqual(r.dragged.before);
       expect(r.dragged.look.save, `${size}: and Save does not move either`).toEqual(
         r.dragged.saveBefore,
       );
       for (const [i, hit] of r.dragged.look.hits.entries()) {
         expect(hit, `${size}: point ${i} on Save after pulling on the corner`).toContain(SAVE);
       }
-      expect(r.dragged.look.save.bottom, `${size}: Save is clear of the dock`).toBeLessThanOrEqual(
-        r.dragged.look.nav.top,
-      );
+      expect(
+        r.dragged.look.save.bottom,
+        `${size}: Save is clear of the dock — Save ${r.dragged.look.save.top}-${r.dragged.look.save.bottom}, dock top ${r.dragged.look.nav.top}`,
+      ).toBeLessThanOrEqual(r.dragged.look.nav.top);
     }
   });
 

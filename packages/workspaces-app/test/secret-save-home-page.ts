@@ -94,6 +94,14 @@ export interface Grip {
    *  reading for its baseline went red alongside the case it was meant to
    *  vouch for, which is the one thing a control may not do. */
   saveBefore: Rect;
+  /** What could have compensated for the growth, read on both sides of it:
+   *  the page's scroll position and the scroller's own reserve. Neither
+   *  moves, and that is the point — a drag is not a scroll, so nothing the
+   *  reserve says is consulted while the form grows under the reader. */
+  scrollBefore: number;
+  scrollAfter: number;
+  reserveBefore: string;
+  reserveAfter: string;
   look: Look;
 }
 
@@ -323,6 +331,9 @@ export async function grip(force: boolean): Promise<Grip> {
   const heightOf = (el: Element): number => Math.round(el.getBoundingClientRect().height);
   const before = fields.map(heightOf);
   const saveBefore = rect(need('.board-walk-cred-send'));
+  const reserveOf = (): string => getComputedStyle(document.documentElement).scrollPaddingBottom;
+  const scrollBefore = Math.round(window.scrollY);
+  const reserveBefore = reserveOf();
   if (force || resize !== 'none') {
     // Past any cap on purpose: `max-height` clamps it, so this lands exactly
     // where the bottom of the grip's travel is without naming that number.
@@ -330,7 +341,17 @@ export async function grip(force: boolean): Promise<Grip> {
   }
   await frame();
   await frame();
-  return { resize, before, after: fields.map(heightOf), saveBefore, look: look() };
+  return {
+    resize,
+    before,
+    after: fields.map(heightOf),
+    saveBefore,
+    scrollBefore,
+    scrollAfter: Math.round(window.scrollY),
+    reserveBefore,
+    reserveAfter: reserveOf(),
+    look: look(),
+  };
 }
 
 /** Everything the driver asks for at one viewport, as JSON. */
