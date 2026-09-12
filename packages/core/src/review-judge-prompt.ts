@@ -13,11 +13,11 @@
  * file only supplies the default and the frame around it.
  */
 
-import type { ReviewOption } from './review-item.ts';
+import type { ReviewOption, ReviewSecretField } from './review-item.ts';
 
 /** Bumped when the frame around the criteria changes, so a stored verdict
  *  can be told from one made under an older ask. */
-export const REVIEW_JUDGE_PROMPT_VERSION = 6;
+export const REVIEW_JUDGE_PROMPT_VERSION = 7;
 
 /**
  * What a workspace judges its review items against until somebody edits it.
@@ -100,6 +100,17 @@ export interface ReviewJudgeItem {
    * perfectly written and still be a repeat.
    */
   priorAsks?: PriorAsk[];
+  /**
+   * The values a SECRET ask is asking the reader to hand over — label and
+   * stored name, never a value, because no value has ever existed on this
+   * side of the door.
+   *
+   * Without them the judge reads a headline and a detail about values it
+   * cannot see, and asks for an explanation the item is already giving: three
+   * of five fresh secret asks were held for "explain more" (UX review,
+   * 2026-09-12). The fields ARE the ask, so they belong in what is judged.
+   */
+  secrets?: readonly ReviewSecretField[];
 }
 
 export interface ReviewJudgeVerdict {
@@ -226,6 +237,18 @@ export function buildReviewJudgePrompt(
     'Criteria:',
     criteria.trim(),
   ];
+  if (item.secrets && item.secrets.length > 0) {
+    system.push(
+      '',
+      // The shape's own rule. A secret ask is not a question with a missing
+      // answer: the reader is being asked to hand something over, and what
+      // makes it answerable is knowing what each value is for and what
+      // cannot run without it.
+      'This item asks the reader to hand over one or more values. The fields it asks for are listed in <item> by their label and the name each is stored under; those fields are part of the ask, so do not hold it for not saying WHAT is being asked for.',
+      'It is answerable when the detail says what the values are for and what cannot run until they are handed over. That is the bar; a field-by-field explanation is not required, and neither is anything about how the values are stored.',
+      'NEVER ask for a value, an example of one, or any part of one, in "reason" or in "add" — the whole point of this shape is that nobody on this side ever sees one.',
+    );
+  }
   if (item.priorAsks && item.priorAsks.length > 0) {
     system.push(
       '',
@@ -275,6 +298,15 @@ export function buildReviewJudgePrompt(
     for (const o of item.options) {
       const cost = oneLine(o.detail);
       lines.push(`- ${oneLine(o.label)}${cost ? ` — ${cost}` : ' — (no cost given)'}`);
+    }
+  }
+  if (item.secrets && item.secrets.length > 0) {
+    // Inside the fence: these are the filer's words, flattened like every
+    // other value they wrote. The stored name is quoted because it is an
+    // identifier the reader will have to match against something.
+    lines.push('Values asked for:');
+    for (const f of item.secrets) {
+      lines.push(`- ${oneLine(f.label)} — stored as ${oneLine(f.service)}`);
     }
   }
   lines.push('</item>');

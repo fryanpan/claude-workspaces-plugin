@@ -1,4 +1,4 @@
-import type { ReviewPayload } from '@claude-workspaces/core';
+import type { ReviewPayload, ReviewShape } from '@claude-workspaces/core';
 /**
  * The review queue and the walkthrough that walks it: everything waiting on a
  * person, in one list, plus the wording each row and card wears (plan §3.9).
@@ -271,11 +271,29 @@ export function applyRefresh<R, V>(current: V, res: R | null, read: (r: R) => V)
  * survives-an-outage behaviour is driven by a test instead of asserted about.
  */
 export async function refreshReviewItems(
-  state: { reviewItems: ReviewThreadItem[] },
-  fetchItems: () => Promise<{ items?: ReviewThreadItem[] } | null>,
+  state: { reviewItems: ReviewThreadItem[]; secretsGate: 'open' | 'not-owner' | 'off-machine' },
+  fetchItems: () => Promise<{
+    items?: ReviewThreadItem[];
+    you?: { role?: string; canAnswerSecrets?: boolean };
+  } | null>,
 ): Promise<void> {
   const res = await fetchItems();
   state.reviewItems = applyRefresh(state.reviewItems, res, (r) => r.items ?? []);
+  // Under the same guard as the list, for the same reason: a read that never
+  // arrived must not be read as "you are a Regular User now". A payload that
+  // arrived without the fields leaves the gate alone too — an older server
+  // answering this route is not a demotion.
+  //
+  // Two fields, read in the order that keeps the WORDING honest. `role` says
+  // whether this reader may ever answer; `canAnswerSecrets` says whether the
+  // door is reachable from where they are. A Regular User is told it is not
+  // theirs; an owner reading through a share hostname is told where it can be
+  // done, which is a different sentence and a true one.
+  state.secretsGate = applyRefresh(state.secretsGate, res, (r) => {
+    if (r.you?.role === 'member') return 'not-owner';
+    if (r.you?.role !== 'owner') return state.secretsGate;
+    return r.you?.canAnswerSecrets === false ? 'off-machine' : 'open';
+  });
 }
 
 export type ReviewKind = 'decision' | 'task-thread' | 'goal-thread' | 'doc-thread' | 'task-review';
@@ -777,6 +795,48 @@ export function reviewReplyRequest(
 }
 
 /**
+ * Where the values of a SECRET item go — a door of its own, not `/answer`.
+ *
+ * An answer is words: recorded on the item, echoed into the activity feed,
+ * read back by the agent that asked. These values must reach none of that, so
+ * they do not travel the path that carries words. Null when this item is not
+ * a secret ask, or is not ticket-borne — which is every case where there is
+ * no such door to post to.
+ */
+export function reviewSecretsRequest(
+  item: ReviewItem,
+  values: ReadonlyArray<{ service: string; value: string }>,
+): { path: string; body: Record<string, unknown> } | null {
+  if (item.review?.shape !== 'secret') return null;
+  const t = item.thread;
+  if (!t || t.kind !== 'task-review' || !t.taskId || !t.reviewItemId) return null;
+  return secretsRequestFor(t.taskId, t.reviewItemId, values);
+}
+
+/**
+ * The same request addressed by ids alone, for the surface that holds the row
+ * rather than the queue item — the task panel's card.
+ *
+ * One spelling of the route for both, because the property that matters here
+ * is WHICH DOOR the values go through: the secrets route stores them and
+ * records only that the ask was answered, and every other door on this item
+ * records words. A second spelling is a second chance to address the wrong
+ * one.
+ */
+export function secretsRequestFor(
+  taskId: string,
+  reviewItemId: string,
+  values: ReadonlyArray<{ service: string; value: string }>,
+): { path: string; body: Record<string, unknown> } {
+  return {
+    path: api(
+      `tasks/${encodeURIComponent(taskId)}/review-items/${encodeURIComponent(reviewItemId)}/secrets`,
+    ),
+    body: { secrets: values.map((v) => ({ service: v.service, value: v.value })) },
+  };
+}
+
+/**
  * What a question asked ON a review item anchors to: the item, on its task's
  * doc. A TICKET-borne item has one, and so does a ticket's OWN decision — it
  * anchors as the derived `r-legacy` row, which the server admits since
@@ -1113,9 +1173,53 @@ export function reviewBadge(kind: ReviewKind): { label: string; tone: string } {
  * fifteen-minute doc read.
  */
 export function reviewItemBadge(item: ReviewItem): { label: string; tone: string } {
-  if (item.review?.shape === 'decision') return { label: 'Decision', tone: 'decision' };
-  if (item.review?.shape === 'review') return { label: 'Question', tone: 'review' };
-  return reviewBadge(item.kind);
+  const byShape = reviewShapeBadge(item.review?.shape);
+  return byShape ?? reviewBadge(item.kind);
+}
+
+/**
+ * Who may hand a SECRET item's values over from where the reader is standing.
+ *
+ * `open` — the board's owner, on the machine the board runs on.
+ * `not-owner` — a member: they may never answer this one.
+ * `off-machine` — the owner, but reading through a share hostname, where the
+ * door that takes the values is not reachable. Two refusals, two sentences:
+ * one is told no, the other is told where.
+ *
+ * Lives here, in the module with no DOM in it, because both the surfaces that
+ * render the shape and the plain-TypeScript row shapes they are handed have
+ * to name it.
+ */
+export type SecretsGate = 'open' | 'not-owner' | 'off-machine';
+
+/**
+ * What a review SHAPE is called and toned, for every surface that names one.
+ *
+ * One mapping, because three of them disagreed. The Home queue read a secret
+ * ask as "Secret"; the task panel badged the same item "Question" both before
+ * and after it was answered, and the comment row in the discussion did too —
+ * so the shape whose entire point is that its value never becomes words was
+ * announced, on two of three surfaces, as an ordinary question (UX review,
+ * 2026-09-12). A `shape` this does not know returns undefined, and the caller
+ * falls back to whatever it said before.
+ *
+ * The word a person reads is "Secret", everywhere and only (Bryan,
+ * 2026-09-11: *"Build it but just refer to secrets. Not keychain."*). Where
+ * the value is kept is a fact about this machine and belongs to the agent
+ * that reads it back, not to the card.
+ *
+ * `secret` carries DECISION's weight rather than a grey of its own: both are
+ * asks only one person can answer and neither can be guessed at, and a
+ * quieter chip made the one that must not be answered in words the quieter of
+ * the two.
+ */
+export function reviewShapeBadge(
+  shape: ReviewShape | undefined,
+): { label: string; tone: string } | undefined {
+  if (shape === 'decision') return { label: 'Decision', tone: 'decision' };
+  if (shape === 'review') return { label: 'Question', tone: 'review' };
+  if (shape === 'secret') return { label: 'Secret', tone: 'secret' };
+  return undefined;
 }
 
 /**

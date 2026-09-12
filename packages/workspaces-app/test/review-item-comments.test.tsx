@@ -109,6 +109,7 @@ function walk(over: Partial<WalkthroughHandlers> = {}): WalkthroughHandlers {
   return {
     onAnswer: vi.fn(),
     onReply: vi.fn(),
+    onSaveSecrets: vi.fn(),
     onAskOnItem: vi.fn(),
     onQuestionOnItem: vi.fn(),
     onOpenItem: vi.fn(),
@@ -148,6 +149,7 @@ function mountWalk(
     progress: { cleared: 0, last: null },
     now: NOW,
     handlers,
+    secretsGate: 'open',
     ...patch,
   };
   dispose = mountWalkthroughIsland(root);

@@ -2020,6 +2020,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * the per-request half (the URL, the visitor, the author) alongside.
    */
   const taskRoutesCtx: TaskRoutesContext = {
+    // Carried through only when the caller supplied one: an explicit
+    // `undefined` and an absent key read the same to the route, and the route
+    // answers 503 for both, but leaving the key out keeps "nothing wired one"
+    // legible in a debugger.
+    ...(opts.secretWriter ? { secretWriter: opts.secretWriter } : {}),
     taskStore,
     taskProjection,
     docStore,

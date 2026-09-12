@@ -507,6 +507,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
             headline: words.headline,
             ...(words.detail !== undefined ? { detail: words.detail } : {}),
             ...(words.options !== undefined ? { options: words.options } : {}),
+            // The fields a secret ask asks for — see `ReviewJudgeItem.secrets`.
+            // Names only; there is no value anywhere on this side to send.
+            ...(words.secrets !== undefined ? { secrets: words.secrets } : {}),
             ...(heldFor.length > 0 ? { priorHolds: heldFor } : {}),
             ...(priorAsks.length > 0 ? { priorAsks } : {}),
           },

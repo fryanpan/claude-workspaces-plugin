@@ -317,3 +317,50 @@ describe('home-review island parity', () => {
     host.remove();
   });
 });
+
+/**
+ * Which row wants values rather than words, before it is opened.
+ *
+ * A reader landing on Home saw the same row for a secret ask as for a
+ * question, and learnt which was which only by opening the card (UX review,
+ * 2026-09-12). It is the one shape whose answer is not typed prose, so it is
+ * the one shape marked; the control is that an ordinary row still carries no
+ * chip at all, because marking every shape would put one on every row.
+ *
+ * The fixtures are synthetic: invented names and invented service names, and
+ * no value of any kind appears on a queue row.
+ */
+describe('the queue row says when an ask wants a secret', () => {
+  const secretItem = (): ReviewItem =>
+    item({
+      key: 'k-secret',
+      kind: 'task-review',
+      ask: 'Paste the two relay values so the nightly post can run',
+      review: {
+        shape: 'secret',
+        headline: 'Paste the two relay values so the nightly post can run',
+        ownerOnly: true,
+        secrets: [
+          { label: 'Relay account name', service: 'saltmarsh-relay-account' },
+          { label: 'Relay signing value', service: 'saltmarsh-relay-signer' },
+        ],
+      },
+    });
+
+  it('marks a secret ask on the row, where an ordinary question carries nothing', () => {
+    const { host, unmount } = mount([secretItem(), item({ key: 'k-plain' })]);
+    const rows = [...host.querySelectorAll('.board-review-row')];
+    expect(rows).toHaveLength(2);
+
+    const mark = rows[0]?.querySelector('.board-review-row-badge');
+    expect(mark?.textContent).toBe('Secret');
+    // The same tone the card and the comment row give it, so the reader is not
+    // told three different things about one ask.
+    expect(mark?.className).toContain('board-walk-k-secret');
+
+    // The control: the commonest row in the queue is unmarked.
+    expect(rows[1]?.querySelector('.board-review-row-badge')).toBeNull();
+    unmount();
+    host.remove();
+  });
+});

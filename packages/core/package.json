@@ -28,6 +28,7 @@
     "./note-suggestion": "./src/note-suggestion.ts",
     "./related-work": "./src/related-work.ts",
     "./review-item-id": "./src/review-item-id.ts",
+    "./secret-name": "./src/secret-name.ts",
     "./schedule-missed": "./src/schedule-missed.ts",
     "./schedule-run-record": "./src/schedule-run-record.ts",
     "./schedule-wake": "./src/schedule-wake.ts",

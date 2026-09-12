@@ -21,7 +21,7 @@ import {
 import { type TaskComment, type TaskThread } from './board-detail-render.ts';
 import { type BoardReviewItem } from './board-model.ts';
 import { timeAgo } from './board-presence-model.ts';
-import { answeredByLine } from './board-review-model.ts';
+import { answeredByLine, reviewShapeBadge } from './board-review-model.ts';
 /** The verbatim words a tapped option recorded, when the payload still holds
  *  the candidate list. Undefined otherwise — the record never invents words.
  *  Exported because a ticket-borne item's answered record reads it too. */
@@ -362,19 +362,28 @@ export function commentRow(
 
 /** The kind chip on a review row — one spelling for a comment-borne and a
  *  ticket-borne item, so the two cannot read differently. Withdrawn wins
- *  over the kind: a retracted ask must not be badged as a question. */
+ *  over the kind: a retracted ask must not be badged as a question.
+ *
+ *  The words come from `reviewShapeBadge`, the one mapping every surface
+ *  names a shape through — this row used to call a secret ask a Question,
+ *  which is the one thing it is not. The TONE is still this row's own: a
+ *  secret gets the same amber class a decision gets, because both are asks
+ *  nobody else can answer. */
 export function reviewBadge(
   shape: ReviewShape | undefined,
   withdrawn: boolean,
   answered: boolean,
 ): HTMLSpanElement {
   const badge = document.createElement('span');
+  const tone = reviewShapeBadge(shape)?.tone;
   badge.className = withdrawn
     ? 'board-comment-review-k is-withdrawn'
     : answered
       ? 'board-comment-review-k is-answered'
-      : 'board-comment-review-k';
-  badge.textContent = withdrawn ? 'Withdrawn' : shape === 'decision' ? 'Decision' : 'Question';
+      : tone === 'secret'
+        ? 'board-comment-review-k is-secret'
+        : 'board-comment-review-k';
+  badge.textContent = withdrawn ? 'Withdrawn' : (reviewShapeBadge(shape)?.label ?? 'Question');
   return badge;
 }
 

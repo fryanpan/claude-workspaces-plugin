@@ -14,6 +14,8 @@
  * that cannot disagree with the gate — a second copy of a limit is how the
  * card ends up showing something the API swore it had refused.
  */
+import { asksReaderToLook, hasLink } from './review-item-look-ask.ts';
+import { isSecretServiceName } from './review-item-secret-wire.ts';
 import { isPlainObject, normalizeReviewType } from './review-item-wire.ts';
 import { wordCount } from './word-count.ts';
 
@@ -80,6 +82,17 @@ export const REVIEW_LIMITS = {
   optionDetailWords: 50,
   minOptions: 2,
   maxOptions: 6,
+  /**
+   * Fields on a `secret` item. ONE is legal, unlike a decision's two options,
+   * and the asymmetry is not an oversight: two options are what make a choice
+   * a choice, while one field is an ordinary ask for one value. Six is the
+   * same ceiling for the same reason — that is what fits a phone screen as
+   * full-width rows.
+   */
+  minSecrets: 1,
+  maxSecrets: 6,
+  /** A field's face still has to fit one line beside its service name. */
+  secretLabelChars: 40,
 } as const;
 
 /**
@@ -101,6 +114,7 @@ export const REVIEW_LIMITS = {
  */
 export type ReviewGap =
   | 'detail'
+  | 'secretLabelLength'
   | 'detailLinkless'
   | 'lookAskLinkless'
   | 'headlineLength'
@@ -114,78 +128,6 @@ export interface ReviewCheck {
   errors: string[];
   /** Present-but-thin. Advice on a SUCCESSFUL create, never a refusal. */
   gaps: ReviewGap[];
-}
-
-/**
- * Does this text give a reader somewhere to go?
- *
- * Two forms, because those are the two an agent writes: an inline markdown
- * link, which is the house style for a workspace path, and a bare absolute
- * URL. A bare relative path deliberately does NOT count — nothing renders it
- * as a link, so a reader cannot act on it either.
- */
-function hasLink(s: string): boolean {
-  return /\[[^\]]*\]\([^)\s]+\)/.test(s) || /https?:\/\/\S/.test(s);
-}
-
-/**
- * Verbs of PERCEIVING. Deliberately a small closed class — this is the set of
- * things you can ask someone to do to an artifact without changing it — and
- * it is extended only with another verb of the same kind, never with the
- * nouns of whatever artifact is in fashion (`mockup`, `PR`, `staging`).
- * Matching artifact nouns is the over-fit: the vocabulary is open-ended, it
- * dates immediately, and it fires on asks that merely MENTION the thing.
- */
-const PERCEIVE_VERBS =
-  'look|read|review|check|see|watch|open|try|visit|browse|inspect|compare|test';
-
-/**
- * Is this ask telling the READER to go and perceive something?
- *
- * Two constraints do the work, and both are about precision rather than
- * coverage — the cost asymmetry runs the other way from most checks. A false
- * positive spends one sentence in a tool result. A false NEGATIVE is Bryan
- * hunting for a link, which is the whole reason this exists. But advice that
- * fires on asks with nothing to link is worse than either: it trains agents
- * to skim past the channel, and then the true positives stop landing too.
- * So this is tuned to be quiet and right, not thorough.
- *
- * 1. The verb is in its BASE form. "Read the draft" is a directive; "I read
- *    the draft", "reviewed", "checking" are reports about work already done,
- *    and a report is the commonest way one of these words appears in a
- *    detail that needs no link at all. `\b` after the stem does this for
- *    free: "looked", "reviews" and "checking" have no boundary there.
- *
- * 2. The verb sits where a request sits — opening a sentence, a line or a
- *    bullet, or following an explicit request marker ("please", "can you",
- *    "take a"). A verb buried mid-clause is almost always narration.
- *
- * 3. It TAKES AN OBJECT: the next word introduces one, being a determiner, a
- *    pronoun, a possessive or a preposition. Position alone is not enough,
- *    because every word in the list above is also a noun or an adjective and
- *    card titles are written as noun phrases — "Open question: what should we
- *    call it?", "Review complete", "Test results" all opened with a listed
- *    word and all were advised to add a link to an artifact that does not
- *    exist (codex review). A noun use is followed by another noun; a
- *    directive is followed by the thing it directs you at.
- *
- * What it deliberately misses: an ask that implies a target without naming
- * the act ("thoughts on the new nav?"). Catching those means guessing, and
- * guessing fires on every open question — the "what should we call it?"
- * family, which is complete with nothing to link. A decision whose options
- * are described in full carries no directive either, and is silent here by
- * construction rather than by a special case.
- */
-function asksReaderToLook(s: string): boolean {
-  const opener = String.raw`^|[.!?;:)\]]\s+|\n\s*(?:[-*>]\s*)?`;
-  const marker = String.raw`\b(?:please|kindly)\s+|\b(?:can|could|would|will)\s+you\s+(?:please\s+)?|\byou\s+(?:can|should|could|might|may)\s+|\b(?:take|have)\s+a\s+`;
-  // What an object of the directive starts with: a determiner, a pronoun, a
-  // possessive ("Bryan's draft"), or a preposition. Anything else after the
-  // verb and the word was a noun.
-  const object = String.raw`at|the|a|an|this|that|these|those|it|them|my|our|your|its|his|her|their|through|over|into|whether|both|each|either|[\w-]+'s`;
-  return new RegExp(`(?:${opener}|${marker})(?:${PERCEIVE_VERBS})\\s+(?:${object})\\b`, 'i').test(
-    s,
-  );
 }
 
 /**
@@ -241,7 +183,7 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
   const shape = normalizeReviewType(p.review_type ?? p.shape);
   if (shape === undefined) {
     fail(
-      "review.review_type must be 'decision' (a choice between named options) or 'question' (read this and tell me what you think). The legacy spellings — field 'shape', value 'review' — are accepted too.",
+      "review.review_type must be 'decision' (a choice between named options), 'question' (read this and tell me what you think), or 'secret' (ask the board's owner for one or more values you must never see). The legacy spellings — field 'shape', value 'review' — are accepted too.",
     );
   }
 
@@ -321,9 +263,11 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
   if (p.options !== undefined && !Array.isArray(p.options)) {
     fail('review.options must be an array.');
   } else if (options !== undefined) {
-    if (shape === 'review' && options.length > 0) {
+    if (shape !== 'decision' && options.length > 0) {
       fail(
-        "review.options belong to a 'decision'. A 'review' item is answered in the person's own words.",
+        shape === 'secret'
+          ? "review.options belong to a 'decision'. A 'secret' item is answered by filling in review.secrets, which is not a choice between anything."
+          : "review.options belong to a 'decision'. A 'review' item is answered in the person's own words.",
       );
     }
     if (options.length > REVIEW_LIMITS.maxOptions) {
@@ -376,6 +320,72 @@ export function checkReviewPayload(input: unknown, context?: { text?: string }):
         }
       }
     });
+  }
+
+  /**
+   * The FIELDS of a secret ask.
+   *
+   * Every refusal here is structural in the sense the head of this file
+   * means: without a well-formed field list the card has nothing to draw and
+   * the door has nowhere to put what the reader types, so there is no
+   * thinner-but-filable version of the item to accept with advice. The one
+   * advisory is the label's length, which wraps a row and breaks nothing.
+   *
+   * `service` is refused rather than sanitized. It is the store key AND an
+   * argument to the command that writes the value, so quietly rewriting one
+   * would store a secret under a name the card never showed and the agent
+   * was never told — which is the same defect as losing it.
+   */
+  const secrets: unknown[] | undefined = Array.isArray(p.secrets) ? p.secrets : undefined;
+  if (p.secrets !== undefined && !Array.isArray(p.secrets)) {
+    fail('review.secrets must be an array.');
+  } else if (secrets !== undefined && shape !== 'secret') {
+    fail(
+      "review.secrets belong to a 'secret' item. Set review_type to 'secret' to ask for values, or drop them.",
+    );
+  } else if (secrets !== undefined) {
+    if (secrets.length > REVIEW_LIMITS.maxSecrets) {
+      fail(
+        `review.secrets has ${secrets.length} entries; at most ${REVIEW_LIMITS.maxSecrets} fit a phone screen as full-width fields.`,
+      );
+    }
+    const seenService = new Set<string>();
+    secrets.forEach((raw, i) => {
+      if (!isPlainObject(raw)) {
+        fail(`review.secrets[${i}] must be an object with a label and a service.`);
+        return;
+      }
+      const label = raw.label;
+      if (typeof label !== 'string' || label.trim() === '') {
+        fail(
+          `review.secrets[${i}].label is required — what you are asking them for, in their words.`,
+        );
+      } else if (label.trim().length > REVIEW_LIMITS.lineMaxChars) {
+        fail(
+          `review.secrets[${i}].label is ${label.trim().length} characters; past ${REVIEW_LIMITS.lineMaxChars} it is not a field label. Put the reasoning in review.detail.`,
+        );
+      } else if (label.trim().length > REVIEW_LIMITS.secretLabelChars) {
+        gaps.push('secretLabelLength');
+      }
+      const service = raw.service;
+      if (!isSecretServiceName(service)) {
+        fail(
+          `review.secrets[${i}].service is required — the name the value is stored under, 1 to 64 characters of letters, digits, dot, dash or underscore, and not starting with a dash. It is the only part of this the agent is ever told.`,
+        );
+      } else if (seenService.has(service)) {
+        fail(
+          `review.secrets[${i}].service '${service}' is used twice; two fields storing under one name would overwrite each other.`,
+        );
+      } else {
+        seenService.add(service);
+      }
+    });
+  }
+
+  if (shape === 'secret' && (secrets?.length ?? 0) < REVIEW_LIMITS.minSecrets) {
+    fail(
+      "a 'secret' item needs at least one entry in review.secrets — each one a label and the service name its value is stored under. With none there is nothing for the reader to fill in.",
+    );
   }
 
   if (shape === 'decision' && (options?.length ?? 0) < REVIEW_LIMITS.minOptions) {
@@ -437,6 +447,11 @@ export function reviewGapAdvice(gaps: ReviewGap[]): string | undefined {
   if (gaps.includes('optionLabelLength')) {
     long.push(
       `An option label runs past ${REVIEW_LIMITS.optionLabelWords} words or ${REVIEW_LIMITS.optionLabelChars} characters, so the button wraps — the reasoning belongs in that option's detail.`,
+    );
+  }
+  if (gaps.includes('secretLabelLength')) {
+    long.push(
+      `A secret's label runs past ${REVIEW_LIMITS.secretLabelChars} characters, so it wraps away from the service name beside it.`,
     );
   }
   if (gaps.includes('optionDetailLength')) {

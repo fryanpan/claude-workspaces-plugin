@@ -31,6 +31,7 @@ import {
   type ReviewQueue,
   askedMeta,
   reviewRowTitle,
+  reviewShapeBadge,
 } from './board-review-model.ts';
 
 export interface ReviewStripHandlers {
@@ -94,6 +95,17 @@ function ReviewRow(props: {
 }) {
   const { item, index, now, handlers } = props;
   const rev = item.revision;
+  /**
+   * SECRET, and only secret, is marked on the row.
+   *
+   * A reader on Home could not tell this one from a question until the card
+   * was open, and it is the one shape whose answer is not words: it wants
+   * values, it can only be handed over from the machine the board runs on,
+   * and a member cannot answer it at all (UX review, 2026-09-12). Every other
+   * shape is what the queue is already full of, so marking them all would put
+   * a chip on every row and tell the reader nothing they act on.
+   */
+  const mark = item.review?.shape === 'secret' ? reviewShapeBadge('secret') : undefined;
   const className = `board-review-row board-review-${item.kind}${index === 0 ? ' board-review-row-current' : ''}${rev ? ' board-review-row-revised' : ''}`;
   const title = `${REVIEW_KIND_LABEL[item.kind]}: ${item.title}${item.ask ? ` — ${item.ask}` : ''}${item.why ? ` · ${item.why}` : ''}`;
   // Into the queue's own card at this row, not out to the task or the doc.
@@ -106,6 +118,11 @@ function ReviewRow(props: {
           the reader's own question under the title so "what did I ask?" is
           answered on the row. */}
       {rev && <span class="board-walk-k board-walk-k-revised board-review-row-badge">Revised</span>}
+      {mark && (
+        <span class={`board-walk-k board-walk-k-${mark.tone} board-review-row-badge`}>
+          {mark.label}
+        </span>
+      )}
       <span class="board-review-row-title">{reviewRowTitle(item)}</span>
       {rev?.question !== undefined && (
         <span class="board-review-row-quote">{`You asked: “${rev.question}”`}</span>

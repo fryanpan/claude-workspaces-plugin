@@ -7,6 +7,7 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { ReviewGate } from '../review-gate-types.ts';
+import type { SecretWriter } from '../secret-store.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, ParallelismCapChange, Task, TaskStore } from '../tasks.ts';
@@ -54,6 +55,22 @@ export interface TaskRoutesContext {
   chatAudit: ChatAudit;
   /** Wakes the lead when a row it owns becomes ready. */
   readyNudger: ReadyWorkNudger;
+
+  /**
+   * Store one value the board's owner handed over, under one name.
+   *
+   * **No default**, the same seam rule the summarizer and the review judge
+   * follow, and here it is doing more work than either: the real writer talks
+   * to the machine's Keychain, so a default would mean the server suite
+   * writing entries into a developer's own store on the way past. Omitted,
+   * the secrets door answers 503 and no command runs. `bin.ts` — the entry
+   * point that starts a real server, staging included — is what wires it.
+   *
+   * Injected as a function rather than reached for directly so a test can
+   * assert WHERE the value went, which is the one property that matters
+   * about this whole path.
+   */
+  secretWriter?: SecretWriter;
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */

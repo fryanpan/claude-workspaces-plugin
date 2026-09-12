@@ -72,6 +72,21 @@ export function reviewItemRow(
     li.append(body);
   }
 
+  // A SECRET ask echoed into the comment history, with the comment box
+  // underneath it. Nothing here can take the values — the comment box records
+  // words, which is the one thing this shape must not do — and the row said
+  // nothing about that, so the reader's nearest affordance was the wrong one
+  // (UX review, 2026-09-12). One line, only while it is still waiting: an
+  // answered ask needs no instruction, and a withdrawn one has no card to be
+  // sent to.
+  if (r.shape === 'secret' && item.answer === undefined && !withdrawn) {
+    const note = document.createElement('p');
+    note.className = 'board-comment-review-note';
+    note.textContent =
+      'Answered on the card above, never in a comment — a comment is recorded and read back.';
+    li.append(note);
+  }
+
   if (item.answer !== undefined) {
     li.classList.add('board-comment-answered-item');
     const a = item.answer;
@@ -232,6 +247,10 @@ export function panelReviewQueue(
         headline: r.headline,
         ...(r.detail !== undefined ? { detail: r.detail } : {}),
         ...(r.options ? { options: r.options } : {}),
+        // Carried so the card can draw the SECRET form. Without it the panel
+        // had the shape but not the fields, so it fell through to the
+        // ordinary answer furniture and offered a verbatim box for a value.
+        ...(r.secrets ? { secrets: r.secrets } : {}),
         askedBy: a.askedBy,
         since: a.askedAt ?? a.since,
         ...(a.direct !== undefined ? { direct: a.direct } : {}),
@@ -265,6 +284,10 @@ export function panelReviewQueue(
       headline: r?.headline ?? a.ask,
       ...(r?.detail !== undefined ? { detail: r.detail } : {}),
       ...(r?.options ? { options: r.options } : {}),
+      // Nothing files a secret ask on a thread today, and the card refuses to
+      // render a form it has no route for — but a shape that reaches this
+      // surface must reach it WITH its fields, or the fallback is the box.
+      ...(r?.secrets ? { secrets: r.secrets } : {}),
       askedBy: a.askedBy,
       since: a.askedAt ?? a.since,
       ...(a.direct !== undefined ? { direct: a.direct } : {}),

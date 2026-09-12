@@ -265,6 +265,14 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/more-info', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/release', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/revise', 'POST'],
+    // NOT `share-scope`, and that is the point: every sibling verb above is
+    // named in the host guard's member allowlist and this one is not, so no
+    // share visitor of any role reaches the address at all. The value lands
+    // in the OWNER'S OWN machine's store, so the owner's own admission path
+    // is the only one that may write it. The route carries
+    // `refuseOwnerOnlyWrite` besides, which is what fails closed if the
+    // allowlist ever gains the prefix.
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo', 'POST'],
   ]),

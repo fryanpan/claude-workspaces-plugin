@@ -1196,6 +1196,18 @@ body.board-body {
   color: var(--accent);
   background: var(--accent-wash, rgba(59, 111, 212, 0.07));
 }
+/* A secret ask, at a decision's weight — the same amber the task panel and
+   the comment row give it. It was the quietest of the three tones, on the
+   theory that an ask for a value the reader is trusted with should not shout;
+   what that produced was one ask badged grey on Home, where Bryan lands
+   first, and amber on the two surfaces he reaches afterwards. One mapping,
+   one weight, and the weight is a decision's: both are asks only one person
+   can answer, and the quieter of the two should not be the one that must
+   never be answered in words. */
+.board-walk-k-secret {
+  color: var(--warn-fg, #b25e09);
+  background: var(--warn-wash, #fff4e5);
+}
 /* The owner revised the item after the reader asked on it — the editor's
    resolved-range green, so "this came back changed" reads the same way a
    resolved doc thread does. Sits beside the kind badge, never instead of it. */
@@ -1303,6 +1315,11 @@ body.board-body {
   display: none;
 }
 @media (max-width: 1100px) {
+  /* Under a thumb the send is the primary gesture, so it takes the width —
+     the same call the composer's Send makes one block below. */
+  .board-walk-cred-send {
+    flex: 1 1 100%;
+  }
   .board-walk-body-clamp {
     /* ~8 lines at 1.55 line-height, then a fade that says "there is more". */
     max-height: 12.4em;
@@ -1461,6 +1478,135 @@ body.board-body {
   font-size: 13px;
   color: var(--fg-muted);
 }
+/* ── Secret fields (approved mock) ────────────────────────────────────────
+   The block that sits where `.board-walk-option` sits, and inherits its
+   measurements: the same 44px floor, the same border and radius, stacked one
+   per field. A reader moving between a decision card and a secret card should
+   feel the same card with a different ask, not a second design. */
+.board-walk-creds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.board-walk-cred {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  font: inherit;
+  text-align: left;
+}
+.board-walk-cred-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.board-walk-cred-label {
+  font-weight: 600;
+}
+/* The name it is stored under, monospace because it is an identifier the
+   reader may have to match against something they are holding. */
+.board-walk-cred-service {
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* The field and its eye, as one box. BOXED, not underlined: the first version
+   drew a top rule and nothing else, so an empty field had no border, no
+   placeholder and nothing to aim at — on a phone it read as a label with a
+   gap under it, and the reviewer could not tell there was an input there at
+   all. This is the same border, radius and padding as the composer's box one
+   block below, which is what "every other input on the board" looks like. */
+.board-walk-cred-box {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.board-walk-cred-box:focus-within {
+  border-color: var(--accent);
+}
+/* The letter-spacing is what makes a masked value countable at a glance.
+   A TEXTAREA, so a pasted SSH key or service-account file keeps its line
+   breaks — a browser `input` strips them out of a paste before any script
+   sees them. It grows with the value up to a few lines and then scrolls,
+   rather than pushing Save off the card.
+
+   WHAT IS NOT WRITTEN HERE, AND WHY. This block is `.board-walk-cred-input`,
+   (0,1,0). The form wears `.board-walk-answer`, so every field in it is also
+   matched by the reply-box rule further down at `.board-walk-answer textarea`,
+   (0,1,1) — which wins every declaration the two share, wherever either one
+   is written. So the field's height floor, its border and its border-radius
+   all come from THAT rule, and the `min-height: 42px` and `border: 0` this
+   block used to carry were dead text: measured in Chrome, the field computed
+   `min-height: 62px` and a 1px border of its own inside the box's. Reading a
+   value off this block is reading a guess; read the composed rule.
+
+   `resize` is the one of the three that had to move rather than go, and it is
+   below with the reason. */
+.board-walk-cred-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 7.5em;
+  padding: 9px 11px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  letter-spacing: 0.12em;
+  overflow-y: auto;
+  field-sizing: content;
+}
+/* Masked is the resting state. `type="password"` has no textarea equivalent,
+   so the masking is this property — WebKit and Blink, which is Safari on the
+   iPad and every browser this board is used from. On an engine without it the
+   value shows; the eye is what says which state you are in either way. */
+.board-walk-cred-input.is-masked {
+  -webkit-text-security: disc;
+}
+.board-walk-cred-input.is-shown {
+  -webkit-text-security: none;
+}
+.board-walk-cred-input:focus {
+  outline: none;
+}
+/* Show what I typed — masked is the resting state, and this is the only way
+   back from a paste that may have gone wrong. A full-height 44px target, on
+   the same row, so a thumb reaching for it never lands in the field. */
+.board-walk-cred-eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.board-walk-cred-eye svg {
+  width: 18px;
+  height: 18px;
+}
+.board-walk-cred-eye:hover,
+.board-walk-cred-eye[aria-pressed="true"] {
+  color: var(--fg);
+}
+/* What a reader who may not answer sees: the same rows, dimmed, with no
+   inputs in them. */
+.board-walk-cred.is-refused {
+  opacity: 0.55;
+}
 /* The reply box (mockup `.replybox`): the field and its dark Send side by
    side, stacking under a thumb — see the ≤900px block. */
 .board-walk-answer,
@@ -1490,6 +1636,130 @@ body.board-body {
 .board-walk-thread-form .md-composer-surface:focus-within,
 .board-walk-question-form .md-composer-surface:focus-within {
   border-color: var(--accent);
+}
+/* NO GRIP ON A MASKED FIELD, and it is written HERE — after the reply-box
+   rule, at the same specificity — for exactly the reason the form's own
+   `flex-direction` is, in the block below. `resize: none` sat in the
+   cred-input block further up, where (0,1,0) loses to the reply box's
+   (0,1,1) wherever either one is written: the computed value read
+   `vertical`, and Chrome drew a drag grip in every field. One drag
+   on the first field at 430x844 took it 62px → 120px and Save's bottom from
+   740 to 786 against a dock top of 789 — three pixels of clearance left, and
+   the reviewer, dragging further, landed Save's edge on `board-nav-item`,
+   where a tap navigates away and drops the pasted key (UX review,
+   2026-09-12).
+
+   NONE RATHER THAN A BOUNDED `vertical`, because the grip cannot show the
+   reader anything the field would not have shown them anyway. `field-sizing:
+   content` already sizes the box to its value, and `max-height: 7.5em` caps
+   both it and the grip at the same 120px — so dragging can only leave blank
+   space under a short value, or crop a long one below the height the browser
+   picked. On a box of discs neither is a thing anyone wants. And the room
+   that keeps Save clear is `scroll-padding-bottom`, which is read when
+   something SCROLLS; a drag scrolls nothing, so no reserve — fixed or
+   computed — can follow a height the reader sets by hand. The way back from a
+   paste that went wrong is the eye, not the grip. */
+textarea.board-walk-cred-input {
+  resize: none;
+}
+/* The secret form wears `.board-walk-answer` too, so it sits in the answering
+   slot — but its fields are a COLUMN, and Save goes under them rather than
+   beside them the way the one-line reply box does. It has to be written AFTER
+   the reply-box rule above: the two select the same element at the same
+   specificity, and the first version of this block sat earlier in the file,
+   lost the cascade, and rendered the fields as a narrow right-hand column
+   with half the card empty beside them. */
+.board-walk-cred-form {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+/* Save, and the one line a half-filled form answers with, on one row — the
+   message to the left of the control it is about, so a reader who pressed
+   Save and went nowhere reads WHY beside the button they pressed.
+
+   SAVE STAYS ON SCREEN, AND NEVER ON TOP OF A FIELD. The row used to be
+   sticky: at 430 the keyboard takes half the viewport and Save sat under it,
+   and on the iPad's task panel Save drew 9px below the fold. But a sticky box
+   rises as far as the top of its containing block, which here is the form, so
+   the row went on to paint itself — opaque, in the panel's own colour —
+   across the fields it belongs to. Measured at 1180x820 with the panel at its
+   top: a hit test at the second field's last line answered "Save row" (UX
+   review, 2026-09-12).
+
+   So the row is ordinary again and the scroll carries the room instead; the
+   rule below is what keeps Save reachable. Measured both ways, at both
+   widths, with the keyboard up and down: with the room reserved, Save is on
+   screen whenever a field is focused whether the row sticks or not — so
+   sticking it bought nothing and cost the field underneath. */
+.board-walk-cred-send-row {
+  padding: 6px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* SAVE'S OWN ROOM IN THE SCROLL — what replaced sticking the row down.
+   Tapping a field scrolls it into view, and the browser stops as soon as the
+   field itself is inside the scrollport, which leaves Save just past the
+   bottom edge. Reserving a band at the foot of the scrollport makes that same
+   scroll carry Save with the field, so the control and the box it belongs to
+   arrive together — and nothing is ever painted over anything.
+
+   TWO SCROLLERS, AND THE RESERVE HAS TO BE ON THE BOX THAT ACTUALLY SCROLLS.
+   The form has two homes and they scroll differently. In the task panel the
+   scroller is `.board-detail-panel`, a real overflow box. On Home the
+   walkthrough is a page in the Home column, so the scroller is the VIEWPORT
+   — and a viewport takes its scroll reserve from the ROOT element. `body` is
+   not it: `body.board-body`'s own `overflow: auto` PROPAGATES to the
+   viewport, which leaves body itself a non-scrolling box whose
+   `scroll-padding` nothing ever reads. One round shipped the reserve on
+   `body` and it computed `auto` on `html`, so on Home the first-draw scroll
+   put the form's foot flush with the viewport's bottom edge — under the
+   fixed nav dock, where every point of Save hit-tested to `board-nav` and a
+   real tap navigated away and dropped the form (UX review, 2026-09-12).
+
+   AND THE TWO BANDS ARE NOT THE SAME BAND, because what ends each scrollport
+   differs. The panel's is the panel's own bottom padding. The viewport's is
+   the dock, which is `position: fixed` and so is not part of the scroll at
+   all — the page can be scrolled to its very end and still have its last
+   58px covered.
+
+   92px in the panel: the 44px button, the row's 6px of padding, the 24px of
+   bottom padding the panel carries, and enough over for a line of the
+   half-filled form's message to wrap beside it.
+
+   104px on Home, and it has to be bigger than the dock rather than added to
+   it: what the first-draw scroll aligns to this band is the FORM, Save
+   included, so a band taller than the 58px dock puts the whole form above it.
+   96px of the 104 is the measured distance from the last field's bottom edge
+   to the form's foot with the "still empty" message showing — the row stacks
+   at this width, so the message sits above the button rather than beside it —
+   and the last 8px keep Save off the dock's edge rather than flush against
+   it. An earlier draft added `--board-bottom-bar` on top of that; the
+   mutation said it bought nothing any measurement could see, so it is not
+   here. `secret-save-home.test.ts` reads the dock's height in the browser and
+   fails if this number ever stops clearing it. `--safe-bottom` because the
+   phone's scroller ends above the home indicator.
+
+   `:has()` keeps both reservations to the pages actually showing a form, so
+   no other surface's scroll-into-view moves. */
+.board-detail-panel:has(.board-walk-cred-form) {
+  scroll-padding-bottom: calc(92px + var(--safe-bottom, 0px));
+}
+html:has(.board-walk-cred-form) {
+  scroll-padding-bottom: calc(104px + var(--safe-bottom, 0px));
+}
+.board-walk-cred-miss {
+  font-size: 13px;
+  color: var(--red-strong);
+  margin-right: auto;
+}
+/* 44px, the floor every other control a thumb aims at holds (design-mobile.md).
+   It was 40. */
+.board-walk-cred-send {
+  min-height: 44px;
 }
 /* Skip (mockup `.actions`), and "I have a question" beside it — both are
    ways out of answering. The old "Tell me more" control that shared this row
@@ -5224,6 +5494,15 @@ label.board-sched-chip:hover {
   color: var(--accent);
   background: var(--accent-wash, rgba(59, 111, 212, 0.07));
 }
+/* A SECRET ask, at DECISION's weight and not a grey of its own. Both are asks
+   only one person can answer; the panel badged this one QUESTION in the
+   accent blue, which made the ask that must never be answered in words the
+   quieter of the two (UX review, 2026-09-12). Same tokens as
+   `.board-decide-k-decision`, deliberately — a third amber would drift. */
+.board-decide-k-secret {
+  color: var(--warn-fg, #b25e09);
+  background: var(--warn-wash, #fff4e5);
+}
 /* The owner revised the item after the reader asked on it — the same
    resolved-range green as `.board-walk-k-revised`, beside the kind badge. */
 .board-decide-k-revised {
@@ -5834,6 +6113,22 @@ label.board-sched-chip:hover {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--accent, #2e7dd7);
+}
+
+/* The same secret ask, on a comment row in the discussion: amber, for the
+   reason `.board-decide-k-secret` is. The row has no background of its own,
+   so the weight is carried by the colour alone. */
+.board-comment-review-k.is-secret {
+  color: var(--warn-fg, #b25e09);
+}
+/* Where a secret ask is answered, said on the row that echoes it into the
+   comment history — because the comment box is the nearest affordance to it
+   and is the one place its values must never go. */
+.board-comment-review-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg-muted);
 }
 
 /* A retracted ask in the board's comment stream. It stays in the history, and

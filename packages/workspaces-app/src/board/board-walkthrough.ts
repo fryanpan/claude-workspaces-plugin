@@ -72,6 +72,13 @@ export interface BoardWalkthroughDeps {
     text: string,
     optionId?: string,
   ) => Promise<'answered' | 'asked' | false>;
+  /** Hand over a secret item's values. Boolean, not the three-way verdict the
+   *  two above return: the door records an answer or records nothing, and
+   *  there is no question it can be read as. */
+  saveSecretsOnItem: (
+    item: ReviewItem,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ) => Promise<boolean>;
   /** This board's queue just drained. `bootBoard` decides whether the sitting
    *  continues on another board (`?then=`) or ends here. */
   onQueueDrained(): void;
@@ -97,6 +104,7 @@ export function createBoardWalkthrough(deps: BoardWalkthroughDeps): BoardWalkthr
     answerDecision,
     askOnReviewItem,
     replyToReviewItem,
+    saveSecretsOnItem,
   } = deps;
 
   /**
@@ -180,6 +188,7 @@ export function createBoardWalkthrough(deps: BoardWalkthroughDeps): BoardWalkthr
       index,
       progress: state.walkProgress,
       now: Date.now(),
+      secretsGate: state.secretsGate,
       handlers: {
         // `current` rather than a lookup by task id: it is the item this
         // render drew, so the key that gets advanced past cannot be a
@@ -206,6 +215,12 @@ export function createBoardWalkthrough(deps: BoardWalkthroughDeps): BoardWalkthr
           if (wrote === 'asked') return true;
           return finishWalkItem(item, next, async () => wrote === 'answered');
         },
+        // A hand-over IS a finish: the server answers the item with the
+        // service names, so the card must leave exactly as an answered one
+        // does. There is no "asked" branch here — the door records an answer
+        // or it records nothing.
+        onSaveSecrets: (item, values) =>
+          finishWalkItem(item, next, () => saveSecretsOnItem(item, values)),
         onOpenItem: (item) => openFromWalk((back) => openReviewItem(item, back)),
         // Same one-step close-then-open as `onOpenItem`, aimed at the thread —
         // and the same doc jump underneath when the item has no thread on a

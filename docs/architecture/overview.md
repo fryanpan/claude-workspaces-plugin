@@ -589,7 +589,7 @@ did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
 
 | **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-quota-notice.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
-| **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
+| **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
 `supervisor-health.ts` joins Ops and moves no boundary. It is the health
@@ -715,7 +715,19 @@ a link edits the stored doc and calls the board. `core` is three tiers: wire typ
 (`review-item*.ts`, `effort-*.ts`, `goal-effort.ts`, and
 `note-suggestion.ts`, which is how a note's written "did you mean this row?"
 is spelled — server writes it, browser reads it back, one definition so the
-two cannot drift into a suggestion nobody can accept).
+two cannot drift into a suggestion nobody can accept). The `review-item*.ts`
+glob is deliberate: `review-item-look-ask.ts` is the gate's two English
+heuristics lifted out whole when the gate crossed the line, and it changes no
+boundary the diagram draws.
+
+`secret-name.ts` joins that third tier for the same reason, with the two
+readers furthest apart in this repo: the server's writer spells the stored
+name when it runs `security`, and the MCP tool descriptions tell an agent the
+name to read back. Neither package can import the other, and the two used to
+be hand-written copies of one prefix — one in code, one in prose — so a rename
+could leave every agent reading an entry that does not exist. It changes no
+boundary the diagram draws; it holds names and one command string, and no
+value passes through it.
 
 `mock-swap-noise.ts` joins that third tier for the same reason and an unusual
 pair of readers: the widget's mockup swap raises a flag there while it inserts

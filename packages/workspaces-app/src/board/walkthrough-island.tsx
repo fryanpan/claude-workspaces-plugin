@@ -54,6 +54,7 @@ import {
   type ReviewItem,
   type ReviewKind,
   type ReviewQueue,
+  type SecretsGate,
   askedMeta,
   reviewCardHeadline,
   reviewHeadline,
@@ -65,6 +66,7 @@ import {
 } from './board-review-model.ts';
 import { requireText } from './board-review-render.ts';
 import { markPhrase, unmarkPhrase } from './review-item-phrase.ts';
+import { ReviewSecretBlock } from './review-secret-form.tsx';
 import { useSelectionPill } from './selection-pill.ts';
 
 // ── The contract with the vanilla loader ───────────────────────────────────
@@ -95,6 +97,16 @@ export interface WalkthroughHandlers {
    *  shape `onAnswer` uses, because a tap and typed words must reach the thread
    *  by one path or the two will drift. */
   onReply: (item: ReviewItem, text: string, optionId?: string) => Promise<boolean>;
+  /** Hand over the values of a SECRET item, all of them, in one request.
+   *
+   *  A separate handler from `onReply` for the reason the route is separate:
+   *  a reply is words that get recorded and echoed, and these must reach
+   *  neither. Resolves to whether the hand-over landed; nothing typed is kept
+   *  either way. */
+  onSaveSecrets: (
+    item: ReviewItem,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ) => Promise<boolean>;
   /** Go to the exact place instead of answering here — the task's discussion at
    *  that thread, the doc anchored on that comment. */
   onOpenItem: (item: ReviewItem) => void;
@@ -135,6 +147,10 @@ export interface WalkthroughView {
   /** Aimed at the item this paint draws — see the note at the top of the file
    *  for why these travel with the data rather than being bound at mount. */
   handlers: WalkthroughHandlers;
+  /** Whether the secret card may offer its form, and if not, which of the two
+   *  reasons to say. Rides with the data rather than being read at mount,
+   *  because a visitor's level arrives with the queue's own read. */
+  secretsGate: SecretsGate;
 }
 
 /** A closed walkthrough answers nothing, which is what the signal holds until
@@ -145,6 +161,7 @@ const IDLE_HANDLERS: WalkthroughHandlers = {
   onAskOnItem: () => Promise.resolve(false),
   onQuestionOnItem: () => Promise.resolve(false),
   onReply: () => Promise.resolve(false),
+  onSaveSecrets: () => Promise.resolve(false),
   onOpenItem: () => {},
   onOpenThread: () => {},
   onStep: () => {},
@@ -158,6 +175,7 @@ export const walkthroughData = signal<WalkthroughView>({
   progress: { cleared: 0, last: null },
   now: 0,
   handlers: IDLE_HANDLERS,
+  secretsGate: 'open',
 });
 
 function clip(text: string, max = 60): string {
@@ -691,8 +709,9 @@ function WalkCard(props: {
   progress: WalkProgress;
   now: number;
   handlers: WalkthroughHandlers;
+  secretsGate: SecretsGate;
 }) {
-  const { item, index, progress, now, handlers } = props;
+  const { item, index, progress, now, handlers, secretsGate } = props;
   // Both expansions are STATE, not a reading of the DOM. The vanilla renderer
   // snapshotted them off the nodes a line before `replaceChildren` destroyed
   // them, because there was nowhere else to keep them; here the instance is
@@ -742,6 +761,14 @@ function WalkCard(props: {
   // state, surfaced as the detail panel's blocked note.)
   const row = item.decision;
   const review = item.review;
+  // The declared fields of a secret ask. Read through the shape rather than
+  // off the array alone: `secrets` on any other shape is refused by the
+  // server, so honouring one here would be the client offering a hand-over
+  // the API will not take.
+  const secrets =
+    review?.shape === 'secret' && review.secrets && review.secrets.length > 0
+      ? review.secrets
+      : null;
   const skip = (
     <button
       type="button"
@@ -896,16 +923,34 @@ function WalkCard(props: {
             )}
             {questionBox}
             <div class={answering}>
-              {/* Always present, options or not — the candidates are a
-                shortcut, never a closed set, and a review item with no
-                options only has this. */}
-              <PromptForm
-                className="board-walk-answer"
-                placeholder={review?.options?.length ? '…or answer in your own words' : 'Reply…'}
-                submitLabel="Send"
-                keepKey={`walk-answer:${item.key}`}
-                onSubmit={(text) => handlers.onReply(item, text)}
-              />
+              {secrets ? (
+                // A SECRET item, and the composer is deliberately absent. A
+                // value typed into a free-text box would travel the ordinary
+                // answer path — recorded on the item, echoed into the feed,
+                // read back by the agent — which is the one thing this shape
+                // exists to prevent. The reader who wants to say something
+                // instead still has "I have a question" below.
+                // One block, shared with the task panel, and it decides the
+                // gate itself — so neither surface can draw the fields while
+                // forgetting who may fill them.
+                <ReviewSecretBlock
+                  fields={secrets}
+                  itemKey={item.key}
+                  gate={secretsGate}
+                  onSave={(values) => handlers.onSaveSecrets(item, values)}
+                />
+              ) : (
+                /* Always present, options or not — the candidates are a
+                  shortcut, never a closed set, and a review item with no
+                  options only has this. */
+                <PromptForm
+                  className="board-walk-answer"
+                  placeholder={review?.options?.length ? '…or answer in your own words' : 'Reply…'}
+                  submitLabel="Send"
+                  keepKey={`walk-answer:${item.key}`}
+                  onSubmit={(text) => handlers.onReply(item, text)}
+                />
+              )}
               <div class="board-walk-actions">
                 {questionLink}
                 {skip}
@@ -978,7 +1023,7 @@ function useHostVisibility(host: HTMLElement, closed: boolean): void {
  * shell — rail, topbar — where it was.
  */
 function Walkthrough(props: { host: HTMLElement }) {
-  const { queue, index, progress, now, handlers } = walkthroughData.value;
+  const { queue, index, progress, now, handlers, secretsGate } = walkthroughData.value;
   useHostVisibility(props.host, index < 0);
   if (index < 0) return null;
   const item = queue.items[index] ?? null;
@@ -1017,6 +1062,7 @@ function Walkthrough(props: { host: HTMLElement }) {
             progress={progress}
             now={now}
             handlers={handlers}
+            secretsGate={secretsGate}
           />
         </Fragment>
       )}

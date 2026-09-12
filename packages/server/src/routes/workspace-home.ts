@@ -25,7 +25,7 @@ export async function handleWorkspaceHome(
     reviewItemsFor,
     resolveWorkspaceForDoc,
   } = ctx;
-  const { req, pathname, scope, url, visitor, authorFor } = rq;
+  const { req, pathname, scope, url, visitor, authorFor, roleFor } = rq;
   /**
    * WHOSE marker this request may move or read.
    *
@@ -121,7 +121,28 @@ export async function handleWorkspaceHome(
     // used to open this block are DELETED rather than left dormant — there
     // is no second copy of "does this board exist" here to drift.
     const { workspaceId, board: workspace } = scope;
-    return j(200, { workspaceId, items: reviewItemsFor(workspace) });
+    // The reader's own level rides along, because the queue is where a card
+    // has to decide whether to offer an act this reader cannot perform. One
+    // read rather than two: a card that asked separately would paint its
+    // controls first and learn afterwards, which is the flicker a person
+    // reads as "it let me, then took it back". `roleFor` is the admission
+    // gate's own verdict, so this cannot disagree with what a write is
+    // refused by.
+    // Two facts, not one. `role` is who the reader is; `canAnswerSecrets` is
+    // whether the secrets door is reachable from where they are standing, and
+    // the two come apart for a board owner who opened the board through a
+    // share hostname. That door is `trusted-local` — the host guard admits
+    // only a local or Access-verified operator host — so a remote owner's
+    // submission is refused in admission whatever their role says. Sending
+    // the role alone had the card offer them a control that could never
+    // succeed. Derived from `visitor`, which is the same signal the guard
+    // turns on, so this cannot drift from what a write is refused by.
+    const role = roleFor(workspaceId);
+    return j(200, {
+      workspaceId,
+      items: reviewItemsFor(workspace),
+      you: { role, canAnswerSecrets: !visitor && role === 'owner' },
+    });
   }
   // ── Home pane (§ approved home-pane design) ──────────────────────
   // GET: the brief + marker + instructions for ONE person. `user` is

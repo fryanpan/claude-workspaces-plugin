@@ -10,7 +10,7 @@
  * `PanelReviewItem`), and this file imports neither of them.
  */
 import { type ReviewPayload } from '@claude-workspaces/core';
-import type { ReviewShape, Thread, User } from '@claude-workspaces/core';
+import type { ReviewSecretField, ReviewShape, Thread, User } from '@claude-workspaces/core';
 import {
   EFFORT_MIN_SAMPLES_FOR_CALIBRATION,
   type EffortCalibration,
@@ -44,7 +44,7 @@ import {
   statusOptions,
 } from './board-model.ts';
 import { type ActivityEvent, assigneeLabel, describeEvent } from './board-presence-model.ts';
-import { type BlockerRow, type ReviewThreadItem } from './board-review-model.ts';
+import { type BlockerRow, type ReviewThreadItem, type SecretsGate } from './board-review-model.ts';
 /**
  * Who has this task, as a picker over everyone it could go to.
  *
@@ -276,6 +276,30 @@ export interface DetailHandlers {
   /** Take back this task's recorded answer. Without it the answered banner
    *  renders with no way out, which is the state this handler exists to end. */
   onUndoAnswer?: (task: BoardTask) => Promise<boolean> | undefined;
+  /**
+   * Hand over the values of a SECRET item, from this surface.
+   *
+   * Separate from `onAnswer` and `onAnswerThread` for the reason the whole
+   * shape exists: those post WORDS, which are recorded on the item, written
+   * to the store on disk, echoed into the feed and read back by the agent.
+   * This one posts values to the item's own route, which records that the ask
+   * was answered and never what with.
+   *
+   * Absent on a surface that cannot take them, and the card then renders the
+   * fields with no inputs rather than falling back to a box.
+   */
+  onSaveSecrets?: (
+    task: BoardTask,
+    item: PanelReviewItem,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ) => Promise<boolean>;
+  /**
+   * Who may hand those values over from where the reader is standing —
+   * `open`, `not-owner` or `off-machine`, the same three the Home walkthrough
+   * reads. Absent is a refusal: a surface that did not say cannot be assumed
+   * to have checked.
+   */
+  secretsGate?: SecretsGate;
   /**
    * Overrule the quality gate on one HELD review item, putting it on the
    * reader's queue without waiting for its filer to reword it.
@@ -1282,6 +1306,14 @@ export interface PanelReviewItem {
    *  answer goes to the task review-item route, keyed by `reviewItemId`. */
   source: 'task' | 'thread' | 'task-review';
   shape: ReviewShape;
+  /**
+   * A SECRET ask's fields, carried so the card can draw the form that takes
+   * them. Present on this row exactly when the payload had them: a card with
+   * the shape and no fields has nothing to draw, and the version of this row
+   * that omitted them is why the panel drew the verbatim answer box over a
+   * secret ask instead (UX review, 2026-09-12).
+   */
+  secrets?: readonly ReviewSecretField[];
   headline: string;
   /** The ONE body. A task-borne decision has no `detail` field to read, so
    *  this is `decisionBlurb`'s derived prose; a declaration carries its own. */

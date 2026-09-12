@@ -15114,6 +15114,16 @@ async function deliverThenCommitMux(frame, deliver, cursors, onGap) {
   }
 }
 
+// packages/core/src/secret-name.ts
+var SECRET_ACCOUNT = "claude-workspaces";
+var SECRET_SERVICE_PREFIX = "claude-workspaces-secret.";
+function storedSecretService(service) {
+  return `${SECRET_SERVICE_PREFIX}${service}`;
+}
+function secretReadCommand(service) {
+  return `security find-generic-password -a ${SECRET_ACCOUNT} -s ${storedSecretService(service)} -w | base64 --decode`;
+}
+
 // packages/core/src/task-wire.ts
 var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
 
@@ -15164,12 +15174,43 @@ var REVIEW_ITEM_SCHEMA = {
   },
   required: ["headline"]
 };
+var SECRET_PROPERTIES = {
+  review_type: {
+    type: "string",
+    enum: ["decision", "question", "secret"],
+    description: "Use 'decision' to offer 2-6 named options. Use 'question' to ask for an answer in the reader's own words. Use 'secret' to ask for values you must never see: the reader types them into the card and they go straight to this machine's store."
+  },
+  shape: {
+    type: "string",
+    enum: ["decision", "review", "secret"]
+  },
+  secrets: {
+    type: "array",
+    description: `For 'secret' only. One to six fields, one per value you need. Secrets on any other shape are refused, and so is a 'secret' item with none. Say in detail WHY each value is needed — the reader is being asked to hand something over. Once the item is answered you read a value back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one); never put one in a message, a file, a log or a commit.`,
+    items: {
+      type: "object",
+      properties: {
+        label: {
+          type: "string",
+          description: "What the reader is being asked for, in their words. Shown beside the field. 40 characters or fewer."
+        },
+        service: {
+          type: "string",
+          description: "The name the value is stored under, and the only part of it you are ever told. Letters, digits, dot, underscore and dash; 1 to 64 characters; must not start with a dash. Two fields on one item cannot share a name."
+        }
+      },
+      required: ["label", "service"]
+    }
+  }
+};
 var TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
-  description: "A review item on this task, with its own headline and its own options. A task can carry several open items at once. Same payload and same refusals as a review item on a comment."
+  properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
+  description: "A review item on this task, with its own headline and its own options. A task can carry several open items at once. Same payload and same refusals as a review item on a comment, plus the 'secret' shape, which only a task item may carry."
 };
 var NEW_TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
+  properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
   description: "A question about the work this task creates, for when you file the work and the question together. For a question that came up on a task that already exists, use add_review_item instead. The task title names the work, and headline names the ask."
 };
 var TOOL_LIST = {
@@ -16868,7 +16909,7 @@ var TOOL_LIST = {
     },
     {
       name: "add_review_item",
-      description: "Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use `review` on a create_tasks entry. Every item passes the board's quality gate: `held: true` means it is OFF the reader's queue until revise_review_item closes `heldReason`.",
+      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -16884,7 +16925,7 @@ var TOOL_LIST = {
     },
     {
       name: "answer_review_item",
-      description: "Record a person's verbatim answer to one review item on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. reviewItemId keeps several open questions on one task independently answerable. It does not transition the task, so close that with task_transition once you have acted on the returned links.",
+      description: "Record a person's verbatim answer to one review item on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. reviewItemId keeps several open questions on one task independently answerable. It does not transition the task, so close that with task_transition once you have acted on the returned links. A 'secret' item is REFUSED here and cannot be answered this way: its values are typed into its own card and go straight to this machine's store, and words recorded through this tool are stored, echoed to the feed and read back to you. If a person offers you such a value in chat, do not pass it on — point them at the item.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17014,7 +17055,7 @@ var TOOL_LIST = {
     },
     {
       name: "answer_decision",
-      description: "Record a person's verbatim answer to a decision task on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. This answers the task's own decision, and answer_review_item answers one of the items hanging on a task. Neither transitions the task, so close it with task_transition.",
+      description: "Record a person's verbatim answer to a decision task on their behalf, for when they told you in chat or voice. Pass their exact words, never a paraphrase. This answers the task's own decision, and answer_review_item answers one of the items hanging on a task. Neither transitions the task, so close it with task_transition. Neither accepts a 'secret' ask either — the server refuses one, because an answer recorded here is stored, echoed to the feed and read back to you.",
       inputSchema: {
         type: "object",
         properties: {
@@ -19613,7 +19654,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.220";
+var PLUGIN_VERSION = "0.1.221";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

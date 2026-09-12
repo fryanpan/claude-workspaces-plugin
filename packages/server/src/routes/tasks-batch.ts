@@ -1,4 +1,5 @@
 import { type TaskReviewItem, type User } from '@claude-workspaces/core';
+import { SECRET_FILING_DENIAL, asksForSecret } from '../share/board-role.ts';
 /**
  * Batch capture: a burst of rows in one call, each landing owned and placed.
  *
@@ -59,7 +60,7 @@ export async function handleTaskBatch(
     judgeReviewItem,
     judgeTaskDecision,
   } = ctx;
-  const { req, pathname, scope, authorFor } = rq;
+  const { req, pathname, scope, authorFor, visitor } = rq;
   /**
    * Batch capture: a burst of ideas in ONE call, each landing owned and
    * placed, and the whole thing coming back in board order so the caller
@@ -224,6 +225,14 @@ export async function handleTaskBatch(
               ...(refs.after !== undefined ? { after: refs.after } : {}),
               ...(refs.afterEnforce !== undefined ? { afterEnforce: refs.afterEnforce } : {}),
             };
+      // A SHARE VISITOR MAY NOT FILE A SECRET ASK, on any door — see
+      // `SECRET_FILING_DENIAL`. Per ROW rather than per request: a batch is
+      // rows that each succeed or fail on their own, so one refused row
+      // joins `failures` and the honest ones still land.
+      if (visitor && asksForSecret((resolvedRow as Record<string, unknown>)?.review)) {
+        failures.push({ index, ...named, ...SECRET_FILING_DENIAL });
+        continue;
+      }
       const parsed = parseTaskCreate(resolvedRow, createdBy, batchBoard);
       if (!parsed.ok) {
         failures.push({

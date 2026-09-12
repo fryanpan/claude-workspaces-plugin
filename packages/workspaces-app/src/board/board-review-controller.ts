@@ -25,6 +25,8 @@ import {
   reviewItemOwner,
   reviewItemQuestionRequest,
   reviewReplyRequest,
+  reviewSecretsRequest,
+  secretsRequestFor,
 } from './board-review-model.ts';
 import { panelAnswerRequest, panelQuestionRequest } from './board-review-render.ts';
 
@@ -459,9 +461,84 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
     return 'answered';
   }
 
+  /**
+   * Hand over the values of a secret item, in one request.
+   *
+   * It is a sibling of `replyToReviewItem` rather than a branch inside it,
+   * and the split is the security property: that function's job is to post
+   * WORDS that get recorded and echoed, and this one's is to post values that
+   * must reach nothing. Nothing typed here is kept on failure either — the
+   * boxes are cleared by the card and the reader types again, because a
+   * retained value is a value sitting in a page for as long as the tab is
+   * open.
+   *
+   * All or nothing, decided by the server: a partial hand-over is refused
+   * rather than recorded, so there is no half-answered state to explain.
+   */
+  async function saveSecretsOnItem(
+    item: ReviewItem,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ): Promise<boolean> {
+    const reqSpec = reviewSecretsRequest(item, values);
+    if (!reqSpec) return false;
+    return sendSecrets(reqSpec, values);
+  }
+
+  /**
+   * The same hand-over from the TASK panel's card, which holds the ticket and
+   * the row id rather than a queue item.
+   *
+   * Both surfaces post to the item's own secrets route and neither can post
+   * words: the panel used to have no secrets verb at all, so its card fell
+   * through to the ordinary answer composer and a typed value was recorded on
+   * the item (UX review, 2026-09-12).
+   */
+  async function saveSecretsOnTaskItem(
+    taskId: string,
+    reviewItemId: string,
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ): Promise<boolean> {
+    return sendSecrets(secretsRequestFor(taskId, reviewItemId, values), values);
+  }
+
+  /**
+   * The one POST, so the refusal, the confirmation and the reload read the
+   * same on both surfaces.
+   *
+   * `values` is read for two things and neither is a value: how many fields
+   * there are, and what they are CALLED. The confirmation names the services
+   * and nothing else — the same words the item's own answer carries, which is
+   * the only thing about this hand-over anybody is ever told.
+   *
+   * Home had a confirmation of its own: the card settles into the answered
+   * stack and the tally moves. The task panel had none — the card simply
+   * vanished, because a ticket-borne item's answered record lives on a
+   * declaring comment and there is no comment (UX review, 2026-09-12). So the
+   * line is here, where both surfaces pass through, rather than bolted onto
+   * the one that was missing it.
+   */
+  async function sendSecrets(
+    reqSpec: { path: string; body: Record<string, unknown> },
+    values: ReadonlyArray<{ service: string; value: string }>,
+  ): Promise<boolean> {
+    if (values.length === 0) return false;
+    const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
+    if (!res.ok) {
+      // The message never names a value, and there is nothing of the reader's
+      // to preserve — see above.
+      showToast('Saving failed — nothing was recorded. Try again.');
+      return false;
+    }
+    showToast(`Saved: ${values.map((v) => v.service).join(', ')}`);
+    await loadReviewItems();
+    return true;
+  }
+
   return {
     startWalkthrough,
     openInQueue,
+    saveSecretsOnItem,
+    saveSecretsOnTaskItem,
     answerDecision,
     answerTaskDecision,
     undoThreadAnswer,

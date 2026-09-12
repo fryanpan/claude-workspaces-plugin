@@ -32,7 +32,31 @@
  * reachable" in docs/process/learnings.md). If a mockup later needs its own
  * embed, that is an additive field on `review`, not a third shape.
  */
-export type ReviewShape = 'decision' | 'review';
+export type ReviewShape = 'decision' | 'review' | 'secret';
+
+/**
+ * One secret a `secret` item asks for: what to call it, and the name it is
+ * stored under.
+ *
+ * The value is not here and never will be. It travels from the reader's field
+ * to the store down a path with no branch into this record — see the secrets
+ * door in `routes/task-review-items.ts` — and what comes back is the
+ * `service`, which is the only half an agent ever holds. That asymmetry is
+ * the whole feature: the person hands over the value, the agent is handed a
+ * name.
+ *
+ * `service` is also the STORE KEY, so its alphabet is narrow on purpose
+ * (`isSecretServiceName`): it is interpolated into a command's argv, and a
+ * name that could carry a space or a dash-leading flag is a name that could
+ * carry an argument.
+ */
+export interface ReviewSecretField {
+  /** What the reader is being asked for, in their words. The field's face. */
+  label: string;
+  /** The name the value is stored under, and the only part of this an agent
+   *  is ever told. `[A-Za-z0-9._-]`, 1–64 characters. */
+  service: string;
+}
 
 export interface ReviewOption {
   /** Stable within the payload. Records WHICH candidate an answer came from;
@@ -79,6 +103,21 @@ export interface ReviewPayload {
   /** `decision` only, at least two — a "choice" of one is a statement. */
   options?: ReviewOption[];
   /**
+   * `secret` only, one to six — the fields the reader fills in.
+   *
+   * A secret item is NOT a decision, and the difference is structural rather
+   * than a matter of labelling: a decision offers a closed set to choose
+   * between, and the gate refuses one with fewer than two options because a
+   * choice of one is a statement. A secret item offers no choice at all — it
+   * has fields, and one field is an ordinary ask. So it gets its own shape
+   * rather than a decision wearing a costume.
+   *
+   * `detail` carries the sentence saying why the value is needed, exactly as
+   * it does on the other two shapes. The reader is about to hand something
+   * over; the ask has to say what for.
+   */
+  secrets?: ReviewSecretField[];
+  /**
    * Only the BOARD'S OWNER may answer this one. Absent — which is every item
    * filed so far — means anybody on the board may.
    *
@@ -92,6 +131,12 @@ export interface ReviewPayload {
    * `true` or absent, never `false`. A field with three states is a field two
    * readers can disagree about, and the absent state already means the same
    * thing the third one would.
+   *
+   * FORCED TRUE on a `secret` item, by `readReviewPayload` — which is both
+   * the write path's normalizer and every read path's reader, so an item
+   * stored before this rule existed still comes out owner-only. A secret ask
+   * whose flag could be omitted would be a secret ask a Regular User could
+   * answer, and the flag is what the server's refusal reads.
    *
    * Enforced server-side by `requireOwner` in the answer route — the flag is
    * what the check reads, and hiding the composer is not the enforcement.

@@ -8,6 +8,7 @@ import { installLogSquelch } from './log-squelch.ts';
 import { acquirePort, classifyBindError, probeLocalPort, shouldWalkPorts } from './port-bind.ts';
 import { lanHostnames, tailscaleHost } from './public-host.ts';
 import { reservedPortError } from './reserved-ports.ts';
+import { storeSecret } from './secret-store.ts';
 import { captureServerError, flushServerSentry, initServerSentry } from './sentry.ts';
 import { resolveServerConfig } from './server-config.ts';
 import { createServerDeps } from './server-deps.ts';
@@ -272,6 +273,11 @@ while (!handle) {
       ...(notesComposer ? { meetingNotes: { composer: notesComposer, taskExtractor } } : {}),
       ...(pluginRefresher ? { pluginRefresher } : {}),
       ...(deployer ? { deployer } : {}),
+      // The one construction of the secret writer, and the reason the option
+      // has no default. macOS only: the store IS the login Keychain, so on
+      // any other platform there is nowhere to put a value and the door
+      // should say so (503) rather than run a command that cannot exist.
+      ...(process.platform === 'darwin' ? { secretWriter: storeSecret } : {}),
     });
   } catch (err) {
     const kind = classifyBindError(err);
