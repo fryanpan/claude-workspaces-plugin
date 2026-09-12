@@ -14591,6 +14591,12 @@ function isChannelEvent(event) {
 function nowMs2(deps) {
   return (deps.now ?? Date.now)();
 }
+async function outsideToolCall(deps, fn) {
+  if (deps.defer)
+    deps.defer(fn);
+  else
+    await fn();
+}
 function createFrameHandler(deps) {
   return (raw) => handleFrame(deps, raw);
 }
@@ -14618,7 +14624,7 @@ async function handleFrame(deps, raw) {
   }
   if (ev === "replay.gap") {
     const p = payload ?? {};
-    await deps.notify({
+    await outsideToolCall(deps, () => deps.notify({
       method: "notifications/claude/channel",
       params: {
         source: "claude-workspaces",
@@ -14626,11 +14632,11 @@ async function handleFrame(deps, raw) {
         content: `[replay.gap] events on ${p.docId ?? "a watched channel"} may have been missed while this session was disconnected — refetch state (get_doc / list_threads / next_tasks) rather than assuming the stream was complete`,
         meta: { event: "replay.gap", ...p.docId ? { doc_id: p.docId } : {} }
       }
-    });
+    }));
     return;
   }
   if (isChannelEvent(ev) && deps.shouldForward(ev, payload)) {
-    await deps.emitChannelMessage(ev, payload);
+    await outsideToolCall(deps, () => deps.emitChannelMessage(ev, payload));
   }
   await ackCommentRow(deps, payload);
 }
@@ -19607,7 +19613,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.217";
+var PLUGIN_VERSION = "0.1.218";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
@@ -19778,7 +19784,8 @@ var handleFrame2 = createFrameHandler({
   notify: (n) => server.notification(n),
   emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),
   http: (method, path, body) => http(method, path, body),
-  shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload)
+  shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload),
+  defer: (fn) => deferredEmits.emitOutsideToolCall(fn)
 });
 var loopTimers = {
   set: (fn, ms) => setTimeout(fn, ms),

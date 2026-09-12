@@ -27,10 +27,29 @@ export interface FrameHandlerDeps {
   shouldForward: (event: string, payload: unknown) => boolean;
   /** Injectable so a test can assert a gap notice's `sent_at`. */
   now?: () => number;
+  /**
+   * Hold a channel write until no tool call is in flight — the deferred
+   * emitter in deferred-emit.ts. A `notifications/claude/channel` frame
+   * written between a `tools/call` request and its response is never seen by
+   * the session (measured 2026-08-20 on the restore notice, and again
+   * 2026-09-11 on stall wakes: the server logged 19 for one board in seven
+   * hours and the lead's transcript held 4). The SSE loops used to write
+   * straight through, which was fine while sessions made few tool calls and
+   * stopped being fine once a lead ran several teammates on one connection.
+   * Optional so a test can drive the handler synchronously; the real process
+   * always passes it.
+   */
+  defer?: (fn: () => Promise<unknown>) => void;
 }
 
 function nowMs(deps: FrameHandlerDeps): number {
   return (deps.now ?? Date.now)();
+}
+
+/** Write through the deferred emitter when there is one, else right now. */
+async function outsideToolCall(deps: FrameHandlerDeps, fn: () => Promise<unknown>): Promise<void> {
+  if (deps.defer) deps.defer(fn);
+  else await fn();
 }
 
 /** Bind the handler to one process's dependencies. */
@@ -64,7 +83,8 @@ async function handleFrame(deps: FrameHandlerDeps, raw: string): Promise<void> {
     // carries no queue row, and acking one would claim delivery of the very
     // frames it is reporting as missing.
     const p = (payload ?? {}) as { docId?: string };
-    await deps.notify({
+    await outsideToolCall(deps, () =>
+      deps.notify({
       method: 'notifications/claude/channel',
       params: {
         source: 'claude-workspaces',
@@ -72,13 +92,14 @@ async function handleFrame(deps: FrameHandlerDeps, raw: string): Promise<void> {
         content: `[replay.gap] events on ${p.docId ?? 'a watched channel'} may have been missed while this session was disconnected — refetch state (get_doc / list_threads / next_tasks) rather than assuming the stream was complete`,
         meta: { event: 'replay.gap', ...(p.docId ? { doc_id: p.docId } : {}) },
       },
-    });
+      }),
+    );
     return;
   }
   // The kind gate FIRST, then the dedup: a word-rate frame must never reach
   // the dedup's window, let alone the channel (channel-gate.ts).
   if (isChannelEvent(ev) && deps.shouldForward(ev, payload)) {
-    await deps.emitChannelMessage(ev, payload);
+    await outsideToolCall(deps, () => deps.emitChannelMessage(ev, payload));
   }
   // The receipt for a durable comment row, AFTER the forward attempt (same
   // ordering rationale as the voice ack below: an ack sent first would clear
