@@ -1413,6 +1413,46 @@ describe('mountMarkupMargin — suggestion balloons', () => {
     );
   });
 
+  it('a proposal that changes the words AND links them names the link too', async () => {
+    const { parent, editor, ydoc, chrome, scope } = mountPlainWithChrome(
+      'The all-hands moves to the Riverbend office next month.\n',
+    );
+    await tick();
+    // Both halves at once: different words and a new link. The words alone
+    // make the card readable, which is exactly why the link went missing —
+    // Accept would write a link the card never showed.
+    suggestOps.suggestReplace(ydoc, {
+      find: 'the Riverbend office',
+      replace: '[the Harborlight office](/docs/harborlight)',
+      author: suggestAuthor,
+    });
+    await tick();
+
+    const margin = mountMarkupMargin({
+      editorEl: parent,
+      view: editor.editor.view,
+      getDeletions: () => [],
+      threads: () => chrome.collectThreads(),
+      chrome,
+      getSuggestions: () => suggestOps.listSuggestions(ydoc),
+      docId: 'd1',
+      scope,
+    });
+    margin.relayout();
+
+    let balloon = parent.querySelector('.cw-balloon.cw-balloon-suggestion') as HTMLElement;
+    expect(balloon.querySelector('.cw-suggest-new')?.textContent).toBe(
+      '[the Harborlight office](/docs/harborlight)',
+    );
+
+    clickToExpand(balloon);
+    balloon = parent.querySelector('.cw-balloon.cw-balloon-suggestion') as HTMLElement;
+    expect(balloon.querySelector('.cw-suggest-old')?.textContent).toBe('the Riverbend office');
+    expect(balloon.querySelector('.cw-suggest-new')?.textContent).toBe(
+      '[the Harborlight office](/docs/harborlight)',
+    );
+  });
+
   it('Accept posts to the accept endpoint and removes the card', async () => {
     const { parent, editor, ydoc, chrome, scope } = mountPlainWithChrome('Alpha bravo gamma.\n');
     await tick();

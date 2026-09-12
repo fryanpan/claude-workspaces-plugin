@@ -79,7 +79,7 @@
  * that bypasses the middleware is the route most worth probing, and a table
  * that skipped it would be silent about exactly the path nothing else covers.
  */
-import { isBoardPageRequest, matchWorkspaceRoute } from '../workspace-path.ts';
+import { isBoardPageRequest, matchWorkspaceRoute, wantsJson } from '../workspace-path.ts';
 
 /**
  * The board a request is on, and what under it was addressed.
@@ -176,6 +176,26 @@ export interface WorkspaceScopeDeps<TBoard = unknown> {
 }
 
 /**
+ * Is a BROWSER on the other end of this request?
+ *
+ * A second, weaker question than `isBoardPageRequest`, and it decides one
+ * thing only: the SHAPE of a refusal. A path the board serves no page for is
+ * still a path a person can paste into a tab — `/workspaces/<deleted>/review/…`
+ * is the shape that sent a reader hunting for a dead server — and answering
+ * that tab with `{"error":"workspace not found"}` is the same dead end in a
+ * different font.
+ *
+ * Keyed on `Accept` rather than on the path, because the path has already
+ * been asked and answered no. A browser navigation asks for `text/html`
+ * first; `fetch`, `curl` and every MCP tool send the wildcard type or ask
+ * for JSON, so none of them can be handed a page by this. It never changes WHAT is
+ * refused, only what the refusal looks like.
+ */
+export function acceptsHtml(accept: string | null): boolean {
+  return accept?.split(',').some((a) => a.trim().startsWith('text/html')) ?? false;
+}
+
+/**
  * Every collection whose next path segment names a MEMBER this board must
  * own, and — per collection — the words that sit where a member id goes and
  * are verbs instead.
@@ -224,7 +244,7 @@ export const SCOPED_COLLECTIONS: Readonly<Record<string, readonly string[]>> = {
  */
 export function resolveWorkspaceScope<TBoard>(
   deps: WorkspaceScopeDeps<TBoard>,
-  rq: { pathname: string; method: string; url: URL },
+  rq: { pathname: string; method: string; url: URL; accept?: string | null },
 ): WorkspaceScopeResult<TBoard> {
   const { pathname, method, url } = rq;
   const match = matchWorkspaceRoute(pathname);
@@ -247,6 +267,25 @@ export function resolveWorkspaceScope<TBoard>(
    * member both confirmed, and a refusal renders as a page rather than JSON.
    */
   const page = isBoardPageRequest(method, rest, url);
+  /**
+   * A refusal a BROWSER can read, whether or not the address it asked for is
+   * one the board serves a page at.
+   *
+   * `page` decides the routing — whether the shell at the tail gets the
+   * request — and it is the narrow list on purpose. It is the wrong list for
+   * deciding what a refusal LOOKS like: `/workspaces/<deleted>/review/<id>`
+   * is not a page this board serves and is exactly the address a person
+   * pastes, and it used to answer a tab with a JSON body. So the rendering
+   * question is asked of the request instead, and only of a GET.
+   *
+   * `?format=json` still wins over any header. It is the one thing in this
+   * server that means "answer me data whatever the path would otherwise do",
+   * and a browser-shaped `Accept` riding along with it — an `<iframe>`, a
+   * pasted debug URL — must not turn a caller's explicit ask into a page.
+   */
+  const render =
+    deps.notFoundPage &&
+    (page || (method === 'GET' && !wantsJson(url) && acceptsHtml(rq.accept ?? null)));
   const refuse = (
     status: number,
     body: unknown,
@@ -254,7 +293,7 @@ export function resolveWorkspaceScope<TBoard>(
   ): WorkspaceScopeResult<TBoard> => ({
     kind: 'refused',
     response:
-      page && deps.notFoundPage
+      render && deps.notFoundPage
         ? deps.notFoundPage({ workspaceId, rest, boardExists })
         : deps.j(status, body),
   });

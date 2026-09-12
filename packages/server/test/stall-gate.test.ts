@@ -137,13 +137,13 @@ describe('the default threshold', () => {
    * the definition. Twenty is what makes the goal reachable, and a later
    * change to it should have to come back through this test.
    */
-  it('is twenty minutes, so a stall surfaces within thirty of going quiet', () => {
-    expect(STALL_QUIET_DEFAULT_MS).toBe(20 * 60_000);
+  it('is thirty minutes, so a stall surfaces within forty of going quiet', () => {
+    expect(STALL_QUIET_DEFAULT_MS).toBe(30 * 60_000);
   });
 
   it('names a row that has been quiet for longer than the default', () => {
     const verdict = evaluate({
-      tasks: [task({ id: 't-1', transitions: [{ ts: now - 25 * MIN, to: 'in-progress' }] })],
+      tasks: [task({ id: 't-1', transitions: [{ ts: now - 35 * MIN, to: 'in-progress' }] })],
     });
     expect(verdict.stalled.map((r) => r.id)).toEqual(['t-1']);
   });
@@ -305,7 +305,7 @@ describe('a row waiting on a person with nothing filed is its own list', () => {
           id: 't-1',
           status: 'todo',
           ownerKind: 'person',
-          transitions: [{ ts: now - 25 * MIN, to: 'todo' }],
+          transitions: [{ ts: now - 35 * MIN, to: 'todo' }],
         }),
       ],
     });
@@ -321,23 +321,23 @@ describe('a row with a watching builder dispatch is judged by builder silence', 
   const watching = new Set(['t-1']);
 
   it('does not stall inside the doubled window, where an undispatched row would', () => {
-    // 30 minutes: past the ordinary 20-minute window (the control below
-    // proves it), inside the builder's 40. The builder promised work by
+    // 45 minutes: past the ordinary 30-minute window (the control below
+    // proves it), inside the builder's 60. The builder promised work by
     // existing, and the price of that promise is a longer leash, not a
     // shorter one.
-    const verdict = evaluate({ tasks: [quietFor(30)], watchingDispatchTaskIds: watching });
+    const verdict = evaluate({ tasks: [quietFor(45)], watchingDispatchTaskIds: watching });
     expect(verdict.stalled).toHaveLength(0);
     // …and the row was still EXAMINED, not exempted.
     expect(verdict.considered).toBe(1);
   });
 
   it('the same row without the dispatch stalls on today’s clock — the control', () => {
-    const verdict = evaluate({ tasks: [quietFor(30)] });
+    const verdict = evaluate({ tasks: [quietFor(45)] });
     expect(verdict.stalled.map((r) => r.bucket)).toEqual(['in-progress']);
   });
 
   it('a builder silent past twice the window is named, as builder-silent', () => {
-    const verdict = evaluate({ tasks: [quietFor(50)], watchingDispatchTaskIds: watching });
+    const verdict = evaluate({ tasks: [quietFor(70)], watchingDispatchTaskIds: watching });
     expect(verdict.stalled).toHaveLength(1);
     // The distinct name is the point: the lead's remedy for a silent builder
     // is to probe or replace it, not to find someone to claim the row —
@@ -348,12 +348,12 @@ describe('a row with a watching builder dispatch is judged by builder silence', 
 
   it('thread or worktree activity inside the doubled window exonerates it', () => {
     // The caller merges worktree churn into threadActivity (the server's
-    // exoneration seam); either way the row's last activity is 30 minutes
-    // ago, inside the doubled window.
+    // exoneration seam); either way the row's last activity is 45 minutes
+    // ago, inside the doubled window of sixty.
     const verdict = evaluate({
       tasks: [quietFor(200)],
       watchingDispatchTaskIds: watching,
-      threadActivity: new Map([['t-1', now - 30 * MIN]]),
+      threadActivity: new Map([['t-1', now - 45 * MIN]]),
     });
     expect(verdict.stalled).toHaveLength(0);
   });
@@ -361,7 +361,7 @@ describe('a row with a watching builder dispatch is judged by builder silence', 
   it('covers a dispatched todo row too — the builder, not the claim, is the promise', () => {
     const verdict = evaluate({
       tasks: [
-        task({ id: 't-1', status: 'todo', transitions: [{ ts: now - 50 * MIN, to: 'todo' }] }),
+        task({ id: 't-1', status: 'todo', transitions: [{ ts: now - 70 * MIN, to: 'todo' }] }),
       ],
       watchingDispatchTaskIds: watching,
     });
@@ -370,13 +370,13 @@ describe('a row with a watching builder dispatch is judged by builder silence', 
 
   it('honors a multiplier override', () => {
     const inside = evaluate({
-      tasks: [quietFor(50)],
+      tasks: [quietFor(70)],
       watchingDispatchTaskIds: watching,
       builderSilentMultiplier: 3,
     });
     expect(inside.stalled).toHaveLength(0);
     const past = evaluate({
-      tasks: [quietFor(70)],
+      tasks: [quietFor(100)],
       watchingDispatchTaskIds: watching,
       builderSilentMultiplier: 3,
     });
@@ -423,7 +423,7 @@ describe('a dispatched row whose holder has not reported owes a check-in', () =>
   });
 
   it('a row past the builder-silence window is a stall, and not also a reminder', () => {
-    const verdict = evaluate({ tasks: [quietFor(50)], watchingDispatchTaskIds: watching });
+    const verdict = evaluate({ tasks: [quietFor(70)], watchingDispatchTaskIds: watching });
     expect(verdict.stalled.map((r) => r.bucket)).toEqual([BUILDER_SILENT_BUCKET]);
     // The lead's act differs — probe the builder, versus ask for a line —
     // so the row appears under exactly one of them.

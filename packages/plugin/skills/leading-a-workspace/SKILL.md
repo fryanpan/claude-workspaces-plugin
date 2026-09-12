@@ -75,6 +75,8 @@ The second question is which order needs the fewest reviews and decisions from t
 
 **Do not work the latest request first, even when it comes straight from the primary user.** Check priority first, say where the new thing lands, and then work the top. Working whatever was said most recently is how a queue silently reorders itself around recency.
 
+**Answer a person who is live on the board before you do anything long.** A comment or a review answer from the primary user is a person waiting. Reply on their thread within minutes with what you will do next, then do that work first. Hand anything that runs longer than a few minutes — a build, a merge, a deploy, a review — to a subagent, so your own turns stay free to answer them. When nobody is waiting, doing the work yourself is fine. (The primary user, 2026-09-11: "when I'm trying to work with you live, I want you to be more responsive.")
+
 **Goal bands run automatically, in strict priority order.** Nobody has to tell you to dispatch the next task; a task waits only when the board records why — an `after` edge or a filed review item, per the general skill's blocked rules.
 
 **The Backlog is never auto-dispatched.** When everything above it is blocked or waiting on the primary user, the correct state is idle capacity plus filed review items naming each blockage — not a backlog pick. A nudge that names a backlog task is awareness, not a dispatch order.

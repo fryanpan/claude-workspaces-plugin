@@ -97,19 +97,20 @@ import type { UngatedUiRow } from './ui-review-gate.ts';
  *
  * Four hours: coarse enough that a lead who has seen the row once is not told
  * a second time inside the span it would take them to act on it, and fine
- * enough that a board abandoned overnight is named several times rather than
- * once. It quantises the silence of the board's OLDEST quiet row — see the
+ * enough that a board left alone is named again every half hour it stays so
+ * (the owner's number, 2026-09-11: "report again in half an hour if still
+ * stalled"). It quantises the silence of the board's OLDEST quiet row — see the
  * header — so nothing here is a timer and nothing needs cancelling.
  *
  * `CW_STALL_REPEAT_HOURS` overrides it, because this is the number that sets
  * what a fleet pays to be told about boards where nothing is changing.
  */
-export const STALL_REPEAT_DEFAULT_MS = 4 * 60 * 60_000;
+export const STALL_REPEAT_DEFAULT_MS = 30 * 60_000;
 
-/** How often the timer looks, when nobody says otherwise. Far below the quiet
- *  window on purpose: the tick is a cheap read over state already in memory,
- *  and the window is what decides when a wake is owed. */
-export const STALL_TICK_DEFAULT_MS = 60_000;
+/** How often the timer looks, when nobody says otherwise. Ten minutes, the
+ *  owner's number (2026-09-11): below the quiet window, so a wake lands within
+ *  a tick of being owed, and the window is what decides when that is. */
+export const STALL_TICK_DEFAULT_MS = 10 * 60_000;
 
 /**
  * How often ONE task may cost the lead a check-in reminder.
@@ -778,7 +779,7 @@ export class StallNudger {
     if (to === undefined) return;
     const top =
       board.stalled[0] ?? board.unfiled[0] ?? held[0] ?? askedBack[0] ?? ungatedUi[0] ?? checkIn[0];
-    this.emit(key, to.agentId, {
+    const delivered = this.emit(key, to.agentId, {
       event: STALL_EVENT,
       workspaceId: key,
       ...(top ? { taskId: top.id, title: top.title } : {}),
@@ -812,6 +813,9 @@ export class StallNudger {
       ...(to.escalatedFrom !== undefined ? { escalatedFrom: to.escalatedFrom } : {}),
       ts: now,
     });
+    // Nothing below is recorded for a wake nobody took: the stamp, the told
+    // rows and the check-in clocks all assert that the lead has heard.
+    if (!delivered) return;
     this.armed.set(key, stamp);
     // Recorded only now, after a delivered wake — a row named while the lead
     // held no stream must stay news, or the lead comes back to a board that
@@ -1410,16 +1414,29 @@ export class StallNudger {
     }
   }
 
-  private emit(workspaceId: string, agentId: string, frame: StallNudgeFrame): void {
+  /**
+   * Deliver one wake. True only when at least one stream took it: the caller
+   * arms the stamp and records `told` on that answer, so a wake that reached
+   * nobody stays owed. `send` used to be called for its side effect and its
+   * count thrown away, which let a board decide it had told a lead whose
+   * stream had closed between the reachability check and the write.
+   */
+  private emit(workspaceId: string, agentId: string, frame: StallNudgeFrame): boolean {
+    let sent: number;
     try {
-      this.opts.send(workspaceId, agentId, frame);
+      sent = this.opts.send(workspaceId, agentId, frame);
     } catch (err) {
       console.error('[stall] send failed:', err);
       // No line: a send that threw spent nobody's turn, and the count below
       // is meant to be countable.
-      return;
+      return false;
     }
-    this.noteWake(workspaceId, agentId, frame);
+    if (typeof sent === 'number' && sent <= 0) {
+      this.report(`[stall] wake undelivered ws=${workspaceId} lead=${agentId} streams=0`);
+      return false;
+    }
+    this.noteWake(workspaceId, agentId, frame, typeof sent === 'number' ? sent : undefined);
+    return true;
   }
 
   /**
@@ -1443,10 +1460,18 @@ export class StallNudger {
    * one no test can assert, and this has to stay true as the arming rules move
    * around it.
    */
-  private noteWake(workspaceId: string, agentId: string, frame: StallNudgeFrame): void {
+  private noteWake(
+    workspaceId: string,
+    agentId: string,
+    frame: StallNudgeFrame,
+    streams?: number,
+  ): void {
     try {
       this.report(
         `[stall] wake ws=${workspaceId} lead=${frame.escalatedFrom ?? agentId} ` +
+          // How many streams took the frame — the number that tells a wake
+          // the lead can read from one written into a closed socket.
+          (streams !== undefined ? `streams=${streams} ` : '') +
           // `lead=` keeps naming the SEAT HOLDER in both cases, so a log
           // grepped for one board reads as one story; `to=` appears only when
           // those two are different people.

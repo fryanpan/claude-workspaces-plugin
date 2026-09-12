@@ -234,14 +234,58 @@ function markedText(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): stri
 }
 
 /**
+ * One side's mark STRUCTURE: the sequence of mark sets its runs carry, each
+ * set flattened to a sorted `key=value` string, with consecutive equal ones
+ * collapsed and empty runs skipped.
+ *
+ * A sequence rather than a set, because where a mark sits is part of the
+ * proposal. `[alpha](/x) beta → alpha [beta](/x)` moves a link without
+ * adding or dropping one: the two sides hold the same single mark, and a set
+ * comparison calls that unchanged and shows neither side's syntax. The
+ * sequence reads `[link, plain]` against `[plain, link]` and does not.
+ *
+ * Lengths are deliberately absent: the words are free to change under a mark
+ * that stays put, which is exactly the case that should keep reading as
+ * words. Consecutive runs are collapsed so that a side split into two ops by
+ * a node boundary compares equal to the same text in one.
+ */
+function markShape(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): string[] {
+  const shape: string[] = [];
+  for (const range of entry.ranges) {
+    if (range.kind !== kind || range.text === '') continue;
+    const key = Object.entries(range.attributes)
+      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+      .sort()
+      .join(' ');
+    if (shape[shape.length - 1] !== key) shape.push(key);
+  }
+  return shape;
+}
+
+/** Do the two sides carry different inline marks, or the same ones in
+ *  different places? */
+function marksDiffer(entry: SuggestionScanEntry): boolean {
+  const deleted = markShape(entry, 'delete');
+  const inserted = markShape(entry, 'insert');
+  return deleted.length !== inserted.length || deleted.some((m, i) => m !== inserted[i]);
+}
+
+/**
  * The two sides as a card should SHOW them.
  *
- * Plain text, except when the plain text cannot tell the sides apart. A
- * proposal that only wraps existing words in a link — or tags them with a
- * speaker, or bolds them — changes a MARK and not a character, so both sides
- * read "the survey is late" and a reader working from the card alone is told
- * nothing. There the sides are spelled in the doc's own markdown instead:
- * `the survey is late → [the survey is late](/docs/survey)`.
+ * Plain text, except where plain text would hide part of the proposal. An
+ * agent that wraps words in a link — or tags them with a speaker, or bolds
+ * them — changes a MARK, and `insertedText` is the CHARACTERS: accept that
+ * proposal and the .md file gains a link the card never showed. So when the
+ * two sides' marks differ, both sides are spelled in the doc's own markdown
+ * instead: `the Riverbend office → [the Harborlight office](/docs/harborlight)`.
+ *
+ * The MARKS decide it, not the characters. The first rule here fired only
+ * when the two sides' characters were equal, which covered the pure
+ * link-wrap and missed the commoner shape — a proposal that changes the
+ * words AND links them, whose card read "the Riverbend office → the
+ * Harborlight office" with the link nowhere on it. Equal characters are one
+ * case of differing marks, not the test for them.
  *
  * Markdown rather than a caption, and that is the deliberate half. It needs
  * no word like "link:" to say what it is, it is exactly the text the .md file
@@ -249,19 +293,27 @@ function markedText(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): stri
  * and one rule covers every mark — a link, a speaker tag, `**bold**` — where
  * a caption would need a vocabulary.
  *
- * Only when the two sides' characters are EQUAL, so an ordinary word change
- * reads exactly as it did; and only when the marks actually differ, so a
- * no-op proposal does not sprout syntax.
+ * The same marks in the same places keep the raw text, so an ordinary word
+ * change reads exactly as it did, and so does one made inside a span that
+ * was already linked: nothing about the link is being proposed, so nothing
+ * about it belongs on the card.
+ *
+ * With one floor under that, which is where this rule started: if the
+ * CHARACTERS are equal, the raw text is two identical sides and a card built
+ * from it shows no proposal at all — so any difference in markdown is spelled
+ * out, including a mark boundary that moved inside an unchanged phrase
+ * (`[alpha beta](/x) gamma → [alpha](/x) beta gamma`). The known gap is that
+ * same shift WITH a word change alongside it, which the shape test reads as
+ * marks unmoved; narrowing it costs the case above, where a mark sits inside
+ * the range and only the words are being proposed.
  */
 function previewSides(entry: SuggestionScanEntry): { deleted: string; inserted: string } {
   const deleted = joinedText(entry, 'delete');
   const inserted = joinedText(entry, 'insert');
-  if (kindOf(entry) !== 'replace' || deleted === '' || deleted !== inserted) {
-    return { deleted, inserted };
-  }
   const mdDeleted = markedText(entry, 'delete');
   const mdInserted = markedText(entry, 'insert');
-  if (mdDeleted === mdInserted) return { deleted, inserted };
+  const hidden = deleted === inserted && mdDeleted !== mdInserted;
+  if (!marksDiffer(entry) && !hidden) return { deleted, inserted };
   return { deleted: mdDeleted, inserted: mdInserted };
 }
 

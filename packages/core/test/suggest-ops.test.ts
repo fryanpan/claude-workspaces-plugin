@@ -571,14 +571,19 @@ describe('suggestion insertions preserve surrounding inline marks', () => {
 });
 
 /**
- * A proposal that changes a MARK and not a character.
+ * A proposal that changes a MARK, whatever it did to the characters.
  *
- * `parseInlineMarks` defaults to true, so an agent wrapping existing words in
- * a link writes the same characters back: both sides of the card read "the
- * survey is late", the body redline shows the difference and a reader working
- * from the card alone is told nothing. The preview fields spell such a
- * proposal in the doc's own markdown instead — the text the .md file will
- * hold once it is accepted.
+ * `parseInlineMarks` defaults to true, so an agent wrapping words in a link
+ * leaves the link in a mark and not in the text: `insertedText` is the
+ * characters, and a card built from it can send a reader to Accept without
+ * ever showing the link Accept will write into the .md. The preview fields
+ * spell both sides in the doc's own markdown wherever the two sides' marks
+ * differ — the text the file will hold once the proposal is accepted.
+ *
+ * The cases below walk the axis that decides it: a mark added over the same
+ * words, a mark added while the words change too, a mark retargeted, and —
+ * as the control at the other end — marks that are EQUAL on both sides,
+ * which keep the raw words whether or not a link is there.
  *
  * `insertedText` / `deletedText` stay the raw characters throughout: a
  * proposal whose markdown did NOT parse reads `[label](url)` there, and that
@@ -650,18 +655,86 @@ describe('a proposal whose change is a mark', () => {
     });
   });
 
-  it('a word change that also adds a link still reads as the words', () => {
-    const doc = docFrom('See the docs here.\n');
+  it('names the link when the words change AND a link is added', () => {
+    const doc = docFrom('The all-hands moves to the Riverbend office next month.\n');
     const res = suggestReplace(doc, {
-      find: 'the docs',
-      replace: '[the manual](https://example.com)',
+      find: 'the Riverbend office',
+      replace: '[the Harborlight office](/docs/harborlight)',
       author,
     });
     expect(res.ok).toBe(true);
     expect(previewOf(doc)).toEqual({
-      del: 'the docs',
-      ins: 'the manual',
-      snippet: 'the docs → the manual',
+      del: 'the Riverbend office',
+      ins: '[the Harborlight office](/docs/harborlight)',
+      snippet: 'the Riverbend office → [the Harborlight office](/docs/harborli…',
+    });
+    // Still the raw characters, which accept and reject work from.
+    const s = listSuggestions(doc)[0]!;
+    expect(s.deletedText).toBe('the Riverbend office');
+    expect(s.insertedText).toBe('the Harborlight office');
+  });
+
+  it('names the tag when the words change AND a speaker tag is added', () => {
+    const doc = docFrom('Speaker B asked for the gate to move.\n');
+    const res = suggestReplace(doc, {
+      find: 'Speaker B',
+      replace: '[@Speaker C](speaker:C)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    expect(previewOf(doc)).toEqual({
+      del: 'Speaker B',
+      ins: '[@Speaker C](speaker:C)',
+      snippet: 'Speaker B → [@Speaker C](speaker:C)',
+    });
+  });
+
+  it('names both sides when the same link moves to different words', () => {
+    const doc = docFrom('Read [the Riverbend brief](/docs/riverbend) before Friday.\n');
+    const res = suggestReplace(doc, {
+      find: 'the Riverbend brief before Friday',
+      replace: 'the Riverbend brief [before Friday](/docs/riverbend)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    // One link on each side, and it is not the same proposal for that: accept
+    // this and the link lands on other words. The characters are equal, so
+    // only the syntax can say so.
+    const p = previewOf(doc);
+    expect(p.del).toBe('[the Riverbend brief](/docs/riverbend) before Friday');
+    expect(p.ins).toBe('the Riverbend brief [before Friday](/docs/riverbend)');
+  });
+
+  it('names both sides when a link boundary moves inside an unchanged phrase', () => {
+    const doc = docFrom('[the Riverbend brief](/docs/riverbend) landed today.\n');
+    const res = suggestReplace(doc, {
+      find: 'the Riverbend brief landed',
+      replace: '[the Riverbend](/docs/riverbend) brief landed',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    // Identical characters on both sides, and the same link in the same
+    // order: only where it ENDS moves. Raw text would put the same words
+    // left and right of the arrow and show no proposal at all.
+    const p = previewOf(doc);
+    expect(p.del).toBe('[the Riverbend brief](/docs/riverbend) landed');
+    expect(p.ins).toBe('[the Riverbend](/docs/riverbend) brief landed');
+  });
+
+  it('a word change inside an already-linked span keeps the raw words', () => {
+    const doc = docFrom('Read [the Saltmarsh plan](/docs/saltmarsh) before Friday.\n');
+    const res = suggestReplace(doc, {
+      find: 'the Saltmarsh plan',
+      replace: '[the Saltmarsh brief](/docs/saltmarsh)',
+      author,
+    });
+    expect(res.ok).toBe(true);
+    // The same link on both sides: the proposal is about the words, and the
+    // card says so without syntax.
+    expect(previewOf(doc)).toEqual({
+      del: 'the Saltmarsh plan',
+      ins: 'the Saltmarsh brief',
+      snippet: 'the Saltmarsh plan → the Saltmarsh brief',
     });
   });
 });

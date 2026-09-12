@@ -340,6 +340,9 @@ const handleFrame = createFrameHandler({
   emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),
   http: (method, path, body) => http(method, path, body),
   shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload),
+  // Every channel write waits for the in-flight tool call to answer first —
+  // see `defer` in frame-handler.ts for the measured loss this closes.
+  defer: (fn) => deferredEmits.emitOutsideToolCall(fn),
 });
 
 /**
