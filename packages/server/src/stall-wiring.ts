@@ -41,6 +41,7 @@ import {
 } from '@claude-workspaces/core';
 import { ListeningAnnouncer } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
+import { lastBoardActivityAt } from './board-activity.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
 import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
@@ -315,8 +316,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(capView ? { parallelismCap: capSummary(capView) } : {}),
       undetermined: verdict.undetermined,
       // The store's durable half of the idle clock. Survives a restart, which
-      // the in-process observations cannot — see ready-nudge.ts.
-      lastActivityAt: tasks.reduce((max, t) => Math.max(max, t.updatedAt, t.createdAt), 0),
+      // the in-process observations cannot — see ready-nudge.ts. Read off the
+      // board's own stamp rather than reduced from `task.updatedAt`: a
+      // turn-end note bumps `updatedAt` and is excluded from board activity,
+      // so the derived reading counted exactly what the filter exists to
+      // ignore and kept this wake silent on every busy board
+      // (`board-activity.ts`).
+      lastActivityAt: lastBoardActivityAt(workspace, tasks),
     };
   };
   /**

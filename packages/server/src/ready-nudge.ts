@@ -106,16 +106,12 @@ export const READY_TICK_DEFAULT_MS = 60_000;
 export const READY_IDLE_EVENT = 'workspace.ready_idle';
 
 /**
- * Whether a store event counts as THE BOARD MOVING — what restarts a
- * board's idle clock. Liveness does not: `agent.*` (attached / detached /
- * heartbeat) is the session being there, and `task.noted` is the session
- * ending a turn — one per turn from any agent holding a row, so counting it
- * would suppress the wake for exactly as long as a builder keeps talking
- * without moving anything, which is the state the wake exists to catch.
+ * Re-exported, not defined here any more. The rule now has TWO readers — this
+ * module's in-process clock and the durable one stamped at the store's emit
+ * choke point — and the two disagreeing is the defect `board-activity.ts`
+ * exists to close, so the predicate lives with that reasoning.
  */
-export function isBoardActivity(type: string): boolean {
-  return !type.startsWith('agent.') && type !== 'task.noted';
-}
+export { isBoardActivity } from './board-activity.ts';
 export const REVIEW_ANSWERED_EVENT = 'workspace.review_answered';
 
 /** A ready row, reduced to what a wake needs to say. */
