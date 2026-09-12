@@ -129,7 +129,6 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/api/push/subscriptions', 'POST DELETE'],
     ['trusted-local', '/api/deploy', 'GET POST'],
     ['loopback-only', '/api/sentry', 'GET POST'],
-    ['loopback-only', '/api/meetings/retitle', 'POST'],
   ]),
 
   ...family('routes/prompts.ts', [

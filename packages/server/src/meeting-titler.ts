@@ -17,7 +17,7 @@
  * call returns — see there.
  *
  * And the one-time retitle of the clock titles this server used to mint,
- * `retitleClockTitles`, which the operator route runs once after deploy.
+ * `retitleClockTitles`, which every boot runs (`retitleClockTitlesAtBoot`).
  */
 
 import type { DocMeta, DocTitleSource } from '@claude-workspaces/core';
@@ -143,6 +143,10 @@ export async function retitleClockTitles(
     const old = meta.title;
     if (!isMeetingDoc(meta) || meta.titleSource !== undefined) continue;
     if (old === undefined || !CLOCK_TITLE.test(old)) continue;
+    // A turn of the event loop per candidate: each one hydrates a doc, and at
+    // boot this runs beside the first requests. The guard below still holds
+    // across the gap — the write names the title it read.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const notes = store.readMarkdownBody(meta.docId);
     let title: string;
     let source: Extract<DocTitleSource, 'auto' | 'default'>;
@@ -164,4 +168,29 @@ export async function retitleClockTitles(
     else skipped++;
   }
   return { renamed, skipped };
+}
+
+/**
+ * The retitle as a boot pass: what `server.ts` starts once the port is bound.
+ *
+ * A pass, not a route, because the one place it has to run is a deployed
+ * server nobody can POST to. It is safe on every boot because it is
+ * idempotent — a renamed doc carries a `titleSource` and is never a
+ * candidate again — so the first boot after the deploy renames and every
+ * boot after it logs 0. One line, the count only: the log is read by people
+ * who need to know it ran, not what anybody's meetings were called.
+ */
+export async function retitleClockTitlesAtBoot(
+  store: MeetingTitleStore,
+  namer: MeetingNamer | null,
+  log: (line: string) => void = console.log,
+): Promise<void> {
+  try {
+    const { renamed } = await retitleClockTitles(store, namer);
+    log(`[meeting-title] renamed ${renamed} old titles`);
+  } catch (err) {
+    log(
+      `[meeting-title] rename of old titles failed (${err instanceof Error ? err.name : 'error'})`,
+    );
+  }
 }

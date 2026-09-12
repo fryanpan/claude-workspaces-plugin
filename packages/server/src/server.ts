@@ -41,7 +41,7 @@ import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
 import { MeetingRelay } from './meeting-protocol.ts';
 import { MEETING_CAPTURE_ACTOR } from './meeting-task-capture.ts';
-import { retitleClockTitles } from './meeting-titler.ts';
+import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
@@ -1824,9 +1824,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // at the same claim.
     notesQualityRollup: () =>
       rollupNotesQuality(dataDir, { now: Date.now(), windowMs: NOTES_QUALITY_WINDOW_MS }),
-    // The same namer the live meetings use: no key, no topics, and a meeting
-    // with notes is skipped rather than defaulted so a later run can name it.
-    retitleMeetings: () => retitleClockTitles(docStore, opts.meetingNotes?.titleNamer ?? null),
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -2838,6 +2835,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // over the same 99 rows, and the abandoned one still calling the API.
   // Reaching this line is what makes a server real.
   void rescoreStaleEffortEstimates();
+  // The old clock titles are renamed here for the same reason: once, by the
+  // server that was kept, never blocking the boot it follows.
+  void retitleClockTitlesAtBoot(docStore, opts.meetingNotes?.titleNamer ?? null);
 
   /**
    * The base every human-facing URL this server emits is built on.

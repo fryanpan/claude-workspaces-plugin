@@ -176,21 +176,6 @@ describe('/api/sentry through the edge', () => {
   });
 });
 
-describe('POST /api/meetings/retitle through the edge', () => {
-  it('refuses the operator through the hop', async () => {
-    const r = await viaEdge('/api/meetings/retitle', 'POST');
-    expect(r.status).toBe(403);
-    const body = (await r.json()) as { error: string };
-    expect(body.error).toMatch(/proxied|edge/i);
-  });
-
-  it('positive control: the same POST from the box runs', async () => {
-    const r = await fromBox('/api/meetings/retitle', 'POST');
-    expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ renamed: 0, skipped: 0 });
-  });
-});
-
 describe('POST /api/plugin/refresh through the edge', () => {
   it('positive control: the operator REACHES the route through the edge (GET)', async () => {
     const r = await viaEdge('/api/plugin/refresh', 'GET');

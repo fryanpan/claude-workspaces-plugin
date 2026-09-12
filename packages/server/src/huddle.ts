@@ -38,7 +38,7 @@ export function huddleTitle(kind?: HuddleKind): string {
  * The clock titles this server used to mint: "Meeting notes 2026-08-29
  * 14:05", "Plan 2026-08-29 14:05", and a calendar meeting's untitled
  * "Meeting 2026-09-01 14:05". Exact, so a title a person typed is never
- * mistaken for one — the one-time retitle (`meeting-retitle.ts`) rewrites
+ * mistaken for one — the boot pass that retitles them (`meeting-titler.ts`) rewrites
  * only a title that still reads as the server minted it.
  */
 export const CLOCK_TITLE = /^(?:Meeting notes|Plan|Meeting) \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;

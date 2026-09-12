@@ -2225,12 +2225,16 @@ writes the title in one synchronous step after the model call returns
 A doc from before the field existed has no source and is never renamed by a
 meeting.
 
-**The old clock titles.** `POST /api/meetings/retitle` (loopback only, never
-through the edge, never a browser) renames every meeting whose title is still
-exactly a minted clock title — "Meeting notes 2026-09-03 10:15", "Plan …" —
-and carries no source: its topic when it has notes, else the default. It
-answers `{renamed, skipped}` and nothing else. A doc with notes and no usable
-topic is skipped so a later run can name it; a second run finds nothing.
+**The old clock titles.** Every boot renames every meeting whose title is
+still exactly a minted clock title — "Meeting notes 2026-09-03 10:15", "Plan
+…" — and carries no source: its topic when it has notes, else the default.
+It runs once the port is bound and never holds the boot up
+(`retitleClockTitlesAtBoot`). A boot pass rather than a route, because the
+server it has to run on is a deployed one nobody POSTs to. It logs one line,
+`[meeting-title] renamed N old titles`, and nothing a meeting was called. A
+renamed doc carries a source and no longer matches, so the first boot after
+the deploy renames and every later boot logs 0. A doc with notes and no usable
+topic is skipped, and a later boot can still name it.
 
 `CW_MEETING_TITLES=0` turns naming off.
 
