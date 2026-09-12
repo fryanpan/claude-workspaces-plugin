@@ -17,6 +17,7 @@
  * module is a leaf at runtime, and `review-item.ts` re-exports both it and
  * the contract.
  */
+import { applySecretShape } from './review-item-secret-wire.ts';
 import type {
   ReviewAnswerUndone,
   ReviewInfoRequest,
@@ -27,7 +28,6 @@ import type {
   ReviewJudgeVerdictKind,
   ReviewOption,
   ReviewPayload,
-  ReviewSecretField,
   ReviewShape,
   TaskReviewItem,
 } from './review-item-types.ts';
@@ -49,60 +49,40 @@ const JUDGE_VERDICTS: ReadonlySet<string> = new Set(['ok', 'held', 'unavailable'
  * new spellings are accepted at every door and normalized here; old spellings
  * are accepted forever for the callers nobody can restart.
  */
+/**
+ * Whether this build reads the SECRET shape at all. True everywhere a person
+ * could answer such an ask — the board, the server, the MCP bundle.
+ *
+ * It is a named anchor as much as a value. The widget's build DELETES the two
+ * lines that mention it below (`packages/widget/scripts/build.ts`), and that
+ * deletion is the whole of how that bundle stops carrying a shape it has no
+ * UI for and must never render: `normalizeReviewType` then answers undefined
+ * for a stored secret payload, so `readReviewPayload` returns undefined, so
+ * the comment carrying it stays an ordinary comment the dock never sees as an
+ * ask. Dropping the ask is the safe direction — there is no state in which
+ * that bundle renders a secret ask with its owner-only flag missing, because
+ * there is no state in which it renders one.
+ *
+ * Deleted rather than flipped because Bun's minifier does not fold a constant
+ * into the branch that reads it — measured: flipping this to `false` left
+ * both branches, the call and the module they reach in the bundle, 28 bytes
+ * over the budget. The rewrite fails the build when either line stops
+ * matching, so a rename cannot quietly put the reader back into every embed.
+ */
+const READS_SECRET_SHAPE = true;
+
 export function normalizeReviewType(value: unknown): ReviewShape | undefined {
   if (value === 'decision') return 'decision';
   if (value === 'review' || value === 'question') return 'review';
   // One spelling, agent-facing and stored alike. The `review`/`question`
   // split above exists because a rename arrived after ~168 docs already said
   // the old word; this shape is new, so it never earns a second spelling.
-  if (value === 'secret') return 'secret';
+  //
+  // Behind the flag the widget's build turns off, because the widget must
+  // never render this shape — see `review-item-secret-wire.ts` for what the
+  // stand-in does and why the answer it gives there is the safe one.
+  if (READS_SECRET_SHAPE && value === 'secret') return 'secret';
   return undefined;
-}
-
-/**
- * The alphabet a stored-secret name may use, and the one place it is written.
- *
- * Narrow because the name is INTERPOLATED INTO A COMMAND'S ARGUMENT LIST by
- * the writer that stores the value. A name holding a space would split into
- * two arguments, and the length ceiling keeps a pasted document out of an
- * argv slot.
- *
- * THE FIRST CHARACTER IS NARROWER THAN THE REST, and that is the half worth
- * reading twice. `-` is a legal character inside a name (`riverbend-weather-
- * key` is the shape every real one has) and an unacceptable one to START
- * with: the writer's command is `security add-generic-password … -s <name>`,
- * and a name of `-w` would be consumed as that command's own password flag
- * rather than as the value of `-s`. The first version of this predicate
- * allowed it, and the test that names the case is what found it.
- *
- * Shared by the gate that admits an item (`checkReviewPayload`) and the
- * module that runs the command, so the name the card showed and the name the
- * store accepts cannot be two different sets.
- */
-export function isSecretServiceName(value: unknown): value is string {
-  return typeof value === 'string' && /^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$/.test(value);
-}
-
-/**
- * The asked-for fields, read back defensively — label and service only.
- *
- * There is no value to read: a stored payload has never held one, on any
- * path. A row missing either half is dropped rather than rendered half-built,
- * because a field with no service has nowhere to store what the reader types
- * and a field with no label asks for nothing.
- */
-function readSecretFields(value: unknown): ReviewSecretField[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const out: ReviewSecretField[] = [];
-  for (const raw of value) {
-    if (!isPlainObject(raw)) continue;
-    if (typeof raw.label !== 'string' || raw.label.trim() === '') continue;
-    // Read through the same predicate the gate uses. A stored name that
-    // would not be admitted today is dropped rather than handed to a writer.
-    if (!isSecretServiceName(raw.service)) continue;
-    out.push({ label: raw.label, service: raw.service });
-  }
-  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -270,15 +250,10 @@ export function readReviewPayload(value: unknown): ReviewPayload | undefined {
     if (options.length > 0) out.options = options;
   }
 
-  const secrets = readSecretFields(value.secrets);
-  if (secrets) out.secrets = secrets;
-  // FORCED, not read. This function is the write path's normalizer AND every
-  // read path's reader, so setting it here means a secret item is owner-only
-  // when it is stored, when it is read back, and when it is read back out of
-  // a `.ydoc` written before this line existed. The server's refusal reads
-  // the flag (`refuseOwnerOnlyWrite`), so anything that could arrive without
-  // it is an ask a Regular User could answer.
-  if (shape === 'secret') out.ownerOnly = true;
+  // The secret shape's own reading — fields and the owner-only flag — lives
+  // in the module the widget swaps out, behind the flag that lets its bundler
+  // delete this line, so the widget carries none of it.
+  if (READS_SECRET_SHAPE) applySecretShape(out, shape, value);
   return out;
 }
 

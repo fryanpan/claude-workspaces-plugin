@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { BunPlugin } from 'bun';
 import { minifyCss } from './minify-css.ts';
 import { assertShimCovers } from './shim-guard.ts';
+import { stripSecretShape } from './strip-secret-shape.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(here, '..');
@@ -75,6 +76,23 @@ const cssMinify: BunPlugin = {
   },
 };
 
+/**
+ * The widget carries no SECRET shape, and this is where that is made true.
+ * What comes out, why it is a deletion rather than a flag, and what it leaves
+ * a widget holding a stored secret payload doing, are all in
+ * `strip-secret-shape.ts`; the rewrite throws rather than shipping a reader
+ * it could not find.
+ */
+const secretShapeOff: BunPlugin = {
+  name: 'widget-no-secret-shape',
+  setup(build) {
+    build.onLoad({ filter: /core[/\\]src[/\\]review-item-wire\.ts$/ }, (args) => ({
+      contents: stripSecretShape(readFileSync(args.path, 'utf8'), args.path),
+      loader: 'ts',
+    }));
+  },
+};
+
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
@@ -86,7 +104,7 @@ async function build(format: 'esm' | 'iife', name: string, entry = 'widget.ts') 
     format: format === 'iife' ? 'iife' : 'esm',
     minify: true,
     sourcemap: 'external',
-    plugins: [lib0Shims, cssMinify],
+    plugins: [lib0Shims, cssMinify, secretShapeOff],
     naming: {
       entry: name,
     },

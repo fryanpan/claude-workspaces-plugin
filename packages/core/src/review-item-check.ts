@@ -15,7 +15,8 @@
  * card ends up showing something the API swore it had refused.
  */
 import { asksReaderToLook, hasLink } from './review-item-look-ask.ts';
-import { isPlainObject, isSecretServiceName, normalizeReviewType } from './review-item-wire.ts';
+import { isSecretServiceName } from './review-item-secret-wire.ts';
+import { isPlainObject, normalizeReviewType } from './review-item-wire.ts';
 import { wordCount } from './word-count.ts';
 
 /**
