@@ -118,7 +118,11 @@ import {
   handleTaskRoutes,
 } from './routes/tasks.ts';
 import { createUpgradeStream } from './routes/upgrade-stream.ts';
-import { type LibraryRoutesContext, handleLibraryRoutes } from './routes/workspace-library.ts';
+import {
+  type LibraryRoutesContext,
+  handleLibraryRoutes,
+  libraryRunOutputSource,
+} from './routes/workspace-library.ts';
 import { handleWorkspaceNotFound } from './routes/workspace-not-found.ts';
 import {
   type MeetingHomeResolution,
@@ -139,6 +143,7 @@ import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
 import { HTTP_IDLE_TIMEOUT_SEC, SseBus } from './sse.ts';
 import { createStallWiring } from './stall-wiring.ts';
 import { TaskProjection, taskBodyDocId } from './task-projection.ts';
+import { type RunOutputSource, observeRunOutput } from './task-run-output.ts';
 import { DEFAULT_SPAWNER_AGENT_ID, observeScheduledWake } from './task-scheduled-wake.ts';
 import { type FiredOccurrence, SCHEDULER_ACTOR, createTaskScheduler } from './task-scheduler.ts';
 import {
@@ -1124,6 +1129,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // `schedulerNow` is a seam for the same reason `stallNudgeQuietMs` is one:
   // the feature IS a comparison against a clock, so a test that could not move
   // the clock would have to burn real minutes to assert anything.
+  let runOutputSource = (): RunOutputSource => ({ files: () => null, opened: () => false });
   const taskScheduler = createTaskScheduler(taskStore, {
     ...(opts.schedulerNow !== undefined ? { now: opts.schedulerNow } : {}),
     observers: [
@@ -1139,6 +1145,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           report: (message) => console.error(message),
         },
         SCHEDULER_ACTOR,
+      ),
+      // A declared output folder's new files reach Home as one item per run.
+      // The Library's context is built further down; a tick reads it late.
+      observeRunOutput(
+        taskStore,
+        {
+          files: (ws) => runOutputSource().files(ws),
+          opened: (ws, relPath) => runOutputSource().opened(ws, relPath),
+        },
+        SCHEDULER_ACTOR,
+        (message) => console.error(message),
       ),
     ],
   });
@@ -1858,6 +1875,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     markdownFiles: createMarkdownLister(),
     requestAddress: (req) => server.requestIP(req)?.address,
   };
+  runOutputSource = () =>
+    libraryRunOutputSource(libraryRoutesCtx, (id) => taskStore.getWorkspace(id));
 
   /**
    * Where a board's meetings file: its project, and what that project chose.

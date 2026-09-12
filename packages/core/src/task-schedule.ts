@@ -28,6 +28,7 @@
  */
 
 import type { MissedRunPolicy } from './schedule-missed.ts';
+import type { ScheduleOutput, ScheduleOutputState } from './schedule-output.ts';
 import { DEFAULT_SCHEDULE_TIMEZONE, instantForLocal, zonedParts } from './schedule-timezone.ts';
 import { type ScheduleOnChange, nextChangeOccurrence } from './schedule-trigger.ts';
 import type { ScheduleWake } from './schedule-wake.ts';
@@ -155,6 +156,9 @@ export interface ScheduleState {
   /** The last instance's wake — attempts, and whether anybody answered
    *  (`schedule-wake.ts`). Replaced when the next instance is filed. */
   wake?: ScheduleWake;
+  /** What was done with the last run's declared output (`schedule-output.ts`):
+   *  one look per success, and the Home item still standing for it. */
+  output?: ScheduleOutputState;
 }
 
 /**
@@ -177,6 +181,9 @@ export interface TaskSchedule {
   armedAt: number;
   /** Display name of whoever set it. */
   armedBy?: string;
+  /** The folder the rule's runs write into, when it declares one. A run's
+   *  files there reach Home as one item (`schedule-output.ts`). */
+  output?: ScheduleOutput;
   state?: ScheduleState;
 }
 

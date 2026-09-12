@@ -5,7 +5,8 @@
  * missed-run policy was parsed and then dropped, so "skip if missed" saved as
  * catch-up. Asserted on the row read back over HTTP, not on the response,
  * which echoes whatever the route thought it stored. An on-change rule goes
- * through the same door. Fixtures are invented; the repo is public.
+ * through the same door, and so does a declared output folder, which a write
+ * that does not mention it must keep. Fixtures are invented; the repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -82,6 +83,24 @@ describe('POST /workspaces/:ws/tasks/:id/schedule', () => {
     });
     expect(plain.status).toBe(200);
     expect((await stored())?.schedule?.onMissed).toBeUndefined();
+  });
+
+  it('keeps a declared output folder across a write that does not mention it, and clears it on null', async () => {
+    const rule = { kind: 'every', everyMs: 3_600_000 };
+    const path = `/workspaces/${wsId}/tasks/${taskId}/schedule`;
+    expect(
+      (await post(path, { author: PERSON, rule, output: { folder: 'roundups/' } })).status,
+    ).toBe(200);
+    expect((await stored())?.schedule?.output).toEqual({ folder: 'roundups' });
+    // The phrase editor rewrites the rule without knowing about outputs.
+    expect((await post(path, { author: PERSON, rule, onMissed: 'skip' })).status).toBe(200);
+    expect((await stored())?.schedule?.output).toEqual({ folder: 'roundups' });
+    expect((await post(path, { author: PERSON, rule, output: { folder: '../up' } })).status).toBe(
+      400,
+    );
+    expect((await stored())?.schedule?.output).toEqual({ folder: 'roundups' });
+    expect((await post(path, { author: PERSON, rule, output: null })).status).toBe(200);
+    expect((await stored())?.schedule?.output).toBeUndefined();
   });
 
   it('stores an on-change rule with its source and quiet window, and refuses a bad id', async () => {
