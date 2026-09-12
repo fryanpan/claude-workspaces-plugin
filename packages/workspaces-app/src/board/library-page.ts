@@ -136,9 +136,11 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     return `<div class="library-tbl"><div class="library-cols" aria-hidden="true"><span>${c1}</span><span>${c2}</span></div><div class="library-list">${list}</div></div>`;
   }
 
-  /** A burst is known by its newest file, which a later load leaves in place. */
-  const burstKey = (rows: readonly LibraryRow[]): string =>
-    `${rows[0]?.at ?? ''}|${rows[0]?.name ?? ''}`;
+  /**
+   * A burst is known by where its newest file opens — unique per row, where a
+   * name is not — so a later load that adds files after it keeps it open.
+   */
+  const burstKey = (rows: readonly LibraryRow[]): string => rows[0]?.open ?? rows[0]?.href ?? '';
 
   /**
    * One line for a burst, which opens in place onto its files. The line reads

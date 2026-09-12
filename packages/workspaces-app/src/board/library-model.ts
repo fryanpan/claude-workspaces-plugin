@@ -59,7 +59,7 @@ export type LibraryFileEntry =
 
 /**
  * How close together, in file-modified time, two neighbouring files must be
- * to belong to one burst. Measured on generator output in three local
+ * to belong to one burst. Measured on generator output in two local
  * research repos: inside a run the widest gap between consecutive files was
  * 48s (nine review files); the narrowest gap between a run and the file
  * before or after it was 112s (and a digest written 4m16s after its seven
