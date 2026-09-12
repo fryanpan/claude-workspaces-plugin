@@ -1,7 +1,7 @@
 /**
- * The Library page's pure rules: how long ago a row happened, what a search
- * finds, and which files a generator wrote in one burst. All fixtures
- * synthetic.
+ * The Library page's pure rules: when a row happened, which order a list is
+ * in, which docs live in one place, what a search finds, and which files a
+ * generator wrote in one burst. All fixtures synthetic.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -13,11 +13,11 @@ import {
   type LibraryRow,
   burstLabel,
   fileEntries,
-  libraryAgo,
-  libraryLength,
+  libraryWhen,
   libraryWhenColumn,
-  meetingSubtitle,
+  placeRows,
   searchLibrary,
+  sortRows,
 } from '../src/board/library-model.ts';
 
 const NOW = 1_700_000_000_000;
@@ -25,7 +25,9 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
-describe('libraryAgo', () => {
+describe('libraryWhen', () => {
+  const fmt = { locale: 'en-US', timeZone: 'UTC' };
+  // NOW is 2023-11-14 22:13 UTC.
   it.each([
     [30_000, 'just now'],
     [MIN, '1m ago'],
@@ -33,18 +35,18 @@ describe('libraryAgo', () => {
     [HOUR, '1h ago'],
     [23 * HOUR, '23h ago'],
     [DAY, '1d ago'],
-    [13 * DAY, '13d ago'],
-    [14 * DAY, '2w ago'],
-    [29 * DAY, '4w ago'],
-    [30 * DAY, '1mo ago'],
-    [364 * DAY, '12mo ago'],
-    [365 * DAY, '1y ago'],
+    [7 * DAY - MIN, '6d ago'],
+    // Seven days on, a date — never "1w ago".
+    [7 * DAY, 'Nov 7'],
+    [40 * DAY, 'Oct 5'],
+    // Another year says which.
+    [365 * DAY, 'Nov 14, 2022'],
   ])('%i ms ago reads %s', (delta, text) => {
-    expect(libraryAgo(NOW - delta, NOW)).toBe(text);
+    expect(libraryWhen(NOW - delta, NOW, fmt)).toBe(text);
   });
 
   it('reads a time slightly in the future as just now, not a negative age', () => {
-    expect(libraryAgo(NOW + 5_000, NOW)).toBe('just now');
+    expect(libraryWhen(NOW + 5_000, NOW, fmt)).toBe('just now');
   });
 });
 
@@ -54,40 +56,84 @@ describe('the time column', () => {
     expect(libraryWhenColumn({ name: 'Volunteer handbook', at: NOW - HOUR }, NOW)).toBe('1h ago');
     expect(libraryWhenColumn({ name: 'A doc whose file went away' }, NOW)).toBe(LIBRARY_NO_TIME);
   });
+
+  it('reads the clock the list is sorted by', () => {
+    const row = { name: 'Ferry schedule', at: NOW - HOUR, created: NOW - 3 * DAY };
+    expect(libraryWhenColumn(row, NOW, 'modified')).toBe('1h ago');
+    expect(libraryWhenColumn(row, NOW, 'created')).toBe('3d ago');
+    expect(libraryWhenColumn({ name: 'No birth time', at: NOW }, NOW, 'created')).toBe(
+      LIBRARY_NO_TIME,
+    );
+  });
 });
 
-describe('a meeting row', () => {
-  it.each([
-    [5 * MIN, '5 min'],
-    [30_000, '1 min'],
-    [47 * MIN, '47 min'],
-    [HOUR, '1 hr'],
-    [72 * MIN, '1 hr 12 min'],
-  ])('%i ms of recording reads %s', (ms, text) => {
-    expect(libraryLength(ms)).toBe(text);
+describe('sortRows', () => {
+  const rows: LibraryRow[] = [
+    { name: 'a', at: NOW, created: NOW - 5 * DAY },
+    { name: 'b', at: NOW - HOUR, created: NOW - DAY },
+    { name: 'c', at: NOW - 2 * HOUR },
+    { name: 'd', at: NOW - 3 * HOUR, created: NOW - DAY },
+  ];
+
+  it('orders by creation newest first, unknown last, ties as sent', () => {
+    expect(sortRows(rows, 'created').map((r) => r.name)).toEqual(['b', 'd', 'a', 'c']);
   });
 
-  /**
-   * The finding this exists for: a board's meetings are all titled from the
-   * clock at the minute they opened, so the LIST has to separate them.
-   */
-  it('is told apart from another of the same title by when it ran and for how long', () => {
-    const fmt = { locale: 'en-US', timeZone: 'UTC' };
-    const one = { name: 'Meeting notes 2026-09-11 16:11', at: NOW, durationMs: 5 * MIN };
-    const two = {
-      name: 'Meeting notes 2026-09-11 16:11',
-      at: NOW - 26 * HOUR,
-      durationMs: 47 * MIN,
+  it('orders by last modified newest first, and leaves the input alone', () => {
+    const shuffled = [rows[2], rows[0], rows[3], rows[1]] as LibraryRow[];
+    expect(sortRows(shuffled, 'modified').map((r) => r.name)).toEqual(['a', 'b', 'c', 'd']);
+    expect(shuffled.map((r) => r.name)).toEqual(['c', 'a', 'd', 'b']);
+  });
+});
+
+describe('placeRows', () => {
+  it("lists the docs of one place, from the list that place's kind is in", () => {
+    const lib: LibraryPayload = {
+      project: null,
+      meetings: [
+        { name: 'Kickoff', href: '/m/1', place: 'meetings:Stored by Workspaces:' },
+        { name: 'Walkthrough', href: '/m/2', place: 'meetings:docs/meetings:' },
+      ],
+      files: [
+        { name: 'dock-survey.md', href: '/f/1', place: 'documents:notes:not mounted' },
+        { name: 'loose.md', open: 'loose.md' },
+      ],
+      where: [
+        {
+          kind: 'meetings',
+          unset: false,
+          places: [
+            { key: 'meetings:docs/meetings:', label: 'docs/meetings', folder: true, stray: false },
+            {
+              key: 'meetings:Stored by Workspaces:',
+              label: 'Stored by Workspaces',
+              folder: false,
+              stray: false,
+            },
+          ],
+        },
+        {
+          kind: 'documents',
+          unset: false,
+          places: [
+            {
+              key: 'documents:notes:not mounted',
+              label: 'notes',
+              folder: true,
+              note: 'not mounted',
+              stray: true,
+            },
+          ],
+        },
+      ],
     };
-    expect(meetingSubtitle(one, fmt)).toBe('Nov 14, 22:13 · 5 min');
-    expect(meetingSubtitle(two, fmt)).toBe('Nov 13, 20:13 · 47 min');
-    expect(meetingSubtitle(one, fmt)).not.toBe(meetingSubtitle(two, fmt));
-  });
-
-  it('claims no length while it is still running, and nothing at all with no start', () => {
-    const fmt = { locale: 'en-US', timeZone: 'UTC' };
-    expect(meetingSubtitle({ name: 'Live', at: NOW }, fmt)).toBe('Nov 14, 22:13');
-    expect(meetingSubtitle({ name: 'Nothing', href: '/m/9' }, fmt)).toBe('');
+    expect(placeRows(lib, 'meetings:Stored by Workspaces:').map((r) => r.name)).toEqual([
+      'Kickoff',
+    ]);
+    expect(placeRows(lib, 'documents:notes:not mounted').map((r) => r.name)).toEqual([
+      'dock-survey.md',
+    ]);
+    expect(placeRows(lib, 'mockups:nowhere:')).toEqual([]);
   });
 });
 
@@ -213,6 +259,18 @@ describe('fileEntries', () => {
     expect(shape(rows(['a', 'b', 'a']))).toEqual(['[3 files]']);
     expect(shape(rows(['', '', '']))).toEqual(['[3 files]']);
     expect(shape(rows(['a', undefined, 'a']))).toEqual(['[3 files]']);
+  });
+
+  it('groups by the clock the list is sorted by', () => {
+    // Written a day apart, created a second apart: a burst only by creation.
+    const files = [0, 1, 2].map((i) => ({
+      name: `c${i}.md`,
+      at: NOW - i * DAY,
+      created: NOW - i * SEC,
+      open: `c${i}.md`,
+    }));
+    expect(shape(fileEntries(files, 'modified'))).toEqual(['c0.md', 'c1.md', 'c2.md']);
+    expect(shape(fileEntries(files, 'created'))).toEqual(['[3 files]']);
   });
 
   it('never puts a file with no clock reading in a burst', () => {

@@ -3964,7 +3964,8 @@ html:has(.board-walk-cred-form) {
 /* ################# BOARD · LIBRARY #################
    The Library tab (`board/library-page.ts`), ported from the approved mock
    (front page, round 4): a sticky header naming the project, then two short
-   tables — recent meetings, recent files — each a title and how long ago.
+   tables — recent meetings, recent files — each a title and one time, whose
+   header is the sort; then "Where files live", folded shut (mock v2).
    A row is one line at every width; a long title ends in an ellipsis. */
 .library-page {
   font-size: 15px;
@@ -4073,10 +4074,8 @@ html:has(.board-walk-cred-form) {
 .library-row:active {
   background: var(--bg-hover);
 }
-/* Name and whatever identifies it further share the first column and stay on
-   one line together: the name gives way to an ellipsis, the label beside it
-   does not, because a secondary line that vanishes at 430px is exactly where
-   two identically-titled meetings needed telling apart. */
+/* Name and a search hit's list label share the first column and stay on one
+   line together: the name gives way to an ellipsis, the label does not. */
 .library-main {
   display: flex;
   align-items: baseline;
@@ -4091,13 +4090,6 @@ html:has(.board-walk-cred-form) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.library-sub {
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--fg-muted);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
 .library-when {
   flex: 0 0 auto;
   min-width: 68px;
@@ -4107,8 +4099,8 @@ html:has(.board-walk-cred-form) {
   font-variant-numeric: tabular-nums;
 }
 /* The two tables: one grid line per row, the time in a fixed right column
-   under its own header. 104px, not 84: the header now NAMES its clock
-   ("File modified"), and a header that ellipsizes says nothing at all. */
+   under its own header. 104px, not 84: the header NAMES its clock ("Last
+   Modified"), and a header that ellipsizes says nothing at all. */
 .library-cols,
 .library-tbl .library-row {
   display: grid;
@@ -4210,6 +4202,117 @@ html:has(.board-walk-cred-form) {
   padding-left: 13px;
   border-left: 1px solid var(--border);
 }
+/* The time column's header is its sort: a native select dressed as the header
+   text, right-aligned, with a small chevron — one tap on a phone, a keyboard
+   stop everywhere. */
+.library-sort {
+  justify-self: end;
+  max-width: 100%;
+  padding: 0 14px 0 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: inherit;
+  text-align: right;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: transparent;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 4px center, right 0 center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+.library-sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* "Where files live": a fold at the end of the page, its caret before the
+   heading, opening onto one line per location under each kind's name. */
+.library-where-fold {
+  margin-top: 18px;
+}
+.library-where-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+.library-where-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.library-where-fold > summary::before {
+  content: "";
+  flex: 0 0 auto;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 120ms ease;
+}
+.library-where-fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+.library-body .library-where-fold > summary h2 {
+  margin: 0;
+}
+.library-where .library-cols,
+.library-where-type {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  column-gap: 16px;
+}
+.library-where .library-cols span:last-child {
+  text-align: left;
+}
+.library-where-type {
+  align-items: start;
+}
+.library-where-name {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+.library-where-places {
+  min-width: 0;
+}
+.library-place {
+  width: calc(100% + 16px);
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  justify-content: flex-start;
+  gap: 12px;
+}
+.library-place.is-empty {
+  cursor: default;
+  color: var(--fg-muted);
+}
+.library-place.is-empty:hover {
+  background: none;
+}
+.library-path {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.library-body h2 .library-path {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+}
+.library-place-note {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.library-place-note.is-stray {
+  color: var(--warn-fg, #b25e09);
+}
 @media (max-width: 1100px) {
   .library-row {
     min-height: 44px;
@@ -4226,6 +4329,17 @@ html:has(.board-walk-cred-form) {
   }
   .library-hitpath {
     max-width: 46%;
+  }
+  .library-where-fold > summary {
+    min-height: 44px;
+  }
+  .library-where .library-cols,
+  .library-where-type {
+    grid-template-columns: 84px minmax(0, 1fr);
+    column-gap: 10px;
+  }
+  .library-where-name {
+    min-height: 44px;
   }
 }
 
