@@ -234,14 +234,45 @@ function markedText(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): stri
 }
 
 /**
+ * Every inline mark one kind's ranges carry, as comparable `key=value`
+ * strings. A SET, because the two sides are compared and never walked: what
+ * decides the preview is whether one side carries a mark the other does not,
+ * not where in the run it sits.
+ */
+function markSetOf(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): Set<string> {
+  const out = new Set<string>();
+  for (const range of entry.ranges) {
+    if (range.kind !== kind) continue;
+    for (const [k, v] of Object.entries(range.attributes)) out.add(`${k}=${JSON.stringify(v)}`);
+  }
+  return out;
+}
+
+/** Do the two sides carry different inline marks? */
+function marksDiffer(entry: SuggestionScanEntry): boolean {
+  const deleted = markSetOf(entry, 'delete');
+  const inserted = markSetOf(entry, 'insert');
+  if (deleted.size !== inserted.size) return true;
+  for (const mark of inserted) if (!deleted.has(mark)) return true;
+  return false;
+}
+
+/**
  * The two sides as a card should SHOW them.
  *
- * Plain text, except when the plain text cannot tell the sides apart. A
- * proposal that only wraps existing words in a link — or tags them with a
- * speaker, or bolds them — changes a MARK and not a character, so both sides
- * read "the survey is late" and a reader working from the card alone is told
- * nothing. There the sides are spelled in the doc's own markdown instead:
- * `the survey is late → [the survey is late](/docs/survey)`.
+ * Plain text, except where plain text would hide part of the proposal. An
+ * agent that wraps words in a link — or tags them with a speaker, or bolds
+ * them — changes a MARK, and `insertedText` is the CHARACTERS: accept that
+ * proposal and the .md file gains a link the card never showed. So when the
+ * two sides' marks differ, both sides are spelled in the doc's own markdown
+ * instead: `the Riverbend office → [the Harborlight office](/docs/harborlight)`.
+ *
+ * The MARKS decide it, not the characters. The first rule here fired only
+ * when the two sides' characters were equal, which covered the pure
+ * link-wrap and missed the commoner shape — a proposal that changes the
+ * words AND links them, whose card read "the Riverbend office → the
+ * Harborlight office" with the link nowhere on it. Equal characters are one
+ * case of differing marks, not the test for them.
  *
  * Markdown rather than a caption, and that is the deliberate half. It needs
  * no word like "link:" to say what it is, it is exactly the text the .md file
@@ -249,20 +280,16 @@ function markedText(entry: SuggestionScanEntry, kind: 'insert' | 'delete'): stri
  * and one rule covers every mark — a link, a speaker tag, `**bold**` — where
  * a caption would need a vocabulary.
  *
- * Only when the two sides' characters are EQUAL, so an ordinary word change
- * reads exactly as it did; and only when the marks actually differ, so a
- * no-op proposal does not sprout syntax.
+ * Marks EQUAL on both sides keep the raw text, so an ordinary word change
+ * reads exactly as it did, and so does one made inside a span that was
+ * already linked: nothing about the link is being proposed, so nothing about
+ * it belongs on the card.
  */
 function previewSides(entry: SuggestionScanEntry): { deleted: string; inserted: string } {
-  const deleted = joinedText(entry, 'delete');
-  const inserted = joinedText(entry, 'insert');
-  if (kindOf(entry) !== 'replace' || deleted === '' || deleted !== inserted) {
-    return { deleted, inserted };
+  if (!marksDiffer(entry)) {
+    return { deleted: joinedText(entry, 'delete'), inserted: joinedText(entry, 'insert') };
   }
-  const mdDeleted = markedText(entry, 'delete');
-  const mdInserted = markedText(entry, 'insert');
-  if (mdDeleted === mdInserted) return { deleted, inserted };
-  return { deleted: mdDeleted, inserted: mdInserted };
+  return { deleted: markedText(entry, 'delete'), inserted: markedText(entry, 'insert') };
 }
 
 function snippetOf(entry: SuggestionScanEntry): string {
