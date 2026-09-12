@@ -3832,6 +3832,28 @@ body.redline-mode .ProseMirror del.cw-del {
   min-width: 0;
 }
 
+/* On a 4K screen the column follows the prose instead of the window edge.
+
+   `minmax(0, 1fr)` above hands the first track every pixel that is not the
+   column, and the prose then centres itself inside it at its own 1200px
+   measure — so the wider the screen, the further the cards sit from the words
+   they are about. Measured on a 3840px window: 1162px of white between the
+   last letter and its own comment, with the leader lines crossing each other
+   to span it. A definite first track plus a centred pair puts the column back
+   beside the prose (a 16px gap, the same as on a laptop) and leaves the prose
+   where it already was, because the pair centres exactly where the prose
+   alone did.
+
+   Scoped to the 4K tier (docs/product/design-mobile.md): from 1101 to 1920 the
+   leftover is small enough that the column already reads as attached, and
+   this is the tier Bryan's desktop is. */
+@media (min-width: 1921px) {
+  #editor.redline-layout {
+    grid-template-columns: min(100%, 1200px) 260px;
+    justify-content: center;
+  }
+}
+
 /* ===== THE NEW-CONTENT INDICATOR (new-indicator.ts) =====
    One pill per direction, in words: grey "4 new", amber "1 question · 2 new"
    when something is waiting on the reader that way, and NOTHING at zero. It
