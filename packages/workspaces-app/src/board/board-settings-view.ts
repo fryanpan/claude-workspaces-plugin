@@ -319,10 +319,11 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
     // landed. On the wide band the subnav is beside the heading saying which
     // pane is current, so the heading names the place: Settings.
     if (title) {
-      title.textContent =
-        editing || (type !== null && narrow()) ? TYPE_LABEL[type ?? 'board'] : 'Settings';
-      // The arrow already says "Prompts" and the h2 below names the prompt.
-      // `settings.css` drops this heading on the phone for that reason.
+      title.textContent = type !== null && narrow() ? TYPE_LABEL[type] : 'Settings';
+      // An open prompt leaves the heading on the page, because the arrow
+      // beside it already says "Prompts" and saying it twice is the thing
+      // this pass came to fix. On the phone the heading goes entirely —
+      // `settings.css` drops it — because the h2 below names the prompt.
       title.classList.toggle('settings-title--editing', editing);
     }
     // The rail is the board's rail, so it wears the board's width. Read off

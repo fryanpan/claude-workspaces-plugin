@@ -210,7 +210,10 @@ describe('the Prompts pane of the board’s settings page', () => {
     expect(document.querySelector('#board-settings-prompts .prompt-editor h2')?.textContent).toBe(
       DETAIL.name,
     );
-    // An open prompt IS a step down, so now there is.
+    // An open prompt IS a step down, so now there is — and the heading beside
+    // it stays on the page rather than repeating the arrow's word.
+    expect(document.getElementById('board-settings-back-label')?.textContent).toBe('Prompts');
+    expect(document.getElementById('board-settings-title')?.textContent).toBe('Settings');
     expect(getComputedStyle(back).display).not.toBe('none');
     page.back();
     await settle(() => document.querySelectorAll('#board-settings-prompts .prompt-row').length > 0);
