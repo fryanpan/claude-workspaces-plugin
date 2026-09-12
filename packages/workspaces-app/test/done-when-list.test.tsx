@@ -216,6 +216,24 @@ describe('one chip per line, and what it says', () => {
   });
 });
 
+describe('a proof url that is not http(s)', () => {
+  it('keeps the words and drops the link, so nothing unsafe becomes an href', () => {
+    mount([
+      {
+        id: 'd-0',
+        text: 'proved',
+        verdict: 'met',
+        proof: [{ text: 'what I ran', url: 'javascript:alert(1)' }],
+      },
+    ]);
+
+    const row = $<HTMLElement>('.dw-proof-row');
+    expect(row.tagName).toBe('DIV');
+    expect(row.querySelector('.dw-proof-what')?.textContent).toBe('what I ran');
+    expect(host?.querySelector('a.dw-proof-row')).toBeNull();
+  });
+});
+
 describe("the owner's two buttons", () => {
   it('appear only on a line the builder left to them, and send the verdict', () => {
     const onCheck = makeCheckMock();

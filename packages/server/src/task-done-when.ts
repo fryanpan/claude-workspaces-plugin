@@ -28,6 +28,7 @@ import {
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { cryptoId } from './task-fields.ts';
+import { isSafeHttpUrl } from './task-helpers.ts';
 
 /** An actor as every task verb takes one. */
 export interface DoneWhenActor {
@@ -62,6 +63,7 @@ export type DoneWhenError =
   | 'unknown-line'
   | 'proof-required'
   | 'not-a-person'
+  | 'not-yours'
   | 'no-lines';
 
 export type DoneWhenResult =
@@ -140,8 +142,12 @@ function readProof(raw: unknown): DoneWhenProof[] | undefined {
     const source = typeof entry === 'string' ? { text: entry } : (entry as DoneWhenProof | null);
     const text = typeof source?.text === 'string' ? source.text.trim() : '';
     if (text === '') continue;
-    const url =
-      typeof source?.url === 'string' && source.url.trim() !== '' ? source.url : undefined;
+    // The url becomes an href on the panel, so only http(s) is kept — the
+    // same guard a task's `url` ref passes, for the same reason. An unsafe
+    // scheme drops the LINK, not the proof: what the builder says it ran is
+    // still worth reading.
+    const given = typeof source?.url === 'string' ? source.url : '';
+    const url = given !== '' && isSafeHttpUrl(given) ? given : undefined;
     out.push({ text, ...(url !== undefined ? { url } : {}) });
   }
   return out.length > 0 ? out : undefined;
@@ -311,6 +317,18 @@ export class TaskDoneWhenStore {
     const line = (task.doneWhen ?? []).find((l) => l.id === lineId);
     if (!line) {
       return { ok: false, error: 'unknown-line', message: 'no done-when line with that id' };
+    }
+    // ONLY a line the builder handed over. This door takes a person's word
+    // with no proof behind it, which is right for a line whose whole point is
+    // that no test can answer it — and would be a way around the proof rule
+    // on every other line. A reader who disagrees with a verdict says so on
+    // the task; they do not overwrite it here.
+    if (line.verdict !== 'owner') {
+      return {
+        ok: false,
+        error: 'not-yours',
+        message: `"${line.text}" is not waiting on you — only a line the builder marked for the owner is answered here`,
+      };
     }
     if (verdict !== 'met' && verdict !== 'not-met') {
       return { ok: false, error: 'bad-verdict', message: 'verdict must be met or not-met' };

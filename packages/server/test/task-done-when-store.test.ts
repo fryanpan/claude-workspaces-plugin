@@ -178,6 +178,36 @@ describe('TaskDoneWhenStore.report', () => {
     expect(task.doneWhen?.[0]?.proof?.[0]?.text).toBe('ran it');
   });
 
+  it('keeps the words of a proof whose url is not http(s), and drops only the link', () => {
+    const task = makeTask(lines('the only outcome'));
+    const { store } = fake(task);
+
+    const res = store.report(
+      task.id,
+      [
+        {
+          id: 'd-0',
+          verdict: 'met',
+          proof: [
+            // The panel turns a proof url into an href, so a scheme that runs
+            // code or reads the host must never reach it.
+            { text: 'what I ran', url: 'javascript:alert(1)' },
+            { text: 'the host file', url: 'file:///etc/passwd' },
+            { text: 'the run', url: 'https://example.test/run' },
+          ],
+        },
+      ],
+      AGENT,
+    );
+
+    expect(res.ok).toBe(true);
+    const proof = task.doneWhen?.[0]?.proof ?? [];
+    expect(proof.map((p) => p.text)).toEqual(['what I ran', 'the host file', 'the run']);
+    expect(proof[0]?.url).toBeUndefined();
+    expect(proof[1]?.url).toBeUndefined();
+    expect(proof[2]?.url).toBe('https://example.test/run');
+  });
+
   it('refuses a line the task does not carry, and a report on a task with no list', () => {
     const withLines = makeTask(lines('an outcome'));
     const unknown = fake(withLines).store.report(
@@ -266,6 +296,27 @@ describe('TaskDoneWhenStore.ownerCheck', () => {
     if (!res.ok) expect(res.error).toBe('not-a-person');
     expect(task.doneWhen?.[0]?.verdict).toBe('owner');
     expect(saved).toEqual([]);
+  });
+
+  it('refuses a line the builder never handed over, whoever is asking', () => {
+    for (const verdict of [undefined, 'unchecked', 'not-met', 'met'] as const) {
+      const task = makeTask([
+        { id: 'd-0', text: 'a line nobody delegated', ...(verdict ? { verdict } : {}) },
+      ]);
+      const { store, moves } = fake(task);
+
+      const res = store.ownerCheck(task.id, 'd-0', 'met', PERSON);
+
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error).toBe('not-yours');
+        expect(res.message).toContain('a line nobody delegated');
+      }
+      // And in particular it cannot be the way round the proof rule: nothing
+      // was written and nothing closed.
+      expect(task.doneWhen?.[0]?.verdict).toBe(verdict);
+      expect(moves).toEqual([]);
+    }
   });
 
   it("sends a line back with the owner's Not met, and does not close", () => {

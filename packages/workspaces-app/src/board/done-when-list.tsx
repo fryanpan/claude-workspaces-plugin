@@ -50,14 +50,29 @@ function chipClass(verdict: DoneWhenVerdict): string {
 /**
  * One artifact the builder attached.
  *
- * A row with a `url` is a link and opens in a new tab; one without is the
- * same row without the affordance, because a proof that names what was run
- * still says more than no proof at all. `rel="noreferrer"` for the reason
+ * A row with a SAFE `url` is a link and opens in a new tab; one without is
+ * the same row without the affordance, because a proof that names what was
+ * run still says more than no proof at all. `rel="noreferrer"` for the reason
  * every outbound link on this board carries it.
  */
+function safeHref(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function ProofRow(props: { proof: { text: string; url?: string } }) {
   const { proof } = props;
-  if (proof.url === undefined) {
+  // The server keeps only http(s) on the way in. Re-checked here anyway: this
+  // row is built from whatever the task currently holds, and a proof stored
+  // before that check existed would otherwise become a live `javascript:`
+  // href on click. An unsafe url leaves the words and drops the link.
+  const href = safeHref(proof.url);
+  if (href === undefined) {
     return (
       <div class="dw-proof-row">
         <span class="dw-proof-what">{proof.text}</span>
@@ -65,7 +80,7 @@ function ProofRow(props: { proof: { text: string; url?: string } }) {
     );
   }
   return (
-    <a class="dw-proof-row" href={proof.url} target="_blank" rel="noreferrer">
+    <a class="dw-proof-row" href={href} target="_blank" rel="noreferrer">
       <span class="dw-proof-what">{proof.text}</span>
       <span class="dw-proof-open" aria-hidden="true">
         Open
