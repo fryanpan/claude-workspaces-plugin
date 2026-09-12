@@ -1,4 +1,5 @@
 import type { FeedbackClient, User } from '@claude-workspaces/core';
+import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardActions } from '../src/board/board-actions.ts';
 import { createBoardDetailPanel } from '../src/board/board-detail-panel.ts';
@@ -160,6 +161,36 @@ describe('createBoardDetailPanel', () => {
     p.state.detailTaskId = null;
     p.renderDetail();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it('a task tapped in the goal panel’s list opens the task panel in its place', () => {
+    const p = panel();
+    p.state.tasks.set('t-live', task('t-live', { goal: 'g-1', status: 'in-progress' }));
+    p.state.detailGoalId = 'g-1';
+    p.renderDetail();
+    const listed = goalDetailData.value.section?.tasks.find((t) => t.id === 't-live');
+    if (!listed) throw new Error('the open task is not in the panel’s section');
+    goalDetailData.value.handlers.onOpenTask?.(listed);
+    expect(p.state.detailTaskId).toBe('t-live');
+    expect(p.state.detailGoalId).toBeNull();
+    expect(taskDetailData.value.task?.id).toBe('t-live');
+    expect(goalDetailData.value.section).toBeNull();
+  });
+
+  it('lists the goal’s schedule rules in its panel, since archiving the goal takes them too', () => {
+    const p = panel();
+    const rule: TaskSchedule = {
+      rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [1, 2, 3, 4, 5] },
+      armedAt: Date.now(),
+    };
+    p.state.tasks.set('t-rule', task('t-rule', { goal: 'g-1', schedule: rule }));
+    p.state.tasks.set('t-other', task('t-other', { goal: 'g-2', schedule: rule }));
+    p.state.detailGoalId = 'g-1';
+    p.renderDetail();
+    const ids = goalDetailData.value.section?.tasks.map((t) => t.id);
+    expect(ids).toContain('t-rule');
+    // Another goal's rule stays out: the rows come back by goal, not wholesale.
+    expect(ids).not.toContain('t-other');
   });
 
   it('opens an ARCHIVED band, because the panel is where its Restore lives', () => {

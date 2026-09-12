@@ -203,6 +203,55 @@ describe('renderGoalDetail', () => {
     expect(text).not.toContain('open task');
   });
 
+  // The goal panel covers the band on a tablet and is the only place a goal
+  // can be archived. It used to show nothing of the band's tasks, and a band
+  // with three rows in progress was archived because it "looked empty"
+  // (2026-09-12). Rows, not counts: the struck breakdown above stays struck.
+  it('lists the band’s unfinished tasks in the band’s order, and leaves done ones out', () => {
+    renderGoalDetail(
+      root,
+      sectionWith({}, [
+        task({ title: 'Wire the relay', status: 'in-progress' }),
+        task({ title: 'Shipped last week', status: 'done' }),
+        task({ title: 'Queue the retry', status: 'todo' }),
+        task({ title: 'Maybe cache it', status: 'triage' }),
+      ]),
+      handlers(),
+    );
+    const rows = [...root.querySelectorAll<HTMLElement>('.board-goal-task')];
+    expect(rows.map((r) => r.querySelector('.board-goal-task-title')?.textContent)).toEqual([
+      'Wire the relay',
+      'Queue the retry',
+      'Maybe cache it',
+    ]);
+    // Each wears its status, for the eye (the ring) and for a screen reader.
+    expect(rows[0]?.querySelector('.board-status-mark-in-progress')).not.toBeNull();
+    expect(rows[2]?.getAttribute('aria-label')).toBe('Maybe cache it — Triage');
+    const heads = [...root.querySelectorAll('.board-detail-subhead')].map((n) => n.textContent);
+    expect(heads).toContain('Tasks');
+  });
+
+  it('draws no Tasks section when everything under the goal is finished', () => {
+    renderGoalDetail(
+      root,
+      sectionWith({}, [task({ status: 'done' }), task({ status: 'done' })]),
+      handlers(),
+    );
+    // Positive half: the panel rendered.
+    expect(root.querySelector('.board-detail-panel')).not.toBeNull();
+    expect(root.querySelector('.board-goal-tasks')).toBeNull();
+    const heads = [...root.querySelectorAll('.board-detail-subhead')].map((n) => n.textContent);
+    expect(heads).not.toContain('Tasks');
+  });
+
+  it('opens a listed task through the handler the app gave it', () => {
+    const onOpenTask = vi.fn();
+    const live = task({ title: 'Wire the relay', status: 'in-progress' });
+    renderGoalDetail(root, sectionWith({}, [live]), handlers({ onOpenTask }));
+    root.querySelector<HTMLButtonElement>('.board-goal-task')?.click();
+    expect(onOpenTask).toHaveBeenCalledWith(expect.objectContaining({ id: live.id }));
+  });
+
   it('draws the owner as a vacancy until the projection says otherwise, and the due date', () => {
     // Noon local, built the way the reader's own calendar would — the same
     // round-trip the task panel's Due control uses, so the date shown here

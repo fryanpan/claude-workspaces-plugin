@@ -3031,6 +3031,41 @@ html:has(.board-walk-cred-form) {
   font-size: 13px;
   color: var(--fg-muted);
 }
+/* The band's unfinished rows (goal-open-tasks.tsx): the Related Links list's
+   shape — ring, then title, one line each — with the whole line the tap
+   target, because the panel is read with a finger. At 36px, twelve rows sit in
+   view at 1180x820 with the archive ask open above them. */
+.board-goal-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.board-goal-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.board-goal-task:hover,
+.board-goal-task:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+.board-goal-task-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* A task list is read by SKIMMING down a column, not by reading each row.
    So the row is a grid with fixed tracks — handle, open caret, status,
    title, badges, assignee — and every cell in a column lines up with the one

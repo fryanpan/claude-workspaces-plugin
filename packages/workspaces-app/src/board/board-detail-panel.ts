@@ -50,6 +50,7 @@ import {
 import type { BoardReviewController } from './board-review-controller.ts';
 import { humanBlockerRows, panelAsks } from './board-review-model.ts';
 import { goalDetailData } from './goal-detail-island.tsx';
+import { goalPanelSection } from './goal-open-tasks.tsx';
 import { GOAL_PLACEHOLDER_TEXT, createTaskBodyEditorHost } from './task-body-editor.ts';
 import { taskDetailData } from './task-detail-island.tsx';
 
@@ -297,14 +298,17 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
     // is "show me this task".
     if (state.detailTaskId) state.detailGoalId = null;
     if (state.detailGoalId) {
-      // Unfiltered on purpose: the panel's counts and advisory are facts
-      // about the GOAL ("what would a done declaration leave open"), not
-      // about whatever tab or done-window the board happens to be on.
+      // Unfiltered on purpose: the panel's Tasks list is a fact about the
+      // GOAL (what is still open under it, its schedule rules included), not
+      // about whatever done-window the board happens to be on.
       const section =
-        boardSections(state.info?.goals ?? [], taskList(), {
-          doneWindow: 'all',
-          now: Date.now(),
-        }).find((s) => s.id === state.detailGoalId) ??
+        goalPanelSection(
+          boardSections(state.info?.goals ?? [], taskList(), {
+            doneWindow: 'all',
+            now: Date.now(),
+          }),
+          state.detailGoalId,
+        ) ??
         // An ARCHIVED band is on no board and so in no section — and the panel
         // is exactly where its Restore lives, reached from the restore list or
         // from a link somebody sent last week. `goalSection` is the lookup that
@@ -365,6 +369,15 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
             onCascadeCount: (goalId) => goalCascadeCount(goalId),
             onArchive: (s) => void archiveGoal(s),
             onRestore: (s) => void restoreGoal(s),
+            // A row in the panel's Tasks list opens the way a board row does:
+            // the task panel replaces this one, on its comments.
+            onOpenTask: (task) => {
+              state.detailTaskId = task.id;
+              state.detailTab = 'comments';
+              state.detailGoalId = null;
+              state.detailThreadId = null;
+              renderDetail();
+            },
             workspaceId,
             ...(state.detailThreadId ? { focusThreadId: state.detailThreadId } : {}),
             now: Date.now(),

@@ -288,6 +288,9 @@ export interface GoalDetailHandlers {
    * the panel never renders a composer it cannot deliver from.
    */
   onComment?: (goalId: string, text: string, threadId?: string) => Promise<boolean>;
+  /** Open one of the band's rows from the panel's Tasks list — the same
+   *  opener a board row's tap uses. Absent, the rows still list. */
+  onOpenTask?: (task: BoardTask) => void;
   /** Which comment the review queue sent the reader here to read. */
   focusThreadId?: string;
   /**

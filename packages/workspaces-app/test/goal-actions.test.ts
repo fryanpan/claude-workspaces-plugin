@@ -87,6 +87,12 @@ describe('the sentence a goal archive asks before it commits', () => {
     expect(archiveConfirmLine('Ship W3', { tasks: 1 })).toBe('Archive “Ship W3” and its 1 task?');
   });
 
+  it('says how many of them are still open, so live work cannot pass for history', () => {
+    expect(archiveConfirmLine('Ship W3', { tasks: 48 }, 11)).toBe(
+      'Archive “Ship W3” and its 48 tasks, 11 of them still open?',
+    );
+  });
+
   it('says plainly when nothing else goes with it', () => {
     expect(archiveConfirmLine('Ship W3', { tasks: 0 })).toBe(
       'Archive “Ship W3”? Nothing else is under it.',
@@ -213,6 +219,43 @@ describe('archiving a goal from the panel', () => {
     expect(ask()).toBe('Archive “Ship W3” and its 14 tasks?');
     button('.board-goal-archive-go')?.click();
     expect(onArchive).toHaveBeenCalledWith(expect.objectContaining({ id: 'g-pr' }));
+  });
+
+  it('names the open rows in the ask the panel shows', async () => {
+    const [section] = boardSections(
+      [{ id: 'g-pr', title: 'Ship W3' }],
+      (
+        [
+          { id: 't-a', title: 'Wire', status: 'in-progress' },
+          { id: 't-b', title: 'Queue', status: 'todo' },
+          { id: 't-c', title: 'Old', status: 'done' },
+        ] as const
+      ).map(
+        (t, i): BoardTask => ({
+          goal: 'g-pr',
+          assignee: 'agent',
+          order: i,
+          after: [],
+          links: [],
+          transitions: [],
+          bodyDocId: `task:${t.id}`,
+          createdAt: NOW,
+          updatedAt: NOW,
+          ...t,
+        }),
+      ),
+      { doneWindow: 'all', now: NOW },
+    );
+    if (!section) throw new Error('no section');
+    renderGoalDetail(
+      host,
+      section,
+      handlers({ onArchive: vi.fn(), onCascadeCount: async () => ({ tasks: 3 }) }),
+    );
+    button('.board-detail-archive')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ask()).toBe('Archive “Ship W3” and its 3 tasks, 2 of them still open?');
   });
 
   it('closes the ask on Cancel, having written nothing', async () => {
