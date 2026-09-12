@@ -473,7 +473,6 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/icon-512.png', 'GET'],
     ['trusted-local', '/sw.js', 'GET'],
     ['trusted-local', '/sw.js.map', 'GET'],
-    ['share-scope', '/workspaces/:ws/mine', 'GET'],
     ['share-scope', '/workspaces/:ws/activity', 'GET'],
     ['share-scope', '/workspaces/:ws/library', 'GET'],
     ['share-scope', '/workspaces/:ws/mockups/:docId', 'GET'],

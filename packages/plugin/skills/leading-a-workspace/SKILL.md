@@ -81,7 +81,7 @@ The second question is which order needs the fewest reviews and decisions from t
 
 **The Backlog is never auto-dispatched.** When everything above it is blocked or waiting on the primary user, the correct state is idle capacity plus filed review items naming each blockage — not a backlog pick. A nudge that names a backlog task is awareness, not a dispatch order.
 
-**Complex or UI-design tasks clear a human gate first.** Their acceptance criteria include reviewing the ticket body — and mocks, for UI — with the primary user before implementing, surfaced as a review item when the task comes up for dispatch. Small, obvious tasks run without the gate.
+**Complex or UI-design tasks clear a human gate first.** Their `doneWhen` list carries an entry for reviewing the ticket body — and mocks, for UI — with the primary user before implementing, surfaced as a review item when the task comes up for dispatch. Small, obvious tasks run without the gate.
 
 **On an agent-filed task that changes the UI, the gate is an ANSWERED item, not a filed one.** You check it twice: once when you re-rank the band, and again in the second before you hand the task to anybody. An unanswered item means the task is not dispatchable yet, whatever its rank. The board watches this too — a task an agent filed that reads as UI work and is in flight with no answered item on it arrives in your stall frame as `ungatedUi` and on the keep-moving verdict's line of the same name — but that flag fires after somebody started building, so it is a record of a check you missed rather than the check itself.
 

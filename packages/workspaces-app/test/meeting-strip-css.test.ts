@@ -50,7 +50,20 @@ const px = (v: string) => Number.parseFloat(v);
 
 /** The strip, and the parts of it a test asks about. */
 function strip(extra = '') {
-  const el = attach(`meeting-strip ${extra}`.trim());
+  // `has-note` is not a class the app writes: it asks for a strip carrying the
+  // one thing that keeps the bar at phone width, which is a `.meeting-note` in
+  // the feed (meeting-feed.ts `showNote`, and the stream alarm's own class).
+  const withNote = extra.includes('has-note');
+  const el = attach(`meeting-strip ${extra.replace('has-note', '')}`.trim());
+  if (withNote) {
+    const line = document.createElement('div');
+    line.className = 'meeting-feed-inner meeting-caption-line';
+    const note = document.createElement('span');
+    note.className = 'meeting-note';
+    note.textContent = 'The meeting is on — the mic needs one tap to start.';
+    line.append(note);
+    el.append(line);
+  }
   return { el, style: styleOf(el) };
 }
 
@@ -209,10 +222,15 @@ describe('the speaker tag', () => {
 });
 
 describe('the strip itself: one flex row, blinker · clock · flowing feed', () => {
-  it('is a single flex row at least 36px tall, at every width', () => {
+  it('is a single flex row at least 36px tall, at every width it is shown at', () => {
     for (const width of [1180, 600, 430]) {
       setViewport({ width, height: 900 });
-      const bar = strip().style;
+      // At or below 640 the row is only earned by a sentence — a refused mic,
+      // a lost stream, the one-tap-to-start note. The bar itself went at that
+      // width on 2026-09-11 (meeting-phone-layout-css.test.ts holds that rule
+      // and the blinking dot that replaced it); its SHAPE, when it is shown,
+      // is what this case is about and is unchanged.
+      const bar = strip(width <= 640 ? 'has-note' : '').style;
       expect(bar.display, `not a flex row at ${width}px`).toBe('flex');
       expect(bar.alignItems).toBe('center');
       expect(px(bar.minHeight)).toBeGreaterThanOrEqual(36);
@@ -313,6 +331,24 @@ describe('motion', () => {
     // not happening.
     const dead = attach('meeting-strip', { attrs: { 'data-state': 'unavailable' } });
     expect(styleOf(attach('meeting-blinker', { parent: dead })).animation).toBe('none');
+    // And idle, which the strip is now visible in: a recording that timed
+    // itself out leaves its sentence there, and a live-red dot beside
+    // "Recording stopped" claims the same thing the refused mic did.
+    const over = attach('meeting-strip', { attrs: { 'data-state': 'idle' } });
+    const overDot = styleOf(attach('meeting-blinker', { parent: over }));
+    expect(overDot.animation).toBe('none');
+    expect(overDot.background).toBe(token('--border-strong'));
+    // Control: the live dot is neither still nor that colour.
+    expect(styleOf(attach('meeting-blinker', { parent: live })).background).not.toBe(
+      token('--border-strong'),
+    );
+    // And the case that makes `:not(.is-live)` load-bearing rather than tidy:
+    // the MICROPHONE is idle for the whole of a bot meeting, and that strip is
+    // live and must go on saying so.
+    const bot = attach('meeting-strip is-bot is-live', { attrs: { 'data-state': 'idle' } });
+    expect(styleOf(attach('meeting-blinker', { parent: bot })).animation).toContain(
+      'meeting-blink',
+    );
   });
 
   it('flashes only the word the model rewrote', () => {

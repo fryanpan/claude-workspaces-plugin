@@ -39,12 +39,47 @@
  * WHAT IS DURABLE IS THE HEADING RECORD. Every meeting that opens or adopts a
  * section writes that block id down beside its own transcript
  * (`notes-heading-store.ts`), and that record outlives the meeting, the
- * authorship and the process. So the test is: a heading SOME MEETING HAS
- * CLAIMED is a meeting's section, and anything else is the doc's own.
+ * authorship and the process. So the first half of the test is: a heading
+ * SOME MEETING HAS CLAIMED is a meeting's section, and anything else is the
+ * doc's own.
+ *
+ * AND THE SECOND HALF IS WHETHER THAT MEETING IS OVER (2026-09-11). A claim
+ * alone refused every second recording on a doc, which is what Bryan saw:
+ * he stopped a recording, started another one minutes later, and the notes
+ * opened a second `## Meeting notes` at the bottom of the page while the
+ * section from minutes earlier sat above it. One conversation, two headings,
+ * and the reader's own `notesSectionStart` takes only the last of them.
+ *
+ * A claim therefore says whose the section is while the meeting is RUNNING —
+ * two recordings live on one doc still keep their sections apart, which is
+ * the case the claim was built for — and stops saying it once the meeting has
+ * stopped. A recording started soon after is the same conversation carrying
+ * on, so its notes continue under the heading that is already there.
+ *
+ * SOON AFTER, AND NOT FOREVER, is what keeps the owner's 2026-08-31 rule
+ * alive for the shape it was written for: a standing doc that hosts a meeting
+ * every week is not one conversation, and yesterday's minutes are not
+ * something to write today's under. `NOTES_CONTINUATION_WINDOW_MS` is the
+ * line between the two, read against the moment the claiming meeting stopped
+ * rather than against any clock a test has to fake.
  */
 
 import type { prose } from '@claude-workspaces/core';
 import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+import type { NotesSectionClaim } from './notes-heading-store.ts';
+
+/**
+ * How long after a meeting stops its section is still the one a new recording
+ * writes into.
+ *
+ * FOUR HOURS: long enough that everything a person means by "I started it
+ * again" lands inside it — a stop for a break, a laptop that slept, a crash,
+ * a deploy, a meeting that resumed after lunch — and short enough that the
+ * next day's meeting on the same doc opens a section of its own. It is read
+ * against the claiming meeting's own stop, so nothing here depends on how
+ * long this process has been up.
+ */
+export const NOTES_CONTINUATION_WINDOW_MS = 4 * 60 * 60 * 1000;
 
 /**
  * Where the section both readers would use starts, or `-1` for a doc with no
@@ -95,11 +130,15 @@ export function notesSectionIsEmpty(outline: readonly prose.OutlineEntry[]): boo
 /**
  * Whether the doc's existing notes section is one new minutes may write into.
  *
- * `claimed` is every heading block id that a meeting has recorded as its
- * section on this doc — the in-process memory's own adoptions plus whatever
- * the heading store holds from earlier meetings and earlier processes. A
- * caller with no such record passes an empty set, which is the honest state
- * for a note-taker built without a store: it can only see the doc.
+ * `claims` is every section a meeting has recorded on this doc, by heading
+ * block id — the in-process memory's own adoptions plus whatever the heading
+ * store holds from earlier meetings and earlier processes — each carrying the
+ * moment its meeting stopped, where one was recorded. A caller with no such
+ * record passes an empty map, which is the honest state for a note-taker
+ * built without a store: it can only see the doc.
+ *
+ * `now` is only ever compared against a recorded stop, so a test says how
+ * long ago a meeting ended by writing the record, not by moving a clock.
  *
  * `true` on a doc with NO notes heading as well: there is nothing to be
  * stranded by and nothing to write into by mistake, so the composer opens the
@@ -107,7 +146,8 @@ export function notesSectionIsEmpty(outline: readonly prose.OutlineEntry[]): boo
  */
 export function notesSectionFits(
   outline: readonly prose.OutlineEntry[],
-  claimed: ReadonlySet<string> = new Set(),
+  claims: ReadonlyMap<string, NotesSectionClaim> = new Map(),
+  now: number = Date.now(),
 ): boolean {
   const at = lastNotesHeadingIndex(outline);
   if (at < 0) return true;
@@ -128,10 +168,20 @@ export function notesSectionFits(
   // protect here.
   if (end === at + 1) return true;
   const id = outline[at]?.id;
-  // A heading a meeting has already claimed AND WRITTEN UNDER is a meeting's
-  // record, whatever the blocks are currently attributed to. This is the
-  // clause that survives `releaseNotesAuthorship`.
-  if (id !== undefined && claimed.has(id)) return false;
+  const claim = id === undefined ? undefined : claims.get(id);
+  // A heading a meeting has already claimed AND WRITTEN UNDER is that
+  // meeting's record, whatever the blocks are currently attributed to — for
+  // as long as the meeting is running. This is the clause that survives
+  // `releaseNotesAuthorship`.
+  //
+  // Once it has stopped, the section is the doc's minutes, and a recording
+  // started inside the window is the same conversation continuing into them.
+  // A meeting with no stop recorded is still running as far as anything on
+  // disk can say — including one the process died under, where opening a
+  // section of its own is the older behaviour and the safe one.
+  if (claim !== undefined) {
+    return claim.endedAt !== undefined && now - claim.endedAt <= NOTES_CONTINUATION_WINDOW_MS;
+  }
   for (let i = at + 1; i < end; i++) {
     const entry = outline[i];
     if (!entry) continue;

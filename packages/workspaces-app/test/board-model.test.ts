@@ -98,8 +98,6 @@ const GOALS: BoardGoal[] = [
 ];
 
 const filters: BoardFilters = {
-  tab: 'all',
-  userName: 'Jordan',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
 };
@@ -221,13 +219,6 @@ describe('taskVisible (done window + tabs)', () => {
     expect(doneAt(doneRecent)).toBe(NOW - HOUR);
     const bare = task({ status: 'done', updatedAt: NOW - 2 * HOUR });
     expect(doneAt(bare)).toBe(NOW - 2 * HOUR);
-  });
-
-  it('My Tasks keeps human-assigned tasks and tasks assigned to me by name', () => {
-    const mineTab = { ...filters, tab: 'mine' as const };
-    expect(taskVisible(task({ assignee: 'human' }), mineTab)).toBe(true);
-    expect(taskVisible(task({ assignee: 'jordan' }), mineTab)).toBe(true);
-    expect(taskVisible(task({ assignee: 'agent' }), mineTab)).toBe(false);
   });
 });
 

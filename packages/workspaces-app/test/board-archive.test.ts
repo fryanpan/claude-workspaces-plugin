@@ -50,7 +50,7 @@ function task(over: Partial<BoardTask> = {}): BoardTask {
   };
 }
 
-const FILTERS = { tab: 'all' as const, userName: 'Bryan', doneWindow: 'all' as const, now: 1000 };
+const FILTERS = { doneWindow: 'all' as const, now: 1000 };
 const GOALS = [{ id: 'g1', title: '1. Ship it' }];
 
 describe('archived rows and the board', () => {

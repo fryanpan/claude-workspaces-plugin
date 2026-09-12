@@ -302,8 +302,6 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
       // about whatever tab or done-window the board happens to be on.
       const section =
         boardSections(state.info?.goals ?? [], taskList(), {
-          tab: 'all',
-          userName: user.name,
           doneWindow: 'all',
           now: Date.now(),
         }).find((s) => s.id === state.detailGoalId) ??

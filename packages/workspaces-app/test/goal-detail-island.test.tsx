@@ -35,8 +35,6 @@ options.debounceRendering = (cb: () => void) => cb();
 
 function section(id = 'g-pr', over: Record<string, unknown> = {}): BoardSection {
   const found = boardSections([{ id, title: '1. Get the PR out', ...over }], [], {
-    tab: 'all',
-    userName: 'Jordan',
     doneWindow: DEFAULT_DONE_WINDOW,
     now: NOW,
   }).find((s) => s.id === id);

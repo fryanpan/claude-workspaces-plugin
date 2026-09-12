@@ -18,7 +18,7 @@
 import type * as Y from 'yjs';
 import type { BoardState } from './board-actions.ts';
 import { type BoardGoal, type BoardTask, DEFAULT_DONE_WINDOW } from './board-model.ts';
-import { boardTabTitle, paneForNav, tabForNav } from './board-presence-model.ts';
+import { boardTabTitle, paneForNav } from './board-presence-model.ts';
 import { renderWorkspaceIdentity } from './board-render.ts';
 import { mergeTaskDetail } from './board-task-detail.ts';
 import type { BoardLocation } from './board-url.ts';
@@ -46,7 +46,6 @@ export function initialBoardState(bootLoc: BoardLocation): BoardState {
     homeEditingRecipe: false,
     homeSettled: new Map(),
     homePollStarted: 0,
-    tab: tabForNav(nav) ?? 'all',
     doneWindow: DEFAULT_DONE_WINDOW,
     view: nav === 'activity' || nav === 'library' ? nav : 'board',
     showArchived: bootLoc.archived,

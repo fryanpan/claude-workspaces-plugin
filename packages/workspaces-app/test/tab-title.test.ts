@@ -71,7 +71,7 @@ describe('boardTabTitle', () => {
 
   it('names the pane after the workspace, so SPA nav is visible in the tab', () => {
     expect(boardTabTitle('search-revamp', 'home')).toBe('search-revamp · Home · Workspaces');
-    expect(boardTabTitle('search-revamp', 'mine')).toBe('search-revamp · My Tasks · Workspaces');
+    expect(boardTabTitle('search-revamp', 'library')).toBe('search-revamp · Library · Workspaces');
     expect(boardTabTitle('search-revamp', 'activity')).toBe(
       'search-revamp · Activity · Workspaces',
     );

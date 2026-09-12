@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
-import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
+import { MEETING_NOTES_HEADING, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import { meetingTranscriptPath } from '../src/meetings.ts';
 import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
 import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
@@ -151,22 +151,25 @@ describe('the end-of-meeting line', () => {
     expect(board.filed).toEqual([]);
   });
 
-  it('reads only its own section when a second meeting has written below it', async () => {
-    // Two meetings on one doc: the second must not be charged with the
-    // first's repeats, which is the whole reason the section is addressed by
-    // the heading's block id.
+  it('reads only what it wrote when it continued the last recording’s section', async () => {
+    // Two recordings on one doc: the second continues the first's section
+    // (2026-09-11) and must not be charged with the first's repeats. What
+    // keeps them apart is the set of blocks the section already held when
+    // this meeting took it over — the heading id alone cannot, because both
+    // recordings are now under one heading.
     const repeat = '- Kestrel Lane keeps the winter crew until April';
     // ONE heading memory, because one server ran both meetings: it is what
-    // tells the second that the section below is the first's record rather
-    // than the doc's own standing section.
+    // carries that set from the meeting's first tick to its stop.
     const heading = createNotesHeadingMemory();
     const first = createNotesTickHarness({
       heading,
       meetingId: 'm-first',
       compose: (input) => addNotes(input, [repeat, repeat, repeat, repeat, repeat].join('\n')),
     });
-    await first.speak('Kestrel Lane keeps the winter crew until April.');
-    await first.end();
+    const firstLines = await captureLog(async () => {
+      await first.speak('Kestrel Lane keeps the winter crew until April.');
+      await first.end();
+    });
 
     const second = createNotesTickHarness({
       heading,
@@ -181,5 +184,11 @@ describe('the end-of-meeting line', () => {
     const line = summaryLine(lines, 'm-second');
     expect(line).toContain('0 repeated bullets');
     expect(line).not.toContain('BAD');
+    // It really is one section: the reading is scoped, not the document.
+    expect(second.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    // MUTATION CONTROL on the scoping: the very same bullets, read for the
+    // meeting that wrote them, ARE charged as repeats. Without this pair the
+    // check above would pass on a reader that counts nothing at all.
+    expect(summaryLine(firstLines, 'm-first')).toContain('4 repeated bullets');
   });
 });

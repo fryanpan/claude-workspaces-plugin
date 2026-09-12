@@ -360,8 +360,8 @@ describe('locking the doc to reading', () => {
   function toggles(): HTMLElement {
     const root = document.createElement('div');
     root.innerHTML = `
-      <button id="toggle-edit-mode" ${WRITE_CONTROL_ATTR}></button>
-      <button id="toggle-suggest-mode" ${WRITE_CONTROL_ATTR}></button>
+      <button id="toggle-suggestions" ${WRITE_CONTROL_ATTR}></button>
+      <button id="apply-all" ${WRITE_CONTROL_ATTR}></button>
       <button id="toggle-format"></button>`;
     document.body.append(root);
     return root;
@@ -374,7 +374,7 @@ describe('locking the doc to reading', () => {
       toViewMode: () => {},
       root,
     });
-    expect(locked.map((b) => b.id).sort()).toEqual(['toggle-edit-mode', 'toggle-suggest-mode']);
+    expect(locked.map((b) => b.id).sort()).toEqual(['apply-all', 'toggle-suggestions']);
     for (const b of locked) {
       expect(b.disabled).toBe(true);
       // Says why, and names the fix — a disabled control with no explanation
@@ -434,17 +434,22 @@ describe('locking the doc to reading', () => {
   it('locks a surface that has no Suggesting and no view/edit mode of its own', () => {
     const root = toggles();
     expect(() => lockDocToReading({ root })).not.toThrow();
-    expect(root.querySelector<HTMLButtonElement>('#toggle-edit-mode')?.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('#toggle-suggestions')?.disabled).toBe(true);
   });
 
-  it('the shipped markup actually carries the marker on both toggles', () => {
+  it('the shipped markup actually carries the marker on the control that writes', () => {
     // The lock reads the DOM, so the lock passing its own unit test proves
     // nothing about the real page. This reads the file the server serves.
+    // Accept-all / reject-all is what is left in the top bar that changes the
+    // document; the two mode toggles that used to be marked are gone.
     const html = readFileSync(join(import.meta.dirname, '..', 'index.html'), 'utf8');
-    for (const id of ['toggle-edit-mode', 'toggle-suggest-mode']) {
-      const tag = html.slice(html.indexOf(`id="${id}"`));
-      expect(tag.slice(0, tag.indexOf('>'))).toContain(WRITE_CONTROL_ATTR);
-    }
+    const tag = html.slice(html.indexOf('id="toggle-suggestions"'));
+    expect(tag.slice(0, tag.indexOf('>'))).toContain(WRITE_CONTROL_ATTR);
+    // The control: a button in the same bar that reads rather than writes is
+    // NOT marked, so the assertion above is the marker and not a match that
+    // any button in this file would satisfy.
+    const readOnly = html.slice(html.indexOf('id="toggle-threads"'));
+    expect(readOnly.slice(0, readOnly.indexOf('>'))).not.toContain(WRITE_CONTROL_ATTR);
   });
 });
 

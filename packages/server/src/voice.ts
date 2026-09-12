@@ -1032,7 +1032,7 @@ export class VoiceRouter {
     const board = `/workspaces/${encodeURIComponent(workspaceId)}`;
     const navigate = sameOriginPath(nav === 'tasks' ? board : `${board}/${nav}`);
     if (!navigate) return undefined;
-    const label = { home: 'Home', tasks: 'the board', mine: 'My tasks', activity: 'Activity' }[nav];
+    const label = { home: 'Home', tasks: 'the board', activity: 'Activity' }[nav];
     return { route: 'fast-path', ack: `${heard(transcript)} Opening ${label}.`, navigate };
   }
 

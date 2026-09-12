@@ -100,12 +100,14 @@ function floatingMic(viewport: { width: number; height: number }) {
   };
 }
 
-/** The task overlay and the settings popover, whose layers the nav sits under. */
+/** The task overlay and the settings page, whose layers the nav sits under.
+ *  The settings surface is the full-screen page, not the panel of rows inside
+ *  it: the popover that carried its own layer is gone. */
 function overlays(viewport: { width: number; height: number }) {
   setViewport(viewport);
   return {
     detail: styleOf(attach('board-detail')),
-    settings: styleOf(attach('board-settings-panel')),
+    settings: styleOf(attach('settings-shell board-settings-view')),
   };
 }
 
@@ -421,7 +423,7 @@ describe('the strip band keeps the mic on screen', () => {
     const strip = nav(STRIP).nav;
     expect(z(strip.zIndex), 'the pinned strip has no layer').not.toBeNaN();
     // …and under the overlay, which is what keeps the deliberate loss below
-    // (`.board-nav-dock`'s own note) true: the panel still covers the strip.
+    // (`.board-nav-dock`'s own note) true: settings still covers the strip.
     const over = overlays(STRIP);
     expect(z(strip.zIndex)).toBeLessThan(z(over.detail.zIndex));
     expect(z(strip.zIndex)).toBeLessThan(z(over.settings.zIndex));

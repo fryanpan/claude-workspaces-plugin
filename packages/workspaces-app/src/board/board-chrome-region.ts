@@ -137,9 +137,9 @@ export function createBoardChromeRegion(deps: BoardChromeDeps): BoardChromeRegio
 
   /**
    * Who the board thinks you are. `ensureUserIdentity` has always decided
-   * this — it is what stamps every comment and what "My Tasks" matches on —
-   * and until now nothing rendered it, so a reader with the wrong name saved
-   * found out by seeing their own comment signed by somebody else.
+   * this — it is what stamps every comment — and until now nothing rendered
+   * it, so a reader with the wrong name saved found out by seeing their own
+   * comment signed by somebody else.
    */
   function renderMe(): void {
     const me = el('board-me');
@@ -161,9 +161,11 @@ export function createBoardChromeRegion(deps: BoardChromeDeps): BoardChromeRegio
     onRenamed: () => location.reload(),
   });
 
+  /** Settings is a page over the board, not a popover on its header: showing
+   *  it hides nothing, so the board behind it keeps rendering and comes back
+   *  exactly as it was left. */
   function renderSettingsPanel(): void {
-    el('board-settings-panel').classList.toggle('hidden', !state.settingsOpen);
-    el('board-settings').setAttribute('aria-expanded', String(state.settingsOpen));
+    el('board-settings-view').classList.toggle('hidden', !state.settingsOpen);
   }
 
   return { peopleFromAwareness, renderPresenceRegion, renderMe, renderSettingsPanel };

@@ -41,7 +41,9 @@ describe('boardDestinationAsk: the board’s own destinations, by explicit phras
   it('hears the board, my tasks and activity', () => {
     expect(boardDestinationAsk('show me the board')).toBe('tasks');
     expect(boardDestinationAsk('go to the task board')).toBe('tasks');
-    expect(boardDestinationAsk('open my tasks')).toBe('mine');
+    // The board no longer has a page of its own for "my tasks"; a phrase
+    // somebody still says lands on the board rather than on a dead path.
+    expect(boardDestinationAsk('open my tasks')).toBe('tasks');
     expect(boardDestinationAsk('show me the activity pane')).toBe('activity');
   });
 
@@ -229,8 +231,8 @@ describe('voice navigation (route)', () => {
     expect(calls.n).toBe(0);
   });
 
-  it('"open my tasks" and "show me the activity pane" reach the other two destinations', async () => {
-    expect((await say('open my tasks')).navigate).toBe(`/workspaces/${boardId}/mine`);
+  it('"open my tasks" lands on the board and "show me the activity pane" on the feed', async () => {
+    expect((await say('open my tasks')).navigate).toBe(`/workspaces/${boardId}`);
     expect((await say('show me the activity pane')).navigate).toBe(
       `/workspaces/${boardId}/activity`,
     );

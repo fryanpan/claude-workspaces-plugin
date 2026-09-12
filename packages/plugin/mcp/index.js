@@ -16459,7 +16459,7 @@ var TOOL_LIST = {
                 },
                 body: {
                   type: "string",
-                  description: "What the task is for, as a compact user story, plus \"done when\" criteria for anything you hand over or park. Markdown, and next_tasks returns it whole. On a `needs: 'decision'` task the body must carry the question, the stakes and what each option costs, or it is refused."
+                  description: "What the task is for, as a compact user story. Markdown, and next_tasks returns it whole. Do not put the completion criteria here: they go in `doneWhen`, which is the field the board counts and gates on. On a `needs: 'decision'` task the body must carry the question, the stakes and what each option costs, or it is refused."
                 },
                 key: {
                   type: "string",
@@ -16515,7 +16515,7 @@ var TOOL_LIST = {
                 },
                 doneWhen: {
                   type: "array",
-                  description: "What has to be true before this task is done, one outcome per entry: [{text}]. It is a FIELD, not prose in the body — the task will not move to done until every line is reported met, and reports it back a line at a time through report_done_when. Write each line so a reader can check it without asking you: name what is measured and where they read it. At most 50.",
+                  description: "What must be true before this task is done. Write the list when you file the task. One outcome per entry: [{text}]. This is a FIELD: the board counts it, shows it, and refuses a move to done while an entry is open. Criteria written into the body do none of that. Report each entry through report_done_when. Write each entry so a reader can check it alone: name what is measured, and where they read it. At most 50.",
                   items: { type: "object" }
                 }
               },
@@ -16538,7 +16538,7 @@ var TOOL_LIST = {
     },
     {
       name: "spin_off_task",
-      description: "Turn a comment thread into a task. It captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body when you do not supply them. Use create_tasks for an ask that did not come from a thread.",
+      description: "Turn a comment thread into a task. It captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body when you do not supply them. It takes no done-when list, so send the criteria straight after, in rewrite_task's `doneWhen` field. Use create_tasks for an ask that did not come from a thread.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16784,11 +16784,11 @@ var TOOL_LIST = {
           },
           body: {
             type: "string",
-            description: "The FULL new description, replacing what is there. Omit it to leave the body alone. Open with the user story, keep it readable on a phone, and state a falsifiable done-when."
+            description: "The FULL new description, replacing what is there. Omit it to leave the body alone. Open with the user story, and keep it readable on a phone. The completion criteria do not go here: send them in `doneWhen`."
           },
           doneWhen: {
             type: "array",
-            description: "The WHOLE done-when list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed.",
+            description: "What must be true before this task is done, one outcome per entry. The criteria live in this field, not in the body. Send the WHOLE list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed.",
             items: { type: "object" }
           },
           reason: {
@@ -19654,7 +19654,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.219";
+var PLUGIN_VERSION = "0.1.221";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

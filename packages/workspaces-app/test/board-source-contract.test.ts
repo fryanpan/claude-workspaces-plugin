@@ -144,14 +144,43 @@ describe('the walkthrough card head keeps a readable title on a phone', () => {
   });
 });
 
-describe('settings popover + presence visibility', () => {
-  it('the settings panel floats instead of shifting the page', () => {
+describe('settings page + presence visibility', () => {
+  it('the settings page covers the board rather than shifting it', () => {
     setViewport(IPAD);
-    const panel = styleOf(attach('board-settings-panel'));
-    expect(panel.backgroundColor).not.toBe(''); // positive control: rule found
-    expect(panel.position).toBe('absolute');
-    // Anchored to the header, which must therefore be a positioned ancestor.
-    expect(styleOf(attach('board-topbar', { tag: 'header' })).position).toBe('relative');
+    const view = styleOf(attach('settings-shell board-settings-view'));
+    expect(view.backgroundColor).not.toBe(''); // positive control: rule found
+    expect(view.position).toBe('fixed');
+    expect(Number(view.zIndex)).toBeGreaterThan(0);
+  });
+
+  /**
+   * One settings button per band, and never both.
+   *
+   * Bryan asked for the button at the foot of the nav rail on the iPad and
+   * the desktop "so that settings never crowd the main tabs or the top bar",
+   * and for the gear to stay in the top right on mobile, where the bottom bar
+   * already holds four tabs and the mic. A stylesheet read would pass on
+   * either rule surviving a rename; this reads what each band computes.
+   */
+  it('puts settings in the rail above 1100 and in the top bar at or below it', () => {
+    setViewport(IPAD);
+    expect(styleOf(attach('board-nav-item board-nav-settings')).display).not.toBe('none');
+    expect(styleOf(attach('board-icon-btn board-topbar-settings')).display).toBe('none');
+    // …and the phone band swaps them, rather than dropping one. `inline-flex`
+    // is the cascaded value, which is what this file can read: in a real
+    // browser the gear is a flex item of `.board-cluster`, so blockification
+    // reports `flex` there. Measured at 430 on staging, and the same button.
+    setViewport(PHONE);
+    expect(styleOf(attach('board-nav-item board-nav-settings')).display).toBe('none');
+    expect(styleOf(attach('board-icon-btn board-topbar-settings')).display).toBe('inline-flex');
+  });
+
+  /** The rail's foot: settings sits apart from the four tabs, pushed there by
+   *  the auto margin the collapse toggle used to own. */
+  it('parks the rail’s settings seat at the foot, away from the tabs', () => {
+    setViewport(IPAD);
+    expect(styleOf(attach('board-nav-item board-nav-settings')).marginTop).toBe('auto');
+    expect(styleOf(attach('board-nav-item board-nav-collapse')).marginTop).toBe('0px');
   });
 
   it('no width band hides the circle presence strip any more', () => {

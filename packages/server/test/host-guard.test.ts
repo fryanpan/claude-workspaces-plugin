@@ -1407,7 +1407,7 @@ describe('shareScopeAllows — resources under the workspace path', () => {
       '/workspaces/w-1',
       '/workspaces/w-1/home',
       '/workspaces/w-1/tasks',
-      '/workspaces/w-1/mine',
+      '/workspaces/w-1/library',
       '/workspaces/w-1/activity',
     ]) {
       expect(shareScopeAllows(p, 'GET', BOARD, workspacesOf), p).toBe(true);

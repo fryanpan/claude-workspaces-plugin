@@ -85,6 +85,7 @@ import {
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
 import { meetingTimingPath } from './meetings.ts';
+import { commentedBlockIds, sectionIds } from './notes-cleanup-scope.ts';
 import { recordMeetingCost } from './notes-cost-store.ts';
 import {
   NOTES_AUTHOR_ID,
@@ -94,7 +95,11 @@ import {
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
-import { type NotesHeadingStore, createNotesHeadingFileStore } from './notes-heading-store.ts';
+import {
+  type NotesHeadingStore,
+  type NotesSectionClaim,
+  createNotesHeadingFileStore,
+} from './notes-heading-store.ts';
 import { stripInventedLinks } from './notes-invented-links.ts';
 import {
   LEGACY_TRANSCRIPT_HEADING,
@@ -108,6 +113,7 @@ import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import { resolveSchemeLinks } from './notes-scheme-links.ts';
 import { lastNotesHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
+import { tidyNotesSection } from './notes-section-tidy.ts';
 import {
   reattributeNotesSection,
   relabelNotesSection,
@@ -181,9 +187,10 @@ export interface NotesContextTasks {
  * section the agent is writing into. A block id changes under neither, so the
  * memory of it is what makes a rename a non-event.
  *
- * PER DOC **AND** PER MEETING. A new recording opens its own section below
- * whatever the last one wrote — the owner's 2026-08-31 rule that a
- * stop-and-restart never replaces what is already written.
+ * PER DOC **AND** PER MEETING, because a section is what ONE recording wrote:
+ * two meetings live on one doc must not be handed each other's heading. What
+ * a recording does when it finds a section a FINISHED meeting wrote is a
+ * different question, answered in `notes-section-fit.ts` — it continues it.
  *
  * AND IT IS NO LONGER MEMORY ONLY. It used to be: a restarted server
  * remembered no heading and opened a new section on its first tick, so a
@@ -235,22 +242,49 @@ export interface NotesHeadingMemory {
    * the same answer would find nothing free and open the twin this exists to
    * prevent.
    */
-  adopt(ids: NotesMeetingIds, headingId: string): void;
-  /** This meeting is (re)starting: forget whatever it remembered, so it opens
-   *  its own section. Another meeting's memory of the same doc is untouched —
-   *  that is the whole reason the key carries the meeting id. */
+  adopt(ids: NotesMeetingIds, headingId: string, prior?: ReadonlySet<string>): void;
+  /**
+   * What was ALREADY in the section when this meeting took it over — the
+   * previous recording's minutes, or the lines a person had typed there.
+   *
+   * Empty for a meeting that opened its own section, which is every meeting
+   * that is not continuing one, so a reader of this set behaves exactly as it
+   * did before continuation existed. The end-of-meeting quality pass is the
+   * reader: a meeting is judged on the notes IT wrote, and being handed the
+   * last recording's repeated bullets would file a bad-notes item against a
+   * meeting that wrote none.
+   *
+   * In memory only: a server restarted mid-meeting has forgotten what the
+   * section held when the meeting started, and answers the empty set, which
+   * reads the whole section exactly as it did before.
+   */
+  priorIn(ids: NotesMeetingIds): ReadonlySet<string>;
+  /** This meeting is (re)starting: forget whatever it remembered, so it asks
+   *  `notesSectionForMeeting` again where it writes. Another meeting's memory
+   *  of the same doc is untouched — that is the whole reason the key carries
+   *  the meeting id. */
   beginMeeting(ids: NotesMeetingIds): void;
   /**
-   * Every heading on this doc that SOME meeting has claimed as its section —
-   * this process's own adoptions and opens, plus whatever the store holds
-   * from meetings that have already stopped.
+   * Every section SOME meeting on this doc has claimed — this process's own
+   * adoptions and opens, plus whatever the store holds from meetings that
+   * have already stopped — each with the moment its meeting stopped, where
+   * one was recorded.
    *
    * The durable half of "is this section a meeting's or the doc's own", and
    * the reason that question is not answered from authorship: starting a
    * recording releases every claim (`releaseNotesAuthorship`), so a finished
    * meeting's minutes read as authorless by design.
    */
-  claimedIn(docId: string): ReadonlySet<string>;
+  claimsIn(docId: string): ReadonlyMap<string, NotesSectionClaim>;
+  /**
+   * This meeting has STOPPED.
+   *
+   * What turns its section from "that meeting's, do not write here" into
+   * "the doc's minutes, carry on under them" for the next recording. Written
+   * beside the meeting's transcript, so a recording started after a restart
+   * reads the same answer.
+   */
+  endMeeting(ids: NotesMeetingIds, at?: number): void;
 }
 
 /** The level a meeting's own section heading is written at. Deeper headings
@@ -285,10 +319,13 @@ export function notesSectionForMeeting(
   if (held !== undefined) return held;
   const free = reusableNotesSection(
     readNotesOutline(docStore, ids.docId),
-    memory.claimedIn(ids.docId),
+    memory.claimsIn(ids.docId),
   );
   if (free === undefined) return undefined;
-  memory.adopt(ids, free);
+  // WHAT IS ALREADY UNDER IT is not this meeting's work, and the one reader
+  // that must not mistake it for this meeting's is the quality pass. Read off
+  // the same outline the answer was decided on.
+  memory.adopt(ids, free, sectionIds(readNotesOutline(docStore, ids.docId), free).blocks);
   return free;
 }
 
@@ -325,11 +362,11 @@ export function notesSectionForMeeting(
  */
 function reusableNotesSection(
   outline: readonly prose.OutlineEntry[],
-  claimed: ReadonlySet<string>,
+  claims: ReadonlyMap<string, NotesSectionClaim>,
 ): string | undefined {
   const at = lastNotesHeadingIndex(outline);
   if (at < 0) return undefined;
-  return notesSectionFits(outline, claimed) ? outline[at]?.id : undefined;
+  return notesSectionFits(outline, claims) ? outline[at]?.id : undefined;
 }
 
 export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadingMemory {
@@ -342,16 +379,25 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
   // meeting's transcript. Without one the memory behaves exactly as it did:
   // remembered for the life of the process and no longer.
   const byMeeting = new Map<string, string>();
-  // Every heading this PROCESS has seen a meeting take, per doc. Added to and
-  // never removed by `beginMeeting`: a section the last recording opened is
-  // still that recording's record after it stops, which is exactly what the
-  // next recording must not write into.
-  const claimedByDoc = new Map<string, Set<string>>();
+  // Every heading this PROCESS has seen a meeting take, per doc, with the
+  // moment that meeting stopped once it has. Added to and never removed by
+  // `beginMeeting`: which recording opened a section is a fact about the doc
+  // that outlives the recording, and it is what says whether the next one is
+  // continuing a finished meeting's notes or writing beside a live one's.
+  const claimedByDoc = new Map<string, Map<string, NotesSectionClaim>>();
+  // A CLAIM IS ALWAYS RECORDED LIVE, INCLUDING OVER A FINISHED ONE. The
+  // meeting claiming the heading is recording right now, and the heading it
+  // takes over is its section until IT stops — otherwise a third recording
+  // would read the previous meeting's stop, find the section continuable, and
+  // write into a section a meeting is live in.
   const claim = (docId: string, headingId: string): void => {
     const held = claimedByDoc.get(docId);
-    if (held) held.add(headingId);
-    else claimedByDoc.set(docId, new Set([headingId]));
+    if (held) held.set(headingId, { headingId });
+    else claimedByDoc.set(docId, new Map([[headingId, { headingId }]]));
   };
+  // What each meeting found in the section it adopted, by meeting key. Only a
+  // meeting that CONTINUED somebody's section has an entry.
+  const priorByMeeting = new Map<string, ReadonlySet<string>>();
   const keyOf = ({ docId, meetingId }: NotesMeetingIds): string => `${docId}::${meetingId}`;
   const present = (id: string, outline: readonly prose.OutlineEntry[]): boolean =>
     outline.some((e) => e.id === id && e.kind === 'heading');
@@ -380,10 +426,14 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
       forget(ids);
       return undefined;
     },
-    adopt(ids, headingId) {
+    adopt(ids, headingId, prior) {
       byMeeting.set(keyOf(ids), headingId);
+      if (prior !== undefined && prior.size > 0) priorByMeeting.set(keyOf(ids), prior);
       claim(ids.docId, headingId);
       store?.write(ids, headingId);
+    },
+    priorIn(ids) {
+      return priorByMeeting.get(keyOf(ids)) ?? new Set<string>();
     },
     learn(ids, before, after) {
       const held = remembered(ids);
@@ -402,10 +452,43 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
         store?.write(ids, opened.id);
       } else if (held !== undefined) forget(ids);
     },
-    claimedIn(docId) {
-      const out = new Set(claimedByDoc.get(docId) ?? []);
-      for (const id of store?.openedIn?.(docId) ?? []) out.add(id);
+    claimsIn(docId) {
+      const out = new Map<string, NotesSectionClaim>();
+      // SEVERAL MEETINGS CAN HAVE CLAIMED ONE HEADING — that is what
+      // continuing a section means — so the claims on it are folded into one
+      // answer, and the fold is not "the last record wins".
+      //
+      // A heading is LIVE if ANY claimant has recorded no stop: one meeting
+      // still recording under it is enough to make it that meeting's, and the
+      // meeting it continued having stopped says nothing. Where they have all
+      // stopped, the LATEST stop is the one the window is measured from,
+      // because that is when the conversation this section holds last had
+      // somebody in it.
+      const add = (claim: NotesSectionClaim): void => {
+        const held = out.get(claim.headingId);
+        if (held === undefined) {
+          out.set(claim.headingId, claim);
+          return;
+        }
+        if (claim.endedAt === undefined || held.endedAt === undefined) {
+          out.set(claim.headingId, { headingId: claim.headingId });
+          return;
+        }
+        out.set(claim.headingId, {
+          headingId: claim.headingId,
+          endedAt: Math.max(held.endedAt, claim.endedAt),
+        });
+      };
+      for (const held of claimedByDoc.get(docId)?.values() ?? []) add(held);
+      for (const stored of store?.claimsIn?.(docId) ?? []) add(stored);
       return out;
+    },
+    endMeeting(ids, at = Date.now()) {
+      const headingId = remembered(ids);
+      if (headingId === undefined) return;
+      const held = claimedByDoc.get(ids.docId);
+      if (held) held.set(headingId, { headingId, endedAt: at });
+      store?.finish(ids, at);
     },
     beginMeeting(ids) {
       // IN MEMORY ONLY, AND THAT IS THE RESTART FIX. A meeting id is minted
@@ -622,11 +705,47 @@ export function applyNotesUpdate(
   const res = applyNotesBlockEdits(docStore, update.docId, linked.edits);
   if (!res.ok) return 'store-refused';
   opts.onOutcomes?.(res.outcomes);
-  heading.learn(
-    { docId: update.docId, meetingId: update.meetingId },
-    before,
-    readNotesOutline(docStore, update.docId, { headingsOnly: true }),
-  );
+  const ids = { docId: update.docId, meetingId: update.meetingId };
+  const after = readNotesOutline(docStore, update.docId, { headingsOnly: true });
+  heading.learn(ids, before, after);
+  // A TOPIC OPENED TWICE IS FOLDED IN THE TICK THAT OPENED IT. A tick is
+  // shown a slice of the doc, so it can open a `### ` heading the section
+  // already carries a little further up — which is what put `Note-taker
+  // performance` in Bryan's doc twice on 2026-09-11, while the meeting was
+  // still running. Dropping the repeat leaves this tick's bullets under the
+  // topic they were already about, and only a repeat of the topic DIRECTLY
+  // above it is touched (`notes-section-tidy.ts`).
+  //
+  // Blank lines are left to the cleanup pass: a person typing in the notes
+  // section has an empty paragraph under their cursor for as long as it
+  // takes them to type, and a live meeting is exactly when that is true.
+  //
+  // AN EMPTY BULLET OF THE NOTE-TAKER'S OWN IS NOT LEFT, and the reason the
+  // same argument does not apply is authorship: a person's half-typed bullet
+  // carries no author, so naming one here is what keeps this off their line
+  // while clearing a blank the note-taker wrote. Cleared in the tick after
+  // the one that wrote it rather than at the end of the meeting, because
+  // what the reader sees meanwhile is a blank line wearing the fresh-note
+  // tint (2026-09-11).
+  const section = heading.headingId(ids, after);
+  if (section !== undefined) {
+    const tidied = tidyNotesSection(doc.ydoc, section, () => commentedBlockIds(doc.ydoc), {
+      blanks: false,
+      bulletsAuthoredBy: NOTES_AUTHOR_ID,
+    });
+    if (tidied.merged > 0) {
+      console.log(
+        `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
+          `${tidied.merged} repeated topic heading folded into the topic above it`,
+      );
+    }
+    if (tidied.bullets > 0) {
+      console.log(
+        `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
+          `${tidied.bullets} empty bullet removed from the section`,
+      );
+    }
+  }
   // A batch every one of whose edits failed wrote nothing, and saying so is
   // what reports the skip. A batch that landed some of its edits is a
   // success: the rest reported `unknown-block`, which is the ordinary answer
@@ -677,7 +796,10 @@ export function notesWriteSkipDetail(
   if (skip === 'not-prose') return 'the doc is not a prose doc, so it has nowhere to put notes';
   if (skip === 'store-refused') return 'the store refused the batch outright';
   if (skip === 'guard-refused') {
-    return 'every edit touched the meeting’s own notes heading, which the guard never lets through';
+    return (
+      'the guard let no edit through — every one touched the meeting’s own notes ' +
+      'heading, or the batch’s only note was a bullet with no words in it'
+    );
   }
   if (outcomes === undefined || outcomes.length === 0) {
     return 'every edit named a block that is no longer in the doc';
@@ -990,6 +1112,7 @@ export function withServerNotesSinks(
           ...(deps.dataDir !== undefined ? { dataDir: deps.dataDir } : {}),
           headingIdOf: (docId, meetingId) =>
             heading.headingId({ docId, meetingId }, readNotesOutline(deps.docStore(), docId)),
+          priorBlocks: (docId, meetingId) => heading.priorIn({ docId, meetingId }),
           actor: deps.qualityActor ?? { id: NOTES_AUTHOR_ID, name: 'Meeting Assistant' },
         },
         {
@@ -1083,6 +1206,11 @@ export function withServerNotesSinks(
     // so a meeting whose notes quietly covered half of what was said read
     // exactly like a healthy one. This is the coverage, stated at the stop.
     onMeetingSummary: (summary): void => {
+      // THE STOP IS RECORDED FIRST, before anything below can throw. It is
+      // what the NEXT recording on this doc reads to decide whether to carry
+      // on under this section or open its own (`notesSectionFits`), so a
+      // quality pass that fails must not cost the doc a second heading.
+      heading.endMeeting({ docId: summary.docId, meetingId: summary.meetingId });
       // AND WHAT THE NOTES THEMSELVES CAME OUT LIKE. The line above says how
       // much of the meeting reached a compose, and a meeting once reported
       // every turn handled while its doc carried dozens of repeated lines,

@@ -173,6 +173,34 @@ export function parseEngineName(raw: unknown): TranscriptionEngineName | undefin
  */
 export const RECORDING_CONSENT_NOTE = "By recording, you confirm that you've asked for consent";
 
+/**
+ * How many minutes of no settled speech end a recording on their own.
+ *
+ * A running timer's only job is to notice a meeting with no content in it
+ * (Bryan, 2026-09-12), so a recording that hears nothing for this long stops
+ * itself rather than running until somebody looks at the tab. Shared because
+ * the server counts the window and the browser says how long it was: two
+ * copies of the number would let the sentence outlive the rule.
+ */
+export const MEETING_SILENCE_MINUTES = 15;
+
+/**
+ * What the strip says once a recording has timed itself out.
+ *
+ * One plain sentence, in the same slot a refused microphone uses — the strip
+ * has one line, and after the stop there are no words competing for it.
+ */
+export const MEETING_SILENCE_NOTE = `Recording stopped after ${MEETING_SILENCE_MINUTES} minutes without speech.`;
+
+/**
+ * Why a meeting ended, when it was not a person pressing Stop.
+ *
+ * Absent on every ordinary stop — a tab closing, the Stop button, a server
+ * shutting down — which is what keeps an older client reading exactly what it
+ * always read.
+ */
+export type MeetingStopReason = 'silence';
+
 /** Client → server. Sent as a JSON text frame; audio is sent as binary frames. */
 export type MeetingClientMessage =
   | {
@@ -435,6 +463,16 @@ export type MeetingServerMessage =
    */
   | { type: 'notes_method'; method: NotesMethod; recorded: boolean }
   /** The meeting ended; its transcript is durable. */
-  | { type: 'stopped'; meetingId: string; endedAt: number }
+  | {
+      type: 'stopped';
+      meetingId: string;
+      endedAt: number;
+      /**
+       * Why, when the server ended it rather than the person. Absent is the
+       * ordinary stop, so a client that does not read this field behaves
+       * exactly as it did.
+       */
+      reason?: MeetingStopReason;
+    }
   /** Something went wrong mid-meeting. Distinct from `unavailable`. */
   | { type: 'error'; message: string };

@@ -2,7 +2,6 @@ import { prose } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
-import { PLACEMENT_CHANGED_EVENT } from '../src/card-placement.ts';
 import { mountFootnoteNotes } from '../src/doc/footnote-notes.ts';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { MountScope } from '../src/mount-scope.ts';
@@ -188,8 +187,9 @@ describe('an open card while the text underneath changes', () => {
     expect(container.querySelectorAll('.cw-fn-on')).toHaveLength(0);
   });
 
-  it('closes when the reader moves their cards into the margin under it', () => {
+  it('closes when the window grows a margin under it', () => {
     // The real predicate this time, reading the attribute the chrome writes.
+    setViewport(PHONE);
     document.body.dataset.cards = 'inline';
     const { container } = mount({
       marginVisible: () => document.body.dataset.cards === 'balloon',
@@ -197,7 +197,7 @@ describe('an open card while the text underneath changes', () => {
     tap(supFor(container, '1'));
     expect(popover(container)?.hidden).toBe(false);
     document.body.dataset.cards = 'balloon';
-    window.dispatchEvent(new Event(PLACEMENT_CHANGED_EVENT));
+    setViewport(IPAD);
     expect(popover(container)?.hidden).toBe(true);
     expect(container.querySelectorAll('.cw-fn-on')).toHaveLength(0);
   });

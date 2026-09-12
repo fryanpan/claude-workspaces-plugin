@@ -69,6 +69,7 @@ import {
   MAX_SPEAKER_NAME,
   MEETING_AUDIO_ENCODING,
   MEETING_SAMPLE_RATE,
+  MEETING_SILENCE_NOTE,
   type MeetingBotStatus,
   type MeetingCaptureSource,
   type MeetingServerMessage,
@@ -138,6 +139,7 @@ import {
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
 import type { TrackLossReason } from './meeting-track-watch.ts';
 import type { TranscriptReader } from './meeting-transcript-panel.ts';
+import { WRITE_CONTROL_ATTR } from './signin/write-gate.ts';
 import type { DocSpeakers } from './speaker-voices.ts';
 
 /** How often the elapsed clock is redrawn. Twice a second: a second-resolution
@@ -491,6 +493,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const record = document.createElement('button');
   record.type = 'button';
   record.className = 'meeting-record';
+  // Recording WRITES: the transcript and every note it mints land in this
+  // doc. A visitor who cannot write it was still offered the button, and the
+  // press failed at the server. The strip is built before the doc's write
+  // gate runs (`app.ts` mounts the meeting, then wires the gates), so
+  // carrying the attribute is all either button needs to arrive disabled.
+  record.setAttribute(WRITE_CONTROL_ATTR, '');
   record.setAttribute('aria-haspopup', 'menu');
   record.setAttribute('aria-expanded', 'false');
   const recordGlyph = document.createElement('span');
@@ -512,6 +520,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const options = document.createElement('button');
   options.type = 'button';
   options.className = 'meeting-record-options';
+  options.setAttribute(WRITE_CONTROL_ATTR, '');
   options.setAttribute('aria-label', 'Recording options');
   options.setAttribute('aria-haspopup', 'dialog');
   options.title = 'Recording options';
@@ -688,6 +697,15 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * resume lands.
    */
   let standingNote = '';
+  /**
+   * What the last recording left behind when the SERVER ended it: today, the
+   * sentence saying it timed itself out for hearing nothing.
+   *
+   * It outlives the meeting on purpose — a person who was not looking is
+   * exactly who it is for — so unlike `standingNote` the end of a meeting does
+   * not clear it. A tap dismisses it, and the next recording replaces it.
+   */
+  let endedNote = '';
 
   // ---- bot presence ---------------------------------------------------------
   /** Whether this mount has seen the bot alive — a terminal state found
@@ -1024,9 +1042,14 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     names: () => names,
     liveBot,
     botFarewell,
+    endedNote: () => endedNote,
     nameSpeaker: (label) => nameSpeaker(label),
     dismissBotNote: () => {
       botNoteDismissed = true;
+      render();
+    },
+    dismissEndedNote: () => {
+      endedNote = '';
       render();
     },
   });
@@ -1213,6 +1236,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     if (state.kind !== 'idle') return true;
     if (liveBot()) return true;
     if (botFarewell()) return true;
+    // A recording that ended itself has a sentence to show, and a hidden
+    // strip would swallow the only explanation there is.
+    if (endedNote) return true;
     return false;
   }
 
@@ -1677,11 +1703,21 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         cancelReconnect();
         releaseAudio();
         closeSocket();
+        // Nobody pressed anything, so the strip has to say what happened. Set
+        // before the state moves: `setState` renders, and the idle line is
+        // where this sentence goes.
+        if (msg.reason === 'silence') endedNote = MEETING_SILENCE_NOTE;
         opts.liveZone?.end();
         // The meeting that just ended is the doc's current one: its cast is
         // the right answer again, and it is the record a late rename lands on.
         opts.onMeetingChange?.(lastMeetingId);
-        announceEnded();
+        // A tidy-up is an offer to re-read what the meeting wrote, and a
+        // recording that timed out having heard NOTHING wrote nothing: the
+        // card would ask a question about an empty transcript, on the one
+        // ending the person did not ask for. A timeout after somebody spoke
+        // is an ordinary end and still gets the offer — the words are the
+        // test, not the reason.
+        if (msg.reason !== 'silence' || turns.length > 0) announceEnded();
         setState({ kind: 'idle' });
         break;
       case 'error':
@@ -1714,6 +1750,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // to the last one is about people this meeting has not heard from.
     opts.onMeetingChange?.(null);
     standingNote = '';
+    // A new recording answers whatever the last one's ending said.
+    endedNote = '';
     forgetStreamLosses();
     tapToStart = false;
     setState({ kind: 'requesting' });

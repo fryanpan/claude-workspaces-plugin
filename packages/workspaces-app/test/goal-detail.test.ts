@@ -59,8 +59,6 @@ function submitComposer(panel: HTMLElement): void {
 }
 
 const filters = {
-  tab: 'all',
-  userName: 'Jordan',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
 } as const;

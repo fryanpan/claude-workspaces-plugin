@@ -92,11 +92,23 @@ export interface MeetingFeedDeps {
   liveBot(): MeetingBotStatus | null;
   /** The terminal bot state worth a dismissable line, or null. */
   botFarewell(): string | null;
+  /**
+   * What the last recording's ENDING has to say, when the server ended it
+   * rather than a person: the recording that timed itself out for hearing
+   * nothing. Empty after every stop somebody pressed.
+   *
+   * The one note here that belongs to a meeting already over, which is why it
+   * renders on an idle strip: the person it is for is the one who was not
+   * watching.
+   */
+  endedNote(): string;
   /** Ask the person what to call this voice — the strip's, because a name
    *  travels on its socket. */
   nameSpeaker(label: string): void;
   /** The farewell note was tapped away. */
   dismissBotNote(): void;
+  /** The timed-out-recording note was tapped away. */
+  dismissEndedNote(): void;
 }
 
 /** What the strip drives the line through. */
@@ -191,6 +203,21 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
         const note = document.createElement('span');
         note.className = 'meeting-note meeting-bot-note';
         note.textContent = `${describeBotState(live.state)}${who}`;
+        line.append(note);
+        return;
+      }
+      // A recording that ended itself outranks a bot's farewell: it is the
+      // more recent thing to have happened on this doc, and the strip has one
+      // line.
+      const ended = deps.endedNote();
+      if (ended) {
+        clearTurnSpans();
+        const note = document.createElement('button');
+        note.type = 'button';
+        note.className = 'meeting-note meeting-note-dismiss';
+        note.textContent = ended;
+        note.title = 'Tap to dismiss';
+        note.addEventListener('click', () => deps.dismissEndedNote());
         line.append(note);
         return;
       }

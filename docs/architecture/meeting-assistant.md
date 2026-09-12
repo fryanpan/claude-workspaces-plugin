@@ -129,6 +129,40 @@ true` when the server took it.
   the doc's lock for a moment. Past the window the strip lands exactly where it
   used to — "The connection to the meeting was lost", mic released.
 
+## A recording with nothing in it ends itself (2026-09-12)
+
+A meeting used to run until somebody noticed it. The socket is the meeting, the
+engine is billed by the second that socket is open, and a person who walks away
+from a doc leaves a microphone recording an empty room for as long as the tab
+lives. Bryan's rule: *the only reason for a running timer is to notice a
+meeting with no content, so time the recording out.*
+
+- **Fifteen minutes with no SETTLED turn**, counted from the moment the meeting
+  goes live and started again by every settled turn. The window and its
+  environment override are `meeting-silence.ts`, the same shape
+  `doc-store-timings.ts` uses — resolved once at load, and only able to
+  shorten, so no deployment can make a microphone outlive the rule.
+- **Settled turns, not audio.** Frames arrive from a silent room exactly as
+  they arrive from a busy one — a dead capture delivers digital silence and a
+  live one delivers the air — so audio is no evidence that anything was said.
+  A partial does not count either: it is the engine still revising, and noise
+  produces them for as long as it is noisy.
+- **It stops down the same path a person's Stop takes.** `MeetingRelay.stop`
+  with a reason: the engine session closes (which flushes the turn in
+  progress), the notes session ends into the doc, the record is stopped, and
+  `meeting.stopped` broadcasts. Nothing about the teardown is special-cased,
+  so nothing about it can be missed.
+- **Two places say why.** The record's `endedBy: 'silence'` — otherwise a
+  meeting with two turns in it and one somebody left running read identically
+  — and the `stopped` frame's `reason`, which the strip turns into one
+  sentence on an idle line (`MEETING_SILENCE_NOTE`). The sentence outlives the
+  meeting on purpose: the person it is for is the one who was not watching. A
+  tap dismisses it; the next Record replaces it, and that next press opens an
+  ordinary new meeting with its own segment.
+- **The timer is injectable** (`MeetingRelayDeps.schedule`), which is what lets
+  `meeting-silence.test.ts` walk a fake clock through twenty-nine minutes
+  without sleeping or shrinking the window it is testing.
+
 ## Engine choice
 
 Criteria (owner, 2026-08-27): latency first, accuracy second, cost/privacy

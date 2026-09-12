@@ -17,11 +17,9 @@ import {
   type BoardTask,
   CHORES_ID,
   DEFAULT_DONE_WINDOW,
-  assignedToHuman,
   boardSections,
   ownedByPerson,
   ownerKind,
-  taskVisible,
 } from '../src/board/board-model.ts';
 import { humanBlockerRows, reviewQueue } from '../src/board/board-review-model.ts';
 import { type ShimHandlers as BoardHandlers, disposeBoards, renderBoard } from './support/board.ts';
@@ -51,8 +49,6 @@ function task(overrides: Partial<BoardTask> = {}): BoardTask {
 const GOALS: BoardGoal[] = [{ id: 'g-pr', title: '1. Get the atlas out' }];
 
 const filters: BoardFilters = {
-  tab: 'all',
-  userName: 'Ada Fenwick',
   doneWindow: DEFAULT_DONE_WINDOW,
   now: NOW,
 };
@@ -87,35 +83,21 @@ describe('ownerKind', () => {
     expect(ownedByPerson(task({ assignee: 'Ada Fenwick' }))).toBe(false);
   });
 
-  it('reads the reserved bucket the same way in both readers', () => {
-    // These two disagreed for one release: `ownerKind` case-folded and
-    // `assignedToHuman` did not, so a row stored `Human` drew the person mark
-    // and was still missing from My Tasks. One question, one spelling.
-    const shouty = task({ assignee: 'Human' });
-    expect(ownerKind(shouty)).toBe('person');
-    expect(assignedToHuman(shouty)).toBe(true);
+  it('case-folds the reserved bucket', () => {
+    // `ownerKind` case-folds, so a row stored `Human` draws the person mark
+    // rather than reading as an agent nobody can name.
+    expect(ownerKind(task({ assignee: 'Human' }))).toBe('person');
     // Positive control: the fold is on the reserved WORD, not on every name.
-    expect(assignedToHuman(task({ assignee: 'Ada Fenwick' }))).toBe(false);
+    expect(ownerKind(task({ assignee: 'Ada Fenwick' }))).toBe('unknown');
   });
 
-  it('separates "a person owns it" from "it is in the unnamed-person bucket"', () => {
+  it('counts a named person and the unnamed bucket alike as owned by a person', () => {
     const named = task({ assignee: 'Ada Fenwick', ownerKind: 'person' });
     const unnamed = task({ assignee: 'human', ownerKind: 'person' });
     expect(ownedByPerson(named)).toBe(true);
     expect(ownedByPerson(unnamed)).toBe(true);
-    // …and My Tasks stays the viewer's own queue. Widening this one would
-    // file somebody ELSE's task under the reader's tab.
-    expect(assignedToHuman(unnamed)).toBe(true);
-    expect(assignedToHuman(named)).toBe(false);
-    const other = task({ assignee: 'Rowan Iles', ownerKind: 'person' });
-    expect(taskVisible(other, { ...filters, tab: 'mine' })).toBe(false);
-    // Positive control for that absence: the reader's OWN named task is in.
-    expect(
-      taskVisible(task({ assignee: 'Ada Fenwick', ownerKind: 'person' }), {
-        ...filters,
-        tab: 'mine',
-      }),
-    ).toBe(true);
+    // …and an agent is still not one, whoever it is assigned to.
+    expect(ownedByPerson(task({ assignee: 'Cartographer', ownerKind: 'agent' }))).toBe(false);
   });
 });
 
@@ -141,10 +123,10 @@ describe('humanBlockerRows', () => {
 
   it('does not sweep in an agent whose display name is also the viewer’s', () => {
     // The rejected fix — matching the VIEWER's name — passes every other
-    // assertion in this file and fails here: `filters.userName` is
-    // 'Ada Fenwick', and an agent called that would drag its blockers into
-    // the strip built to stay short. The queue takes no viewer at all, which
-    // is what keeps the count at the top of the board one number.
+    // assertion in this file and fails here: an agent sharing the reader's
+    // display name would drag its blockers into the strip built to stay
+    // short. The queue takes no viewer at all, which is what keeps the count
+    // at the top of the board one number.
     const tasks = [
       task({ id: 't-twin', assignee: 'Ada Fenwick', ownerKind: 'agent' }),
       task({ after: ['t-twin'] }),

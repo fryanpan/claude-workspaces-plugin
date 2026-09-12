@@ -462,6 +462,16 @@ restart mid-recording keeps writing under the section it opened rather than
 opening a second one. Ids and a block id, no meeting words, so it sits with
 `notes-timing.ts` rather than with the stores that own durable text.
 
+`notes-section-tidy.ts` joins the same `notes-*` family and moves nothing in
+the picture: it is the repair on a notes section that neither a prompt nor a
+block edit can make — an empty paragraph under the heading, a topic heading
+repeating the topic directly above it — and it is the one module here that
+writes the document directly rather than through `applyBlockEdits`, because
+neither block has an authorship to write through. Two callers, both after a
+write has had the last word: the tick path in `meeting-notes-doc.ts` (topic
+headings only) and `notes-cleanup-pass.ts` (both). It reads no transcript and
+composes nothing.
+
 `notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
 the picture either: it is the at-stop tidy-up, and it is deliberately not a
 second note-taking path — it reuses `NotesComposer`, the shared
@@ -480,6 +490,15 @@ family and moves nothing in the picture: it is the fan-out one level below
 two engines' independent turn numbering and speaker labels back into the one
 transcript a meeting keeps. The relay still owns the lifecycle; this owns only
 what two sessions collide on.
+
+`meeting-silence.ts` joins the same family and changes nothing in the picture
+either: it is one window and its resolver, the fifteen minutes of no settled
+speech after which `meeting-protocol.ts` ends a recording itself. It sits
+beside the relay rather than inside it for the reason `doc-store-timings.ts`
+sits outside the doc store — a cadence with an environment override is a
+decision a test reads and a reviewer checks, not a number buried in a
+`setTimeout`. No state, no `Request`, nothing to schedule: the relay owns the
+timer, this owns only how long it runs.
 
 `notes-invented-links.ts` sits in the Meetings box beside `notes-edit-guard.ts`
 and is the second deterministic refusal on the applier path: the guard says

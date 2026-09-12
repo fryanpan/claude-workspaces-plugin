@@ -33,7 +33,7 @@ export type WorkspaceLink =
 // The optional suffix is the board's nav destinations: the board keeps its
 // panel params on every nav page, so a link copied from `/home` addresses
 // the same task a link copied from the bare path does.
-const WS_PATH = /^\/workspaces\/([^/?#]+)(?:\/(?:home|tasks|mine|activity))?\/?$/;
+const WS_PATH = /^\/workspaces\/([^/?#]+)(?:\/(?:home|tasks|library|activity))?\/?$/;
 const WS_CHILD_PATH = /^\/workspaces\/([^/?#]+)\/(docs|mockups|attachments)\/([^/?#]+)\/?$/;
 
 function decode(part: string): string {
