@@ -2374,10 +2374,36 @@ body.has-set .doc-switcher-caret {
 /* No click-to-type runway under the transcript while it is showing: its last
    line sits against the bottom of the pane, not a screen above it. The base
    rule's 160px is what put it there. The keyboard inset stays — on a phone
-   that runway is the only thing keeping the last line off the keyboard. */
+   that runway is the only thing keeping the last line off the keyboard.
+   `--lz-runway` is the one exception, and it is zero on every doc that has no
+   float dock over that pane — see below. */
 #editor:has(> .live-zone:not([hidden])) {
-  padding-bottom: calc(var(--safe-bottom) + max(8px, var(--kb-bottom, 0px)));
+  padding-bottom: calc(var(--safe-bottom) + var(--lz-runway, 0px) + max(8px, var(--kb-bottom, 0px)));
 }
+/* THE DOCK IS OVER THE LAST LINE, so the scroller has to be able to push the
+   transcript past it (Bryan, 2026-09-11, recording from his phone: "the
+   transcript scrolls and stays above the Make plan and Review buttons; today
+   it collides with them and will not scroll up").
+
+   The floats (float-dock.ts) are pinned to #editor-pane, not to the prose, so
+   they lie OVER the bottom of the scroller; with 8px of padding under the
+   words the scroll ended with the last lines behind Make Plan and Review and
+   nothing left to scroll. This is the dock's own footprint given back as
+   runway: the words clear the buttons at maximum scroll, and at rest the
+   transcript still hugs the last line of the doc rather than sitting a screen
+   below it.
+
+   Only where the dock is actually OVER the prose. Two conditions, and both
+   are load-bearing: a dock holding a visible float (an ordinary doc has
+   none), and a dock that has not been seated in the comment column —
+   `.doc-floats.is-floating` (new-indicator.ts) moves the row into the
+   balloon margin beside the text on a layout wide enough to have one, where
+   it covers nothing and this runway would be 104px of dead surface under an
+   iPad's transcript. */
+#editor-pane:has(> .doc-floats:not(.is-floating) > .plan-float:not([hidden])) #editor {
+  --lz-runway: 104px;
+}
+
 body.is-reading-width #editor > .live-zone {
   max-width: 36rem;
 }
