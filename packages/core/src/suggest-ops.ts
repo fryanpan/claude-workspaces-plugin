@@ -33,6 +33,27 @@ import {
  * result to disk; not a browser-local origin, so a client Y.UndoManager with
  * default trackedOrigins never puts these transactions on a human's undo
  * stack (pinned by test).
+ *
+ * A PROPOSAL'S OFFERED TEXT IS MARKDOWN, and that is why the two creation
+ * primitives below parse it by default while `findAndReplace` does not. A
+ * proposal exists to be READ: it sits in the doc and in a margin card until
+ * somebody answers it, so `[@Devi](speaker:B)` showing as brackets is the
+ * reader's whole view of the change. The block-proposal path
+ * (`suggest-blocks.ts`, via `applyBlockEdits`) already parses, so the same
+ * change proposed by the other verb rendered as a tag — one product, two
+ * answers, decided by which tool the agent reached for.
+ *
+ * And the literal characters were never durable anyway: the markdown
+ * serializer does not escape them, so accepting a literal `[label](url)`
+ * wrote real link syntax to the file and the next parse-from-disk turned it
+ * into a link. The doc showed brackets, the file held a link, and a restart
+ * settled it — which is the corruption family `prose-integrity.ts` exists to
+ * report. Parsing at write time makes the live doc agree with the file it
+ * will become.
+ *
+ * `parseInlineMarks: false` is still there for text that is somebody's words
+ * rather than an agent's markup: a spoken correction carries whatever the
+ * room said, and an asterisk in a transcript must not italicise half a note.
  */
 
 export interface SuggestionAuthor {
@@ -414,7 +435,13 @@ export function suggestReplace(
     contextAfter?: string;
     /** 1-indexed. When omitted, requires a unique match. */
     occurrence?: number;
-    /** Parse inline markdown in `replace` into marks on the proposed text. */
+    /**
+     * Read markdown syntax in `replace` as marks (a link, bold, italic,
+     * code, strike) rather than as characters. DEFAULTS TO TRUE here, unlike
+     * `findAndReplace`, and see the module header for why. Pass `false` for
+     * text that is somebody's words rather than an agent's markdown — the
+     * spoken-correction path does.
+     */
     parseInlineMarks?: boolean;
     author: SuggestionAuthor;
     /** Creation timestamp override (epoch ms). Defaults to Date.now(). */
@@ -451,7 +478,7 @@ export function suggestReplace(
   doc.transact(() => {
     segment.node.format(offsetInNode, length, { [SUGGEST_DELETE_MARK]: attrs });
     insertTextWithMarks(segment.node, offsetInNode + length, opts.replace, {
-      parseInlineMarks: opts.parseInlineMarks === true,
+      parseInlineMarks: opts.parseInlineMarks !== false,
       attributes: { ...inherited, [SUGGEST_INSERT_MARK]: attrs },
     });
   }, opts.transactionOrigin ?? 'agent');
@@ -481,7 +508,13 @@ export function suggestRewriteRange(
     startRel: Uint8Array;
     endRel: Uint8Array;
     replacement: string;
-    /** Parse inline markdown in `replacement` into marks on the proposed text. */
+    /**
+     * Read markdown syntax in `replacement` as marks (a link, bold, italic,
+     * code, strike) rather than as characters. DEFAULTS TO TRUE here, unlike
+     * `findAndReplace`, and see the module header for why. Pass `false` for
+     * text that is somebody's words rather than an agent's markdown — the
+     * spoken-correction path does.
+     */
     parseInlineMarks?: boolean;
     author: SuggestionAuthor;
     /** Creation timestamp override (epoch ms). Defaults to Date.now(). */
@@ -492,7 +525,7 @@ export function suggestRewriteRange(
   const start = resolveRelativePositionRaw(doc, opts.startRel);
   const end = resolveRelativePositionRaw(doc, opts.endRel);
   if (!start || !end) return { ok: false, error: 'anchor-orphaned' };
-  const parseInlineMarks = opts.parseInlineMarks === true;
+  const parseInlineMarks = opts.parseInlineMarks !== false;
 
   const sid = newSid();
   const attrs: SuggestionAttrs = {

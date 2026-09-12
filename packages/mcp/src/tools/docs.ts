@@ -575,7 +575,11 @@ export async function handleDocsTool(
           ...(contextAfter !== undefined ? { contextAfter } : {}),
           ...(occurrence !== undefined ? { occurrence } : {}),
           ...(replaceAll === true ? { replaceAll: true } : {}),
-          ...(parseInlineMarks === true ? { parseInlineMarks: true } : {}),
+          // Forwarded whenever it is a boolean, not only when true: a
+          // proposal's offered text parses by DEFAULT, so `false` is the
+          // only way to ask for literal characters and dropping it here
+          // would answer the opposite of what the caller wrote.
+          ...(typeof parseInlineMarks === 'boolean' ? { parseInlineMarks } : {}),
           ...(suggest === true ? { suggest: true, author: suggestionAuthor() } : {}),
         },
       );
@@ -594,7 +598,9 @@ export async function handleDocsTool(
         `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/rewrite_region`,
         {
           replacement,
-          ...(parseInlineMarks === true ? { parseInlineMarks: true } : {}),
+          // Forwarded as a boolean, never only-when-true — see
+          // find_and_replace above.
+          ...(typeof parseInlineMarks === 'boolean' ? { parseInlineMarks } : {}),
           ...(suggest === true ? { suggest: true, author: suggestionAuthor() } : {}),
         },
       );

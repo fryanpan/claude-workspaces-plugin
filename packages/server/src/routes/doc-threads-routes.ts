@@ -541,7 +541,10 @@ export async function handleDocThreadRoutes(
         if (!author) return j(400, { error: 'author required when suggest is true' });
         const res = docStore.createSuggestionForThread(docId, threadId, {
           replacement,
-          parseInlineMarks,
+          // The direct branch above reads an omitted field as false; a
+          // proposal reads it as "core decides", which is parsed.
+          parseInlineMarks:
+            typeof body?.parseInlineMarks === 'boolean' ? body.parseInlineMarks : undefined,
           author,
         });
         return res.ok ? j(200, res) : j(409, res);
