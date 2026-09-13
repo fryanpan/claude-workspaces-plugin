@@ -68,6 +68,14 @@ describe('serializeKeepingSource', () => {
     expect(normalizeMarkdown(out)).toBe(serializeFragmentToMarkdown(live));
   });
 
+  it('keeps the source around an edit in a doc too long for a whole-doc LCS', () => {
+    // 2,100 blocks squared is past the diff table's budget; only the run
+    // between the first and last difference should need the table.
+    const source = Array.from({ length: 2100 }, (_, i) => `Para ${i}\nwrapped.`).join('\n\n');
+    const edited = source.replace('Para 1050\nwrapped.', 'Para 1050 edited.');
+    expect(serializeKeepingSource(docOf(edited), source)).toBe(edited);
+  });
+
   it('nests a list under an ordered item past the marker width', () => {
     expect(serializeFragmentToMarkdown(docOf('1. one\n  - child\n10. ten\n  - child\n'))).toBe(
       '1. one\n   - child\n2. ten\n   - child\n',
