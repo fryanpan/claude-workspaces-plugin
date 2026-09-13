@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serveStaticUnder } from '../src/server.ts';
+import { serveStatic } from '../src/shells.ts';
 
 /**
  * `/app/*` and `/demos/*` build their path out of the request URL. That was
@@ -73,5 +74,18 @@ describe('serveStaticUnder', () => {
 
   it('returns null for a file that simply is not there', () => {
     expect(serveStaticUnder(root, join(root, 'missing.txt'))).toBeNull();
+  });
+
+  it('returns null for a directory, the root itself included', () => {
+    // A directory exists, so an existence check waved it through to a read
+    // that threw EISDIR — a 500 for asking after a folder.
+    expect(serveStaticUnder(root, root)).toBeNull();
+    expect(serveStaticUnder(root, join(root, 'nested'))).toBeNull();
+    // The unguarded form too: a non-HTML mockup source is served through it.
+    expect(serveStatic(join(root, 'nested'))).toBeNull();
+  });
+
+  it('returns null for a path that runs through a file as if it were a directory', () => {
+    expect(serveStatic(join(root, 'ok.txt', 'child.txt'))).toBeNull();
   });
 });
