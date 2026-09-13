@@ -30,7 +30,7 @@ function linkedBlock(items: unknown[]): string {
   return `<script type="application/json" data-cw-linked-items>${JSON.stringify(items)}</script>`;
 }
 
-const LINKED = { taskId: 't-stand', reviewItemId: 'r-board', review: ASK, by: 'Lead Agent', ts: T0 };
+const LINKED = { taskId: 't-stand', reviewItemId: 'r-board', review: ASK, by: 'Cartographer', ts: T0 };
 
 interface Mounted {
   el: FeedbackWidgetEl;

@@ -29,7 +29,7 @@ function item(
   return {
     id: 'r-price',
     createdAt: T0,
-    createdBy: 'Lead Agent',
+    createdBy: 'Cartographer',
     ...rest,
     review: { shape: 'review', headline: 'Is the price board readable?', ...review },
   } as TaskReviewItem;
@@ -75,7 +75,7 @@ describe('the ticket items a mock page carries', () => {
     const rows = [task([item({ review: linking('d-board') })])];
     const got = run('d-board', rows);
     expect(got.map((i) => [i.taskId, i.reviewItemId, i.by])).toEqual([
-      ['t-stand', 'r-price', 'Lead Agent'],
+      ['t-stand', 'r-price', 'Cartographer'],
     ]);
     expect(run('d-elsewhere', rows)).toEqual([]);
   });
@@ -94,7 +94,7 @@ describe('the ticket items a mock page carries', () => {
       judge: { at: T0, verdict: 'held', reason: 'no stakes' },
     });
     const withdrawn = item({
-      review: { ...linking('d-board'), withdrawnAt: T0, withdrawnBy: 'Lead Agent' },
+      review: { ...linking('d-board'), withdrawnAt: T0, withdrawnBy: 'Cartographer' },
     });
     const ownerOnly = item({ review: { ...linking('d-board'), ownerOnly: true } });
     for (const excluded of [answered, held, withdrawn, ownerOnly]) {
@@ -115,7 +115,7 @@ describe('the ticket items a mock page carries', () => {
         taskId: 't-stand',
         reviewItemId: 'r-price',
         review: { shape: 'review', headline: '</script><b>bold</b>' },
-        by: 'Lead Agent',
+        by: 'Cartographer',
         ts: T0,
       },
     ]);
@@ -142,7 +142,7 @@ describe('serving a mock', () => {
     expect(res.ok, `${path} ${res.status} ${await res.clone().text()}`).toBe(true);
     return res.json() as Promise<Record<string, unknown>>;
   };
-  const AGENT = { id: 'agent:lead', name: 'Lead Agent', kind: 'agent' };
+  const AGENT = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
   const bindMock = async (name: string) => {
     const file = join(dataDir, `${name}.html`);
     writeFileSync(file, `<!doctype html><html><body><h1>${name}</h1></body></html>`);
@@ -174,7 +174,7 @@ describe('serving a mock', () => {
     taskId = (
       (await post(`/workspaces/${ws}/tasks`, {
         title: 'Price board',
-        assignee: 'Lead Agent',
+        assignee: 'Cartographer',
         author: AGENT,
       })) as { task: { id: string } }
     ).task.id;
