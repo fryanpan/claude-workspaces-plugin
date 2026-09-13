@@ -54,6 +54,7 @@ import {
 import { recallCallbackAllows } from './middleware/recall-callback-gate.ts';
 import { localHostnames } from './public-host.ts';
 import { type BoardRole } from './share/board-role.ts';
+import { collabMemberKey } from './share/collab-member-key.ts';
 import { redactMetaForVisitor, relativeReviewUrl } from './share/redact-meta.ts';
 import { shareMemberKey } from './share/share-links.ts';
 import type { Shares } from './share/shares.ts';
@@ -247,7 +248,8 @@ export type Admission =
       /** The share that authorized this request, stamped onto any websocket
        *  it upgrades so revocation can find and close it later. */
       visitorShareId: string | null;
-      /** The MEMBERSHIP that authorized it, on the share hostname. */
+      /** The MEMBERSHIP that authorized it, on the share or collaboration
+       *  hostname (`shareMemberKey` / `collabMemberKey`). */
       visitorMemberKey: string | null;
       /** The email Cloudflare Access verified for this request, if any. */
       accessEmail: string | null;
@@ -319,10 +321,11 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      *  it upgrades so revocation can find and close it later. */
     let visitorShareId: string | null = null;
     /** The MEMBERSHIP that authorized this request, when it came in on the
-     *  share hostname. The same job as `visitorShareId` for the door that
-     *  has no Cloudflare share behind it: without it, ejecting a member or
-     *  shutting external access off left their open socket and stream
-     *  running, because both are authorized once and never re-checked. */
+     *  share or collaboration hostname. The same job as `visitorShareId` for
+     *  the doors no one Cloudflare share admits: without it, ending a
+     *  membership or shutting external access off left their open socket
+     *  and stream running, because both are authorized once and never
+     *  re-checked. */
     let visitorMemberKey: string | null = null;
     /**
      * The email Cloudflare Access verified for this request, if any.
@@ -422,12 +425,10 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       //
       // `collab` is in here with the other two: it is external reach by
       // the same definition, so the one switch that answers "is anything
-      // reachable from outside right now?" has to cover it. One honest
-      // limit — a collab request carries no shareId, so the hang-up sweep
-      // that runs when the switch is flipped off (`closeSocketsForShare`)
-      // cannot find its live sockets. Flipping the switch closes the door
-      // to new requests immediately; an already-open collab websocket
-      // survives until the process restarts.
+      // reachable from outside right now?" has to cover it. A collab request
+      // carries no shareId, so what the hang-up sweep finds its live
+      // connections by is the membership key stamped in the collab branch
+      // below.
       //
       // `proxied-local` is in here too, and it is the WIDEST of the four:
       // the operator's own public hostname through the tunnel, with the
@@ -570,8 +571,15 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         if (!scope.allowed) return j(403, { error: 'out_of_share_scope' });
         // An outsider like any other: identity rewritten to a guest, doc
         // metadata redacted, `visitor`-gated routes closed. What it does
-        // NOT get is a `visitorShareId` — there is no share behind it.
+        // NOT get is a `visitorShareId` — no ONE share admitted it.
         visitor = scope.target;
+        // The membership instead, stamped on whatever this request upgrades
+        // so that revoking or expiring a share, or throwing the master
+        // switch, can find the connection and ask the question above again.
+        visitorMemberKey =
+          accessEmail && scope.target?.workspaceId
+            ? collabMemberKey(scope.target.workspaceId, accessEmail)
+            : null;
       } else if (decision.kind === 'recall-callback') {
         // Recall's dedicated hostname. No Access token is demanded and
         // none could be presented: this caller is a vendor's backend.
