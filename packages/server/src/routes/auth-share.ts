@@ -36,6 +36,7 @@ import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
+import { collabMembershipEnded } from '../share/collab-member-key.ts';
 import { readCookie } from '../share/link-session.ts';
 import { type ShareLinks, shareMemberKey } from '../share/share-links.ts';
 import { ACCESS_NOT_CONFIGURED, type Shares } from '../share/shares.ts';
@@ -139,6 +140,12 @@ export interface AuthShareRoutesContext {
    * mint: a link whose URL names no hostname is a link nobody can open.
    */
   shareLinkBaseHost: string;
+  /**
+   * Is this email a member of this workspace on the COLLABORATION hostname —
+   * the gate's own question, asked again after a share is revoked so the
+   * connections it no longer admits can be hung up.
+   */
+  collabMemberOf: (workspaceId: string, email: string) => boolean;
   /** The master switch for external access. */
   sharingGate: SharingGate;
   /** The email-keyed roster. */
@@ -226,6 +233,7 @@ export async function handleAuthShareRoutes(
     shares,
     shareLinks,
     shareLinkBaseHost,
+    collabMemberOf,
     sharingGate,
     identities,
     emailCodes,
@@ -587,10 +595,12 @@ export async function handleAuthShareRoutes(
         closedSockets += docStore.closeSocketsForShare(share.shareId);
         closedStreams += sse.closeForShare(share.shareId);
       }
-      // And every share-link visitor, who carries no Cloudflare shareId for
-      // the sweep above to match. Without this the switch closed the door to
-      // new requests while an already-open `/y/<doc>` kept reading AND
-      // writing, and an `/events/` stream kept delivering.
+      // And every share-link and collaboration-hostname visitor, neither of
+      // whom carries a Cloudflare shareId for the sweep above to match. Both
+      // carry a membership key, and this matches every one. Without it the
+      // switch closed the door to new requests while an already-open
+      // `/y/<doc>` kept reading AND writing, and an `/events/` stream kept
+      // delivering.
       closedSockets += docStore.closeSocketsForShareMembers(() => true);
       closedStreams += sse.closeForShareMembers(() => true);
     }
@@ -1048,11 +1058,23 @@ export async function handleAuthShareRoutes(
       // authorized once at its upgrade — so without this, a visitor who
       // already had the doc open kept reading and writing it after the
       // share was revoked.
-      const closed = result.ok ? docStore.closeSocketsForShare(shareId) : 0;
+      //
+      // Two kinds of visitor, found two ways. One on the share's own
+      // hostname carries its `shareId`. One on the collaboration hostname
+      // was admitted by being on this share's allow list, and carries a
+      // membership key instead — so the membership is asked again, now the
+      // share is gone, and only the connections it no longer admits close.
+      // Somebody a second live share still names keeps theirs.
+      const ended = collabMembershipEnded(collabMemberOf);
+      const closed = result.ok
+        ? docStore.closeSocketsForShare(shareId) + docStore.closeSocketsForShareMembers(ended)
+        : 0;
       // The SSE stream has the same "authorized once, then long-lived"
       // shape: a visitor with the review page still open would otherwise
       // keep receiving every new comment on a doc they can no longer load.
-      const closedStreams = result.ok ? sse.closeForShare(shareId) : 0;
+      const closedStreams = result.ok
+        ? sse.closeForShare(shareId) + sse.closeForShareMembers(ended)
+        : 0;
       return result.ok
         ? j(200, {
             ok: true,

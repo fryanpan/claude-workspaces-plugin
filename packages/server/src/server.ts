@@ -142,6 +142,7 @@ import {
 import { handleWrongPrefix } from './routes/wrong-prefix.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
+import { collabMembershipEnded } from './share/collab-member-key.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
@@ -2075,6 +2076,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shares,
     shareLinks,
     shareLinkBaseHost,
+    collabMemberOf,
     sharingGate,
     identities,
     emailCodes,
@@ -3058,6 +3060,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // authorized once at open too, and would otherwise keep delivering
     // comments to a visitor whose share has lapsed.
     sse.closeForDeadShares(isLive);
+    // A collaboration-hostname visitor carries no shareId — no one share
+    // admitted them — so a lapsed share is found by asking their membership
+    // again, the question DELETE /api/share/:id asks when one is revoked.
+    const ended = collabMembershipEnded(collabMemberOf);
+    docStore.closeSocketsForShareMembers(ended);
+    sse.closeForShareMembers(ended);
   };
   const shareSweep = shares
     ? setInterval(() => {

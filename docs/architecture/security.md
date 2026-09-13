@@ -71,11 +71,13 @@ An email gets a workspace in one of two ways:
 
 The gate runs on every request, against the workspace named in that request's own path. A request that names no workspace is refused rather than answered, so an admitted stranger learns nothing about what else exists. A link that is revoked, expired, or never existed shows one page, the same page in all three cases, naming no workspace and no owner.
 
-Two verbs end access, and only these two. Revoking a link stops new redemptions but leaves existing members; a link is usually revoked for having been passed around, not to remove the people who used it. Removing a member ends that person's access at once, including any live connection they already had open — the same act whether it is asked for from this machine or from the board's own settings by an Owner. Neither destroys anything: a revoked link keeps its record of who redeemed it and when.
+Two verbs end the access a share link gave, and only these two. Revoking a link stops new redemptions but leaves existing members; a link is usually revoked for having been passed around, not to remove the people who used it. Removing a member ends that person's access at once, including any live connection they already had open — the same act whether it is asked for from this machine or from the board's own settings by an Owner. Neither destroys anything: a revoked link keeps its record of who redeemed it and when.
+
+On the collaboration hostname the share records are the membership, so ending a share is what ends access there. Revoking one ends it at once for everybody its allow list admitted whom no other live share, and not the owner's own list, still admits, and closes the live connections they already had open; expiry does the same within a minute. Somebody a second share still names keeps both. Removing a share-link member never closes a collaboration-hostname connection, because that person may still be admitted there by a share.
 
 Retiring a board is not one of them. A retired board is still a board, so its members keep reaching it; retirement stands work down, it does not take anyone's access away. To remove somebody, remove the member.
 
-Above all of this is a master switch. Off, every outside hostname is refused before any sign-in check runs and every visitor's open connection is dropped. Only a program on this machine can throw it.
+Above all of this is a master switch. Off, every outside hostname is refused before any sign-in check runs and every visitor's open connection is dropped, on the share hostname and the collaboration hostname alike. Only a program on this machine can throw it.
 
 ### Layer 3: inside a workspace, an Owner and Regular Users
 

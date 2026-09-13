@@ -154,13 +154,16 @@ export type WsCtx = {
   shareId?: string;
   /**
    * The MEMBERSHIP that authorized this socket, when it came from a share-link
-   * visitor: `shareMemberKey(workspaceId, email)`.
+   * visitor (`shareMemberKey(workspaceId, email)`) or a collaboration-hostname
+   * one (`collabMemberKey`, spelled apart so ejecting a share-link member never
+   * matches it).
    *
-   * The same problem `shareId` solves, for the door that has no share behind
-   * it. A share-link visitor is admitted by being a member, so ejecting them —
-   * or shutting external access off entirely — has to be able to find the
-   * connections that membership opened. Absent on every other socket, so the
-   * sweeps below can never reach an owner's.
+   * The same problem `shareId` solves, for the doors that no one share
+   * admits. Both visitors are admitted by being members, so ejecting them,
+   * revoking or expiring a share whose allow list admitted them, or shutting
+   * external access off entirely has to be able to find the connections that
+   * membership opened. Absent on every other socket, so the sweeps below can
+   * never reach an owner's.
    */
   shareMember?: string;
   /**
