@@ -326,8 +326,6 @@ export class FeedbackWidgetEl extends HTMLElement {
     const update = () => {
       const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap)}px`);
-      // The screen's right edge, for --cw-edge in styles.ts.
-      this.style.setProperty('--cw-vv-right', `${vv.offsetLeft + vv.width}px`);
     };
     this.vvHandler = update;
     vv.addEventListener('resize', update);
