@@ -14,6 +14,7 @@ import {
 // (`scripts/bundle-guard.ts`).
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
+import { httpBase } from './widget-auth.ts';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -140,14 +141,20 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
 
 export function positionPins(el: FeedbackWidgetEl): void {
   if (!el.pinLayer) return;
+  // A second comment on the same element stands its pin beside the first's,
+  // not on top of it, wrapping to a row below before it leaves the screen.
+  const onEl = new Map<Element, number>();
   for (const pin of Array.from(el.pinLayer.children)) {
     const id = (pin as HTMLElement).dataset.threadId;
     if (!id) continue;
     const pos = el.threadPositions.get(id);
     if (!pos) continue;
+    const n = onEl.get(pos.el) ?? 0;
+    onEl.set(pos.el, n + 1);
     const rect = pos.el.getBoundingClientRect();
-    (pin as HTMLElement).style.left = `${rect.right - 6}px`;
-    (pin as HTMLElement).style.top = `${rect.top + 6}px`;
+    const row = Math.max(1, Math.floor((rect.right - 18) / 26) + 1);
+    (pin as HTMLElement).style.left = `${rect.right - 6 - (n % row) * 26}px`;
+    (pin as HTMLElement).style.top = `${rect.top + 6 + Math.floor(n / row) * 26}px`;
   }
 }
 
@@ -276,11 +283,19 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
     row.className = 'comment';
     row.innerHTML =
       `<div class="author"><span class="swatch" style="background:${cssColor(c.author.color)}"></span>${escape(c.author.name)} <span class="time">${formatTime(c.ts)}</span></div>` +
-      `<div class="body">${escape(c.text)}</div>`;
+      `<div class="body">${escape(c.text)}</div>` +
+      // A spoken comment keeps its clip and the words as heard.
+      (c.voice
+        ? `<div class="vnote"><button data-clip="${escape(c.voice.clip)}">▶ Play</button><details><summary>Raw words</summary>${escape(c.voice.raw)}</details></div>`
+        : '');
     cList.appendChild(row);
   }
   el.shadow.appendChild(pop);
   pop.querySelector('.close')?.addEventListener('click', () => pop.remove());
+  cList.addEventListener('click', (ev) => {
+    const clip = (ev.target as Element).closest('[data-clip]')?.getAttribute('data-clip');
+    if (clip) void new Audio(httpBase(el) + clip).play().catch(() => {});
+  });
   pop.querySelector('.submit')?.addEventListener('click', async () => {
     const ta = pop.querySelector('textarea') as HTMLTextAreaElement;
     const text = ta.value.trim();

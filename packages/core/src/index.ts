@@ -41,6 +41,8 @@ export * from './task-schedule.ts';
 export * from './task-wire.ts';
 export * from './footnotes.ts';
 export * from './word-count.ts';
+export * from './voice-feedback.ts';
+export * from './pcm-audio.ts';
 export * from './review-size.ts';
 export * as anchors from './anchor/index.ts';
 export * as prose from './prose.ts';

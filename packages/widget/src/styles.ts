@@ -387,6 +387,8 @@ export const widgetStyles = `
 .thread-popover .author .swatch { margin-right: 4px; }
 .thread-popover .author .time { margin-left: 6px; color: #afb8c1; }
 .thread-popover .body { color: #1b1f23; }
+.vnote { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: #6e7781; }
+.vnote button { border: 0; background: none; color: #2e7dd7; padding: 4px 0; font: inherit; cursor: pointer; }
 .thread-popover .actions {
   display: flex; gap: 6px; padding-top: 8px; margin-top: 6px; border-top: 1px solid #eaeef2;
   flex-wrap: wrap;

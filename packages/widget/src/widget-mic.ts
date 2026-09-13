@@ -15,21 +15,22 @@ import type { FeedbackWidgetEl } from './widget.ts';
 export const SIGN_IN_NOTE = 'Sign in to post. Your draft is kept.';
 
 /**
- * A microphone on the widget, for a host that has one to hand it.
+ * A microphone on the widget: the button, its hover labels, and the line
+ * beside it for what the page needs to say.
  *
- * The widget has no voice capture of its own and gets none here. The board
- * already has one — `createVoiceCapture` in the app, hold-to-talk with its
- * origin gate and its error wording — so this module only makes the BUTTON
- * and the line the capture writes into, and the host wires its own capture
- * to them. One capture, not a second one grown inside the widget.
+ * Voice feedback itself — the capture, the socket, the live comment — is
+ * `voice/voice-mode.ts`, mounted on the button this makes. This module only
+ * makes the BUTTON and the readout, so a mock page can put the mic up at load
+ * and fetch everything else on its first tap (`voice/voice-loader.ts`).
  *
  * Its own entry (`@claude-workspaces/widget/mic`), never imported by
  * `widget.ts`. The one page with a microphone to offer is the board, which
  * imports the widget into its own bundle; every mock page loads the budgeted
- * `widget.iife.js` instead, and none of the bytes below reach it.
+ * `widget.iife.js` instead, and none of the bytes below reach it: a mock page
+ * gets them from `mockup-live.js`, which only a served mock loads.
  *
  * The mic takes the slot the thread list stood in, above the FAB, and the list
- * steps up one (`.side`). The owner's words for this embed (2026-09-11):
+ * becomes a small chip beside the FAB (`.side`). The owner's words for this embed (2026-09-11):
  * "Replace the feedback history button with a button that initiates voice
  * feedback" — and both buttons should say, on hover, whose feedback they
  * take. `labels` carries that wording, so the host that knows what the
@@ -60,7 +61,19 @@ export interface WidgetMic {
  * browser test can seat the real buttons beside the board's own page.
  */
 export const MIC_CSS = [
-  '.side{bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(126px,calc(env(safe-area-inset-bottom) + 126px)))}',
+  // The thread list, beside the mic, becomes a small chip left of the FAB —
+  // round 4 of the voice design: "past comments become a small chip". The
+  // BUTTON keeps the 44px a finger needs and is transparent; the chip is
+  // drawn inside it, on its ::before, 30px tall. Its label opens upward
+  // rather than to its left, where a long host label would run off a phone.
+  '.fab-list.side{right:max(76px,calc(env(safe-area-inset-right) + 58px));bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(20px,calc(env(safe-area-inset-bottom) + 2px)));width:auto;min-width:44px;padding:0 10px;gap:5px;background:none;border:0;box-shadow:none;color:#41505f}',
+  '.fab-list.side::before{content:"";position:absolute;inset:7px 0;border-radius:99px;background:#fff;border:1px solid #d5dce4;box-shadow:0 3px 10px rgba(18,38,63,.12);z-index:-1}',
+  '.fab-list.side:hover::before{border-color:#2e7dd7}',
+  '.fab-list.side svg{width:14px;height:14px}',
+  '.fab-list.side .count{position:static;min-width:0;height:auto;padding:0;background:none;color:inherit;font-size:12px}',
+  '.fab-list.side[data-tip]:hover::after{right:0;top:auto;bottom:calc(100% + 4px);transform:none}',
+  // It folds away while either button's label shows, and while recording.
+  '.fab-list.side:has(~.fab:hover),.fab-list.side:has(~.fab-mic:hover),.fab-list.side:has(~.fab-mic.voice-active){display:none}',
   // The phone face folds the floating buttons away under its bottom panel,
   // and the mic wears .fab-list for its look and its slot, so it folded with
   // the thread list — leaving the one width where speaking beats typing with
@@ -125,6 +138,8 @@ export const MIC_CSS = [
   '@keyframes cw-voice-spin{to{transform:rotate(360deg)}}',
   // Asking for less motion keeps the mark and drops the rotation.
   '@media (prefers-reduced-motion:reduce){.voice-spinner{animation:none;opacity:.8}}',
+  // A note up beside the mic is where its label would open, and says more.
+  '.fab-mic:has(~.readout:not(.hidden))[data-tip]:hover::after{display:none}',
   // Last, so a hidden readout stays hidden however the capture has classed it.
   '.readout.hidden{display:none}',
 ].join('');

@@ -164,6 +164,7 @@ import {
 import { ThreadRequestDedup } from './thread-request-dedup.ts';
 import type { TranscriptionEngine } from './transcribe.ts';
 import { UptimeMonitor } from './uptime.ts';
+import { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { VoiceRouter } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
 
@@ -422,6 +423,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         (repoKey ? mountStore.meetingsOf(repoKey)?.retention : undefined) ?? 'transcripts-and-audio'
       );
     },
+  });
+  /**
+   * Voice feedback on a page: the same engines a meeting opens, and a tidier
+   * that turns what was said into comments. Both seams default to nothing,
+   * for the reason `transcription` does — see server-options.ts.
+   */
+  const voiceRelay = new VoiceFeedbackRelay({
+    engines: Array.isArray(opts.transcription)
+      ? opts.transcription
+      : opts.transcription
+        ? [opts.transcription as TranscriptionEngine]
+        : [],
+    tidy: opts.voiceFeedbackTidy ?? null,
+    dataDir,
+    log: (line) => console.log(line),
   });
   const meetingRelay = new MeetingRelay({
     store: meetingStore,
@@ -1751,7 +1767,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * are passed, never anything read out of them, so every frame sees the
    * state as it is when the frame arrives.
    */
-  const socketHandlers = createSocketHandlers({ docStore, meetingRelay, recallRelay });
+  const socketHandlers = createSocketHandlers({
+    docStore,
+    meetingRelay,
+    recallRelay,
+    voiceRelay,
+  });
 
   /**
    * Whose name goes on a write — see request-attribution.ts. Composed
@@ -3205,6 +3226,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // their notes belong in the docs this flushes next.
       crossReview.dispose();
       await meetingRelay.dispose();
+      await voiceRelay.dispose();
       // And the bots. A bot left in a call after this process is gone bills
       // two vendors and delivers nothing — see RecallMeetingRelay.dispose.
       await recallRelay.dispose();

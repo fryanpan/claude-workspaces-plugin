@@ -35,6 +35,7 @@ import type { CfApi } from './share/cf-api.ts';
 import type { ShareConfig } from './share/types.ts';
 import type { ThreadSummarizer } from './summarize.ts';
 import type { TranscriptionEngine } from './transcribe.ts';
+import type { TidyComplete } from './voice-feedback-tidy.ts';
 import type { VoiceComplete } from './voice.ts';
 
 export interface ServerOptions {
@@ -601,6 +602,13 @@ export interface ServerOptions {
    * exactly as before.
    */
   transcription?: TranscriptionEngine | readonly TranscriptionEngine[];
+  /**
+   * What turns spoken voice feedback into tidied, element-anchored comments
+   * (`voice-feedback-tidy.ts`). **No default**, the same seam rule as
+   * `transcription`: only `bin.ts` builds the billed one. Absent, a voice
+   * session still transcribes and its words land as said.
+   */
+  voiceFeedbackTidy?: TidyComplete;
   /**
    * The Recall.ai client that puts a BOT in a Zoom / Meet call. **No
    * default**, the same seam rule as `transcription` directly above and for

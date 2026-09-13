@@ -171,6 +171,15 @@ describe.skipIf(CHROME === null)('the mic and its labels at phone width', () => 
       }
     });
 
+    it('draws no mic label over a note beside the mic', () => {
+      for (const width of [1180, 430]) {
+        expect(at(width).micLabelNoNote, `CONTROL: the label shows with no note (${width})`).toBe(
+          true,
+        );
+        expect(at(width).micLabelUnderNote, `no label over the note (${width})`).toBe(false);
+      }
+    });
+
     it('CONTROL: does not narrow a label at 1180, where there is room', () => {
       // The cap is the screen, not a house width — a tablet label still says
       // its sentence on one line, which is what it did before the fix.

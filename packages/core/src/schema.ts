@@ -11,6 +11,7 @@ import type {
   ThreadStatus,
   User,
 } from './types.ts';
+import { type VoiceNote, readVoiceNote } from './voice-feedback.ts';
 
 /**
  * Yjs doc shape:
@@ -202,11 +203,13 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
         // comment" rather than reach a renderer.
         const review = readReviewPayload(c.get('review'));
         const edits = readCommentEdits(c.get('edits'));
+        const voice = readVoiceNote(c.get('voice'));
         comments.push({
           id,
           author,
           text,
           ts,
+          ...(voice ? { voice } : {}),
           ...(review ? { review } : {}),
           ...(edits ? { edits } : {}),
         });
@@ -247,7 +250,7 @@ export interface CreateThreadArgs {
   threadId: string;
   anchor: Anchor;
   createdBy: User;
-  firstComment: { id: string; text: string; review?: ReviewPayload };
+  firstComment: { id: string; text: string; review?: ReviewPayload; voice?: VoiceNote };
 }
 
 export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
@@ -263,6 +266,7 @@ export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
     firstCommentMap.set('text', args.firstComment.text);
     firstCommentMap.set('ts', now);
     if (args.firstComment.review) firstCommentMap.set('review', args.firstComment.review);
+    if (args.firstComment.voice) firstCommentMap.set('voice', args.firstComment.voice);
     comments.push([firstCommentMap]);
 
     threadMap.set('anchor', args.anchor);
@@ -360,6 +364,8 @@ export function setCommentText(
   commentId: string,
   text: string,
   by: { name: string; at: number; reason?: string },
+  /** A spoken comment's note, replaced along with the words it grew with. */
+  voice?: VoiceNote,
 ): boolean {
   const threadMap = getThreads(doc).get(threadId);
   const comments = threadMap?.get('comments') as Y.Array<Y.Map<unknown>> | undefined;
@@ -368,6 +374,12 @@ export function setCommentText(
     if (c.get('id') !== commentId) continue;
     const previous = c.get('text');
     if (typeof previous !== 'string') return false;
+    if (previous === text) {
+      // Only the note moved (a longer clip, more raw words): no correction
+      // happened, so no trail entry says one did.
+      if (voice) c.set('voice', voice);
+      return true;
+    }
     const trail = readCommentEdits(c.get('edits')) ?? [];
     doc.transact(() => {
       c.set('edits', [
@@ -380,6 +392,7 @@ export function setCommentText(
         },
       ]);
       c.set('text', text);
+      if (voice) c.set('voice', voice);
     });
     return true;
   }

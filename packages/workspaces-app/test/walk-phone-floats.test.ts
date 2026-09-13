@@ -10,6 +10,19 @@
  * `claude-feedback-widget` (UX review, 2026-09-12). A scroll reserve cannot
  * move a fixed box, so the buttons keep a gutter instead.
  *
+ * THE GUTTER CLEARS THE COLUMN, NOT THE CHIP. The thread list is now a chip
+ * left of the bubble, ~120px in from the right, on the bubble's row — which
+ * sits on the board's bottom bar: at 390x844 the chip's 44px box spans
+ * 780-824 against a bar top of 789, its drawn pill from 787. A sweep reads
+ * Save only wholly above the bar, so it can never line Save up beside the
+ * chip; the most the chip's box can reach is a sliver of Save's last few
+ * pixels at the one scroll position where Save rests on the bar, where the
+ * bar itself takes the next pixel down. Widening every walk button's gutter
+ * by ~60px of a phone's width to clear that is the wrong trade, so the test
+ * judges the gutter against the buttons a sweep can reach (`besides`) and
+ * asserts, separately, that every other button stays down on the bar's row —
+ * a chip that rose into the reading area fails there.
+ *
  * THE TOAST. Saving a hand-over on Home showed "Saved: …" for 3.5 seconds
  * while the walk had already advanced — so at 430 the toast stood over the
  * NEXT ask's empty form, saying the same thing the "✓ Answered" banner above
@@ -87,10 +100,27 @@ describe.skipIf(CHROME === null)("Home's walkthrough at phone width", () => {
   it("every point of the credential form's Save answers for itself", () => {
     each((r, size) => {
       expectFullSweep(r.save, `${size} Save`);
+      // The buttons the sweep does not line Save up beside are the bottom
+      // row, sitting on the bar: their middles below its top, so no scroll
+      // puts Save beside them above it. This is the premise that lets the
+      // gutter below leave the chip out, so it is read first.
+      const rest = r.widget.filter((w) => !r.save.besides.includes(w.name));
+      expect(
+        rest.map((w) => w.name),
+        `${size}: the chip and bubble are on the bottom row`,
+      ).toEqual(expect.arrayContaining(['button.fab-list.side', 'button.fab']));
+      for (const w of rest) {
+        expect((w.top + w.bottom) / 2, `${size}: ${w.name} sits on the bar`).toBeGreaterThan(
+          r.dockTop,
+        );
+      }
       expect(r.save.hitBy, `${size}: what else answered`).toEqual([]);
       expect(r.save.covered, `${size}: points not on Save`).toBe(0);
-      const leftmost = Math.min(...r.widget.map((w) => w.left));
-      expect(r.save.button.right, `${size}: Save ends clear of the widget`).toBeLessThan(leftmost);
+      // Clear of every widget button a scroll can put Save beside.
+      const reachable = r.widget.filter((w) => r.save.besides.includes(w.name));
+      expect(reachable.length, `${size}: reachable buttons named`).toBe(r.save.besides.length);
+      const leftmost = Math.min(...reachable.map((w) => w.left));
+      expect(r.save.button.right, `${size}: Save ends clear of the column`).toBeLessThan(leftmost);
     });
   });
 
