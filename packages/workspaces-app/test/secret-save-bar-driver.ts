@@ -136,7 +136,7 @@ function readField(i: number): FieldReading {
 }
 
 /** Mount the panel with one secret ask on it and paste into both fields. */
-async function paint(): Promise<void> {
+export async function paint(): Promise<void> {
   const host = document.createElement('div');
   host.className = 'board-detail';
   document.body.replaceChildren(host);

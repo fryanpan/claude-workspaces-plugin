@@ -8,9 +8,8 @@
  * drew a grip in every field. A drag grows the form after the scroll that
  * placed it, and no scroll reserve can follow a height the reader sets by
  * hand, because `scroll-padding` is read when something scrolls. The grip is
- * gone rather than bounded: `field-sizing: content` already sizes the box to
- * its value and `max-height` caps them both, so the grip could only leave
- * blank space under a short value or crop a long one (UX review, 2026-09-12).
+ * gone rather than bounded: on a box of discs a taller field shows nothing the
+ * eye would not (UX review, 2026-09-12). The field is one line tall now.
  *
  * THE FAULT. Home's Save button was painted underneath the fixed bottom nav
  * dock at any viewport shorter than about 900px — 430x844, 390x844, 430x700
