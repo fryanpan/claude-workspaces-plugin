@@ -626,6 +626,11 @@ export class FeedbackWidgetEl extends HTMLElement {
     // turn them back on.
     s.textContent =
       '.cfw-pin:hover{transform:translate(-50%,-100%) scale(1.08)}' +
+      // A 24px pin takes a finger's 44px of taps, reaching left and down only:
+      // pins on one element stand 26px apart leftward and wrap downward, and a
+      // later pin paints over an earlier one, so reaching right or up would
+      // take taps off the disc of the pin before it.
+      '.cfw-pin::after{content:"";position:absolute;inset:0 0 -20px -20px}' +
       `.cfw-pin[data-status="resolved"]{background:${STATUS_COLORS.resolved}!important}` +
       `.cfw-pin[data-status="orphan"]{background:${STATUS_COLORS.orphan}!important}` +
       `body.cfw-feedback-mode,body.cfw-feedback-mode *{cursor:${bubbleCursor},crosshair!important}` +

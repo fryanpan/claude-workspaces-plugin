@@ -43,10 +43,39 @@ export interface VoiceModeOpts {
   shown?: (el: HTMLElement) => boolean;
 }
 
+const short = (el: Element | null | undefined): string => {
+  const words = (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return words.length <= 40 ? words : '';
+};
+
+/**
+ * What a person calls an element with no label of its own, when its words
+ * alone would read as a value: a row of two by its first cell ("Harborlight
+ * launch date", not "... September 30"), the value in such a row by the cell
+ * before it, and a section by its heading. A button's words are its name,
+ * whatever stands before it.
+ */
+function rowLabel(el: HTMLElement | null): string {
+  if (!el) return '';
+  const first = el.firstElementChild;
+  if (first && /^H[1-6]$/.test(first.tagName)) return short(first);
+  if (
+    el.children.length === 2 &&
+    !Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent?.trim())
+  ) {
+    return short(first);
+  }
+  const before = el.previousElementSibling;
+  if (!before || el.parentElement?.children.length !== 2) return '';
+  if (/^(button|a|input|select|textarea|label|summary|h[1-6])$/i.test(el.tagName)) return '';
+  return short(before);
+}
+
 /** A short name a person would recognise for a catalog entry. */
-function nameOf(t: VoiceTarget | undefined): string {
+function nameOf(t: VoiceTarget | undefined, el: HTMLElement | null): string {
   if (!t) return 'This page';
-  const words = t.label || t.text || t.hint?.replace(/[#.]/g, ' ').trim() || `<${t.tag}>`;
+  const words =
+    t.label || rowLabel(el) || t.text || t.hint?.replace(/[#.]/g, ' ').trim() || `<${t.tag}>`;
   return words.length > 40 ? `${words.slice(0, 39)}…` : words;
 }
 
@@ -106,8 +135,10 @@ export function mountVoiceMode(
     session,
     shadow: widget.shadow,
     element,
-    name: (t) => nameOf(t === null ? undefined : targets.get(t)),
-    author: () => widget.user?.name ?? 'Anonymous',
+    name: (t) => nameOf(t === null ? undefined : targets.get(t), element(t)),
+    // A token sign-in names the widget's user; a guest name may be replaced by
+    // the server with a workspace sign-in's, so it waits for the server's word.
+    author: () => widget.authUser?.name ?? null,
     clipUrl: (clip) => `${widget.opts.serverUrl.replace(/^ws/, 'http')}${clip}`,
     onMove: (key) => {
       view.picking = key;

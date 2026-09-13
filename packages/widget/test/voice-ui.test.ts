@@ -1,86 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { VoiceComment, VoiceSession } from '../src/voice/voice-session.ts';
-import { SETTLED_MS, VoiceView, clipLength, stackColumn } from '../src/voice/voice-ui.ts';
+import { SETTLED_MS, clipLength } from '../src/voice/voice-ui.ts';
+import { CLIP, comment, setup } from './voice-ui-harness.ts';
 
 /**
  * What a recording looks like. The view reads a session's state and draws it,
  * so the session here is the state alone — the fields the view reads, set by
  * each test — and `setResolved` recorded.
  */
-
-interface FakeSession {
-  state: VoiceSession['state'];
-  comments: Map<string, VoiceComment>;
-  heard: string;
-  pinned: number | null | undefined;
-  note: string | null;
-  setResolved: ReturnType<typeof vi.fn>;
-}
-
-const CLIP = '/workspaces/w-1/docs/d-1/voice-feedback/seg-1.wav#t=12.4,31';
-
-function comment(over: Partial<VoiceComment> = {}): VoiceComment {
-  return {
-    key: 'v1',
-    wire: 'v1',
-    take: 1,
-    text: 'The goal bar is too tall.',
-    raw: 'um the goal bar is like too tall',
-    clip: CLIP,
-    target: null,
-    final: false,
-    ...over,
-  };
-}
-
-function setup() {
-  const host = document.createElement('div');
-  const shadow = host.attachShadow({ mode: 'open' });
-  document.body.append(host);
-  const goal = document.createElement('div');
-  document.body.append(goal);
-  const elements = new Map<number, HTMLElement>([[2, goal]]);
-  const session: FakeSession = {
-    state: 'recording',
-    comments: new Map(),
-    heard: '',
-    pinned: undefined,
-    note: null,
-    setResolved: vi.fn(async () => {}),
-  };
-  const moved: string[] = [];
-  let now = 1_000;
-  const view = new VoiceView({
-    session: session as unknown as VoiceSession,
-    shadow,
-    element: (t) => (t === null ? null : (elements.get(t) ?? null)),
-    name: (t) => (t === 2 ? 'Goal bar' : `#${t}`),
-    author: () => 'Ada <Admin>',
-    clipUrl: (clip) => `http://host${clip}`,
-    onMove: (key) => moved.push(key),
-    now: () => now,
-  });
-  const add = (c: VoiceComment) => {
-    session.comments.set(c.key, c);
-    view.render();
-  };
-  const card = (key = 'v1') =>
-    shadow.querySelector(`.vcard[data-key="${key}"]`) as HTMLElement | null;
-  const where = () => view.live.querySelector('.vwhere') as HTMLElement;
-  return {
-    view,
-    session,
-    shadow,
-    elements,
-    moved,
-    add,
-    card,
-    where,
-    advance: (ms: number) => {
-      now += ms;
-    },
-  };
-}
 
 beforeEach(() => {
   // The view places its cards every frame while any is up; the tests call
@@ -171,14 +97,14 @@ describe('a settled comment’s card', () => {
     expect(t.card()?.querySelector('.vtext')?.textContent).toBe('The goal bar is too tall.');
     expect(t.card()?.querySelector('.vplay')?.textContent).toBe('▶ 0:19');
     // The author's name is text, not markup.
-    expect(t.card()?.querySelector('.vby')?.textContent).toBe('Ada <Admin> · by voice');
+    expect(t.card()?.querySelector('.vby')?.textContent).toBe('Guest <Admin> · by voice');
   });
 
   it('names the author the server recorded once the thread exists', () => {
     const t = setup();
     t.add(comment({ final: true }));
     expect(t.card()?.querySelector('.vby')?.textContent, 'CONTROL: the widget’s own name').toBe(
-      'Ada <Admin> · by voice',
+      'Guest <Admin> · by voice',
     );
     t.add(
       comment({
@@ -187,6 +113,27 @@ describe('a settled comment’s card', () => {
       }),
     );
     expect(t.card()?.querySelector('.vby')?.textContent).toBe('Reviewer · by voice');
+  });
+
+  it('before its thread exists, takes the name the server gave this recording’s others', () => {
+    const t = setup({ author: null });
+    t.add(comment({ key: 'v1', final: true }));
+    expect(
+      t.card('v1')?.querySelector('.vby')?.textContent,
+      'no name the server has not given',
+    ).toBe('By voice');
+    t.add(
+      comment({
+        key: 'v1',
+        final: true,
+        posted: { threadId: 't1', commentId: 'c1', author: 'Signed-in reviewer' },
+      }),
+    );
+    t.add(comment({ key: 'v2', final: true }));
+    expect(t.card('v2')?.querySelector('.vby')?.textContent).toBe('Signed-in reviewer · by voice');
+    // A later recording may be someone else signed in: no name borrowed across.
+    t.add(comment({ key: '2.v1', take: 2, final: true }));
+    expect(t.card('2.v1')?.querySelector('.vby')?.textContent).toBe('By voice');
   });
 
   it('plays the clip from the server', () => {
@@ -279,181 +226,6 @@ describe('a settled comment’s card', () => {
     t.add(comment({ final: true }));
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
     expect(t.card()).not.toBeNull();
-  });
-
-  it('on a phone, is a pin while recording and shows only the newest after Stop', () => {
-    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(430);
-    const t = setup();
-    t.add(comment({ key: 'v1', final: true }));
-    t.add(comment({ key: 'v2', final: true, text: 'The Save button hides.' }));
-    t.view.place();
-    expect(t.card('v1')?.hidden, 'no card over the page while talking').toBe(true);
-    expect(t.card('v2')?.hidden).toBe(true);
-
-    t.session.state = 'idle';
-    t.view.render();
-    t.view.place();
-    expect(t.card('v1'), 'the older one waits as its pin').toBeNull();
-    expect(t.card('v2')?.hidden).toBe(false);
-
-    // Talking again straight away: the card gives the page back.
-    t.session.state = 'recording';
-    t.view.render();
-    t.view.place();
-    expect(t.card('v2')?.hidden, 'hidden again while talking').toBe(true);
-    t.session.state = 'idle';
-    t.view.render();
-    t.view.place();
-    expect(t.card('v2')?.hidden).toBe(false);
-
-    t.card('v2')?.dispatchEvent(new Event('pointerenter'));
-    t.advance(SETTLED_MS + 1);
-    t.view.place();
-    expect(t.card('v2'), 'kept while being read').not.toBeNull();
-    t.card('v2')?.dispatchEvent(new Event('pointerleave'));
-    t.advance(SETTLED_MS + 1);
-    t.view.place();
-    expect(t.card('v2')).toBeNull();
-  });
-});
-
-/** An element on the page standing at `top`..`bottom`, 600px wide from the left. */
-function rowAt(top: number, bottom: number): HTMLElement {
-  const el = document.createElement('div');
-  document.body.append(el);
-  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
-    DOMRect.fromRect({ x: 24, y: top, width: 600, height: bottom - top }),
-  );
-  return el;
-}
-
-/** The page is 1180x820 or 430x932. */
-function screen(width: number, height: number): void {
-  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width);
-  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(height);
-  // The test DOM has no visual viewport, so the window is the screen.
-  expect(window.visualViewport ?? null).toBeNull();
-}
-
-/** A card is 130px tall, 260px with its raw words open; the live card 150px. */
-function heights(): void {
-  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
-    this: HTMLElement,
-  ) {
-    if (this.classList.contains('vlive')) return 150;
-    return this.querySelector('.vrawtext:not([hidden])') ? 260 : 130;
-  });
-}
-
-const box = (el: HTMLElement | null) => {
-  const top = Number.parseFloat(el?.style.top ?? '');
-  return { top, bottom: top + (el?.offsetHeight ?? 0) };
-};
-
-describe('the column of cards beside the page', () => {
-  it('opening a card’s raw words moves the others instead of hiding one', () => {
-    screen(1180, 820);
-    heights();
-    const t = setup();
-    t.elements.set(3, rowAt(100, 140));
-    t.elements.set(4, rowAt(300, 340));
-    t.elements.set(5, rowAt(500, 540));
-    t.add(comment({ key: 'v1', target: 3, final: true }));
-    t.add(comment({ key: 'v2', target: 4, final: true }));
-    t.add(comment({ key: 'v3', target: 5, final: true }));
-    t.view.place();
-    expect(['v1', 'v2', 'v3'].map((k) => t.card(k)?.hidden)).toEqual([false, false, false]);
-
-    (t.card('v2')?.querySelector('.vrawbtn') as HTMLElement).click();
-    t.view.place();
-    expect(
-      ['v1', 'v2', 'v3'].map((k) => t.card(k)?.hidden),
-      'all three still fit the column',
-    ).toEqual([false, false, false]);
-    const [a, b, c] = ['v1', 'v2', 'v3'].map((k) => box(t.card(k)));
-    // In the order of their elements, overlapping nothing, above the buttons.
-    expect(a.bottom).toBeLessThanOrEqual(b.top);
-    expect(b.bottom).toBeLessThanOrEqual(c.top);
-    expect(c.bottom).toBeLessThanOrEqual(820 - 8 - 190);
-  });
-
-  it('stands cards in the order of their elements, so leader lines do not cross', () => {
-    screen(1180, 820);
-    heights();
-    const t = setup();
-    // Said about the upper element first; the newer card is placed first.
-    t.elements.set(3, rowAt(380, 420));
-    t.elements.set(4, rowAt(400, 440));
-    t.add(comment({ key: 'v1', target: 3, final: true }));
-    t.add(comment({ key: 'v2', target: 4, final: true }));
-    t.view.place();
-    expect(box(t.card('v1')).bottom).toBeLessThanOrEqual(box(t.card('v2')).top);
-  });
-});
-
-describe('stackColumn', () => {
-  it('keeps the most important cards that fit together, and hides the rest', () => {
-    // 600px of column; the third card would need 610.
-    const ys = stackColumn(
-      [
-        { h: 300, want: 0 },
-        { h: 200, want: 0 },
-        { h: 100, want: 0 },
-        { h: 50, want: 0 },
-      ],
-      0,
-      600,
-    );
-    expect(ys.map((y) => y !== null)).toEqual([true, true, false, true]);
-  });
-
-  it('stands each card as near its element as its neighbours allow, inside the column', () => {
-    expect(
-      stackColumn(
-        [
-          { h: 100, want: 580 },
-          { h: 100, want: 20 },
-        ],
-        10,
-        600,
-      ),
-    ).toEqual([500, 20]);
-    // Two that want the bottom share it: the upper one moves up.
-    expect(
-      stackColumn(
-        [
-          { h: 100, want: 550 },
-          { h: 100, want: 560 },
-        ],
-        10,
-        600,
-      ),
-    ).toEqual([390, 500]);
-  });
-});
-
-describe('the live comment on a phone', () => {
-  it('rests above the buttons rather than across the rows under its element', () => {
-    screen(430, 932);
-    heights();
-    const t = setup();
-    t.elements.set(3, rowAt(78, 125));
-    t.add(comment({ target: 3 }));
-    t.view.place();
-    const live = box(t.view.live);
-    expect(live.bottom).toBe(932 - 8 - 190);
-    // Nothing between the element and the buttons is covered.
-    expect(live.top).toBeGreaterThan(125 + 8 + 150);
-  });
-
-  it('goes to the top when resting above the buttons would cover its element', () => {
-    screen(430, 932);
-    heights();
-    const t = setup();
-    t.elements.set(3, rowAt(640, 700));
-    t.add(comment({ target: 3 }));
-    t.view.place();
-    expect(box(t.view.live).top).toBe(8);
   });
 });
 

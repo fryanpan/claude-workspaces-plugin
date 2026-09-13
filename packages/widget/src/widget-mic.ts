@@ -140,6 +140,10 @@ export const MIC_CSS = [
   '@media (prefers-reduced-motion:reduce){.voice-spinner{animation:none;opacity:.8}}',
   // A note up beside the mic is where its label would open, and says more.
   '.fab-mic:has(~.readout:not(.hidden))[data-tip]:hover::after{display:none}',
+  // A tap leaves a touch screen "hovering" on the button until the next tap
+  // elsewhere, so a label shown by hover goes once the button is pressed, and
+  // comes back only for a mouse that leaves and returns.
+  '.tipoff[data-tip]:hover::after{display:none}',
   // Last, so a hidden readout stays hidden however the capture has classed it.
   '.readout.hidden{display:none}',
 ].join('');
@@ -296,6 +300,18 @@ export function addMic(el: FeedbackWidgetEl, labels: MicLabels): WidgetMic {
     b.setAttribute('aria-label', tip);
   }
   s.append(style, button, readout);
+  s.addEventListener('pointerdown', (ev) => {
+    (ev.target as Element).closest?.('[data-tip]')?.classList.add('tipoff');
+  });
+  // A mouse moving off the button brings its label back for next time. An
+  // out, not a leave: a leave does not bubble, so none reaches this root.
+  s.addEventListener('pointerout', (ev) => {
+    const e = ev as PointerEvent;
+    const b = (e.target as Element).closest?.('.tipoff');
+    if (b && e.pointerType === 'mouse' && !b.contains(e.relatedTarget as Node | null)) {
+      b.classList.remove('tipoff');
+    }
+  });
   shareRetrySlot(el);
   watchQuickPanel(el, button);
   return { button, readout };

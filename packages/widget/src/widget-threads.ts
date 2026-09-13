@@ -15,6 +15,7 @@ import {
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
 import { httpBase } from './widget-auth.ts';
+import { pinX } from './widget-card.ts';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -152,8 +153,9 @@ export function positionPins(el: FeedbackWidgetEl): void {
     const n = onEl.get(pos.el) ?? 0;
     onEl.set(pos.el, n + 1);
     const rect = pos.el.getBoundingClientRect();
-    const row = Math.max(1, Math.floor((rect.right - 18) / 26) + 1);
-    (pin as HTMLElement).style.left = `${rect.right - 6 - (n % row) * 26}px`;
+    const x = pinX(pos.el, rect);
+    const row = Math.max(1, Math.floor((x - 12) / 26) + 1);
+    (pin as HTMLElement).style.left = `${x - (n % row) * 26}px`;
     (pin as HTMLElement).style.top = `${rect.top + 6 + Math.floor(n / row) * 26}px`;
   }
 }

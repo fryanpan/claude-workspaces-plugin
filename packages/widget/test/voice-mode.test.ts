@@ -25,9 +25,9 @@ interface Posted {
 
 const cleanups: Array<() => void> = [];
 
-function setup(over: { signInToWrite?: boolean } = {}) {
+function setup(over: { signInToWrite?: boolean; page?: string } = {}) {
   document.body.innerHTML =
-    '<main><h1 id="goal">Goal</h1><button id="done">Done <b></b></button></main>';
+    over.page ?? '<main><h1 id="goal">Goal</h1><button id="done">Done <b></b></button></main>';
   const host = document.createElement('claude-feedback-widget');
   const shadow = host.attachShadow({ mode: 'open' });
   for (const cls of ['fab-list', 'fab']) {
@@ -92,12 +92,34 @@ function setup(over: { signInToWrite?: boolean } = {}) {
     if (!t) throw new Error(`no target for #${id}`);
     return t.i;
   };
+  /** The catalog index the page sent for the element with this id, by its hint. */
+  const indexOfId = (id: string): number => {
+    const start = socket()
+      .json()
+      .find((m) => m.type === 'start') as { targets: VoiceTarget[] } | undefined;
+    const t = start?.targets.find((x) => x.hint?.split(' ').includes(`#${id}`));
+    if (!t) throw new Error(`no target for #${id}`);
+    return t.i;
+  };
   const tap = (el: Element): MouseEvent => {
     const ev = new MouseEvent('click', { bubbles: true, cancelable: true, composed: true });
     el.dispatchEvent(ev);
     return ev;
   };
-  return { widget, mode, mic, micParts, sockets, socket, posted, server, indexOf, tap, shadow };
+  return {
+    widget,
+    mode,
+    mic,
+    micParts,
+    sockets,
+    socket,
+    posted,
+    server,
+    indexOf,
+    indexOfId,
+    tap,
+    shadow,
+  };
 }
 
 /** Tap the mic's toggle, and the server's engine comes up. */
@@ -194,6 +216,25 @@ describe('tapping the page while recording', () => {
     await vi.waitFor(() => expect(t.posted).toHaveLength(2));
     expect(t.posted[1]?.url).toBe('http://host:8787/workspaces/w-1/docs/d-1/threads/t1/reanchor');
     expect(t.posted[1]?.body.anchor).toMatchObject({ kind: 'element' });
+  });
+
+  it('names a value, its row and a section on the live card as a person would', async () => {
+    const t = setup({
+      page:
+        '<main><div class="row" id="row"><span>Harborlight launch date</span><strong id="date">September 30</strong></div>' +
+        '<section id="budget"><h2>Saltmarsh budget</h2><p>Design $12,000</p><p>Build $38,000</p></section>' +
+        '<div class="bar"><button id="cancel">Cancel</button><button id="save">Save</button></div></main>',
+    });
+    await recording(t);
+    const where = () => t.mode.view.live.querySelector('.vwhere')?.textContent;
+    const say = async (id: string, name: string, why?: string) => {
+      t.socket().recv(commentFrame({ key: 'v1', target: t.indexOfId(id), final: false }));
+      await vi.waitFor(() => expect(where(), why).toBe(name));
+    };
+    await say('date', 'Harborlight launch date');
+    await say('row', 'Harborlight launch date');
+    await say('budget', 'Saltmarsh budget');
+    await say('save', 'Save', 'CONTROL: a button by its own words, not the one before it');
   });
 
   it('anchors a comment the server placed on an element to that element', async () => {

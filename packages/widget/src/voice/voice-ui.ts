@@ -1,5 +1,5 @@
 import { escapeHtml as escape } from '@claude-workspaces/core';
-import { isPhoneFace } from '../widget-card.ts';
+import { isPhoneFace, pinX } from '../widget-card.ts';
 import type { VoiceComment, VoiceSession } from './voice-session.ts';
 
 /**
@@ -23,7 +23,7 @@ import type { VoiceComment, VoiceSession } from './voice-session.ts';
 
 /** Must match `.vlive` / `.vcard` width below. */
 const CARD_W = 280;
-/** The buttons' column: how far up from the bottom a card must stay. */
+/** How far up from the bottom a card must stay when the mic is not on screen to measure. */
 const BUTTONS_H = 190;
 /** On a phone, how long the newest settled card stays up once recording stops. */
 export const SETTLED_MS = 6000;
@@ -41,7 +41,9 @@ export const VOICE_CSS = [
   '.vwhere{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1b1f23}',
   '.vwhere.seeking{color:#6e7781;font-weight:500;font-style:italic}',
   '.vlive.picking .vwhere{color:#2e7dd7}',
-  '.vmove{margin-left:auto;flex:none;min-height:28px;padding:3px 10px;border:1px solid #cfd8e3;border-radius:6px;color:#2e7dd7;font:600 12px system-ui,sans-serif;background:#fff;cursor:pointer}',
+  '.vmove{position:relative;margin-left:auto;flex:none;min-height:28px;padding:3px 10px;border:1px solid #cfd8e3;border-radius:6px;color:#2e7dd7;font:600 12px system-ui,sans-serif;background:#fff;cursor:pointer}',
+  // A finger needs 44px; the grip keeps its 28px look and takes taps around it.
+  '.vmove::after{content:"";position:absolute;inset:-9px -4px}',
   '.vlive.float .vmove,.vlive.picking .vmove{display:none}',
   '.vpol{padding:9px 12px 2px;overflow-wrap:anywhere}',
   '.vpol:empty::before{content:"Say your feedback.";color:#a3acb5}',
@@ -53,7 +55,11 @@ export const VOICE_CSS = [
   '.vtext{overflow-wrap:anywhere}',
   '.vrawtext{margin-top:6px;font-size:12px;color:#8a939c;overflow-wrap:anywhere}',
   '.vfoot{display:flex;gap:4px;align-items:center;margin-top:8px;padding-top:4px;border-top:1px solid #eef1f4}',
-  '.vfoot button{min-height:32px;padding:0 8px;border:0;background:none;font:500 12px system-ui,sans-serif;color:#6e7781;cursor:pointer;border-radius:6px}',
+  // 44px tall to a finger, 32px to the eye: the margins give the height back.
+  '.vfoot button{min-height:44px;min-width:44px;margin:-6px 0;padding:0 8px;border:0;background:none;font:500 12px system-ui,sans-serif;color:#6e7781;cursor:pointer;border-radius:6px}',
+  '.vfoot button:disabled{color:#c9d1d9;cursor:default}',
+  '.vpager{display:none;align-items:center;font:500 12px system-ui,sans-serif;color:#6e7781}',
+  '.vcard.paged .vpager{display:flex}',
   '.vfoot .vplay{color:#2e7dd7}',
   '.vfoot .vundo{margin-left:auto}',
   '.vlead{position:fixed;inset:0;pointer-events:none;z-index:2147483646}',
@@ -75,7 +81,8 @@ export interface VoiceViewDeps {
   element: (target: number | null) => HTMLElement | null;
   /** A short name for where a comment is ("Goal bar", "Done chip"). */
   name: (target: number | null) => string;
-  author: () => string;
+  /** The name the widget itself is signed in as, if it knows one. */
+  author: () => string | null;
   /** The clip's URL, made absolute against the server. */
   clipUrl: (clip: string) => string;
   onMove: (key: string) => void;
@@ -92,6 +99,10 @@ export function clipLength(clip: string): string {
 export class VoiceView {
   readonly live: HTMLDivElement;
   private lead: HTMLDivElement;
+  /** On a phone, the outline round the element the live card is about. */
+  private mark: HTMLDivElement;
+  /** On a phone after Stop, the card being read; null for the newest. */
+  private page: string | null = null;
   private cards = new Map<string, { el: HTMLDivElement; until: number; html: string }>();
   private settled = new Set<string>();
   private raf: number | null = null;
@@ -113,9 +124,12 @@ export class VoiceView {
       '<div class="vpol"></div><div class="vraw"><span></span></div>';
     this.lead = document.createElement('div');
     this.lead.className = 'vlead';
+    this.mark = document.createElement('div');
+    this.mark.className = 'vhl';
+    this.mark.hidden = true;
     const style = document.createElement('style');
     style.textContent = VOICE_CSS;
-    deps.shadow.append(style, this.lead, this.live);
+    deps.shadow.append(style, this.lead, this.mark, this.live);
     // A tap anywhere else, once recording has stopped, puts the cards away.
     document.addEventListener(
       'pointerdown',
@@ -161,6 +175,7 @@ export class VoiceView {
     const s = this.deps.session;
     const recording = s.state !== 'idle';
     if (this.wasRecording && !recording) this.stoppedAt = this.now;
+    if (this.wasRecording !== recording) this.page = null;
     this.wasRecording = recording;
     const open = this.openComment();
     this.live.hidden = !recording && !this.picking;
@@ -182,37 +197,64 @@ export class VoiceView {
     where.classList.toggle('seeking', !this.picking && !attached);
     (this.live.querySelector('.vpol') as HTMLElement).textContent = open?.text ?? '';
     (this.live.querySelector('.vraw span') as HTMLElement).textContent = s.heard;
+    // Every new card first, so each one's "2 of 3" counts them all.
+    for (const c of s.comments.values()) this.makeCard(c);
     for (const c of s.comments.values()) this.drawCard(c);
-    this.schedule();
+    // Placed now as well as next frame: a card just attached has lost the
+    // floating position and has no other until it is placed.
+    if (this.place()) this.schedule();
+  }
+
+  private makeCard(c: VoiceComment): void {
+    // A card is made once, when its comment settles. One put away stays
+    // away: the comment is its pin now, and a render comes with every word.
+    if (!c.final || this.settled.has(c.key)) return;
+    this.settled.add(c.key);
+    this.pulse(c.target);
+    const el = document.createElement('div');
+    el.className = 'vcard';
+    el.dataset.key = c.key;
+    this.deps.shadow.append(el);
+    this.cards.set(c.key, { el, until: Number.NEGATIVE_INFINITY, html: '' });
+    this.wireCard(c.key, el);
+  }
+
+  /** Who wrote it, as the server has it. Until its thread exists, the name
+   *  the server gave another comment from this recording: the widget's own
+   *  may be a guest name the server replaces with a signed-in one. */
+  private byline(c: VoiceComment): string {
+    let who = c.posted?.author;
+    for (const o of this.deps.session.comments.values())
+      if (o.take === c.take) who ??= o.posted?.author;
+    who ??= this.deps.author() ?? undefined;
+    return who ? `${escape(who)} · by voice` : 'By voice';
+  }
+
+  /** The cards from the recording that said `key`, which its pager steps through. */
+  private sameTake(key: string): string[] {
+    const take = this.deps.session.comments.get(key)?.take;
+    return [...this.cards.keys()].filter((k) => this.deps.session.comments.get(k)?.take === take);
   }
 
   private drawCard(c: VoiceComment): void {
-    if (!c.final) return;
-    let card = this.cards.get(c.key);
-    // A card is made once, when its comment settles. One put away stays
-    // away: the comment is its pin now, and a render comes with every word.
-    if (!this.settled.has(c.key)) {
-      this.settled.add(c.key);
-      this.pulse(c.target);
-      const el = document.createElement('div');
-      el.className = 'vcard';
-      el.dataset.key = c.key;
-      this.deps.shadow.append(el);
-      card = { el, until: Number.NEGATIVE_INFINITY, html: '' };
-      this.cards.set(c.key, card);
-      this.wireCard(c.key, el);
-    }
-    if (!card) return;
+    const card = this.cards.get(c.key);
+    if (!c.final || !card) return;
     const el = card.el;
     const rawOpen = el.querySelector('.vrawtext')?.hasAttribute('hidden') === false;
     el.classList.toggle('undone', c.resolved === true);
+    const keys = this.sameTake(c.key);
+    const at = keys.indexOf(c.key) + 1;
     const html =
-      `<div class="vby">${escape(c.posted?.author ?? this.deps.author())} · by voice</div>` +
+      `<div class="vby">${this.byline(c)}</div>` +
       `<div class="vtext">${escape(c.text)}</div>` +
       `<div class="vrawtext"${rawOpen ? '' : ' hidden'}>“${escape(c.raw)}”</div>` +
       '<div class="vfoot">' +
       (c.clip ? `<button type="button" class="vplay">▶ ${clipLength(c.clip)}</button>` : '') +
       '<button type="button" class="vrawbtn">Raw words</button>' +
+      // A phone shows one card at a time after Stop; these step through the rest.
+      (keys.length > 1
+        ? `<span class="vpager"><button type="button" class="vprev" aria-label="Earlier comment"${at === 1 ? ' disabled' : ''}>‹</button>${at} of ${keys.length}<button type="button" class="vnext" aria-label="Later comment"${at === keys.length ? ' disabled' : ''}>›</button></span>`
+        : '') +
       (c.posted
         ? `<button type="button" class="vundo">${c.resolved ? 'Redo' : 'Undo'}</button>`
         : '') +
@@ -243,6 +285,16 @@ export class VoiceView {
       else if (b.classList.contains('vrawbtn'))
         el.querySelector('.vrawtext')?.toggleAttribute('hidden');
       else if (b.classList.contains('vundo')) void this.deps.session.setResolved(key, !c.resolved);
+      else if (b.classList.contains('vprev') || b.classList.contains('vnext')) {
+        const keys = this.sameTake(key);
+        const to = keys[keys.indexOf(key) + (b.classList.contains('vprev') ? -1 : 1)];
+        const next = to === undefined ? undefined : this.cards.get(to);
+        if (to && next) {
+          this.page = to;
+          next.until = this.now + SETTLED_MS;
+          this.schedule();
+        }
+      }
       const card = this.cards.get(key);
       if (card) card.until = Math.max(card.until, this.now + SETTLED_MS);
     });
@@ -261,7 +313,7 @@ export class VoiceView {
     const r = t.getBoundingClientRect();
     const ring = document.createElement('div');
     ring.className = 'vring';
-    ring.style.left = `${r.right - 6}px`;
+    ring.style.left = `${pinX(t, r)}px`;
     ring.style.top = `${r.top + 6 + 12}px`;
     this.deps.shadow.append(ring);
     setTimeout(() => ring.remove(), 1500);
@@ -281,7 +333,11 @@ export class VoiceView {
     const left = vv?.offsetLeft ?? 0;
     const top = (vv?.offsetTop ?? 0) + 8;
     const width = vv ? vv.width : innerWidth;
-    const room = (vv ? vv.offsetTop + vv.height : innerHeight) - 8 - BUTTONS_H;
+    // The column ends above the mic, the highest of the buttons, wherever it
+    // stands: reserving a fixed height left 190px empty above them at 1180.
+    const mic = this.deps.shadow.querySelector('.fab-mic')?.getBoundingClientRect();
+    const room =
+      (mic?.height ? mic.top : (vv ? vv.offsetTop + vv.height : innerHeight) - BUTTONS_H) - 8;
     const phone = isPhoneFace();
     const x = left + width - 16 - CARD_W;
     const s = this.deps.session;
@@ -312,32 +368,46 @@ export class VoiceView {
         r ? Math.max(0, Math.min(y + h, r.bottom) - Math.max(y, r.top)) : 0;
       const y = covers(room - h) > covers(top) ? top : room - h;
       Object.assign(this.live.style, { top: `${y}px`, bottom: 'auto', left: '', right: '' });
+      // With the card that far from its element, the element says it is the one.
+      if (r) {
+        Object.assign(this.mark.style, {
+          left: `${r.left - 3}px`,
+          top: `${r.top - 3}px`,
+          width: `${r.width + 6}px`,
+          height: `${r.height + 6}px`,
+        });
+      }
+      this.mark.hidden = !r;
     } else if (!this.live.hidden && this.live.classList.contains('attached')) {
+      this.mark.hidden = true;
       spot(this.live, this.deps.element(liveTarget));
     } else {
+      this.mark.hidden = true;
       // Floating: the stylesheet stands it above the buttons.
       Object.assign(this.live.style, { top: '', bottom: '', left: '', right: '' });
     }
     // Newest first, so when the column runs out of room it is the oldest
     // cards that wait behind their pins. A desktop card stays until a tap
     // elsewhere puts them away; a phone has no column beside the page, so
-    // while recording its cards are pins only, and after Stop the newest
-    // shows for a moment.
+    // while recording its cards are pins only, and after Stop one card shows
+    // for a moment — the newest, or the one its pager stepped to.
     const recording = s.state !== 'idle';
-    const newest = [...this.cards.keys()].at(-1);
+    const read =
+      this.page !== null && this.cards.has(this.page) ? this.page : [...this.cards.keys()].at(-1);
+    const reading = read === undefined ? undefined : this.cards.get(read);
+    if (
+      phone &&
+      !recording &&
+      reading &&
+      Math.max(reading.until, this.stoppedAt + SETTLED_MS) < this.now
+    ) {
+      this.dismiss();
+    }
     for (const [key, card] of [...this.cards].reverse()) {
-      if (phone) {
-        const shown =
-          !recording &&
-          key === newest &&
-          Math.max(card.until, this.stoppedAt + SETTLED_MS) >= this.now;
-        if (!shown && !recording) {
-          card.el.remove();
-          this.cards.delete(key);
-          continue;
-        }
-        card.el.hidden = !shown;
-        if (!shown) continue;
+      card.el.classList.toggle('paged', phone);
+      if (phone && (recording || key !== read)) {
+        card.el.hidden = true;
+        continue;
       }
       card.el.hidden = false;
       spot(card.el, this.deps.element(s.comments.get(key)?.target ?? null));
@@ -358,11 +428,7 @@ export class VoiceView {
       this.lead.dataset.p = lines;
       this.lead.innerHTML = `<svg>${lines}</svg>`;
     }
-    return (
-      !this.live.hidden ||
-      [...this.cards.values()].some((c) => !c.el.hidden) ||
-      (phone && this.cards.size > 0)
-    );
+    return !this.live.hidden || this.cards.size > 0;
   }
 }
 

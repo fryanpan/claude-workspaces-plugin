@@ -73,4 +73,24 @@ describe('positionPins', () => {
       ['72px', '362px'],
     ]);
   });
+
+  it('stands a heading’s pin just past its words, not in the far corner', () => {
+    const heading = element(1100, 30);
+    const row = element(700, 80);
+    // The words' own box: the heading's end 380px in; the row's reach its edge.
+    vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(function (this: Range) {
+      const right = this.startContainer === heading ? 380 : 682;
+      return DOMRect.fromRect({ x: 24, y: 0, width: right - 24, height: 30 });
+    });
+    const w = widgetWith([
+      ['t1', heading],
+      ['t2', heading],
+      ['t3', row],
+    ]);
+    positionPins(w.el);
+    expect([w.pin('t1').style.left, w.pin('t2').style.left]).toEqual(['394px', '368px']);
+    expect(w.pin('t3').style.left, 'CONTROL: words that reach the edge keep the corner').toBe(
+      '694px',
+    );
+  });
 });
