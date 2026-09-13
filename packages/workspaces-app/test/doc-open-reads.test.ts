@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { fetchDocMeta } from '../src/doc-meta.ts';
 import { mountDocFloats } from '../src/doc/doc-floats.ts';
-import { createDocRecordReader } from '../src/doc/doc-record.ts';
+import { createDocRecordReader, rememberDocRecord, takeDocRecord } from '../src/doc/doc-record.ts';
 import { MountScope } from '../src/mount-scope.ts';
 
 /**
@@ -192,6 +192,15 @@ describe('opening a doc', () => {
 });
 
 describe('createDocRecordReader', () => {
+  it('holds only the latest router read, and hands it over once', () => {
+    rememberDocRecord('/code-doc', { meta: { type: 'code' } });
+    rememberDocRecord('/plan-doc', { meta: { type: 'markdown' } });
+    expect(takeDocRecord('/code-doc')).toBeUndefined();
+    rememberDocRecord('/plan-doc', { meta: { type: 'markdown' } });
+    expect(takeDocRecord('/plan-doc')).toEqual({ meta: { type: 'markdown' } });
+    expect(takeDocRecord('/plan-doc')).toBeUndefined();
+  });
+
   it('shares one in-flight read, and asks again after an invalidate', async () => {
     let calls = 0;
     const reader = createDocRecordReader('/r', async () => {

@@ -48,17 +48,21 @@ export interface DocRecordReader {
   noteStamps(get: (key: string) => unknown): boolean;
 }
 
-const seeds = new Map<string, unknown>();
+/** One slot, not a map: only the latest router read can be the one a mount is
+ *  about to take, and a surface with no floats (code, diff) never takes its
+ *  record, so a map would keep one body per document visited. */
+let seed: { url: string; body: unknown } | undefined;
 
 /** Keep the record the router just read, for the mount that follows it. */
 export function rememberDocRecord(url: string, body: unknown): void {
-  seeds.set(url, body);
+  seed = { url, body };
 }
 
-/** The record the router read for this address, once. */
+/** The record the router read for this address, once. Any other address's
+ *  record is dropped too — it was never going to be taken. */
 export function takeDocRecord(url: string): unknown {
-  const body = seeds.get(url);
-  seeds.delete(url);
+  const body = seed?.url === url ? seed.body : undefined;
+  seed = undefined;
   return body;
 }
 
