@@ -91,7 +91,16 @@ describe('security docs are wired together', () => {
     // pattern was edited.
     const match = skill.match(/grep -E '([^']+)'/);
     expect(match).not.toBeNull();
-    const pattern = new RegExp((match as RegExpMatchArray)[1]);
+    const include = new RegExp((match as RegExpMatchArray)[1]);
+    // …and the `grep -v` stage after it, for the same reason. Every `-v` in
+    // the pipeline is applied, so a second exclusion added later is judged
+    // here too rather than ignored.
+    const excludes = [...skill.matchAll(/grep -v '([^']+)'/g)].map((m) => new RegExp(m[1] ?? ''));
+    const pattern = {
+      test: (path: string): boolean => include.test(path) && !excludes.some((x) => x.test(path)),
+    };
+    /** What the skill's pipeline prints for a changed-file list. */
+    const selects = (changed: string[]): string[] => changed.filter((p) => pattern.test(p));
 
     const security = [
       'packages/server/src/middleware/write-gate.ts',
@@ -103,7 +112,7 @@ describe('security docs are wired together', () => {
       // addresses them is a hash of a name anyone on the board can read, so
       // the gate is the only thing standing there.
       'packages/server/src/auth/agent-token.ts',
-      'packages/server/src/share/url-signing.ts',
+      'packages/server/src/share/link-session.ts',
       'packages/server/src/recall-webhook-auth.ts',
       'packages/server/src/fs-scan.ts',
       'packages/server/src/server.ts',
@@ -185,5 +194,17 @@ describe('security docs are wired together', () => {
       'README.md',
     ];
     for (const path of unrelated) expect(pattern.test(path)).toBe(false);
+
+    // The one exclusion. `share/url-signing.ts` is retired with no callers,
+    // so a diff touching only it asks for no review — and the exclusion is
+    // that one file, not the directory: a diff touching it alongside any
+    // other share file still does.
+    const retired = 'packages/server/src/share/url-signing.ts';
+    expect(include.test(retired)).toBe(true); // the directory match still sees it
+    expect(selects([retired])).toEqual([]);
+    expect(selects([retired, 'packages/server/src/share/shares.ts'])).toEqual([
+      'packages/server/src/share/shares.ts',
+    ]);
+    expect(selects(['packages/server/src/share/url-signing.test-helper.ts'])).toHaveLength(1);
   });
 });
