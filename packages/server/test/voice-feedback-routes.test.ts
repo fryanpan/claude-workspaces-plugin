@@ -27,7 +27,7 @@ setDefaultTimeout(30_000);
 
 const AUTHOR = {
   id: 'known-riverbend',
-  name: 'Riverbend Reviewer',
+  name: 'Reviewer',
   kind: 'known',
   color: '#2e7dd7',
 };

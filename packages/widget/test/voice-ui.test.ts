@@ -182,10 +182,10 @@ describe('a settled comment’s card', () => {
     t.add(
       comment({
         final: true,
-        posted: { threadId: 't1', commentId: 'c1', author: 'Riverbend Reviewer' },
+        posted: { threadId: 't1', commentId: 'c1', author: 'Reviewer' },
       }),
     );
-    expect(t.card()?.querySelector('.vby')?.textContent).toBe('Riverbend Reviewer · by voice');
+    expect(t.card()?.querySelector('.vby')?.textContent).toBe('Reviewer · by voice');
   });
 
   it('plays the clip from the server', () => {
