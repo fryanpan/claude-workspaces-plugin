@@ -113,7 +113,7 @@ describe('createMeetingFeed — words on the line', () => {
     expect(pills(h.line)).toEqual(['Speaker A']);
   });
 
-  it('rewrites only the corrected word, and flashes that one', () => {
+  it('rewrites only the corrected word, in place and without a flash', () => {
     const h = makeFeed();
     h.state = { kind: 'recording', startedAt: 0 };
     h.turns = [{ turn: 1, text: 'meet on thirsty', final: false }];
@@ -126,7 +126,8 @@ describe('createMeetingFeed — words on the line', () => {
     expect(after[0]).toBe(before[0]);
     expect(after[1]).toBe(before[1]);
     expect(words(h.line)).toEqual(['meet', 'on', 'Thursday']);
-    expect(after.map((el) => el.classList.contains('is-fixed'))).toEqual([false, false, true]);
+    // Calm by default: the corrected word is marked with nothing that draws the eye.
+    expect(after.some((el) => el.classList.contains('is-fixed'))).toBe(false);
   });
 
   it('drops the span of a turn that has rolled out of the window', () => {

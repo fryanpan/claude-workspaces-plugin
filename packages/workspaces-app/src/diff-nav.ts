@@ -326,7 +326,6 @@ function fileRow(f: GroupedFile, activeDocId: string): string {
     f.diffAdditions != null || f.diffDeletions != null
       ? `<span class="tree-diff-counts"><span class="add">+${f.diffAdditions ?? 0}</span> <span class="del">−${f.diffDeletions ?? 0}</span></span>`
       : '';
-  const open = f.openCount > 0 ? `<span class="tree-badge badge-open">${f.openCount}</span>` : '';
   const cls = [isActive ? 'active' : '', f.stale ? 'stale' : ''].filter(Boolean).join(' ');
   const hint = f.stale
     ? `${escapeHtml(f.relPath)} — no longer in this attachment set; comments kept`
@@ -335,7 +334,7 @@ function fileRow(f: GroupedFile, activeDocId: string): string {
     isActive ? ' aria-current="page"' : ''
   } title="${hint}"><span class="tree-diff-status tree-diff-${letter}">${letter}</span><span class="diff-file-name">${escapeHtml(
     f.name,
-  )}</span>${open}${counts}</a></li>`;
+  )}</span>${counts}</a></li>`;
 }
 
 function groupKey(workspaceId: string, title: string): string {
@@ -392,7 +391,7 @@ function groupFolderKey(workspaceId: string, path: string): string {
 
 /** Render one group's changed files as a compact folder tree: directories
  *  (sorted) before files (sorted). Leaf files reuse fileRow, so each keeps its
- *  A/M/D/R status, churn +/− counts, and open-comment badge. Folders default to
+ *  A/M/D/R status and churn +/− counts. Folders default to
  *  expanded (they're all on the path to a change) but persist a manual collapse
  *  via `data-rel` + localStorage, so the 30s heartbeat rebuild doesn't spring
  *  them back open. */
@@ -453,9 +452,7 @@ export function renderGrouped(
       <details class="diff-group"${open ? ' open' : ''} data-group="${escapeHtml(g.title)}">
         <summary class="diff-group-title"><span class="diff-group-name">${escapeHtml(
           g.title,
-        )}</span><span class="diff-group-meta">${g.files.length}</span>${
-          g.openCount > 0 ? `<span class="tree-badge badge-open">${g.openCount}</span>` : ''
-        }</summary>${details}
+        )}</span><span class="diff-group-meta">${g.files.length}</span></summary>${details}
         <ul class="diff-group-files tree-root">${renderGroupFolderTree(g.files, activeDocId, workspaceId)}</ul>
       </details>`;
     })

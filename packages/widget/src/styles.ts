@@ -87,23 +87,6 @@ export const widgetStyles = `
    comment history very often" (the owner, 2026-09-11). It is the node just
    before the FAB, which wears .open while the mode is on. */
 .fab-list:has(+.open) { display: none; }
-.fab-list .count {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 17px;
-  height: 17px;
-  border-radius: 99px;
-  background: ${STATUS_COLORS.open};
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
-}
-.fab-list .count[hidden] { display: none; }
 
 .panel {
   position: fixed;
@@ -297,9 +280,7 @@ export const widgetStyles = `
 .saved {
   border-left-color: #1f7a3a;
   box-shadow: 0 1px 4px rgba(0,0,0,0.12);
-  animation: cw-saved 1.6s ease-out;
 }
-@keyframes cw-saved { from { background: #e8f5ed; } }
 .saved-text { overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .tick { float: right; margin-left: 6px; color: #1f7a3a; font-weight: 700; font-size: 11px; }
 .tick::before { content: "✓ "; }

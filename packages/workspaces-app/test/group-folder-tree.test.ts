@@ -76,15 +76,15 @@ describe('renderGroupFolderTree', () => {
     expect(beta).toBeLessThan(zeta);
   });
 
-  it('keeps churn and open-comment badges on each leaf file', () => {
+  it('keeps churn on each leaf file, and no open-comment count badge', () => {
     const html = renderGroupFolderTree(
       [gf('src/a.ts', { diffAdditions: 5, diffDeletions: 2, openCount: 3 })],
       '',
     );
     expect(html).toContain('+5');
     expect(html).toContain('−2'); // − (minus sign) 2, as fileRow emits
-    expect(html).toContain('badge-open');
-    expect(html).toContain('>3<'); // the open-comment count
+    // Calm by default: three open comments put no count badge on the row.
+    expect(html).not.toContain('>3<');
   });
 
   it('marks the active file', () => {

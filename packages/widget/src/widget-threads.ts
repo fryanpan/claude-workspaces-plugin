@@ -111,12 +111,6 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
     el.threadPositions.set(t.id, { el: res.element, status: statusBase, at: t.anchor.at });
   }
   positionPins(el);
-  const badge = el.shadow.querySelector('.fab-list .count') as HTMLElement | null;
-  if (badge) {
-    const open = annotated.filter((a) => a.status === 'open').length;
-    badge.textContent = String(open);
-    badge.hidden = open === 0;
-  }
   renderPanelList(el, annotated);
 }
 

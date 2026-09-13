@@ -355,12 +355,6 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
         // cannot line-break, and at the start of a line a real space
         // collapses away.
         el.textContent = ` ${word.text}`;
-        el.classList.remove('is-fixed');
-        if (word.changed) {
-          // Reading the box restarts the animation for a word corrected twice.
-          void el.offsetWidth;
-          el.classList.add('is-fixed');
-        }
       }
       for (const extra of entry.words.splice(words.length)) extra.remove();
       entry.text = turn.text;
