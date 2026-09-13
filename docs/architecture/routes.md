@@ -205,6 +205,9 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/docs/:docId/threads/by_find` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/title` | PUT | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/unarchive` | POST | `routes/archive.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/voice` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/voice-feedback.md` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/voice-feedback/:file` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/y` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/events` | GET | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/events:stream` | GET | `routes/upgrade-stream.ts` | share-scope |  |

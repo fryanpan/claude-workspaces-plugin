@@ -19,6 +19,7 @@ import {
   type ReviewItemJudgement,
   type ReviewPayload,
   type Thread,
+  type VoiceNote,
   type User,
   type WebhookPayload,
   contentKind,
@@ -112,6 +113,7 @@ import {
 } from './live-doc-fanout.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
+import { deleteVoiceFeedback } from './voice-feedback-store.ts';
 import { preCompactPath, writePreCompactBackup } from './pre-compact-backup.ts';
 import {
   deletePrivateMeta,
@@ -136,7 +138,7 @@ export type WsCtx = {
    * every existing upgrade predates this field and none of them should have
    * to be touched to keep meaning what they meant.
    */
-  kind?: 'yjs' | 'audio' | 'recall';
+  kind?: 'yjs' | 'audio' | 'recall' | 'voice';
   /**
    * The per-bot token the `/recall/<token>` upgrade matched. Only ever set
    * on a `recall` socket; it is that socket's whole identity, since Recall
@@ -1404,6 +1406,9 @@ export class DocStore {
       // …and its rounds, for the same reason and on the same rule: archiving
       // keeps them addressable by docId, a purge takes them.
       deleteMockupVersions(this.cfg.dataDir, docId);
+      // …and what was said about it by voice, which is ABOUT this doc and has
+      // no reader once the doc is gone.
+      deleteVoiceFeedback(this.cfg.dataDir, docId);
       return !existsSync(p);
     } catch (err) {
       console.error(`[doc-store] failed to remove persisted ${docId}:`, err);
@@ -2591,7 +2596,7 @@ export class DocStore {
     threadId: string,
     commentId: string,
     text: string,
-    opts: { actor: User; reason?: string },
+    opts: { actor: User; reason?: string; voice?: VoiceNote },
   ): { ok: true; thread: Thread } | { ok: false; error: 'no-doc' | 'not-found' | 'unchanged' } {
     return this.docThreads.editCommentText(docId, threadId, commentId, text, opts);
   }

@@ -94,6 +94,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/audio', 'GET'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/voice', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/y', 'GET'],
     ['collab-scope', '/workspaces/:ws/y', 'GET'],
   ]),
@@ -367,6 +368,10 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/promote', 'POST'],
   ]),
 
+  ...family('routes/doc-voice-feedback.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/voice-feedback.md', 'GET'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/voice-feedback/:file', 'GET'],
+  ]),
   ...family('routes/doc-resource.ts', [
     ['share-scope', '/workspaces/:ws/docs/:docId', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId', 'DELETE'],

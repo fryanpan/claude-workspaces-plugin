@@ -33,7 +33,9 @@ import {
   reviewItemState,
   reviewPayloadMessage,
   summaryHash,
+  readVoiceNote,
   threadReviewItemId,
+  type VoiceNote,
 } from '@claude-workspaces/core';
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
@@ -65,6 +67,21 @@ import {
  * `undefined` when nothing on the thread is declaring, which is the ordinary
  * comment and the overwhelming majority.
  */
+/**
+ * A spoken comment's note from a request body: absent is `undefined`, a
+ * readable one pointing at THIS doc's recordings is the note, anything else is
+ * `false` and refused. Pinned to the doc so a comment cannot carry somebody
+ * else's recording as its own.
+ */
+function voiceFromBody(raw: unknown, docId: string): VoiceNote | undefined | false {
+  if (raw === undefined) return undefined;
+  const note = readVoiceNote(raw);
+  if (!note || !note.clip.includes(`/docs/${encodeURIComponent(docId)}/voice-feedback/`)) {
+    return false;
+  }
+  return note;
+}
+
 function declaredItemId(docId: string, thread: Thread | null): string | undefined {
   if (!thread) return undefined;
   const declaring = pendingDeclaration(thread);
@@ -385,8 +402,11 @@ export async function handleDocThreadRoutes(
           message: 'an edit replaces the words; use withdraw or resolve to retire a comment',
         });
       }
+      const voice = voiceFromBody(body?.voice, docId);
+      if (voice === false) return j(400, { error: 'voice must be { clip, raw } for this doc' });
       const res = docStore.editCommentText(docId, threadId, commentId, text, {
         actor: user,
+        ...(voice ? { voice } : {}),
         ...(typeof body?.reason === 'string' ? { reason: body.reason } : {}),
       });
       if (!res.ok) {
@@ -664,6 +684,8 @@ export async function handleDocThreadRoutes(
     // return can build the SAME response shape — a retry must get
     // its reviewAdvice back too, not just its thread.
     const requestId = typeof body?.requestId === 'string' ? body.requestId : undefined;
+    const voice = voiceFromBody(body?.voice, docId);
+    if (voice === false) return j(400, { error: 'voice must be { clip, raw } for this doc' });
     const declared = reviewFromBody(body?.review, text);
     if (!declared.ok) return j(400, { error: declared.error });
     // Identity for the dedup below — computed from the RAW anchor
@@ -798,6 +820,7 @@ export async function handleDocThreadRoutes(
         const created = await docStore.postComment(docId, null, user, text, anchor, {
           generate: !visitor,
           ...(declared.review ? { review: declared.review } : {}),
+          ...(voice ? { voice } : {}),
         });
         if (created && itemAsk?.range) {
           const asked = taskStore.requestMoreInfoOnReview(

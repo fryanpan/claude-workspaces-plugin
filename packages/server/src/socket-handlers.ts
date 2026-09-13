@@ -37,6 +37,7 @@ import type { WebSocketHandler } from 'bun';
 import { type DocStore, type FeedbackWs } from './doc-store.ts';
 import type { MeetingRelay } from './meeting-protocol.ts';
 import type { RecallMeetingRelay } from './recall-meeting.ts';
+import type { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { onClose, onMessage, onOpen } from './yjs-protocol.ts';
 
 /** What the socket handlers read. All three are live stores, read at call
@@ -48,6 +49,8 @@ export interface SocketHandlersContext {
   meetingRelay: MeetingRelay;
   /** The bot relay's per-bot token registry. */
   recallRelay: RecallMeetingRelay;
+  /** Voice feedback sessions, keyed by socket. */
+  voiceRelay: VoiceFeedbackRelay;
 }
 
 /**
@@ -73,7 +76,9 @@ export interface SocketHandlersContext {
  */
 export type UpgradeData = {
   docId: string;
-  kind?: 'yjs' | 'audio' | 'recall';
+  kind?: 'yjs' | 'audio' | 'recall' | 'voice';
+  /** The board a voice socket was addressed under — its clips' URLs need it. */
+  workspaceId?: string;
   token?: string;
   shareId?: string;
   shareMember?: string;
@@ -90,7 +95,7 @@ export type UpgradeData = {
  * measurement is about the very frame `open` sends first.
  */
 export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandler<UpgradeData> {
-  const { docStore, meetingRelay, recallRelay } = ctx;
+  const { docStore, meetingRelay, recallRelay, voiceRelay } = ctx;
 
   return {
     // Yjs sync step 2 hands a fresh tab the WHOLE doc state in one binary
@@ -108,7 +113,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
     // context per socket.
     perMessageDeflate: true,
     open(ws) {
-      if (ws.data.kind === 'recall') return;
+      if (ws.data.kind === 'recall' || ws.data.kind === 'voice') return;
       if (ws.data.kind === 'audio') {
         // Before the relay, because the relay's own bookkeeping is a
         // WeakMap nothing can enumerate: this is what makes the socket
@@ -133,6 +138,18 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         // is not ours to interpret.
         if (typeof message === 'string' && ws.data.token) {
           recallRelay.onSocketText(ws.data.token, message);
+        }
+        return;
+      }
+      if (ws.data.kind === 'voice') {
+        if (typeof message === 'string') voiceRelay.onText(ws, message);
+        else {
+          // Copied for the reason the audio socket's frames are below.
+          const buf = message as unknown as ArrayBufferView;
+          voiceRelay.onAudio(
+            ws,
+            new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)),
+          );
         }
         return;
       }
@@ -168,6 +185,10 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       if (ws.data.kind === 'recall') {
         // NOT the end of the meeting — see RecallMeetingRelay.onSocketClose.
         if (ws.data.token) recallRelay.onSocketClose(ws.data.token);
+        return;
+      }
+      if (ws.data.kind === 'voice') {
+        voiceRelay.onClose(ws);
         return;
       }
       if (ws.data.kind === 'audio') {

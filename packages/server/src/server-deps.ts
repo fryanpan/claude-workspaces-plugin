@@ -44,6 +44,7 @@ import {
 } from './transcribe-assemblyai.ts';
 import { SONIOX_KEYCHAIN_SERVICE, createSonioxEngine } from './transcribe-soniox.ts';
 import { orderedEngines } from './transcribe.ts';
+import { createHaikuTidy } from './voice-feedback-tidy.ts';
 import { haikuVoiceComplete } from './voice.ts';
 
 export function createServerDeps(
@@ -107,6 +108,8 @@ export function createServerDeps(
   // same seam rule (and the same dedicated-key consent) as the summarizer.
   // Absent key → null → the fast path is off and voice routes to the agent.
   const voiceComplete = haikuVoiceComplete();
+  // And voice feedback's tidier, on the same consent.
+  const voiceFeedbackTidy = createHaikuTidy();
 
   // The ONLY place the real review-item judge is constructed — same seam rule
   // and the SAME dedicated-key consent as the summarizer, because what leaves
@@ -378,6 +381,7 @@ export function createServerDeps(
     summarizer,
     codeSenderChoice,
     voiceComplete,
+    voiceFeedbackTidy,
     reviewJudge,
     effortEstimator,
     transcription,

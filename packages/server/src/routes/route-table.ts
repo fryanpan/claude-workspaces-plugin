@@ -146,6 +146,8 @@ const EXAMPLE_PARAMS: Readonly<Record<string, string>> = {
   owner: 'o-1',
   eventId: 'ev-1',
   fileId: 'f-1',
+  // A voice feedback recording — the handler matches `seg-<N>.wav` exactly.
+  file: 'seg-1.wav',
   // A membership is addressed by the address Cloudflare verified. The example
   // stands in for one rather than being one: this table renders into a public
   // document, and a rendered address there is a person's, invented or not.
