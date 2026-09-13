@@ -19,13 +19,11 @@ export const dockStyles = `
    A standing ask, on the page it is about. Full width at the bottom because
    that is where the eye lands after reading the thing, and because a corner
    card at 430px either covers the mock or clips its own headline. The FAB,
-   the list button and the panel all sit above it (--cw-dock-h, measured).
-   Edge to edge of the SCREEN, not the page: on a page wider than a phone a
-   fixed box is laid out against the page (see --cw-edge in styles.ts). */
+   the list button and the panel all sit above it (--cw-dock-h, measured). */
 .cw-dock {
   position: fixed;
-  left: var(--cw-vv-left);
-  right: var(--cw-edge);
+  left: 0;
+  right: 0;
   bottom: var(--cw-vv-bottom);
   z-index: 2147483646;
   background: #fff;
@@ -78,14 +76,9 @@ export const dockStyles = `
 }
 .cw-dock-caret { flex: 0 0 auto; color: #afb8c1; font-size: 18px; }
 
-/* Over the screen rather than the page, like the bar, so the item opens in
-   view; its top reaches the page's, which only ever covers more. */
 .cw-dock-scrim {
   position: fixed;
-  top: 0;
-  left: var(--cw-vv-left);
-  right: var(--cw-edge);
-  bottom: var(--cw-vv-bottom);
+  inset: 0;
   z-index: 2147483647;
   background: rgba(27,31,35,0.32);
   display: flex;

@@ -99,11 +99,7 @@ export const MIC_CSS = [
   //   of side padding hangs off the end of it, which is 20px back off-screen.
   // - the cap itself.
   '[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:56px;top:50%;transform:translateY(-50%);box-sizing:border-box;width:max-content;max-width:calc(100vw - 88px);background:#1b1f23;color:#fff;font-size:12px;line-height:1.3;padding:6px 10px;border-radius:6px;pointer-events:none}',
-  // Its right margin is the widget's `--cw-edge`, the gap between the page's
-  // right edge and the screen's, so a page wider than a phone keeps it on
-  // screen, panned or not. The width cap needs no such term: `100vw` already
-  // measured the screen there, not the page.
-  '.readout{position:fixed;right:78px;margin-right:var(--cw-edge);bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px,calc(env(safe-area-inset-bottom) + 74px)));max-width:min(320px,calc(100vw - 110px));background:#1b1f23;color:#fff;border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.4;z-index:2147483647}',
+  '.readout{position:fixed;right:78px;bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px,calc(env(safe-area-inset-bottom) + 74px)));max-width:min(320px,calc(100vw - 110px));background:#1b1f23;color:#fff;border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.4;z-index:2147483647}',
   // Both of them above the phone face's bottom panel, whose height
   // `placeCards` measures into --cw-quick-h every frame. AFTER the two rules
   // that set their slots, because it is the same property at the same
