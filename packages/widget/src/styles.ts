@@ -94,9 +94,11 @@ export const widgetStyles = `
 }
 .fab-list .count[hidden] { display: none; }
 
+/* On a page wider than a phone, fixed boxes are laid out against the page's
+   width, not the screen's: 100% - 100vw is how far the page runs past it. */
 .panel {
   position: fixed;
-  right: max(16px, env(safe-area-inset-right));
+  right: max(16px, env(safe-area-inset-right), calc(100% - 100vw + 16px));
   bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(128px, calc(env(safe-area-inset-bottom) + 128px)));
   width: 340px;
   max-height: 70vh;

@@ -247,7 +247,10 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
   existing?.remove();
   const pop = document.createElement('div');
   pop.className = 'thread-popover';
-  pop.style.left = `${Math.min(cx + 6, window.innerWidth - 340)}px`;
+  // The screen's right edge: `innerWidth` is the page's, past it when the
+  // page is wider than a phone.
+  const vv = window.visualViewport;
+  pop.style.left = `${Math.min(cx + 6, (vv ? vv.offsetLeft + vv.width : innerWidth) - 340)}px`;
   pop.style.top = `${Math.min(cy + 6, window.innerHeight - 240)}px`;
   const snippet = threadSnippet(t.anchor);
   const status = t.anchor.kind === 'orphan' ? 'orphan' : t.status;
