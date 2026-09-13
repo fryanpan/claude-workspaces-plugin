@@ -236,6 +236,21 @@ describe('apportionTick', () => {
     expect(out.comments.map((c) => c.text)).toEqual([BUDGET, 'Should say save changes.']);
   });
 
+  it('keeps a sentence a "not" makes different from the later one, either way round', () => {
+    const not = "The save button shouldn't say save changes.";
+    const plain = 'The save button should say save changes.';
+    expect(tick(BUDGET, grown(`${BUDGET} ${not}`), save(plain)).comments[0]?.text).toBe(
+      `${BUDGET} ${not}`,
+    );
+    // "should not" holds every word of the plain sentence, and still turns it.
+    const spelt = save('The save button should not say save changes.');
+    expect(tick(BUDGET, grown(`${BUDGET} ${plain}`), spelt).comments[0]?.text).toBe(
+      `${BUDGET} ${plain}`,
+    );
+    // Both saying "not", however spelt, is still one point said twice.
+    expect(tick(BUDGET, grown(`${BUDGET} ${not}`), spelt).comments[0]?.text).toBe(BUDGET);
+  });
+
   it('keeps a sentence holding a word no later comment says', () => {
     const blue = `${BUDGET} The save button should be blue.`;
     const out = tick(BUDGET, grown(blue), save('The save button should say Save changes.'));

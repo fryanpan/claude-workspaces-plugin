@@ -212,11 +212,31 @@ const FILLER = new Set(
 function keys(text: string): string[] {
   return text
     .split(/\s+/)
-    .map((w) => normWord(w).replace(/^'+|'+$/g, ''))
+    .map(normWord)
     .map((w) => (w.length < 3 || FILLER.has(w) ? '' : w.slice(0, 5)));
 }
 
 const keySet = (text: string): Set<string> => new Set(keys(text).filter(Boolean));
+
+/** Words that change no meaning — a far shorter list than `FILLER`, which drops "not". */
+const HOLLOW = new Set('a an the and but also just so yeah actually really um uh'.split(' '));
+
+const NEGATION =
+  /n't$|^(not|no|never|none|nothing|cannot|dont|cant|wont|isnt|arent|doesnt|didnt|shouldnt|wasnt)$/;
+
+/**
+ * Every word that could change what a sentence means, quotes off, stemmed as
+ * `keys` stems — except that every negation reads as "not", before a stem
+ * could cut "shouldn't" down to "shoul".
+ */
+const meaningSet = (text: string): Set<string> =>
+  new Set(
+    text
+      .split(/\s+/)
+      .map((w) => normWord(w).replace(/^'+|'+$/g, ''))
+      .filter((w) => w && !HOLLOW.has(w))
+      .map((w) => (NEGATION.test(w) ? 'not' : w.slice(0, 5))),
+  );
 
 export interface TickPart {
   words: string;
@@ -287,9 +307,9 @@ export function splitTick(
  * and once returned no comment at all; a repeated sentence is cheaper than
  * lost words, so the repeat is taken out here, where nothing can be lost:
  *
- * - a sentence goes only when every word of it is said by a later comment,
- *   or names the element that comment is on ("Should say save changes." on
- *   the Save button still says "button");
+ * - a sentence goes only when every word of it, "not" included, is said by a
+ *   later comment or names the element that comment is on ("Should say save
+ *   changes." on the Save button still says "button");
  * - never a sentence the open comment already held, and never every sentence
  *   of a comment;
  * - and only when the tick's split then hands more of its words to the later
@@ -320,7 +340,7 @@ export function apportionTick(
   const comments =
     forgot && first ? [{ ...first, continues: false }, ...replied.slice(1)] : replied;
   const drops = comments.map((c, k) => {
-    const later = keySet(
+    const later = meaningSet(
       comments
         .slice(k + 1)
         .map(said)
@@ -330,7 +350,10 @@ export function apportionTick(
     const repeat = sentences.map((s) => {
       const ks = [...keySet(s)];
       const held = c.continues && ks.filter((w) => old.has(w)).length * 2 >= ks.length;
-      return ks.length > 0 && !held && ks.every((w) => later.has(w));
+      const means = meaningSet(s);
+      // A later "not" the sentence lacks makes it a different point, not a repeat.
+      const turned = later.has('not') && !means.has('not');
+      return ks.length > 0 && !held && !turned && [...means].every((w) => later.has(w));
     });
     return { sentences, repeat: repeat.every(Boolean) ? repeat.map(() => false) : repeat };
   });
