@@ -121,12 +121,14 @@ async function seed(base: string, dataDir: string): Promise<Seeded> {
     samplePath,
     '# Nightly UI check\n\nA short document, so the shell is measured against content that does\nnot fill it — which is the case the grid bug needed.\n',
   );
-  const doc = (await post(`${base}/api/docs`, {
+  // The board is named by the address, not the body: `/api/docs` with a
+  // `hubWorkspaceId` field was removed when every board resource moved under
+  // `/workspaces/<workspaceId>/`, and answers 410 now.
+  const doc = (await post(`${base}/workspaces/${ws.workspace.id}/docs`, {
     docId: 'nightly-ui-sample',
     type: 'markdown',
     title: 'Nightly UI sample',
     sourceUrl: samplePath,
-    hubWorkspaceId: ws.workspace.id,
   })) as { docId: string };
 
   return { workspaceId: ws.workspace.id, docId: doc.docId };
