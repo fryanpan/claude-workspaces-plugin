@@ -27,15 +27,17 @@ export const widgetStyles = `
 /* --cw-edge is how far the screen's right edge stands in from the edge that
    fixed boxes are laid out against, and zero on a page that fits. On a page
    wider than a phone, or one panned or pinched, the browser lays out fixed
-   boxes against the page's width instead, so the widget's own controls add
-   this to their right offset to stay on screen. --cw-vv-right is the visual
-   viewport's right edge, kept by wireVisualViewport, and the 100% resolves
-   in the rule that uses it. */
+   boxes against the page's width instead, so the widget's own controls take
+   it as a right margin, on top of their right offset, to stay on screen.
+   --cw-vv-right is the visual viewport's right edge, kept by
+   wireVisualViewport, and the 100% resolves in the rule below, against the
+   same width the offset is measured from. */
+.fab, .fab-list, .panel { margin-right: var(--cw-edge); }
 * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif; }
 
 .fab {
   position: fixed;
-  right: calc(var(--cw-edge) + max(18px, env(safe-area-inset-right)));
+  right: max(18px, env(safe-area-inset-right));
   bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(18px, env(safe-area-inset-bottom)));
   width: 48px;
   height: 48px;
@@ -63,7 +65,7 @@ export const widgetStyles = `
 /* The thread list's way in, above the FAB. 44px floor. */
 .fab-list {
   position: fixed;
-  right: calc(var(--cw-edge) + max(20px, calc(env(safe-area-inset-right) + 2px)));
+  right: max(20px, calc(env(safe-area-inset-right) + 2px));
   bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(74px, calc(env(safe-area-inset-bottom) + 74px)));
   width: 44px;
   height: 44px;
@@ -103,7 +105,7 @@ export const widgetStyles = `
 
 .panel {
   position: fixed;
-  right: calc(var(--cw-edge) + max(16px, env(safe-area-inset-right)));
+  right: max(16px, env(safe-area-inset-right));
   bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h) + max(128px, calc(env(safe-area-inset-bottom) + 128px)));
   width: 340px;
   max-height: 70vh;
