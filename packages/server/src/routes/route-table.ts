@@ -62,8 +62,13 @@
  *   Access-verified operator host. This is the default, and every route that
  *   `shareScopeAllows` does not name has it.
  * - `loopback-only` — additionally requires a loopback peer address and
- *   refuses anything carrying `cf-ray`. The deploy, the plugin refresh, the
- *   Sentry state read and the agent merge.
+ *   refuses anything carrying `cf-ray`. The deploy POST, the Sentry state,
+ *   the agent merge, the agent token, watch set and event stream, the mount
+ *   table and the repo registry. The plugin refresh is NOT one: its POST
+ *   refuses `cf-ray` and a browser but checks no address. Unlike the share
+ *   gates, `shareScopeAllows` cannot tell this gate from `trusted-local`, so
+ *   `test/route-table-loopback.test.ts` checks it by dialling each row from
+ *   a loopback and a non-loopback address.
  * - `share-scope` — named by `shareScopeAllows`, so a share visitor scoped to
  *   the board in the path reaches it.
  * - `owner-in-handler` — the host guard ADMITS a visitor to this address, and
@@ -256,8 +261,12 @@ export function renderRouteTable(entries: readonly RouteEntry[]): string {
     '`packages/server/src/routes/route-table-rows.ts`, which `Bun.serve` mounts as',
     'its `routes` object; `packages/server/test/route-table.test.ts` fails when this',
     'file and that one disagree, and when a row’s declared gate disagrees with what',
-    '`shareScopeAllows` actually decides. The gate vocabulary is',
-    '[security.md](security.md).',
+    '`shareScopeAllows` actually decides. That check cannot tell `trusted-local`',
+    'from `loopback-only`, so `packages/server/test/route-table-loopback.test.ts`',
+    'dials every row filed under either from a loopback and a non-loopback address',
+    'and fails when the route refuses a different caller than its row says. It also',
+    'calls every `loopback-only` row through the tunnel and fails unless the route',
+    'refuses it. The gate vocabulary is [security.md](security.md).',
     '',
     '| Pattern | Methods | Module | Gate | Reason |',
     '| --- | --- | --- | --- | --- |',

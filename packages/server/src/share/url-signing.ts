@@ -1,4 +1,18 @@
 /**
+ * RETIRED — nothing in the server calls this module.
+ *
+ * Link mode was retired on 2026-09-02: no share is minted as a signed URL,
+ * and `/share/<id>` redeems nothing (`routes/auth-share.ts`). The only
+ * importer left is this module's own test, which also cross-checks the
+ * retired edge Worker in `infra/share-link-worker/`. It is kept, not
+ * deleted, and it is excluded by name from `ship-it`'s security trigger.
+ *
+ * Do not add a caller. A new signed value goes through
+ * `auth/signed-token.ts` as a `TokenFormat` (security-review checklist,
+ * heading 5), never through the hand-rolled HMAC below.
+ *
+ * What follows is the original description, kept for the record.
+ *
  * Signed share URLs — the S3-presigned pattern.
  *
  * A share link is `/share/<id>?exp=<unix-seconds>&sig=<hex>`: the id says
