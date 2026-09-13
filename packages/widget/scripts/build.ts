@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BunPlugin } from 'bun';
+import { assertBundleExcludes } from './bundle-guard.ts';
 import { minifyCss } from './minify-css.ts';
 import { assertShimCovers } from './shim-guard.ts';
 import { stripSecretShape } from './strip-secret-shape.ts';
@@ -96,7 +97,7 @@ const secretShapeOff: BunPlugin = {
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
-async function build(format: 'esm' | 'iife', name: string, entry = 'widget.ts') {
+async function build(format: 'esm' | 'iife', name: string, entry: string) {
   const result = await Bun.build({
     entrypoints: [join(pkgRoot, 'src', entry)],
     outdir: dist,
@@ -125,8 +126,19 @@ async function build(format: 'esm' | 'iife', name: string, entry = 'widget.ts') 
   return result;
 }
 
-await build('esm', 'widget.esm.js');
-await build('iife', 'widget.iife.js');
+/** Refuse a widget bundle holding a module it was measured without (`bundle-guard.ts`). */
+async function guardWidget(result: Awaited<ReturnType<typeof build>>, name: string) {
+  const map = result.outputs.find((o) => o.kind === 'sourcemap');
+  if (!map) throw new Error(`widget-bundle-guard: ${name} was built without a source map.`);
+  const { sources } = JSON.parse(await map.text()) as { sources?: string[] };
+  assertBundleExcludes(sources ?? [], name);
+}
+
+// The ES module is imported for its exports, so it is built from the module
+// that has them; the script tag's bundle is built from `widget-iife.ts`, which
+// says why it exports nothing.
+await guardWidget(await build('esm', 'widget.esm.js', 'widget.ts'), 'widget.esm.js');
+await guardWidget(await build('iife', 'widget.iife.js', 'widget-iife.ts'), 'widget.iife.js');
 // The mockup live-update script. Its own entrypoint, not part of the widget:
 // it runs on ONE surface (a mockup the workspace serves) and it replaces the
 // host page's DOM, which the widget — a guest on other people's pages — must

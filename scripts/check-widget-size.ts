@@ -42,11 +42,26 @@ import { gzipSync } from 'node:zlib';
  * ask, and an affordance for answering it, in front of readers the server
  * refuses.
  *
- * Which leaves main's own margin as the thing worth knowing — six bytes under
- * the ceiling now, twenty before. This gate is close to being a tripwire on
- * the next change to `packages/core`, whatever that change is about. Raising
- * it is a decision about what the widget costs the pages it is a guest on, so
- * it takes a paragraph here, not a round-up.
+ * Which left main's own margin as the thing worth knowing — six bytes under
+ * the ceiling, and this gate a tripwire on the next change to `packages/core`,
+ * whatever that change was about.
+ *
+ * The room came back without moving the number (2026-09-12):
+ *
+ *   before        40,954 gz   (133,133 raw)
+ *   after         38,818 gz   (126,623 raw)   2,142 under
+ *
+ * 1,844 of it was the widget reading `anchors.Element` off the core barrel. A
+ * namespace object keeps every module behind it, so each embed carried
+ * text-range anchors, their validator and the yjs position code they reach,
+ * none of which an element pin calls. The other 292 was Bun building an export
+ * object and CommonJS interop for an IIFE that has nowhere to put exports
+ * (`packages/widget/src/widget-iife.ts`). The build now refuses a bundle that
+ * holds any module it was measured without (`packages/widget/scripts/bundle-guard.ts`),
+ * so that regrowth fails on the change that causes it, not on the next one.
+ *
+ * Raising the ceiling is a decision about what the widget costs the pages it is
+ * a guest on, so it takes a paragraph here, not a round-up.
  */
 const BUDGET_BYTES = 40 * 1024;
 const WIDGET_IIFE = join(import.meta.dir, '..', 'packages', 'widget', 'dist', 'widget.iife.js');
