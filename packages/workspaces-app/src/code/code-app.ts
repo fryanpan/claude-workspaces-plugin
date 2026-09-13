@@ -1,3 +1,5 @@
+import { browserStorage } from '../boot-env.ts';
+import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { renderDiffNav, wireDiffNavRefresh } from '../diff-nav.ts';
 import { api } from '../doc-path.ts';
 import { el } from '../doc/chrome-dom.ts';
@@ -219,6 +221,7 @@ export async function mountCode(
   // CodeMirror manages its own scroller inside #editor; the tracker reads
   // scroll depth from editorMount and listens for interaction at the window.
   scope.onCleanup(startReadingTracker({ docId, user, scrollEl: editorMount }));
+  void syncDeviceContext(browserDeviceEnv(browserStorage), { mayAsk: false });
 
   // --- diff ↔ whole-file toggle ---------------------------------------------
   if (isDiff) {

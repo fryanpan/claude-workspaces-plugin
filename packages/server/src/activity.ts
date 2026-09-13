@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
 import type { ActorKind } from './actor-identity.ts';
+import { type EventDevice, stampEventOrigin } from './event-origin.ts';
 
 /**
  * The "hands-on activity" event stream. One JSON object per line, append-only,
@@ -99,6 +100,11 @@ export interface Event {
   threadId?: string;
   doc: EventDoc;
   payload: EventPayload;
+  /** The browser that caused the row. Absent for agent, server and backfill
+   *  rows — see event-origin.ts. */
+  device?: EventDevice;
+  /** Rounded to ~1 km, only when that browser allowed location. */
+  location?: { lat: number; lng: number };
 }
 
 /**
@@ -294,7 +300,7 @@ export function activityLogPath(dataDir: string): string {
 export function appendActivity(dataDir: string, event: Event): void {
   try {
     if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
-    appendFileSync(activityLogPath(dataDir), `${JSON.stringify(event)}\n`);
+    appendFileSync(activityLogPath(dataDir), `${JSON.stringify(stampEventOrigin(event))}\n`);
   } catch (err) {
     console.error('[activity] append failed:', err);
   }

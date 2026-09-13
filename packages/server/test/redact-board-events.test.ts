@@ -148,6 +148,25 @@ describe('redactBoardEventForVisitor', () => {
     }
   });
 
+  it('drops location from every row, board-shaped or not, and keeps the device', () => {
+    // A row a person's browser caused carries where it was (event-origin.ts).
+    // `server.started` is outside the board prefixes on purpose: the strip
+    // has to run before that test, or a non-board row walks past it.
+    for (const event of ['task.created', 'server.started']) {
+      const out = redactBoardEventForVisitor({
+        event,
+        workspaceId: 'w-1',
+        device: { kind: 'ipad', browser: 'Safari' },
+        location: { lat: 10.12, lng: -20.34 },
+        ts: 13,
+      }) as unknown as Record<string, unknown>;
+      // Positive control: the row itself survives, device included.
+      expect(out.event, event).toBe(event);
+      expect(out.device, event).toEqual({ kind: 'ipad', browser: 'Safari' });
+      expect('location' in out, event).toBe(false);
+    }
+  });
+
   it('redacts the bucket-review actor on triage.requested', () => {
     const out = redactBoardEventForVisitor({
       event: 'triage.requested',

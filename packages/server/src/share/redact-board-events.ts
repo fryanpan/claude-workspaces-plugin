@@ -73,6 +73,14 @@ function isTaskShape(value: unknown): value is Task {
  * call this) and untouched events pay nothing.
  */
 export function redactBoardEventForVisitor<T extends { event: string }>(payload: T): T {
+  // Location first and for EVERY row, not only the board prefixes below: a
+  // log row caused by a person's browser carries where that browser was
+  // (event-origin.ts), whatever family the event belongs to, and it is the
+  // one field on this feed that must never leave the owner's server.
+  if ('location' in payload) {
+    const { location: _dropped, ...rest } = payload as T & { location?: unknown };
+    return redactBoardEventForVisitor(rest as unknown as T);
+  }
   if (!BOARD_EVENT.test(payload.event)) return payload;
   const p = payload as unknown as { event: string } & Record<string, unknown>;
   const out: { event: string } & Record<string, unknown> = { ...p };

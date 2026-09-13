@@ -1,6 +1,7 @@
 import type { FeedbackClient, User } from '@claude-workspaces/core';
 import type { BootLocation, BootStorage, BootWindow } from './boot-env.ts';
 import { mountCode } from './code/code-app.ts';
+import { browserDeviceEnv, syncDeviceContext } from './device-context.ts';
 import { fetchDocMeta } from './doc-meta.ts';
 import { docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
 import { el, showToast } from './doc/chrome-dom.ts';
@@ -310,6 +311,7 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   // Interaction-bounded reading-session capture (doc_open + read_session).
   // The #editor element is the scroll container on the markdown surface.
   scope.onCleanup(startReadingTracker({ docId, user, scrollEl: editorMount }));
+  void syncDeviceContext(browserDeviceEnv(localStorage), { mayAsk: false });
 
   // Opened by the Board's "Make a plan" / "Have a meeting": the address carries
   // a flag, and the strip asks for the mic at once instead of waiting for a

@@ -32,6 +32,7 @@ import { DispatchRegistry } from './dispatch-registry.ts';
 import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
+import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { createHomePane } from './home-pane.ts';
 import { spokenReviewComment } from './huddle.ts';
@@ -47,7 +48,7 @@ import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
-import { isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
+import { isBrowserRequest, isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
 import { MountStore } from './mount-store.ts';
 import { spokenLinkRef } from './notes-link-intent.ts';
 import { writeNotesMethod } from './notes-method-store.ts';
@@ -2178,6 +2179,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * Bun’s specificity matching, still orders the eight adjacencies whose
    * comments call them load-bearing.
    */
+  /** The device and location a browser request's analytics rows carry, in
+   *  scope for exactly as long as the request is (event-origin.ts). */
+  function handleWithOrigin(req: Request): Promise<Response | undefined> {
+    const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
+    return withEventOrigin(origin, () => handleRequest(req));
+  }
+
   async function handleRequest(req: Request): Promise<Response | undefined> {
     const startedAt = performance.now();
     const pathname = new URL(req.url).pathname;
@@ -2875,9 +2883,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // the `/recall/` upgrade, meetings above the doc catch-all, and the rest
     // named in `route-table.ts`). Handing dispatch to a matcher that does not
     // know those adjacencies would change what a request is answered by.
-    routes: mountRouteTable(ROUTE_TABLE, handleRequest),
+    routes: mountRouteTable(ROUTE_TABLE, handleWithOrigin),
     async fetch(req) {
-      return handleRequest(req);
+      return handleWithOrigin(req);
     },
     // ── Socket handlers ── see socket-handlers.ts. A19 decided the socket
     // may open and what is stamped on it; this is what Bun calls for the
