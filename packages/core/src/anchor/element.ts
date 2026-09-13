@@ -83,12 +83,10 @@ export function scoreMatch(fp: ElementFingerprint, el: HTMLElement): number {
   if (fp.id && fp.id === el.id) score += 30;
 
   let attrHits = 0;
-  let attrMisses = 0;
   for (const name of STABLE_ATTR_NAMES) {
     const want = fp.stableAttrs[name];
     if (!want) continue;
     if (el.getAttribute(name) === want) attrHits++;
-    else attrMisses++;
   }
   score += Math.min(attrHits * 5, 20);
 
@@ -106,14 +104,11 @@ export function scoreMatch(fp: ElementFingerprint, el: HTMLElement): number {
     score += Math.min((shared.length / fp.classes.length) * 10, 10);
   }
 
-  // text similarity: simple token-overlap ratio on leading 60 chars. An
-  // element with no words matches a fingerprint with none, so long as no
-  // label it kept says otherwise: without it an icon button with no id tops
-  // out at 35 and never resolves, and with it unguarded a "Delete" icon
-  // button in the same place stood in for a "More options" one.
+  // text similarity: simple token-overlap ratio on leading 60 chars
   const elText = extractText(el);
-  if (fp.text || elText) score += Math.min(tokenOverlap(fp.text, elText) * 20, 20);
-  else if (!attrMisses) score += 20;
+  if (fp.text && elText) {
+    score += Math.min(tokenOverlap(fp.text, elText) * 20, 20);
+  }
 
   // path match score
   score += Math.min(pathMatchScore(fp.path, computePath(el)) * 20, 20);
@@ -148,8 +143,20 @@ function readDataAttrs(el: HTMLElement): Record<string, string> {
   return out;
 }
 
+/**
+ * The words an element says. One with none of its own — an icon button —
+ * says its label: without it such a button with no id tops out at 35 and
+ * never resolves, and the label is what tells it from the icon beside it.
+ */
 function extractText(el: HTMLElement): string {
-  const raw = (el.textContent ?? '').trim().replace(/\s+/g, ' ');
+  const raw = (
+    el.textContent?.trim() ||
+    el.getAttribute('aria-label') ||
+    el.getAttribute('title') ||
+    ''
+  )
+    .trim()
+    .replace(/\s+/g, ' ');
   return truncate(raw, TEXT_MAX);
 }
 

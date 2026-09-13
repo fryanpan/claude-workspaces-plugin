@@ -105,6 +105,28 @@ describe('element anchor', () => {
     expect(resolve(anchor, { root: document }).ok).toBe(false);
   });
 
+  it('tells two icon buttons apart by their labels: gone orphans, reordered follows', () => {
+    const toolbar = (...labels: string[]) =>
+      `<main><nav class="toolbar">${labels
+        .map(
+          (l) =>
+            `<button class="icon" aria-label="${l}"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/></svg></button>`,
+        )
+        .join('')}</nav></main>`;
+    const button = (label: string) =>
+      document.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+    setDom(toolbar('Share', 'Delete'));
+    const anchor = createAnchor(button('Delete'));
+    // Delete is removed: the thread orphans rather than moving onto Share.
+    setDom(toolbar('Share'));
+    expect(resolve(anchor, { root: document }).ok).toBe(false);
+    // Delete is still there, moved first: the thread follows it.
+    setDom(toolbar('Delete', 'Share'));
+    const r = resolve(anchor, { root: document });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.element).toBe(button('Delete'));
+  });
+
   it('does not match a wordless fingerprint to an element with words', () => {
     setDom('<main><section><button class="icon"></button></section></main>');
     const fp = createFingerprint(document.querySelector('.icon') as HTMLElement);

@@ -15,7 +15,7 @@ import {
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
 import { httpBase } from './widget-auth.ts';
-import { IGNORE_ATTR, lift } from './widget-picker.ts';
+import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
@@ -93,10 +93,7 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
       annotated.push({ thread: t, status: 'orphan', el: null });
       continue;
     }
-    // A thread saved before a press on an icon was lifted to its button is
-    // anchored to a shape inside it; its pin belongs to the button too.
-    const target = lift(res.element);
-    annotated.push({ thread: t, status: statusBase, el: target });
+    annotated.push({ thread: t, status: statusBase, el: res.element });
     // Every thread on the page has a pin, resolved ones included — the pin is
     // how a comment is found again, and a resolved one is still worth
     // reopening. Its look says which it is (the light styles in `widget.ts`).
@@ -111,7 +108,7 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
       showThreadPopover(el, t, ev.clientX, ev.clientY);
     });
     pinLayer.appendChild(pin);
-    el.threadPositions.set(t.id, { el: target, status: statusBase, at: t.anchor.at });
+    el.threadPositions.set(t.id, { el: res.element, status: statusBase, at: t.anchor.at });
   }
   positionPins(el);
   const badge = el.shadow.querySelector('.fab-list .count') as HTMLElement | null;

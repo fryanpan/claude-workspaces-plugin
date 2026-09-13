@@ -254,7 +254,7 @@ function hitTest(ev: MouseEvent): HTMLElement | null {
  * draws, so that is what it anchors to. A shape in no control stays itself:
  * a chart's bars and labels are each something to comment on.
  */
-export const lift = (el: Element): HTMLElement =>
+const lift = (el: Element): HTMLElement =>
   (el instanceof SVGElement && el.closest('a,button,[role=button]')) || (el as HTMLElement);
 
 /** The other half of `hitTest`'s question, asked of a mutation record rather
