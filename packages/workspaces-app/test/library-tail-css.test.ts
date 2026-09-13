@@ -1,26 +1,26 @@
 /**
  * The Library's last row clears the floating buttons.
  *
- * Three of them stack in the viewport's bottom-right corner at every width —
- * the comment bubble, the mic, and the thread-list button above it — and they
- * belong to the feedback widget's shadow root, so nothing in the page's own
- * layout knows they are there. Measured in a real browser at 430x932 with a
- * seeded board: the topmost sits 762-806 down the viewport, and the list's
+ * They sit in the viewport's bottom-right corner at every width — the comment
+ * bubble with the thread-list chip to its left, and the mic one slot above
+ * the bubble — and they belong to the feedback widget's shadow root, so
+ * nothing in the page's own layout knows they are there. Measured in a real
+ * browser at 430x932 with a seeded board, when the thread list still stood
+ * above the mic: the topmost sat 762-806 down the viewport, and the list's
  * last row ran 778-822. Half of it was under a button, including its right
  * end, where the time is and where a thumb lands.
  *
  * So the page reserves a tail. The number it owes is the float block's top
- * edge — 170px above the viewport bottom, a 126px offset plus that button's
- * own 44px — minus what the board already ends above: `#board-root`'s own
+ * edge — now the mic's, 118px above the viewport bottom, a 74px offset plus
+ * its own 44px — minus what the board already ends above: `#board-root`'s own
  * 24px, plus the fixed nav bar on a phone. The two `env(safe-area-inset-
  * bottom)` terms cancel, one on each side, which is why neither appears.
  *
- * And 12px of daylight on top, because a reservation of exactly 170 ended the
- * last row's box ON the topmost button's top edge, with its count badge
- * (`top: -4px`) reaching into the row.
+ * And 12px of daylight on top, because a reservation of exactly the stack's
+ * height ended the last row's box ON the topmost button's top edge.
  *
- *   1180: 170 + 12 - 24 - 0  = 158px
- *    430: 170 + 12 - 24 - 58 = 100px
+ *   1180: 118 + 12 - 24 - 0  = 106px
+ *    430: 118 + 12 - 24 - 58 = 48px
  *
  * happy-dom runs the cascade but no layout engine, so this reads the
  * reservation rather than the geometry it buys; the geometry is re-measured
@@ -34,7 +34,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 /** The top edge of the topmost floating button, above the viewport bottom. */
-const FLOAT_STACK_PX = 170;
+const FLOAT_STACK_PX = 118;
 /** What `#board-root` ends its own content above, before any bar. */
 const BOARD_ROOT_SLACK_PX = 24;
 /** Room between the last row and that edge, clearing the button's badge. */

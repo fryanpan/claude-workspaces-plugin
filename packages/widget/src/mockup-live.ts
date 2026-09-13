@@ -28,6 +28,7 @@
  */
 
 import { insertScript } from './mockup-live-scripts.ts';
+import { mountVoiceLoader } from './voice/voice-loader.ts';
 
 interface Config {
   docId: string;
@@ -373,9 +374,16 @@ export function startMockupLive(cfg: Config): void {
 const script = document.currentScript as HTMLScriptElement | null;
 const parsed = readConfig(script);
 if (parsed) {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => startMockupLive(parsed), { once: true });
-  } else {
+  // The mic, in the history button's slot; voice feedback itself is fetched
+  // from beside this script on its first tap (`voice-loader.ts`).
+  const voiceSrc = new URL('voice.js', script?.src || location.href).href;
+  const start = (): void => {
     startMockupLive(parsed);
+    mountVoiceLoader(document, voiceSrc);
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
   }
 }

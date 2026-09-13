@@ -73,6 +73,31 @@ describe('the mic a host adds to the widget', () => {
     }
   });
 
+  it('puts a button’s label away once it is pressed, until a mouse leaves it', () => {
+    const el = fakeWidget();
+    const { button } = addMic(el, LABELS);
+    const off = () => button.classList.contains('tipoff');
+    const out = (pointerType: string, to: Node) =>
+      button.dispatchEvent(
+        new PointerEvent('pointerout', {
+          pointerType,
+          relatedTarget: to,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    const glyph = button.firstElementChild as Element;
+    expect(off(), 'CONTROL: the label shows on hover before any press').toBe(false);
+    button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+    expect(off()).toBe(true);
+    out('touch', document.body);
+    expect(off(), 'a finger lifting leaves the screen hovering there: still away').toBe(true);
+    out('mouse', glyph);
+    expect(off(), 'moving onto its own glyph is not leaving it').toBe(true);
+    out('mouse', document.body);
+    expect(off(), 'a mouse that leaves brings it back for next time').toBe(false);
+  });
+
   it('moves the thread list up, so the mic takes its place', () => {
     const el = fakeWidget();
     const list = el.shadow.querySelector('.fab-list') as HTMLElement;

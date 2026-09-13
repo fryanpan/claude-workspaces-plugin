@@ -4,11 +4,14 @@
  *
  * Two defects, both seen at 1180x820 on the Library's All files view.
  *
- * - THE TAIL. Three widget buttons stack in the viewport's bottom-right
+ * - THE TAIL. The widget's buttons sit in the viewport's bottom-right
  *   corner. The list reserved exactly the stack's height, so at the end of
  *   the scroll the last row's box ended ON the topmost button's top edge
  *   (650.3 against 650), with that button's count badge reaching 4px into
- *   the row. The list now keeps 12px of daylight above the stack.
+ *   the row. The list now keeps 12px of daylight above the stack — and no
+ *   more: when the thread list left the column for a chip beside the bubble,
+ *   the stack's top fell from 170px to the mic's 118px, and a reservation
+ *   still sized for three buttons left 64px of empty tail.
  * - THE RAIL FOOT. The mic dock is `position: sticky` so it stays in view on
  *   a tall page; Settings and Collapse above it were not. Scrolling down, the
  *   two rose from the viewport's foot INTO the stuck dock: between 220 and
@@ -196,8 +199,11 @@ const PROBE = `(async () => {
   const fixedTail = await tail();
   const fixedSweep = await sweep();
 
-  // The controls: both rules as they were before the fix.
-  body.style.paddingBottom = 'calc(146px - var(--board-bottom-bar))';
+  // The controls: both rules as they were before the fix. The tail's is the
+  // reservation with no daylight — exactly the stack's 118px less the 24px
+  // #board-root already ends above — so it tracks today's stack, not the
+  // three-button one that stood 52px taller.
+  body.style.paddingBottom = 'calc(94px - var(--board-bottom-bar))';
   const tailControl = await tail();
   body.style.removeProperty('padding-bottom');
   const pin = document.createElement('style');
@@ -261,8 +267,11 @@ describe.skipIf(!CHROME)('the Library list clears the floating buttons, in a rea
         const r = reading(preset);
         expect(r.tail.scrollRemaining).toBe(0);
         expect(r.tail.daylight).toBeGreaterThanOrEqual(8);
+        // ...and not a reservation sized for a taller stack than the one
+        // drawn: the page's scarce axis is height, and empty tail is a cost.
+        expect(r.tail.daylight).toBeLessThanOrEqual(20);
         expect(r.tail.whenHitsSelf).toBe(true);
-        // The control is the bug: the old reservation leaves no daylight.
+        // The control is the bug: exactly the stack's height leaves no daylight.
         expect(r.tailControl.scrollRemaining).toBe(0);
         expect(r.tailControl.daylight).toBeLessThanOrEqual(0);
       },

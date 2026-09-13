@@ -2,44 +2,50 @@ import type { FeedbackWidgetEl } from '@claude-workspaces/widget';
 import { SIGN_IN_NOTE } from '@claude-workspaces/widget/mic';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FEEDBACK_LABELS, mountFeedbackMic } from '../src/board/board-feedback-mic.ts';
-import type { RecognitionLike, RecognitionResultEvent } from '../src/voice-capture.ts';
 import { mountShell } from './support/board-region-harness.ts';
 
 /**
  * Voice feedback about Workspaces itself, from any board.
  *
  * The widget on a board is bound to the Workspaces feedback doc, not to the
- * project on the board — so the button in the thread list's old slot is a mic
- * whose utterance lands in the same place typed feedback does: a thread about
- * that doc as a whole. What the board adds is the capture; the widget only
- * lends the button (`@claude-workspaces/widget/mic`).
+ * project on the board — so the button in the thread list's old slot is a
+ * tap-to-talk mic whose comments land where typed feedback does. The capture,
+ * the socket and the live comment are the widget's voice mode; what the board
+ * adds is the wording on the buttons and a glyph of its own.
  */
-class FakeRecognition implements RecognitionLike {
-  onresult: ((ev: RecognitionResultEvent) => void) | null = null;
-  onend: (() => void) | null = null;
-  onerror: ((ev: unknown) => void) | null = null;
-  started = 0;
-  start(): void {
-    this.started += 1;
+
+/** The voice relay's socket, as far as the page can tell. */
+class FakeSocket {
+  binaryType = '';
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onmessage: ((ev: { data: unknown }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  readonly sent: string[] = [];
+  constructor(readonly url: string) {}
+  send(data: unknown): void {
+    if (typeof data === 'string') this.sent.push(data);
   }
-  stop(): void {
-    this.onend?.();
+  close(): void {
+    this.readyState = 3;
   }
-  say(text: string): void {
-    this.onresult?.({ resultIndex: 0, results: [{ 0: { transcript: text }, isFinal: true }] });
+  recv(msg: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(msg) });
   }
 }
 
-interface Sent {
-  anchor: { kind: string };
-  text: string;
+interface Posted {
+  url: string;
+  body: { text?: string; anchor?: { kind: string } };
 }
+
+const cleanups: Array<() => void> = [];
 
 /**
- * The widget's shell as the mic finds it, plus the two auth fields the mic
- * reads to tell "the workspace wants a signature" from "the post just failed".
- * `signInToWrite` is what the widget's own 401 handling sets before a refused
- * post resolves.
+ * The widget's shell as the mic finds it, plus the fields voice mode reads:
+ * where the server is, who is speaking, and the two auth fields that tell
+ * "the workspace wants a signature" from "the post just failed".
  */
 function widgetWithMic(over: { refuse?: boolean; signInToWrite?: boolean } = {}) {
   const host = document.createElement('div');
@@ -50,91 +56,149 @@ function widgetWithMic(over: { refuse?: boolean; signInToWrite?: boolean } = {})
     shadow.append(b);
   }
   document.body.append(host);
-  const sent: Sent[] = [];
-  let refuse = over.refuse === true;
-  // Built ON the host element rather than beside it: the real
-  // `FeedbackWidgetEl` IS the element, and the mic writes the panel height it
-  // measures into that element's own inline style. A bare object stood in for
-  // it until the mic started doing that, and then read as a widget with no
-  // `style` at all — which no real one has ever been.
   const widget = Object.assign(host, {
     shadow,
+    opts: { serverUrl: 'http://host:8787', workspaceId: 'w-hub', docId: 'workspaces-feedback' },
+    user: { name: 'Ada', color: '#123456' },
+    feedbackMode: false,
     signInToWrite: over.signInToWrite === true,
     authToken: null,
-    retryAfterSignIn: null,
-    postNewThread: async (anchor: { kind: string }, text: string) => {
-      sent.push({ anchor, text });
-      return !refuse;
-    },
   }) as unknown as FeedbackWidgetEl;
-  const rec = new FakeRecognition();
-  const capture = mountFeedbackMic(widget, { createRecognition: () => rec });
+
+  const posted: Posted[] = [];
+  let refuse = over.refuse === true;
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    posted.push({ url, body: JSON.parse(String(init.body)) as Posted['body'] });
+    if (refuse) return new Response('{}', { status: 500 });
+    return new Response(JSON.stringify({ thread: { id: 't1', comments: [{ id: 'c1' }] } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  const sockets: FakeSocket[] = [];
+  let micStops = 0;
+  const mode = mountFeedbackMic(widget, {
+    openSocket: (url) => {
+      const s = new FakeSocket(url);
+      sockets.push(s);
+      return s;
+    },
+    startCapture: async () => {
+      return {
+        ok: true,
+        capture: {
+          stop: () => {
+            micStops += 1;
+          },
+        },
+      };
+    },
+    shown: () => true,
+  });
+  // A recording left running keeps its document listeners, which would take
+  // the next test's taps.
+  cleanups.push(() => {
+    if (mode.session.state === 'idle') return;
+    mode.session.stop();
+    sockets.at(-1)?.recv({ type: 'stopped' });
+  });
   const button = shadow.querySelector('.fab-mic') as HTMLElement;
   const readout = shadow.querySelector('.readout') as HTMLElement;
-  /** The workspace takes the post now — what signing in changes. */
-  const accept = (): void => {
-    refuse = false;
+  return {
+    widget,
+    mode,
+    button,
+    readout,
+    posted,
+    sockets,
+    socket: () => sockets.at(-1) as FakeSocket,
+    micStops: () => micStops,
+    accept: () => {
+      refuse = false;
+    },
   };
-  return { widget, sent, rec, capture, button, readout, accept };
 }
 
-/** Hold the mic, say a sentence, let go. */
-async function utter(v: ReturnType<typeof widgetWithMic>, text: string): Promise<void> {
-  v.button.dispatchEvent(new Event('pointerdown'));
-  v.rec.say(text);
-  v.button.dispatchEvent(new Event('pointerup'));
-  await vi.advanceTimersByTimeAsync(0);
+/** Tap the mic, and the server's engine comes up. */
+async function tapToTalk(v: ReturnType<typeof widgetWithMic>): Promise<void> {
+  v.button.click();
+  v.socket().readyState = 1;
+  v.socket().onopen?.();
+  v.socket().recv({ type: 'ready', segment: 1 });
+  await vi.waitFor(() => expect(v.mode.session.state).toBe('recording'));
+}
+
+/** A settled spoken comment from the server. */
+function said(v: ReturnType<typeof widgetWithMic>, text: string, key = 'v1'): void {
+  v.socket().recv({
+    type: 'comment',
+    key,
+    text,
+    raw: text,
+    clip: '/workspaces/w-hub/docs/workspaces-feedback/voice-feedback/seg-1.wav#t=0,4',
+    target: null,
+    final: true,
+  });
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
-  // The mic is gated on a secure context, which no test environment is. That
-  // gate has its own suite (`voice-capture.test.ts`); here it must be open.
-  Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 0);
 });
 afterEach(() => {
-  vi.useRealTimers();
+  for (const c of cleanups.splice(0)) c();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   document.body.innerHTML = '';
 });
 
 describe('the board mic', () => {
-  it('posts what it heard as feedback about the whole doc', async () => {
+  it('records on a tap, talking to the feedback doc’s voice relay', async () => {
     const v = widgetWithMic();
-    await utter(v, 'the phone composer has too many rows');
-    expect(v.sent).toEqual([
-      { anchor: { kind: 'subject' }, text: 'the phone composer has too many rows' },
+    v.button.click();
+    expect(v.sockets.map((s) => s.url)).toEqual([
+      'http://host:8787/workspaces/w-hub/docs/workspaces-feedback/voice',
     ]);
-    v.capture.destroy();
+    expect(v.button.getAttribute('aria-pressed')).toBe('true');
+    v.socket().readyState = 1;
+    v.socket().onopen?.();
+    expect(JSON.parse(v.socket().sent[0] as string)).toMatchObject({
+      type: 'start',
+      sampleRate: 16000,
+    });
   });
 
-  it('says where it went, in the readout beside the button', async () => {
+  it('posts what was said as feedback on the Workspaces feedback doc', async () => {
     const v = widgetWithMic();
-    await utter(v, 'the phone composer has too many rows');
-    expect(v.readout.classList.contains('hidden')).toBe(false);
-    expect(v.readout.textContent).toContain('Workspaces feedback');
-    expect(v.readout.textContent).toContain('too many rows');
-    v.capture.destroy();
+    await tapToTalk(v);
+    said(v, 'the phone composer has too many rows');
+    await vi.waitFor(() => expect(v.posted).toHaveLength(1));
+    expect(v.posted[0]?.url).toBe(
+      'http://host:8787/workspaces/w-hub/docs/workspaces-feedback/threads',
+    );
+    expect(v.posted[0]?.body).toMatchObject({
+      text: 'the phone composer has too many rows',
+      anchor: { kind: 'subject' },
+    });
   });
 
-  it('CONTROL: a refused post says so rather than claiming it landed', async () => {
-    const v = widgetWithMic({ refuse: true });
-    await utter(v, 'the phone composer has too many rows');
-    expect(v.sent, 'CONTROL: it did try').toHaveLength(1);
-    expect(v.readout.textContent).toContain('failed');
-    v.capture.destroy();
-  });
-
-  it('leaves Space alone — the board dock owns that gesture', async () => {
-    // Two captures listening for one press both record and both post.
+  it('stops on a second tap, and lets go of the microphone at once', async () => {
     const v = widgetWithMic();
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));
-    await vi.advanceTimersByTimeAsync(500);
-    expect(v.rec.started, 'the widget mic must not start on Space').toBe(0);
-    // CONTROL: the same capture does start from its own button.
-    v.button.dispatchEvent(new Event('pointerdown'));
-    expect(v.rec.started).toBe(1);
-    v.button.dispatchEvent(new Event('pointerup'));
-    v.capture.destroy();
+    await tapToTalk(v);
+    v.button.click();
+    expect(v.micStops()).toBe(1);
+    expect(v.socket().sent.map((s) => JSON.parse(s).type)).toContain('stop');
+    v.socket().recv({ type: 'stopped' });
+    expect(v.button.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('leaves Space alone — the board dock owns that gesture', () => {
+    // Two captures listening for one press would both record.
+    const v = widgetWithMic();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
+    expect(v.sockets, 'the widget mic must not start on Space').toHaveLength(0);
+    v.button.click();
+    expect(v.sockets, 'CONTROL: the same mic does start from its own button').toHaveLength(1);
   });
 
   it('names the app, not the project, on every button', () => {
@@ -152,10 +216,9 @@ describe('the board mic', () => {
     expect(new Set(tips)).toEqual(
       new Set([FEEDBACK_LABELS.comment, FEEDBACK_LABELS.voice, FEEDBACK_LABELS.history]),
     );
-    v.capture.destroy();
   });
 
-  it('is a different glyph from the voice dock, so the board\u2019s two mics are not one control drawn twice', () => {
+  it('is a different glyph from the voice dock, so the board’s two mics are not one control drawn twice', () => {
     // A board carries both at once: the dock's mic bottom-left talks to the
     // board, this one bottom-right sends feedback about the app. They drew the
     // same icon, so the only thing separating them was a hover label — which
@@ -167,72 +230,44 @@ describe('the board mic', () => {
     expect(dock.querySelector('svg'), 'CONTROL: the dock draws a glyph').toBeTruthy();
     expect(feedback.querySelector('svg'), 'CONTROL: and so does the mic').toBeTruthy();
     expect(feedback.innerHTML, 'the two mics are drawn differently').not.toBe(dock.innerHTML);
-    v.capture.destroy();
   });
 });
 
 describe('the board mic when the workspace wants a signature', () => {
-  it('keeps what was said and asks for a sign-in, in the composer\u2019s own words', async () => {
+  it('keeps what was said and asks for a sign-in, in the composer’s own words', async () => {
     const v = widgetWithMic({ refuse: true, signInToWrite: true });
-    await utter(v, 'the phone composer has too many rows');
-    expect(v.sent, 'CONTROL: it did try').toHaveLength(1);
-    // The typed composer has always held the draft and said this. A spoken
-    // one used to be told the request failed, with the sentence already gone.
-    expect(v.readout.textContent).toBe(SIGN_IN_NOTE);
-    expect(v.readout.textContent).not.toContain('failed');
-    v.capture.destroy();
+    await tapToTalk(v);
+    said(v, 'the phone composer has too many rows');
+    await vi.waitFor(() => expect(v.readout.textContent).toBe(SIGN_IN_NOTE));
+    expect(v.posted, 'CONTROL: it did try').toHaveLength(1);
   });
 
-  it('posts the utterance itself once the sign-in lands', async () => {
-    // "Your draft is kept" is a promise about what happens next, so the test
-    // is that the words go out — not that a flag was set somewhere.
+  it('posts every comment said before the sign-in, once it lands', async () => {
     const v = widgetWithMic({ refuse: true, signInToWrite: true });
-    await utter(v, 'the phone composer has too many rows');
-    expect(typeof v.widget.retryAfterSignIn, 'the retry is armed').toBe('function');
-
-    v.accept();
-    v.widget.retryAfterSignIn?.();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(v.sent.map((s) => s.text)).toEqual([
-      'the phone composer has too many rows',
-      'the phone composer has too many rows',
-    ]);
-    expect(v.sent[1]?.anchor, 'as feedback about the doc as a whole').toEqual({ kind: 'subject' });
-    expect(v.readout.textContent, 'and the readout says where it went').toContain(
-      'Workspaces feedback',
+    await tapToTalk(v);
+    said(v, 'the ferry times are wrong', 'v1');
+    said(v, 'and the map is upside down', 'v2');
+    await vi.waitFor(() => expect(v.posted).toHaveLength(2));
+    await vi.waitFor(() =>
+      expect(typeof v.widget.retryAfterSignIn, 'the retry is armed').toBe('function'),
     );
-    v.capture.destroy();
-  });
-
-  it('holds every utterance said before the sign-in, not just the last', async () => {
-    // The widget keeps ONE retry slot and the typed composer arms it too, so
-    // an assignment here answers "your draft is kept" to two sentences and
-    // keeps the later one. Say two things while signed out and both go.
-    const v = widgetWithMic({ refuse: true, signInToWrite: true });
-    await utter(v, 'the ferry times are wrong');
-    await utter(v, 'and the map is upside down');
-    expect(
-      v.sent.map((x) => x.text),
-      'CONTROL: both were tried and both refused',
-    ).toEqual(['the ferry times are wrong', 'and the map is upside down']);
 
     v.accept();
     v.widget.retryAfterSignIn?.();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(
-      v.sent.slice(2).map((x) => x.text),
-      'oldest first',
-    ).toEqual(['the ferry times are wrong', 'and the map is upside down']);
-    v.capture.destroy();
+    await vi.waitFor(() => expect(v.posted).toHaveLength(4));
+    expect(v.posted.slice(2).map((p) => p.body.text)).toEqual([
+      'the ferry times are wrong',
+      'and the map is upside down',
+    ]);
   });
 
   it('CONTROL: a refusal with nothing to sign in to is still a failure', async () => {
-    // The sign-in wording is not the new name for every refusal: a workspace
-    // that never asked for a signature gets the plain report back.
     const v = widgetWithMic({ refuse: true });
-    await utter(v, 'the phone composer has too many rows');
-    expect(v.readout.textContent).toContain('failed');
+    await tapToTalk(v);
+    said(v, 'the phone composer has too many rows');
+    await vi.waitFor(() =>
+      expect(v.readout.textContent).toBe('A comment could not be saved. Its words are kept.'),
+    );
     expect(v.widget.retryAfterSignIn, 'and nothing is armed').toBeNull();
-    v.capture.destroy();
   });
 });

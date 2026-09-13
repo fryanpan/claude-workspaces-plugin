@@ -5,6 +5,7 @@ import {
   type ReviewPayload,
   type Thread,
   type User,
+  type VoiceNote,
   applyReviewRevision,
   contentKind,
   createThread,
@@ -134,6 +135,8 @@ export class DocThreads {
        * layer where the payload has to be accepted, not the routes above it.
        */
       review?: ReviewPayload;
+      /** A spoken comment's clip and raw words — see `VoiceNote`. */
+      voice?: VoiceNote;
     },
   ): Promise<Thread | null> {
     const doc = this.p.doc(docId);
@@ -145,7 +148,12 @@ export class DocThreads {
         threadId: id,
         anchor,
         createdBy: author,
-        firstComment: { id: randomId(), text, ...(opts?.review ? { review: opts.review } : {}) },
+        firstComment: {
+          id: randomId(),
+          text,
+          ...(opts?.review ? { review: opts.review } : {}),
+          ...(opts?.voice ? { voice: opts.voice } : {}),
+        },
       });
       this.p.fireThreadEvent(doc, 'thread.created', t, undefined, opts);
       // Hash the activity event with the comment's PERSISTED ts (not a fresh
@@ -329,7 +337,7 @@ export class DocThreads {
     threadId: string,
     commentId: string,
     text: string,
-    opts: { actor: User; reason?: string },
+    opts: { actor: User; reason?: string; voice?: VoiceNote },
   ): { ok: true; thread: Thread } | { ok: false; error: 'no-doc' | 'not-found' | 'unchanged' } {
     const doc = this.p.residentDoc(docId);
     if (!doc) return { ok: false, error: 'no-doc' };
@@ -338,14 +346,26 @@ export class DocThreads {
     if (!target) return { ok: false, error: 'not-found' };
     // An edit that changes nothing would still push a trail entry, which
     // would read as a correction somebody made — so it is refused rather
-    // than recorded. A sweep that re-runs is the caller that hits this.
-    if (target.text === text) return { ok: false, error: 'unchanged' };
+    // than recorded. A sweep that re-runs is the caller that hits this. A
+    // spoken comment whose words held while its clip or raw words grew is
+    // not unchanged: the note is written, with no trail entry.
+    const sameVoice =
+      !opts.voice ||
+      (target.voice?.clip === opts.voice.clip && target.voice?.raw === opts.voice.raw);
+    if (target.text === text && sameVoice) return { ok: false, error: 'unchanged' };
     if (
-      !setCommentText(doc.ydoc, threadId, commentId, text, {
-        name: opts.actor.name,
-        at: Date.now(),
-        ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
-      })
+      !setCommentText(
+        doc.ydoc,
+        threadId,
+        commentId,
+        text,
+        {
+          name: opts.actor.name,
+          at: Date.now(),
+          ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+        },
+        opts.voice,
+      )
     ) {
       // The comment went between the read and the write — a race.
       return { ok: false, error: 'not-found' };

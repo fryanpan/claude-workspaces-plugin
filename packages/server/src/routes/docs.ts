@@ -81,6 +81,7 @@ import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
 import { handleDocTitleRoute } from './doc-title.ts';
+import { handleDocVoiceFeedbackRoute } from './doc-voice-feedback.ts';
 import type {
   DocResourceRouteRequest,
   DocRouteRequest,
@@ -627,6 +628,7 @@ export async function handleDocResourceRoutes(
   return (
     (await handleDocResourceCore(ctx, docRq)) ??
     (await handleDocTitleRoute(ctx, docRq)) ??
+    (await handleDocVoiceFeedbackRoute(ctx, docRq)) ??
     (await handleDocThreadRoutes(ctx, docRq)) ??
     (await handleDocEditRoutes(ctx, docRq))
   );

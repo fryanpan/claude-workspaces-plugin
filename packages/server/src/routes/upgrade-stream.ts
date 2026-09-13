@@ -327,6 +327,33 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         return undefined;
       }
 
+      // `/workspaces/<ws>/docs/<docId>/voice` — voice feedback on a page
+      // (`voice-feedback-relay.ts`). The meeting socket's guards, and one
+      // more: share visitors are refused outright. A session spends a
+      // transcription engine and the model on the owner's keys, and a visitor
+      // who could talk into it would be spending them — the rule the comment
+      // routes keep with `generate: !visitor`. Trusted-local in the route table.
+      const voice = docSocket(pathname, 'voice');
+      if (voice) {
+        if ('refusal' in voice) return voice.refusal;
+        if (visitor) return j(403, { error: 'not available to share visitors' });
+        if (!isAllowedBrowserOrigin(req.headers.get('origin'), policyFor(req))) {
+          return j(403, { error: 'origin_not_allowed' });
+        }
+        if (!docStore.get(voice.docId)) return j(404, { error: 'doc not found' });
+        const upgraded = server.upgrade(req, {
+          data: {
+            docId: voice.docId,
+            workspaceId: voice.workspaceId,
+            kind: 'voice' as const,
+            // Carried, not refused here, so the page can say why — as above.
+            ...(requireSignInToWrite && browserProvedNobody() ? { readOnly: true } : {}),
+          },
+        });
+        if (!upgraded) return new Response('upgrade required', { status: 426 });
+        return undefined;
+      }
+
       // --- WebSocket upgrade: the BOARD's own room ---
       // `/workspaces/<ws>/y`, which was `/y/ws:<workspaceId>`.
       //

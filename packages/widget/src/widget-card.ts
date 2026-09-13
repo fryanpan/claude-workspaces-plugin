@@ -46,6 +46,18 @@ export function isPhoneFace(): boolean {
   return window.innerWidth <= PHONE_MAX;
 }
 
+/**
+ * Where a thread's pin stands across: over the element's top right corner, or
+ * just past its words when they end well short of that — a heading's pin sits
+ * after the heading, not in the far corner of the page.
+ */
+export function pinX(el: Element, r: DOMRect): number {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const words = range.getBoundingClientRect?.();
+  return words?.width && r.right - words.right > 40 ? words.right + 14 : r.right - 6;
+}
+
 /** Must match `.composer` / `.saved` width in `styles.ts`. */
 const CARD_W = 280;
 const GAP = 12;

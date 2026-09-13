@@ -75,7 +75,7 @@ const REQUIRED: Record<keyof ClientSources, string[]> = {
   // widget bundles and not this one looks entirely healthy: every mockup
   // serves, the page just silently stops taking new rounds and the reviewer
   // is back to reloading to find out whether anything changed.
-  widget: ['widget.iife.js', 'widget.esm.js', 'mockup-live.js'],
+  widget: ['widget.iife.js', 'widget.esm.js', 'mockup-live.js', 'voice.js'],
   // `sw.js` and the manifest are listed because their absence is silent:
   // notifications simply never arrive and the page looks entirely healthy.
   markdownApp: ['app.js', 'index.html', 'sw.js', 'manifest.webmanifest'],

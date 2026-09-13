@@ -84,6 +84,10 @@ export interface Reading {
   tips: Record<string, Tip>;
   /** The same, in comment mode: the two buttons that stay. */
   tipsInMode: Record<string, Tip>;
+  /** The mic's hover label is drawn, with no note beside the mic. */
+  micLabelNoNote: boolean;
+  /** The same, with a note showing. */
+  micLabelUnderNote: boolean;
 }
 
 function pageHtml(bundle: string): string {
@@ -241,9 +245,22 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   ] as const;
   /** The pointer, resting on each button in turn. A button that is not
    *  painted is not hovered — there is nothing under the pointer to label. */
+  const offButtons = async (): Promise<void> => {
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: 4,
+      y: height - 4,
+      pointerType: 'mouse',
+    });
+    await settle();
+  };
   const readTips = async (): Promise<Record<string, Tip>> => {
     const out: Record<string, Tip> = {};
     for (const [name, selector] of BUTTONS) {
+      // From off the buttons each time: the history chip folds away while the
+      // FAB's or the mic's label shows, so a pointer still resting on the FAB
+      // would find no chip to hover.
+      await offButtons();
       const at = `${SHADOW}.querySelector(${JSON.stringify(selector)})`;
       const painted = (await cdp.evaluate(
         `(() => { const b = ${at}; return !!b && getComputedStyle(b).display !== 'none'; })()`,
@@ -256,13 +273,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
       out[name] = (await cdp.evaluate(tipOf(selector))) as Tip;
     }
     // Off the buttons again, so the next look is not taken through a label.
-    await cdp.send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: 4,
-      y: height - 4,
-      pointerType: 'mouse',
-    });
-    await settle();
+    await offButtons();
     return out;
   };
   const fab = `${SHADOW}.querySelector('.fab')`;
@@ -289,7 +300,23 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   await settle();
   await tap(done);
   await look('done');
-  return { width, height, looks, tips, tipsInMode };
+  // A note beside the mic (a refusal, a lost connection) opens where the
+  // mic's label would: with the pointer on the mic, is the label still drawn?
+  const labelShown = async (): Promise<boolean> => {
+    await offButtons();
+    await hover(`${SHADOW}.querySelector('.fab-mic')`);
+    return (await cdp.evaluate(
+      `(() => { const a = getComputedStyle(${SHADOW}.querySelector('.fab-mic'), '::after');
+        return a.display !== 'none' && !!a.content && a.content !== 'none'; })()`,
+    )) as boolean;
+  };
+  const micLabelNoNote = await labelShown();
+  await cdp.evaluate(
+    `(() => { const r = ${SHADOW}.querySelector('.readout'); r.textContent = 'Voice feedback lost its connection.'; r.classList.remove('hidden'); })()`,
+  );
+  const micLabelUnderNote = await labelShown();
+  await offButtons();
+  return { width, height, looks, tips, tipsInMode, micLabelNoNote, micLabelUnderNote };
 }
 
 const runId = `micphone${process.pid}`;
