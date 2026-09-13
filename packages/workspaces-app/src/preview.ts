@@ -9,7 +9,9 @@ let mermaidReady = false;
 
 function ensureMermaid(): void {
   if (mermaidReady) return;
-  mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+  // Strict, never loose: loose leaves script links and event handlers in the
+  // SVG. The reason in full is beside the editor's call in mermaid-code-block.ts.
+  mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
   mermaidReady = true;
 }
 
