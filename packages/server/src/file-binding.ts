@@ -178,10 +178,11 @@ interface FileBinding {
   lastWritten?: string;
   /** The file's own bytes as we last read or wrote them — not serializer
    *  space. The write-back reuses them for every block an edit did not touch
-   *  (`prose.serializeKeepingSource`), so a one-paragraph edit rewrites one
-   *  paragraph. Only ever a formatting hint: a stale value costs fidelity,
-   *  never content. */
-  diskText?: string;
+   *  (`prose.serializeKeepingSourceLayout`), so a one-paragraph edit rewrites
+   *  one paragraph. A read stores the text; a write stores the layout of what
+   *  it wrote, so the next flush does not parse the file again. Only ever a
+   *  formatting hint: a stale value costs fidelity, never content. */
+  diskSource?: string | prose.SourceLayout;
   /** Set when the most recent disk→doc reconcile failed (parse threw or
    *  produced zero blocks) or hit a conflict. Cleared on the next successful
    *  reconcile. Surfaced via getDoc AND on edit-tool responses so a wedged
@@ -593,7 +594,7 @@ export class FileBindings {
       path: abs,
       lastMtimeMs: existing?.lastMtimeMs,
       lastSize: existing?.lastSize,
-      diskText: seedText,
+      diskSource: seedText,
     };
     this.bindings.set(docId, binding);
     // sourceUrl records the bound path. It stays OUT of the CRDT (an absolute
@@ -612,7 +613,7 @@ export class FileBindings {
     if (!seeded && fileExists()) {
       try {
         const md = readFile();
-        binding.diskText = md;
+        binding.diskSource = md;
         const currentSerialized = prose.serializeFragmentToMarkdown(fragment);
         const prior = existing?.lastWritten;
         if (md !== currentSerialized) {
@@ -1562,7 +1563,7 @@ export class FileBindings {
       return { ok: true };
     }
     if (prose.parseMarkdownBlocks(md).length === 0) return { ok: false, error: 'missing' };
-    binding.diskText = md;
+    binding.diskSource = md;
     const fragment = prose.getProseFragment(doc.ydoc);
     doc.ydoc.transact(() => {
       // Block-level diff, not delete-all + push: blocks the rewrite didn't
@@ -1656,7 +1657,7 @@ export class FileBindings {
       binding.lastSyncError = undefined;
       return decision;
     }
-    binding.diskText = md;
+    binding.diskSource = md;
     const fragment = prose.getProseFragment(doc.ydoc);
     const currentSerialized = prose.serializeFragmentToMarkdown(fragment);
     const decision = decideReconcile({
@@ -1878,10 +1879,14 @@ export class FileBindings {
       // What lands on disk: `md` itself for flat text, and for prose `md`
       // with the file's own bytes kept for every block the edit did not
       // touch. `lastWritten` stays `md` — the bookkeeping is serializer space.
-      const bytes =
+      const written =
         contentKind(doc.meta.type) === 'flat'
-          ? md
-          : prose.serializeKeepingSource(prose.getProseFragment(doc.ydoc), binding.diskText);
+          ? undefined
+          : prose.serializeKeepingSourceLayout(
+              prose.getProseFragment(doc.ydoc),
+              binding.diskSource,
+            );
+      const bytes = written?.text ?? md;
       // Atomic: write-temp-then-rename, so a crash mid-write can't leave
       // the user's file truncated and a concurrent reader never sees half
       // a document. (Same save pattern editors use.) Rename onto the
@@ -1922,7 +1927,7 @@ export class FileBindings {
               return;
             }
             binding.lastWritten = md;
-            binding.diskText = bytes;
+            binding.diskSource = written;
             // Record our own write's mtime so the poll doesn't treat the
             // write-back as an external edit and schedule a redundant reconcile.
             if (res.exists) {
@@ -1985,7 +1990,7 @@ export class FileBindings {
       writeFileSync(tmp, bytes);
       renameSync(tmp, target);
       binding.lastWritten = md;
-      binding.diskText = bytes;
+      binding.diskSource = written;
       // Record our own write's mtime so the poll doesn't treat the
       // write-back as an external edit and schedule a redundant reconcile.
       try {

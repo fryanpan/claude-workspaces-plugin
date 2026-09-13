@@ -884,8 +884,10 @@ next reader knows a new `prose-*` module was placed rather than missed.
 `prose-keep-source.ts` sits in the same tier and does not move the picture
 either. It is the serializer the file write-back uses. It keeps the file's own
 bytes for every block an edit did not touch, so editing one paragraph rewrites
-one paragraph. Before it, the first edit re-serialized the whole file, which in
-an `.mdx` post joined the `import` lines onto one line.
+one paragraph, and a note added to a list rewrites only that list item. A block
+counts as touched when its content changed, whoever changed it. Before it, the
+first edit re-serialized the whole file, which in an `.mdx` post joined the
+`import` lines onto one line.
 
 `prose-identity.ts`, `prose-outline.ts` and `prose-batch.ts` join that same
 document-model tier, and together they are how an agent addresses a block
