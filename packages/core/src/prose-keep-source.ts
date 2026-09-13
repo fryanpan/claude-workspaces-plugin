@@ -29,17 +29,19 @@ import {
   serializeBlockToMarkdown,
   serializeFragmentParts,
 } from './prose-markdown.ts';
+import type { MarkdownParseOptions } from './prose-mdx.ts';
 
 export function serializeKeepingSource(
   fragment: Y.XmlFragment,
   source: string | undefined,
+  opts: MarkdownParseOptions = {},
 ): string {
   const parts = serializeFragmentParts(fragment);
   const plain = parts.length > 0 ? `${parts.join('\n\n')}\n` : '';
   // CRLF would make the source's line offsets disagree with the parse's.
   if (!source || source.includes('\r') || parts.length === 0) return plain;
 
-  const { blocks, lines, starts } = parseMarkdownSource(source);
+  const { blocks, lines, starts } = parseMarkdownSource(source, opts);
   if (blocks.length === 0 || starts.length !== blocks.length) return plain;
   const keys = sourceKeys(blocks);
 
@@ -104,7 +106,7 @@ export function serializeKeepingSource(
   }
   out += prev === blocks.length - 1 ? source.slice(to[prev]) : '\n';
 
-  return normalizeMarkdown(out) === plain ? out : plain;
+  return normalizeMarkdown(out, opts) === plain ? out : plain;
 }
 
 /** Serializer-space keys for freshly parsed blocks. A prelim block cannot be

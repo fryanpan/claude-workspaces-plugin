@@ -257,6 +257,11 @@ function notDownloadedLine(docId: string, err: unknown, outcome: string): string
   return `[doc-store] ${docId}: bound file is not downloaded (${code}); ${outcome}`;
 }
 
+/** How a bound file parses: an `.mdx` path holds its components as blocks. */
+function parseOptsFor(path: string): prose.MarkdownParseOptions {
+  return { mdx: prose.isMdxPath(path) };
+}
+
 /** Yjs origin for the private-meta guard's own deletes, so it never
 
 /** How often the shared mtime sweep runs — the cadence the old per-binding
@@ -570,7 +575,7 @@ export class FileBindings {
       try {
         const md = readFile();
         seedText = md;
-        const blocks = prose.parseMarkdownBlocks(md);
+        const blocks = prose.parseMarkdownBlocks(md, parseOptsFor(abs));
         if (blocks.length > 0) {
           doc.ydoc.transact(() => fragment.push(blocks), 'file-seed');
           seeded = true;
@@ -621,7 +626,7 @@ export class FileBindings {
           // hydrate pays one parse+serialize per bound doc (~1ms for a
           // typical doc). Accepted: the alternative was rewriting ~every
           // never-edited bound file on each restart.
-          const diskNormalized = prose.normalizeMarkdown(md);
+          const diskNormalized = prose.normalizeMarkdown(md, parseOptsFor(abs));
           if (diskNormalized === currentSerialized) {
             // Pure normalization drift: disk parses to exactly the live
             // doc's content, the bytes just differ in formatting the
@@ -631,6 +636,15 @@ export class FileBindings {
             // live side newer and rewrite the file). Semantically equal
             // means in-sync — leave the file untouched.
             binding.lastWritten = currentSerialized;
+          } else if (prose.isMdxPath(abs) && prose.normalizeMarkdown(md) === currentSerialized) {
+            // An `.mdx` doc last parsed before its components were blocks:
+            // disk and doc agree under the old grammar. Re-read the doc
+            // under the new one and write nothing — the file is already
+            // right, and a write at boot would be a rewrite nobody asked for.
+            doc.ydoc.transact(() => {
+              prose.applyMarkdownToFragment(fragment, md, parseOptsFor(abs));
+            }, 'file-watch');
+            binding.lastWritten = prose.serializeFragmentToMarkdown(fragment);
           } else if (prior !== undefined && currentSerialized !== prior) {
             // The live doc has un-flushed edits relative to our last write —
             // we are NOT at rest, so don't pick a winner here. Keep the old
@@ -663,7 +677,7 @@ export class FileBindings {
             this.backupExternalVersion(docId, md);
             binding.lastWritten = md;
             this.scheduleFileWrite(doc, binding);
-          } else if (prose.parseMarkdownBlocks(md).length > 0) {
+          } else if (prose.parseMarkdownBlocks(md, parseOptsFor(abs)).length > 0) {
             // At rest: pull disk in as a block diff so anchors on untouched
             // blocks keep resolving. On the no-bookkeeping path we can't
             // PROVE the fragment's extra state was ever flushed, so snapshot
@@ -673,7 +687,7 @@ export class FileBindings {
               this.backupExternalVersion(docId, currentSerialized, 'live');
             }
             doc.ydoc.transact(() => {
-              prose.applyMarkdownToFragment(fragment, md);
+              prose.applyMarkdownToFragment(fragment, md, parseOptsFor(abs));
             }, 'file-watch');
             prose.normalizeHeadingLevels(doc.ydoc);
           }
@@ -1381,7 +1395,10 @@ export class FileBindings {
       // No bookkeeping: the re-run takes the fresh-attach branch, backs the
       // file up and reasserts the doc.
       binding.lastWritten = undefined;
-    } else if (disk !== live && prose.normalizeMarkdown(disk) !== live) {
+    } else if (
+      disk !== live &&
+      prose.normalizeMarkdown(disk, parseOptsFor(binding.path)) !== live
+    ) {
       // Bookkeeping kept, and equal to the doc, so the re-run APPLIES the file
       // whatever the two stamps say now. That branch backs nothing up when
       // bookkeeping exists, so the doc's copy is kept here instead.
@@ -1561,14 +1578,15 @@ export class FileBindings {
       binding.lastSyncError = undefined;
       return { ok: true };
     }
-    if (prose.parseMarkdownBlocks(md).length === 0) return { ok: false, error: 'missing' };
+    const opts = parseOptsFor(binding.path);
+    if (prose.parseMarkdownBlocks(md, opts).length === 0) return { ok: false, error: 'missing' };
     binding.diskText = md;
     const fragment = prose.getProseFragment(doc.ydoc);
     doc.ydoc.transact(() => {
       // Block-level diff, not delete-all + push: blocks the rewrite didn't
       // touch keep their Y.XmlText identity, so their thread anchors keep
       // resolving instead of every thread in the doc orphaning.
-      prose.applyMarkdownToFragment(fragment, md);
+      prose.applyMarkdownToFragment(fragment, md, opts);
     }, 'file-watch');
     // The diff above keys blocks by their serialized markdown, so a block
     // whose only defect is an ATTRIBUTE (a legacy string heading level, which
@@ -1678,7 +1696,8 @@ export class FileBindings {
     // rewrite, broken anchors) or, with un-flushed live edits, 'conflict'
     // (backup + syncError + reassert over the human's formatting). Parse
     // cost is fine here: we only get this far on a detected mtime change.
-    const diskNormalized = prose.normalizeMarkdown(md);
+    const opts = parseOptsFor(binding.path);
+    const diskNormalized = prose.normalizeMarkdown(md, opts);
     if (diskNormalized === currentSerialized) {
       // Formatting-variant of the live content — semantically in-sync.
       // Leave the file as the external tool wrote it.
@@ -1706,7 +1725,7 @@ export class FileBindings {
     // decision === 'apply' — disk changed externally and the live doc is clean.
     let blocks: Y.XmlElement[];
     try {
-      blocks = prose.parseMarkdownBlocks(md);
+      blocks = prose.parseMarkdownBlocks(md, opts);
     } catch (err) {
       // A parse throw used to vanish into the setTimeout callback, leaving
       // the doc silently serving pre-edit content. Record + log instead so
@@ -1743,7 +1762,7 @@ export class FileBindings {
     // snippet-match re-anchor sweep for suggestions is out of scope for v1).
     const sidsBefore = new Set(suggestOps.scanSuggestions(fragment).keys());
     doc.ydoc.transact(() => {
-      prose.applyMarkdownToFragment(fragment, md);
+      prose.applyMarkdownToFragment(fragment, md, opts);
     }, 'file-watch');
     const sidsAfter = new Set(suggestOps.scanSuggestions(fragment).keys());
     const droppedSids = [...sidsBefore].filter((sid) => !sidsAfter.has(sid));
@@ -1881,7 +1900,11 @@ export class FileBindings {
       const bytes =
         contentKind(doc.meta.type) === 'flat'
           ? md
-          : prose.serializeKeepingSource(prose.getProseFragment(doc.ydoc), binding.diskText);
+          : prose.serializeKeepingSource(
+              prose.getProseFragment(doc.ydoc),
+              binding.diskText,
+              parseOptsFor(binding.path),
+            );
       // Atomic: write-temp-then-rename, so a crash mid-write can't leave
       // the user's file truncated and a concurrent reader never sees half
       // a document. (Same save pattern editors use.) Rename onto the
