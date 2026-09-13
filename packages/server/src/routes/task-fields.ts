@@ -26,6 +26,7 @@ import {
   setExternalWait,
 } from '../task-wait.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
+import { markPersonRelease } from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
 export async function handleTaskFields(
@@ -75,6 +76,7 @@ export async function handleTaskFields(
     if (strayDep !== undefined) return j(403, OUT_OF_SHARE_SCOPE);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
+    const released = markPersonRelease(ctx, author, taskId);
     const res = taskStore.setDependencies(
       taskId,
       {
@@ -84,6 +86,7 @@ export async function handleTaskFields(
       { actor: author },
     );
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
+    released();
     taskProjection.ensureWorkspace(res.task.workspaceId);
     return j(200, res);
   }
@@ -190,11 +193,13 @@ export async function handleTaskFields(
         message: BAD_ASSIGNEE_KIND_MESSAGE,
       });
     }
+    const released = markPersonRelease(ctx, author, taskId);
     const res = taskStore.setAssignee(taskId, assignee, {
       actor: author,
       assigneeKind: handoverKind.assigneeKind,
     });
     if (!res.ok) return j(404, res);
+    released();
     // A no-op emits nothing, so nothing would refresh the board doc —
     // harmless here (nothing changed) but the changed path is covered
     // by the task.assigned event's own projection hook.
@@ -469,11 +474,13 @@ export async function handleTaskFields(
     const body = await safeJson(req);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
+    const released = markPersonRelease(ctx, author, taskId);
     const res = taskStore.archiveTask(taskId, {
       actor: author,
       ...(typeof body?.reason === 'string' ? { reason: body.reason } : {}),
     });
     if (!res.ok) return j(404, res);
+    released();
     if (!res.changed) taskProjection.ensureWorkspace(res.task.workspaceId);
     return j(200, res);
   }
