@@ -9,6 +9,7 @@ import {
   reviewAnswered,
   reviewWithdrawn,
 } from '@claude-workspaces/core';
+import { authedPost, httpBase } from './widget-auth.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
@@ -39,6 +40,43 @@ export interface DockItem {
   ts: number;
   /** Somebody has answered; the bar reads as settled rather than waiting. */
   answered: boolean;
+  /**
+   * Set on an ask filed on a TICKET that links this page, rather than raised
+   * in the page's own threads. `threadId` then holds the item's
+   * `reviewItemId`, and the answer goes to the ticket's own answer route.
+   */
+  taskId?: string;
+}
+
+/**
+ * The ticket items the server found linking this page, handed out in the
+ * page itself (`mockup-linked-items.ts`) — nothing is fetched for them.
+ * Empty when the page carries no block, or one that does not parse.
+ */
+interface LinkedWire {
+  taskId: string;
+  reviewItemId: string;
+  review: ReviewPayload;
+  by: string;
+  ts: number;
+}
+
+export function readLinkedItems(doc: Document): DockItem[] {
+  try {
+    const raw = doc.querySelector('script[data-cw-linked-items]')?.textContent;
+    const list = raw ? (JSON.parse(raw) as LinkedWire[]) : [];
+    return list.map((i) => ({
+      threadId: i.reviewItemId,
+      commentId: '',
+      review: i.review,
+      by: i.by,
+      ts: i.ts,
+      answered: false,
+      taskId: i.taskId,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -76,8 +114,10 @@ export interface DockRound {
  * An ANSWERED item stays until its thread is resolved, which is what makes
  * the answer visible where it was given rather than only in the queue it left.
  */
-export function dockItems(threads: Thread[]): DockItem[] {
-  const items: DockItem[] = [];
+export function dockItems(threads: Thread[], linked: DockItem[] = []): DockItem[] {
+  // A linked ticket item has already passed the Home queue's membership on
+  // the server; the owner-only rule below is still the dock's own to apply.
+  const items = linked.filter((i) => !i.review.ownerOnly);
   for (const t of threads) {
     if (t.status !== 'open') continue;
     // The standing ask, if there is one — the newest non-withdrawn
@@ -193,6 +233,36 @@ function answerHtml(item: DockItem): string {
   }<div class="cw-answer-err" hidden></div></div>`;
 }
 
+/**
+ * Answer a ticket item through the ticket's own route — the door the Home
+ * queue answers through, so the answer lands on the task and wakes its agent
+ * exactly as an answer given there does. `answeredWith` is that route's
+ * spelling of the option an answer was tapped from.
+ */
+async function postTaskAnswer(
+  el: FeedbackWidgetEl,
+  item: DockItem,
+  text: string,
+  optionId?: string,
+): Promise<boolean> {
+  const res = await authedPost(
+    el,
+    `${httpBase(el)}/workspaces/${encodeURIComponent(el.opts.workspaceId)}/tasks/${encodeURIComponent(
+      item.taskId ?? '',
+    )}/review-items/${encodeURIComponent(item.threadId)}/answer`,
+    () => ({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        author: el.user,
+        text,
+        ...(optionId !== undefined ? { answeredWith: optionId } : {}),
+      }),
+    }),
+  );
+  return res.ok;
+}
+
 /** Open the expanded item — the rounds, and the way to answer it. */
 export function openDockItem(el: FeedbackWidgetEl, item: DockItem): void {
   el.shadow.querySelector('.cw-dock-scrim')?.remove();
@@ -220,7 +290,9 @@ export function openDockItem(el: FeedbackWidgetEl, item: DockItem): void {
   const send = async (text: string, optionId?: string): Promise<void> => {
     if (inFlight || !text) return;
     inFlight = true;
-    const ok = await el.postAnswer(item.threadId, item.commentId, text, optionId);
+    const ok = item.taskId
+      ? await postTaskAnswer(el, item, text, optionId)
+      : await el.postAnswer(item.threadId, item.commentId, text, optionId);
     inFlight = false;
     if (!ok) {
       if (err) {
@@ -230,6 +302,12 @@ export function openDockItem(el: FeedbackWidgetEl, item: DockItem): void {
       return;
     }
     close();
+    // A ticket item is not in this page's threads, so no sync will retire it:
+    // drop it here, and the dock clears without the page moving.
+    if (item.taskId) {
+      el.linkedItems = el.linkedItems.filter((i) => i !== item);
+      el.scheduleRender();
+    }
   };
   for (const b of Array.from(scrim.querySelectorAll('.cw-answer-opt'))) {
     b.addEventListener('click', () => {
@@ -253,7 +331,7 @@ export function openDockItem(el: FeedbackWidgetEl, item: DockItem): void {
  */
 export function renderDockInto(el: FeedbackWidgetEl): void {
   if (!el.client) return;
-  const items = dockItems(listThreads(el.client.ydoc));
+  const items = dockItems(listThreads(el.client.ydoc), el.linkedItems);
   const item = items[0];
   let bar = el.shadow.querySelector('.cw-dock') as HTMLElement | null;
   if (!item) {
