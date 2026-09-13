@@ -1377,6 +1377,22 @@ body.board-body {
   .board-walk-cred-send {
     flex: 1 1 100%;
   }
+  /* ...but not the width under the feedback widget. Its buttons are a
+     `position: fixed` column 66px in from the viewport's right edge (48px wide,
+     18px inset), and a form's full-width button ended 29px in, so wherever
+     the scroll put that button beside the column, its right end was the
+     widget's: at 390x844 and 430x844 the credential form's Save first drew
+     with a 34x43px corner that hit-tested to `claude-feedback-widget`. A
+     scroll reserve cannot move a fixed box, so the button keeps out of the
+     column instead — 48px back from the card's edge ends it 77px in, 11px
+     clear of the widest widget button. Every walk form's button, because the
+     composer's Send takes the full width the same way. */
+  .board-walk-cred-send,
+  .board-walk-answer .board-btn,
+  .board-walk-thread-form .board-btn,
+  .board-walk-question-form .board-btn {
+    margin-right: 48px;
+  }
   .board-walk-body-clamp {
     /* ~8 lines at 1.55 line-height, then a fade that says "there is more". */
     max-height: 12.4em;
@@ -7110,10 +7126,13 @@ label.board-sched-chip:hover {
     flex-direction: column;
     align-items: stretch;
   }
+  /* Stretched rather than `width: 100%`, so the widget gutter the ≤1100 block
+     gives these buttons comes out of their width instead of overflowing it. */
   .board-walk-answer .board-btn,
   .board-walk-thread-form .board-btn,
   .board-walk-question-form .board-btn {
-    width: 100%;
+    width: auto;
+    align-self: stretch;
   }
   /* The card's tail still ends under one viewport-fixed launcher — the
      feedback widget's pencil, bottom-right. (The mic used to be the other

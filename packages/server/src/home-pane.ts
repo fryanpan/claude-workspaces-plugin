@@ -251,6 +251,12 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
       events,
       queue: { total: homeQueueTotal(workspace, items) },
       titleOf: (taskId) => taskStore.getTask(taskId)?.title,
+      reviewOf: (taskId, reviewItemId) => {
+        const review = taskStore
+          .getTask(taskId)
+          ?.reviews?.find((r) => r.id === reviewItemId)?.review;
+        return review && { shape: review.shape, secretCount: review.secrets?.length ?? 0 };
+      },
     };
   };
 

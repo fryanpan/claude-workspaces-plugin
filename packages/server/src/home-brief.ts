@@ -267,6 +267,36 @@ export interface BriefInput {
   queue: BriefQueueSummary;
   /** taskId → current title, for events that carry only an id. */
   titleOf: (taskId: string) => string | undefined;
+  /**
+   * What an answered review item ASKED, looked up by the ids the answer's
+   * event carries. Optional: without it every answer reads as a decision,
+   * which is what a legacy row (no `reviewItemId`) always is anyway.
+   */
+  reviewOf?: (taskId: string, reviewItemId: string) => AnsweredReview | undefined;
+}
+
+/** The two facts about an answered item that decide how the brief says it. */
+export interface AnsweredReview {
+  shape: 'decision' | 'review' | 'secret';
+  /** How many values a `secret` item asked for. */
+  secretCount?: number;
+}
+
+/**
+ * What a `decision.answered` row answered.
+ *
+ * The event is named for the decision it was first written for, and every
+ * review item's answer still writes it — so a credential hand-over of two
+ * values read "**Decided:** 2 decisions were answered" when nobody had
+ * decided anything. The shape lives on the item, not the event, so it is
+ * looked up; a row the lookup cannot place stays a decision, which is what
+ * the brief said before.
+ */
+function answeredShape(input: BriefInput, row: BriefEventRow): AnsweredReview {
+  if (typeof row.taskId !== 'string' || typeof row.reviewItemId !== 'string') {
+    return { shape: 'decision' };
+  }
+  return input.reviewOf?.(row.taskId, row.reviewItemId) ?? { shape: 'decision' };
 }
 
 function actorName(actor: unknown): string | undefined {
@@ -332,6 +362,9 @@ export function deterministicBrief(input: BriefInput): string {
   const started: string[] = [];
   const created: string[] = [];
   const answered: string[] = [];
+  const reviewed: string[] = [];
+  const handedOver: string[] = [];
+  let valuesHandedOver = 0;
   const reopened: string[] = [];
   let goalEdits = 0;
   for (const row of input.events) {
@@ -343,9 +376,18 @@ export function deterministicBrief(input: BriefInput): string {
         if (row.to === 'done') done.push(linked(input, row));
         else if (row.to === 'in-progress') started.push(linked(input, row));
         break;
-      case 'decision.answered':
-        answered.push(linked(input, row));
+      case 'decision.answered': {
+        const asked = answeredShape(input, row);
+        if (asked.shape === 'secret') {
+          handedOver.push(linked(input, row));
+          valuesHandedOver += asked.secretCount ?? 1;
+        } else if (asked.shape === 'review') {
+          reviewed.push(linked(input, row));
+        } else {
+          answered.push(linked(input, row));
+        }
         break;
+      }
       // Only a withdrawal `settleWithdrawnAnswers` could not pair reaches
       // here: the answer it undid stood before the window opened.
       case 'decision.answer_withdrawn':
@@ -375,6 +417,14 @@ export function deterministicBrief(input: BriefInput): string {
     if (answered.length > 0)
       lines.push(
         `**Decided:** ${answered.length} ${plural(answered.length, 'decision was', 'decisions were')} answered — ${listOf(answered)}.`,
+      );
+    if (reviewed.length > 0)
+      lines.push(
+        `**Reviewed:** ${reviewed.length} ${plural(reviewed.length, 'review was', 'reviews were')} answered — ${listOf(reviewed)}.`,
+      );
+    if (handedOver.length > 0)
+      lines.push(
+        `**Handed over:** ${valuesHandedOver} ${plural(valuesHandedOver, 'value', 'values')} — ${listOf(handedOver)}.`,
       );
     if (reopened.length > 0)
       lines.push(
@@ -487,7 +537,15 @@ export function buildBriefPrompt(
     .map((row) => {
       const when = typeof row.ts === 'number' ? new Date(row.ts).toISOString() : '';
       const who = actorName(row.actor);
-      const what = String(row.event);
+      // The model reads the event name as the claim, so an answer to an item
+      // that decided nothing is not handed over as `decision.answered`.
+      const asked = row.event === 'decision.answered' ? answeredShape(input, row).shape : null;
+      const what =
+        asked === 'secret'
+          ? 'secret.handed_over'
+          : asked === 'review'
+            ? 'review.answered'
+            : String(row.event);
       const task = typeof row.taskId === 'string' ? linked(input, row) : '';
       const extra =
         row.event === 'task.transitioned'
@@ -529,6 +587,9 @@ export function buildBriefPrompt(
     'text itself approves; a done transition on the task does not. In a quoted answer, " … " marks an',
     'elided middle: state only what the visible text itself says, and if the visible text does not',
     'state the outcome, treat the polarity as undeterminable and say only that an answer was recorded.',
+    'A secret.handed_over event means the reader handed over values for an agent to use, and',
+    'review.answered means they replied to a review; neither is a decision, so never count one as',
+    'a decision.',
     '',
     "The reader's standing instructions for this brief:",
     instructions,
