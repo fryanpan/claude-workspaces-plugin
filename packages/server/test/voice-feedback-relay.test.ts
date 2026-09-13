@@ -201,10 +201,15 @@ describe('VoiceFeedbackRelay', () => {
     speak(ws, 6);
     await until(() => ws.comments('v1')[0], 'v1');
 
-    // "make it shorter" and "the save button hides" both settle before the tick.
+    // "make it shorter" and "the save button hides" both settle before the tick,
+    // and the grown comment repeats the next topic's sentence, as a recording did.
     t.replies.push(
       reply(
-        { continues: true, text: 'The header is too tall; make it shorter.', element: 'e0' },
+        {
+          continues: true,
+          text: 'The header is too tall; make it shorter. The Save button hides.',
+          element: 'e0',
+        },
         { text: 'The Save button hides.', element: 'e1' },
       ),
     );
@@ -212,7 +217,11 @@ describe('VoiceFeedbackRelay', () => {
     const v2 = await until(() => ws.comments('v2')[0], 'v2');
     const v1 = ws.comments('v1').at(-1) as Frame;
     expect(t.prompts[1]).toContain('<new_words>make it shorter the save button hides</new_words>');
-    expect(v1).toMatchObject({ raw: 'the header is too tall make it shorter', final: true });
+    expect(v1).toMatchObject({
+      text: 'The header is too tall; make it shorter.',
+      raw: 'the header is too tall make it shorter',
+      final: true,
+    });
     expect(v2).toMatchObject({ raw: 'the save button hides', target: 1 });
 
     const range = (f: Frame) => String(f.clip).split('#t=')[1]?.split(',').map(Number) ?? [];
@@ -323,9 +332,9 @@ describe('VoiceFeedbackRelay', () => {
     t.replies.push('Sorry, I cannot help with that.');
     speak(ws, 4);
     const grown = await until(() => ws.comments('v1')[1], 'v1 grown from junk');
-    // With a comment open and nothing pinned, the fallback continues it.
+    // With a comment open and nothing pinned, the fallback grows it.
     expect(grown).toMatchObject({
-      text: 'make it shorter',
+      text: 'the header is too tall make it shorter',
       raw: 'the header is too tall make it shorter',
     });
 

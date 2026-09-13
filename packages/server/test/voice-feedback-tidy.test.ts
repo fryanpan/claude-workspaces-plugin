@@ -9,7 +9,9 @@ import { describe, expect, it } from 'bun:test';
 import type { VoiceTarget } from '@claude-workspaces/core';
 import {
   TIDY_MODEL,
+  type TidyComment,
   type TidyInput,
+  apportionTick,
   buildTidyPrompt,
   createHaikuTidy,
   parseTidyReply,
@@ -192,6 +194,114 @@ describe('splitTick', () => {
     expect(parts.map((p) => p.words).join('')).toBe('shorter');
     expect(parts[0]?.words).toBe('shorter');
     expect(parts.at(-1)?.endMs).toBe(3);
+  });
+});
+
+describe('apportionTick', () => {
+  const BUDGET = 'The Saltmarsh budget card needs the total at the top, not at the bottom.';
+  const SAID = 'And the save button should say save changes.';
+  const tick = (open: string | null, ...comments: TidyComment[]) =>
+    apportionTick(
+      input({ open: open === null ? null : { text: open, target: 0, fixed: false }, words: SAID }),
+      comments,
+      0,
+      8,
+    );
+  const grown = (text: string): TidyComment => ({ continues: true, text, target: 0 });
+  const save = (text: string): TidyComment => ({ continues: false, text, target: 1 });
+
+  it("drops the next topic's sentence from the comment it grew, as a staging recording did", () => {
+    // The model's reply in that recording: the budget comment grown with the
+    // Save sentence, and a Save comment saying it again.
+    const out = tick(
+      BUDGET,
+      grown(`${BUDGET} And the save button should say 'Save changes'.`),
+      save("The save button should say 'Save changes'."),
+    );
+    expect(out.comments.map((c) => c.text)).toEqual([
+      BUDGET,
+      "The save button should say 'Save changes'.",
+    ]);
+    expect(out.parts.map((p) => p.words)).toEqual([
+      'And',
+      'the save button should say save changes.',
+    ]);
+    expect(out.parts.at(-1)?.endMs).toBe(8);
+  });
+
+  it('counts the element a comment is on as saying its name, and reads past quotes', () => {
+    // "Should say save changes." on the Save button never says "button".
+    const quoted = `${BUDGET} And the save button should say 'Save changes'.`;
+    const out = tick(BUDGET, grown(quoted), save('Should say save changes.'));
+    expect(out.comments.map((c) => c.text)).toEqual([BUDGET, 'Should say save changes.']);
+  });
+
+  it('keeps a sentence a "not" makes different from the later one, either way round', () => {
+    const not = "The save button shouldn't say save changes.";
+    const plain = 'The save button should say save changes.';
+    expect(tick(BUDGET, grown(`${BUDGET} ${not}`), save(plain)).comments[0]?.text).toBe(
+      `${BUDGET} ${not}`,
+    );
+    // "should not" holds every word of the plain sentence, and still turns it.
+    const spelt = save('The save button should not say save changes.');
+    expect(tick(BUDGET, grown(`${BUDGET} ${plain}`), spelt).comments[0]?.text).toBe(
+      `${BUDGET} ${plain}`,
+    );
+    // Both saying "not", however spelt, is still one point said twice.
+    expect(tick(BUDGET, grown(`${BUDGET} ${not}`), spelt).comments[0]?.text).toBe(BUDGET);
+  });
+
+  it('keeps a sentence holding a word no later comment says', () => {
+    const blue = `${BUDGET} The save button should be blue.`;
+    const out = tick(BUDGET, grown(blue), save('The save button should say Save changes.'));
+    expect(out.comments.map((c) => c.text)).toEqual([
+      blue,
+      'The save button should say Save changes.',
+    ]);
+  });
+
+  it('never removes what the open comment already said', () => {
+    const small = 'The save button is small.';
+    const out = tick(
+      small,
+      grown(`${small} The label should say Save changes.`),
+      save('The save button is small, and its label should say Save changes.'),
+    );
+    expect(out.comments[0]?.text).toBe(small);
+  });
+
+  it('keeps the sentence when the person said its words within the comment it is in', () => {
+    // Said once, inside the first topic: the later comment has no words of its own.
+    const hides = 'The save button hides behind the header. The save button hides.';
+    const out = apportionTick(
+      input({ words: 'the save button hides behind the header' }),
+      [save(hides), save('The save button hides.')],
+      0,
+      7,
+    );
+    expect(out.comments[0]?.text).toBe(hides);
+    expect(out.parts.map((p) => p.words)).toEqual(['the save button hides behind the header', '']);
+  });
+
+  it('makes a new comment of a "continuation" that forgot what the open comment said', () => {
+    // A recording's reply: the budget comment "grown" into only the Save sentence.
+    const out = tick(BUDGET, grown('And the save button should say "Save changes."'));
+    expect(out.comments).toEqual(
+      [save('And the save button should say "Save changes."')].map((c) => ({ ...c, target: 0 })),
+    );
+    // A rewrite that keeps the open comment's point still grows it.
+    const kept = tick(
+      BUDGET,
+      grown('Put the Saltmarsh total at the top, not the bottom; save it.'),
+    );
+    expect(kept.comments[0]?.continues).toBe(true);
+  });
+
+  it('never empties a comment, and leaves a single comment whole', () => {
+    const twice = tick(null, save('Save changes.'), save('Save changes.'));
+    expect(twice.comments.map((c) => c.text)).toEqual(['Save changes.', 'Save changes.']);
+    const one = tick(null, save(SAID));
+    expect(one).toEqual({ comments: [save(SAID)], parts: [{ words: SAID, startMs: 0, endMs: 8 }] });
   });
 });
 
