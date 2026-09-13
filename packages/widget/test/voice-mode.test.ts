@@ -1,6 +1,6 @@
 import type { VoiceTarget } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mountVoiceMode } from '../src/voice/voice-mode.ts';
+import { STOP_LABEL, mountVoiceMode } from '../src/voice/voice-mode.ts';
 import { SIGN_IN_NOTE, addMic } from '../src/widget-mic.ts';
 import type { FeedbackWidgetEl } from '../src/widget.ts';
 import { FakeSocket, commentFrame, fakeMic } from './voice-fakes.ts';
@@ -258,6 +258,7 @@ describe('the mic button', () => {
     expect(button.getAttribute('aria-pressed')).toBe('true');
     expect(button.classList.contains('voice-active')).toBe(true);
     expect(button.querySelector('.vstop'), 'a Stop square while recording').not.toBeNull();
+    expect(button.dataset.tip, 'its label says what a tap does now').toBe(STOP_LABEL);
     t.socket().open();
     t.socket().recv({ type: 'ready', segment: 1 });
     await vi.waitFor(() => expect(t.mic.opts).not.toBeNull());
@@ -266,6 +267,7 @@ describe('the mic button', () => {
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(button.classList.contains('voice-active')).toBe(false);
     expect(button.querySelector('.idle-glyph'), 'its own glyph back').not.toBeNull();
+    expect(button.dataset.tip, 'and its own label').toBe(LABELS.voice);
   });
 
   it('says why voice is unavailable in the readout', async () => {

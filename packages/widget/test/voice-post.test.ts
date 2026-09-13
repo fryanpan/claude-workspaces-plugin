@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { widgetPoster } from '../src/voice/voice-post.ts';
-import type { FeedbackWidgetEl } from '../src/widget.ts';
+import { FeedbackWidgetEl } from '../src/widget.ts';
 
 /**
  * The thread routes a spoken comment is written through, against a recorded
@@ -48,6 +48,22 @@ describe('writing a spoken comment through the thread routes', () => {
       voice: VOICE,
     });
     expect(calls[0]?.auth, 'signed like a typed comment').toBe('Bearer tok');
+  });
+
+  it('posts under the same author a typed comment on the same widget would', async () => {
+    const { p, calls } = poster(() => json({ thread: { id: 't9', comments: [{ id: 'c9' }] } }));
+    // The typed composer's own post, on a widget holding the same identity.
+    const typed = Object.assign(Object.create(FeedbackWidgetEl.prototype), {
+      opts: { serverUrl: 'ws://host:8787', workspaceId: 'w 1', docId: 'd-1' },
+      user: { name: 'Ada', color: '#123456' },
+      authToken: 'tok',
+    }) as FeedbackWidgetEl;
+    await typed.postNewThread(ANCHOR, 'typed');
+    await p.create(ANCHOR, 'spoken', VOICE);
+    const [typedCall, voiceCall] = calls;
+    expect(typedCall?.body.text, 'CONTROL: the first write is the typed one').toBe('typed');
+    expect(voiceCall?.body.author).toEqual(typedCall?.body.author);
+    expect(voiceCall?.auth).toBe(typedCall?.auth);
   });
 
   it('reads a refused create, or an answer without a comment id, as nothing', async () => {

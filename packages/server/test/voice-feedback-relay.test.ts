@@ -321,10 +321,12 @@ describe('VoiceFeedbackRelay', () => {
     const log = readFileSync(voiceLogPath(dataDir, DOC), 'utf8');
     expect(log).toContain('## Recording 1');
     expect(log).toMatch(/^- \[\d\d:\d\d\] the header is too tall$/m);
-    expect(log).toMatch(/Comment v1 on header “Riverbend”: The header is too tall\./);
-    const heard = log.indexOf('the header is too tall');
-    const posted = log.indexOf('Comment v1 posted as thread th-riverbend-1');
-    expect(posted).toBeGreaterThan(heard);
+    // The thread rides on the comment's own line, not a line nested under
+    // whatever was heard just before it was posted.
+    expect(log).toMatch(
+      /^- \[\d\d:\d\d\]–\[\d\d:\d\d\] Comment v1 \(thread th-riverbend-1\) on header “Riverbend”: The header is too tall\.$/m,
+    );
+    expect(log).not.toContain('posted as thread');
     expect(log).toMatch(/_Recording 1 ended at \[\d\d:\d\d\]; 1 tidy calls/);
 
     const second = await open();

@@ -25,7 +25,7 @@ import type { VoiceComment, VoiceSession } from './voice-session.ts';
 const CARD_W = 280;
 /** The buttons' column: how far up from the bottom a card must stay. */
 const BUTTONS_H = 190;
-/** How long a settled card stays up after it settles. */
+/** On a phone, how long the newest settled card stays up once recording stops. */
 export const SETTLED_MS = 6000;
 
 export const VOICE_CSS = [
@@ -95,6 +95,9 @@ export class VoiceView {
   private cards = new Map<string, { el: HTMLDivElement; until: number; html: string }>();
   private settled = new Set<string>();
   private raf: number | null = null;
+  /** When the last recording stopped; a phone shows its newest card after. */
+  private stoppedAt = Number.NEGATIVE_INFINITY;
+  private wasRecording = false;
   /** The comment Move is choosing a place for. */
   picking: string | null = null;
   private audio: HTMLAudioElement | null = null;
@@ -113,6 +116,18 @@ export class VoiceView {
     const style = document.createElement('style');
     style.textContent = VOICE_CSS;
     deps.shadow.append(style, this.lead, this.live);
+    // A tap anywhere else, once recording has stopped, puts the cards away.
+    document.addEventListener(
+      'pointerdown',
+      (ev) => {
+        if (deps.session.state !== 'idle' || this.picking) return;
+        const onCard = ev
+          .composedPath()
+          .some((n) => n instanceof HTMLElement && n.classList.contains('vcard'));
+        if (!onCard) this.dismiss();
+      },
+      true,
+    );
     this.live.querySelector('.vmove')?.addEventListener('click', () => {
       const open = this.openComment();
       if (open) deps.onMove(open.key);
@@ -130,6 +145,14 @@ export class VoiceView {
     return open;
   }
 
+  /** Every settled card off the screen. The comments stay, as pins. */
+  dismiss(): void {
+    for (const card of this.cards.values()) card.el.remove();
+    this.cards.clear();
+    this.lead.dataset.p = '';
+    this.lead.innerHTML = '';
+  }
+
   level(l: number): void {
     this.live.style.setProperty('--lv', l.toFixed(2));
   }
@@ -137,6 +160,8 @@ export class VoiceView {
   render(): void {
     const s = this.deps.session;
     const recording = s.state !== 'idle';
+    if (this.wasRecording && !recording) this.stoppedAt = this.now;
+    this.wasRecording = recording;
     const open = this.openComment();
     this.live.hidden = !recording && !this.picking;
     const target = this.picking
@@ -163,20 +188,21 @@ export class VoiceView {
 
   private drawCard(c: VoiceComment): void {
     if (!c.final) return;
+    let card = this.cards.get(c.key);
+    // A card is made once, when its comment settles. One put away stays
+    // away: the comment is its pin now, and a render comes with every word.
     if (!this.settled.has(c.key)) {
       this.settled.add(c.key);
       this.pulse(c.target);
-    }
-    let card = this.cards.get(c.key);
-    if (!card) {
       const el = document.createElement('div');
       el.className = 'vcard';
       el.dataset.key = c.key;
       this.deps.shadow.append(el);
-      card = { el, until: this.now + SETTLED_MS, html: '' };
+      card = { el, until: Number.NEGATIVE_INFINITY, html: '' };
       this.cards.set(c.key, card);
       this.wireCard(c.key, el);
     }
+    if (!card) return;
     const el = card.el;
     const rawOpen = el.querySelector('.vrawtext')?.hasAttribute('hidden') === false;
     el.classList.toggle('undone', c.resolved === true);
@@ -260,7 +286,7 @@ export class VoiceView {
     const x = left + width - 16 - CARD_W;
     const taken: Array<[number, number]> = [];
     let lines = '';
-    const stand = (card: HTMLElement, target: HTMLElement | null) => {
+    const stand = (card: HTMLElement, target: HTMLElement | null): boolean => {
       const h = card.offsetHeight;
       const room = bottom - BUTTONS_H;
       const r = target?.getBoundingClientRect();
@@ -282,6 +308,7 @@ export class VoiceView {
           }
         }
       }
+      if (y + h > room && taken.length > 0) return false;
       taken.push([y, y + h + 10]);
       card.style.top = `${y}px`;
       card.style.bottom = 'auto';
@@ -295,6 +322,7 @@ export class VoiceView {
         card.style.left = '';
         card.style.right = '';
       }
+      return true;
     };
     const s = this.deps.session;
     if (!this.live.hidden && this.live.classList.contains('attached')) {
@@ -312,18 +340,40 @@ export class VoiceView {
       this.live.style.left = '';
       this.live.style.right = '';
     }
-    for (const [key, card] of this.cards) {
-      if (this.now > card.until) {
-        card.el.remove();
-        this.cards.delete(key);
-        continue;
+    // Newest first, so when the column runs out of room it is the oldest
+    // cards that wait behind their pins. A desktop card stays until a tap
+    // elsewhere puts them away; a phone has no column beside the page, so
+    // while recording its cards are pins only, and after Stop the newest
+    // shows for a moment.
+    const recording = s.state !== 'idle';
+    const newest = [...this.cards.keys()].at(-1);
+    for (const [key, card] of [...this.cards].reverse()) {
+      if (phone) {
+        const shown =
+          !recording &&
+          key === newest &&
+          Math.max(card.until, this.stoppedAt + SETTLED_MS) >= this.now;
+        if (!shown && !recording) {
+          card.el.remove();
+          this.cards.delete(key);
+          continue;
+        }
+        card.el.hidden = !shown;
+        if (!shown) continue;
       }
-      stand(card.el, this.deps.element(s.comments.get(key)?.target ?? null));
+      card.el.hidden = false;
+      if (!stand(card.el, this.deps.element(s.comments.get(key)?.target ?? null))) {
+        card.el.hidden = true;
+      }
     }
     if (this.lead.dataset.p !== lines) {
       this.lead.dataset.p = lines;
       this.lead.innerHTML = `<svg>${lines}</svg>`;
     }
-    return !this.live.hidden || this.cards.size > 0;
+    return (
+      !this.live.hidden ||
+      [...this.cards.values()].some((c) => !c.el.hidden) ||
+      (phone && this.cards.size > 0)
+    );
   }
 }

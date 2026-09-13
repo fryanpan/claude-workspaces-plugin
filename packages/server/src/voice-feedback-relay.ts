@@ -96,6 +96,8 @@ interface LiveComment {
   endMs: number;
   fixed: boolean;
   final: boolean;
+  /** The thread the page posted it as, once the page says. */
+  threadId?: string;
 }
 
 interface Session {
@@ -379,10 +381,11 @@ export class VoiceFeedbackRelay {
     if (s.open === c) s.open = null;
     this.emit(s, c);
     const where = c.target === null ? 'the page' : this.describe(s, c.target);
+    const thread = c.threadId ? ` (thread ${c.threadId})` : '';
     appendVoiceLog(
       this.deps.dataDir,
       s.ws.data.docId,
-      `- ${stamp(c.startMs)}–${stamp(c.endMs)} Comment ${c.key} on ${where}: ${c.text}\n`,
+      `- ${stamp(c.startMs)}–${stamp(c.endMs)} Comment ${c.key}${thread} on ${where}: ${c.text}\n`,
     );
   }
 
@@ -430,13 +433,22 @@ export class VoiceFeedbackRelay {
         this.emit(s, c);
         return;
       }
-      case 'posted':
+      case 'posted': {
+        // A comment is posted on its first words and logged when it settles,
+        // so its thread rides on that line; only a comment that settled before
+        // the post came back gets a line of its own.
+        const c = s.comments.get(msg.key);
+        if (c && !c.final) {
+          c.threadId = msg.threadId;
+          return;
+        }
         appendVoiceLog(
           this.deps.dataDir,
           s.ws.data.docId,
-          `  - Comment ${msg.key} posted as thread ${msg.threadId}\n`,
+          `- Comment ${msg.key} posted as thread ${msg.threadId}\n`,
         );
         return;
+      }
       case 'stop':
         void this.finish(s, true);
         return;

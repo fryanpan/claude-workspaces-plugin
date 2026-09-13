@@ -45,6 +45,25 @@ function squash(s: string | null | undefined, max = VOICE_TARGET_TEXT): string {
   return (s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+/** All the text inside, with a space at every element edge: "Design" and
+ *  "$12,000" in two cells read as two words, not "Design$12,000". */
+function spacedText(el: Element, max = VOICE_TARGET_TEXT): string {
+  let s = '';
+  const add = (n: Node): void => {
+    for (const c of n.childNodes) {
+      if (s.length > max * 2) return;
+      if (c.nodeType === 3) s += c.textContent ?? '';
+      else if (c.nodeType === 1 && !SKIP.has((c as Element).tagName.toLowerCase())) {
+        s += ' ';
+        add(c);
+        s += ' ';
+      }
+    }
+  };
+  add(el);
+  return squash(s, max);
+}
+
 function ownText(el: Element): string {
   let s = '';
   for (const n of el.childNodes) if (n.nodeType === 3) s += n.textContent ?? '';
@@ -117,7 +136,7 @@ export function collectTargets(
       targets.push({
         i,
         tag,
-        text: squash(el.textContent),
+        text: spacedText(el),
         ...(label ? { label } : {}),
         ...(hint ? { hint } : {}),
         ...(parent !== undefined ? { parent } : {}),

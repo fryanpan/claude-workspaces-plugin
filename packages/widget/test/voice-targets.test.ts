@@ -115,6 +115,14 @@ describe('the page’s catalog', () => {
     expect(targets[1]).toEqual({ i: 1, tag: 'input', text: '', label: 'Search tasks' });
   });
 
+  it('keeps a space between the words of neighbouring cells', () => {
+    const root = page(
+      '<section><h3>Saltmarsh budget</h3><dl><dt>Design</dt><dd>$12,000</dd></dl></section>',
+    );
+    const { targets } = collectTargets(root, () => true);
+    expect(targets.find((x) => x.tag === 'section')?.text).toBe('Saltmarsh budget Design $12,000');
+  });
+
   it('leaves out a generated class name of the shape its own docs give (`css-1x9f2`)', () => {
     const root = page('<button class="primary css-1x9f2">Save</button>');
     expect(collectTargets(root, all).targets[0]?.hint).toBe('.primary');

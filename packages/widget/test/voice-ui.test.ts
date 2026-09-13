@@ -235,17 +235,67 @@ describe('a settled comment’s card', () => {
     expect(t.card()?.querySelector('.vplay'), 'CONTROL: a real change redraws it').not.toBe(play);
   });
 
-  it('goes away a while after it settles, unless the pointer is on it', () => {
+  it('stays up through the recording, and a tap elsewhere after Stop puts it away', () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1180);
     const t = setup();
     t.add(comment({ final: true }));
-    t.card()?.dispatchEvent(new Event('pointerenter'));
+    t.advance(SETTLED_MS * 10);
+    t.view.place();
+    expect(t.card(), 'still up mid-recording').not.toBeNull();
+    expect(t.card()?.hidden).toBe(false);
+
+    t.session.state = 'idle';
+    t.view.render();
+    t.card()?.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+    t.view.place();
+    expect(t.card(), 'a tap on the card itself keeps it').not.toBeNull();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+    expect(t.card(), 'a tap on the page puts it away').toBeNull();
+    t.view.render();
+    expect(t.card(), 'and the next render does not bring it back').toBeNull();
+  });
+
+  it('CONTROL: a tap on the page while recording leaves the cards up', () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1180);
+    const t = setup();
+    t.add(comment({ final: true }));
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+    expect(t.card()).not.toBeNull();
+  });
+
+  it('on a phone, is a pin while recording and shows only the newest after Stop', () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(430);
+    const t = setup();
+    t.add(comment({ key: 'v1', final: true }));
+    t.add(comment({ key: 'v2', final: true, text: 'The Save button hides.' }));
+    t.view.place();
+    expect(t.card('v1')?.hidden, 'no card over the page while talking').toBe(true);
+    expect(t.card('v2')?.hidden).toBe(true);
+
+    t.session.state = 'idle';
+    t.view.render();
+    t.view.place();
+    expect(t.card('v1'), 'the older one waits as its pin').toBeNull();
+    expect(t.card('v2')?.hidden).toBe(false);
+
+    // Talking again straight away: the card gives the page back.
+    t.session.state = 'recording';
+    t.view.render();
+    t.view.place();
+    expect(t.card('v2')?.hidden, 'hidden again while talking').toBe(true);
+    t.session.state = 'idle';
+    t.view.render();
+    t.view.place();
+    expect(t.card('v2')?.hidden).toBe(false);
+
+    t.card('v2')?.dispatchEvent(new Event('pointerenter'));
     t.advance(SETTLED_MS + 1);
     t.view.place();
-    expect(t.card(), 'kept while being read').not.toBeNull();
-    t.card()?.dispatchEvent(new Event('pointerleave'));
+    expect(t.card('v2'), 'kept while being read').not.toBeNull();
+    t.card('v2')?.dispatchEvent(new Event('pointerleave'));
     t.advance(SETTLED_MS + 1);
     t.view.place();
-    expect(t.card()).toBeNull();
+    expect(t.card('v2')).toBeNull();
   });
 });
 

@@ -31,6 +31,9 @@ export interface VoiceMode {
   toggle(context?: AudioContext): void;
 }
 
+/** The mic's hover label while it is a Stop button. */
+export const STOP_LABEL = 'Stop recording';
+
 /** How long the page must be still before a changed page is described again. */
 const RECATALOG_MS = 1500;
 
@@ -82,6 +85,7 @@ export function mountVoiceMode(
 
   const { button, readout } = mic;
   const idleIcon = button.innerHTML;
+  const idleTip = button.dataset.tip ?? '';
   const session = new VoiceSession({
     url,
     openSocket: opts.openSocket ?? ((u) => new WebSocket(u) as unknown as SocketLike),
@@ -118,6 +122,8 @@ export function mountVoiceMode(
     button.setAttribute('aria-pressed', String(on));
     if (on !== (lastState !== 'idle')) {
       button.innerHTML = on ? '<span class="vstop"></span>' : idleIcon;
+      // Its label says what a tap does now.
+      button.dataset.tip = on ? STOP_LABEL : idleTip;
       if (on) watchPage();
       else unwatchPage();
     }
