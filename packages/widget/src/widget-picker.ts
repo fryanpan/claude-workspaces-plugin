@@ -118,7 +118,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     // element the composer is about.
     el.hoverEl = t;
     setHighlight(el, t);
-    openComposerForElement(el, t);
+    openComposerForElement(el, t, ev);
   };
   // A finger's press is followed, AFTER its pointerup, by a compatibility
   // mousedown whose default took focus back off the field the tap had just
@@ -241,12 +241,21 @@ function pressIsOurs(ev: Event): boolean {
 function hitTest(ev: MouseEvent): HTMLElement | null {
   // Our own chrome (FAB, banner, composer, dock, pins) answers for itself.
   if (pressIsOurs(ev)) return null;
-  const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+  const el = document.elementFromPoint(ev.clientX, ev.clientY);
   if (!el) return null;
   // skip widget chrome
   if (el.closest(`[${IGNORE_ATTR}],${TAG}`)) return null;
-  return el;
+  return lift(el);
 }
+
+/**
+ * A press on an icon lands on a shape inside its <svg>, a <circle> with no
+ * id, class or words. The comment is about the button or link the icon
+ * draws, so that is what it anchors to. A shape in no control stays itself:
+ * a chart's bars and labels are each something to comment on.
+ */
+const lift = (el: Element): HTMLElement =>
+  (el instanceof SVGElement && el.closest('a,button,[role=button]')) || (el as HTMLElement);
 
 /** The other half of `hitTest`'s question, asked of a mutation record rather
  *  than a pointer: writes the widget made itself must not re-enter the
@@ -306,11 +315,24 @@ function clearHighlight(owner: FeedbackWidgetEl): void {
 
 // --- Composer ---
 
-function openComposerForElement(widget: FeedbackWidgetEl, el: HTMLElement): void {
+/** `tap` is the press that picked the element: the anchor keeps where in the
+ *  element it landed, so the pin can stand there (`ElementAnchor.at`). */
+function openComposerForElement(
+  widget: FeedbackWidgetEl,
+  el: HTMLElement,
+  tap?: PointerEvent,
+): void {
+  const r = el.getBoundingClientRect();
   const anchor: ElementAnchor = {
     ...createAnchor(el),
     ...(hasContext(widget.currentContext) ? { context: { ...widget.currentContext } } : {}),
   };
+  if (tap && r.width && r.height) {
+    anchor.at = {
+      x: +((tap.clientX - r.left) / r.width).toFixed(3),
+      y: +((tap.clientY - r.top) / r.height).toFixed(3),
+    };
+  }
   showComposer(widget, anchor, el);
 }
 

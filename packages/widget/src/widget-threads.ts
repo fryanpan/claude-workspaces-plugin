@@ -1,11 +1,11 @@
 import {
   type ElementAnchor,
-  STATUS_COLORS,
   type Thread,
   cssColor,
   escapeHtml as escape,
   formatTime,
   listThreads,
+  pendingDeclaration,
 } from '@claude-workspaces/core';
 // The anchor LEAVES, never the `anchors` namespace off the core barrel: a
 // namespace object keeps every module behind it, and that one carried text-range
@@ -15,7 +15,6 @@ import {
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
 import { httpBase } from './widget-auth.ts';
-import { pinX } from './widget-card.ts';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -95,40 +94,21 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
       continue;
     }
     annotated.push({ thread: t, status: statusBase, el: res.element });
-    // Hide pins for resolved threads by default — they pile up visual
-    // noise on the page during iteration. The thread still flows into
-    // the panel list (where it's collapsed under a "Show resolved (N)"
-    // toggle), so reopening is one click away.
-    if (statusBase === 'resolved' && !el.showResolved) continue;
+    // Every thread on the page has a pin, resolved ones included — the pin is
+    // how a comment is found again, and a resolved one is still worth
+    // reopening. Its look says which it is (the light styles in `widget.ts`).
     const pin = document.createElement('div');
     pin.setAttribute(IGNORE_ATTR, '');
     pin.className = 'cfw-pin';
     pin.dataset.threadId = t.id;
-    pin.dataset.status = statusBase;
-    pin.style.cssText = [
-      'position:absolute',
-      'pointer-events:auto',
-      'width:24px',
-      'height:24px',
-      'border-radius:50%',
-      `background:${statusBase === 'resolved' ? STATUS_COLORS.resolved : STATUS_COLORS.open}`,
-      'color:#fff',
-      'font:600 12px system-ui',
-      'display:flex',
-      'align-items:center',
-      'justify-content:center',
-      'cursor:pointer',
-      'box-shadow:0 2px 6px rgba(0,0,0,0.25)',
-      'transform:translate(-50%,-100%)',
-    ].join(';');
-    const idx = annotated.filter((a) => a.status !== 'orphan').length;
-    pin.textContent = String(idx);
+    pin.dataset.state =
+      statusBase === 'resolved' ? statusBase : pendingDeclaration(t) ? 'review' : statusBase;
     pin.title = t.comments[0]?.text ?? 'open thread';
     pin.addEventListener('click', (ev) => {
       showThreadPopover(el, t, ev.clientX, ev.clientY);
     });
     pinLayer.appendChild(pin);
-    el.threadPositions.set(t.id, { el: res.element, status: statusBase });
+    el.threadPositions.set(t.id, { el: res.element, status: statusBase, at: t.anchor.at });
   }
   positionPins(el);
   const badge = el.shadow.querySelector('.fab-list .count') as HTMLElement | null;
@@ -140,23 +120,115 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
   renderPanelList(el, annotated);
 }
 
+/** Where a thread's pin goes, kept between frames while its element's size
+ *  holds: `spot` is the tip's offset from the element's top-left corner. */
+export interface PinPosition {
+  el: HTMLElement;
+  status: 'open' | 'resolved' | 'orphan';
+  at?: { x: number; y: number } | undefined;
+  spot?: number[] | undefined;
+}
+
+const words = document.createRange();
+
+/**
+ * Is a teardrop with its tip at (x, y) clear of the page's text and of the
+ * pins already stood this frame?
+ *
+ * The page is asked what is under nine points of the drop's box, and the text
+ * directly inside each element there is measured against the box. A pin used
+ * to be drawn over the words of the chip it marked ("Malformed", on a
+ * Confirmed chip); nothing about an element's box says where its words are.
+ */
+function clear(x: number, y: number, placed: number[][], text = true): boolean {
+  const l = x - 11;
+  const t = y - 26;
+  if (l < 0 || x + 11 > innerWidth || t < 0 || y > innerHeight) return false;
+  for (const [px, py] of placed) {
+    if (Math.abs(px - x) < 22 && Math.abs(py - y) < 27) return false;
+  }
+  for (let i = 0; text && i < 9; i++) {
+    for (const e of document.elementsFromPoint(l + (i % 3) * 11, t + ((i / 3) | 0) * 13.5)) {
+      for (const n of e.childNodes) {
+        if (n.nodeType !== 3 || !n.textContent?.trim()) continue;
+        words.selectNodeContents(n);
+        for (const q of words.getClientRects()) {
+          if (q.left < x + 11 && q.right > l && q.top < y + 1 && q.bottom > t) return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 export function positionPins(el: FeedbackWidgetEl): void {
   if (!el.pinLayer) return;
-  // A second comment on the same element stands its pin beside the first's,
-  // not on top of it, wrapping to a row below before it leaves the screen.
-  const onEl = new Map<Element, number>();
-  for (const pin of Array.from(el.pinLayer.children)) {
-    const id = (pin as HTMLElement).dataset.threadId;
-    if (!id) continue;
-    const pos = el.threadPositions.get(id);
+  const placed: number[][] = [];
+  for (const pin of el.pinLayer.children as HTMLCollectionOf<HTMLElement>) {
+    const pos = el.threadPositions.get(pin.dataset.threadId ?? '');
     if (!pos) continue;
-    const n = onEl.get(pos.el) ?? 0;
-    onEl.set(pos.el, n + 1);
-    const rect = pos.el.getBoundingClientRect();
-    const x = pinX(pos.el, rect);
-    const row = Math.max(1, Math.floor((x - 12) / 26) + 1);
-    (pin as HTMLElement).style.left = `${x - (n % row) * 26}px`;
-    (pin as HTMLElement).style.top = `${rect.top + 6 + Math.floor(n / row) * 26}px`;
+    const r = pos.el.getBoundingClientRect();
+    // An element on a screen the page has not opened has no box, or is not
+    // shown. Its pin waits, hidden, and stands on the element when the page
+    // shows it — rather than at the no-box corner, off the top left.
+    pin.hidden =
+      !(r.width || r.height) ||
+      pos.el.checkVisibility?.({ opacityProperty: true, visibilityProperty: true }) === false;
+    if (pin.hidden) continue;
+    // The spot is kept while the element holds its size and its place on the
+    // page: a scroll moves neither, but an element that slides has new
+    // neighbours under the spot.
+    const px = r.left + scrollX;
+    const py = r.top + scrollY;
+    let s = pos.spot;
+    if (!s || s[2] !== r.width || s[3] !== r.height || s[4] !== px || s[5] !== py) {
+      // The tapped point first, then the element's edges: past its words
+      // (past its right side when they reach it, so a chip's pill is not
+      // cut), above it, below it, before its left side.
+      // An element with nothing in it has an empty range at the origin; its
+      // words end at its right side.
+      words.selectNodeContents(pos.el);
+      const q = words.getBoundingClientRect();
+      const end = q.width ? q.right : r.right;
+      const m = r.height / 2 + 13;
+      // How far the element reaches as a reader sees it: a heading's box runs
+      // the width of the page, but its words stop part way, and a pin by the
+      // box's far corner belongs to nothing on screen.
+      const w = (r.right - end > 40 ? end : r.right) - r.left;
+      const spots = [
+        [w + 16, m],
+        [w - 12, 0],
+        [w - 12, r.height + 27],
+        [-12, m],
+      ];
+      // The tapped point only on an element with words: words are what the
+      // check keeps a pin off, and nothing tells it where an icon is drawn —
+      // a pin at the tap on an icon button covered the icon.
+      const at = pos.at;
+      if (pos.el.textContent?.trim() && at && at.x >= 0 && at.x <= 1 && at.y >= 0 && at.y <= 1) {
+        spots.unshift([at.x * r.width, at.y * r.height]);
+      }
+      let c = spots.find(([x, y]) => clear(r.left + x, r.top + y, placed));
+      // More threads on it than spots: a row along its top, then rows under
+      // it, clear of the other pins — of the page's words too, the first time
+      // round those four rows.
+      const n = Math.max(1, (w / 24) | 0);
+      for (let k = 0; !c && k < 8 * n; k++) {
+        const j = ((k % (4 * n)) / n) | 0;
+        const d = [w - 12 - 24 * (k % n), j && r.height - 2 + 29 * j];
+        if (clear(r.left + d[0], r.top + d[1], placed, k < 4 * n)) c = d;
+      }
+      c ??= spots[0];
+      s = [c[0], c[1], r.width, r.height, px, py];
+      // Kept only when the drop was on screen: off it, the page has nothing
+      // under the points to say whether they were clear.
+      if (r.top + s[1] > 26 && r.top + s[1] < innerHeight) pos.spot = s;
+    }
+    const x = r.left + s[0];
+    const y = r.top + s[1];
+    placed.push([x, y]);
+    pin.style.left = `${x}px`;
+    pin.style.top = `${y}px`;
   }
 }
 
@@ -199,7 +271,7 @@ function renderPanelList(
     toggle.addEventListener('click', () => {
       el.showResolved = !el.showResolved;
       localStorage.setItem('cfw:showResolved', el.showResolved ? '1' : '0');
-      // Rerender to flip pins on/off and the resolved group visibility
+      // Rerender to show or hide the resolved group; their pins stay either way
       el.scheduleRender();
     });
     list.appendChild(toggle);

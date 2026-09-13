@@ -465,6 +465,14 @@ export interface ElementAnchor {
   /** short text for orphan display. */
   snippet: AnchorSnippet;
   context?: AnchorContext;
+  /**
+   * Where in the element the tap landed, as fractions of its box (0..1 on
+   * each axis). The element under a tap on white space is whatever holds
+   * that space — often a container nearly the size of the page — so the
+   * element alone cannot say where the comment was put. Absent on anchors
+   * made without a tap; a pin then stands at the element's edge.
+   */
+  at?: { x: number; y: number };
 }
 
 /** Wraps a non-orphan anchor when recovery fails. */

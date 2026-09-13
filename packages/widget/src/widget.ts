@@ -28,7 +28,7 @@ import {
   isInOwnChrome,
   toggleFeedbackMode,
 } from './widget-picker.ts';
-import { positionPins, renderThreadsInto } from './widget-threads.ts';
+import { type PinPosition, positionPins, renderThreadsInto } from './widget-threads.ts';
 
 /**
  * <claude-feedback-widget> web component
@@ -168,7 +168,7 @@ export class FeedbackWidgetEl extends HTMLElement {
   pinLayer: HTMLDivElement | null = null;
   private panelOpen = false;
   activeThread: string | null = null;
-  threadPositions = new Map<string, { el: HTMLElement; status: 'open' | 'resolved' | 'orphan' }>();
+  threadPositions = new Map<string, PinPosition>();
   private observer: MutationObserver | null = null;
   private statusEl: HTMLElement | null = null;
   private rafId: number | null = null;
@@ -625,14 +625,14 @@ export class FeedbackWidgetEl extends HTMLElement {
     // buttons too, and important, so a host page's own button rule cannot
     // turn them back on.
     s.textContent =
-      '.cfw-pin:hover{transform:translate(-50%,-100%) scale(1.08)}' +
-      // A 24px pin takes a finger's 44px of taps, reaching left and down only:
-      // pins on one element stand 26px apart leftward and wrap downward, and a
-      // later pin paints over an earlier one, so reaching right or up would
-      // take taps off the disc of the pin before it.
-      '.cfw-pin::after{content:"";position:absolute;inset:0 0 -20px -20px}' +
-      `.cfw-pin[data-status="resolved"]{background:${STATUS_COLORS.resolved}!important}` +
-      `.cfw-pin[data-status="orphan"]{background:${STATUS_COLORS.orphan}!important}` +
+      // A pin is ONE shape, a teardrop whose tip is the spot it marks
+      // (`positionPins` puts the box's 22,33 there), inside a 44px box a finger
+      // can take. Orange is open; white ringed in green is resolved; a white
+      // eye in the orange is an open review item on the thread.
+      '.cfw-pin{position:absolute;pointer-events:auto;width:44px;height:44px;transform:translate(-22px,-33px);cursor:pointer}' +
+      `.cfw-pin:before{content:"";position:absolute;left:12px;top:9px;width:20px;height:20px;box-sizing:border-box;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 1px 4px #0006;background:${STATUS_COLORS.open};border:2px solid #fff}` +
+      `.cfw-pin[data-state=resolved]:before{background:#fff;border:2.5px solid ${STATUS_COLORS.resolved}}` +
+      `.cfw-pin[data-state=review]:before{background:radial-gradient(#fff 3.5px,${STATUS_COLORS.open} 4px)}` +
       `body.cfw-feedback-mode,body.cfw-feedback-mode *{cursor:${bubbleCursor},crosshair!important}` +
       'body.cfw-feedback-mode [data-cw-mock-versions],body.cfw-feedback-mode [data-cw-mock-versions] *{pointer-events:none!important}';
     document.head.appendChild(s);

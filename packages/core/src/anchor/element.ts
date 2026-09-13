@@ -143,8 +143,20 @@ function readDataAttrs(el: HTMLElement): Record<string, string> {
   return out;
 }
 
+/**
+ * The words an element says. One with none of its own — an icon button —
+ * says its label: without it such a button with no id tops out at 35 and
+ * never resolves, and the label is what tells it from the icon beside it.
+ */
 function extractText(el: HTMLElement): string {
-  const raw = (el.textContent ?? '').trim().replace(/\s+/g, ' ');
+  const raw = (
+    el.textContent?.trim() ||
+    el.getAttribute('aria-label') ||
+    el.getAttribute('title') ||
+    ''
+  )
+    .trim()
+    .replace(/\s+/g, ' ');
   return truncate(raw, TEXT_MAX);
 }
 
