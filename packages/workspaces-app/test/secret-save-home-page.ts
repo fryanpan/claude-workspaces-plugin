@@ -75,9 +75,7 @@ export interface Look {
  * The grip's whole reach, and what it leaves Save standing on.
  *
  * Dragging a textarea's grip makes the browser write an inline height on it,
- * which `max-height` then clamps — so asking for far more than the cap is the
- * same geometry as dragging to the bottom of the grip's travel, and it needs
- * no number from the stylesheet to say where that is. Every field, because a
+ * so writing one is the same geometry as a drag. Every field, because a
  * reader with three values to paste has three fields they might want to see
  * more of.
  */
@@ -85,7 +83,7 @@ export interface Grip {
   /** Computed `resize` on a field. `none` is the answer that says the browser
    *  draws no grip at all, so there is nothing to take hold of. */
   resize: string;
-  /** Field heights before and after the drag. With no grip they are equal —
+  /** Row heights (field and eye) before and after the drag. With no grip they are equal —
    *  that equality is the claim, not the absence of a screenshot. */
   before: number[];
   after: number[];
@@ -329,22 +327,27 @@ export async function grip(force: boolean): Promise<Grip> {
   const fields = boxes();
   const resize = fields[0] ? getComputedStyle(fields[0]).resize : 'no field';
   const heightOf = (el: Element): number => Math.round(el.getBoundingClientRect().height);
-  const before = fields.map(heightOf);
+  // The ROW each field sits in, field and eye together: that row is what
+  // stacks above Save, and a one-line field centred beside a 44px eye grows
+  // the row by less than its own height.
+  const rows = (): HTMLElement[] =>
+    Array.from(document.querySelectorAll<HTMLElement>('.board-walk-cred-box'));
+  const before = rows().map(heightOf);
   const saveBefore = rect(need('.board-walk-cred-send'));
   const reserveOf = (): string => getComputedStyle(document.documentElement).scrollPaddingBottom;
   const scrollBefore = Math.round(window.scrollY);
   const reserveBefore = reserveOf();
   if (force || resize !== 'none') {
-    // Past any cap on purpose: `max-height` clamps it, so this lands exactly
-    // where the bottom of the grip's travel is without naming that number.
-    for (const box of fields) box.style.height = '999px';
+    // 120px: where the grip's travel ended when the field had one — the
+    // `max-height: 7.5em` cap it carried while it grew with its value.
+    for (const box of fields) box.style.height = '120px';
   }
   await frame();
   await frame();
   return {
     resize,
     before,
-    after: fields.map(heightOf),
+    after: rows().map(heightOf),
     saveBefore,
     scrollBefore,
     scrollAfter: Math.round(window.scrollY),

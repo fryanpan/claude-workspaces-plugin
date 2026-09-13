@@ -19,7 +19,7 @@
  */
 import type { ReviewSecretField } from '@claude-workspaces/core';
 import { Fragment } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { SecretsGate } from './board-review-model.ts';
 
 /** The eye on a secret field — open when the value is masked (tap to show),
@@ -39,6 +39,125 @@ function EyeMark(props: { shown: boolean }) {
         <path d="M2.5 13.5 13.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" />
       ) : null}
     </svg>
+  );
+}
+
+/**
+ * One value box: the masked field, the … that says it runs on past the edge,
+ * and the eye.
+ *
+ * ONE LINE, WHATEVER IS PASTED. The box used to grow with its value up to
+ * three lines, so a long key moved everything under it — Save included — as
+ * it arrived. Now it is a single line that scrolls sideways under the caret,
+ * and a value longer than the box shows a literal … at the edge it runs past,
+ * the way a password field in any sign-in form does.
+ *
+ * STILL A TEXTAREA, and the reason is unchanged: an `input` strips the line
+ * breaks out of a pasted SSH key before any script sees them. `wrap="off"`
+ * keeps each line of the value on one line of the box.
+ *
+ * The … is drawn here rather than by `text-overflow`, because no engine
+ * applies `text-overflow` to a textarea (measured in Chrome: the value simply
+ * ends at the edge). What this component holds is which edges the value runs
+ * past — two booleans read off the box's own scroll geometry. Never the value.
+ */
+function SecretField(props: {
+  field: ReviewSecretField;
+  id: string;
+  shown: boolean;
+  onToggle: () => void;
+  onInput: () => void;
+}) {
+  const { field: f, shown } = props;
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  /** The value runs on past the box's leading edge (the caret has scrolled
+   *  its start away) and past its trailing edge. */
+  const [clipStart, setClipStart] = useState(false);
+  const [clipEnd, setClipEnd] = useState(false);
+  const measure = (): void => {
+    const box = ref.current;
+    if (!box) return;
+    // At rest the box shows the START of the value and a … where it runs on,
+    // whichever end the caret last scrolled to. Done here rather than only on
+    // blur, because the caret's own scroll into view can land after the blur.
+    if (box.ownerDocument.activeElement !== box) {
+      box.scrollLeft = 0;
+      box.scrollTop = 0;
+    }
+    setClipStart(box.scrollLeft > 0 || box.scrollTop > 0);
+    setClipEnd(
+      box.scrollLeft + box.clientWidth < box.scrollWidth - 1 ||
+        box.scrollTop + box.clientHeight < box.scrollHeight - 1,
+    );
+  };
+  // Revealing changes the width of every character, and the box's own width
+  // changes with the viewport; both move where the value ends.
+  useLayoutEffect(() => {
+    measure();
+  }, [shown]);
+  useEffect(() => {
+    const box = ref.current;
+    if (!box || typeof ResizeObserver !== 'function') return;
+    const watch = new ResizeObserver(() => measure());
+    watch.observe(box);
+    return () => watch.disconnect();
+  }, []);
+  return (
+    <label class="board-walk-cred" for={props.id}>
+      <span class="board-walk-cred-head">
+        <span class="board-walk-cred-label">{f.label}</span>
+        <span class="board-walk-cred-service">{f.service}</span>
+      </span>
+      <span class="board-walk-cred-box">
+        {/* Masked with `-webkit-text-security` rather than `type="password"`,
+            which a textarea has no equivalent of; the eye toggles the same
+            class. On an engine without that property the value is visible
+            rather than hidden — the eye is still the control that says which
+            state you are in.
+
+            Enter makes a new line here; Save submits. A key that submitted
+            would make a multi-line value untypeable. */}
+        <textarea
+          ref={ref}
+          id={props.id}
+          name={`secret:${f.service}`}
+          class={shown ? 'board-walk-cred-input is-shown' : 'board-walk-cred-input is-masked'}
+          rows={1}
+          wrap="off"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck={false}
+          data-1p-ignore
+          data-lpignore="true"
+          onInput={() => {
+            props.onInput();
+            measure();
+          }}
+          onScroll={measure}
+          onBlur={measure}
+        />
+        {clipStart ? (
+          <span class="board-walk-cred-more is-start" aria-hidden="true">
+            …
+          </span>
+        ) : null}
+        {clipEnd ? (
+          <span class="board-walk-cred-more is-end" aria-hidden="true">
+            …
+          </span>
+        ) : null}
+        <button
+          type="button"
+          class="board-walk-cred-eye"
+          aria-label={shown ? `Hide ${f.label}` : `Show ${f.label}`}
+          aria-pressed={shown}
+          onClick={props.onToggle}
+        >
+          <EyeMark shown={shown} />
+        </button>
+      </span>
+    </label>
   );
 }
 
@@ -156,7 +275,11 @@ function SecretFieldsForm(props: {
       // the queue the moment a save lands, and a failure leaves the reader
       // exactly where they were: able to fix one character and press Save.
       if (saved) {
-        for (const input of inputs(form)) input.value = '';
+        for (const input of inputs(form)) {
+          input.value = '';
+          // So each box re-reads where its value ends and drops its ….
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
         setShown([]);
       }
       setBusy(false);
@@ -165,70 +288,22 @@ function SecretFieldsForm(props: {
   return (
     <form class="board-walk-answer board-walk-cred-form" ref={formRef} onSubmit={submit}>
       <div class="board-walk-creds">
-        {fields.map((f) => {
-          const isShown = shown.includes(f.service);
-          return (
-            <label key={f.service} class="board-walk-cred" for={`secret:${itemKey}:${f.service}`}>
-              <span class="board-walk-cred-head">
-                <span class="board-walk-cred-label">{f.label}</span>
-                <span class="board-walk-cred-service">{f.service}</span>
-              </span>
-              <span class="board-walk-cred-box">
-                {/* A TEXTAREA, not an input, and that is the whole of the
-                    multi-line fix. A browser `input` strips line breaks out
-                    of a paste before any script can see them, so a
-                    three-line SSH key arrived as one joined line, passed the
-                    store's own newline check because the newlines were
-                    already gone, and was stored silently wrong under the name
-                    the reader thought held their key (UX review,
-                    2026-09-12).
-
-                    Masked with `-webkit-text-security` rather than
-                    `type="password"`, which a textarea has no equivalent of;
-                    the eye toggles the same class. On an engine without that
-                    property the value is visible rather than hidden — worth
-                    knowing, and the reason the eye is still the control that
-                    says which state you are in.
-
-                    Enter makes a new line here; Save submits. A key that
-                    submitted would make a multi-line value untypeable, which
-                    is what this control exists for. */}
-                <textarea
-                  id={`secret:${itemKey}:${f.service}`}
-                  name={`secret:${f.service}`}
-                  class={
-                    isShown ? 'board-walk-cred-input is-shown' : 'board-walk-cred-input is-masked'
-                  }
-                  rows={1}
-                  autocomplete="off"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck={false}
-                  data-1p-ignore
-                  data-lpignore="true"
-                  onInput={() => {
-                    if (missing === f.service) setMissing(null);
-                  }}
-                />
-                <button
-                  type="button"
-                  class="board-walk-cred-eye"
-                  aria-label={isShown ? `Hide ${f.label}` : `Show ${f.label}`}
-                  aria-pressed={isShown}
-                  onClick={() =>
-                    setShown((was) =>
-                      was.includes(f.service)
-                        ? was.filter((s) => s !== f.service)
-                        : [...was, f.service],
-                    )
-                  }
-                >
-                  <EyeMark shown={isShown} />
-                </button>
-              </span>
-            </label>
-          );
-        })}
+        {fields.map((f) => (
+          <SecretField
+            key={f.service}
+            field={f}
+            id={`secret:${itemKey}:${f.service}`}
+            shown={shown.includes(f.service)}
+            onToggle={() =>
+              setShown((was) =>
+                was.includes(f.service) ? was.filter((s) => s !== f.service) : [...was, f.service],
+              )
+            }
+            onInput={() => {
+              if (missing === f.service) setMissing(null);
+            }}
+          />
+        ))}
       </div>
       <div class="board-walk-cred-send-row">
         {missing !== null ? (
@@ -288,7 +363,18 @@ export function ReviewSecretBlock(props: {
   onSave: (values: Array<{ service: string; value: string }>) => Promise<boolean>;
 }) {
   if (props.gate === 'open') {
-    return <SecretFieldsForm fields={props.fields} itemKey={props.itemKey} onSave={props.onSave} />;
+    // Keyed by the item, so moving to another ask draws a NEW form: nothing
+    // revealed, nothing typed. Without it Preact reuses the instance between
+    // two secret asks on the same surface, and a value the reader unmasked
+    // for one ask would come up unmasked over the next.
+    return (
+      <SecretFieldsForm
+        key={props.itemKey}
+        fields={props.fields}
+        itemKey={props.itemKey}
+        onSave={props.onSave}
+      />
+    );
   }
   // A Fragment, not a wrapper: the two children sit directly in whatever
   // column the surface put this block in, which is how the walkthrough has

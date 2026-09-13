@@ -1598,6 +1598,7 @@ body.board-body {
    all. This is the same border, radius and padding as the composer's box one
    block below, which is what "every other input on the board" looks like. */
 .board-walk-cred-box {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 4px;
@@ -1611,8 +1612,10 @@ body.board-body {
 /* The letter-spacing is what makes a masked value countable at a glance.
    A TEXTAREA, so a pasted SSH key or service-account file keeps its line
    breaks — a browser `input` strips them out of a paste before any script
-   sees them. It grows with the value up to a few lines and then scrolls,
-   rather than pushing Save off the card.
+   sees them. ONE LINE TALL, whatever is pasted: the value scrolls sideways
+   under the caret (`white-space: pre` with the element's `wrap="off"`), and
+   the box never grows, so nothing typed can move Save. It used to grow to
+   three lines, which moved the card under the reader as a key arrived.
 
    WHAT IS NOT WRITTEN HERE, AND WHY. This block is `.board-walk-cred-input`,
    (0,1,0). The form wears `.board-walk-answer`, so every field in it is also
@@ -1629,14 +1632,11 @@ body.board-body {
 .board-walk-cred-input {
   flex: 1;
   min-width: 0;
-  max-height: 7.5em;
   padding: 9px 11px;
   background: transparent;
   color: var(--fg);
   font: inherit;
   letter-spacing: 0.12em;
-  overflow-y: auto;
-  field-sizing: content;
 }
 /* Masked is the resting state. `type="password"` has no textarea equivalent,
    so the masking is this property — WebKit and Blink, which is Safari on the
@@ -1675,6 +1675,31 @@ body.board-body {
 .board-walk-cred-eye[aria-pressed="true"] {
   color: var(--fg);
 }
+/* The … at an edge the value runs past. Drawn over the field because no
+   engine applies `text-overflow` to a textarea. It covers the characters
+   under it in the field's own ground, takes no taps (a tap there is a tap in
+   the field), and is only present while the value actually overflows that
+   edge — the component reads that off the box's scroll geometry. */
+.board-walk-cred-more {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+.board-walk-cred-more.is-start {
+  left: 1px;
+  padding-left: 11px;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+/* Just left of the eye: its 44px and the box's 4px gap. */
+.board-walk-cred-more.is-end {
+  right: 48px;
+}
 /* What a reader who may not answer sees: the same rows, dimmed, with no
    inputs in them. */
 .board-walk-cred.is-refused {
@@ -1710,9 +1735,9 @@ body.board-body {
 .board-walk-question-form .md-composer-surface:focus-within {
   border-color: var(--accent);
 }
-/* NO GRIP ON A MASKED FIELD, and it is written HERE — after the reply-box
-   rule, at the same specificity — for exactly the reason the form's own
-   `flex-direction` is, in the block below. `resize: none` sat in the
+/* ONE LINE, AND NO GRIP ON A MASKED FIELD, both written HERE — after the
+   reply-box rule, at the same specificity — for exactly the reason the form's
+   own `flex-direction` is, in the block below. `resize: none` sat in the
    cred-input block further up, where (0,1,0) loses to the reply box's
    (0,1,1) wherever either one is written: the computed value read
    `vertical`, and Chrome drew a drag grip in every field. One drag
@@ -1722,18 +1747,30 @@ body.board-body {
    where a tap navigates away and drops the pasted key (UX review,
    2026-09-12).
 
-   NONE RATHER THAN A BOUNDED `vertical`, because the grip cannot show the
-   reader anything the field would not have shown them anyway. `field-sizing:
-   content` already sizes the box to its value, and `max-height: 7.5em` caps
-   both it and the grip at the same 120px — so dragging can only leave blank
-   space under a short value, or crop a long one below the height the browser
-   picked. On a box of discs neither is a thing anyone wants. And the room
-   that keeps Save clear is `scroll-padding-bottom`, which is read when
-   something SCROLLS; a drag scrolls nothing, so no reserve — fixed or
-   computed — can follow a height the reader sets by hand. The way back from a
-   paste that went wrong is the eye, not the grip. */
+   NONE RATHER THAN A BOUNDED `vertical`: on a box of discs, a taller field
+   shows the reader nothing the eye would not. And the room that keeps Save
+   clear is `scroll-padding-bottom`, which is read when something SCROLLS; a
+   drag scrolls nothing, so no reserve can follow a height the reader sets by
+   hand.
+
+   The one-line height is here for the same cascade reason: the reply box's
+   `min-height: 62px` would otherwise hold the field at three lines. So the
+   floor goes, `rows="1"` sets the height, and the field sits centred in the
+   box beside the eye rather than stretched to the eye's 44px — a stretched
+   field shows the top of its second line in the padding under the first. Its
+   own border goes too: the box around it is the border, and the field drew a
+   second one inside it. */
 textarea.board-walk-cred-input {
   resize: none;
+  align-self: center;
+  min-height: 0;
+  padding-block: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  white-space: pre;
+  overflow-wrap: normal;
+  field-sizing: fixed;
 }
 /* The secret form wears `.board-walk-answer` too, so it sits in the answering
    slot — but its fields are a COLUMN, and Save goes under them rather than
