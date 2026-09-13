@@ -136,11 +136,22 @@ const escapeAttr = (v: string): string =>
  * owns it. This server knows the board — it is the one in the URL the reader
  * opened — so the embed it writes always carries it. A hand-written embed on
  * someone else's page has to say it itself.
+ *
+ * `identity-scope="host"` is the browser half of "resolve the reviewer from
+ * the browser". Without it the widget reads its name from the `cfw:` keys a
+ * guest keeps on a stranger's page, where nothing is stored — so a reader the
+ * board greets by name was shown "Anonymous <animal>" in the mock's own panel.
+ * This page is not a stranger's: it is served by this server, on the board's
+ * origin, where the board and the review doc have already written the
+ * signed-in name under the unprefixed keys. The board's feedback embed
+ * (`renderBoardShell`) sets the same attribute for the same reason. It names
+ * nobody, so it re-brands nobody; a share visitor reads their own browser's
+ * name and the server still writes down whoever it proved.
  */
 export function widgetEmbed(docId: string, workspaceId: string): string {
   return (
     `<claude-feedback-widget workspace-id="${escapeAttr(workspaceId)}" ` +
-    `doc-id="${escapeAttr(docId)}"></claude-feedback-widget>` +
+    `doc-id="${escapeAttr(docId)}" identity-scope="host"></claude-feedback-widget>` +
     `<script src="/widget.iife.js"></script>`
   );
 }

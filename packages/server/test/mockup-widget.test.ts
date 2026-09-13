@@ -16,7 +16,7 @@ describe('injectWidget', () => {
       'doc-1',
       'w-1',
     );
-    expect(out).toContain('<claude-feedback-widget workspace-id="w-1" doc-id="doc-1">');
+    expect(out).toContain('<claude-feedback-widget workspace-id="w-1" doc-id="doc-1"');
     expect(out).toContain('src="/widget.iife.js"');
     expect(out.indexOf('claude-feedback-widget')).toBeLessThan(out.indexOf('</body>'));
   });
@@ -179,5 +179,33 @@ describe('a bound mockup is served with the widget already in it', () => {
     expect(html).toContain(`workspace-id="${WS}"`);
     // …and the file on disk is untouched — the reason this is worth doing.
     expect(Bun.file(file).text()).resolves.toBe(source);
+  });
+
+  // Observed on a served mock: the board greeted a signed-in reader by name,
+  // and the mock's widget panel on the same origin said "Anonymous Wombat",
+  // because the embed kept its identity under the `cfw:` guest keys where the
+  // board never writes. The widget half of `identity-scope` is covered in
+  // packages/widget/test/widget.test.ts; this is the half that asks for it.
+  it('tells the served widget to adopt the name the board stored for this browser', async () => {
+    const file = join(dataDir, 'harborlight.html');
+    writeFileSync(file, '<!doctype html><html><body><h1>Harborlight</h1></body></html>');
+    const res = await fetch(`${base}/workspaces/${WS}/docs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ docId: 'mock-widget-scope', type: 'mockup', sourceUrl: file }),
+    });
+    expect(res.ok, `${res.status} ${await res.clone().text()}`).toBe(true);
+
+    const html = await (await fetch(`${base}/workspaces/${WS}/mockups/mock-widget-scope`)).text();
+    const tags = [...html.matchAll(/<claude-feedback-widget\b([^>]*)>/g)].map((m) => m[1] ?? '');
+    // Positive control: exactly one widget, and it is the one this server wrote.
+    expect(tags).toHaveLength(1);
+    const attrs = Object.fromEntries(
+      [...(tags[0] ?? '').matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]),
+    );
+    expect(attrs['workspace-id']).toBe(WS);
+    expect(attrs['identity-scope']).toBe('host');
+    // Scope, never a name: whoever opens the page is still themselves.
+    expect(attrs.user).toBeUndefined();
   });
 });
