@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VoiceComment, VoiceSession } from '../src/voice/voice-session.ts';
-import { SETTLED_MS, VoiceView, clipLength } from '../src/voice/voice-ui.ts';
+import { SETTLED_MS, VoiceView, clipLength, stackColumn } from '../src/voice/voice-ui.ts';
 
 /**
  * What a recording looks like. The view reads a session's state and draws it,
@@ -71,6 +71,7 @@ function setup() {
     view,
     session,
     shadow,
+    elements,
     moved,
     add,
     card,
@@ -313,6 +314,146 @@ describe('a settled comment’s card', () => {
     t.advance(SETTLED_MS + 1);
     t.view.place();
     expect(t.card('v2')).toBeNull();
+  });
+});
+
+/** An element on the page standing at `top`..`bottom`, 600px wide from the left. */
+function rowAt(top: number, bottom: number): HTMLElement {
+  const el = document.createElement('div');
+  document.body.append(el);
+  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ x: 24, y: top, width: 600, height: bottom - top }),
+  );
+  return el;
+}
+
+/** The page is 1180x820 or 430x932. */
+function screen(width: number, height: number): void {
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width);
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(height);
+  // The test DOM has no visual viewport, so the window is the screen.
+  expect(window.visualViewport ?? null).toBeNull();
+}
+
+/** A card is 130px tall, 260px with its raw words open; the live card 150px. */
+function heights(): void {
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    if (this.classList.contains('vlive')) return 150;
+    return this.querySelector('.vrawtext:not([hidden])') ? 260 : 130;
+  });
+}
+
+const box = (el: HTMLElement | null) => {
+  const top = Number.parseFloat(el?.style.top ?? '');
+  return { top, bottom: top + (el?.offsetHeight ?? 0) };
+};
+
+describe('the column of cards beside the page', () => {
+  it('opening a card’s raw words moves the others instead of hiding one', () => {
+    screen(1180, 820);
+    heights();
+    const t = setup();
+    t.elements.set(3, rowAt(100, 140));
+    t.elements.set(4, rowAt(300, 340));
+    t.elements.set(5, rowAt(500, 540));
+    t.add(comment({ key: 'v1', target: 3, final: true }));
+    t.add(comment({ key: 'v2', target: 4, final: true }));
+    t.add(comment({ key: 'v3', target: 5, final: true }));
+    t.view.place();
+    expect(['v1', 'v2', 'v3'].map((k) => t.card(k)?.hidden)).toEqual([false, false, false]);
+
+    (t.card('v2')?.querySelector('.vrawbtn') as HTMLElement).click();
+    t.view.place();
+    expect(
+      ['v1', 'v2', 'v3'].map((k) => t.card(k)?.hidden),
+      'all three still fit the column',
+    ).toEqual([false, false, false]);
+    const [a, b, c] = ['v1', 'v2', 'v3'].map((k) => box(t.card(k)));
+    // In the order of their elements, overlapping nothing, above the buttons.
+    expect(a.bottom).toBeLessThanOrEqual(b.top);
+    expect(b.bottom).toBeLessThanOrEqual(c.top);
+    expect(c.bottom).toBeLessThanOrEqual(820 - 8 - 190);
+  });
+
+  it('stands cards in the order of their elements, so leader lines do not cross', () => {
+    screen(1180, 820);
+    heights();
+    const t = setup();
+    // Said about the upper element first; the newer card is placed first.
+    t.elements.set(3, rowAt(380, 420));
+    t.elements.set(4, rowAt(400, 440));
+    t.add(comment({ key: 'v1', target: 3, final: true }));
+    t.add(comment({ key: 'v2', target: 4, final: true }));
+    t.view.place();
+    expect(box(t.card('v1')).bottom).toBeLessThanOrEqual(box(t.card('v2')).top);
+  });
+});
+
+describe('stackColumn', () => {
+  it('keeps the most important cards that fit together, and hides the rest', () => {
+    // 600px of column; the third card would need 610.
+    const ys = stackColumn(
+      [
+        { h: 300, want: 0 },
+        { h: 200, want: 0 },
+        { h: 100, want: 0 },
+        { h: 50, want: 0 },
+      ],
+      0,
+      600,
+    );
+    expect(ys.map((y) => y !== null)).toEqual([true, true, false, true]);
+  });
+
+  it('stands each card as near its element as its neighbours allow, inside the column', () => {
+    expect(
+      stackColumn(
+        [
+          { h: 100, want: 580 },
+          { h: 100, want: 20 },
+        ],
+        10,
+        600,
+      ),
+    ).toEqual([500, 20]);
+    // Two that want the bottom share it: the upper one moves up.
+    expect(
+      stackColumn(
+        [
+          { h: 100, want: 550 },
+          { h: 100, want: 560 },
+        ],
+        10,
+        600,
+      ),
+    ).toEqual([390, 500]);
+  });
+});
+
+describe('the live comment on a phone', () => {
+  it('rests above the buttons rather than across the rows under its element', () => {
+    screen(430, 932);
+    heights();
+    const t = setup();
+    t.elements.set(3, rowAt(78, 125));
+    t.add(comment({ target: 3 }));
+    t.view.place();
+    const live = box(t.view.live);
+    expect(live.bottom).toBe(932 - 8 - 190);
+    // Nothing between the element and the buttons is covered.
+    expect(live.top).toBeGreaterThan(125 + 8 + 150);
+  });
+
+  it('goes to the top when resting above the buttons would cover its element', () => {
+    screen(430, 932);
+    heights();
+    const t = setup();
+    t.elements.set(3, rowAt(640, 700));
+    t.add(comment({ target: 3 }));
+    t.view.place();
+    expect(box(t.view.live).top).toBe(8);
   });
 });
 

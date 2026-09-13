@@ -281,64 +281,42 @@ export class VoiceView {
     const left = vv?.offsetLeft ?? 0;
     const top = (vv?.offsetTop ?? 0) + 8;
     const width = vv ? vv.width : innerWidth;
-    const bottom = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
+    const room = (vv ? vv.offsetTop + vv.height : innerHeight) - 8 - BUTTONS_H;
     const phone = isPhoneFace();
     const x = left + width - 16 - CARD_W;
-    const taken: Array<[number, number]> = [];
-    let lines = '';
-    const stand = (card: HTMLElement, target: HTMLElement | null): boolean => {
-      const h = card.offsetHeight;
-      const room = bottom - BUTTONS_H;
-      const r = target?.getBoundingClientRect();
-      let y: number;
-      if (!r) {
-        y = top + 64;
-      } else if (!phone && r.right + 12 <= x) {
-        y = r.top;
-      } else {
-        y = r.bottom + 8 + h <= room ? r.bottom + 8 : r.top - 8 - h;
-      }
-      y = Math.max(top, Math.min(y, room - h));
-      for (let moved = true; moved; ) {
-        moved = false;
-        for (const [a, b] of taken) {
-          if (y < b && y + h > a) {
-            y = b;
-            moved = true;
-          }
-        }
-      }
-      if (y + h > room && taken.length > 0) return false;
-      taken.push([y, y + h + 10]);
-      card.style.top = `${y}px`;
-      card.style.bottom = 'auto';
-      if (!phone) {
-        card.style.left = `${x}px`;
-        card.style.right = 'auto';
-        if (r && r.right + 12 <= x) {
-          lines += `<line x1="${r.right + 2}" y1="${r.top + Math.min(r.height / 2, 14)}" x2="${x}" y2="${y + 16}"/>`;
-        }
-      } else {
-        card.style.left = '';
-        card.style.right = '';
-      }
-      return true;
-    };
     const s = this.deps.session;
-    if (!this.live.hidden && this.live.classList.contains('attached')) {
-      const open = this.openComment();
-      const target = this.picking
-        ? (s.comments.get(this.picking)?.target ?? null)
-        : open
-          ? open.target
-          : (s.pinned ?? null);
-      stand(this.live, this.deps.element(target));
+    const spots: Array<{ el: HTMLElement; r: DOMRect | undefined; h: number; want: number }> = [];
+    const spot = (el: HTMLElement, target: HTMLElement | null) => {
+      const h = el.offsetHeight;
+      const r = target?.getBoundingClientRect();
+      const want = !r
+        ? top + 64
+        : !phone && r.right + 12 <= x
+          ? r.top
+          : r.bottom + 8 + h <= room
+            ? r.bottom + 8
+            : r.top - 8 - h;
+      spots.push({ el, r, h, want });
+    };
+    const liveTarget = this.picking
+      ? (s.comments.get(this.picking)?.target ?? null)
+      : (this.openComment()?.target ?? s.pinned ?? null);
+    const docked = phone && !this.live.hidden && this.live.classList.contains('attached');
+    if (docked) {
+      // A phone has no room beside the page: the live card rests above the
+      // buttons, or at the top when that would cover the element it names,
+      // rather than lying across the rows under it.
+      const h = this.live.offsetHeight;
+      const r = this.deps.element(liveTarget)?.getBoundingClientRect();
+      const covers = (y: number) =>
+        r ? Math.max(0, Math.min(y + h, r.bottom) - Math.max(y, r.top)) : 0;
+      const y = covers(room - h) > covers(top) ? top : room - h;
+      Object.assign(this.live.style, { top: `${y}px`, bottom: 'auto', left: '', right: '' });
+    } else if (!this.live.hidden && this.live.classList.contains('attached')) {
+      spot(this.live, this.deps.element(liveTarget));
     } else {
       // Floating: the stylesheet stands it above the buttons.
-      this.live.style.top = '';
-      this.live.style.bottom = '';
-      this.live.style.left = '';
-      this.live.style.right = '';
+      Object.assign(this.live.style, { top: '', bottom: '', left: '', right: '' });
     }
     // Newest first, so when the column runs out of room it is the oldest
     // cards that wait behind their pins. A desktop card stays until a tap
@@ -362,10 +340,20 @@ export class VoiceView {
         if (!shown) continue;
       }
       card.el.hidden = false;
-      if (!stand(card.el, this.deps.element(s.comments.get(key)?.target ?? null))) {
-        card.el.hidden = true;
-      }
+      spot(card.el, this.deps.element(s.comments.get(key)?.target ?? null));
     }
+    const ys = stackColumn(spots, top, room);
+    let lines = '';
+    spots.forEach(({ el, r, h }, i) => {
+      const y = ys[i];
+      el.hidden = y === null;
+      if (y === null || y === undefined) return;
+      Object.assign(el.style, { top: `${y}px`, bottom: 'auto' });
+      Object.assign(el.style, phone ? { left: '', right: '' } : { left: `${x}px`, right: 'auto' });
+      if (!phone && r && r.right + 12 <= x) {
+        lines += `<line x1="${r.right + 2}" y1="${r.top + Math.min(r.height / 2, 14)}" x2="${x}" y2="${y + Math.min(h / 2, 16)}"/>`;
+      }
+    });
     if (this.lead.dataset.p !== lines) {
       this.lead.dataset.p = lines;
       this.lead.innerHTML = `<svg>${lines}</svg>`;
@@ -376,4 +364,46 @@ export class VoiceView {
       (phone && this.cards.size > 0)
     );
   }
+}
+
+/** Space between two cards in the column. */
+const GAP = 10;
+
+/**
+ * Where each card in the column stands, or null for one that waits behind its
+ * pin. `spots` come most important first: the ones kept are the first that
+ * fit the column's height together, so opening one card's raw words moves the
+ * others rather than hiding one while there is still room. The kept cards
+ * stand in the order of the elements they are about — so leader lines never
+ * cross — each as near its element as the cards above and below allow.
+ */
+export function stackColumn(
+  spots: ReadonlyArray<{ h: number; want: number }>,
+  top: number,
+  room: number,
+): Array<number | null> {
+  const out: Array<number | null> = spots.map(() => null);
+  let used = 0;
+  const kept: number[] = [];
+  spots.forEach((sp, i) => {
+    if (used + sp.h > room - top) return;
+    used += sp.h + GAP;
+    kept.push(i);
+  });
+  kept.sort((a, b) => (spots[a]?.want ?? 0) - (spots[b]?.want ?? 0) || a - b);
+  let floor = top;
+  for (const i of kept) {
+    const sp = spots[i] as { h: number; want: number };
+    const y = Math.max(floor, Math.min(sp.want, room - sp.h));
+    out[i] = y;
+    floor = y + sp.h + GAP;
+  }
+  let ceiling = room + GAP;
+  for (const i of [...kept].reverse()) {
+    const sp = spots[i] as { h: number; want: number };
+    const y = Math.max(top, Math.min(out[i] as number, ceiling - GAP - sp.h));
+    out[i] = y;
+    ceiling = y;
+  }
+  return out;
 }

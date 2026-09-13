@@ -141,13 +141,18 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
 
 export function positionPins(el: FeedbackWidgetEl): void {
   if (!el.pinLayer) return;
+  // A second comment on the same element stands its pin beside the first's,
+  // not on top of it.
+  const onEl = new Map<Element, number>();
   for (const pin of Array.from(el.pinLayer.children)) {
     const id = (pin as HTMLElement).dataset.threadId;
     if (!id) continue;
     const pos = el.threadPositions.get(id);
     if (!pos) continue;
+    const n = onEl.get(pos.el) ?? 0;
+    onEl.set(pos.el, n + 1);
     const rect = pos.el.getBoundingClientRect();
-    (pin as HTMLElement).style.left = `${rect.right - 6}px`;
+    (pin as HTMLElement).style.left = `${rect.right - 6 - n * 26}px`;
     (pin as HTMLElement).style.top = `${rect.top + 6}px`;
   }
 }
