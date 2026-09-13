@@ -773,7 +773,7 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
         handle.tasks.createTask(boardId, {
           title: 'Filed from the owner’s page',
           assignee: 'human',
-          actor: { id: 'agent-share-test', name: 'Share Test', kind: 'agent' },
+          actor: { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' },
         }),
       );
       if (!filed.ok) throw new Error('create refused');

@@ -212,7 +212,7 @@ describe('both logs, through the real server', () => {
         body: JSON.stringify({
           title,
           assignee: 'human',
-          author: { id: 'agent-origin-test', name: 'Origin Test', kind: 'agent' },
+          author: { id: 'agent-riverbend', name: 'Riverbend', kind: 'agent' },
         }),
       });
       expect(res.status, await res.clone().text()).toBe(200);
