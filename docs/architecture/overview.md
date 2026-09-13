@@ -380,19 +380,34 @@ control rides, so the FAB, the phone prompt and the dock stand on a mock's tab
 bar instead of covering it. Also layout only, and re-measured on resize,
 scroll and DOM change rather than per frame.
 
-**The widget's mic belongs to the host that has one.** The board's own widget
+**The widget's mic, and voice feedback behind it.** The board's own widget
 is bound to the Workspaces feedback doc, not to the board's project, so its
-buttons are about the app: the thread list steps up a slot and a microphone
-takes its place. `widget-mic.ts` is a top-level module of the widget package
-beside `widget-card.ts`, but it is a SECOND ENTRY
-(`@claude-workspaces/widget/mic`) that `widget.ts` never imports — it makes
-only the button, the readout and their rules, and the host wires its own
-capture to them. That keeps every byte of it out of `widget.iife.js`, which
-mock pages load against a hard size budget, and keeps voice capture in one
-place: `board/board-feedback-mic.ts` in `workspaces-app` mounts the mic and
-hands it `createVoiceCapture` (Space left to the board's dock), whose
-transcript is posted as a subject thread through the widget. No new data flow —
-it is the thread POST the typed composer already makes.
+buttons are about the app; a served mock's are about the mock. On both, the
+thread list shrinks to a chip and a microphone takes its slot.
+`widget-mic.ts` is a top-level module of the widget package beside
+`widget-card.ts`, but it is a SECOND ENTRY (`@claude-workspaces/widget/mic`)
+that `widget.ts` never imports — it makes only the button, the readout and
+their rules. Voice feedback itself is the widget's `voice/` directory, a third
+entry (`@claude-workspaces/widget/voice`): `voice-session.ts` streams PCM over
+`WS /workspaces/<ws>/docs/<docId>/voice` and writes the comments the server
+settles through the ordinary thread routes, `voice-ui.ts` draws the live
+comment and the settled cards, and `voice-mode.ts` glues them to the page
+(taps pin the next words to an element). The board imports it directly
+(`board/board-feedback-mic.ts`); a mock page gets the mic from
+`mockup-live.js` and fetches the rest as the lazy chunk `voice.js` on the
+first tap (`voice/voice-loader.ts`), so none of it is in `widget.iife.js`,
+which mock pages load against a hard size budget. The DSP the meeting capture
+already used moved to core's `pcm-audio.ts` so both captures share one
+resampler and one worklet; `meeting-audio.ts` re-exports it.
+
+On the server, `routes/upgrade-stream.ts` hands that socket to
+`voice-feedback-relay.ts`, which runs the meeting's transcription engine and a
+Haiku tidy (`voice-feedback-tidy.ts`) that decides which words become which
+comment on which catalog element, and `voice-feedback-store.ts` keeps each
+recording's WAV and a timestamped raw transcript beside the doc
+(`routes/doc-voice-feedback.ts` serves both). No new write path: a spoken
+comment is the thread POST the typed composer already makes, carrying a
+`voice` note (clip and raw words).
 
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,
