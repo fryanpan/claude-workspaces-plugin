@@ -1,7 +1,8 @@
 /**
  * The Library page's model: the shape `GET /workspaces/<id>/library/items`
- * answers, and the three decisions the page makes over it — how long ago a
- * row happened, which rows the front page shows, and what a search finds.
+ * answers, and the decisions the page makes over it — when a row happened,
+ * which order the lists are in, which rows the front page shows, where each
+ * kind of doc lives, and what a search finds.
  *
  * Pure, so the page's rules are testable without a DOM; `library-page.ts`
  * paints what this returns.
@@ -11,13 +12,15 @@
 export interface LibraryRow {
   name: string;
   /**
-   * A meeting's start, or a file's last change ON DISK. Absent for a file
-   * this server could not stat — the column says so rather than borrowing a
-   * different clock for that one row.
+   * "Last Modified": a file's last change ON DISK, or a meeting's notes'.
+   * Absent for a file this server could not stat — the column says so rather
+   * than borrowing a different clock for that one row.
    */
   at?: number;
-  /** How long the meeting ran, for one that has ended. Meetings only. */
-  durationMs?: number;
+  /** "Created": a file's birth on disk, or when a meeting started. */
+  created?: number;
+  /** The key of the place this board doc lives in (`LibraryPayload.where`). */
+  place?: string;
   /** Opens as a plain link. */
   href?: string;
   /** A project file with no doc yet — opened by `POST …/library/open`. */
@@ -34,6 +37,70 @@ export interface LibraryPayload {
   project: { name: string; path: string } | null;
   meetings: LibraryRow[];
   files: LibraryRow[];
+  /** Where each kind really lives (`packages/server/src/library-location.ts`). */
+  where?: LibraryWhere[];
+}
+
+/** The three kinds of thing a board files. */
+export type LibraryKind = 'meetings' | 'documents' | 'mockups';
+
+/** One location of one kind. Its label is never a host path. */
+export interface LibraryPlace {
+  key: string;
+  /** A folder from the repo root, a project's name, or a fixed phrase. */
+  label: string;
+  /** The label is a folder path. */
+  folder: boolean;
+  note?: string;
+  /** The note flags docs outside their kind's configured folders. */
+  stray: boolean;
+}
+
+export interface LibraryWhere {
+  kind: LibraryKind;
+  places: LibraryPlace[];
+  /** The project names no folder for this kind. */
+  unset: boolean;
+}
+
+export const LIBRARY_KIND_NAMES: Record<LibraryKind, string> = {
+  meetings: 'Meetings',
+  documents: 'Documents',
+  mockups: 'Mockups',
+};
+
+/** What a kind the project names no folder for says, rather than nothing. */
+export const LIBRARY_NO_FOLDER = 'no folder named';
+
+/** The board docs living in one place, from the list that kind is in. */
+export function placeRows(payload: LibraryPayload, key: string): LibraryRow[] {
+  const kind = payload.where?.find((w) => w.places.some((p) => p.key === key))?.kind;
+  if (!kind) return [];
+  return payload[kind === 'meetings' ? 'meetings' : 'files'].filter((r) => r.place === key);
+}
+
+/** Which clock a list is ordered and labelled by. */
+export type LibrarySort = 'modified' | 'created';
+
+/** The row's reading of the clock a list is sorted by. */
+export const rowClock = (row: LibraryRow, sort: LibrarySort): number | undefined =>
+  sort === 'created' ? row.created : row.at;
+
+/**
+ * A list in the order its sort names: newest first by that clock, a row with
+ * no reading after every row that has one (unknown is not "oldest"), and ties
+ * in the order the server sent them.
+ */
+export function sortRows(rows: readonly LibraryRow[], sort: LibrarySort): LibraryRow[] {
+  return rows
+    .map((row, i) => ({ row, i, t: rowClock(row, sort) }))
+    .sort((a, b) => {
+      if (a.t === undefined || b.t === undefined) {
+        return a.t === b.t ? a.i - b.i : a.t === undefined ? 1 : -1;
+      }
+      return b.t - a.t || a.i - b.i;
+    })
+    .map((x) => x.row);
 }
 
 /** Which of the page's three states is showing. */
@@ -85,7 +152,10 @@ export const BURST_MIN = 3;
  * A file with no clock reading is never in a burst — nothing measured puts it
  * beside anything.
  */
-export function fileEntries(files: readonly LibraryRow[]): LibraryFileEntry[] {
+export function fileEntries(
+  files: readonly LibraryRow[],
+  sort: LibrarySort = 'modified',
+): LibraryFileEntry[] {
   const out: LibraryFileEntry[] = [];
   let run: LibraryRow[] = [];
   const flush = (): void => {
@@ -95,12 +165,14 @@ export function fileEntries(files: readonly LibraryRow[]): LibraryFileEntry[] {
   };
   for (const row of files) {
     const prev = run.at(-1);
-    if (row.at === undefined) {
+    const t = rowClock(row, sort);
+    if (t === undefined) {
       flush();
       out.push({ kind: 'file', row });
       continue;
     }
-    if (prev?.at !== undefined && prev.at - row.at > BURST_GAP_MS) flush();
+    const before = prev && rowClock(prev, sort);
+    if (before !== undefined && before - t > BURST_GAP_MS) flush();
     run.push(row);
   }
   flush();
@@ -131,12 +203,13 @@ export function burstLabel(entry: { rows: readonly LibraryRow[]; folder: string 
 }
 
 /**
- * "12m ago", "2h ago", "3d ago", "2w ago", "1mo ago", "2y ago" — the mock's
- * spelling, which runs past the board's `timeAgo` (days only) because a
- * library reaches back months. Floors rather than rounds, so a file changed
- * 13 days ago never reads "2w ago" before it is two weeks old.
+ * When a row happened, as its time column reads (Bryan, mock v2): under a week
+ * it is how long ago — "just now", "12m ago", "3h ago", "4d ago" — and from
+ * seven days on it is the date, "Sep 4", with the year only when it is not
+ * this one. Floors rather than rounds, so a file changed 6 days 23 hours ago
+ * still reads "6d ago".
  */
-export function libraryAgo(at: number, now: number): string {
+export function libraryWhen(at: number, now: number, fmt: LibraryFormat = {}): string {
   const s = Math.max(0, Math.floor((now - at) / 1000));
   if (s < 60) return 'just now';
   const m = Math.floor(s / 60);
@@ -144,69 +217,40 @@ export function libraryAgo(at: number, now: number): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
-  if (d < 14) return `${d}d ago`;
-  if (d < 30) return `${Math.floor(d / 7)}w ago`;
-  if (d < 365) return `${Math.floor(d / 30)}mo ago`;
-  return `${Math.floor(d / 365)}y ago`;
+  if (d < 7) return `${d}d ago`;
+  const zone = fmt.timeZone === undefined ? {} : { timeZone: fmt.timeZone };
+  const year = (t: number) =>
+    new Intl.DateTimeFormat('en-US', { year: 'numeric', ...zone }).format(new Date(t));
+  return new Intl.DateTimeFormat(fmt.locale, {
+    month: 'short',
+    day: 'numeric',
+    ...(year(at) === year(now) ? {} : { year: 'numeric' }),
+    ...zone,
+  }).format(new Date(at));
 }
 
-/**
- * What a row's time column reads when the server could not stat its file.
- * An em dash, not a guess: the doc is still openable, and the one thing the
- * page must not do is print a clock it did not measure.
- */
-export const LIBRARY_NO_TIME = '—';
-
-/** The row's age, or the em dash when there is no clock reading for it. */
-export function libraryWhenColumn(row: LibraryRow, now: number): string {
-  return row.at === undefined ? LIBRARY_NO_TIME : libraryAgo(row.at, now);
-}
-
-/** How the reader's own locale writes a moment. Overridable for tests. */
+/** How the reader's own locale writes a date. Overridable for tests. */
 export interface LibraryFormat {
   locale?: string;
   timeZone?: string;
 }
 
 /**
- * "Sep 11, 22:43" — the calendar moment, not how long ago.
- *
- * The reader's own locale and zone by default; a test passes both so the
- * string does not depend on where the runner sits.
+ * What a row's time column reads when there is no reading of its clock.
+ * An em dash, not a guess: the doc is still openable, and the one thing the
+ * page must not do is print a clock it did not measure.
  */
-export function libraryMoment(at: number, fmt: LibraryFormat = {}): string {
-  return new Intl.DateTimeFormat(fmt.locale, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    ...(fmt.timeZone === undefined ? {} : { timeZone: fmt.timeZone }),
-  }).format(new Date(at));
-}
+export const LIBRARY_NO_TIME = '—';
 
-/** "5 min", "47 min", "1 hr 12 min" — how long a recording ran. */
-export function libraryLength(durationMs: number): string {
-  const min = Math.max(1, Math.round(durationMs / 60_000));
-  if (min < 60) return `${min} min`;
-  const hr = Math.floor(min / 60);
-  const rest = min % 60;
-  return rest === 0 ? `${hr} hr` : `${hr} hr ${rest} min`;
-}
-
-/**
- * A meeting row's secondary text: "Sep 11, 22:43 · 5 min".
- *
- * Every meeting on a board is titled from the clock at the minute it opened,
- * so two held in the same minute — or two whose titles nobody changed — read
- * identically in a list. What actually separates them is when they ran and
- * for how long, which is what this says. Empty for a row with no start at
- * all, so nothing renders a bare separator.
- */
-export function meetingSubtitle(row: LibraryRow, fmt: LibraryFormat = {}): string {
-  if (row.at === undefined) return '';
-  const when = libraryMoment(row.at, fmt);
-  return row.durationMs === undefined ? when : `${when} · ${libraryLength(row.durationMs)}`;
+/** The row's reading of the list's clock, or the em dash when there is none. */
+export function libraryWhenColumn(
+  row: LibraryRow,
+  now: number,
+  sort: LibrarySort = 'modified',
+  fmt: LibraryFormat = {},
+): string {
+  const t = rowClock(row, sort);
+  return t === undefined ? LIBRARY_NO_TIME : libraryWhen(t, now, fmt);
 }
 
 /** One search hit, and which list it came from. */

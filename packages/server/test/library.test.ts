@@ -59,35 +59,42 @@ describe('buildLibrary', () => {
     // A plan huddle is a meeting too: "Make a plan" and "have a meeting" are
     // two ways into one conversation, and a person hunting for it presses
     // neither button again — they open the meetings list.
-    expect(lib.meetings.map((r) => [r.name, r.at])).toEqual([
-      ['Harborlight weekly sync', 9_000],
-      ['Saltmarsh plan', 1_000],
-      ['Trail map review', 1_000],
+    expect(lib.meetings.map((r) => r.name).sort()).toEqual([
+      'Harborlight weekly sync',
+      'Saltmarsh plan',
+      'Trail map review',
     ]);
     expect(lib.files.map((r) => r.name)).toEqual(['Volunteer handbook']);
-    expect(lib.meetings[0]?.href).toBe('/workspaces/w-test/docs/d-sync');
+    expect(lib.meetings.find((r) => r.name === 'Harborlight weekly sync')?.href).toBe(
+      '/workspaces/w-test/docs/d-sync',
+    );
   });
 
   /**
-   * Finding 3 of the Library fresh-eyes pass. Every meeting is titled from
-   * the clock at the minute it opened, so two in one minute read the same
-   * — the row has to carry what separates them.
+   * Both lists' clock column reads "Last Modified", with "Created" a sort
+   * away (Bryan, mock v2). A meeting's last change is its notes' file, then
+   * the doc's own activity, and only then when it started; created is when
+   * it started.
    */
-  it('gives a meeting row its length, so two of one title are told apart', () => {
-    const both = [
-      meta('d-am', { title: 'Meeting notes 2026-09-11 16:11' }),
-      meta('d-pm', { title: 'Meeting notes 2026-09-11 16:11' }),
-    ];
-    const held: Record<string, { startedAt: number; endedAt: number | null }> = {
-      'd-am': { startedAt: 9_000, endedAt: 9_000 + 47 * 60_000 },
-      // Still running: no end, so no length to claim.
-      'd-pm': { startedAt: 90_000, endedAt: null },
-    };
-    const lib = buildLibrary(sources({ docs: both, lastMeeting: (id) => held[id] }));
-    expect(lib.meetings.map((r) => [r.at, r.durationMs])).toEqual([
-      [90_000, undefined],
-      [9_000, 47 * 60_000],
+  it('times a meeting by its last change and dates its creation by its start', () => {
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-file', { title: 'Ferry schedule sync' }),
+          meta('d-active', { title: 'Dock survey sync', lastActivityAt: 70_000 }),
+          meta('d-bare', { title: 'Tide gauge sync' }),
+        ],
+        lastMeeting: (id) => ({ startedAt: id === 'd-bare' ? 30_000 : 10_000, endedAt: null }),
+        fileMtime: (id) => (id === 'd-file' ? 90_000 : undefined),
+      }),
+    );
+    expect(lib.meetings.map((r) => [r.name, r.at, r.created])).toEqual([
+      ['Ferry schedule sync', 90_000, 10_000],
+      ['Dock survey sync', 70_000, 10_000],
+      ['Tide gauge sync', 30_000, 30_000],
     ]);
+    // No meeting row carries a length any more: the row is a title and a time.
+    expect(lib.meetings.every((r) => !('durationMs' in r))).toBe(true);
   });
 
   /**

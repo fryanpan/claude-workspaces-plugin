@@ -8,9 +8,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibraryPayload, LibraryRow } from '../src/board/library-model.ts';
-import { type LibraryPage, createLibraryPage } from '../src/board/library-page.ts';
-import { fakeHistory, settle } from './boot-harness.ts';
+import { settle } from './boot-harness.ts';
 import { WS, bootTestBoard, click, el, resetBoardServer, server } from './support/board-drive.ts';
+import { type DriveOptions, driveLibrary } from './support/library-drive.ts';
 
 const NOW = 1_700_000_000_000;
 const HOUR = 3_600_000;
@@ -27,62 +27,12 @@ const PAYLOAD: LibraryPayload = {
   project: { name: 'riverbend', path: '~/dev/riverbend' },
   meetings: rows('Harborlight sync', 7),
   files: [
-    { name: 'Tide gauge notes', at: NOW - 60_000, open: 'docs/tide-gauge.md' },
+    { name: 'Tide gauge notes', at: NOW, open: 'docs/tide-gauge.md' },
     ...rows('Saltmarsh plan', 3),
   ],
 };
 
-interface Driven {
-  page: LibraryPage;
-  root: HTMLElement;
-  history: ReturnType<typeof fakeHistory>;
-  sent: { path: string; method: string; body: unknown }[];
-  navigated: string[];
-}
-
-function drive(
-  opts: {
-    payload?: LibraryPayload | null | (LibraryPayload | null)[];
-    openAnswer?: { ok: boolean; status: number; data: Record<string, unknown> | null };
-    requestedOpen?: string;
-  } = {},
-): Driven {
-  document.body.innerHTML = '<div id="board-library"></div>';
-  const root = document.getElementById('board-library') as HTMLElement;
-  const history = fakeHistory();
-  const sent: Driven['sent'] = [];
-  const navigated: string[] = [];
-  const page = createLibraryPage({
-    root,
-    workspaceId: WS,
-    boardName: () => 'Kitchen rebuild',
-    fetchJson: async <T>() => {
-      if (opts.payload === undefined) return PAYLOAD as T;
-      if (Array.isArray(opts.payload)) return (opts.payload.shift() ?? null) as T | null;
-      return opts.payload as T | null;
-    },
-    send: async (path, method, body) => {
-      sent.push({ path, method, body });
-      return (
-        opts.openAnswer ?? {
-          ok: true,
-          status: 200,
-          data: { docId: 'library-x', href: `/workspaces/${WS}/docs/library-x` },
-        }
-      );
-    },
-    navigate: (href) => navigated.push(href),
-    history,
-    here: () => `https://board.test/workspaces/${WS}/library`,
-    takeRequestedOpen: () => {
-      const wanted = opts.requestedOpen ?? null;
-      opts.requestedOpen = undefined;
-      return wanted;
-    },
-    now: () => NOW,
-  });
-  return { page, root, history, sent, navigated };
-}
+const drive = (opts: DriveOptions = {}) => driveLibrary(WS, PAYLOAD, NOW, opts);
 
 const names = (root: ParentNode) =>
   [...root.querySelectorAll('.library-name')].map((n) => n.textContent);
@@ -228,31 +178,17 @@ describe('the Library front page', () => {
   });
 
   /**
-   * Two meetings of one title is the ordinary case, not a corner: every
-   * huddle is named from the clock at the minute it opened. The page has to
-   * separate them where the reader is — in the row.
+   * A meeting row is its title and one time on the right, like a file row
+   * (Bryan, mock v2): no second date label and no duration.
    */
-  it('separates two meetings of the same title, and leaves file rows alone', async () => {
-    const twins: LibraryPayload = {
-      project: { name: 'riverbend', path: '~/dev/riverbend' },
-      meetings: [
-        { name: 'Meeting notes', at: NOW, durationMs: 5 * 60_000, href: '/m/1' },
-        { name: 'Meeting notes', at: NOW - 26 * HOUR, durationMs: 47 * 60_000, href: '/m/2' },
-      ],
-      files: [{ name: 'handbook.md', at: NOW - HOUR, href: '/f/1' }],
-    };
-    const { page, root } = drive({ payload: twins });
+  it('gives a meeting row no second label, only its time on the right', async () => {
+    const { page, root } = drive();
     await page.open();
-    const [meetings, files] = [...root.querySelectorAll('.library-tbl')];
-    const subs = [...(meetings as Element).querySelectorAll('.library-sub')].map(
-      (n) => n.textContent,
-    );
-    expect(subs).toHaveLength(2);
-    expect(subs[0]).not.toBe(subs[1]);
-    expect(subs[0]).toContain('5 min');
-    expect(subs[1]).toContain('47 min');
-    // No second label on a file: its name already identifies it.
-    expect((files as Element).querySelectorAll('.library-sub')).toHaveLength(0);
+    const meetings = root.querySelectorAll('.library-tbl')[0] as Element;
+    expect(meetings.querySelectorAll('.library-sub')).toHaveLength(0);
+    const row = meetings.querySelector('.library-row') as HTMLElement;
+    expect([...row.children].map((c) => c.className)).toEqual(['library-main', 'library-when']);
+    expect(row.querySelector('.library-main')?.textContent).toBe('Harborlight sync 1');
   });
 
   it('says so, rather than guessing, for a file with no readable clock', async () => {
@@ -264,18 +200,6 @@ describe('the Library front page', () => {
     const { page, root } = drive({ payload: noClock });
     await page.open();
     expect(root.querySelector('.library-when')?.textContent).toBe('—');
-  });
-
-  it('names the clock in the header of each column', async () => {
-    const { page, root } = drive();
-    await page.open();
-    const headers = [...root.querySelectorAll('.library-cols')].map((h) =>
-      [...h.children].map((c) => c.textContent),
-    );
-    expect(headers).toEqual([
-      ['Title', 'Held'],
-      ['Name', 'File modified'],
-    ]);
   });
 
   it('opens a full list, with its own history entry and a way back', async () => {

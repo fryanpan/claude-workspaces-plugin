@@ -268,7 +268,9 @@ describe('library routes', () => {
     expect(mounted.status).toBe(200);
 
     const lib = await items();
-    expect(lib.files.some((f) => f.open === 'notes/survey.md')).toBe(true);
+    const listed = lib.files.find((f) => f.open === 'notes/survey.md');
+    // Its Created is read in the side checkout too: the main one has no such file.
+    expect(listed?.created).toBeGreaterThan(0);
     // Positive control on the same server: the main checkout's own file opens.
     expect((await open('docs/tide-gauge.md')).status).toBe(200);
 

@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { statSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeDocKey, parseDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
 import {
   type LibrarySources,
   type ProjectFile,
+  birthOf,
   buildLibrary,
   createMarkdownLister,
   openableFiles,
+  projectName,
   projectRepoKey,
 } from '../library.ts';
 import { listMeetings } from '../meetings.ts';
@@ -112,11 +114,20 @@ function sourcesFor(
   const ids = new Set(scope.board.docIds);
   const docs = docStore.list().filter((m) => ids.has(m.docId));
   const boundPaths = new Map(docs.map((m) => [m.docId, m.sourceUrl]));
+  // One stat per bound doc per load, shared by both of its clocks.
+  const stats = new Map<string, { mtimeMs: number; birthtimeMs: number } | undefined>();
+  const statOf = (docId: string) => {
+    if (stats.has(docId)) return stats.get(docId);
+    const st = statBound(boundPaths.get(docId));
+    stats.set(docId, st);
+    return st;
+  };
   // A local-only project's files must not leave the machine, and their NAMES
   // are the first thing that would: off the box, such a project lists only
   // the docs already filed on the board, exactly as `/mounts/<id>` refuses
   // its bytes.
   const hidden = (repoKey: string): boolean => mounts.privacyOf(repoKey) === 'local-only' && !onBox;
+  const projectKey = projectRepoKey(docs, (docId) => docStore.repos.primaryKeyFor(docId));
   return {
     workspaceId: scope.workspaceId,
     docs,
@@ -132,31 +143,73 @@ function sourcesFor(
     },
     // Read off the metas already in hand, never `docStore.get`: hydrating
     // every doc on the board to draw a list of them is the wrong price for a
-    // page view. `statSync` never materializes a cloud-synced file, so an
-    // online-only file costs a syscall rather than a download — the same
-    // reason `createMarkdownLister` stats instead of reading.
-    fileMtime: (docId) => {
-      const path = boundPaths.get(docId);
-      if (path === undefined || !path.startsWith('/')) return undefined;
-      try {
-        // `throwIfNoEntry` covers only ENOENT. A path whose parent turned into
-        // a file (ENOTDIR), one a permission change put out of reach (EACCES),
-        // a symlink loop — each still throws, and an unreadable file is the
-        // ordinary reason a row has no time to show. Failing the whole page
-        // over one of them would blank the Library instead.
-        const st = statSync(path, { throwIfNoEntry: false });
-        return st?.isFile() ? st.mtimeMs : undefined;
-      } catch {
-        return undefined;
-      }
-    },
+    // page view.
+    fileMtime: (docId) => statOf(docId)?.mtimeMs,
+    fileBirth: (docId) => birthOf(statOf(docId) ?? { birthtimeMs: 0 }).createdMs,
     projectRoot: (repoKey) => (hidden(repoKey) ? null : mounts.rootFor(repoKey)),
     markdownFiles: ctx.markdownFiles,
-    mountedFiles: (repoKey) =>
-      mounts
-        .listFiles(repoKey, { limit: MAX_MOUNTED_FILES })
-        .files.map((f) => ({ fileId: f.fileId, relPath: f.relPath, mtimeMs: f.mtimeMs })),
+    mountedFiles: (repoKey) => {
+      // Each file's birth time is read in the checkout its MOUNT was made
+      // from, which may be a worktree the project root is not.
+      const roots = new Map<string, string | null>();
+      const rootOf = (mountId: string): string | null => {
+        if (!roots.has(mountId)) {
+          const mount = mounts.registry.mountById(repoKey, mountId);
+          roots.set(mountId, mount ? mounts.checkoutRootOf(repoKey, mount) : null);
+        }
+        return roots.get(mountId) ?? null;
+      };
+      return mounts.listFiles(repoKey, { limit: MAX_MOUNTED_FILES }).files.map((f) => {
+        const root = rootOf(f.mountId);
+        const st = root ? statBound(join(root, f.relPath)) : undefined;
+        const born = st ? birthOf(st) : {};
+        return { fileId: f.fileId, relPath: f.relPath, mtimeMs: f.mtimeMs, ...born };
+      });
+    },
+    // Where each doc lives. Folders are repo-relative and storage is a
+    // phrase; the data dir is only compared against, never named.
+    placing: {
+      storageRoots: storageRootsOf(dataDir),
+      meetingsFolder: projectKey ? mounts.meetingsOf(projectKey)?.relPath : undefined,
+      mountFolders: projectKey ? mounts.registry.liveMounts(projectKey).map((m) => m.relPath) : [],
+      projectNameOf: (repoKey) => {
+        if (hidden(repoKey)) return null;
+        const root = mounts.rootFor(repoKey);
+        return root ? projectName(repoKey, root) : null;
+      },
+    },
   };
+}
+
+/**
+ * A bound path's stat, or undefined when there is no file there to read.
+ *
+ * `throwIfNoEntry` covers only ENOENT. A path whose parent turned into a file
+ * (ENOTDIR), one a permission change put out of reach (EACCES), a symlink
+ * loop — each still throws, and an unreadable file is the ordinary reason a
+ * row has no time to show. Failing the whole page over one of them would
+ * blank the Library instead. `statSync` never materializes a cloud-synced
+ * file, so an online-only file costs a syscall rather than a download.
+ */
+function statBound(path: string | undefined): { mtimeMs: number; birthtimeMs: number } | undefined {
+  if (path === undefined || !path.startsWith('/')) return undefined;
+  try {
+    const st = statSync(path, { throwIfNoEntry: false });
+    return st?.isFile() ? { mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The data dir as given and as the filesystem resolves it — a bound path may
+ *  carry either spelling (`/var` against `/private/var` on macOS). */
+function storageRootsOf(dataDir: string): string[] {
+  try {
+    const real = realpathSync(dataDir);
+    return real === dataDir ? [dataDir] : [dataDir, real];
+  } catch {
+    return [dataDir];
+  }
 }
 
 /**
