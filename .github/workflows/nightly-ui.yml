@@ -97,8 +97,12 @@ jobs:
       # somebody can read; seven issues is a mailbox somebody mutes. Green
       # closes it, so the issue list answers "is the UI currently healthy"
       # without opening a workflow run.
+      #
+      # Both steps are main-only. The issue answers "is main healthy", and a
+      # `workflow_dispatch` on a branch — how a fix to this job gets proven
+      # before it merges — says nothing about main either way.
       - name: Open or update the failure issue
-        if: ${{ failure() && steps.checks.conclusion == 'failure' }}
+        if: ${{ failure() && steps.checks.conclusion == 'failure' && github.ref == 'refs/heads/main' }}
         uses: actions/github-script@v7
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -144,8 +148,10 @@ jobs:
             core.notice(`Opened issue #${created.data.number}.`);
 
       - name: Close the failure issue when the run is clean
-        if: ${{ success() }}
+        if: ${{ success() && github.ref == 'refs/heads/main' }}
         uses: actions/github-script@v7
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -155,7 +161,7 @@ jobs:
             for (const issue of open.data) {
               await github.rest.issues.createComment({
                 owner, repo, issue_number: issue.number,
-                body: `The nightly browser checks passed on \`${context.sha.slice(0, 8)}\`. Closing.`,
+                body: `The nightly browser checks passed on \`${context.sha.slice(0, 8)}\`. Closing.\n\nRun: ${process.env.RUN_URL}`,
               });
               await github.rest.issues.update({
                 owner, repo, issue_number: issue.number, state: 'closed',
