@@ -1,5 +1,6 @@
 import type { HuddleKind } from '@claude-workspaces/core';
 import { docJsonUrl } from './doc-path.ts';
+import { rememberDocRecord } from './doc/doc-record.ts';
 import type { DocMeta } from './mount-context.ts';
 
 /**
@@ -25,7 +26,8 @@ export async function fetchDocMeta(docId: string): Promise<DocMeta> {
     diffTarget: '',
   };
   try {
-    const res = await fetch(docJsonUrl(docId));
+    const url = docJsonUrl(docId);
+    const res = await fetch(url);
     if (!res.ok) return fallback;
     const data = (await res.json()) as {
       meta?: {
@@ -43,6 +45,9 @@ export async function fetchDocMeta(docId: string): Promise<DocMeta> {
       // board that holds it. The server resolves one from the other.
       backTo?: { workspaceId?: string; name?: string };
     };
+    // The floats read this same record as they mount; handing them this
+    // answer is what keeps a doc open to one read (doc/doc-record.ts).
+    rememberDocRecord(url, data);
     const t = data.meta?.type;
     const backId = data.backTo?.workspaceId;
     return {

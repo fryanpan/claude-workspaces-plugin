@@ -368,6 +368,7 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
       user,
       canWrite,
       scope,
+      whenSynced: (cb) => client.onReady(cb),
       ...(meeting?.watchLeadPresence ? { watchLeadPresence: meeting.watchLeadPresence } : {}),
     });
   }

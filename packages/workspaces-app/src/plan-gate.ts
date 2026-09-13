@@ -38,6 +38,7 @@
 
 import type { LeadPresence, User } from '@claude-workspaces/core';
 import { api, docJsonUrl } from './doc-path.ts';
+import type { DocRecordReader } from './doc/doc-record.ts';
 import { floatDock } from './float-dock.ts';
 import { leadReceiptSuffix } from './lead-banner.ts';
 
@@ -59,6 +60,9 @@ export interface PlanGateOpts {
   canWrite: boolean;
   /** Injected so a test drives this without a server or an EventSource. */
   fetchJson?: (url: string, init?: RequestInit) => Promise<unknown>;
+  /** The doc record, shared with the Review float and seeded by the router's
+   *  read (`doc/doc-record.ts`). Absent, every load reads through `fetchJson`. */
+  record?: Pick<DocRecordReader, 'read' | 'invalidate'>;
   subscribe?: (workspaceId: string, onTaskEvent: () => void) => () => void;
   /**
    * Watch the doc's own metadata for a change, and re-read when one lands.
@@ -155,6 +159,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
   const docPostBase = api(`docs/${encodeURIComponent(docId)}`);
   // The RECORD. Same path, and only the query asks for data.
   const docReadUrl = docJsonUrl(docId);
+  const record = opts.record ?? { read: () => fetchJson(docReadUrl), invalidate: () => {} };
 
   const float = document.createElement('button');
   float.type = 'button';
@@ -269,16 +274,19 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
         streams.set(
           wsId,
           subscribe(wsId, () => {
-            if (!disposed) void load();
+            if (!disposed) void load({ fresh: true });
           }),
         );
       }
     }
   }
 
-  async function load(): Promise<void> {
+  /** `fresh` when something the synced meta map does not describe moved — a
+   *  press here, a task event on a board — so a shared answer would be old. */
+  async function load({ fresh = false }: { fresh?: boolean } = {}): Promise<void> {
+    if (fresh) record.invalidate();
     try {
-      const body = (await fetchJson(docReadUrl)) as DocAnswer;
+      const body = (await record.read()) as DocAnswer;
       if (disposed) return;
       state = body.meta?.planState;
       kind = body.meta?.huddleKind;
@@ -306,7 +314,7 @@ export function mountPlanGate(opts: PlanGateOpts): PlanGateHandle {
     busy = true;
     render();
     void run()
-      .then(() => load())
+      .then(() => load({ fresh: true }))
       .catch((err: Error) => {
         error.textContent = err.message;
         error.hidden = false;

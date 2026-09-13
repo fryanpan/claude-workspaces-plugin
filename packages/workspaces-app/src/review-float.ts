@@ -31,6 +31,7 @@
 
 import type { LeadPresence, User } from '@claude-workspaces/core';
 import { api, docJsonUrl } from './doc-path.ts';
+import type { DocRecordReader } from './doc/doc-record.ts';
 import { floatDock } from './float-dock.ts';
 import { leadReceiptSuffix } from './lead-banner.ts';
 
@@ -46,6 +47,8 @@ export interface ReviewFloatOpts {
   canWrite: boolean;
   /** Injected so a test drives this without a server. */
   fetchJson?: (url: string, init?: RequestInit) => Promise<unknown>;
+  /** The doc record, shared with the plan gate — see `PlanGateOpts.record`. */
+  record?: Pick<DocRecordReader, 'read' | 'invalidate'>;
   /** The doc's own metadata — the stamp lands there, so another tab's
    *  press flips this one to the receipt. Re-reads on any change. */
   watchDocMeta?: (onChange: () => void) => () => void;
@@ -111,6 +114,7 @@ export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
   const docPostBase = api(`docs/${encodeURIComponent(docId)}`);
   // The RECORD. Same path, and only the query asks for data.
   const docReadUrl = docJsonUrl(docId);
+  const record = opts.record ?? { read: () => fetchJson(docReadUrl), invalidate: () => {} };
 
   const float = document.createElement('button');
   float.type = 'button';
@@ -180,9 +184,11 @@ export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
     if (face !== 'ask') error.hidden = true;
   }
 
-  async function load(): Promise<void> {
+  /** `fresh` after a press here, whose answer the shared record predates. */
+  async function load({ fresh = false }: { fresh?: boolean } = {}): Promise<void> {
+    if (fresh) record.invalidate();
     try {
-      const body = (await fetchJson(docReadUrl)) as DocAnswer;
+      const body = (await record.read()) as DocAnswer;
       if (disposed) return;
       huddle = body.meta?.huddle === true;
       requestedAt = body.meta?.reviewRequestedAt;
@@ -207,7 +213,7 @@ export function mountReviewFloat(opts: ReviewFloatOpts): ReviewFloatHandle {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ author: user }),
     })
-      .then(() => load())
+      .then(() => load({ fresh: true }))
       .catch((err: Error) => {
         error.textContent = err.message;
         error.hidden = false;
