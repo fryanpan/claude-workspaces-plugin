@@ -1928,7 +1928,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'unarchive_task',
       description:
-        'Put an archived task back. It rejoins its band at the position, status and owner it had. Find archived tasks with list_tasks(includeArchived: true). A task that was not archived answers changed: false rather than erroring.',
+        'Put an archived task back, or an archived goal with its tasks. A task rejoins its band at the position, status and owner it had. Find archived tasks with list_tasks(includeArchived: true). A goal comes back with the tasks that its archive removed, and each task keeps its status. A task that was archived before the goal stays archived. get_workspace shows an archived goal with archivedAt. Pass taskId or goalId, not both. A task or goal that was not archived answers changed: false and does not cause an error.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1937,9 +1937,14 @@ export const TOOL_LIST: ListToolsResult = {
             description:
               'The board this resource is on. get_workspace lists the boards you are attached to.',
           },
-          taskId: { type: 'string' },
+          taskId: { type: 'string', description: 'The archived task to restore.' },
+          goalId: {
+            type: 'string',
+            description:
+              'The archived goal to restore. The answer gives restoredTaskIds: the ids of the tasks that came back.',
+          },
         },
-        required: ['workspaceId', 'taskId'],
+        required: ['workspaceId'],
       },
     },
     {

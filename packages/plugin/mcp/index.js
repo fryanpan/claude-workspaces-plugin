@@ -16823,7 +16823,7 @@ var TOOL_LIST = {
     },
     {
       name: "unarchive_task",
-      description: "Put an archived task back. It rejoins its band at the position, status and owner it had. Find archived tasks with list_tasks(includeArchived: true). A task that was not archived answers changed: false rather than erroring.",
+      description: "Put an archived task back, or an archived goal with its tasks. A task rejoins its band at the position, status and owner it had. Find archived tasks with list_tasks(includeArchived: true). A goal comes back with the tasks that its archive removed, and each task keeps its status. A task that was archived before the goal stays archived. get_workspace shows an archived goal with archivedAt. Pass taskId or goalId, not both. A task or goal that was not archived answers changed: false and does not cause an error.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16831,9 +16831,13 @@ var TOOL_LIST = {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
-          taskId: { type: "string" }
+          taskId: { type: "string", description: "The archived task to restore." },
+          goalId: {
+            type: "string",
+            description: "The archived goal to restore. The answer gives restoredTaskIds: the ids of the tasks that came back."
+          }
         },
-        required: ["workspaceId", "taskId"]
+        required: ["workspaceId"]
       }
     },
     {
@@ -18644,7 +18648,24 @@ async function handleTaskTool(name, a, ctx) {
       });
     }
     case "unarchive_task": {
-      const { taskId } = a;
+      const { taskId, goalId } = a;
+      if (taskId !== undefined && goalId !== undefined) {
+        return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
+      }
+      if (goalId !== undefined) {
+        const res2 = await http("POST", `${board()}/goals/${encodeURIComponent(goalId)}/restore`, {
+          author: AUTHOR
+        });
+        return ok2({
+          goalId,
+          title: res2.goal.title,
+          restoredTaskIds: res2.taskIds,
+          changed: res2.changed
+        });
+      }
+      if (taskId === undefined) {
+        return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
+      }
       const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/restore`, {
         author: AUTHOR
       });
@@ -19746,7 +19767,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.226";
+var PLUGIN_VERSION = "0.1.227";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
