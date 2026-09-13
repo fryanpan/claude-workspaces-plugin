@@ -71,7 +71,6 @@ export interface VoiceSessionDeps {
   anchorFor: (target: number | null) => Anchor;
   /** Anything worth redrawing changed. */
   onChange: () => void;
-  onLevel?: (level: number) => void;
   /** A write was refused; the words to show, or null to say nothing. */
   refusedNote?: () => string | null;
   timers?: { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
@@ -148,7 +147,6 @@ export class VoiceSession {
     ws.onclose = () => this.closed();
     const started = await this.deps.startCapture({
       onFrame: (pcm) => this.frame(pcm),
-      ...(this.deps.onLevel ? { onLevel: this.deps.onLevel } : {}),
       ...(context ? { context } : {}),
     });
     if (!started.ok) {

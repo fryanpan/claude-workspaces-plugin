@@ -1,19 +1,19 @@
 import { escapeHtml as escape } from '@claude-workspaces/core';
-import { isPhoneFace, pinX } from '../widget-card.ts';
+import { isPhoneFace } from '../widget-card.ts';
 import type { VoiceComment, VoiceSession } from './voice-session.ts';
 
 /**
  * What a recording looks like on the page — the round-4 design the owner
  * approved ("Build it").
  *
- * - ONE thing moves: the live comment, which carries the recording dot and
- *   bars. The mic is a still red Stop button with no timer.
+ * - Nothing pulses or blinks (calm by default, owner 2026-09-13): the live
+ *   comment carries a steady red recording dot, and the mic is a still red
+ *   Stop button with no timer.
  * - The live comment shows the tidied words on top, growing, and two lines of
  *   raw transcript below.
  * - It floats above the buttons until the transcriber picks an element, then
  *   stands beside it. Move, then a tap on the element, fixes a wrong pick.
- * - No "Posted" label: a comment that settles turns its dashed edge solid, and
- *   its pin pulses once.
+ * - No "Posted" label: a comment that settles turns its dashed edge solid.
  * - Every voice comment keeps its clip (▶) and its raw words at its foot.
  *
  * Drawn from the session's state every time it changes; placed every frame
@@ -33,11 +33,7 @@ export const VOICE_CSS = [
   '.vlive{border:1.5px dashed #2e7dd7;overflow:hidden}',
   '.vlive.float{right:16px;bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + 132px)}',
   '.vhead{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #eef1f4;font:600 12px/1.2 system-ui,sans-serif;color:#6e7781}',
-  '.vdot{flex:none;width:9px;height:9px;border-radius:50%;background:#d1242f;animation:cw-vpulse 1.6s ease-out infinite}',
-  '@keyframes cw-vpulse{0%{box-shadow:0 0 0 0 rgba(209,36,47,.35)}80%,100%{box-shadow:0 0 0 8px rgba(209,36,47,0)}}',
-  '.vbars{display:flex;gap:2px;align-items:center;height:12px}',
-  '.vbars i{width:2.5px;height:calc(3px + 9px * var(--lv,0));border-radius:2px;background:#d1242f;transition:height 90ms linear}',
-  '.vbars i:nth-child(2),.vbars i:nth-child(4){height:calc(3px + 6px * var(--lv,0))}',
+  '.vdot{flex:none;width:9px;height:9px;border-radius:50%;background:#d1242f}',
   '.vwhere{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1b1f23}',
   '.vwhere.seeking{color:#6e7781;font-weight:500;font-style:italic}',
   '.vlive.picking .vwhere{color:#2e7dd7}',
@@ -48,8 +44,7 @@ export const VOICE_CSS = [
   '.vpol{padding:9px 12px 2px;overflow-wrap:anywhere}',
   '.vpol:empty::before{content:"Say your feedback.";color:#a3acb5}',
   '.vraw{display:flex;flex-direction:column;justify-content:flex-end;padding:0 12px;margin:4px 0 10px;max-height:2.9em;overflow:hidden;font-size:12px;color:#8a939c;overflow-wrap:anywhere}',
-  '.vcard{border:1px solid #d5dce4;padding:10px 12px;animation:cw-vsettle .5s ease-out}',
-  '@keyframes cw-vsettle{from{border-color:#2e7dd7;border-style:dashed}}',
+  '.vcard{border:1px solid #d5dce4;padding:10px 12px}',
   '.vcard.undone .vtext{text-decoration:line-through;color:#8a939c}',
   '.vby{font:600 11px/1.2 system-ui,sans-serif;color:#6e7781;margin-bottom:6px}',
   '.vtext{overflow-wrap:anywhere}',
@@ -65,12 +60,9 @@ export const VOICE_CSS = [
   '.vlead{position:fixed;inset:0;pointer-events:none;z-index:2147483646}',
   '.vlead svg{width:100%;height:100%}',
   '.vlead line{stroke:#9fb9d8;stroke-width:1.2;stroke-dasharray:3 3}',
-  '.vring{position:fixed;width:24px;height:24px;margin:-24px 0 0 -12px;border-radius:50%;pointer-events:none;z-index:2147483647;animation:cw-vring 1.4s ease-out 1 forwards}',
-  '@keyframes cw-vring{0%{box-shadow:0 0 0 0 rgba(45,138,78,.6)}100%{box-shadow:0 0 0 12px rgba(45,138,78,0)}}',
   '.vhl{position:fixed;border:2px dashed #2e7dd7;border-radius:6px;background:rgba(46,125,215,.1);pointer-events:none;z-index:2147483646}',
   // The mic is a still Stop button while recording: no animation of its own.
   '.fab-mic.voice-active .vstop{display:block;width:14px;height:14px;border-radius:3px;background:#fff}',
-  '@media (prefers-reduced-motion:reduce){.vdot,.vcard,.vring{animation:none}}',
   '@media (max-width:1100px){.vlive,.vcard{width:auto;left:12px;right:12px}}',
 ].join('');
 
@@ -119,7 +111,7 @@ export class VoiceView {
     this.live.hidden = true;
     this.live.setAttribute('aria-live', 'polite');
     this.live.innerHTML =
-      '<div class="vhead"><span class="vdot"></span><span class="vbars"><i></i><i></i><i></i><i></i></span>' +
+      '<div class="vhead"><span class="vdot"></span>' +
       '<span class="vwhere"></span><button class="vmove" type="button">Move</button></div>' +
       '<div class="vpol"></div><div class="vraw"><span></span></div>';
     this.lead = document.createElement('div');
@@ -167,10 +159,6 @@ export class VoiceView {
     this.lead.innerHTML = '';
   }
 
-  level(l: number): void {
-    this.live.style.setProperty('--lv', l.toFixed(2));
-  }
-
   render(): void {
     const s = this.deps.session;
     const recording = s.state !== 'idle';
@@ -210,7 +198,6 @@ export class VoiceView {
     // away: the comment is its pin now, and a render comes with every word.
     if (!c.final || this.settled.has(c.key)) return;
     this.settled.add(c.key);
-    this.pulse(c.target);
     const el = document.createElement('div');
     el.className = 'vcard';
     el.dataset.key = c.key;
@@ -304,19 +291,6 @@ export class VoiceView {
     this.audio?.pause();
     this.audio = new Audio(this.deps.clipUrl(clip));
     void this.audio.play().catch(() => {});
-  }
-
-  /** One soft pulse where the comment's pin stands. */
-  private pulse(target: number | null): void {
-    const t = this.deps.element(target);
-    if (!t) return;
-    const r = t.getBoundingClientRect();
-    const ring = document.createElement('div');
-    ring.className = 'vring';
-    ring.style.left = `${pinX(t, r)}px`;
-    ring.style.top = `${r.top + 6 + 12}px`;
-    this.deps.shadow.append(ring);
-    setTimeout(() => ring.remove(), 1500);
   }
 
   private schedule(): void {

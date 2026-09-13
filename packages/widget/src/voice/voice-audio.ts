@@ -26,8 +26,6 @@ export type PcmCaptureStart = { ok: true; capture: PcmCapture } | { ok: false; m
 
 export interface PcmCaptureOpts {
   onFrame: (pcm: Int16Array) => void;
-  /** Loudness of each frame, 0..1. */
-  onLevel?: (level: number) => void;
   /** Made inside the tap that asked for it — see `createAudioPump`. */
   context?: AudioContext;
   getMedia?: (c: MediaStreamConstraints) => Promise<MediaStream>;
@@ -42,14 +40,6 @@ export function micRefusal(err: unknown): string {
   }
   if (name === 'NotFoundError') return 'No microphone was found.';
   return 'The microphone could not be opened.';
-}
-
-/** RMS of a frame, scaled so ordinary speech reads near the top. */
-export function frameLevel(pcm: Int16Array): number {
-  let sum = 0;
-  for (const s of pcm) sum += s * s;
-  const rms = Math.sqrt(sum / Math.max(1, pcm.length)) / 32768;
-  return Math.min(1, rms * 6);
 }
 
 export async function startPcmCapture(opts: PcmCaptureOpts): Promise<PcmCaptureStart> {
@@ -88,7 +78,6 @@ export async function startPcmCapture(opts: PcmCaptureOpts): Promise<PcmCaptureS
     const step = chunkPcm16(pending, floatToPcm16(resample(block)), MEETING_FRAME_SAMPLES);
     pending = step.rest;
     for (const frame of step.frames) {
-      opts.onLevel?.(frameLevel(frame));
       opts.onFrame(frame);
     }
   };

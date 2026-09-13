@@ -1,6 +1,6 @@
 import type { AudioPump } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { frameLevel, micRefusal, startPcmCapture } from '../src/voice/voice-audio.ts';
+import { micRefusal, startPcmCapture } from '../src/voice/voice-audio.ts';
 
 /**
  * The microphone as frames. There is no audio hardware here, so the media
@@ -36,16 +36,6 @@ const secure = (value: boolean) =>
 beforeEach(() => secure(true));
 afterEach(() => secure(false));
 
-describe('frameLevel', () => {
-  it('reads silence as zero and a loud frame as full', () => {
-    expect(frameLevel(new Int16Array(800))).toBe(0);
-    expect(frameLevel(new Int16Array(800).fill(32767))).toBe(1);
-    const quiet = frameLevel(new Int16Array(800).fill(1000));
-    expect(quiet).toBeGreaterThan(0);
-    expect(quiet).toBeLessThan(1);
-  });
-});
-
 describe('micRefusal', () => {
   it('tells a blocked microphone from a missing one', () => {
     expect(micRefusal({ name: 'NotAllowedError' })).toMatch(/blocked/);
@@ -64,14 +54,12 @@ describe('startPcmCapture', () => {
     });
   });
 
-  it('turns blocks from the pump into whole frames, each with its level', async () => {
+  it('turns blocks from the pump into whole frames', async () => {
     const { stream, track } = fakeStream();
     const pump = fakePump();
     const frames: Int16Array[] = [];
-    const levels: number[] = [];
     const started = await startPcmCapture({
       onFrame: (f) => frames.push(f),
-      onLevel: (l) => levels.push(l),
       getMedia: async () => stream,
       createPump: async () => pump,
     });
@@ -82,7 +70,6 @@ describe('startPcmCapture', () => {
     pump.onBlock?.(new Float32Array(600).fill(0.5));
     expect(frames).toHaveLength(1);
     expect(frames[0]).toHaveLength(800);
-    expect(levels).toHaveLength(1);
 
     if (started.ok) started.capture.stop();
     expect(pump.stops).toBe(1);

@@ -70,7 +70,6 @@ export const MIC_CSS = [
   '.fab-list.side::before{content:"";position:absolute;inset:7px 0;border-radius:99px;background:#fff;border:1px solid #d5dce4;box-shadow:0 3px 10px rgba(18,38,63,.12);z-index:-1}',
   '.fab-list.side:hover::before{border-color:#2e7dd7}',
   '.fab-list.side svg{width:14px;height:14px}',
-  '.fab-list.side .count{position:static;min-width:0;height:auto;padding:0;background:none;color:inherit;font-size:12px}',
   '.fab-list.side[data-tip]:hover::after{right:0;top:auto;bottom:calc(100% + 4px);transform:none}',
   // It folds away while either button's label shows, and while recording.
   '.fab-list.side:has(~.fab:hover),.fab-list.side:has(~.fab-mic:hover),.fab-list.side:has(~.fab-mic.voice-active){display:none}',
