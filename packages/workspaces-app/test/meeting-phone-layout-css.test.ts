@@ -24,6 +24,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-harness.ts';
 
+const token = (name: string) => styleOf(document.documentElement).getPropertyValue(name);
+
 let removeSheets = () => {};
 beforeEach(() => {
   removeSheets = installSheets('tokens.css', 'styles.css', 'doc.css');
@@ -136,24 +138,19 @@ describe('no status bar under the recording bar (rule 2)', () => {
     expect(styleOf(strip).display).toBe('flex');
   });
 
-  it('the indicator that is left blinks: the Record button’s dot, top right', () => {
-    setViewport(PHONE);
-    const record = attach('meeting-record is-live', { tag: 'button' });
-    const dot = attach('meeting-record-dot', { tag: 'span', parent: record });
-    // happy-dom does not expand the `animation` shorthand into
-    // `animation-name`, so the shorthand is what there is to read.
-    expect(styleOf(dot).animation).toContain('meeting-blink');
-  });
-
-  it('control — on an iPad the strip’s own blinker is still the blinking one', () => {
-    setViewport(IPAD);
-    const record = attach('meeting-record is-live', { tag: 'button' });
-    const dot = attach('meeting-record-dot', { tag: 'span', parent: record });
-    const blinker = attach('meeting-blinker', { tag: 'span' });
-    expect(styleOf(dot).animation).not.toContain('meeting-blink');
-    // The positive control: the sheet IS reaching this document, and the
-    // strip's own blinker is still the thing that blinks at this width.
-    expect(styleOf(blinker).animation).toContain('meeting-blink');
+  it('the indicator that is left is steady at both widths: nothing blinks', () => {
+    for (const size of [PHONE, IPAD]) {
+      setViewport(size);
+      const record = attach('meeting-record is-live', { tag: 'button' });
+      const dot = attach('meeting-record-dot', { tag: 'span', parent: record });
+      const blinker = attach('meeting-blinker', { tag: 'span' });
+      // happy-dom does not expand the `animation` shorthand into
+      // `animation-name`, so the shorthand is what there is to read.
+      expect(styleOf(dot).animation).toBe('');
+      expect(styleOf(blinker).animation).toBe('');
+      // Positive control: the sheet IS reaching this document.
+      expect(styleOf(blinker).background).toBe(token('--red'));
+    }
   });
 });
 

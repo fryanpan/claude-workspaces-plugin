@@ -280,16 +280,16 @@ describe('a recording with no audio leaving the page', () => {
   });
 });
 
-describe('the Recording dot is the level meter', () => {
-  it('follows the loudness of each frame', async () => {
+describe('the Recording dot is steady', () => {
+  it('does not change with the loudness of each frame', async () => {
     const h = mountStrip();
     h.record().click();
     await settle();
     h.goLive();
     const dot = h.root.querySelector('.meeting-record-dot') as HTMLElement;
     h.frame();
-    expect(dot.style.getPropertyValue('--mic-level')).toBe('0.00');
+    const quiet = dot.getAttribute('style');
     h.loud();
-    expect(Number(dot.style.getPropertyValue('--mic-level'))).toBeGreaterThan(0.5);
+    expect(dot.getAttribute('style')).toBe(quiet);
   });
 });
