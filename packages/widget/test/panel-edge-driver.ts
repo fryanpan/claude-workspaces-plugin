@@ -9,14 +9,18 @@
  * with a cleanup that must run even when a case throws.
  *
  * The page is the shape of the checkout mock the bug was seen on: a top bar
- * that does not wrap, so at phone width the page runs off the right edge. A
+ * that does not wrap, so at phone width the page runs off the right edge.
+ * Here the bar is a block of a fixed 640px, so how far the page runs past
+ * the screen depends on no font the machine happens to have. A
  * mobile browser then lays `position: fixed` out against the whole width of
  * the page rather than the screen, and `window.innerWidth` reports that width
  * too — so anything placed from the right, or clamped to `innerWidth`, stands
  * partly past the screen's edge. Neither happens on a page that fits, which
  * is why the other layout drivers never saw it. A pan sideways moves the
  * screen across that width while fixed boxes stay put, so the second look
- * is taken after a real touch pan.
+ * is taken after one. The pan is a wheel: on CI's Chrome a synthesized
+ * touch scroll gesture left the screen where it was, while the wheel is what
+ * `comment-layout-driver.ts` already pans with there.
  *
  * audit: no-text — nothing here reads a source file, a bundle or a
  * stylesheet; every value it returns was measured in a running browser.
@@ -69,11 +73,11 @@ function pageHtml(bundle: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
  body{font:15px/1.5 system-ui;margin:0;background:#f7f7f2}
- header{display:flex;gap:24px;padding:14px 32px;background:#fff;white-space:nowrap}
+ #bar{width:640px;height:48px;background:#fff}
  main{padding:24px}
 </style></head>
 <body>
-<header><b>Riverbend Ferries</b><span>Timetable</span><span>Fares</span><span>Harbours</span><span>Saltmarsh line</span><span>Help</span></header>
+<div id="bar"></div>
 <main><h1 id="title">Harborlight open day</h1></main>
 <${TAG} doc-id="panel-edge" workspace-id="w-demo" user="Test Reviewer" server-url="ws://127.0.0.1:1"></${TAG}>
 <script>${bundle}</script>
@@ -166,13 +170,13 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   const still = await measure();
   let panned: Look | null = null;
   if (width <= 1100) {
-    // A finger dragging the page leftwards, well past its right-hand end.
-    await cdp.send('Input.synthesizeScrollGesture', {
+    // Sideways, well past the page's right-hand end.
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
       x: 200,
       y: 300,
-      xDistance: -400,
-      yDistance: 0,
-      gestureSourceType: 'touch',
+      deltaX: 600,
+      deltaY: 0,
     });
     for (let i = 0; i < 40; i++) {
       if (((await cdp.evaluate('visualViewport.offsetLeft')) as number) > 0) break;

@@ -74,8 +74,11 @@ describe.skipIf(CHROME === null)("the widget's controls on a page wider than the
     it(`the page really does run past a ${width}px screen, and the pan moved the screen`, () => {
       // The controls: on a page that fits, the old placement was already right,
       // and a pan that went nowhere would re-measure the first look.
-      expect(at(width).still.innerWidth).toBeGreaterThan(width + 100);
-      expect(at(width).panned?.vv[0]).toBeGreaterThan(100);
+      expect(
+        at(width).still.innerWidth,
+        'CONTROL: the page is wider than the screen',
+      ).toBeGreaterThan(width + 100);
+      expect(at(width).panned?.vv[0], 'CONTROL: the pan moved the screen').toBeGreaterThan(100);
     });
 
     it(`the FAB, list button, panel and popovers sit inside a ${width}px screen`, () => {
