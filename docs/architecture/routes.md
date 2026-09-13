@@ -171,6 +171,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/workspaces/:ws/docs/:docId/meetings/:meetingId` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/meetings/:meetingId/notes-cleanup` | POST | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/meetings/:meetingId/speakers` | POST | `routes/meetings-calendar.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/move` | POST | `routes/doc-move.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/notes-method` | GET, PUT | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/plan` | POST | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/plan-request` | POST | `routes/doc-resource.ts` | trusted-local |  |
