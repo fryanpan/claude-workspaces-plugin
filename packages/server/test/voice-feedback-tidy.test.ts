@@ -15,6 +15,7 @@ import {
   parseTidyReply,
   splitTick,
   tidyDollars,
+  unusedWords,
 } from '../src/voice-feedback-tidy.ts';
 
 const TARGETS: VoiceTarget[] = [
@@ -244,5 +245,38 @@ describe('createHaikuTidy', () => {
       new Response('overloaded', { status: 529 })) as unknown as typeof fetch;
     const tidy = createHaikuTidy({ env: {}, read: () => FAKE_KEY, fetchImpl });
     await expect(tidy?.({ system: 's', user: 'u' })).rejects.toThrow('HTTP 529');
+  });
+});
+
+describe('unusedWords', () => {
+  const w = (s: string) => s.split(' ');
+  const n = (s: string) => w(s).map((x) => x.toLowerCase().replace(/[^\p{L}\p{N}']/gu, ''));
+
+  it('returns the words past the used prefix, matched case- and punctuation-blind', () => {
+    expect(unusedWords(w('The header, is too tall.'), n('the header is'))).toEqual([
+      'too',
+      'tall.',
+    ]);
+    expect(unusedWords(w('the header'), [])).toEqual(['the', 'header']);
+    expect(unusedWords(w('the header'), n('the header'))).toEqual([]);
+  });
+
+  it('does not drop later words when the engine re-formats a used stretch', () => {
+    // "sixty six" was handed to a tick; the settled turn says "66 dollars".
+    const out = unusedWords(w('the price is 66 dollars'), n('the price is sixty six'));
+    // Cutting by count would return nothing; one repeated token is the price.
+    expect(out).toEqual(['66', 'dollars']);
+    // A same-length correction ("sink" settling as "sync") resumes after it.
+    expect(unusedWords(w('so the sync is the bottleneck'), n('so the sink is the'))).toEqual([
+      'bottleneck',
+    ]);
+  });
+
+  it('does not repeat a long matched tail after one early re-format', () => {
+    const out = unusedWords(
+      w('the 1st row and the second row look wrong'),
+      n('the first row and the second row'),
+    );
+    expect(out).toEqual(['look', 'wrong']);
   });
 });

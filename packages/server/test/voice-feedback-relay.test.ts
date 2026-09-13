@@ -15,7 +15,7 @@ import type { VoiceTarget } from '@claude-workspaces/core';
 import { type MockScriptTurn, createMockTranscriptionEngine } from '../src/transcribe.ts';
 import { VoiceFeedbackRelay, type VoiceWs } from '../src/voice-feedback-relay.ts';
 import { voiceAudioDir, voiceLogPath } from '../src/voice-feedback-store.ts';
-import { type TidyComplete, unusedWords } from '../src/voice-feedback-tidy.ts';
+import type { TidyComplete } from '../src/voice-feedback-tidy.ts';
 import { waitFor } from './wait-for.ts';
 
 setDefaultTimeout(15_000);
@@ -468,38 +468,5 @@ describe('VoiceFeedbackRelay', () => {
     // Audio after close is not recorded.
     speak(ws, 2);
     expect(statSync(join(voiceAudioDir(dataDir, DOC), 'seg-1.wav')).size).toBe(44 + 6 * CHUNK);
-  });
-});
-
-describe('unusedWords', () => {
-  const w = (s: string) => s.split(' ');
-  const n = (s: string) => w(s).map((x) => x.toLowerCase().replace(/[^\p{L}\p{N}']/gu, ''));
-
-  it('returns the words past the used prefix, matched case- and punctuation-blind', () => {
-    expect(unusedWords(w('The header, is too tall.'), n('the header is'))).toEqual([
-      'too',
-      'tall.',
-    ]);
-    expect(unusedWords(w('the header'), [])).toEqual(['the', 'header']);
-    expect(unusedWords(w('the header'), n('the header'))).toEqual([]);
-  });
-
-  it('does not drop later words when the engine re-formats a used stretch', () => {
-    // "sixty six" was handed to a tick; the settled turn says "66 dollars".
-    const out = unusedWords(w('the price is 66 dollars'), n('the price is sixty six'));
-    // Cutting by count would return nothing; one repeated token is the price.
-    expect(out).toEqual(['66', 'dollars']);
-    // A same-length correction ("sink" settling as "sync") resumes after it.
-    expect(unusedWords(w('so the sync is the bottleneck'), n('so the sink is the'))).toEqual([
-      'bottleneck',
-    ]);
-  });
-
-  it('does not repeat a long matched tail after one early re-format', () => {
-    const out = unusedWords(
-      w('the 1st row and the second row look wrong'),
-      n('the first row and the second row'),
-    );
-    expect(out).toEqual(['look', 'wrong']);
   });
 });
