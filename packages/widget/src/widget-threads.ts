@@ -142,7 +142,7 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
 export function positionPins(el: FeedbackWidgetEl): void {
   if (!el.pinLayer) return;
   // A second comment on the same element stands its pin beside the first's,
-  // not on top of it.
+  // not on top of it, wrapping to a row below before it leaves the screen.
   const onEl = new Map<Element, number>();
   for (const pin of Array.from(el.pinLayer.children)) {
     const id = (pin as HTMLElement).dataset.threadId;
@@ -152,8 +152,9 @@ export function positionPins(el: FeedbackWidgetEl): void {
     const n = onEl.get(pos.el) ?? 0;
     onEl.set(pos.el, n + 1);
     const rect = pos.el.getBoundingClientRect();
-    (pin as HTMLElement).style.left = `${rect.right - 6 - n * 26}px`;
-    (pin as HTMLElement).style.top = `${rect.top + 6}px`;
+    const row = Math.max(1, Math.floor((rect.right - 18) / 26) + 1);
+    (pin as HTMLElement).style.left = `${rect.right - 6 - (n % row) * 26}px`;
+    (pin as HTMLElement).style.top = `${rect.top + 6 + Math.floor(n / row) * 26}px`;
   }
 }
 

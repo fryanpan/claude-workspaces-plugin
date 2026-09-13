@@ -55,4 +55,22 @@ describe('positionPins', () => {
     expect(at('t3')).toEqual(['368px', '86px']);
     expect(at('t4')).toEqual(['342px', '86px']);
   });
+
+  it('wraps the pins of a narrow element near the left edge to a row below', () => {
+    // A button ending 104px from the left: four pins fit between it and the edge.
+    const save = element(104, 330);
+    const w = widgetWith(['t1', 't2', 't3', 't4', 't5', 't6'].map((id) => [id, save]));
+    positionPins(w.el);
+    const lefts = ['t1', 't2', 't3', 't4', 't5', 't6'].map((id) =>
+      Number.parseFloat(w.pin(id).style.left),
+    );
+    expect(Math.min(...lefts), 'no pin centre closer than 12px to the edge').toBeGreaterThanOrEqual(
+      12,
+    );
+    expect(['t4', 't5', 't6'].map((id) => [w.pin(id).style.left, w.pin(id).style.top])).toEqual([
+      ['20px', '336px'],
+      ['98px', '362px'],
+      ['72px', '362px'],
+    ]);
+  });
 });
