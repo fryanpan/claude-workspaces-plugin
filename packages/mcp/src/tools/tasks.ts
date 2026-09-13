@@ -561,7 +561,24 @@ export async function handleTaskTool(
       });
     }
     case 'unarchive_task': {
-      const { taskId } = a as { taskId: string };
+      const { taskId, goalId } = a as { taskId?: string; goalId?: string };
+      if ((taskId === undefined) === (goalId === undefined)) {
+        return err('pass taskId to restore one task, or goalId to restore a goal with its tasks');
+      }
+      if (goalId !== undefined) {
+        // Its own route, because a goal's restore cascades: the server brings
+        // back exactly the tasks the goal's archive stamped, and leaves a task
+        // somebody archived on its own before that where they put it.
+        const res = (await http('POST', `${board()}/goals/${encodeURIComponent(goalId)}/restore`, {
+          author: AUTHOR,
+        })) as { goal: { title?: string }; changed: boolean; taskIds: string[] };
+        return ok({
+          goalId,
+          title: res.goal.title,
+          restoredTaskIds: res.taskIds,
+          changed: res.changed,
+        });
+      }
       const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/restore`, {
         author: AUTHOR,
       })) as { task: TaskPayload; changed: boolean };
