@@ -267,16 +267,16 @@ export function renderControl(state: Config, go: (v: number | null) => void): vo
  *
  * They sit in the same bottom corner band as the FAB, so a mock with a fixed
  * tab bar had them over its first tab. The widget already measures that bar,
- * and the keyboard, into `--cw-vv-bottom` on its host element; the chevrons
- * are not inside the host, so they read it from there rather than measuring
- * the page a second time.
+ * and the keyboard, into `--cw-vv-bottom` on its host element, and the
+ * review-item dock's height into `--cw-dock-h`; the chevrons are not inside
+ * the host, so they read both from there rather than measuring the page a
+ * second time. Without the dock's height a docked ask covered them.
  */
 function liftControl(): void {
   const box = document.querySelector<HTMLElement>(`[${CONTROL_ATTR}]`);
-  const lift = document
-    .querySelector<HTMLElement>(WIDGET_TAG)
-    ?.style.getPropertyValue('--cw-vv-bottom');
-  if (box) box.style.bottom = `calc(16px + ${lift || '0px'})`;
+  const host = document.querySelector<HTMLElement>(WIDGET_TAG);
+  const read = (name: string) => host?.style.getPropertyValue(name) || '0px';
+  if (box) box.style.bottom = `calc(16px + ${read('--cw-vv-bottom')} + ${read('--cw-dock-h')})`;
 }
 
 /** Re-lift the chevrons each time the widget writes a new offset. */
