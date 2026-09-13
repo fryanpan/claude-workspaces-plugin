@@ -482,7 +482,12 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
   ): Promise<boolean> {
     const reqSpec = reviewSecretsRequest(item, values);
     if (!reqSpec) return false;
-    return sendSecrets(reqSpec, values);
+    // No toast: both walkthroughs settle the card into their "✓ Answered"
+    // banner, which is the confirmation, attached to the ask it confirms. A
+    // toast as well said it twice and outlived the card — at 430 it stood for
+    // its 3.5 seconds over the NEXT ask's empty form, which the walk had
+    // already drawn (UX review, 2026-09-12).
+    return sendSecrets(reqSpec, values, false);
   }
 
   /**
@@ -499,7 +504,7 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
     reviewItemId: string,
     values: ReadonlyArray<{ service: string; value: string }>,
   ): Promise<boolean> {
-    return sendSecrets(secretsRequestFor(taskId, reviewItemId, values), values);
+    return sendSecrets(secretsRequestFor(taskId, reviewItemId, values), values, true);
   }
 
   /**
@@ -514,13 +519,14 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
    * Home had a confirmation of its own: the card settles into the answered
    * stack and the tally moves. The task panel had none — the card simply
    * vanished, because a ticket-borne item's answered record lives on a
-   * declaring comment and there is no comment (UX review, 2026-09-12). So the
-   * line is here, where both surfaces pass through, rather than bolted onto
-   * the one that was missing it.
+   * declaring comment and there is no comment (UX review, 2026-09-12). So
+   * `confirm` is the panel's, and a walkthrough passes false: its banner
+   * already says it. A refusal toasts on both, because nothing else does.
    */
   async function sendSecrets(
     reqSpec: { path: string; body: Record<string, unknown> },
     values: ReadonlyArray<{ service: string; value: string }>,
+    confirm: boolean,
   ): Promise<boolean> {
     if (values.length === 0) return false;
     const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
@@ -530,7 +536,7 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
       showToast('Saving failed — nothing was recorded. Try again.');
       return false;
     }
-    showToast(`Saved: ${values.map((v) => v.service).join(', ')}`);
+    if (confirm) showToast(`Saved: ${values.map((v) => v.service).join(', ')}`);
     await loadReviewItems();
     return true;
   }

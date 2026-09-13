@@ -1,6 +1,6 @@
 /**
  * On a phone, Home's walkthrough keeps its buttons out from under the feedback
- * widget.
+ * widget, and a hand-over does not leave its confirmation over the next ask.
  *
  * THE WIDGET. Its buttons are a `position: fixed` column 66px in from the
  * viewport's right edge. At ≤720 a walk form's last button stretched to the
@@ -10,7 +10,13 @@
  * `claude-feedback-widget` (UX review, 2026-09-12). A scroll reserve cannot
  * move a fixed box, so the buttons keep a gutter instead.
  *
- * WHY A REAL BROWSER. It is "what is painted at this point", and
+ * THE TOAST. Saving a hand-over on Home showed "Saved: …" for 3.5 seconds
+ * while the walk had already advanced — so at 430 the toast stood over the
+ * NEXT ask's empty form, saying the same thing the "✓ Answered" banner above
+ * it said (UX review, 2026-09-12). The banner is the confirmation now, and
+ * it names the ask it confirms.
+ *
+ * WHY A REAL BROWSER. Both are "what is painted at this point", and
  * happy-dom lays nothing out.
  *
  * THE CONTROLS RUN IN THE SAME PAGE.
@@ -19,6 +25,9 @@
  *    points, or the clean sweeps are reading a page that could not fail.
  *  - `aligned` says each sweep really put the button beside every widget
  *    button above the dock.
+ *  - `panelToast` is the task panel's hand-over through the same controller,
+ *    which does toast — so the hand-over reading can see a toast when one is
+ *    there.
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -90,6 +99,24 @@ describe.skipIf(CHROME === null)("Home's walkthrough at phone width", () => {
       expectFullSweep(r.send, `${size} Send`);
       expect(r.send.hitBy, `${size}: what else answered`).toEqual([]);
       expect(r.send.covered, `${size}: points not on Send`).toBe(0);
+    });
+  });
+
+  it('CONTROL: the task panel hand-over still confirms with a toast', () => {
+    each((r, size) => {
+      expect(r.panelToast, `${size}: the panel toast`).toBe('Saved: saltmarsh-relay-account');
+    });
+  });
+
+  it('when the next ask is on screen, the confirmation is the banner on the answered one', () => {
+    each((r, size) => {
+      const h = r.handOver;
+      expect(h.nextFormDrawn, `${size}: the next ask's form was drawn`).toBe(true);
+      expect(h.toast, `${size}: no toast over it`).toBeNull();
+      expect(h.toastsSeen, `${size}: no toast on the way there either`).toEqual([]);
+      expect(h.banner, `${size}: the banner names the ask it confirms`).toBe(
+        '✓ Answered “Post the nightly index to the Saltmarsh relay”',
+      );
     });
   });
 });
