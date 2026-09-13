@@ -23,7 +23,16 @@ import { STATUS_COLORS } from '@claude-workspaces/core';
  *   bounded upstream.
  */
 export const widgetStyles = `
-:host { all: initial; --cw-vv-bottom: 0px; --cw-dock-h: 0px; }
+:host { all: initial; --cw-vv-bottom: 0px; --cw-dock-h: 0px; --cw-vv-right: 100vw; --cw-edge: max(0px, 100% - var(--cw-vv-right)); }
+/* --cw-edge is how far the screen's right edge stands in from the edge that
+   fixed boxes are laid out against, and zero on a page that fits. On a page
+   wider than a phone, or one panned or pinched, the browser lays out fixed
+   boxes against the page's width instead, so the widget's own controls take
+   it as a right margin, on top of their right offset, to stay on screen.
+   --cw-vv-right is the visual viewport's right edge, kept by
+   wireVisualViewport, and the 100% resolves in the rule below, against the
+   same width the offset is measured from. */
+.fab, .fab-list, .panel { margin-right: var(--cw-edge); }
 * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif; }
 
 .fab {
