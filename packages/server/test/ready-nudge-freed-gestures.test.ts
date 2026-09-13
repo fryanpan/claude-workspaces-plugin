@@ -36,8 +36,8 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedGoalsOverHttp } from './goal-seed.ts';
 import { type Frame, listenFrames, waitForFrames } from './sse-frames.ts';
 
-const PERSON = { id: 'known-owner', name: 'Board Owner', kind: 'person' };
-const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
+const PERSON = { id: 'known-owner', name: 'Riverbend', kind: 'person' };
+const LEAD = { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' };
 type Actor = typeof PERSON | typeof LEAD;
 
 /** The production window. Nothing in this file may wait it out. */
@@ -157,7 +157,7 @@ const GESTURES: Record<string, Gesture> = {
     // An owner the board cannot name — no roster entry, no declared kind — is
     // `unowned`, and there is no session to wake about it.
     frees: async (title) => {
-      const id = await row(title, { assignee: 'Night Shift', assigneeKind: undefined });
+      const id = await row(title, { assignee: 'Saltmarsh', assigneeKind: undefined });
       return {
         id,
         act: (who) =>
@@ -170,7 +170,7 @@ const GESTURES: Record<string, Gesture> = {
     },
     // Handed to a PERSON instead: owned now, and still nothing an agent can take.
     keepsHeld: async (title) => {
-      const id = await row(title, { assignee: 'Night Shift', assigneeKind: undefined });
+      const id = await row(title, { assignee: 'Saltmarsh', assigneeKind: undefined });
       return {
         id,
         act: (who) =>
