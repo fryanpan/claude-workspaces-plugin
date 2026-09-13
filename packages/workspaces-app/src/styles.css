@@ -410,23 +410,11 @@ button {
 body.view-mode #toggle-format {
   display: none;
 }
+/* The count the topbar buttons still carry in their markup is never drawn:
+   calm by default (owner, 2026-09-13) — no badges. The panel the button
+   opens is where the reader counts, when they ask. */
 .icon-btn .badge {
   display: none;
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  background: var(--orange);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: var(--radius-pill);
-  min-width: 16px;
-  line-height: 1.2;
-  border: 1px solid var(--bg);
-}
-.icon-btn .badge.has-count {
-  display: inline-block;
 }
 
 /* ================= VOICE (hold-to-talk, §2.4/§3.8) =================
@@ -1298,23 +1286,8 @@ body.threads-resizing {
 .cw-ic-done {
   background-image: var(--ic-done);
 }
-/* The red dot: something here changed since the reader last looked. On the
-   glyph rather than beside it, so it costs no width in a 300px column. */
-.cw-ic.is-new::after,
-.thread.is-new .thread-glyph::after {
-  content: "";
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--red);
-  box-shadow: 0 0 0 1.5px var(--bg);
-}
-.thread.is-new {
-  box-shadow: 0 0 0 2px rgba(215, 58, 73, 0.35);
-}
+/* No red "new" dot or ring on a card that changed since the reader last
+   looked: calm by default (owner, 2026-09-13), no badges. */
 /* The folded face of a declared thread answers in place, and the field IS how
    the reader knows it is a question — no chip says so. One line, because it
    has to fit under two lines of summary inside a 260px margin bubble; the
@@ -1619,31 +1592,16 @@ body.threads-resizing {
 .thread-discussion.none::before {
   content: "";
 }
-/* A regenerated summary is in flight: say so, muted italic with a gentle
-   pulse, no arrow (this line is status, not discussion). Swapped for the
+/* A regenerated summary is in flight: say so, muted italic and steady, no
+   arrow (this line is status, not discussion). Swapped for the
    summary when it syncs, or back to the fallback lines when the pending
    window expires (see summaryPending in core/thread-summary.ts). */
 .thread-discussion.pending {
   color: var(--fg-muted);
   font-style: italic;
-  animation: summary-pending-pulse 1.6s ease-in-out infinite;
 }
 .thread-discussion.pending::before {
   content: "";
-}
-@keyframes summary-pending-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .thread-discussion.pending {
-    animation: none;
-  }
 }
 
 /* The last row of an EXPANDED thread, inside slot B's detail face — so a

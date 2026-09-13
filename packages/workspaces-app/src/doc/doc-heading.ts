@@ -133,9 +133,6 @@ export function mountDocHeading(deps: DocHeadingDeps): DocHeadingHandle {
   editorMount.prepend(header);
 
   let modifiedAt = deps.lastActivityAt;
-  /** Was the title the placeholder at the last paint? A placeholder that
-   *  becomes a name settles in once; a name that changes does not. */
-  let wasPending: boolean | null = null;
 
   const currentTitle = (): string => {
     const m = readDocMeta(ydoc);
@@ -151,12 +148,6 @@ export function mountDocHeading(deps: DocHeadingDeps): DocHeadingHandle {
     }
     const pending = m.titleSource === 'default';
     title.classList.toggle('is-pending', pending);
-    if (wasPending === true && !pending && m.titleSource === 'auto') {
-      title.classList.remove('is-arriving');
-      void title.offsetWidth;
-      title.classList.add('is-arriving');
-    }
-    if (synced) wasPending = pending;
     when.textContent = synced ? formatHeadingWhen(m.createdAt, modifiedAt, now()) : '';
   };
 

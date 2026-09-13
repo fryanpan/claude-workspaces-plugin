@@ -749,11 +749,10 @@ describe('the strip while a meeting runs', () => {
     });
     const after = h.root.querySelectorAll('.meeting-caption-line .w');
     expect(h.caption().trim()).toBe('come back by Thursday');
-    // The same span is rewritten, so the correction animates on the word that
-    // was already on screen rather than redrawing the line.
+    // The same span is rewritten, so the correction lands on the word that
+    // was already on screen rather than redrawing the line — and quietly.
     expect(after[3]).toBe(before[3]);
-    expect(after[3]?.classList.contains('is-fixed')).toBe(true);
-    expect(after[0]?.classList.contains('is-fixed')).toBe(false);
+    expect(after[3]?.classList.contains('is-fixed')).toBe(false);
   });
 
   it('never writes the transcript into the document body', async () => {

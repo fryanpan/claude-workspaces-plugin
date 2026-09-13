@@ -1,8 +1,8 @@
 /**
  * Workspace (bound-folder) file tree. A doc created by `bind_folder` carries a
  * `workspaceId`; this renders the folder's files as a collapsible tree into the
- * left `#set-pane` (and the mobile `#doc-menu`), with per-file open-comment
- * badges and folder roll-ups. Shared by both review surfaces — the markdown
+ * left `#set-pane` (and the mobile `#doc-menu`), with no open-comment count
+ * badges (calm by default, owner 2026-09-13). Shared by both review surfaces — the markdown
  * (Tiptap) boot path and the code (CodeMirror) boot path — so the tree shows
  * regardless of the file type you're viewing.
  *
@@ -74,8 +74,6 @@ function renderTreeNode(
     const href = node.reviewUrl
       ? appendParams(node.reviewUrl, params)
       : docHref(node.docId, workspaceIdFromPath(location.pathname), params.toString());
-    const badge =
-      node.openCount > 0 ? `<span class="tree-badge badge-open">${node.openCount}</span>` : '';
     // Diff-review files carry an A/M/D/R status letter + line-count badge.
     let diffBadge = '';
     if (node.diffStatus) {
@@ -92,15 +90,13 @@ function renderTreeNode(
       : '';
     return `<li class="tree-file"><a href="${href}" class="${cls}"${
       isActive ? ' aria-current="page"' : ''
-    }${staleHint}><span class="tree-name">${escapeHtml(node.name)}</span>${diffBadge}${badge}</a></li>`;
+    }${staleHint}><span class="tree-name">${escapeHtml(node.name)}</span>${diffBadge}</a></li>`;
   }
   const relPath = prefix ? `${prefix}/${node.name}` : node.name;
   let open = true;
   try {
     if (localStorage.getItem(treeDetailsKey(workspaceId, relPath)) === 'closed') open = false;
   } catch {}
-  const badge =
-    node.openCount > 0 ? `<span class="tree-badge tree-badge-dir">${node.openCount}</span>` : '';
   const children = node.children
     .map((c) => renderTreeNode(c, workspaceId, relPath, activeDocId))
     .join('');
@@ -108,7 +104,7 @@ function renderTreeNode(
     relPath,
   )}"><summary><span class="tree-name">${escapeHtml(
     node.name,
-  )}</span>${badge}</summary><ul>${children}</ul></details></li>`;
+  )}</span></summary><ul>${children}</ul></details></li>`;
 }
 
 /** Structural signature of a folder tree: renderer namespace + workspace + the
