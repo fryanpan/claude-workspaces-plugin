@@ -247,3 +247,40 @@ describe('what leaves on the wire', () => {
     expect(o.captures.map((c) => c.stop.mock.calls.length)).toEqual([1, 1]);
   });
 });
+
+describe('the first stream is metered on its own', () => {
+  it('hands only the microphone’s frames, untagged, to the first-stream sink', async () => {
+    const { startCapture, frames } = opener();
+    const first: Int16Array[] = [];
+    const wire: Array<Uint8Array | Int16Array> = [];
+    const set = await openCaptureSet({
+      source: COMBINED_SOURCE,
+      mode: 'conversation',
+      onFrame: (pcm) => wire.push(pcm),
+      onFirstStreamFrame: (pcm) => first.push(pcm),
+      startCapture,
+    });
+    expect(set.ok).toBe(true);
+    const mic = new Int16Array([1, 2]);
+    frames[1]?.(new Int16Array([3, 4]));
+    expect(first).toHaveLength(0);
+    frames[0]?.(mic);
+    expect(first).toEqual([mic]);
+    expect(wire).toHaveLength(2);
+  });
+
+  it('meters the Mac audio when the microphone was refused', async () => {
+    const { startCapture, frames } = opener(['mic']);
+    const first: Int16Array[] = [];
+    const set = await openCaptureSet({
+      source: COMBINED_SOURCE,
+      mode: 'conversation',
+      onFrame: () => {},
+      onFirstStreamFrame: (pcm) => first.push(pcm),
+      startCapture,
+    });
+    expect(set.ok).toBe(true);
+    frames[0]?.(new Int16Array([5, 6]));
+    expect(first).toHaveLength(1);
+  });
+});

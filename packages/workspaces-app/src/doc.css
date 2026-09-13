@@ -1325,6 +1325,11 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   height: 10px;
   border-radius: var(--radius-pill);
   background: var(--red);
+  /* The level meter: meeting-strip.ts writes the mic's loudness (0..1) into
+     --mic-level per frame, so the dot sits small on silence and swells with a
+     voice. A transform, so the button never reflows. */
+  transform: scale(calc(0.6 + var(--mic-level, 0.4)));
+  transition: transform 90ms linear;
 }
 /* The chooser's door beside Record, for the doc where a tap records at once
    (nobody else on it): a chevron the height of the pill, no border of its
@@ -2438,6 +2443,9 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   .meeting-record-dot,
   .meeting-caption-line .w.is-fixed {
     animation: none;
+  }
+  .meeting-record-dot {
+    transition: none;
   }
 }
 

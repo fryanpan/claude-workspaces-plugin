@@ -340,7 +340,14 @@ export type MeetingClientMessage =
       state: 'lost' | 'restored';
       /** A short machine reason (`ended`, `muted`) for the record. */
       reason?: string;
-    };
+    }
+  /**
+   * "Recording started and no audio has left this page." Sent once, a few
+   * seconds in, so the server log can say why a meeting heard nothing: the
+   * audio context's state (`suspended` is Safari outside a gesture), its
+   * rate, and how many blocks the audio graph delivered. Log-only.
+   */
+  | { type: 'no_audio'; contextState: string; sampleRate: number; blocks: number };
 
 /** Longest name a speaker label can be given. A name, not a bio. */
 export const MAX_SPEAKER_NAME = 60;

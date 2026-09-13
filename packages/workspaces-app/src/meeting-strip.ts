@@ -89,7 +89,11 @@ import {
   defaultAdvancedState,
   tuningPayload,
 } from './meeting-advanced.ts';
-import { type RoomAudioProcessing, startMeetingCapture } from './meeting-audio.ts';
+import {
+  type RoomAudioProcessing,
+  makeGestureContext,
+  startMeetingCapture,
+} from './meeting-audio.ts';
 import type { MeetingBotClient } from './meeting-bot-client.ts';
 import {
   type CaptureSetResult,
@@ -235,6 +239,18 @@ export interface MeetingStripOpts {
    * a two-minute window without waiting two minutes.
    */
   schedule?: (fn: () => void, ms: number) => () => void;
+  /**
+   * The no-audio check's clock (`NO_AUDIO_MS` after the start frame). Its own
+   * seam rather than `schedule`, whose queue the reconnect tests drive in
+   * order.
+   */
+  captureWatch?: (fn: () => void, ms: number) => () => void;
+  /**
+   * Make the audio context inside the Record tap — `makeGestureContext`
+   * unless a test says otherwise. Never called for an automatic start, which
+   * is not a gesture.
+   */
+  createAudioContext?: () => AudioContext | undefined;
   openSocket?: (url: string) => MeetingSocket;
   /**
    * How ONE stream is opened. A mic + Mac-audio meeting calls it twice — see
@@ -445,6 +461,24 @@ function defaultInterval(fn: () => void, ms: number): () => void {
   return () => clearInterval(id);
 }
 
+/** RMS of a frame, 0..1, scaled so ordinary speech reads near the top. */
+export function frameLevel(pcm: Int16Array): number {
+  let sum = 0;
+  for (const v of pcm) sum += v * v;
+  return Math.min(1, (Math.sqrt(sum / Math.max(1, pcm.length)) / 32768) * 6);
+}
+
+/**
+ * How long a meeting's socket may be open with no audio frame sent before the
+ * strip says the microphone is delivering nothing. A working capture sends
+ * twenty frames a second from its first moment, so three seconds is sixty
+ * frames of margin.
+ */
+export const NO_AUDIO_MS = 3_000;
+
+/** What the strip says when the microphone opened and delivers nothing. */
+export const NO_AUDIO_NOTE = 'No audio from the mic — nothing is being transcribed.';
+
 function defaultSchedule(fn: () => void, ms: number): () => void {
   const id = setTimeout(fn, ms);
   return () => clearTimeout(id);
@@ -485,6 +519,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const interval = opts.interval ?? defaultInterval;
   const openSocket = opts.openSocket ?? defaultOpenSocket;
   const schedule = opts.schedule ?? defaultSchedule;
+  const captureWatch = opts.captureWatch ?? defaultSchedule;
   const startCapture = opts.startCapture ?? startMeetingCapture;
   const promptName = opts.promptName ?? defaultPromptName;
   const bot = opts.bot;
@@ -591,6 +626,15 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   let startNote = '';
   let socket: MeetingSocket | null = null;
   let socketOpen = false;
+  /**
+   * Frames of the FIRST stream — the one the tap's context went to — that
+   * went out on a socket this meeting. Not every frame: in a mic + Mac audio
+   * meeting the Mac's frames would hide a microphone delivering nothing.
+   */
+  let framesSent = 0;
+  /** The socket has been open `NO_AUDIO_MS` and not one frame went out. */
+  let noAudio = false;
+  let cancelNoAudio: (() => void) | null = null;
   let stopClock: (() => void) | null = null;
   let disposed = false;
   /**
@@ -1312,6 +1356,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // a capture for it: a retry that outlived the meeting would reopen the
       // microphone with nothing recording, permission light and all.
       standingNote = '';
+      noAudio = false;
       forgetStreamLosses();
       liveMeetingId = null;
       // However the meeting ended, there is no live session left to tune —
@@ -1392,7 +1437,43 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
 
   /** What the strip shows about the captures, or null while all is well. */
   function currentAlarm(): StreamAlarm | null {
-    return streamAlarm({ lost: lostStreams, running: runningStreams() });
+    const alarm = streamAlarm({ lost: lostStreams, running: runningStreams() });
+    return alarm ?? (noAudio ? { text: NO_AUDIO_NOTE } : null);
+  }
+
+  /**
+   * Arm the check that audio is actually leaving the page.
+   *
+   * THE FAILURE IT EXISTS FOR IS SILENT EVERYWHERE ELSE. A graph whose context
+   * never started delivers no blocks, so the track watch — which ticks per
+   * block — never runs, the socket carries a start frame and nothing more, and
+   * the meeting ends with zero turns and no error anywhere. So after
+   * `NO_AUDIO_MS` with no frame sent, the strip says so, the context gets a
+   * second resume, and the server is told the context's state, rate and block
+   * count for its log.
+   */
+  function armNoAudioWatch(sock: MeetingSocket): void {
+    cancelNoAudio?.();
+    const before = framesSent;
+    cancelNoAudio = captureWatch(() => {
+      cancelNoAudio = null;
+      if (disposed || socket !== sock || framesSent > before) return;
+      const health = capture?.health() ?? null;
+      // `interrupted` is iOS taking the audio session away; resume is the ask.
+      if (health && health.contextState !== 'running') void capture?.resumeAudio();
+      noAudio = true;
+      if (socketOpen) {
+        sock.send(
+          JSON.stringify({
+            type: 'no_audio',
+            contextState: health?.contextState ?? 'unknown',
+            sampleRate: health?.sampleRate ?? 0,
+            blocks: health?.blocks ?? 0,
+          }),
+        );
+      }
+      render();
+    }, NO_AUDIO_MS);
   }
 
   /**
@@ -1537,6 +1618,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     socket = null;
     socketOpen = false;
     resuming = false;
+    cancelNoAudio?.();
+    cancelNoAudio = null;
     if (!sock) return;
     // Handlers first: closing is a deliberate end, and an onclose that still
     // fired would report it as a dropped connection.
@@ -1754,12 +1837,30 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     endedNote = '';
     forgetStreamLosses();
     tapToStart = false;
+    framesSent = 0;
+    // Before anything is awaited: this is still the Record tap, and Safari
+    // lets an audio context start only inside one. An automatic start is no
+    // gesture, and keeps the context the capture makes for itself.
+    const context = auto ? undefined : (opts.createAudioContext ?? makeGestureContext)();
     setState({ kind: 'requesting' });
     startNote = '';
     const started = await openCaptureSet({
+      ...(context ? { context } : {}),
       // Every stream this source names, opened in order — one for a
       // microphone meeting, two for mic + Mac audio.
       source,
+      onFirstStreamFrame: (pcm) => {
+        // The Recording dot doubles as the level meter: it swells with the
+        // voice and sits small on silence, so a dead microphone is visible
+        // on the one indicator that is always on screen.
+        recordDot.style.setProperty('--mic-level', frameLevel(pcm).toFixed(2));
+        if (!socketOpen) return;
+        framesSent += 1;
+        if (noAudio) {
+          noAudio = false;
+          render();
+        }
+      },
       onFrame: (pcm) => {
         if (!socketOpen) return;
         socket?.send(pcm);
@@ -1865,6 +1966,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // After the start frame: the server reads the flag off it, and a ping
       // that overtook it would be answered by a connection not yet measuring.
       timing?.begin();
+      armNoAudioWatch(sock);
     };
     sock.onmessage = (ev) => {
       // The receive mark comes before the parse — the downlink ends when the

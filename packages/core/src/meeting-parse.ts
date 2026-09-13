@@ -84,6 +84,23 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       ? { type: 'stream_state', stream, state: m.state, reason }
       : { type: 'stream_state', stream, state: m.state };
   }
+  if (m.type === 'no_audio') {
+    // It reaches a log line, so every field is a closed set or a bounded
+    // integer: nothing a page writes here can put text in the server log.
+    const states = ['running', 'suspended', 'interrupted', 'closed'];
+    const contextState =
+      typeof m.contextState === 'string' && states.includes(m.contextState)
+        ? m.contextState
+        : 'unknown';
+    const int = (v: unknown): number =>
+      typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1e6, Math.round(v))) : 0;
+    return {
+      type: 'no_audio',
+      contextState,
+      sampleRate: int(m.sampleRate),
+      blocks: int(m.blocks),
+    };
+  }
   if (m.type === 'name_speaker') {
     const speaker = typeof m.speaker === 'string' ? m.speaker.trim() : '';
     const name = typeof m.name === 'string' ? m.name.trim() : '';

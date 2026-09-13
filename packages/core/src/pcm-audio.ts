@@ -145,6 +145,13 @@ export interface AudioPump {
   readonly sampleRate: number;
   onBlock: ((samples: Float32Array) => void) | null;
   stop(): void;
+  /**
+   * The context's state (`running`, `suspended`, …) and a second try at
+   * resuming it — what a capture that has delivered nothing reports and
+   * retries. Optional, so a test pump need not pretend to be a context.
+   */
+  contextState?(): string;
+  resume?(): Promise<void>;
 }
 
 export type AudioPumpFactory = (stream: MediaStream, context?: AudioContext) => Promise<AudioPump>;
@@ -195,12 +202,16 @@ export async function createAudioPump(
   // starts one only from a gesture, and a context built after an await (a
   // lazily loaded chunk, a permission prompt) can stay suspended for good.
   const ctx = context ?? new (Ctor as typeof AudioContext)();
-  if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+  // Not only `suspended`: iOS reports `interrupted` when getUserMedia takes
+  // the audio session over a context that was already running.
+  if (ctx.state !== 'running') void ctx.resume().catch(() => {});
   const source = ctx.createMediaStreamSource(stream);
   const pump: AudioPump = {
     sampleRate: ctx.sampleRate,
     onBlock: null,
     stop: () => {},
+    contextState: () => ctx.state,
+    resume: () => ctx.resume(),
   };
   let url: string | null = null;
   try {

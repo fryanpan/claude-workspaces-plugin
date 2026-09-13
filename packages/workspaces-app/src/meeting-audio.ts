@@ -120,6 +120,45 @@ export interface MeetingCapture {
    * without a person, so this module is not the second place it is written.
    */
   reopen(): Promise<MeetingReopen>;
+  /** What the audio graph has done so far — see `CaptureHealth`. */
+  health?(): CaptureHealth;
+  /** Ask the audio context to run again. Never rejects. */
+  resumeAudio?(): Promise<void>;
+}
+
+/**
+ * Whether audio is moving under a capture: how many blocks the graph has
+ * handed over, and the context's state and rate. A capture that opened and
+ * delivered nothing reads `blocks: 0`, and `suspended` there is the Safari
+ * shape — a context that was never allowed to start.
+ */
+export interface CaptureHealth {
+  blocks: number;
+  contextState: string;
+  sampleRate: number;
+}
+
+/**
+ * An AudioContext made NOW, inside the tap that asked for a recording, and
+ * told to run — or nothing where the browser has none.
+ *
+ * Safari starts a context only from a user gesture, and the capture builds
+ * its graph after `getUserMedia` resolves, which is outside the gesture.
+ * Made here, synchronously in the click, the context is already allowed to
+ * run by the time the graph is attached to it. The widget's voice capture
+ * does the same (`makeContext`).
+ */
+export function makeGestureContext(): AudioContext | undefined {
+  const Ctor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  try {
+    const ctx = Ctor ? new Ctor() : undefined;
+    void ctx?.resume().catch(() => {});
+    return ctx;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -153,6 +192,13 @@ export interface MeetingCaptureOpts {
   onLost?: (reason: TrackLossReason) => void;
   /** The clock the mute window is measured on. Injected by tests. */
   now?: () => number;
+  /**
+   * A context made inside the tap that started this capture
+   * (`makeGestureContext`), used by the FIRST leg only: a reopen is not a
+   * gesture, and the first leg's graph closes this context when it stops.
+   * Closed here if that leg never opens, so a refused tap leaks nothing.
+   */
+  context?: AudioContext;
   deps?: MeetingCaptureDeps;
 }
 
@@ -167,7 +213,10 @@ export interface MeetingCaptureOpts {
 export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<MeetingCaptureStart> {
   const deps = opts.deps ?? {};
   const blocked = insecureOriginMessage((deps.readOrigin ?? defaultOriginFacts)());
-  if (blocked) return { ok: false, kind: 'insecure', message: blocked };
+  if (blocked) {
+    void opts.context?.close().catch(() => {});
+    return { ok: false, kind: 'insecure', message: blocked };
+  }
   const constraints = captureConstraints(opts.mode ?? DEFAULT_CAPTURE_MODE, opts.room);
   const source = opts.source ?? 'mic';
 
@@ -178,7 +227,13 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
     watch: TrackWatch;
   }
 
-  async function openLeg(): Promise<{ ok: true; leg: Leg } | { ok: false; message: string }> {
+  /** Blocks the graph has handed over, across every leg. */
+  let blocks = 0;
+
+  async function openLeg(
+    context?: AudioContext,
+  ): Promise<{ ok: true; leg: Leg } | { ok: false; message: string }> {
+    const release = (): void => void context?.close().catch(() => {});
     let stream: MediaStream;
     try {
       stream =
@@ -190,13 +245,15 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
       const message = isSourceRefusal(err)
         ? err.message
         : recognitionErrorMessage(mediaErrorCode(err));
+      release();
       return { ok: false, message };
     }
     let pump: AudioPump;
     try {
-      pump = await (deps.createPump ?? createAudioPump)(stream);
+      pump = await (deps.createPump ?? createAudioPump)(stream, context);
     } catch (err) {
       for (const track of stream.getTracks()) track.stop();
+      release();
       return { ok: false, message: recognitionErrorMessage(mediaErrorCode(err)) };
     }
     // A resampler PER LEG, never one shared across a reopen: it is built from
@@ -236,6 +293,7 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
       // track is producing, and forwarding it first would put another frame of
       // nothing on the wire ahead of the report.
       watch.tick();
+      blocks += 1;
       const step = chunkPcm16(pending, floatToPcm16(resample(block)), MEETING_FRAME_SAMPLES);
       pending = step.rest;
       for (const frame of step.frames) opts.onFrame(frame);
@@ -243,7 +301,7 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
     return { ok: true, leg: { stream, pump, watch } };
   }
 
-  const first = await openLeg();
+  const first = await openLeg(opts.context);
   if (!first.ok) return { ok: false, kind: 'denied', message: first.message };
   let leg = first.leg;
   let closed = false;
@@ -296,6 +354,14 @@ export async function startMeetingCapture(opts: MeetingCaptureOpts): Promise<Mee
       stop: () => {
         closed = true;
         tearDown(leg);
+      },
+      health: () => ({
+        blocks,
+        contextState: leg.pump.contextState?.() ?? 'unknown',
+        sampleRate: leg.pump.sampleRate,
+      }),
+      resumeAudio: async () => {
+        await leg.pump.resume?.().catch(() => {});
       },
     },
   };
