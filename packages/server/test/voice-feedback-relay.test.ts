@@ -67,16 +67,22 @@ function fakeTidy(): {
   tidy: TidyComplete;
   prompts: string[];
   replies: Array<string | Error>;
+  /** When set, the next answer waits for it. */
+  hold: { gate: Promise<void> | null };
 } {
   const prompts: string[] = [];
   const replies: Array<string | Error> = [];
+  const hold: { gate: Promise<void> | null } = { gate: null };
   const tidy: TidyComplete = async ({ user }) => {
     prompts.push(user);
+    const gate = hold.gate;
+    hold.gate = null;
+    if (gate) await gate;
     const next = replies.shift();
     if (next instanceof Error) throw next;
     return { text: next ?? '{"comments":[]}' };
   };
-  return { tidy, prompts, replies };
+  return { tidy, prompts, replies, hold };
 }
 
 const reply = (...comments: Array<{ continues?: boolean; text: string; element?: string }>) =>
@@ -337,6 +343,46 @@ describe('VoiceFeedbackRelay', () => {
       'heading 2',
     );
     expect(existsSync(join(voiceAudioDir(dataDir, DOC), 'seg-2.wav'))).toBe(true);
+  });
+
+  it('a Stop and a close that race end the recording once', async () => {
+    make();
+    const ws = await open();
+    await until(() => ws.of('ready')[0], 'ready');
+    speak(ws, 3);
+    let release = (): void => {};
+    t.hold.gate = new Promise<void>((r) => {
+      release = r;
+    });
+    t.replies.push(reply({ text: 'The header is…', element: 'e0' }));
+    relay.onText(ws, JSON.stringify({ type: 'stop' }));
+    await until(() => t.prompts.length === 1, 'the final tidy call is under way');
+    relay.onClose(ws);
+    release();
+    await until(() => ws.of('stopped')[0], 'stopped');
+    const log = readFileSync(voiceLogPath(dataDir, DOC), 'utf8');
+    expect(log.match(/_Recording 1 ended/g)).toHaveLength(1);
+    expect(ws.comments('v1').at(-1)).toMatchObject({ final: true });
+  });
+
+  it('a close during a tidy call still settles and logs the comment it makes', async () => {
+    make();
+    const ws = await open();
+    await until(() => ws.of('ready')[0], 'ready');
+    let release = (): void => {};
+    t.hold.gate = new Promise<void>((r) => {
+      release = r;
+    });
+    t.replies.push(reply({ text: 'The header is too tall.', element: 'e0' }));
+    speak(ws, 6);
+    await until(() => t.prompts.length === 1, 'a tidy call is under way');
+    relay.onClose(ws);
+    release();
+    await until(() => ws.comments('v1').at(-1)?.final === true, 'v1 settled');
+    await relay.dispose();
+    const log = readFileSync(voiceLogPath(dataDir, DOC), 'utf8');
+    expect(log).toMatch(/Comment v1 on header “Riverbend”: The header is too tall\./);
+    expect(log.indexOf('Comment v1')).toBeLessThan(log.indexOf('_Recording 1 ended'));
   });
 
   it('a socket that goes away settles the open comment without a stopped frame', async () => {

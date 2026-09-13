@@ -109,6 +109,8 @@ interface Session {
   due: number;
   /** The tick in flight, if any — one at a time. */
   inflight: Promise<void> | null;
+  /** The one ending: a Stop and a close that race share it. */
+  ending: Promise<void> | null;
   closed: boolean;
   usd: number;
   ticks: number;
@@ -155,7 +157,7 @@ export class VoiceFeedbackRelay {
 
   onAudio(ws: VoiceWs, pcm: Uint8Array): void {
     const s = this.sessions.get(ws);
-    if (!s || s.closed) return;
+    if (!s || s.closed || s.ending) return;
     s.wav.write(pcm);
     s.engine?.send(pcm);
   }
@@ -198,6 +200,7 @@ export class VoiceFeedbackRelay {
       timer: null,
       due: 0,
       inflight: null,
+      ending: null,
       closed: false,
       usd: 0,
       ticks: 0,
@@ -452,8 +455,17 @@ export class VoiceFeedbackRelay {
    * first, so the sentence being said when Stop was pressed still becomes a
    * comment — the sentence most likely to matter.
    */
-  private async finish(s: Session, flush: boolean): Promise<void> {
-    if (s.closed) return;
+  private finish(s: Session, flush: boolean): Promise<void> {
+    s.ending ??= this.end(s, flush);
+    return s.ending;
+  }
+
+  private async end(s: Session, flush: boolean): Promise<void> {
+    if (!flush) {
+      // A tidy call already under way still becomes a settled, logged comment.
+      if (s.timer !== null) this.timers.clear(s.timer);
+      if (s.inflight) await s.inflight;
+    }
     if (flush && s.engine) {
       await s.engine.close();
       if (s.timer !== null) this.timers.clear(s.timer);
