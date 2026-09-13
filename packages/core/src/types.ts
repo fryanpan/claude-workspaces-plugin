@@ -1,3 +1,4 @@
+import type { VoiceNote } from './voice-feedback.ts';
 import type { ReviewPayload } from './review-item.ts';
 
 /** Kinds of surfaces the feedback core can power.
@@ -547,6 +548,11 @@ export interface Comment {
   author: User;
   text: string;
   ts: number;
+  /**
+   * Present on a comment that was SPOKEN: the stretch of the recording it came
+   * from and the words as heard, before tidying (`voice-feedback.ts`).
+   */
+  voice?: VoiceNote;
   /**
    * Every previous version of `text`, oldest first — present only on a
    * comment somebody has edited. See `CommentEdit`.
