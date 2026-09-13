@@ -6,7 +6,8 @@
   "main": "src/widget.ts",
   "exports": {
     ".": "./src/widget.ts",
-    "./mic": "./src/widget-mic.ts"
+    "./mic": "./src/widget-mic.ts",
+    "./voice": "./src/voice/voice-mode.ts"
   },
   "dependencies": {
     "@claude-workspaces/core": "workspace:*",

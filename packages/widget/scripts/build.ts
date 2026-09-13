@@ -145,6 +145,9 @@ await guardWidget(await build('iife', 'widget.iife.js', 'widget-iife.ts'), 'widg
 // never do. Separate also keeps it off `check:widget-size`, which measures the
 // bundle every embed loads, not this one.
 await build('iife', 'mockup-live.js', 'mockup-live.ts');
+// Voice feedback: fetched by a mock page on the mic's first tap, so it rides on
+// no page that never records — and on none of the budgeted bundle's bytes.
+await build('iife', 'voice.js', 'voice/voice-entry.ts');
 
 writeFileSync(join(dist, 'BUILD_INFO.txt'), `built ${new Date().toISOString()}\n`);
 
