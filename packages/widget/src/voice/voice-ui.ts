@@ -207,7 +207,7 @@ export class VoiceView {
     const rawOpen = el.querySelector('.vrawtext')?.hasAttribute('hidden') === false;
     el.classList.toggle('undone', c.resolved === true);
     const html =
-      `<div class="vby">${escape(this.deps.author())} · by voice</div>` +
+      `<div class="vby">${escape(c.posted?.author ?? this.deps.author())} · by voice</div>` +
       `<div class="vtext">${escape(c.text)}</div>` +
       `<div class="vrawtext"${rawOpen ? '' : ' hidden'}>“${escape(c.raw)}”</div>` +
       '<div class="vfoot">' +

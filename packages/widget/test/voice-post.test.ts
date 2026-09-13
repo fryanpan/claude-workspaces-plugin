@@ -66,6 +66,19 @@ describe('writing a spoken comment through the thread routes', () => {
     expect(voiceCall?.auth).toBe(typedCall?.auth);
   });
 
+  it('reads back the author the server recorded, which a sign-in decides', async () => {
+    const { p } = poster(() =>
+      json({
+        thread: { id: 't9', comments: [{ id: 'c9', author: { name: 'Riverbend Reviewer' } }] },
+      }),
+    );
+    expect(await p.create(ANCHOR, 'hi', VOICE)).toEqual({
+      threadId: 't9',
+      commentId: 'c9',
+      author: 'Riverbend Reviewer',
+    });
+  });
+
   it('reads a refused create, or an answer without a comment id, as nothing', async () => {
     expect(await poster(() => json({}, 500)).p.create(ANCHOR, 'hi', VOICE)).toBeNull();
     expect(

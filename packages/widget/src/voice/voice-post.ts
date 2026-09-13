@@ -15,6 +15,8 @@ import type { FeedbackWidgetEl } from '../widget.ts';
 export interface PostedComment {
   threadId: string;
   commentId: string;
+  /** Who the server says wrote it — a signed-in name wins over the widget's own. */
+  author?: string;
 }
 
 export interface VoicePoster {
@@ -40,10 +42,17 @@ export function widgetPoster(el: FeedbackWidgetEl): VoicePoster {
       const res = await post('', () => ({ author: el.user, text, anchor, voice }));
       if (!res.ok) return null;
       const { thread } = (await res.json()) as {
-        thread?: { id?: string; comments?: Array<{ id?: string }> };
+        thread?: { id?: string; comments?: Array<{ id?: string; author?: { name?: unknown } }> };
       };
-      const commentId = thread?.comments?.[0]?.id;
-      return thread?.id && commentId ? { threadId: thread.id, commentId } : null;
+      const first = thread?.comments?.[0];
+      const commentId = first?.id;
+      if (!thread?.id || !commentId) return null;
+      const author = first?.author?.name;
+      return {
+        threadId: thread.id,
+        commentId,
+        ...(typeof author === 'string' && author ? { author } : {}),
+      };
     },
     async edit(at, text, voice) {
       const res = await post(`/${enc(at.threadId)}/edit-comment`, () => ({

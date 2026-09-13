@@ -173,6 +173,21 @@ describe('a settled comment’s card', () => {
     expect(t.card()?.querySelector('.vby')?.textContent).toBe('Ada <Admin> · by voice');
   });
 
+  it('names the author the server recorded once the thread exists', () => {
+    const t = setup();
+    t.add(comment({ final: true }));
+    expect(t.card()?.querySelector('.vby')?.textContent, 'CONTROL: the widget’s own name').toBe(
+      'Ada <Admin> · by voice',
+    );
+    t.add(
+      comment({
+        final: true,
+        posted: { threadId: 't1', commentId: 'c1', author: 'Riverbend Reviewer' },
+      }),
+    );
+    expect(t.card()?.querySelector('.vby')?.textContent).toBe('Riverbend Reviewer · by voice');
+  });
+
   it('plays the clip from the server', () => {
     const played: string[] = [];
     class FakeAudio {
