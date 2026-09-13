@@ -407,8 +407,29 @@ function acceptedInsertPos(fragment: Y.XmlFragment, j: number): number {
 }
 
 export function parseMarkdownBlocks(markdown: string): Y.XmlElement[] {
+  return parseMarkdownSource(markdown).blocks;
+}
+
+/** A parse that also says where each top-level block began. */
+export interface ParsedMarkdownSource {
+  blocks: Y.XmlElement[];
+  /** The source split on `\n`, after CRLF normalization. */
+  lines: string[];
+  /** `starts[k]` is the index in `lines` of block k's first line. A block
+   *  runs to the next block's start, less any blank lines between them. */
+  starts: number[];
+}
+
+/**
+ * `parseMarkdownBlocks`, keeping each block's first source line. Every pass of
+ * the loop below pushes exactly one block, so the line it started on is its
+ * start; the write-back uses these to reuse the author's bytes for a block an
+ * edit did not touch (`prose-keep-source.ts`).
+ */
+export function parseMarkdownSource(markdown: string): ParsedMarkdownSource {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const out: Y.XmlElement[] = [];
+  const starts: number[] = [];
   let i = 0;
 
   // These read a line that has already had its indent stripped by the
@@ -614,6 +635,7 @@ export function parseMarkdownBlocks(markdown: string): Y.XmlElement[] {
         t.insert(0, yamlLines.join('\n'));
         cb.insert(0, [t]);
         out.push(cb);
+        starts.push(i);
         i = j + 1;
       }
     }
@@ -625,6 +647,7 @@ export function parseMarkdownBlocks(markdown: string): Y.XmlElement[] {
       i++;
       continue;
     }
+    starts.push(i);
 
     if (isHeading(line.trimStart())) {
       const m = line.trimStart().match(/^(#{1,6})\s+(.*)$/);
@@ -729,7 +752,7 @@ export function parseMarkdownBlocks(markdown: string): Y.XmlElement[] {
     }
     out.push(mkParagraph(paraLines.join(' ')));
   }
-  return out;
+  return { blocks: out, lines, starts };
 }
 
 export function splitTableRow(line: string): string[] {
@@ -817,6 +840,16 @@ export function normalizeMarkdown(markdown: string): string {
  * disk as human-readable markdown.
  */
 export function serializeFragmentToMarkdown(fragment: Y.XmlFragment): string {
+  const parts = serializeFragmentParts(fragment);
+  return parts.length > 0 ? `${parts.join('\n\n')}\n` : '';
+}
+
+/**
+ * The top-level pieces `serializeFragmentToMarkdown` joins with a blank line:
+ * one per block that writes anything, with a legacy frontmatter run counted as
+ * one piece.
+ */
+export function serializeFragmentParts(fragment: Y.XmlFragment): string[] {
   const children = fragment.toArray();
   // Recognize a leading YAML-frontmatter pattern: horizontalRule, then one or
   // more paragraphs (the YAML lines), then a closing horizontalRule. The
@@ -852,7 +885,7 @@ export function serializeFragmentToMarkdown(fragment: Y.XmlFragment): string {
     const s = serializeBlock(children[i] as Y.XmlElement | Y.XmlText);
     if (s != null && s !== '') parts.push(s);
   }
-  return parts.length > 0 ? `${parts.join('\n\n')}\n` : '';
+  return parts;
 }
 
 function isHorizontalRuleNode(n: unknown): boolean {
@@ -903,7 +936,7 @@ function serializeBlock(node: Y.XmlElement | Y.XmlText): string | null {
       return '---';
     case 'bulletList':
     case 'orderedList':
-      return serializeList(node, 0);
+      return serializeList(node, '');
     case 'table':
       return serializeTable(node);
     case 'image': {
@@ -1176,9 +1209,10 @@ function isEntirelySuggestedInsert(node: Y.XmlElement): boolean {
 
 /**
  * Serialize a bulletList / orderedList to markdown, preserving nested
- * lists and multi-paragraph list items. `depth` is the nesting level
- * (0 = top). Indentation is 2 spaces per level — the same unit the
- * parser reads back, so the round-trip is lossless.
+ * lists and multi-paragraph list items. `indent` is the list's own leading
+ * whitespace; each item's children sit one marker-width further in (two
+ * columns under `- `, three under `1. `). The parser reads any deeper indent
+ * as nesting, so the round-trip is lossless.
  *
  * The editor (y-prosemirror) shapes a list item as
  *   listItem > paragraph [, bulletList|orderedList ] [, paragraph … ]
@@ -1187,10 +1221,8 @@ function isEntirelySuggestedInsert(node: Y.XmlElement): boolean {
  * nested bullets and sub-paragraphs on write-back (a peer lost a nested
  * "Notes & Questions" section this way). Recurse instead.
  */
-function serializeList(list: Y.XmlElement, depth: number): string {
+function serializeList(list: Y.XmlElement, indent: string): string {
   const ordered = list.nodeName === 'orderedList';
-  const indent = '  '.repeat(depth);
-  const contIndent = '  '.repeat(depth + 1);
   const lines: string[] = [];
   let n = 0;
   for (const li of list.toArray()) {
@@ -1200,6 +1232,11 @@ function serializeList(list: Y.XmlElement, depth: number): string {
     if (isEntirelySuggestedInsert(li)) continue;
     n++;
     const marker = ordered ? `${n}. ` : '- ';
+    // An item's children sit past its marker, not a fixed two columns in:
+    // CommonMark reads a line indented less than the marker's width as the end
+    // of the item, so a bullet two columns under `1. ` rendered as a sibling
+    // list — MDX flattened every list nested under an ordered item.
+    const contIndent = indent + ' '.repeat(marker.length);
     const children = li.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement);
     // The first paragraph is the item's own line; everything after it
     // (nested lists, extra paragraphs) renders as indented child content.
@@ -1210,7 +1247,7 @@ function serializeList(list: Y.XmlElement, depth: number): string {
       if (k === firstParaIdx) continue;
       const child = children[k]!;
       if (child.nodeName === 'bulletList' || child.nodeName === 'orderedList') {
-        lines.push(serializeList(child, depth + 1));
+        lines.push(serializeList(child, contIndent));
       } else {
         // Continuation paragraph (or other block) inside the item: blank
         // line, then indent one level deeper than the marker.

@@ -16,6 +16,8 @@
  *                        anchors that name where.
  *   `prose-integrity.ts` the post-write read that asks whether a doc now
  *                        holds markdown syntax as literal characters.
+ *   `prose-keep-source.ts` the write-back's serializer: the file's own bytes
+ *                        for every block an edit did not touch.
  *
  * This file exports exactly what it exported when it was one 2,847-line
  * module, which is why the re-exports below are written out by name rather
@@ -55,6 +57,8 @@ export {
 export type { TextSegment } from './prose-fragment.ts';
 export { detectLiteralMarkdown, literalMarkdownMessage } from './prose-integrity.ts';
 export type { LiteralMarkdownFinding, LiteralMarkdownKind } from './prose-integrity.ts';
+export { serializeKeepingSource, serializeKeepingSourceLayout } from './prose-keep-source.ts';
+export type { SourceLayout } from './prose-keep-source.ts';
 export { nestBlocksOutcome, nestBlocksUnderLead } from './prose-nest.ts';
 export type { NestBlocksError, NestBlocksOptions, NestBlocksResult } from './prose-nest.ts';
 export {
