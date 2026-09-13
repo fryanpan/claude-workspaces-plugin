@@ -67,7 +67,6 @@ import { createPushAnnounce } from './push-announce.ts';
 import type { NudgeTally } from './ready-nudge.ts';
 import { CalendarConnectionStore, CalendarSyncConsumer } from './recall-calendar.ts';
 import { RecallMeetingRelay } from './recall-meeting.ts';
-import { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { unreachableCallbackReason } from './recall.ts';
 import { scanSettledDocRefs } from './refs-backfill.ts';
 import { createOriginPolicy, createRequestAdmission } from './request-admission.ts';
@@ -165,6 +164,7 @@ import {
 import { ThreadRequestDedup } from './thread-request-dedup.ts';
 import type { TranscriptionEngine } from './transcribe.ts';
 import { UptimeMonitor } from './uptime.ts';
+import { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { VoiceRouter } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
 

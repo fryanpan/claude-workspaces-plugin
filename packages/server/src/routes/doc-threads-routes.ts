@@ -19,6 +19,7 @@ import {
   type Anchor,
   type ReviewPayload,
   type Thread,
+  type VoiceNote,
   anchors,
   answerAsksBack,
   answerFromReply,
@@ -29,13 +30,12 @@ import {
   normalizeReviewType,
   pendingDeclaration,
   readReviewPayload,
+  readVoiceNote,
   reviewGapAdvice,
   reviewItemState,
   reviewPayloadMessage,
   summaryHash,
-  readVoiceNote,
   threadReviewItemId,
-  type VoiceNote,
 } from '@claude-workspaces/core';
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';

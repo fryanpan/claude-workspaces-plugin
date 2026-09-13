@@ -1,5 +1,5 @@
-import type { VoiceNote } from './voice-feedback.ts';
 import type { ReviewPayload } from './review-item.ts';
+import type { VoiceNote } from './voice-feedback.ts';
 
 /** Kinds of surfaces the feedback core can power.
  *  - markdown: WYSIWYG prose editing (Tiptap), bidirectional file sync.
