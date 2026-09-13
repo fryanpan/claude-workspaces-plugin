@@ -193,6 +193,76 @@ describe('VoiceFeedbackRelay', () => {
     expect(v2).toMatchObject({ target: 1, raw: 'the save button hides', final: false });
   });
 
+  it('two topics in one tick get their own words and clips that do not overlap', async () => {
+    make();
+    const ws = await open();
+    await until(() => ws.of('ready')[0], 'ready');
+    t.replies.push(reply({ text: 'The header is too tall.', element: 'e0' }));
+    speak(ws, 6);
+    await until(() => ws.comments('v1')[0], 'v1');
+
+    // "make it shorter" and "the save button hides" both settle before the tick.
+    t.replies.push(
+      reply(
+        { continues: true, text: 'The header is too tall; make it shorter.', element: 'e0' },
+        { text: 'The Save button hides.', element: 'e1' },
+      ),
+    );
+    speak(ws, 9);
+    const v2 = await until(() => ws.comments('v2')[0], 'v2');
+    const v1 = ws.comments('v1').at(-1) as Frame;
+    expect(t.prompts[1]).toContain('<new_words>make it shorter the save button hides</new_words>');
+    expect(v1).toMatchObject({ raw: 'the header is too tall make it shorter', final: true });
+    expect(v2).toMatchObject({ raw: 'the save button hides', target: 1 });
+
+    const range = (f: Frame) => String(f.clip).split('#t=')[1]?.split(',').map(Number) ?? [];
+    const [s1, e1] = range(v1);
+    const [s2, e2] = range(v2);
+    expect(s1).toBe(0);
+    expect(e1 as number).toBeGreaterThan(s1 as number);
+    expect(s2 as number).toBeGreaterThanOrEqual(e1 as number);
+    expect(e2 as number).toBeGreaterThan(s2 as number);
+  });
+
+  it("writes a comment's line after the words it was made of, before words said later", async () => {
+    make();
+    const ws = await open();
+    await until(() => ws.of('ready')[0], 'ready');
+    t.replies.push(reply({ text: 'The header is too tall.', element: 'e0' }));
+    speak(ws, 6);
+    await until(() => ws.comments('v1')[0], 'v1');
+    t.replies.push(reply({ continues: true, text: 'Header too tall; shorter.', element: 'e0' }));
+    speak(ws, 4);
+    await until(() => ws.comments('v1')[1], 'v1 grown');
+    // "footer text is faint" is heard while the Save tick is still thinking,
+    // so v1 settles after words said later than it.
+    let release = (): void => {};
+    t.hold.gate = new Promise<void>((r) => {
+      release = r;
+    });
+    t.replies.push(reply({ text: 'The Save button hides.', element: 'e1' }));
+    speak(ws, 5);
+    await until(() => t.prompts.length === 3, 'the Save tick is under way');
+    speak(ws, 5);
+    await until(() => ws.of('heard').some((f) => String(f.text).endsWith('is faint')), 'faint');
+    t.replies.push(reply({ text: 'The footer text is faint.', element: 'e3' }));
+    release();
+    await until(() => ws.comments('v3')[0], 'v3');
+    relay.onText(ws, JSON.stringify({ type: 'stop' }));
+    await until(() => ws.of('stopped')[0], 'stopped');
+
+    const lines = readFileSync(voiceLogPath(dataDir, DOC), 'utf8')
+      .split('\n')
+      .filter((l) => l.startsWith('- '));
+    const at = (needle: string) => lines.findIndex((l) => l.includes(needle));
+    expect(at('Comment v1')).toBeGreaterThan(at('make it shorter'));
+    expect(at('Comment v1')).toBeLessThan(at('the save button hides'));
+    expect(at('Comment v2')).toBeGreaterThan(at('the save button hides'));
+    expect(at('Comment v2')).toBeLessThan(at('footer text is faint'));
+    expect(at('Comment v3')).toBeGreaterThan(at('footer text is faint'));
+    expect(lines.filter((l) => /^- \[/.test(l)).length).toBe(7);
+  });
+
   it('a pin settles the open comment and fixes the next new comment to the tapped element', async () => {
     make();
     const ws = await open();

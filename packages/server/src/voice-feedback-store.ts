@@ -77,6 +77,47 @@ export function appendVoiceLog(dataDir: string, docId: string, text: string): vo
   appendFileSync(p, text);
 }
 
+/**
+ * One recording's log, in the order things were said. A heard line is ready
+ * the moment its turn settles, but the comment made from those words is only
+ * written when it settles — usually once the next topic has started — so
+ * written as they arrived, a comment landed below words said after it. Heard
+ * lines wait here until a comment that ends at or after them settles, or the
+ * recording ends, and go out ahead of it. The recording is the durable copy
+ * of the words in the meantime.
+ */
+export class VoiceLog {
+  private heard: Array<{ ms: number; line: string }> = [];
+
+  constructor(
+    private readonly dataDir: string,
+    private readonly docId: string,
+  ) {}
+
+  write(text: string): void {
+    appendVoiceLog(this.dataDir, this.docId, text);
+  }
+
+  /** A settled turn, `ms` into the recording. */
+  heardAt(ms: number, text: string): void {
+    this.heard.push({ ms, line: `- ${stamp(ms)} ${text}\n` });
+  }
+
+  /** A settled comment's line, after every word heard up to its end. */
+  comment(endMs: number, line: string): void {
+    this.flush(endMs);
+    this.write(line);
+  }
+
+  /** Every waiting heard line up to `upTo`, written. */
+  flush(upTo = Number.POSITIVE_INFINITY): void {
+    const ready = this.heard.filter((h) => h.ms <= upTo);
+    if (ready.length === 0) return;
+    this.heard = this.heard.filter((h) => h.ms > upTo);
+    this.write(ready.map((h) => h.line).join(''));
+  }
+}
+
 /** A 44-byte WAV header for PCM16 mono of `dataBytes` bytes. */
 export function wavHeader(sampleRate: number, dataBytes: number): Uint8Array {
   const b = new DataView(new ArrayBuffer(44));

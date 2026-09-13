@@ -24,6 +24,7 @@ import {
   buildTidyPrompt,
   createHaikuTidy,
   parseTidyReply,
+  splitTick,
   tidyDollars,
 } from '../packages/server/src/voice-feedback-tidy.ts';
 import { EVAL_CREDENTIAL_HELP } from './eval-credential.ts';
@@ -55,6 +56,8 @@ interface Case {
   expect: string[] | null | 'none';
   /** Whether the first comment should continue the open one. */
   continues?: boolean;
+  /** For a reply of two comments: how the second one's raw words must begin (filler aside). */
+  splitAt?: RegExp;
 }
 
 const GOAL_OPEN = {
@@ -131,6 +134,7 @@ const CASES: Case[] = [
       'yeah make it a solid button actually also the sync resumes task says blocked but nobody said why',
     expect: ['#blk', '#t-sleep', '#t-sleep .t'],
     continues: true,
+    splitAt: /^(actually )?(also )?the sync resumes/,
   },
   {
     name: 'fixed element is kept',
@@ -159,6 +163,8 @@ let pickOk = 0;
 let pickN = 0;
 let topicOk = 0;
 let topicN = 0;
+let splitOk = 0;
+let splitN = 0;
 let usd = 0;
 const lat: number[] = [];
 console.log(`catalog: ${targets.length} targets; model ${TIDY_MODEL}; runs ${runs}`);
@@ -198,18 +204,27 @@ for (let r = 0; r < runs; r++) {
       if (c.name === 'continue then change topic') topic = topic && comments.length >= 2;
       if (topic) topicOk++;
     }
+    let split = true;
+    if (c.splitAt) {
+      splitN++;
+      const parts = splitTick(c.words, comments, 0, 1);
+      split = parts.length >= 2 && c.splitAt.test(parts[1]?.words ?? '');
+      if (split) splitOk++;
+    }
     const got = comments
       .map(
         (x) =>
           `${x.continues ? '+' : '*'}${x.target === null ? 'page' : `e${x.target}`} "${x.text}"`,
       )
       .join(' | ');
-    console.log(`${pick && topic ? 'PASS' : 'FAIL'}  ${c.name}: ${got || '(no comments)'}`);
+    console.log(
+      `${pick && topic && split ? 'PASS' : 'FAIL'}  ${c.name}: ${got || '(no comments)'}`,
+    );
   }
 }
 lat.sort((a, b) => a - b);
 console.log(
-  `\npick ${pickOk}/${pickN}  topic ${topicOk}/${topicN}  ` +
+  `\npick ${pickOk}/${pickN}  topic ${topicOk}/${topicN}  split ${splitOk}/${splitN}  ` +
     `latency p50 ${Math.round(lat[Math.floor(lat.length / 2)] ?? 0)}ms ` +
     `p90 ${Math.round(lat[Math.floor(lat.length * 0.9)] ?? 0)}ms  spend $${usd.toFixed(4)} ` +
     `($${(usd / pickN).toFixed(5)} per tick)`,

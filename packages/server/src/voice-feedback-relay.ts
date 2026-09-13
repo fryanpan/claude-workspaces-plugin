@@ -28,7 +28,7 @@ import {
   parseVoiceClientMessage,
 } from '@claude-workspaces/core';
 import type { EngineTurn, TranscriptionEngine, TranscriptionSession } from './transcribe.ts';
-import { type WavWriter, appendVoiceLog, openNextSegment, stamp } from './voice-feedback-store.ts';
+import { VoiceLog, type WavWriter, openNextSegment, stamp } from './voice-feedback-store.ts';
 import {
   type TidyComment,
   type TidyComplete,
@@ -36,6 +36,7 @@ import {
   buildTidyPrompt,
   normWord,
   parseTidyReply,
+  splitTick,
   tidyDollars,
   unusedWords,
 } from './voice-feedback-tidy.ts';
@@ -96,6 +97,7 @@ interface Session {
   ws: VoiceWs;
   engine: TranscriptionSession | null;
   wav: WavWriter;
+  log: VoiceLog;
   segment: number;
   targets: VoiceTarget[];
   turns: Map<number, Turn>;
@@ -189,6 +191,7 @@ export class VoiceFeedbackRelay {
       ws,
       engine: null,
       wav,
+      log: new VoiceLog(dataDir, docId),
       segment,
       targets,
       turns: new Map(),
@@ -210,11 +213,7 @@ export class VoiceFeedbackRelay {
     this.sessions.set(ws, s);
     this.live.add(s);
     const at = new Date((this.deps.now ?? Date.now)()).toISOString();
-    appendVoiceLog(
-      dataDir,
-      docId,
-      `\n## Recording ${segment} — ${at}\n\nAudio: seg-${segment}.wav\n\n`,
-    );
+    s.log.write(`\n## Recording ${segment} — ${at}\n\nAudio: seg-${segment}.wav\n\n`);
     try {
       s.engine = await engine.open({
         sampleRate: MEETING_SAMPLE_RATE,
@@ -249,11 +248,7 @@ export class VoiceFeedbackRelay {
     };
     s.turns.set(t.turn, turn);
     if (t.final && t.text.trim() && !prev?.final) {
-      appendVoiceLog(
-        this.deps.dataDir,
-        s.ws.data.docId,
-        `- ${stamp(this.audioMs(s))} ${t.text.trim()}\n`,
-      );
+      s.log.heardAt(this.audioMs(s), t.text.trim());
     }
     const tail = [...s.turns.values()]
       .map((x) => x.text)
@@ -339,7 +334,12 @@ export class VoiceFeedbackRelay {
         target: s.open?.target ?? null,
       },
     ];
-    for (const c of comments) this.place(s, c, words, startMs, endMs);
+    // Each comment gets its own stretch of the tick, so no two share a clip or words.
+    const parts = splitTick(words, comments, startMs, endMs);
+    comments.forEach((c, k) => {
+      const p = parts[k];
+      if (p) this.place(s, c, p.words, p.startMs, p.endMs);
+    });
   }
 
   private place(s: Session, c: TidyComment, words: string, startMs: number, endMs: number): void {
@@ -377,9 +377,8 @@ export class VoiceFeedbackRelay {
     this.emit(s, c);
     const where = c.target === null ? 'the page' : this.describe(s, c.target);
     const thread = c.threadId ? ` (thread ${c.threadId})` : '';
-    appendVoiceLog(
-      this.deps.dataDir,
-      s.ws.data.docId,
+    s.log.comment(
+      c.endMs,
       `- ${stamp(c.startMs)}–${stamp(c.endMs)} Comment ${c.key}${thread} on ${where}: ${c.text}\n`,
     );
   }
@@ -437,11 +436,7 @@ export class VoiceFeedbackRelay {
           c.threadId = msg.threadId;
           return;
         }
-        appendVoiceLog(
-          this.deps.dataDir,
-          s.ws.data.docId,
-          `- Comment ${msg.key} posted as thread ${msg.threadId}\n`,
-        );
+        s.log.write(`- Comment ${msg.key} posted as thread ${msg.threadId}\n`);
         return;
       }
       case 'stop':
@@ -480,9 +475,8 @@ export class VoiceFeedbackRelay {
     s.wav.close();
     this.live.delete(s);
     const secs = Math.round(this.audioMs(s) / 1000);
-    appendVoiceLog(
-      this.deps.dataDir,
-      s.ws.data.docId,
+    s.log.flush();
+    s.log.write(
       `\n_Recording ${s.segment} ended at ${stamp(this.audioMs(s))}; ${s.ticks} tidy calls, $${s.usd.toFixed(4)}._\n`,
     );
     this.deps.log?.(

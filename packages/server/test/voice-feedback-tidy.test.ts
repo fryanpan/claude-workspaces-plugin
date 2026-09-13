@@ -13,6 +13,7 @@ import {
   buildTidyPrompt,
   createHaikuTidy,
   parseTidyReply,
+  splitTick,
   tidyDollars,
 } from '../src/voice-feedback-tidy.ts';
 
@@ -107,6 +108,89 @@ describe('parseTidyReply', () => {
     expect(parseTidyReply('{not json}', input())).toBeNull();
     expect(parseTidyReply('{"answer":"nope"}', input())).toBeNull();
     expect(parseTidyReply('{"comments":[]}', input())).toEqual([]);
+  });
+});
+
+describe('splitTick', () => {
+  const WORDS = 'make it shorter and the save button hides also the done chip is grey';
+  const c = (text: string) => ({ continues: false, text, target: null });
+
+  /** Every part touches the next, and together they are the whole tick. */
+  const expectDisjoint = (
+    parts: ReturnType<typeof splitTick>,
+    words: string,
+    a: number,
+    b: number,
+  ) => {
+    expect(
+      parts
+        .map((p) => p.words)
+        .filter(Boolean)
+        .join(' '),
+    ).toBe(words);
+    expect(parts[0]?.startMs).toBe(a);
+    expect(parts.at(-1)?.endMs).toBe(b);
+    for (let k = 1; k < parts.length; k++) {
+      expect(parts[k]?.startMs).toBe(parts[k - 1]?.endMs as number);
+    }
+  };
+
+  it('cuts where the spoken words stop matching one comment and start matching the next', () => {
+    const parts = splitTick(
+      WORDS,
+      [
+        c('The header is too tall; make it shorter.'),
+        c('The Save button hides.'),
+        c('The Done chips are gray and hard to tell apart.'),
+      ],
+      1000,
+      15_000,
+    );
+    // Joining words open the next comment; "grey" vs "gray" does not matter.
+    expect(parts.map((p) => p.words)).toEqual([
+      'make it shorter',
+      'and the save button hides',
+      'also the done chip is grey',
+    ]);
+    // Fourteen words over fourteen seconds: a second a word.
+    expect(parts.map((p) => [p.startMs, p.endMs])).toEqual([
+      [1000, 4000],
+      [4000, 9000],
+      [9000, 15_000],
+    ]);
+    expectDisjoint(parts, WORDS, 1000, 15_000);
+  });
+
+  it('matches word stems, so a tidied "blocks" still ties to a spoken "blocked"', () => {
+    // No word is spelt the same in both; only the stems tie them. Cut by
+    // share, the long first comment would have taken "and the blocked chips".
+    const parts = splitTick(
+      'the header looks cramped and the blocked chips need reasons',
+      [c('Headers: cramp everywhere, very very tight and squeezed overall.'), c('Blocks, reason.')],
+      0,
+      10,
+    );
+    expect(parts.map((p) => p.words)).toEqual([
+      'the header looks cramped',
+      'and the blocked chips need reasons',
+    ]);
+  });
+
+  it('cuts by share of the tidied text when no word ties them', () => {
+    const parts = splitTick(WORDS, [c('Shorter.'), c('Much longer comment text here.')], 0, 14);
+    expect(parts[0]?.words.length).toBeGreaterThan(0);
+    expect(parts[1]?.words.length).toBeGreaterThan(parts[0]?.words.length as number);
+    expectDisjoint(parts, WORDS, 0, 14);
+  });
+
+  it('hands one comment the whole tick, and never loses words to more comments than words', () => {
+    expect(splitTick(WORDS, [c('All of it.')], 3, 9)).toEqual([
+      { words: WORDS, startMs: 3, endMs: 9 },
+    ]);
+    const parts = splitTick('shorter', [c('shorter'), c('shorter'), c('shorter')], 0, 3);
+    expect(parts.map((p) => p.words).join('')).toBe('shorter');
+    expect(parts[0]?.words).toBe('shorter');
+    expect(parts.at(-1)?.endMs).toBe(3);
   });
 });
 

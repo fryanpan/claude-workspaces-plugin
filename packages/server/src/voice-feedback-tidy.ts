@@ -202,6 +202,79 @@ export function createHaikuTidy(opts?: {
   };
 }
 
+const FILLER = new Set(
+  "the and but are was for not you its it's this that with also just like yeah actually really so".split(
+    ' ',
+  ),
+);
+
+/** The words that can tie spoken words to a tidied comment: no filler, stems cut to five letters. */
+function keys(text: string): string[] {
+  return text
+    .split(/\s+/)
+    .map(normWord)
+    .map((w) => (w.length < 3 || FILLER.has(w) ? '' : w.slice(0, 5)));
+}
+
+export interface TickPart {
+  words: string;
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * The stretch of one tick's words, and of its audio, that each comment is
+ * made of: in order, touching, never shared. Handing every comment the whole
+ * tick gave two topics said in one breath the same clip, and the first
+ * comment's raw words the second one's sentence.
+ *
+ * Each cut goes where the words before it best match the comment before and
+ * the words after it best match the comments after — a tidied comment keeps
+ * the speaker's nouns ("sync", "blocked"). Among equal cuts the earliest wins,
+ * so a joining "and also" opens the next comment. Asking the model to quote
+ * where each comment starts was tried and made it merge topics it had split
+ * (topic 10/12 against 12/12 without it). No match at all cuts by each
+ * comment's share of the tidied text. Times are spread over the tick by word
+ * position: the words carry no times of their own here.
+ */
+export function splitTick(
+  words: string,
+  comments: readonly TidyComment[],
+  startMs: number,
+  endMs: number,
+): TickPart[] {
+  const list = words.split(/\s+/).filter(Boolean);
+  const spoken = keys(list.join(' '));
+  const sets = comments.map((c) => new Set(keys(c.text).filter(Boolean)));
+  const hits = (set: Set<string>, a: number, b: number) =>
+    spoken.slice(a, b).filter((w) => w && set.has(w)).length;
+  const total = comments.reduce((n, c) => n + c.text.length, 0) || 1;
+  const starts = [0];
+  let share = 0;
+  for (let k = 1; k < comments.length; k++) {
+    const prev = starts[k - 1] ?? 0;
+    share += comments[k - 1]?.text.length ?? 0;
+    const min = Math.min(prev + 1, list.length);
+    const before = sets[k - 1] ?? new Set<string>();
+    const after = new Set(sets.slice(k).flatMap((x) => [...x]));
+    let best = min;
+    let bestScore = -1;
+    for (let i = min; i <= list.length; i++) {
+      const score = hits(before, prev, i) + hits(after, i, list.length);
+      if (score > bestScore) [best, bestScore] = [i, score];
+    }
+    const guess = Math.min(Math.max(min, Math.round((list.length * share) / total)), list.length);
+    starts.push(bestScore > 0 ? best : guess);
+  }
+  const at = (i: number) =>
+    list.length === 0 ? endMs : startMs + ((endMs - startMs) * i) / list.length;
+  return comments.map((_, k) => {
+    const a = starts[k] ?? 0;
+    const b = starts[k + 1] ?? list.length;
+    return { words: list.slice(a, b).join(' '), startMs: at(a), endMs: at(b) };
+  });
+}
+
 /** A word as the used-words bookkeeping compares it. */
 export const normWord = (w: string): string => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
 
