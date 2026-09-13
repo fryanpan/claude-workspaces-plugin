@@ -809,6 +809,9 @@ export interface AgentRoster {
   displayNameFor(id: string): string | null;
   /** The survivor an id was merged into, or null when the id is live. */
   mergedAwayInto(id: string): string | null;
+  /** Changes whenever a resolution above could. A roster without it is
+   *  never trusted to be unchanged. */
+  revision?(): number;
 }
 
 export interface AgentAttachment {
@@ -1808,6 +1811,8 @@ export class TaskStore {
   attachmentThresholds: AttachmentThresholds;
   deliveryProbe: DeliveryProbe | undefined;
   roster: AgentRoster | undefined;
+  /** How many times a roster was wired — half of `rosterRevision`. */
+  private rosterSwaps = 0;
   readonly voiceAckGraceMs: number;
   readonly commentAckGraceMs: number;
   agentStreamProbe: AgentStreamProbe | undefined;
@@ -2058,6 +2063,19 @@ export class TaskStore {
    */
   setAgentRoster(roster: AgentRoster | undefined): void {
     this.roster = roster;
+    this.rosterSwaps++;
+  }
+
+  /**
+   * Which state of the roster every owner resolution is being read against,
+   * or null when the roster cannot say. Equal answers mean `ownerIdOf` and
+   * `resolveAgentId` answer as they did — what lets the board projection
+   * leave rows nobody named alone (board-row-sync.ts).
+   */
+  rosterRevision(): string | null {
+    if (!this.roster) return `${this.rosterSwaps}`;
+    const revision = this.roster.revision?.();
+    return revision === undefined ? null : `${this.rosterSwaps}:${revision}`;
   }
 
   /** The roster's id for an owner name, or undefined. The reserved words

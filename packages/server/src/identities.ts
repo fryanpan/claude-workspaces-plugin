@@ -119,6 +119,8 @@ export class Identities {
   private state: FileShape;
   /** Set when the file on disk was unreadable and moved aside. */
   readonly loadError: string | null = null;
+  /** Bumped by every write, so a reader can tell that nothing moved. */
+  private writes = 0;
 
   constructor(opts: IdentitiesOptions) {
     this.path = join(opts.dataDir, FILENAME);
@@ -490,7 +492,18 @@ export class Identities {
     return next;
   }
 
+  /**
+   * A number that changes whenever any row does. The board projection caches
+   * every row's resolved owner and re-resolves only when this moves — no
+   * store event fires for a rename or a merge here, yet either can change
+   * who owns a hundred rows.
+   */
+  revision(): number {
+    return this.writes;
+  }
+
   private save(): void {
+    this.writes++;
     mkdirSync(dirname(this.path), { recursive: true });
     const tmp = `${this.path}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(this.state, null, 2)}\n`);

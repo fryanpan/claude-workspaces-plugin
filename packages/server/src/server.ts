@@ -472,7 +472,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
               console.error(`[meeting-tasks] spoken link refused for ${taskId}: ${linked.error}`);
               return;
             }
-            if (linked.changed) taskProjection.ensureWorkspace(linked.task.workspaceId);
+            if (linked.changed) taskProjection.refreshTask(linked.task);
           },
           // A huddle doc is HELD by a board workspace rather than owned by one
           // (no `setId`), which is where "create a task" said aloud used to
@@ -692,7 +692,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     if (!filed) return;
     // Same two steps the review-item route takes: re-project so the board
     // doc carries the item, and announce so the queue hears about it.
-    taskProjection.ensureWorkspace(filed.task.workspaceId);
+    taskProjection.refreshTask(filed.task);
     announceTaskReview(filed.task, filed.item, {
       id: agentIdForName(note.agent),
       name: note.agent,
@@ -865,7 +865,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const { scoreEffortEstimate, rescoreStaleEffortEstimates, stopEffortRescore } =
     createEffortScoring({
       taskStore,
-      refreshWorkspace: (workspaceId) => taskProjection.refresh(workspaceId),
+      refreshTask: (task) => taskProjection.refreshTask(task),
       opts,
     });
   // Effort-estimate scoring: re-score a ticket in the background whenever

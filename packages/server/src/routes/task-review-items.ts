@@ -100,7 +100,7 @@ export async function handleTaskReviewItems(
         ...(res.message !== undefined ? { message: res.message } : {}),
       });
     }
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     // The gate, BEFORE the announcement: a held item is not on anybody's
     // queue, so nothing may say it is.
     const gate = await judgeReviewItem(res.task, res.item, author);
@@ -197,7 +197,7 @@ export async function handleTaskReviewItems(
       ...(answeredWith !== undefined ? { answeredWith } : {}),
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, res);
   }
   // "Tell me more" on ONE review item — the `request_more_info` tool's
@@ -228,7 +228,7 @@ export async function handleTaskReviewItems(
       actor: author,
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, res);
   }
   /**
@@ -286,7 +286,7 @@ export async function handleTaskReviewItems(
             actor: author,
           });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     announceTaskReview(res.task, res.item, author);
     return j(200, { taskId, item: res.item, released: true });
   }
@@ -353,7 +353,7 @@ export async function handleTaskReviewItems(
       if (!revised.ok) {
         return j(revised.error === 'not-found' ? 404 : 400, revised);
       }
-      taskProjection.ensureWorkspace(revised.task.workspaceId);
+      taskProjection.refreshTask(revised.task);
       // Judged again, on the new words — the promise the hold's message
       // makes. A revision that still misses comes back held.
       const gate = await judgeTaskDecision(revised.task, author);
@@ -388,7 +388,7 @@ export async function handleTaskReviewItems(
       { actor: author, ...(revisedRange ? { revisedRange } : {}) },
     );
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     // Re-judged on every revision: the verdict was about the old words.
     const gate = await judgeReviewItem(res.task, res.item, author);
     if (wasHeld && !gate.held) announceTaskReview(res.task, gate.item, author);
@@ -458,7 +458,7 @@ export async function handleTaskReviewItems(
         ...(res.message !== undefined ? { message: res.message } : {}),
       });
     }
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     // Announced on the way BACK only, exactly as the doc route reasons:
     // a withdrawal must not buzz the reader with the ask just taken off
     // their queue, and a reinstated item still held by the gate is on

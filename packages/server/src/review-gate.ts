@@ -668,7 +668,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
           });
           return res.ok ? { ok: true, row: res.item } : { ok: false };
         },
-        settled: () => taskProjection.ensureWorkspace(task.workspaceId),
+        settled: () => taskProjection.refreshTask(task),
       },
       item,
       author,
@@ -728,7 +728,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
           });
           return res.ok ? { ok: true, row: res.item } : { ok: false };
         },
-        settled: () => taskProjection.ensureWorkspace(task.workspaceId),
+        settled: () => taskProjection.refreshTask(task),
       },
       derived,
       author,
@@ -933,7 +933,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
       threadId: created.id,
     });
     if (!asked.ok) return j(asked.error === 'not-found' ? 404 : 400, asked);
-    taskProjection.ensureWorkspace(asked.task.workspaceId);
+    taskProjection.refreshTask(asked.task);
     return j(200, {
       asked: true,
       task: asked.task,

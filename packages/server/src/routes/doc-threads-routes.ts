@@ -806,7 +806,7 @@ export async function handleDocThreadRoutes(
             text,
             { actor: user, threadId: created.id, range: itemAsk.range },
           );
-          if (asked.ok) taskProjection.ensureWorkspace(asked.task.workspaceId);
+          if (asked.ok) taskProjection.refreshTask(asked.task);
         }
         if (created && declared.review) {
           // Judged before it is announced, and before this route
