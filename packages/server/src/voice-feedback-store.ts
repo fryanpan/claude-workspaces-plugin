@@ -110,9 +110,37 @@ export interface WavWriter {
   readonly bytes: number;
 }
 
-export function openWav(path: string, sampleRate: number): WavWriter {
+/**
+ * The next recording, claimed: its number and its open writer. The file is
+ * created exclusively, so two sessions that read the same highest number (two
+ * servers on one data dir, say) cannot both write `seg-N.wav` — the second
+ * takes N+1. `from` is where the claim starts; it is the scan by default.
+ */
+export function openNextSegment(
+  dataDir: string,
+  docId: string,
+  sampleRate: number,
+  from = nextSegment(dataDir, docId),
+): { segment: number; wav: WavWriter } {
+  for (let segment = from; ; segment++) {
+    try {
+      const wav = openWav(join(voiceAudioDir(dataDir, docId), `seg-${segment}.wav`), sampleRate, {
+        exclusive: true,
+      });
+      return { segment, wav };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+}
+
+export function openWav(
+  path: string,
+  sampleRate: number,
+  opts: { exclusive?: boolean } = {},
+): WavWriter {
   mkdirSync(join(path, '..'), { recursive: true });
-  const fd = openSync(path, 'w');
+  const fd = openSync(path, opts.exclusive ? 'wx' : 'w');
   writeSync(fd, wavHeader(sampleRate, 0));
   let bytes = 0;
   let closed = false;

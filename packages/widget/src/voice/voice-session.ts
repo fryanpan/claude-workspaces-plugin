@@ -168,12 +168,15 @@ export class VoiceSession {
     if (this.state === 'idle' || this.state === 'stopping') return;
     this.capture?.stop();
     this.capture = null;
-    if (!this.ready) {
+    // Nothing said yet: nothing to wait for.
+    if (!this.ready && this.buffered.length === 0) {
       this.finish(null);
       return;
     }
     this.state = 'stopping';
-    this.sendJson({ type: 'stop' });
+    // Words said while the engine was still opening wait for it: `ready`
+    // sends them, then the stop.
+    if (this.ready) this.sendJson({ type: 'stop' });
     this.stopTimer = this.timers.set(() => this.finish(null), STOP_WAIT_MS);
     this.change();
   }
@@ -246,6 +249,7 @@ export class VoiceSession {
         if (this.state === 'connecting') this.state = 'recording';
         for (const pcm of this.buffered) this.ws?.send(pcm);
         this.buffered = [];
+        if (this.state === 'stopping') this.sendJson({ type: 'stop' });
         this.change();
         return;
       case 'unavailable':

@@ -330,7 +330,30 @@ describe('stopping', () => {
     expect(t.session.state).toBe('idle');
   });
 
-  it('ends at once when stopped before the engine was ready', async () => {
+  it('keeps words said before the engine was ready, and stops once it has them', async () => {
+    const t = setup();
+    await t.session.start();
+    t.socket().open();
+    const a = new Int16Array([1]);
+    t.mic.frame(a);
+    t.session.stop();
+    expect(t.session.state, 'waiting for the engine, not given up').toBe('stopping');
+    expect(t.mic.stops).toBe(1);
+    expect(
+      t
+        .socket()
+        .json()
+        .some((m) => m.type === 'stop'),
+      'no stop before the engine could hear the words',
+    ).toBe(false);
+    t.socket().recv({ type: 'ready', segment: 1 });
+    expect(t.socket().audio()).toEqual([a]);
+    expect(t.socket().json().at(-1)).toEqual({ type: 'stop' });
+    t.socket().recv({ type: 'stopped' });
+    expect(t.session.state).toBe('idle');
+  });
+
+  it('ends at once when stopped before anything was said', async () => {
     const t = setup();
     await t.session.start();
     t.socket().open();

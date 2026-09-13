@@ -18,7 +18,6 @@
  * session spends a transcription engine and the model on the owner's keys;
  * a page that could not sign in to write arrives `readOnly` and is told so.
  */
-import { join } from 'node:path';
 import {
   MAX_VOICE_RAW,
   MEETING_SAMPLE_RATE,
@@ -29,14 +28,7 @@ import {
   parseVoiceClientMessage,
 } from '@claude-workspaces/core';
 import type { EngineTurn, TranscriptionEngine, TranscriptionSession } from './transcribe.ts';
-import {
-  type WavWriter,
-  appendVoiceLog,
-  nextSegment,
-  openWav,
-  stamp,
-  voiceAudioDir,
-} from './voice-feedback-store.ts';
+import { type WavWriter, appendVoiceLog, openNextSegment, stamp } from './voice-feedback-store.ts';
 import {
   type TidyComment,
   type TidyComplete,
@@ -190,11 +182,11 @@ export class VoiceFeedbackRelay {
     }
     const { dataDir } = this.deps;
     const { docId } = ws.data;
-    const segment = nextSegment(dataDir, docId);
+    const { segment, wav } = openNextSegment(dataDir, docId, MEETING_SAMPLE_RATE);
     const s: Session = {
       ws,
       engine: null,
-      wav: openWav(join(voiceAudioDir(dataDir, docId), `seg-${segment}.wav`), MEETING_SAMPLE_RATE),
+      wav,
       segment,
       targets,
       turns: new Map(),

@@ -12,6 +12,7 @@ import {
   appendVoiceLog,
   deleteVoiceFeedback,
   nextSegment,
+  openNextSegment,
   openWav,
   stamp,
   voiceAudioDir,
@@ -40,6 +41,19 @@ describe('voice feedback store', () => {
     writeFileSync(join(dir, 'seg-99.txt'), 'not a recording');
     writeFileSync(join(dir, 'notes.wav'), 'not a recording');
     expect(nextSegment(dataDir, DOC)).toBe(8);
+  });
+
+  it('claims a recording another session already took by the next number, leaving it whole', () => {
+    // Two sessions that scanned the same highest number: the first has
+    // already claimed seg-1 and written into it.
+    const first = openNextSegment(dataDir, DOC, 16_000);
+    expect(first.segment).toBe(1);
+    first.wav.write(new Uint8Array(640).fill(7));
+    const second = openNextSegment(dataDir, DOC, 16_000, 1);
+    expect(second.segment, 'the second takes the next number').toBe(2);
+    first.wav.close();
+    second.wav.close();
+    expect(readFileSync(join(voiceAudioDir(dataDir, DOC), 'seg-1.wav')).byteLength).toBe(44 + 640);
   });
 
   it('resolves only seg-<digits>.wav names to a path inside the doc folder', () => {
