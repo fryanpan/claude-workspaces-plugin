@@ -20,8 +20,8 @@ export const dockStyles = `
    that is where the eye lands after reading the thing, and because a corner
    card at 430px either covers the mock or clips its own headline. The FAB,
    the list button and the panel all sit above it (--cw-dock-h, measured).
-   Edge to edge of the SCREEN, not the page: on a page wider than a phone a
-   fixed box is laid out against the page (see --cw-edge in styles.ts). */
+   Edge to edge of the SCREEN, not the page, because on a page wider than a
+   phone a fixed box is laid out against the page (see --cw-edge in styles.ts). */
 .cw-dock {
   position: fixed;
   left: var(--cw-vv-left);
