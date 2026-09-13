@@ -25,11 +25,15 @@ function loadMermaid(): Promise<MermaidModule> {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid').then((m) => {
       // startOnLoad=false: we drive rendering manually per block.
-      // securityLevel=loose: allow the diagram to use inline styles.
+      // securityLevel=strict: the diagram is document text an agent or a
+      // collaborator wrote, rendered on the board's own origin. Loose keeps
+      // `click … href "javascript:…"` links and on* attributes in the SVG;
+      // strict sanitizes the output. `style`/`classDef` still apply.
+      // mermaid-strict-browser.test.ts clicks both kinds of payload.
       m.default.initialize({
         startOnLoad: false,
         theme: 'neutral',
-        securityLevel: 'loose',
+        securityLevel: 'strict',
         fontFamily: 'inherit',
       });
       return m as unknown as MermaidModule;
