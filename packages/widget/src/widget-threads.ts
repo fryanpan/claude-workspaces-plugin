@@ -2,16 +2,20 @@ import {
   type ElementAnchor,
   STATUS_COLORS,
   type Thread,
-  anchors,
   cssColor,
   escapeHtml as escape,
   formatTime,
   listThreads,
 } from '@claude-workspaces/core';
+// The anchor LEAVES, never the `anchors` namespace off the core barrel: a
+// namespace object keeps every module behind it, and that one carried text-range
+// anchors, their validator and the yjs position code they reach — about 1.8 KB
+// gzipped that no element pin reads. The build refuses a bundle holding them
+// (`scripts/bundle-guard.ts`).
+import { contextMatches } from '@claude-workspaces/core/anchor/context';
+import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
-
-const { contextMatches } = anchors;
 
 /**
  * Threads, pins and the popover — everything that renders a comment back onto
@@ -83,7 +87,7 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
       annotated.push({ thread: t, status: statusBase, el: null });
       continue;
     }
-    const res = anchors.Element.resolve(t.anchor, { root: document });
+    const res = resolveElement(t.anchor, { root: document });
     if (!res.ok) {
       annotated.push({ thread: t, status: 'orphan', el: null });
       continue;
@@ -228,7 +232,7 @@ function renderThreadRow(
 
 function showThreadPopoverForThread(el: FeedbackWidgetEl, t: Thread): void {
   if (t.anchor.kind === 'element') {
-    const res = anchors.Element.resolve(t.anchor, { root: document });
+    const res = resolveElement(t.anchor, { root: document });
     if (res.ok) {
       const r = res.element.getBoundingClientRect();
       showThreadPopover(el, t, r.right, r.top);

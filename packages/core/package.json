@@ -10,6 +10,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./anchor": "./src/anchor/index.ts",
+    "./anchor/element": "./src/anchor/element.ts",
+    "./anchor/context": "./src/anchor/context.ts",
     "./prose": "./src/prose.ts",
     "./asset-manifest": "./src/asset-manifest.ts",
     "./done-when": "./src/done-when.ts",

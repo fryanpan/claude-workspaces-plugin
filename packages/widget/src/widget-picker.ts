@@ -1,9 +1,10 @@
-import { type ElementAnchor, anchors, escapeHtml as escape } from '@claude-workspaces/core';
+import { type ElementAnchor, escapeHtml as escape } from '@claude-workspaces/core';
+// Anchor leaves, not the `anchors` namespace — see widget-threads.ts.
+import { hasContext } from '@claude-workspaces/core/anchor/context';
+import { createAnchor } from '@claude-workspaces/core/anchor/element';
 import { composerNote, composerSignIn } from './widget-auth.ts';
 import { cardTarget, drafts, isPhoneFace, keepDraft, placeCards } from './widget-card.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
-
-const { hasContext } = anchors;
 
 /**
  * Feedback mode and the composer — arming the picker, deciding what a tap
@@ -307,7 +308,7 @@ function clearHighlight(owner: FeedbackWidgetEl): void {
 
 function openComposerForElement(widget: FeedbackWidgetEl, el: HTMLElement): void {
   const anchor: ElementAnchor = {
-    ...anchors.Element.createAnchor(el),
+    ...createAnchor(el),
     ...(hasContext(widget.currentContext) ? { context: { ...widget.currentContext } } : {}),
   };
   showComposer(widget, anchor, el);
