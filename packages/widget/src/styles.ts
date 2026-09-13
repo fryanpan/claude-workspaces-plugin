@@ -427,11 +427,12 @@ export const widgetStyles = `
    the bottom, above the dock — not a sheet, not a scrim, so the page behind
    keeps its place. After .picker-banner and .composer so it wins at equal
    specificity. The composer's panel replaces the prompt's while it is up, and
-   the floating buttons it would sit on fold away. */
+   the floating buttons it would sit on fold away. Edge to edge of the SCREEN,
+   like the dock, so it stays on a phone when the page is wider (--cw-edge). */
 .quick {
   top: auto;
-  left: 0;
-  right: 0;
+  left: var(--cw-vv-left);
+  right: var(--cw-edge);
   bottom: calc(var(--cw-vv-bottom) + var(--cw-dock-h));
   width: auto;
   transform: none;

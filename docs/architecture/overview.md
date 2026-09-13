@@ -374,6 +374,11 @@ card with a tick; at phone width it is a compact panel along the bottom.
 or above it when the element reaches into the margin, never over it — and is
 asked again every frame from the widget's existing rAF loop. It joins no data
 flow: it reads layout and writes only the widget's own shadow DOM.
+`widget-page-bar.ts`, beside it, finds the page's own fixed or sticky bar
+along the bottom of the screen and adds its height to the offset every bottom
+control rides, so the FAB, the phone prompt and the dock stand on a mock's tab
+bar instead of covering it. Also layout only, and re-measured on resize,
+scroll and DOM change rather than per frame.
 
 **The widget's mic belongs to the host that has one.** The board's own widget
 is bound to the Workspaces feedback doc, not to the board's project, so its
