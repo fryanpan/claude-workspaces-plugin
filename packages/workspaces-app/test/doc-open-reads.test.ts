@@ -24,7 +24,7 @@ import { MountScope } from '../src/mount-scope.ts';
 const WS = 'w-harbor';
 const DOC = 'd-tide';
 const RECORD_URL = `/workspaces/${WS}/docs/${DOC}?format=json`;
-const HARBOR: User = { id: 'u-harbor', name: 'Harbor Reviewer', kind: 'known', color: '#2e7dd7' };
+const HARBOR: User = { id: 'u-harbor', name: 'Reviewer', kind: 'known', color: '#2e7dd7' };
 
 const open: Array<() => void> = [];
 beforeEach(() => {
@@ -59,7 +59,7 @@ function fakeServer() {
         if (url.endsWith('/plan-request')) {
           ydoc.transact(() => {
             meta.set('planRequestedAt', 1_789_000_000_000);
-            meta.set('planRequestedBy', 'Harbor Reviewer');
+            meta.set('planRequestedBy', 'Reviewer');
           });
         }
         return new Response('{}', { status: 200 });
@@ -141,7 +141,7 @@ describe('opening a doc', () => {
     // One transaction, as `setReviewRequested` writes it.
     server.ydoc.transact(() => {
       server.meta.set('reviewRequestedAt', 1_789_000_000_001);
-      server.meta.set('reviewRequestedBy', 'Harbor Reviewer');
+      server.meta.set('reviewRequestedBy', 'Reviewer');
     });
     await vi.waitFor(() => expect(reviewFloat()?.dataset.face).toBe('requested'));
     // Both floats woke; they shared the one read.
@@ -154,7 +154,7 @@ describe('opening a doc', () => {
     await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('make'));
     server.ydoc.transact(() => {
       server.meta.set('planRequestedAt', 1_789_000_000_002);
-      server.meta.set('planRequestedBy', 'Harbor Reviewer');
+      server.meta.set('planRequestedBy', 'Reviewer');
     });
     sync();
     await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('requested'));
