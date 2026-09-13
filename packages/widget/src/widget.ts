@@ -617,11 +617,19 @@ export class FeedbackWidgetEl extends HTMLElement {
     const bubbleCursor = `url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="${BUBBLE_PATH}" fill="%232e7dd7" stroke="white" stroke-width="1.5"/></svg>') 3 21`;
     // Written minified, a rule a line: the build minifies only the `styles*.ts`
     // sheets, and whitespace here would ship to every host page.
+    //
+    // The last rule: in the mode, a mock's version chevrons are looked through.
+    // They rest in the bottom-left corner over whatever the page keeps there —
+    // a left rail's last button — and a tap on them could not anchor a comment
+    // to it. Out of the mode they take taps again and step the rounds. The
+    // buttons too, and important, so a host page's own button rule cannot
+    // turn them back on.
     s.textContent =
       '.cfw-pin:hover{transform:translate(-50%,-100%) scale(1.08)}' +
       `.cfw-pin[data-status="resolved"]{background:${STATUS_COLORS.resolved}!important}` +
       `.cfw-pin[data-status="orphan"]{background:${STATUS_COLORS.orphan}!important}` +
-      `body.cfw-feedback-mode,body.cfw-feedback-mode *{cursor:${bubbleCursor},crosshair!important}`;
+      `body.cfw-feedback-mode,body.cfw-feedback-mode *{cursor:${bubbleCursor},crosshair!important}` +
+      'body.cfw-feedback-mode [data-cw-mock-versions],body.cfw-feedback-mode [data-cw-mock-versions] *{pointer-events:none!important}';
     document.head.appendChild(s);
   }
 

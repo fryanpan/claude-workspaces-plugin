@@ -14,6 +14,11 @@
  * Two more pages hold the rest still: one with no bar, where nothing may move,
  * and at 430 one wider than the screen, panned, for the prompt's edges.
  *
+ * And at 1180, a page with a left rail and no bar, whose last button rests
+ * under the chevrons: in comment mode a tap there anchors to the button, and
+ * out of it the chevrons still step the rounds. That page's own stylesheet
+ * turns every button's pointer events on, importantly, as a host page may.
+ *
  * Spawned by `widget-page-bar.test.ts`, which reads the JSON it prints.
  *
  * audit: no-text — nothing here reads a source file, a bundle or a
@@ -86,15 +91,31 @@ export interface WideLook {
   banner: Box | null;
 }
 
+export interface RailLook {
+  talk: Box | null;
+  chevrons: Box | null;
+  /** Out of the mode, the page's own hit test at the button's centre lands
+   *  in the chevrons — they really do cover it. */
+  covered: boolean;
+  /** In comment mode, a tap at the button's centre. */
+  tap: Tap;
+  /** Out of the mode again, a tap on the back chevron: what it asked for,
+   *  and whether the mode came on or a composer opened. */
+  went: unknown[];
+  mode: boolean;
+  composer: boolean;
+}
+
 export interface Reading {
   width: number;
   height: number;
   bar: BarLook;
   plain: PlainLook;
   wide: WideLook | null;
+  rail: RailLook | null;
 }
 
-type Variant = 'bar' | 'plain' | 'wide';
+type Variant = 'bar' | 'plain' | 'wide' | 'rail';
 
 function pageHtml(bundle: string, variant: Variant): string {
   const tabs = TABS.map((t) => `<a id="t-${t}" href="#${t}"><span>*</span>${t}</a>`).join('');
@@ -109,9 +130,13 @@ function pageHtml(bundle: string, variant: Variant): string {
  nav{position:fixed;left:0;right:0;bottom:0;height:64px;background:#fff;border-top:1px solid #ccc;display:flex}
  nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#234;text-decoration:none}
  body.bare nav{display:none}
+ aside{position:fixed;left:0;top:0;bottom:0;width:88px;background:#fff;border-right:1px solid #ccc}
+ body.rail button{pointer-events:auto!important}
+ #rail-talk{position:absolute;left:22px;bottom:28px;width:44px;height:44px;border:0;border-radius:22px;background:#234;color:#fff}
 </style></head>
-<body>
+<body${variant === 'rail' ? ' class="rail" style="padding-left:88px"' : ''}>
 ${variant === 'wide' ? '<div id="wide"></div>' : ''}
+${variant === 'rail' ? '<aside id="rail"><button id="rail-talk" aria-label="Hold to talk">o</button></aside>' : ''}
 <header><h1 style="margin:0;font-size:20px">Saltmarsh settings</h1></header>
 <main><div class="row" id="r-tides">Tide alerts</div><div class="row">Riverbend moorings</div></main>
 ${variant === 'bar' ? `<nav id="tabs">${tabs}</nav>` : ''}
@@ -323,6 +348,34 @@ async function plainLook(cdp: Cdp): Promise<PlainLook> {
   return { fab, list, chevrons, banner };
 }
 
+async function railLook(cdp: Cdp): Promise<RailLook> {
+  const talk = await box(cdp, `document.getElementById('rail-talk')`);
+  const chevrons = await box(cdp, `document.querySelector('[data-cw-mock-versions]')`);
+  const [x, y] = centre(talk as Box);
+  const covered = (await cdp.evaluate(
+    `!!document.elementFromPoint(${x}, ${y})?.closest('[data-cw-mock-versions]')`,
+  )) as boolean;
+  await enterMode(cdp);
+  const tap0 = await tapFor(cdp, 'hold to talk', x, y, false);
+  await cdp.evaluate(`${SHADOW}.querySelector('.picker-cancel')?.click()`);
+  if (!(await until(cdp, `!${MODE}`))) throw new Error('comment mode never went off');
+  const prev = (await box(cdp, `document.querySelector('[data-cw-mock-versions] button')`)) as Box;
+  // Only this tap's asks count: on main's sources the tap in the mode above
+  // reached the chevrons too.
+  await cdp.evaluate('window.__went = []');
+  await tap(cdp, ...centre(prev), false);
+  await until(cdp, 'window.__went.length > 0', 40);
+  return {
+    talk,
+    chevrons,
+    covered,
+    tap: tap0,
+    went: (await cdp.evaluate('window.__went')) as unknown[],
+    mode: (await cdp.evaluate(MODE)) as boolean,
+    composer: (await cdp.evaluate(`!!${SHADOW}.querySelector('.composer')`)) as boolean,
+  };
+}
+
 async function wideLook(cdp: Cdp): Promise<WideLook> {
   await enterMode(cdp);
   await cdp.send('Input.dispatchMouseEvent', {
@@ -388,11 +441,15 @@ try {
     await load(cdp, dir, pageHtml(bundle, 'plain'), width, height);
     const plain = await plainLook(cdp);
     let wide: WideLook | null = null;
+    let rail: RailLook | null = null;
     if (touch) {
       await load(cdp, dir, pageHtml(bundle, 'wide'), width, height);
       wide = await wideLook(cdp);
+    } else {
+      await load(cdp, dir, pageHtml(bundle, 'rail'), width, height);
+      rail = await railLook(cdp);
     }
-    readings.push({ width, height, bar, plain, wide });
+    readings.push({ width, height, bar, plain, wide, rail });
   }
   cdp.close();
   console.log(JSON.stringify(readings));
