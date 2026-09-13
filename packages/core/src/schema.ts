@@ -1,7 +1,6 @@
 import * as Y from 'yjs';
 import { type ReviewPayload, readReviewPayload } from './review-item.ts';
 import { readStoredSummary } from './thread-summary.ts';
-import { type VoiceNote, readVoiceNote } from './voice-feedback.ts';
 import type {
   Anchor,
   Comment,
@@ -12,6 +11,7 @@ import type {
   ThreadStatus,
   User,
 } from './types.ts';
+import { type VoiceNote, readVoiceNote } from './voice-feedback.ts';
 
 /**
  * Yjs doc shape:
@@ -374,6 +374,12 @@ export function setCommentText(
     if (c.get('id') !== commentId) continue;
     const previous = c.get('text');
     if (typeof previous !== 'string') return false;
+    if (previous === text) {
+      // Only the note moved (a longer clip, more raw words): no correction
+      // happened, so no trail entry says one did.
+      if (voice) c.set('voice', voice);
+      return true;
+    }
     const trail = readCommentEdits(c.get('edits')) ?? [];
     doc.transact(() => {
       c.set('edits', [

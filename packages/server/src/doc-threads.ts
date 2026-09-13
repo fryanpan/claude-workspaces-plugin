@@ -346,8 +346,13 @@ export class DocThreads {
     if (!target) return { ok: false, error: 'not-found' };
     // An edit that changes nothing would still push a trail entry, which
     // would read as a correction somebody made — so it is refused rather
-    // than recorded. A sweep that re-runs is the caller that hits this.
-    if (target.text === text) return { ok: false, error: 'unchanged' };
+    // than recorded. A sweep that re-runs is the caller that hits this. A
+    // spoken comment whose words held while its clip or raw words grew is
+    // not unchanged: the note is written, with no trail entry.
+    const sameVoice =
+      !opts.voice ||
+      (target.voice?.clip === opts.voice.clip && target.voice?.raw === opts.voice.raw);
+    if (target.text === text && sameVoice) return { ok: false, error: 'unchanged' };
     if (
       !setCommentText(
         doc.ydoc,

@@ -112,4 +112,33 @@ describe('startPcmCapture', () => {
     expect(started.ok).toBe(false);
     expect(track.stopped).toBe(1);
   });
+
+  it('closes the tap’s audio context when the capture never starts', async () => {
+    const closes: string[] = [];
+    const context = (label: string) =>
+      ({
+        close: async () => {
+          closes.push(label);
+        },
+      }) as unknown as AudioContext;
+    await startPcmCapture({
+      onFrame: () => {},
+      context: context('refused mic'),
+      getMedia: async () => {
+        throw Object.assign(new Error('no'), { name: 'NotAllowedError' });
+      },
+    });
+    const { stream } = fakeStream();
+    await startPcmCapture({
+      onFrame: () => {},
+      context: context('no graph'),
+      getMedia: async () => stream,
+      createPump: async () => {
+        throw new Error('no worklet');
+      },
+    });
+    secure(false);
+    await startPcmCapture({ onFrame: () => {}, context: context('insecure') });
+    expect(closes).toEqual(['refused mic', 'no graph', 'insecure']);
+  });
 });

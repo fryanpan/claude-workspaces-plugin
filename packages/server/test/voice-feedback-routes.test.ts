@@ -54,7 +54,12 @@ interface Frame {
   [k: string]: unknown;
 }
 
-type CommentPayload = { id: string; text: string; voice?: { clip: string; raw: string } };
+type CommentPayload = {
+  id: string;
+  text: string;
+  voice?: { clip: string; raw: string };
+  edits?: unknown[];
+};
 type ThreadPayload = { id: string; comments: CommentPayload[] };
 
 describe('voice feedback routes', () => {
@@ -251,6 +256,30 @@ describe('voice feedback routes', () => {
     expect(after?.text).toBe('The Save button hides behind the footer.');
     expect(after?.voice).toEqual(grown);
 
+    // The words held while the clip and raw words grew: the note is written,
+    // and no correction appears on the trail.
+    const longer = { clip: clipFor(docId, 3), raw: `${grown.raw} again` };
+    const noteOnly = await post(
+      `/workspaces/${WS}/docs/${docId}/threads/${threadId}/edit-comment`,
+      {
+        author: AUTHOR,
+        commentId: first?.id,
+        text: 'The Save button hides behind the footer.',
+        voice: longer,
+      },
+    );
+    expect(noteOnly.status, await noteOnly.clone().text()).toBe(200);
+    const held = await read();
+    expect(held?.voice).toEqual(longer);
+    expect(held?.edits?.length).toBe(after?.edits?.length);
+    const same = await post(`/workspaces/${WS}/docs/${docId}/threads/${threadId}/edit-comment`, {
+      author: AUTHOR,
+      commentId: first?.id,
+      text: 'The Save button hides behind the footer.',
+      voice: longer,
+    });
+    expect(same.status, 'nothing moved: still unchanged').toBe(409);
+
     const refused = await post(`/workspaces/${WS}/docs/${docId}/threads/${threadId}/edit-comment`, {
       author: AUTHOR,
       commentId: first?.id,
@@ -258,7 +287,7 @@ describe('voice feedback routes', () => {
       voice: { clip: 'https://elsewhere.example/seg-1.wav#t=0,1', raw: 'x' },
     });
     expect(refused.status).toBe(400);
-    expect((await read())?.voice).toEqual(grown);
+    expect((await read())?.voice).toEqual(longer);
   });
 
   it('refuses a voice note pointing at another doc or off this server', async () => {

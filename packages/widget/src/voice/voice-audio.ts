@@ -53,9 +53,13 @@ export function frameLevel(pcm: Int16Array): number {
 }
 
 export async function startPcmCapture(opts: PcmCaptureOpts): Promise<PcmCaptureStart> {
-  if (!window.isSecureContext) {
-    return { ok: false, message: 'Voice feedback needs https or localhost.' };
-  }
+  // The tap made a context for this capture; a capture that never starts
+  // closes it, or every refused tap leaks one toward the browser's limit.
+  const refuse = (message: string): PcmCaptureStart => {
+    void opts.context?.close().catch(() => {});
+    return { ok: false, message };
+  };
+  if (!window.isSecureContext) return refuse('Voice feedback needs https or localhost.');
   let stream: MediaStream;
   try {
     const getMedia =
@@ -69,14 +73,14 @@ export async function startPcmCapture(opts: PcmCaptureOpts): Promise<PcmCaptureS
       },
     });
   } catch (err) {
-    return { ok: false, message: micRefusal(err) };
+    return refuse(micRefusal(err));
   }
   let pump: Awaited<ReturnType<AudioPumpFactory>>;
   try {
     pump = await (opts.createPump ?? createAudioPump)(stream, opts.context);
   } catch (err) {
     for (const t of stream.getTracks()) t.stop();
-    return { ok: false, message: micRefusal(err) };
+    return refuse(micRefusal(err));
   }
   const resample = createResampler(pump.sampleRate, MEETING_SAMPLE_RATE);
   let pending: Int16Array = new Int16Array(0);
