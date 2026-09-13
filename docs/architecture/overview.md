@@ -426,6 +426,13 @@ at hydrate, which is safe for a `ws:` doc and nothing else because the sidecar
 is the record and the projection is reasserted after load. `slow-load-alarm.ts`
 reports a board load that crossed its budget. Measured together on the live
 board: 1.53 MB on the wire before, 0.22 MB after.
+**An edit re-projects the rows it names, not the board.** The projection runs on
+the server's one thread, so a whole-board pass per store event taxed every
+request on a busy board. `board-row-sync.ts` writes only the rows an event or a
+single-row verb names, and falls back to the full pass whenever something could
+have moved an unnamed row: the attached agents or the identity roster changed,
+a row's notes trim window lapsed, or a row appeared or left unannounced.
+Heartbeats and tool calls name no row and project none.
 
 **"Done when" is a field on the task, and it is what closes the task.** The
 list lives beside the body rather than inside it, so the server can read it:

@@ -1255,7 +1255,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       markCommentRowsEmitted(workspaceId, rows);
       // Task path only: a plain doc thread moves no row, so refreshing the
       // projection for it would be a board-wide rewrite that changes nothing.
-      taskProjection.refresh(workspaceId);
+      // And only this row: a comment moves its own count and nothing else's.
+      taskProjection.refresh(workspaceId, [rowId]);
       return;
     }
     // Exactly one hop from review to board — the same non-transitive rule

@@ -53,7 +53,7 @@ export async function handleTaskDoneWhen(
     if (!parsed.ok) return j(400, { error: parsed.error, message: parsed.message });
     const res = taskStore.setDoneWhen(taskId, parsed.lines ?? [], { actor: author });
     if (!res.ok) return j(statusFor(res.error), res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, { taskId, lines: res.lines, closed: res.closed, status: res.task.status });
   }
 
@@ -86,7 +86,7 @@ export async function handleTaskDoneWhen(
     }
     const res = taskStore.reportDoneWhen(taskId, entries, { actor: author });
     if (!res.ok) return j(statusFor(res.error), res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, { taskId, lines: res.lines, closed: res.closed, status: res.task.status });
   }
 
@@ -105,7 +105,7 @@ export async function handleTaskDoneWhen(
     }
     const res = taskStore.checkDoneWhen(taskId, lineId, verdict, { actor: author });
     if (!res.ok) return j(statusFor(res.error), res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, { taskId, lines: res.lines, closed: res.closed, status: res.task.status });
   }
 

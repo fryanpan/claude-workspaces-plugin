@@ -87,7 +87,7 @@ export async function handleTaskFields(
     );
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
     released();
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, res);
   }
   // In-place task title edit (§3.9: tap the title, Enter commits) —
@@ -109,7 +109,7 @@ export async function handleTaskFields(
       ...(reason ? { reason } : {}),
     });
     if (!res.ok) return j(404, res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     // A decision ticket's headline just moved — see `regateDecisionWords`.
     if (res.changed) await regateDecisionWords(taskId, author);
     return j(200, res);
@@ -203,7 +203,7 @@ export async function handleTaskFields(
     // A no-op emits nothing, so nothing would refresh the board doc —
     // harmless here (nothing changed) but the changed path is covered
     // by the task.assigned event's own projection hook.
-    if (!res.changed) taskProjection.ensureWorkspace(res.task.workspaceId);
+    if (!res.changed) taskProjection.refreshTask(res.task);
     // Echo what the board now says this owner IS. Without it the caller
     // learns only that the call didn't error — which is exactly what a
     // declaration that silently failed to land also reports.
@@ -235,7 +235,7 @@ export async function handleTaskFields(
     }
     const res = taskStore.setDueAt(taskId, dueAt, { actor: author });
     if (!res.ok) return j(404, res);
-    if (!res.changed) taskProjection.ensureWorkspace(res.task.workspaceId);
+    if (!res.changed) taskProjection.refreshTask(res.task);
     return j(200, res);
   }
   // Set / clear the SCHEDULE — the rule that says when this row's work
@@ -295,7 +295,7 @@ export async function handleTaskFields(
     if (body?.clear === true) {
       const cleared = clearExternalWait(taskStore, taskId);
       if (!cleared.ok) return j(404, cleared);
-      taskProjection.ensureWorkspace(cleared.task.workspaceId);
+      taskProjection.refreshTask(cleared.task);
       return j(200, { ok: true, task: cleared.task, changed: cleared.changed });
     }
     // Refused rather than defaulted: a caller that sent an `hours` we cannot
@@ -322,7 +322,7 @@ export async function handleTaskFields(
               : 'what is required: say, in a reader’s words, what this task is waiting on',
       });
     }
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, { ok: true, task: res.task, wait: res.wait });
   }
   // Block a row on another ticket — and, on its old payload, park it.
@@ -389,7 +389,7 @@ export async function handleTaskFields(
       // `setDependencies` emits no store event (§3.6 has no row for an
       // edge change), so the projection is refreshed by hand — the same
       // contract the dependencies route above keeps.
-      taskProjection.ensureWorkspace(res.task.workspaceId);
+      taskProjection.refreshTask(res.task);
       return j(200, {
         ok: true,
         task: res.task,
@@ -451,7 +451,7 @@ export async function handleTaskFields(
       // Machine-written and one line long: not worth an outbound call.
       { generate: false },
     );
-    if (!changed) taskProjection.ensureWorkspace(task.workspaceId);
+    if (!changed) taskProjection.refreshTask(task);
     return j(200, {
       ok: true,
       task: taskStore.getTask(taskId) ?? task,
@@ -481,7 +481,7 @@ export async function handleTaskFields(
     });
     if (!res.ok) return j(404, res);
     released();
-    if (!res.changed) taskProjection.ensureWorkspace(res.task.workspaceId);
+    if (!res.changed) taskProjection.refreshTask(res.task);
     return j(200, res);
   }
   const taskRestoreMatch = matchRest(scope, /^tasks\/([^/]+)\/restore$/);
@@ -492,7 +492,7 @@ export async function handleTaskFields(
     if (!author) return j(400, { error: 'author required' });
     const res = taskStore.unarchiveTask(taskId, { actor: author });
     if (!res.ok) return j(404, res);
-    if (!res.changed) taskProjection.ensureWorkspace(res.task.workspaceId);
+    if (!res.changed) taskProjection.refreshTask(res.task);
     return j(200, res);
   }
   return undefined;

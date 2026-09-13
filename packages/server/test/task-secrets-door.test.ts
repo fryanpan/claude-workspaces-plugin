@@ -65,10 +65,10 @@ async function drive(
       listReviewItems: () => [item],
       answerTaskReview: (_t: string, _i: string, text: string) => {
         answered.push(text);
-        return { ok: true, task: { workspaceId: 'w-harbor' }, item };
+        return { ok: true, task: { id: 't-harbor', workspaceId: 'w-harbor' }, item };
       },
     },
-    taskProjection: { ensureWorkspace: () => undefined },
+    taskProjection: { refreshTask: () => undefined },
     j: (status: number, body: unknown) =>
       new Response(JSON.stringify(body), {
         status,

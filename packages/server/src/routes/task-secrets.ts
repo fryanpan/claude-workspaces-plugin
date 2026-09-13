@@ -176,7 +176,7 @@ export async function handleTaskSecrets(
     const text = `Secrets saved: ${declared.map((d) => d.service).join(', ')}`;
     const res = taskStore.answerTaskReview(taskId, reviewItemId, text, { actor: author });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, { taskId, reviewItemId, item: res.item, saved: declared.map((d) => d.service) });
   }
   return undefined;

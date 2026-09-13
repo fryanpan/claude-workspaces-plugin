@@ -136,6 +136,20 @@ function trimTransitions(value: unknown): { value: unknown; trimmed: boolean } {
 }
 
 /**
+ * The instant this row stops keeping its notes — the one moment its slim
+ * shape can change with nothing about the row having changed.
+ *
+ * Named beside `slimTaskRow`, which reads its own gate through it, because the
+ * incremental projection (`board-row-sync.ts`) has to know when a row it did
+ * not re-project would come out differently, and a second spelling of the
+ * window is how the two would start to disagree.
+ */
+export function notesKeptUntil(row: ProjectedTaskRow): number {
+  const updatedAt = typeof row.updatedAt === 'number' ? row.updatedAt : 0;
+  return updatedAt + DETAIL_FRESH_MS;
+}
+
+/**
  * The row as the board's ydoc should carry it.
  *
  * Returns the SAME object when nothing is trimmed, so `refresh`'s `sameJson`
@@ -144,8 +158,7 @@ function trimTransitions(value: unknown): { value: unknown; trimmed: boolean } {
  * stably.
  */
 export function slimTaskRow(row: ProjectedTaskRow, now: number): ProjectedTaskRow {
-  const updatedAt = typeof row.updatedAt === 'number' ? row.updatedAt : 0;
-  const keepNotes = now - updatedAt < DETAIL_FRESH_MS;
+  const keepNotes = now < notesKeptUntil(row);
   const keepBody = rendersBodyInAList(row);
   const slim: ProjectedTaskRow = {};
   let trimmed = false;

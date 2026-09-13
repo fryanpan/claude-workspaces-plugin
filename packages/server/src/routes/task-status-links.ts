@@ -321,7 +321,7 @@ export async function handleTaskStatusAndLinks(
     // Link changes emit no store event (§3.6's exhaustive table has no
     // row for them), so refresh the projection by hand — the same
     // pattern as createWorkspace/attachDoc above.
-    taskProjection.ensureWorkspace(res.task.workspaceId);
+    taskProjection.refreshTask(res.task);
     return j(200, { ok: true, changed: res.changed, task: res.task });
   }
   // set_task_goal (§3.10): goal + exact position — the write
@@ -368,7 +368,7 @@ export async function handleTaskStatusAndLinks(
     // A confirm-in-place (changed:false) mutates gated fields
     // (triagedAgainst, triagePendingTs) without emitting an event —
     // refresh the projection by hand, same as attachDoc.
-    if (!res.changed) taskProjection.ensureWorkspace(res.task.workspaceId);
+    if (!res.changed) taskProjection.refreshTask(res.task);
     return j(200, res);
   }
   return undefined;

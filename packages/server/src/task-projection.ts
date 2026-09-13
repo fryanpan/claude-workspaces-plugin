@@ -1,5 +1,6 @@
 import { listThreads, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import { BoardRowSync, type RowSyncStats, sameJson } from './board-row-sync.ts';
 import type { DocStore } from './doc-store.ts';
 import { slimTaskRow } from './task-row-slim.ts';
 import {
@@ -146,11 +147,25 @@ export class TaskProjection {
   private bodyWired = new Map<string, Y.Doc>();
   private snapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private off: (() => void) | null = null;
+  /** Which rows each board doc was last written against — keyed to the ydoc
+   *  for the same reason `wired` is: a recreated doc starts with a full pass. */
+  private rowSync = new Map<string, { ydoc: Y.Doc; sync: BoardRowSync<Task> }>();
+  private clock: () => number;
+  /** How much projecting has happened. Read by tests to prove an event
+   *  re-projected nothing, which a timing could only suggest. */
+  readonly rowStats: RowSyncStats = { rowsProjected: 0, fullPasses: 0, scopedPasses: 0 };
 
-  constructor(opts: { docStore: DocStore; tasks: TaskStore; snapshotDebounceMs?: number }) {
+  constructor(opts: {
+    docStore: DocStore;
+    tasks: TaskStore;
+    snapshotDebounceMs?: number;
+    /** The clock the notes trim window is read against. Tests step it. */
+    now?: () => number;
+  }) {
     this.docStore = opts.docStore;
     this.tasks = opts.tasks;
     this.snapshotDebounceMs = opts.snapshotDebounceMs ?? 300;
+    this.clock = opts.now ?? Date.now;
   }
 
   /** Wire everything up. Order matters on hydrate: the docs have already
@@ -201,7 +216,7 @@ export class TaskProjection {
   }
 
   private onEvent(ev: TaskStoreEvent): void {
-    this.ensureWorkspace(ev.workspaceId);
+    this.ensureWorkspace(ev.workspaceId, rowsNamedBy(ev));
     if (ev.type === 'task.created') this.ensureTaskBody(ev.task);
   }
 
@@ -320,7 +335,7 @@ export class TaskProjection {
    * (which mutate the store without emitting events) and `onEvent` calls it
    * for everything else.
    */
-  ensureWorkspace(workspaceId: string): void {
+  ensureWorkspace(workspaceId: string, rows: readonly string[] | null = null): void {
     const ws = this.tasks.getWorkspace(workspaceId);
     if (!ws) return;
     const doc = this.docStore.getOrCreate(
@@ -349,8 +364,20 @@ export class TaskProjection {
       for (const t of this.tasks.listTasks(workspaceId, { includeArchived: true })) {
         this.ensureTaskBody(t);
       }
+      this.refresh(workspaceId);
+      return;
     }
-    this.refresh(workspaceId);
+    this.refresh(workspaceId, rows);
+  }
+
+  /**
+   * Re-project one task's row after a verb that changed that task and nothing
+   * else — the scoped twin of `ensureWorkspace`. A caller whose verb can touch
+   * other rows must call `ensureWorkspace` instead: see board-row-sync.ts for
+   * what the scoped pass checks and the one thing it cannot.
+   */
+  refreshTask(task: Pick<Task, 'id' | 'workspaceId'>): void {
+    this.ensureWorkspace(task.workspaceId, [task.id]);
   }
 
   /** Every doc this projection owns for a workspace: the board, plus one
@@ -432,8 +459,12 @@ export class TaskProjection {
    * Reassert the projection from the store — diff-aware, so an in-sync map
    * is a no-op transaction and a foreign write is surgically overwritten.
    * Never touches task body docs.
+   *
+   * `rows` names the only task rows that can have changed; null (the default)
+   * re-projects every row. The board's own fields are recomputed either way —
+   * a handful of goals, and a named row may be a goal.
    */
-  refresh(workspaceId: string): void {
+  refresh(workspaceId: string, rows: readonly string[] | null = null): void {
     const ws = this.tasks.getWorkspace(workspaceId);
     if (!ws) return;
     const doc = this.docStore.getOrCreate(
@@ -465,18 +496,14 @@ export class TaskProjection {
     // on every transition is what made opening this board a 1.6 MB download.
     // The panel refetches when a reader opens one — see
     // `routes/task-detail.ts`.
-    const now = Date.now();
-    const want = new Map(
-      this.tasks
-        .listTasks(workspaceId, { includeArchived: true })
-        .map((t) => [
-          t.id,
-          slimTaskRow(
-            projectTask(t, this.commentCount(t.id), ownerKindOf(t), this.tasks.ownerIdOf(t)),
-            now,
-          ),
-        ]),
-    );
+    const now = this.clock();
+    const attached = this.tasks.listAttachments(workspaceId).map((a) => a.agentId);
+    let sync = this.rowSync.get(workspaceId);
+    if (sync?.ydoc !== doc.ydoc) {
+      sync = { ydoc: doc.ydoc, sync: new BoardRowSync<Task>(this.rowStats) };
+      this.rowSync.set(workspaceId, sync);
+    }
+    const rowSync = sync.sync;
     // Each band rides out decorated with its goal ROW's status (and done
     // attribution), read through the store's public API. The board renders
     // bands from this array and nothing else, so a status only the store can
@@ -492,9 +519,7 @@ export class TaskProjection {
     // store would say who owns the goal while the board kept saying nobody.
     // `ownerKind` resolves through the same roster rules a task's does; a
     // goal row declares no kind, so the roster and the reserved words decide.
-    const isAttachedAgent = attachedAgentTest(
-      this.tasks.listAttachments(workspaceId).map((a) => a.agentId),
-    );
+    const isAttachedAgent = attachedAgentTest(attached);
     const goalRows = this.tasks.listGoalRows(workspaceId);
     // A goal's DESCRIPTION and its discussion, projected the way a task's are.
     //
@@ -522,12 +547,21 @@ export class TaskProjection {
     // arriving unmeasured.
     const wsFields: Record<string, unknown> = projectWorkspaceFields(ws, goalMeta);
     doc.ydoc.transact(() => {
-      for (const key of Array.from(tasksMap.keys())) {
-        if (!want.has(key)) tasksMap.delete(key);
-      }
-      for (const [id, projected] of want) {
-        if (!sameJson(tasksMap.get(id), projected)) tasksMap.set(id, projected);
-      }
+      rowSync.sync({
+        tasksMap,
+        rows: this.tasks.listTasks(workspaceId, { includeArchived: true }),
+        named: rows,
+        // Everything a row reads from outside itself that no event names:
+        // which agents are attached, and the identity roster they and every
+        // owner resolve through.
+        roster: rosterSignature(attached, this.tasks.rosterRevision()),
+        now,
+        project: (t) =>
+          slimTaskRow(
+            projectTask(t, this.commentCount(t.id), ownerKindOf(t), this.tasks.ownerIdOf(t)),
+            now,
+          ),
+      });
       for (const key of Array.from(wsMap.keys())) {
         if (!(key in wsFields)) wsMap.delete(key);
       }
@@ -707,7 +741,7 @@ export class TaskProjection {
       const goal = this.tasks.getGoalRow(rowId);
       if (goal) {
         if (!this.tasks.updateGoalBodySnapshot(rowId, md)) return;
-        this.refresh(goal.workspaceId);
+        this.refresh(goal.workspaceId, [rowId]);
         return;
       }
       if (!this.tasks.updateBodySnapshot(rowId, md)) return;
@@ -718,16 +752,30 @@ export class TaskProjection {
       // creation, forever. `refresh` is diff-aware, so an unchanged body
       // costs an empty transaction.
       const workspaceId = this.tasks.getTask(rowId)?.workspaceId;
-      if (workspaceId) this.refresh(workspaceId);
+      if (workspaceId) this.refresh(workspaceId, [rowId]);
     } catch (err) {
       console.error(`[projection] body snapshot failed for ${docId}:`, err);
     }
   }
 }
 
-/** JSON-compare a current map value (possibly a foreign-written Yjs type)
- *  against the projected plain object. */
-function sameJson(current: unknown, next: unknown): boolean {
-  const plain = current instanceof Y.AbstractType ? current.toJSON() : current;
-  return JSON.stringify(plain) === JSON.stringify(next);
+/** Null when the identity roster cannot say whether it moved. */
+function rosterSignature(attached: readonly string[], revision: string | null): string | null {
+  return revision === null ? null : `${revision}\n${attached.join('\n')}`;
+}
+
+/**
+ * The task rows an event says moved, or null when it cannot say.
+ *
+ * `agent.*` events name no row: what they can change is the roster, which the
+ * row sync compares for itself. A per-row event names its row — including the
+ * per-row events a goal cascade or a band edit emits for each task it moved,
+ * after the head event for the goal itself. Everything else re-projects the
+ * board.
+ */
+export function rowsNamedBy(ev: TaskStoreEvent): readonly string[] | null {
+  if (ev.type.startsWith('agent.')) return [];
+  if (ev.type.startsWith('workspace.')) return null;
+  const taskId = (ev as { taskId?: unknown }).taskId;
+  return typeof taskId === 'string' ? [taskId] : null;
 }
