@@ -97,7 +97,8 @@ describe('the meeting heading', () => {
     ydoc.getMap('meta').set('titleSource', 'auto');
     expect(titleEl()?.textContent).toBe(TOPIC);
     expect(titleEl()?.classList.contains('is-pending')).toBe(false);
-    expect(titleEl()?.classList.contains('is-arriving')).toBe(true);
+    // The name simply replaces the placeholder: nothing animates it in.
+    expect(titleEl()?.classList.contains('is-arriving')).toBe(false);
   });
 
   it('shows a title from before titleSource as an ordinary name', () => {

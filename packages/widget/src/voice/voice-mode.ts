@@ -123,7 +123,6 @@ export function mountVoiceMode(
     catalog,
     anchorFor,
     onChange: () => draw(),
-    onLevel: (l) => view.level(l),
     refusedNote: () => {
       if (!widget.signInToWrite || widget.authToken) return null;
       // Appended: `addMic` made the retry slot hold everything put in it.

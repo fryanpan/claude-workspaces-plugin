@@ -50,9 +50,6 @@ export function centreScrollTop(m: CentreMetrics): number {
   return Math.max(0, Math.min(max, wanted));
 }
 
-/** How long the target card stays highlighted after the nav jumps to it. */
-export const NAV_FLASH_MS = 900;
-
 export interface MobileReviewOpts {
   /** Phone-width, i.e. the viewport where inline + sheet replace the drawer. */
   /** Do inline cards apply at this width? NOT "is this a phone" — the cards
@@ -117,7 +114,6 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
   /** One live node per inline thread, keyed by thread id. Kept across
    *  refreshes so an expanded card is not rebuilt out from under its morph. */
   const built = new Map<string, { key: string; el: HTMLElement }>();
-  let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
   function inlineThreads(): Thread[] {
     const withPos: Array<{ t: Thread; from: number }> = [];
@@ -174,14 +170,6 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     for (const c of cards) if (c.el.isConnected) sizeThreadSlots(c.el);
   }
 
-  function flash(el: HTMLElement): void {
-    if (flashTimer) clearTimeout(flashTimer);
-    for (const other of Array.from(document.querySelectorAll('.cw-nav-flash')))
-      other.classList.remove('cw-nav-flash');
-    el.classList.add('cw-nav-flash');
-    flashTimer = setTimeout(() => el.classList.remove('cw-nav-flash'), NAV_FLASH_MS);
-  }
-
   function centreCard(el: HTMLElement): void {
     const sc = scrollContainerOf(el);
     if (!sc) return;
@@ -194,9 +182,9 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     // Scroll THIS container by hand. `scrollIntoView()` would walk up and
     // scroll every ancestor scroller too, dragging the page behind the
     // review surface along with it.
-    // The morph and the anchor flash both honour reduced motion, and on this
-    // path they are already silent — which leaves this scroll as the only
-    // thing moving. Jump instead.
+    // The morph honours reduced motion, and on this path it is already
+    // silent — which leaves this scroll as the only thing moving. Jump
+    // instead.
     if (typeof sc.scrollTo === 'function') {
       sc.scrollTo({ top, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     } else {
@@ -212,7 +200,6 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     if (el?.isConnected) {
       if (opts.isSheetOpen()) opts.closeSheet();
       centreCard(el);
-      flash(el);
       return true;
     }
     // The card exists but isn't in the DOM: CodeMirror only renders its
@@ -225,7 +212,6 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
         const later = built.get(id)?.el;
         if (later?.isConnected) {
           centreCard(later);
-          flash(later);
         }
       });
       return true;
@@ -238,7 +224,6 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
   }
 
   opts.onCleanup?.(() => {
-    if (flashTimer) clearTimeout(flashTimer);
     built.clear();
     opts.surface.setInlineCards?.([]);
   });

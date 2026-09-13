@@ -477,8 +477,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     listBtn.className = 'fab-list';
     listBtn.title = 'Comment threads';
     listBtn.innerHTML =
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>' +
-      '<span class="count" hidden></span>';
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>';
     listBtn.addEventListener('click', () => this.togglePanel());
     this.shadow.appendChild(listBtn);
 

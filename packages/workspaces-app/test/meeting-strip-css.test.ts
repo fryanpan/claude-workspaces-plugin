@@ -348,13 +348,4 @@ describe('motion', () => {
     const bot = attach('meeting-strip is-bot is-live', { attrs: { 'data-state': 'idle' } });
     expect(styleOf(attach('meeting-blinker', { parent: bot })).background).toBe(token('--red'));
   });
-
-  it('flashes only the word the model rewrote', () => {
-    const line = attach('meeting-caption-line');
-    expect(styleOf(attach('w is-fixed', { tag: 'span', parent: line })).animation).toContain(
-      'meeting-fix',
-    );
-    // Control: a word the model did not rewrite carries no animation.
-    expect(styleOf(attach('w', { tag: 'span', parent: line })).animation).toBe('');
-  });
 });
