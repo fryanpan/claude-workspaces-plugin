@@ -143,7 +143,7 @@ const words = document.createRange();
 function clear(x: number, y: number, placed: number[][], text = true): boolean {
   const l = x - 11;
   const t = y - 26;
-  if (l < 0 || x + 11 > innerWidth) return false;
+  if (l < 0 || x + 11 > innerWidth || t < 0 || y > innerHeight) return false;
   for (const [px, py] of placed) {
     if (Math.abs(px - x) < 22 && Math.abs(py - y) < 27) return false;
   }

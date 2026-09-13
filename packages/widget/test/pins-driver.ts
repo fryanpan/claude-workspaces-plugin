@@ -88,6 +88,7 @@ function pageHtml(bundle: string): string {
 </style></head>
 <body>
 <div id="board-main">
+ <div id="bar" style="position:fixed;top:0;left:0;right:0;padding:4px 32px;background:#fff;font-size:13px"><span id="bar-tag" style="display:inline-block;width:64px">Draft</span> Dock schedule for the week, shared with the harbour crews</div>
  <h1 id="title">Dock schedule</h1>
  <div class="cards">
   <section class="card"><h2>Berth 4 — Riverbend ferry</h2><p>Arrives 06:40, departs 07:15.</p><span class="chip" id="b4-chip">Confirmed</span><br><button class="book" id="b4-book">Change slot</button></section>
@@ -154,7 +155,7 @@ const LOOK = `(() => {
     for (const q of range.getClientRects()) text.push([q.left, q.top, q.right, q.bottom].map(Math.round));
   }
   const el = {};
-  for (const id of ['title', 'b4-chip', 'b4-book', 'b2-title', 'b2-dot', 'tide-high', 'walk-step']) el[id] = box(document.getElementById(id));
+  for (const id of ['bar-tag', 'title', 'b4-chip', 'b4-book', 'b2-title', 'b2-dot', 'tide-high', 'walk-step']) el[id] = box(document.getElementById(id));
   const pop = ${SHADOW}.querySelector('.thread-popover');
   return { pins, text, el, popover: pop ? pop.textContent : null };
 })()`;
@@ -249,6 +250,10 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
       'What does this open?', { shape: 'review', headline: 'Sheet or new page?' });
     // A dot with no words in it, and more threads on the heading than it has
     // edges to stand them at.
+    // A tag on a bar at the top of the screen, words right beside it: the
+    // spot above its right end clears its word but is off the screen, where
+    // the page has nothing under it to say it is not clear.
+    put('t-bar', createAnchor(document.getElementById('bar-tag')), 'Say who drafted it');
     put('t-dot', createAnchor(document.getElementById('b2-dot')), 'Is green right here?');
     for (let i = 1; i <= 5; i++) put('t-crowd-' + i, createAnchor(document.getElementById('title')), 'Heading note ' + i);
     put('t-tide', createAnchor(document.getElementById('tide-high')), 'Show the height too');

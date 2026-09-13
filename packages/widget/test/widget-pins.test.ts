@@ -122,7 +122,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
 
     it('stands no pin on another', () => {
       const shown = look(width, 'walkBuilt').pins.filter((p) => p.shown);
-      expect(shown.length, 'CONTROL: two share an element, five a heading').toBe(13);
+      expect(shown.length, 'CONTROL: two share an element, five a heading').toBe(14);
       for (const [i, a] of shown.entries()) {
         for (const b of shown.slice(i + 1)) {
           expect(overlap(drop(a), drop(b)), `${a.id} on ${b.id}`).toBe(0);
@@ -142,6 +142,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
         .map((p) => p.id)
         .sort();
       expect(shown).toEqual([
+        't-bar',
         't-chip',
         't-crowd-1',
         't-crowd-2',
@@ -180,6 +181,15 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       for (const t of look(width, 'slid').text) {
         expect(overlap(drop(p), t), `over text at ${t}`).toBe(0);
       }
+    });
+
+    it('stands a pin on screen for an element at the top edge', () => {
+      const l = look(width, 'reloaded');
+      expect(l.el['bar-tag']?.[1], 'CONTROL: the tag is at the top').toBeLessThan(10);
+      const p = pin(width, 'reloaded', 't-bar');
+      expect(p.shown).toBe(true);
+      expect(p.tip[1] - 25, `drop top at ${p.tip}`).toBeGreaterThanOrEqual(0);
+      expect(near(p, l.el['bar-tag'], 30)).toBe(true);
     });
 
     it('holds the pin of a hidden screen’s thread until the page shows it, never off screen', () => {
@@ -231,7 +241,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       // thread, one pin per pinned thread.
       expect(l.pins.map((p) => p.text)).toEqual(l.pins.map(() => ''));
       expect(pin(width, 'reloaded', 't-chip').paint).toEqual(open);
-      expect(l.pins.length).toBe(12);
+      expect(l.pins.length).toBe(13);
     });
   });
 });
