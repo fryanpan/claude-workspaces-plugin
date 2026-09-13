@@ -175,8 +175,13 @@ export function positionPins(el: FeedbackWidgetEl): void {
       !(r.width || r.height) ||
       pos.el.checkVisibility?.({ opacityProperty: true, visibilityProperty: true }) === false;
     if (pin.hidden) continue;
+    // The spot is kept while the element holds its size and its place on the
+    // page: a scroll moves neither, but an element that slides has new
+    // neighbours under the spot.
+    const px = r.left + scrollX;
+    const py = r.top + scrollY;
     let s = pos.spot;
-    if (!s || s[2] !== r.width || s[3] !== r.height) {
+    if (!s || s[2] !== r.width || s[3] !== r.height || s[4] !== px || s[5] !== py) {
       // The tapped point first, then the element's edges: past its words
       // (past its right side when they reach it, so a chip's pill is not
       // cut), above it, below it, before its left side.
@@ -205,7 +210,7 @@ export function positionPins(el: FeedbackWidgetEl): void {
         if (clear(r.left + d[0], r.top + d[1], placed, k < 3 * n)) c = d;
       }
       c ??= spots[0];
-      s = [c[0], c[1], r.width, r.height];
+      s = [c[0], c[1], r.width, r.height, px, py];
       // Kept only when the drop was on screen: off it, the page has nothing
       // under the points to say whether they were clear.
       if (r.top + s[1] > 26 && r.top + s[1] < innerHeight) pos.spot = s;

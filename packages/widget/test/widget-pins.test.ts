@@ -109,7 +109,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       expect(near(chip, chipBox, 30), 'still by its chip').toBe(true);
       // Nor over the chip's pill, cutting its end off.
       expect(overlap(drop(chip), chipBox ?? [0, 0, 0, 0]), 'on the chip it marks').toBe(0);
-      for (const name of ['reloaded', 'tidesShown', 'walkBuilt']) {
+      for (const name of ['reloaded', 'tidesShown', 'walkBuilt', 'slid']) {
         const l = look(width, name);
         expect(l.text.length, 'CONTROL: page text was measured').toBeGreaterThanOrEqual(8);
         for (const p of l.pins.filter((q) => q.shown)) {
@@ -164,6 +164,22 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       expect(l.el['b2-dot'], 'CONTROL: the dot is on screen').not.toBeNull();
       expect((l.el['b2-dot']?.[0] ?? 0) - 16, 'CONTROL: far from the edge').toBeGreaterThan(60);
       expect(near(pin(width, 'reloaded', 't-dot'), l.el['b2-dot'], 30)).toBe(true);
+    });
+
+    it('moves a pin off the words an element slides onto, size unchanged', () => {
+      const before = look(width, 'walkBuilt').el['b2-dot'];
+      const after = look(width, 'slid').el['b2-dot'];
+      // CONTROL: the dot moved and kept its size.
+      expect((before?.[0] ?? 0) - (after?.[0] ?? 0)).toBeGreaterThan(40);
+      expect(
+        Math.abs((after?.[2] ?? 0) - (after?.[0] ?? 0) - ((before?.[2] ?? 0) - (before?.[0] ?? 0))),
+      ).toBeLessThanOrEqual(1);
+      const p = pin(width, 'slid', 't-dot');
+      expect(p.shown).toBe(true);
+      expect(near(p, after, 30)).toBe(true);
+      for (const t of look(width, 'slid').text) {
+        expect(overlap(drop(p), t), `over text at ${t}`).toBe(0);
+      }
     });
 
     it('holds the pin of a hidden screen’s thread until the page shows it, never off screen', () => {

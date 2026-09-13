@@ -276,6 +276,15 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   );
   await sleep(600);
   await look('walkBuilt');
+  // The dot slides to just before its chip without changing size: the spot
+  // its pin stood at before, past its right side, would now be on "Tentative".
+  await cdp.evaluate(`(() => {
+    const dot = document.getElementById('b2-dot');
+    const by = dot.previousElementSibling.getBoundingClientRect().left - 12 - dot.getBoundingClientRect().left;
+    dot.style.transform = 'translateX(' + by + 'px)';
+  })()`);
+  await sleep(400);
+  await look('slid');
   return { width, height, taps, anchors, main, looks };
 }
 
