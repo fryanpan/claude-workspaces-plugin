@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Where the Feedback panel and a thread popover land on a page wider than
- * the phone it is open on.
+ * Where the widget's own fixed controls — the FAB, the list button, the
+ * Feedback panel and a thread popover — land on a page wider than the phone
+ * it is open on, before and after the reader pans across it.
  *
  * Spawned by `widget-panel-edge.test.ts`, which reads the JSON it prints. Its
  * own process for the reason `post-click-driver.ts` gives: one browser launch
@@ -13,7 +14,9 @@
  * the page rather than the screen, and `window.innerWidth` reports that width
  * too — so anything placed from the right, or clamped to `innerWidth`, stands
  * partly past the screen's edge. Neither happens on a page that fits, which
- * is why the other layout drivers never saw it.
+ * is why the other layout drivers never saw it. A pan sideways moves the
+ * screen across that width while fixed boxes stay put, so the second look
+ * is taken after a real touch pan.
  *
  * audit: no-text — nothing here reads a source file, a bundle or a
  * stylesheet; every value it returns was measured in a running browser.
@@ -37,20 +40,28 @@ const SHADOW = `document.querySelector('${TAG}').shadowRoot`;
 /** [left, top, right, bottom], rounded. */
 export type Box = [number, number, number, number];
 
-export interface Reading {
-  width: number;
-  height: number;
+export interface Look {
   /** The page's own width as the browser reports it: wider than the screen
    *  on a phone is the condition under test. */
   innerWidth: number;
   /** The screen: the visual viewport's left offset and width. */
   vv: [number, number];
+  fab: Box | null;
+  list: Box | null;
   /** The open Feedback panel. */
   panel: Box | null;
   /** A popover opened from the far end of a heading that runs past the
    *  screen, and one from a pin near the screen's right edge. */
   fromRow: Box | null;
   fromPin: Box | null;
+}
+
+export interface Reading {
+  width: number;
+  height: number;
+  still: Look;
+  /** After a pan to the page's right-hand end; phones only. */
+  panned: Look | null;
 }
 
 function pageHtml(bundle: string): string {
@@ -117,6 +128,10 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     mobile: width <= 1100,
   });
   const loaded = cdp.once('Page.loadEventFired');
+  await cdp.send('Emulation.setTouchEmulationEnabled', {
+    enabled: width <= 1100,
+    maxTouchPoints: 5,
+  });
   await cdp.send('Page.navigate', { url: `file://${html}` });
   await loaded;
   for (let i = 0; i < 100; i++) {
@@ -126,17 +141,46 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   // From script: on the page under test the list button itself stands past
   // the screen's edge, and it is the panel's placement being measured.
   await cdp.evaluate(`${SHADOW}.querySelector('.fab-list').click()`);
-  const panel = (await cdp.evaluate(`(${BOX})(${SHADOW}.querySelector('.panel'))`)) as Box | null;
-  const fromRow = (await cdp.evaluate(
-    popover(`document.getElementById('title').getBoundingClientRect().right`, 80),
-  )) as Box | null;
-  const fromPin = (await cdp.evaluate(
-    popover('visualViewport.offsetLeft + visualViewport.width - 24', 120),
-  )) as Box | null;
-  const [innerWidth, vvLeft, vvWidth] = (await cdp.evaluate(
-    '[innerWidth, visualViewport.offsetLeft, visualViewport.width].map(Math.round)',
-  )) as [number, number, number];
-  return { width, height, innerWidth, vv: [vvLeft, vvWidth], panel, fromRow, fromPin };
+  const measure = async (): Promise<Look> => {
+    const box = async (sel: string) =>
+      (await cdp.evaluate(`(${BOX})(${SHADOW}.querySelector('${sel}'))`)) as Box | null;
+    const fromRow = (await cdp.evaluate(
+      popover(`document.getElementById('title').getBoundingClientRect().right`, 80),
+    )) as Box | null;
+    const fromPin = (await cdp.evaluate(
+      popover('visualViewport.offsetLeft + visualViewport.width - 24', 120),
+    )) as Box | null;
+    const [innerWidth, vvLeft, vvWidth] = (await cdp.evaluate(
+      '[innerWidth, visualViewport.offsetLeft, visualViewport.width].map(Math.round)',
+    )) as [number, number, number];
+    return {
+      innerWidth,
+      vv: [vvLeft, vvWidth],
+      fab: await box('.fab'),
+      list: await box('.fab-list'),
+      panel: await box('.panel'),
+      fromRow,
+      fromPin,
+    };
+  };
+  const still = await measure();
+  let panned: Look | null = null;
+  if (width <= 1100) {
+    // A finger dragging the page leftwards, well past its right-hand end.
+    await cdp.send('Input.synthesizeScrollGesture', {
+      x: 200,
+      y: 300,
+      xDistance: -400,
+      yDistance: 0,
+      gestureSourceType: 'touch',
+    });
+    for (let i = 0; i < 40; i++) {
+      if (((await cdp.evaluate('visualViewport.offsetLeft')) as number) > 0) break;
+      await sleep(50);
+    }
+    panned = await measure();
+  }
+  return { width, height, still, panned };
 }
 
 const runId = `paneledge${process.pid}`;
