@@ -16,7 +16,8 @@
  *
  * And at 1180, a page with a left rail and no bar, whose last button rests
  * under the chevrons: in comment mode a tap there anchors to the button, and
- * out of it the chevrons still step the rounds.
+ * out of it the chevrons still step the rounds. That page's own stylesheet
+ * turns every button's pointer events on, importantly, as a host page may.
  *
  * Spawned by `widget-page-bar.test.ts`, which reads the JSON it prints.
  *
@@ -130,9 +131,10 @@ function pageHtml(bundle: string, variant: Variant): string {
  nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#234;text-decoration:none}
  body.bare nav{display:none}
  aside{position:fixed;left:0;top:0;bottom:0;width:88px;background:#fff;border-right:1px solid #ccc}
+ body.rail button{pointer-events:auto!important}
  #rail-talk{position:absolute;left:22px;bottom:28px;width:44px;height:44px;border:0;border-radius:22px;background:#234;color:#fff}
 </style></head>
-<body${variant === 'rail' ? ' style="padding-left:88px"' : ''}>
+<body${variant === 'rail' ? ' class="rail" style="padding-left:88px"' : ''}>
 ${variant === 'wide' ? '<div id="wide"></div>' : ''}
 ${variant === 'rail' ? '<aside id="rail"><button id="rail-talk" aria-label="Hold to talk">o</button></aside>' : ''}
 <header><h1 style="margin:0;font-size:20px">Saltmarsh settings</h1></header>
