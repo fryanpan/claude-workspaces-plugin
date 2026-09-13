@@ -118,7 +118,7 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
     // element the composer is about.
     el.hoverEl = t;
     setHighlight(el, t);
-    openComposerForElement(el, t);
+    openComposerForElement(el, t, ev);
   };
   // A finger's press is followed, AFTER its pointerup, by a compatibility
   // mousedown whose default took focus back off the field the tap had just
@@ -306,11 +306,24 @@ function clearHighlight(owner: FeedbackWidgetEl): void {
 
 // --- Composer ---
 
-function openComposerForElement(widget: FeedbackWidgetEl, el: HTMLElement): void {
+/** `tap` is the press that picked the element: the anchor keeps where in the
+ *  element it landed, so the pin can stand there (`ElementAnchor.at`). */
+function openComposerForElement(
+  widget: FeedbackWidgetEl,
+  el: HTMLElement,
+  tap?: PointerEvent,
+): void {
+  const r = el.getBoundingClientRect();
   const anchor: ElementAnchor = {
     ...createAnchor(el),
     ...(hasContext(widget.currentContext) ? { context: { ...widget.currentContext } } : {}),
   };
+  if (tap && r.width && r.height) {
+    anchor.at = {
+      x: +((tap.clientX - r.left) / r.width).toFixed(3),
+      y: +((tap.clientY - r.top) / r.height).toFixed(3),
+    };
+  }
   showComposer(widget, anchor, el);
 }
 
