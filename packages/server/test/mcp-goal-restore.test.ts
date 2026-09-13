@@ -207,6 +207,9 @@ describe('unarchive_task restores an archived goal with its tasks', () => {
     expect(both.isError).toBe(true);
     const neither = await toolRaw('unarchive_task', { workspaceId: wsId });
     expect(neither.isError).toBe(true);
+    // The refusal names the way out, rather than a 404 for a task id nobody sent.
+    expect(neither.content?.[0]?.text).toContain('goalId');
+    expect(both.content?.[0]?.text).toContain('goalId');
     // Nothing was restored by either refusal.
     expect(handle.tasks.getGoalRow(G.lamps ?? '')?.archivedAt).toBeGreaterThan(0);
     expect(handle.tasks.getTask(ids.earlier)?.archivedAt).toBeGreaterThan(0);

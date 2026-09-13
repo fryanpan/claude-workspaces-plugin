@@ -18649,7 +18649,7 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "unarchive_task": {
       const { taskId, goalId } = a;
-      if (taskId === undefined === (goalId === undefined)) {
+      if (taskId !== undefined && goalId !== undefined) {
         return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
       }
       if (goalId !== undefined) {
@@ -18662,6 +18662,9 @@ async function handleTaskTool(name, a, ctx) {
           restoredTaskIds: res2.taskIds,
           changed: res2.changed
         });
+      }
+      if (taskId === undefined) {
+        return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
       }
       const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/restore`, {
         author: AUTHOR
