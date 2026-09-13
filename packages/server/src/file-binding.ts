@@ -176,6 +176,12 @@ interface FileBinding {
   /** The serialized markdown we last wrote or last read from disk.
    *  Both directions guard against this to break echo loops. */
   lastWritten?: string;
+  /** The file's own bytes as we last read or wrote them — not serializer
+   *  space. The write-back reuses them for every block an edit did not touch
+   *  (`prose.serializeKeepingSource`), so a one-paragraph edit rewrites one
+   *  paragraph. Only ever a formatting hint: a stale value costs fidelity,
+   *  never content. */
+  diskText?: string;
   /** Set when the most recent disk→doc reconcile failed (parse threw or
    *  produced zero blocks) or hit a conflict. Cleared on the next successful
    *  reconcile. Surfaced via getDoc AND on edit-tool responses so a wedged
@@ -559,9 +565,11 @@ export class FileBindings {
     const fileExists = () => (pre ? pre.exists : existsSync(abs));
     const readFile = () => (pre ? (pre.text ?? '') : readFileSync(abs, 'utf8'));
     let seeded = false;
+    let seedText: string | undefined;
     if (fragment.length === 0 && fileExists()) {
       try {
         const md = readFile();
+        seedText = md;
         const blocks = prose.parseMarkdownBlocks(md);
         if (blocks.length > 0) {
           doc.ydoc.transact(() => fragment.push(blocks), 'file-seed');
@@ -585,6 +593,7 @@ export class FileBindings {
       path: abs,
       lastMtimeMs: existing?.lastMtimeMs,
       lastSize: existing?.lastSize,
+      diskText: seedText,
     };
     this.bindings.set(docId, binding);
     // sourceUrl records the bound path. It stays OUT of the CRDT (an absolute
@@ -603,6 +612,7 @@ export class FileBindings {
     if (!seeded && fileExists()) {
       try {
         const md = readFile();
+        binding.diskText = md;
         const currentSerialized = prose.serializeFragmentToMarkdown(fragment);
         const prior = existing?.lastWritten;
         if (md !== currentSerialized) {
@@ -1552,6 +1562,7 @@ export class FileBindings {
       return { ok: true };
     }
     if (prose.parseMarkdownBlocks(md).length === 0) return { ok: false, error: 'missing' };
+    binding.diskText = md;
     const fragment = prose.getProseFragment(doc.ydoc);
     doc.ydoc.transact(() => {
       // Block-level diff, not delete-all + push: blocks the rewrite didn't
@@ -1645,6 +1656,7 @@ export class FileBindings {
       binding.lastSyncError = undefined;
       return decision;
     }
+    binding.diskText = md;
     const fragment = prose.getProseFragment(doc.ydoc);
     const currentSerialized = prose.serializeFragmentToMarkdown(fragment);
     const decision = decideReconcile({
@@ -1863,6 +1875,13 @@ export class FileBindings {
         this.p.clearPendingFileWrite(doc.docId);
         return;
       }
+      // What lands on disk: `md` itself for flat text, and for prose `md`
+      // with the file's own bytes kept for every block the edit did not
+      // touch. `lastWritten` stays `md` — the bookkeeping is serializer space.
+      const bytes =
+        contentKind(doc.meta.type) === 'flat'
+          ? md
+          : prose.serializeKeepingSource(prose.getProseFragment(doc.ydoc), binding.diskText);
       // Atomic: write-temp-then-rename, so a crash mid-write can't leave
       // the user's file truncated and a concurrent reader never sees half
       // a document. (Same save pattern editors use.) Rename onto the
@@ -1883,7 +1902,7 @@ export class FileBindings {
         // here: until then the doc genuinely is unsaved, and a restart in
         // between must still reassert it.
         void boundFiles
-          .write(binding.path, md)
+          .write(binding.path, bytes)
           .then((res) => {
             if (this.bindings.get(doc.docId) !== binding) return;
             // A synchronous flush ran while this write was still on the pool.
@@ -1903,6 +1922,7 @@ export class FileBindings {
               return;
             }
             binding.lastWritten = md;
+            binding.diskText = bytes;
             // Record our own write's mtime so the poll doesn't treat the
             // write-back as an external edit and schedule a redundant reconcile.
             if (res.exists) {
@@ -1962,9 +1982,10 @@ export class FileBindings {
       // two writers filling one temp file interleave their bytes into it,
       // which the rename then publishes as the user's document.
       const tmp = `${target}.cw-flush~`;
-      writeFileSync(tmp, md);
+      writeFileSync(tmp, bytes);
       renameSync(tmp, target);
       binding.lastWritten = md;
+      binding.diskText = bytes;
       // Record our own write's mtime so the poll doesn't treat the
       // write-back as an external edit and schedule a redundant reconcile.
       try {
