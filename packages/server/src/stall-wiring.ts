@@ -81,7 +81,7 @@ import {
   type Task,
   type TaskStore,
 } from './tasks.ts';
-import { collectUngatedUiRows } from './ui-review-gate.ts';
+import { type ChangedWork, collectUngatedUiRows } from './ui-review-gate.ts';
 
 /** The cap as a wake names it — `capSummary`'s answer, built in
  *  `createServer` so every reader of the number shares one spelling. */
@@ -860,7 +860,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * worktree serving rows on two boards is read once per board, which is the
    * price of each board's snapshot being its own.
    */
-  function changedFilesReader(): (taskId: string) => readonly string[] | undefined {
+  function changedFilesReader(): (taskId: string) => ChangedWork | undefined {
     const open = dispatches.list();
     // Two live dispatches in one checkout are one pile of edits with no way
     // to say whose, and a stylesheet written for either would convict both.
@@ -872,7 +872,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         .filter((d) => sharers.get(d.worktreePath) === 1)
         .map((d) => [d.taskId, { path: d.worktreePath, since: d.baseCommit }]),
     );
-    const byWorktree = new Map<string, readonly string[] | undefined>();
+    const byWorktree = new Map<string, ChangedWork | undefined>();
     return (taskId) => {
       const dispatch = worktreeOf.get(taskId);
       if (dispatch === undefined) return undefined;
@@ -884,13 +884,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         // A worktree that has vanished, is not a repo, or whose git fails
         // reads as no evidence — never as "changed nothing". Throwing here
         // would take the whole stall pass down over one builder's checkout.
-        let files: readonly string[] | undefined;
+        let work: ChangedWork | undefined;
         try {
-          files = changedFilesInWorktree(worktreePath, since) ?? undefined;
+          work = changedFilesInWorktree(worktreePath, since) ?? undefined;
         } catch {
-          files = undefined;
+          work = undefined;
         }
-        byWorktree.set(path, files);
+        byWorktree.set(path, work);
       }
       return byWorktree.get(path);
     };
@@ -981,7 +981,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // over the body was wrong six times out of six.
     const ungatedUi = collectUngatedUiRows(taskStore.listTasks(workspace.id), {
       isAgentName: (name) => taskStore.resolveAgentId(name) !== null,
-      changedFiles: changedFilesReader(),
+      changedWork: changedFilesReader(),
       answeredReviewItem: answeredReviewItemOn,
     });
     const sessionLive = taskStore.hasLiveAttachment(workspace.id);

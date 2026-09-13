@@ -176,6 +176,12 @@ export interface UngatedUiRowPayload {
   title?: string;
   file?: string;
   keyword?: string;
+  /** Where `file` was measured from: `dispatch` is the commit pinned when
+   *  this task's dispatch was registered, so the file is this task's work;
+   *  `trunk` is the merge base the read fell back to, which also counts
+   *  anything else committed in that checkout since. Absent from a server
+   *  older than this — see `ungatedRowClause`. */
+  from?: 'dispatch' | 'trunk';
 }
 
 /**
@@ -635,8 +641,10 @@ export function stalledLine(p: StallPayload): string {
   const ungated = p.ungatedUi ?? [];
   if (ungated.length > 0) {
     const noun = ungated.length === 1 ? 'UI task is' : 'UI tasks are';
+    // A trunk read cannot say whose the change is, so it is not the builder's.
+    const who = ungated.some((row) => row.from === 'trunk') ? 'its worktree' : 'its builder';
     parts.push(
-      `${ungated.length} ${noun} being built past the review gate — an agent filed it, its builder ` +
+      `${ungated.length} ${noun} being built past the review gate — an agent filed it, ${who} ` +
         'has changed a file a person looks at, and nobody answered a review item on it — ' +
         `${ungatedRowsClause(ungated)}. ` +
         'Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.',
@@ -757,10 +765,23 @@ function askedBackRowsClause(rows: readonly AskedBackRowPayload[]): string {
  *  work, and — when the row's own words agree — the matched word too. The
  *  file is what makes the finding checkable from the line itself; the word
  *  is what made dismissing the old prose-only false positives cheap, and it
- *  costs four characters to keep. */
+ *  costs four characters to keep.
+ *
+ *  The file says which baseline it was read from, because the two are not
+ *  the same claim. Read from the dispatch's pinned commit it is this task's
+ *  work. Read from the trunk merge base it is everything committed in that
+ *  checkout since, which includes whoever held it before, so the line says it
+ *  cannot tell rather than handing the file to this builder. A frame from an
+ *  older server names no baseline, and neither does the line. */
 function ungatedRowClause(row: UngatedUiRowPayload): string {
   const title = row.title ? `"${row.title}" ` : '';
-  const file = row.file ? `, changed: ${row.file}` : '';
+  const since =
+    row.from === 'dispatch'
+      ? 'changed since dispatch commit'
+      : row.from === 'trunk'
+        ? 'changed since trunk merge base, cannot tell this task\u2019s work from other work'
+        : 'changed';
+  const file = row.file ? `, ${since}: ${row.file}` : '';
   const word = row.keyword ? `, matched: ${row.keyword}` : '';
   return `${title}(${row.id}${file}${word})`;
 }

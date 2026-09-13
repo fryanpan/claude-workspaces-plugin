@@ -94,6 +94,7 @@ describe('what a verdict says', () => {
               id: 't-ui',
               title: 'move the button',
               file: 'packages/workspaces-app/src/board.css',
+              from: 'dispatch' as const,
               keyword: 'button',
             },
           ],

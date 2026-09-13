@@ -65,7 +65,7 @@ describe('the base a builder is judged against', () => {
     wt.edit({ 'packages/server/src/clock.ts': 'export const t = 1;\n' });
 
     expect(defaultBaseRef(wt.path)).toBe('origin/main');
-    expect(changedFilesInWorktree(wt.path)).toEqual(['packages/server/src/clock.ts']);
+    expect(changedFilesInWorktree(wt.path)?.files).toEqual(['packages/server/src/clock.ts']);
   });
 
   it('is nothing at all when no remote branch answers', () => {
@@ -92,26 +92,26 @@ describe('the base a builder is judged against', () => {
 describe('what the read returns', () => {
   it('lists a file the builder has written and not committed', () => {
     const wt = worktree({ 'packages/app/src/board.css': '.b{}\n' });
-    expect(changedFilesInWorktree(wt.path)).toEqual(['packages/app/src/board.css']);
+    expect(changedFilesInWorktree(wt.path)?.files).toEqual(['packages/app/src/board.css']);
   });
 
   it('lists it the same once it is committed', () => {
     const wt = worktree({ 'packages/app/src/board.css': '.b{}\n' });
     wt.commit();
-    expect(changedFilesInWorktree(wt.path)).toEqual(['packages/app/src/board.css']);
+    expect(changedFilesInWorktree(wt.path)?.files).toEqual(['packages/app/src/board.css']);
   });
 
   it('lists committed and uncommitted work together', () => {
     const wt = worktree({ 'src/one.ts': 'a\n' });
     wt.commit();
     wt.edit({ 'src/two.ts': 'b\n' });
-    expect(changedFilesInWorktree(wt.path)?.sort()).toEqual(['src/one.ts', 'src/two.ts']);
+    expect(changedFilesInWorktree(wt.path)?.files.sort()).toEqual(['src/one.ts', 'src/two.ts']);
   });
 
   it('is an empty list — not null — for a worktree that has changed nothing', () => {
-    const files = changedFilesInWorktree(worktree().path);
-    expect(files).toEqual([]);
-    expect(files).not.toBeNull();
+    const changes = changedFilesInWorktree(worktree().path);
+    expect(changes?.files).toEqual([]);
+    expect(changes).not.toBeNull();
   });
 
   it('starts from a recorded baseline, so a reused worktree is not one history', () => {
@@ -125,11 +125,16 @@ describe('what the read returns', () => {
     }).trim();
     wt.edit({ 'packages/server/src/clock.ts': 'export const t = 1;\n' });
 
-    expect(changedFilesInWorktree(wt.path)?.sort()).toEqual([
+    expect(changedFilesInWorktree(wt.path)?.files.sort()).toEqual([
       'packages/app/src/board.css',
       'packages/server/src/clock.ts',
     ]);
-    expect(changedFilesInWorktree(wt.path, baseline)).toEqual(['packages/server/src/clock.ts']);
+    expect(changedFilesInWorktree(wt.path)?.from).toBe('trunk');
+    const pinned = changedFilesInWorktree(wt.path, baseline);
+    expect(pinned?.files).toEqual(['packages/server/src/clock.ts']);
+    // The finding has to be able to say which of the two it was measured
+    // from, because only one of them is this dispatch's own work.
+    expect(pinned?.from).toBe('dispatch');
   });
 
   it('ignores a baseline that is not in this branch’s history', () => {
@@ -141,7 +146,9 @@ describe('what the read returns', () => {
     const wt = worktree({ 'src/mine.ts': 'mine\n' });
     // A commit this repo has never heard of falls back to the merge base
     // rather than failing the read or reporting a diff about nothing.
-    expect(changedFilesInWorktree(wt.path, stranger)).toEqual(['src/mine.ts']);
+    const fallen = changedFilesInWorktree(wt.path, stranger);
+    expect(fallen?.files).toEqual(['src/mine.ts']);
+    expect(fallen?.from).toBe('trunk');
   });
 
   it('reads a repository whose object ids are SHA-256', () => {
@@ -149,7 +156,7 @@ describe('what the read returns', () => {
     // 40-character shape answers "cannot tell" for every worktree in such a
     // repo, which silences the gate rather than failing it.
     const wt = worktree({ 'packages/app/src/board.css': '.b{}\n' }, {}, 'sha256');
-    expect(changedFilesInWorktree(wt.path)).toEqual(['packages/app/src/board.css']);
+    expect(changedFilesInWorktree(wt.path)?.files).toEqual(['packages/app/src/board.css']);
   });
 
   it('names both ends of a rename, so a file moved OUT of a tree still counts', () => {
@@ -165,7 +172,7 @@ describe('what the read returns', () => {
       'packages/server/src/home-template.ts',
     ]);
     wt.commit('move the screen');
-    expect(changedFilesInWorktree(wt.path)?.sort()).toEqual([
+    expect(changedFilesInWorktree(wt.path)?.files.sort()).toEqual([
       'packages/app/src/pages/home.tsx',
       'packages/server/src/home-template.ts',
     ]);
@@ -196,6 +203,6 @@ describe('what the read returns', () => {
       execFileSync('git', ['-C', wt.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     ]);
     execFileSync('git', ['-C', wt.path, 'checkout', '-q', 'builder']);
-    expect(changedFilesInWorktree(wt.path)).toEqual(['src/mine.ts']);
+    expect(changedFilesInWorktree(wt.path)?.files).toEqual(['src/mine.ts']);
   });
 });

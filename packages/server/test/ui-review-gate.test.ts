@@ -32,13 +32,16 @@ const SERVER_DIFF = [
   'packages/server/test/ready-nudge-routes.test.ts',
 ];
 
+const UI_WORK = { files: UI_DIFF, from: 'dispatch' } as const;
+const SERVER_WORK = { files: SERVER_DIFF, from: 'dispatch' } as const;
+
 const breach = {
   id: 't-1',
   title: 'Agent can move the Plan button onto the ticket',
   filedByAgent: true,
   dispatched: true,
   answeredReviewItem: false,
-  changedFiles: UI_DIFF,
+  changedWork: UI_WORK,
 };
 
 describe('reading a changed file as a screen', () => {
@@ -102,6 +105,7 @@ describe('which rows are a breach', () => {
         id: 't-1',
         title: breach.title,
         file: 'packages/workspaces-app/src/board.css',
+        from: 'dispatch',
         keyword: 'button',
       },
     ]);
@@ -118,6 +122,7 @@ describe('which rows are a breach', () => {
         id: 't-1',
         title: 'Agent can see why a task is blocked',
         file: 'packages/workspaces-app/src/board.css',
+        from: 'dispatch',
       },
     ]);
     expect(row[0]?.keyword).toBeUndefined();
@@ -131,6 +136,7 @@ describe('which rows are a breach', () => {
         id: 't-1',
         title: 'Agent can finish the flow',
         file: 'packages/workspaces-app/src/board.css',
+        from: 'dispatch',
         keyword: 'panel',
       },
     ]);
@@ -140,13 +146,13 @@ describe('which rows are a breach', () => {
     expect(ungatedUiRows([{ ...breach, filedByAgent: false }])).toEqual([]);
     expect(ungatedUiRows([{ ...breach, dispatched: false }])).toEqual([]);
     expect(ungatedUiRows([{ ...breach, answeredReviewItem: true }])).toEqual([]);
-    expect(ungatedUiRows([{ ...breach, changedFiles: SERVER_DIFF }])).toEqual([]);
+    expect(ungatedUiRows([{ ...breach, changedWork: SERVER_WORK }])).toEqual([]);
   });
 });
 
 describe('prose says UI, the diff does not — the six recorded false positives', () => {
   const silent = (title: string, body: string) =>
-    ungatedUiRows([{ ...breach, title, body, changedFiles: SERVER_DIFF }]);
+    ungatedUiRows([{ ...breach, title, body, changedWork: SERVER_WORK }]);
 
   it('does not flag a row whose only UI word is inside a skill name', () => {
     const title = 'Agent files a project’s docs in the project’s own folders';
@@ -177,13 +183,15 @@ describe('prose says UI, the diff does not — the six recorded false positives'
 
 describe('a row with no diff to read', () => {
   it('says nothing, however loudly its words read as UI work', () => {
-    const noDispatch = { ...breach, changedFiles: undefined };
+    const noDispatch = { ...breach, changedWork: undefined };
     expect(uiKeywordIn(noDispatch.title)).toBe('button');
     expect(ungatedUiRows([noDispatch])).toEqual([]);
   });
 
   it('says nothing about a readable worktree that has changed nothing yet', () => {
-    expect(ungatedUiRows([{ ...breach, changedFiles: [] }])).toEqual([]);
+    expect(ungatedUiRows([{ ...breach, changedWork: { files: [], from: 'dispatch' } }])).toEqual(
+      [],
+    );
   });
 });
 
@@ -200,7 +208,7 @@ function task(parts: Partial<UiGateTask> = {}): UiGateTask {
 
 const agentsOnly = {
   isAgentName: (name: string) => name === 'UX Bot',
-  changedFiles: () => UI_DIFF,
+  changedWork: () => UI_WORK,
   answeredReviewItem: () => false,
 };
 
@@ -208,6 +216,7 @@ const found = {
   id: 't-1',
   title: task().title,
   file: 'packages/workspaces-app/src/board.css',
+  from: 'dispatch' as const,
   keyword: 'button',
 };
 
@@ -243,9 +252,9 @@ describe('collecting a board', () => {
   });
 
   it('leaves a row whose builder has no worktree the board can read', () => {
-    expect(
-      collectUngatedUiRows([task()], { ...agentsOnly, changedFiles: () => undefined }),
-    ).toEqual([]);
+    expect(collectUngatedUiRows([task()], { ...agentsOnly, changedWork: () => undefined })).toEqual(
+      [],
+    );
   });
 
   it('asks git nothing about a row the cheap reads already cleared', () => {
@@ -254,9 +263,9 @@ describe('collecting a board', () => {
     const asked: string[] = [];
     const counting = {
       ...agentsOnly,
-      changedFiles: (id: string) => {
+      changedWork: (id: string) => {
         asked.push(id);
-        return UI_DIFF;
+        return UI_WORK;
       },
     };
     collectUngatedUiRows(
@@ -275,7 +284,7 @@ describe('collecting a board', () => {
     const asked: string[] = [];
     collectUngatedUiRows([task({ id: 't-server' }), task({ id: 't-ui' })], {
       ...agentsOnly,
-      changedFiles: (id) => (id === 't-ui' ? UI_DIFF : SERVER_DIFF),
+      changedWork: (id) => (id === 't-ui' ? UI_WORK : SERVER_WORK),
       answeredReviewItem: (id) => {
         asked.push(id);
         return false;

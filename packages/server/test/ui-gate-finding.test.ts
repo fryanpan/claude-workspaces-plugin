@@ -17,6 +17,7 @@
  * Every fixture is invented.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -191,6 +192,7 @@ describe('a row built past the UI gate is the lead’s finding', () => {
       id: taskId,
       file: 'packages/workspaces-app/src/board.css',
       keyword: 'tap',
+      from: 'dispatch',
     });
 
     const { latest } = await latestVerdict(workspaceId);
@@ -216,6 +218,25 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     expect(ungatedOf(told)[0]?.keyword).toBeUndefined();
     const { latest } = await latestVerdict(workspaceId);
     expect(latest?.ungatedUi).toEqual([taskId]);
+  }, 20_000);
+
+  it('says the file was read from trunk when the dispatch baseline is no longer on the branch', async () => {
+    // The builder took a checkout holding a previous occupant's commit, then
+    // started a fresh branch off trunk. The pinned commit is not in HEAD's
+    // history, so the read falls back to the merge base — and the finding has
+    // to say so, because that read cannot tell whose the file is.
+    const { workspaceId, taskId } = await boardWithRow('Agent can see why a task is blocked');
+    const wt = await dispatch(workspaceId, taskId, {}, SERVER_WORK);
+    execFileSync('git', ['-C', wt.path, 'checkout', '-q', '-b', 'fresh', 'origin/main']);
+    wt.edit(UI_WORK);
+    const lead = await agentStream(workspaceId, LEAD);
+
+    const told = await waitForFinding(lead);
+    expect(ungatedOf(told)[0]).toMatchObject({
+      id: taskId,
+      file: 'packages/workspaces-app/src/board.css',
+      from: 'trunk',
+    });
   }, 20_000);
 
   it('says nothing about a row whose words read as UI while its builder edits the server', async () => {
