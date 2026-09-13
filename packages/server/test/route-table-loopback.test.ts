@@ -233,8 +233,10 @@ describe('every loopback-only row refuses a request through the edge', () => {
         const edge = await viaEdge(entry.example, method);
         const box = await fromBox(entry.example, method);
         expect(edge.error, 'the host guard refused the edge probe').not.toBe('unknown_host');
+        // The refusal has to be the edge veto's, not any 403: every one of
+        // them names the hop (`agent-stream-proxied`, "through the edge").
         expect({ edge, box }, `${method} ${entry.pattern} through the edge`).toMatchObject({
-          edge: { status: 403 },
+          edge: { status: 403, error: expect.stringMatching(/edge|proxied/i) },
         });
         expect(box.status, `${method} ${entry.pattern} from the box`).not.toBe(403);
       });
