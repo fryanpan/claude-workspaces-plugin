@@ -140,14 +140,14 @@ const words = document.createRange();
  * to be drawn over the words of the chip it marked ("Malformed", on a
  * Confirmed chip); nothing about an element's box says where its words are.
  */
-function clear(x: number, y: number, placed: number[][]): boolean {
+function clear(x: number, y: number, placed: number[][], text = true): boolean {
   const l = x - 11;
   const t = y - 26;
   if (l < 0 || x + 11 > innerWidth) return false;
   for (const [px, py] of placed) {
     if (Math.abs(px - x) < 22 && Math.abs(py - y) < 27) return false;
   }
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; text && i < 9; i++) {
     for (const e of document.elementsFromPoint(l + (i % 3) * 11, t + ((i / 3) | 0) * 13.5)) {
       for (const n of e.childNodes) {
         if (n.nodeType !== 3 || !n.textContent?.trim()) continue;
@@ -180,8 +180,11 @@ export function positionPins(el: FeedbackWidgetEl): void {
       // The tapped point first, then the element's edges: past its words
       // (past its right side when they reach it, so a chip's pill is not
       // cut), above it, below it, before its left side.
+      // An element with no words (an icon, an image) has an empty range at
+      // the origin; its words end at its right side.
       words.selectNodeContents(pos.el);
-      const end = words.getBoundingClientRect().right;
+      const q = words.getBoundingClientRect();
+      const end = q.width ? q.right : r.right;
       const m = r.height / 2 + 13;
       const spots = [
         [(r.right - end > 40 ? end : r.right) - r.left + 16, m],
@@ -193,8 +196,16 @@ export function positionPins(el: FeedbackWidgetEl): void {
       if (at && at.x >= 0 && at.x <= 1 && at.y >= 0 && at.y <= 1) {
         spots.unshift([at.x * r.width, at.y * r.height]);
       }
-      s = spots.find(([x, y]) => clear(r.left + x, r.top + y, placed)) ?? spots[0];
-      s = [s[0], s[1], r.width, r.height];
+      let c = spots.find(([x, y]) => clear(r.left + x, r.top + y, placed));
+      // More threads on it than spots: rows under the element, clear of the
+      // other pins — of the page's words too when three rows allow it.
+      const n = Math.max(1, (r.width / 24) | 0);
+      for (let k = 0; !c && k < 6 * n; k++) {
+        const d = [r.width - 12 - 24 * (k % n), r.height + 27 + 29 * (((k % (3 * n)) / n) | 0)];
+        if (clear(r.left + d[0], r.top + d[1], placed, k < 3 * n)) c = d;
+      }
+      c ??= spots[0];
+      s = [c[0], c[1], r.width, r.height];
       // Kept only when the drop was on screen: off it, the page has nothing
       // under the points to say whether they were clear.
       if (r.top + s[1] > 26 && r.top + s[1] < innerHeight) pos.spot = s;

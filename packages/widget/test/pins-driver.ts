@@ -8,8 +8,8 @@
  * page is then loaded again, as a reload would, and the two anchors are put
  * back exactly as they were posted (through JSON, as the server stores them),
  * beside threads the page could not have had a tap for: a resolved one, a
- * second on the same element, one
- * with an open review item, one on a screen the page keeps hidden, and one on
+ * second on the same element, five on one heading, one on a dot with no
+ * words, one with an open review item, one on a screen the page keeps hidden, and one on
  * an element the page's script has not built yet.
  *
  * Each look records what a reader sees: every pin's tip, its state, whether it
@@ -83,14 +83,15 @@ function pageHtml(bundle: string): string {
  .card h2{font-size:16px;margin:0 0 6px}
  .card p{margin:0 0 6px}
  .chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:#e6f0ea;color:#1f6b3d}
+ .dot{display:inline-block;width:10px;height:10px;margin-left:8px;border-radius:50%;background:#2da44e}
  .book{margin-top:6px;padding:6px 12px;border-radius:6px;border:1px solid #1f2a33;background:#1f2a33;color:#fff;font:inherit}
 </style></head>
 <body>
 <div id="board-main">
- <h1>Dock schedule</h1>
+ <h1 id="title">Dock schedule</h1>
  <div class="cards">
   <section class="card"><h2>Berth 4 — Riverbend ferry</h2><p>Arrives 06:40, departs 07:15.</p><span class="chip" id="b4-chip">Confirmed</span><br><button class="book" id="b4-book">Change slot</button></section>
-  <section class="card"><h2 id="b2-title">Berth 2 — pilot boat</h2><p>On call from 12:00.</p><span class="chip">Tentative</span></section>
+  <section class="card"><h2 id="b2-title">Berth 2 — pilot boat</h2><p>On call from 12:00.</p><span class="chip">Tentative</span><i class="dot" id="b2-dot"></i></section>
  </div>
  <div id="screen-tides" hidden><p id="tide-high">High water 14:20</p></div>
  <div id="later"></div>
@@ -153,7 +154,7 @@ const LOOK = `(() => {
     for (const q of range.getClientRects()) text.push([q.left, q.top, q.right, q.bottom].map(Math.round));
   }
   const el = {};
-  for (const id of ['b4-chip', 'b4-book', 'b2-title', 'tide-high', 'walk-step']) el[id] = box(document.getElementById(id));
+  for (const id of ['title', 'b4-chip', 'b4-book', 'b2-title', 'b2-dot', 'tide-high', 'walk-step']) el[id] = box(document.getElementById(id));
   const pop = ${SHADOW}.querySelector('.thread-popover');
   return { pins, text, el, popover: pop ? pop.textContent : null };
 })()`;
@@ -246,6 +247,10 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     // there would sit on the chip's word.
     put('t-review', { ...createAnchor(document.getElementById('b4-book')), at: { x: 0.3, y: 0.15 } },
       'What does this open?', { shape: 'review', headline: 'Sheet or new page?' });
+    // A dot with no words in it, and more threads on the heading than it has
+    // edges to stand them at.
+    put('t-dot', createAnchor(document.getElementById('b2-dot')), 'Is green right here?');
+    for (let i = 1; i <= 5; i++) put('t-crowd-' + i, createAnchor(document.getElementById('title')), 'Heading note ' + i);
     put('t-tide', createAnchor(document.getElementById('tide-high')), 'Show the height too');
     const later = document.getElementById('later');
     later.innerHTML = '<p id="walk-step">Walk the pier</p>';

@@ -122,11 +122,17 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
 
     it('stands no pin on another', () => {
       const shown = look(width, 'walkBuilt').pins.filter((p) => p.shown);
-      expect(shown.length, 'CONTROL: two of them share an element').toBe(7);
+      expect(shown.length, 'CONTROL: two share an element, five a heading').toBe(13);
       for (const [i, a] of shown.entries()) {
         for (const b of shown.slice(i + 1)) {
           expect(overlap(drop(a), drop(b)), `${a.id} on ${b.id}`).toBe(0);
         }
+      }
+      // Five on one heading is more than its edges hold; the rest still stand
+      // by it.
+      const title = look(width, 'walkBuilt').el.title;
+      for (const p of shown.filter((q) => q.id.startsWith('t-crowd'))) {
+        expect(near(p, title, 30), `${p.id} at ${p.tip}`).toBe(true);
       }
     });
 
@@ -135,10 +141,29 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
         .pins.filter((p) => p.shown)
         .map((p) => p.id)
         .sort();
-      expect(shown).toEqual(['t-chip', 't-resolved', 't-review', 't-space', 't-title']);
+      expect(shown).toEqual([
+        't-chip',
+        't-crowd-1',
+        't-crowd-2',
+        't-crowd-3',
+        't-crowd-4',
+        't-crowd-5',
+        't-dot',
+        't-resolved',
+        't-review',
+        't-space',
+        't-title',
+      ]);
       expect(
         near(pin(width, 'reloaded', 't-resolved'), look(width, 'reloaded').el['b2-title'], 30),
       ).toBe(true);
+    });
+
+    it('stands a pin beside an element with no words, not at the screen’s edge', () => {
+      const l = look(width, 'reloaded');
+      expect(l.el['b2-dot'], 'CONTROL: the dot is on screen').not.toBeNull();
+      expect((l.el['b2-dot']?.[0] ?? 0) - 16, 'CONTROL: far from the edge').toBeGreaterThan(60);
+      expect(near(pin(width, 'reloaded', 't-dot'), l.el['b2-dot'], 30)).toBe(true);
     });
 
     it('holds the pin of a hidden screen’s thread until the page shows it, never off screen', () => {
@@ -190,7 +215,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       // thread, one pin per pinned thread.
       expect(l.pins.map((p) => p.text)).toEqual(l.pins.map(() => ''));
       expect(pin(width, 'reloaded', 't-chip').paint).toEqual(open);
-      expect(l.pins.length).toBe(6);
+      expect(l.pins.length).toBe(12);
     });
   });
 });
