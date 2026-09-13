@@ -668,6 +668,20 @@ export async function handleWorkspaceTool(
         ),
       );
     }
+    case 'move_doc_to_project': {
+      const { workspaceId, docId, relPath } = a as {
+        workspaceId: string;
+        docId: string;
+        relPath: string;
+      };
+      return ok(
+        await http(
+          'POST',
+          `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move`,
+          { relPath },
+        ),
+      );
+    }
     case 'request_plugin_refresh': {
       // No arguments reach the process this runs — the server's argv is
       // fixed. Nothing a caller can send gets spawned.

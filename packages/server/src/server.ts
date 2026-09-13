@@ -87,6 +87,7 @@ import {
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext, handleAuthShareRoutes } from './routes/auth-share.ts';
 import { type ChatAuditRoutesContext, handleChatAuditRoutes } from './routes/chat-audit-routes.ts';
+import { type DocMoveRoutesContext, handleDocMoveRoute } from './routes/doc-move.ts';
 import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import {
   handleDocCreateListRoutes,
@@ -1924,6 +1925,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   runOutputSource = () =>
     libraryRunOutputSource(libraryRoutesCtx, (id) => taskStore.getWorkspace(id));
 
+  /** The migration verb: one board doc into its project's folder, same doc. */
+  const docMoveRoutesCtx: DocMoveRoutesContext = {
+    docStore,
+    mounts: mountStore,
+    dataDir,
+    isRecording: (docId) => meetingStore.active(docId) !== undefined,
+    j,
+    safeJson,
+    isValidDocId,
+  };
+
   /**
    * Where a board's meetings file: its project, and what that project chose.
    *
@@ -2673,6 +2685,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // position is not load-bearing.
       {
         const handled = await handleLibraryRoutes(libraryRoutesCtx, { scope, req, visitor });
+        if (handled) return handled;
+      }
+      // --- Moving a doc into its project --- ./routes/doc-move.ts. Its one
+      // path, `docs/<id>/move`, is a subroute the doc resource block below
+      // does not answer, so the position is not load-bearing.
+      {
+        const handled = await handleDocMoveRoute(docMoveRoutesCtx, { scope, req, visitor });
         if (handled) return handled;
       }
       // --- REST: agent attachments (§4) --- see

@@ -508,6 +508,12 @@ project it may name, or the server's own storage — compared with the folders
 the project named, for the Library's "Where files live" fold. It is handed
 every filesystem answer already read, and emits folder names from the repo
 root and fixed phrases, never a host path.
+`doc-move.ts` joins the Doc store box under its `doc-*.ts` glob and changes
+none of the picture: the migration verb that moves a board doc from the
+server's storage into a mounted or meetings folder of the board's project. It
+writes the file, rebinds the doc through `file-binding.ts`, claims the file's
+address in `repo-registry.ts` so the Library above reads it as one document,
+and moves a meeting's filing record with it. `routes/doc-move.ts` answers it.
 
 `notes-timing.ts` joins the same `notes-*` family in the services tier and
 changes none of the picture: it is where one meeting's per-tick latency is

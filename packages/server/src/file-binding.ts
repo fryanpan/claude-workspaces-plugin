@@ -983,6 +983,37 @@ export class FileBindings {
   }
 
   /**
+   * Write a prose doc's current markdown to a NEW file and bind the doc there.
+   *
+   * The move verb's half that touches disk. The file is created exclusively
+   * (`wx`), so a file that appeared since the caller checked is refused rather
+   * than overwritten, and nothing about the doc changes until that write has
+   * landed — a failed write leaves the doc bound exactly where it was. The
+   * rebind is `retargetHomeBinding` with the live doc winning, because the
+   * file it finds is the one this call just wrote from that doc. The old file,
+   * when there was one, is left on disk untouched.
+   */
+  exportAndRebind(
+    doc: LiveDoc,
+    absPath: string,
+  ): { ok: true; previous?: string } | { ok: false; error: 'target-exists' | 'write-failed' } {
+    const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
+    try {
+      mkdirSync(dirname(absPath), { recursive: true });
+      writeFileSync(absPath, md, { flag: 'wx' });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        return { ok: false, error: 'target-exists' };
+      }
+      console.error(`[doc-store] ${doc.docId}: could not write ${absPath}:`, err);
+      return { ok: false, error: 'write-failed' };
+    }
+    const previous = this.bindings.get(doc.docId)?.path ?? doc.meta.sourceUrl;
+    this.retargetHomeBinding(doc, absPath, { liveWins: true });
+    return { ok: true, ...(previous !== undefined ? { previous } : {}) };
+  }
+
+  /**
    * Point a home-pinned doc's binding at `absPath` (the freshly-resolved
    * home) with a CLEAN attach. The old binding's bookkeeping is about the
    * old file — letting `attachFile` read its `lastWritten` as `prior` would

@@ -3224,6 +3224,19 @@ export class DocStore {
     return this.bindings.setDocOriginRepo(docId, input);
   }
 
+  /** Write a doc's markdown to a new file and bind it there. See
+   *  `FileBindings.exportAndRebind`. */
+  exportAndRebind(
+    docId: string,
+    absPath: string,
+  ):
+    | { ok: true; previous?: string }
+    | { ok: false; error: 'not-found' | 'target-exists' | 'write-failed' } {
+    const doc = this.get(docId);
+    if (!doc) return { ok: false, error: 'not-found' };
+    return this.bindings.exportAndRebind(doc, absPath);
+  }
+
   /** Unpin: the doc keeps whatever binding it has. */
   clearDocOriginRepo(docId: string): { ok: boolean } {
     return this.bindings.clearDocOriginRepo(docId);
