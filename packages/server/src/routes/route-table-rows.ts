@@ -90,7 +90,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   // own credential.
   ...family('routes/upgrade-stream.ts', [
     ['recall-callback', '/recall/:token', 'GET'],
-    ['trusted-local', '/events/agent/:agentId', 'GET'],
+    ['loopback-only', '/events/agent/:agentId', 'GET'],
     ['share-scope', '/workspaces/:ws/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/audio', 'GET'],
@@ -125,9 +125,16 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/api/summaries/backfill', 'POST'],
     ['trusted-local', '/api/webhooks/log', 'GET POST'],
     ['trusted-local', '/api/plugin/refresh', 'GET'],
-    ['loopback-only', '/api/push/key', 'GET'],
+    [
+      'trusted-local',
+      '/api/plugin/refresh',
+      'POST',
+      'Refuses `cf-ray` and a browser, and checks no peer address: a refresh rewrites a version-keyed cache and interrupts nobody.',
+    ],
+    ['trusted-local', '/api/push/key', 'GET'],
     ['trusted-local', '/api/push/subscriptions', 'POST DELETE'],
-    ['trusted-local', '/api/deploy', 'GET POST'],
+    ['trusted-local', '/api/deploy', 'GET'],
+    ['loopback-only', '/api/deploy', 'POST'],
     ['loopback-only', '/api/sentry', 'GET POST'],
   ]),
 
@@ -143,8 +150,8 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ]),
 
   ...family('routes/agent-identity.ts', [
-    ['trusted-local', '/api/agents/:agentId/token', 'GET'],
-    ['trusted-local', '/api/agents/:agentId/watches', 'GET POST'],
+    ['loopback-only', '/api/agents/:agentId/token', 'GET'],
+    ['loopback-only', '/api/agents/:agentId/watches', 'GET POST'],
     ['loopback-only', '/api/agents/:agentId/merge', 'POST'],
   ]),
 

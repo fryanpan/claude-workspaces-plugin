@@ -6,8 +6,12 @@ Every path pattern this server answers. The source is
 `packages/server/src/routes/route-table-rows.ts`, which `Bun.serve` mounts as
 its `routes` object; `packages/server/test/route-table.test.ts` fails when this
 file and that one disagree, and when a row’s declared gate disagrees with what
-`shareScopeAllows` actually decides. The gate vocabulary is
-[security.md](security.md).
+`shareScopeAllows` actually decides. That check cannot tell `trusted-local`
+from `loopback-only`, so `packages/server/test/route-table-loopback.test.ts`
+dials every row filed under either from a loopback and a non-loopback address
+and fails when the route refuses a different caller than its row says. It also
+calls every `loopback-only` row through the tunnel and fails unless the route
+refuses it. The gate vocabulary is [security.md](security.md).
 
 | Pattern | Methods | Module | Gate | Reason |
 | --- | --- | --- | --- | --- |
@@ -17,8 +21,8 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/agent-notes` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/agent-notes/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/agents/:agentId/merge` | POST | `routes/agent-identity.ts` | loopback-only |  |
-| `/api/agents/:agentId/token` | GET | `routes/agent-identity.ts` | trusted-local |  |
-| `/api/agents/:agentId/watches` | GET, POST | `routes/agent-identity.ts` | trusted-local |  |
+| `/api/agents/:agentId/token` | GET | `routes/agent-identity.ts` | loopback-only |  |
+| `/api/agents/:agentId/watches` | GET, POST | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/attachments` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/attachments/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/auth/logout` | POST | `routes/auth-share.ts` | trusted-local |  |
@@ -35,7 +39,8 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/calendar/google/connect` | GET | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/api/chat-audit` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/chat-audit/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
-| `/api/deploy` | GET, POST | `routes/ops.ts` | trusted-local |  |
+| `/api/deploy` | GET | `routes/ops.ts` | trusted-local |  |
+| `/api/deploy` | POST | `routes/ops.ts` | loopback-only |  |
 | `/api/diffs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/diffs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/dispatches` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
@@ -54,9 +59,10 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/api/next` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/next/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/plugin/refresh` | GET | `routes/ops.ts` | trusted-local |  |
+| `/api/plugin/refresh` | POST | `routes/ops.ts` | trusted-local | Refuses `cf-ray` and a browser, and checks no peer address: a refresh rewrites a version-keyed cache and interrupts nobody. |
 | `/api/prompts` | GET | `routes/prompts.ts` | trusted-local |  |
 | `/api/prompts/:id` | GET, PUT | `routes/prompts.ts` | trusted-local |  |
-| `/api/push/key` | GET | `routes/ops.ts` | loopback-only |  |
+| `/api/push/key` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/push/subscriptions` | POST, DELETE | `routes/ops.ts` | trusted-local |  |
 | `/api/refs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/refs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
@@ -90,7 +96,7 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 | `/app/*` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/apple-touch-icon.png` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/demos/*` | GET | `routes/shell-static.ts` | trusted-local |  |
-| `/events/agent/:agentId` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
+| `/events/agent/:agentId` | GET | `routes/upgrade-stream.ts` | loopback-only |  |
 | `/favicon.ico` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/icon-192.png` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/icon-512.png` | GET | `routes/shell-static.ts` | share-scope |  |
