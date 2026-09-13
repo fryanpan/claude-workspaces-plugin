@@ -104,11 +104,11 @@ export function scoreMatch(fp: ElementFingerprint, el: HTMLElement): number {
     score += Math.min((shared.length / fp.classes.length) * 10, 10);
   }
 
-  // text similarity: simple token-overlap ratio on leading 60 chars
+  // text similarity: simple token-overlap ratio on leading 60 chars. An
+  // element with no words matches a fingerprint with none: without it an icon
+  // button with no id tops out at 35 and never resolves.
   const elText = extractText(el);
-  if (fp.text && elText) {
-    score += Math.min(tokenOverlap(fp.text, elText) * 20, 20);
-  }
+  score += fp.text || elText ? Math.min(tokenOverlap(fp.text, elText) * 20, 20) : 20;
 
   // path match score
   score += Math.min(pathMatchScore(fp.path, computePath(el)) * 20, 20);

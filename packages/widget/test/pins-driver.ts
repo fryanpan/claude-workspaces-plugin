@@ -54,6 +54,8 @@ export interface Look {
   pins: Pin[];
   /** Every line box of page text on screen. */
   text: Box[];
+  /** The box around the title's words, narrower than its box. */
+  words: Box;
   el: Record<string, Box | null>;
   /** The open thread popover's text, or null. */
   popover: string | null;
@@ -64,7 +66,7 @@ export interface Reading {
   height: number;
   /** Where each tap landed, and the element the page says is under it. */
   taps: Record<string, { x: number; y: number; under: string }>;
-  /** The anchors as the widget posted them. */
+  /** The anchors as the widget posted them: white space, the chip, the icon. */
   anchors: Array<{ at?: { x: number; y: number }; fingerprint: { id?: string; tag: string } }>;
   /** The page-sized container's box, for the control. */
   main: Box;
@@ -79,7 +81,8 @@ function pageHtml(bundle: string): string {
  #board-main{min-height:100vh;box-sizing:border-box;padding:120px 32px 40px}
  h1{font-size:24px;margin:0 0 4px}
  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:16px}
- .card{background:#fff;border:1px solid #e2e0da;border-radius:10px;padding:14px 16px}
+ .card{position:relative;background:#fff;border:1px solid #e2e0da;border-radius:10px;padding:14px 16px}
+ .icon{position:absolute;top:10px;right:10px;width:32px;height:32px;border-radius:8px;border:1px solid #d4d1ca;background:#fff;display:grid;place-items:center}
  .card h2{font-size:16px;margin:0 0 6px}
  .card p{margin:0 0 6px}
  .chip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:#e6f0ea;color:#1f6b3d}
@@ -91,7 +94,7 @@ function pageHtml(bundle: string): string {
  <div id="bar" style="position:fixed;top:0;left:0;right:0;padding:4px 32px;background:#fff;font-size:13px"><span id="bar-tag" style="display:inline-block;width:64px">Draft</span> Dock schedule for the week, shared with the harbour crews</div>
  <h1 id="title">Dock schedule</h1>
  <div class="cards">
-  <section class="card"><h2>Berth 4 — Riverbend ferry</h2><p>Arrives 06:40, departs 07:15.</p><span class="chip" id="b4-chip">Confirmed</span><br><button class="book" id="b4-book">Change slot</button></section>
+  <section class="card"><h2>Berth 4 — Riverbend ferry</h2><p>Arrives 06:40, departs 07:15.</p><span class="chip" id="b4-chip">Confirmed</span><br><button class="book" id="b4-book">Change slot</button><button class="icon" aria-label="More options"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="3" cy="8" r="2"/><circle cx="8" cy="8" r="2"/><circle cx="13" cy="8" r="2"/></svg></button></section>
   <section class="card"><h2 id="b2-title">Berth 2 — pilot boat</h2><p>On call from 12:00.</p><span class="chip">Tentative</span><i class="dot" id="b2-dot"></i></section>
  </div>
  <div id="screen-tides" hidden><p id="tide-high">High water 14:20</p></div>
@@ -156,8 +159,11 @@ const LOOK = `(() => {
   }
   const el = {};
   for (const id of ['bar-tag', 'title', 'b4-chip', 'b4-book', 'b2-title', 'b2-dot', 'tide-high', 'walk-step']) el[id] = box(document.getElementById(id));
+  el['b4-icon'] = box(document.querySelector('.icon'));
+  range.selectNodeContents(document.getElementById('title'));
+  const w = range.getBoundingClientRect();
   const pop = ${SHADOW}.querySelector('.thread-popover');
-  return { pins, text, el, popover: pop ? pop.textContent : null };
+  return { pins, text, words: [w.left, w.top, w.right, w.bottom].map(Math.round), el, popover: pop ? pop.textContent : null };
 })()`;
 
 async function drive(cdp: Cdp, dir: string, bundle: string, width: number, height: number) {
@@ -191,7 +197,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     };
   const under = (x: number, y: number) =>
     cdp.evaluate(
-      `(() => { const e = document.elementFromPoint(${x}, ${y}); return e.id || e.className || e.tagName; })()`,
+      `(() => { const e = document.elementFromPoint(${x}, ${y}); return e.id || e.getAttribute('class') || e.tagName; })()`,
     ) as Promise<string>;
   const enter = async (): Promise<void> => {
     const k = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
@@ -224,6 +230,12 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   await tapAt(chip.x, chip.y);
   await cdp.send('Input.insertText', { text: 'Confirmed by whom?' });
   await enter();
+  // The middle dot of an icon button's drawing: a <circle> is what is there.
+  const icon = await centre(`document.querySelectorAll('.icon circle')[1]`);
+  taps.icon = { ...icon, under: await under(icon.x, icon.y) };
+  await tapAt(icon.x, icon.y);
+  await cdp.send('Input.insertText', { text: 'What does this menu hold?' });
+  await enter();
   const done = await centre(`${SHADOW}.querySelector('.picker-cancel')`);
   await tapAt(done.x, done.y);
   const anchors = (await cdp.evaluate('window.__anchors')) as Reading['anchors'];
@@ -240,6 +252,7 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     const posted = ${JSON.stringify(anchors)};
     put('t-space', posted[0], 'Room for the tide table here');
     put('t-chip', posted[1], 'Confirmed by whom?');
+    put('t-icon', posted[2], 'What does this menu hold?');
     put('t-resolved', createAnchor(document.getElementById('b2-title')), 'Say it is on call');
     setStatus(doc, 't-resolved', 'resolved');
     // A second comment on the same title, with no tap to place it either.

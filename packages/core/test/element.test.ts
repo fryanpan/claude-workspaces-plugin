@@ -84,6 +84,25 @@ describe('element anchor', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('resolves an icon button with no id and no words after the page is rebuilt', () => {
+    const page =
+      '<main><section><h2>Berth 4</h2><button class="icon" aria-label="More options"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/></svg></button></section></main>';
+    setDom(page);
+    const anchor = createAnchor(document.querySelector('.icon') as HTMLElement);
+    setDom(page);
+    const r = resolve(anchor, { root: document });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.element).toBe(document.querySelector('.icon'));
+  });
+
+  it('does not match a wordless fingerprint to an element with words', () => {
+    setDom('<main><section><button class="icon"></button></section></main>');
+    const fp = createFingerprint(document.querySelector('.icon') as HTMLElement);
+    setDom('<main><section><button class="icon">Cancel</button></section></main>');
+    const el = document.querySelector('.icon') as HTMLElement;
+    expect(scoreMatch(fp, el)).toBe(30);
+  });
+
   it('resolves among many similar siblings using path index', () => {
     setDom(`
       <ul>

@@ -122,18 +122,45 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
 
     it('stands no pin on another', () => {
       const shown = look(width, 'walkBuilt').pins.filter((p) => p.shown);
-      expect(shown.length, 'CONTROL: two share an element, five a heading').toBe(14);
+      expect(shown.length, 'CONTROL: two share an element, five a heading').toBe(15);
       for (const [i, a] of shown.entries()) {
         for (const b of shown.slice(i + 1)) {
           expect(overlap(drop(a), drop(b)), `${a.id} on ${b.id}`).toBe(0);
         }
       }
-      // Five on one heading is more than its edges hold; the rest still stand
-      // by it.
-      const title = look(width, 'walkBuilt').el.title;
-      for (const p of shown.filter((q) => q.id.startsWith('t-crowd'))) {
-        expect(near(p, title, 30), `${p.id} at ${p.tip}`).toBe(true);
-      }
+    });
+
+    it('keeps a crowded heading’s pins by its words, not out at its box’s far corner', () => {
+      // Five on one heading is more than its edges hold. Each still stands
+      // within about a pin of the words a reader sees (its drop is 25px tall)
+      // — a heading's box runs the width of the page, and a pin by its far
+      // corner reads as belonging to nothing.
+      const l = look(width, 'walkBuilt');
+      const title = l.el.title ?? [0, 0, 0, 0];
+      expect(title[2] - l.words[2], 'CONTROL: the box runs far past the words').toBeGreaterThan(
+        150,
+      );
+      const crowd = l.pins.filter((q) => q.shown && q.id.startsWith('t-crowd'));
+      expect(crowd.length).toBe(5);
+      for (const p of crowd) expect(near(p, l.words, 32), `${p.id} at ${p.tip}`).toBe(true);
+    });
+
+    it('anchors a tap on an icon to its button, and pins it after a reload', () => {
+      const { taps, anchors } = at(width);
+      // CONTROL: the tap landed on a shape inside the icon's drawing.
+      expect(taps.icon?.under).toBe('circle');
+      expect(anchors[2]?.fingerprint.tag).toBe('BUTTON');
+      expect(anchors[2]?.fingerprint.id, 'CONTROL: the button has no id').toBeUndefined();
+      const p = pin(width, 'reloaded', 't-icon');
+      expect(p.shown).toBe(true);
+      expect(near(p, look(width, 'reloaded').el['b4-icon'], 30)).toBe(true);
+    });
+
+    it('stands an icon button’s pin beside it, not over its icon', () => {
+      const icon = look(width, 'reloaded').el['b4-icon'];
+      // CONTROL: the thread keeps the tapped point, in the middle of the icon.
+      expect(at(width).anchors[2]?.at?.x).toBeCloseTo(0.5, 1);
+      expect(overlap(drop(pin(width, 'reloaded', 't-icon')), icon ?? [0, 0, 0, 0])).toBe(0);
     });
 
     it('pins every thread after a reload, resolved ones included', () => {
@@ -150,6 +177,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
         't-crowd-4',
         't-crowd-5',
         't-dot',
+        't-icon',
         't-resolved',
         't-review',
         't-space',
@@ -241,7 +269,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       // thread, one pin per pinned thread.
       expect(l.pins.map((p) => p.text)).toEqual(l.pins.map(() => ''));
       expect(pin(width, 'reloaded', 't-chip').paint).toEqual(open);
-      expect(l.pins.length).toBe(13);
+      expect(l.pins.length).toBe(14);
     });
   });
 });

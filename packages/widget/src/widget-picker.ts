@@ -241,7 +241,12 @@ function pressIsOurs(ev: Event): boolean {
 function hitTest(ev: MouseEvent): HTMLElement | null {
   // Our own chrome (FAB, banner, composer, dock, pins) answers for itself.
   if (pressIsOurs(ev)) return null;
-  const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+  let el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+  // A tap on an icon lands on a shape inside its <svg> — a <circle> with no
+  // id, class or words, which nothing can find again after a reload. The
+  // comment is about the control the icon draws, or else the icon.
+  if (el instanceof SVGElement)
+    el = (el.closest('a,button,[role=button]') ?? el.closest('svg')) as HTMLElement | null;
   if (!el) return null;
   // skip widget chrome
   if (el.closest(`[${IGNORE_ATTR}],${TAG}`)) return null;

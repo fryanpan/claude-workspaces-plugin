@@ -185,29 +185,38 @@ export function positionPins(el: FeedbackWidgetEl): void {
       // The tapped point first, then the element's edges: past its words
       // (past its right side when they reach it, so a chip's pill is not
       // cut), above it, below it, before its left side.
-      // An element with no words (an icon, an image) has an empty range at
-      // the origin; its words end at its right side.
+      // An element with nothing in it has an empty range at the origin; its
+      // words end at its right side.
       words.selectNodeContents(pos.el);
       const q = words.getBoundingClientRect();
       const end = q.width ? q.right : r.right;
       const m = r.height / 2 + 13;
+      // How far the element reaches as a reader sees it: a heading's box runs
+      // the width of the page, but its words stop part way, and a pin by the
+      // box's far corner belongs to nothing on screen.
+      const w = (r.right - end > 40 ? end : r.right) - r.left;
       const spots = [
-        [(r.right - end > 40 ? end : r.right) - r.left + 16, m],
-        [r.width - 12, 0],
-        [r.width - 12, r.height + 27],
+        [w + 16, m],
+        [w - 12, 0],
+        [w - 12, r.height + 27],
         [-12, m],
       ];
+      // The tapped point only on an element with words: words are what the
+      // check keeps a pin off, and nothing tells it where an icon is drawn —
+      // a pin at the tap on an icon button covered the icon.
       const at = pos.at;
-      if (at && at.x >= 0 && at.x <= 1 && at.y >= 0 && at.y <= 1) {
+      if (pos.el.textContent?.trim() && at && at.x >= 0 && at.x <= 1 && at.y >= 0 && at.y <= 1) {
         spots.unshift([at.x * r.width, at.y * r.height]);
       }
       let c = spots.find(([x, y]) => clear(r.left + x, r.top + y, placed));
-      // More threads on it than spots: rows under the element, clear of the
-      // other pins — of the page's words too when three rows allow it.
-      const n = Math.max(1, (r.width / 24) | 0);
-      for (let k = 0; !c && k < 6 * n; k++) {
-        const d = [r.width - 12 - 24 * (k % n), r.height + 27 + 29 * (((k % (3 * n)) / n) | 0)];
-        if (clear(r.left + d[0], r.top + d[1], placed, k < 3 * n)) c = d;
+      // More threads on it than spots: a row along its top, then rows under
+      // it, clear of the other pins — of the page's words too, the first time
+      // round those four rows.
+      const n = Math.max(1, (w / 24) | 0);
+      for (let k = 0; !c && k < 8 * n; k++) {
+        const j = ((k % (4 * n)) / n) | 0;
+        const d = [w - 12 - 24 * (k % n), j && r.height - 2 + 29 * j];
+        if (clear(r.left + d[0], r.top + d[1], placed, k < 4 * n)) c = d;
       }
       c ??= spots[0];
       s = [c[0], c[1], r.width, r.height, px, py];
