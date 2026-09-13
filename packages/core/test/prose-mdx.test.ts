@@ -105,6 +105,21 @@ describe('parsing an .mdx file', () => {
     const src = `<>\n  <Row label="}">\n    <Cell value={"<"} />\n  </Row>\n</>`;
     expect(summary(docOf(`${src}\n\nAfter.\n`))).toEqual([`mdx:${src}`, 'paragraph']);
   });
+
+  it('keeps an export whose body holds a blank line in one block', () => {
+    const fn = `export function Fare({ zone }) {\n  const base = 3;\n\n  return base + zone; // "}" is text\n}`;
+    const meta = "export const meta = {\n  title: 'Ferries',\n\n  tags: [`transit`],\n}";
+    expect(summary(docOf(`${fn}\n\n${meta}\n\nAfter.\n`))).toEqual([
+      `mdx:${fn}`,
+      `mdx:${meta}`,
+      'paragraph',
+    ]);
+    // A bracket that never closes ends the run at its first blank line.
+    expect(summary(docOf('export const broken = {\n\nAfter.\n'))).toEqual([
+      'mdx:export const broken = {',
+      'paragraph',
+    ]);
+  });
 });
 
 describe('writing an .mdx file back', () => {

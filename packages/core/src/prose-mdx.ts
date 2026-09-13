@@ -43,12 +43,7 @@ const TAG_START = /^<(?:[A-Za-z]|>)/;
  */
 export function mdxFlowEnd(lines: string[], start: number): number | null {
   const first = lines[start] ?? '';
-  if (ESM.test(first)) {
-    // MDX ends an ESM block at the first blank line.
-    let k = start + 1;
-    while (k < lines.length && (lines[k] ?? '').trim() !== '') k++;
-    return k;
-  }
+  if (ESM.test(first)) return esmEnd(lines, start);
   const lead = first.length - first.trimStart().length;
   if (lead > 3) return null;
   const text = lines.slice(start).join('\n');
@@ -64,6 +59,54 @@ export function mdxFlowEnd(lines: string[], start: number): number | null {
   let lineCount = 1;
   for (let c = 0; c < end; c++) if (text[c] === '\n') lineCount++;
   return start + lineCount;
+}
+
+/**
+ * The line after an `import` / `export` run. MDX ends one at a blank line where
+ * the code so far is a complete program, so a blank line inside a function
+ * body or an object literal does not end it: brackets must be balanced and no
+ * string, template or block comment open. A run that never balances ends at
+ * its first blank line, which is what a stray bracket would otherwise cost.
+ */
+function esmEnd(lines: string[], start: number): number {
+  let depth = 0;
+  let mode: 'code' | 'block' | 'template' = 'code';
+  let firstBlank: number | null = null;
+  for (let k = start; k < lines.length; k++) {
+    const line = lines[k] ?? '';
+    if (k > start && line.trim() === '') {
+      if (mode === 'code' && depth <= 0) return k;
+      firstBlank ??= k;
+      continue;
+    }
+    for (let c = 0; c < line.length; c++) {
+      const ch = line[c];
+      if (mode === 'block') {
+        if (ch === '*' && line[c + 1] === '/') {
+          mode = 'code';
+          c++;
+        }
+      } else if (mode === 'template') {
+        if (ch === '\\') c++;
+        else if (ch === '`') mode = 'code';
+      } else if (ch === '/' && line[c + 1] === '*') {
+        mode = 'block';
+        c++;
+      } else if (ch === '/' && line[c + 1] === '/') {
+        break;
+      } else if (ch === '"' || ch === "'") {
+        const e = skipString(line, c);
+        c = e === null ? line.length : e - 1;
+      } else if (ch === '`') {
+        mode = 'template';
+      } else if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+      }
+    }
+  }
+  return mode === 'code' && depth <= 0 ? lines.length : (firstBlank ?? lines.length);
 }
 
 /** Index just past the `}` matching the `{` at `at`, or null. */
