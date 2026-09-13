@@ -468,6 +468,17 @@ debounced snapshot of it.
 | **HTTP** | `server.ts`, `routes/**`, `middleware/**`, `shells.ts`, `request-admission.ts`, `request-attribution.ts`, `socket-handlers.ts` | The only code that knows about HTTP. Parse, admit, call one service, format. |
 | **Services / stores** | `doc-store.ts`, `tasks.ts` and the `task-*` stores, `review-items/**`, `home-pane.ts`, `share/**`, `auth/**`, the `meeting-*` and `notes-*` families, `sse.ts`, `activity.ts` | Owns durable state and orchestrates one change across stores and adapters. |
 
+`event-origin.ts` joins `activity.ts` in the services tier: it is how a row
+in either analytics log (`activity.jsonl`, a board's `events.jsonl`) says
+which device a person's browser was on, and roughly where. `server.ts` opens
+an `AsyncLocalStorage` context around each request, filled only for a browser
+and closed when the request is answered, and the two log writers stamp
+`device` / `location` from it. The browser half is two cookies:
+`device-context.ts` (workspaces-app) writes them and asks for location at most
+once per device, `core/event-origin.ts` is the cookie format both sides share.
+Location is stripped from a share visitor's Activity tab and is never on the
+live stream.
+
 `library.ts` joins the Board box in the services tier: it builds a board's
 Library — the meetings and files a person opens it to find — from the board's
 docs, its project repo's markdown files (`fs-scan.ts`) and its mounts. It owns

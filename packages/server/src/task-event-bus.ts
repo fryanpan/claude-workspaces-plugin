@@ -20,6 +20,7 @@ import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentIdCandidates } from '@claude-workspaces/core';
 import { isBoardActivity } from './board-activity.ts';
+import { stampEventOrigin } from './event-origin.ts';
 import type { AgentAttachment, TaskStoreEvent } from './tasks.ts';
 
 /** Where a workspace's append-only event audit log lives (plan §3.6: "the
@@ -88,7 +89,9 @@ export class TaskEventBus {
 
   /** Append one JSON line to the per-workspace events.jsonl. Shaped exactly
    *  like the SSE payload (`event` key, not `type`) so the two records are
-   *  the same bytes-modulo-transport. Synchronous append — an event either
+   *  the same bytes-modulo-transport — except `device` / `location`, which a
+   *  browser-caused row gains here and the live stream never carries
+   *  (event-origin.ts). Synchronous append — an event either
    *  reaches both the log and the listeners, or (I/O failure, logged loudly)
    *  the listeners still fire: delivery beats bookkeeping. */
   private appendAudit(event: TaskStoreEvent): void {
@@ -98,7 +101,7 @@ export class TaskEventBus {
       const { type, ...rest } = event;
       appendFileSync(
         eventsLogPath(this.p.dataDir(), event.workspaceId),
-        `${JSON.stringify({ event: type, ...rest })}\n`,
+        `${JSON.stringify(stampEventOrigin({ event: type, ...rest }))}\n`,
       );
     } catch (err) {
       console.error('[tasks] failed to append audit event:', err);

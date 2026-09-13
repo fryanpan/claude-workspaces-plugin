@@ -36,6 +36,7 @@ import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
+import { originOfHeaders, withEventOrigin } from '../src/event-origin.ts';
 import { BOARD_FEEDBACK_DOC_ID, type ServerHandle, createServer } from '../src/server.ts';
 import {
   ACCESS_BASE_HOSTNAME,
@@ -757,6 +758,40 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
         expect(e.actor?.name).toBe(emailDisplayName(VISITOR_EMAIL));
         expect(e.actor?.id).not.toBe('known-bryan');
       }
+    });
+
+    it('never hands a member the location an owner’s browser wrote into the Activity log', async () => {
+      // The row is written the way a request from the owner's page writes it:
+      // inside that request's origin (event-origin.ts). The owner's own read
+      // of the log is the positive control — it proves the location reached
+      // the row a member then reads.
+      const origin = originOfHeaders(
+        new Headers({ 'sec-fetch-site': 'same-origin', cookie: 'cw_geo=10.12,-20.34' }),
+        true,
+      );
+      const filed = await withEventOrigin(origin, async () =>
+        handle.tasks.createTask(boardId, {
+          title: 'Filed from the owner’s page',
+          assignee: 'human',
+          actor: { id: 'agent-share-test', name: 'Share Test', kind: 'agent' },
+        }),
+      );
+      if (!filed.ok) throw new Error('create refused');
+      const task = filed.task;
+      type Row = { event: string; taskId?: string; location?: unknown };
+      const created = (rows: Row[]) =>
+        rows.find((e) => e.event === 'task.created' && e.taskId === task.id);
+
+      const owner = (await (await local(`/workspaces/${boardId}/events`)).json()) as {
+        events: Row[];
+      };
+      expect(created(owner.events)?.location).toEqual({ lat: 10.12, lng: -20.34 });
+
+      const member = await pub(`/workspaces/${boardId}/events`, boardCookie, { method: 'GET' });
+      expect(member.status).toBe(200);
+      const { events } = (await member.json()) as { events: Row[] };
+      expect(created(events)).toBeDefined();
+      expect(events.filter((e) => 'location' in e)).toEqual([]);
     });
 
     it('refuses every row on a board this member was NOT given', async () => {
