@@ -750,7 +750,7 @@ describe('a UI gate finding says which baseline its file was read from', () => {
   it('a file read from the dispatch’s own baseline is this builder’s work', () => {
     const line = ungated({ ...UNGATED_ROW, from: 'dispatch' });
     expect(line).toContain(
-      '(t-u1, changed since dispatch: packages/workspaces-app/src/board.css, matched: badge)',
+      '(t-u1, changed since dispatch commit: packages/workspaces-app/src/board.css, matched: badge)',
     );
     expect(line).toContain('its builder has changed a file');
   });

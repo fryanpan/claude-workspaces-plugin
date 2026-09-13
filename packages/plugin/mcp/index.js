@@ -14242,7 +14242,7 @@ function askedBackRowsClause(rows) {
 }
 function ungatedRowClause(row) {
   const title = row.title ? `"${row.title}" ` : "";
-  const since = row.from === "dispatch" ? "changed since dispatch" : row.from === "trunk" ? "changed since trunk merge base, cannot tell this task’s work from other work" : "changed";
+  const since = row.from === "dispatch" ? "changed since dispatch commit" : row.from === "trunk" ? "changed since trunk merge base, cannot tell this task’s work from other work" : "changed";
   const file = row.file ? `, ${since}: ${row.file}` : "";
   const word = row.keyword ? `, matched: ${row.keyword}` : "";
   return `${title}(${row.id}${file}${word})`;

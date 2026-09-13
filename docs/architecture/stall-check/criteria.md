@@ -179,7 +179,8 @@ refuses.
 
 **A degraded read says it is one.** The read returns which base it used
 (`from: 'dispatch' | 'trunk'`), and the finding line carries it: `changed
-since dispatch: <file>` is this task's work, while `changed since trunk merge
+since dispatch commit: <file>` is this task's work (less any edits left
+uncommitted before the dispatch, which no commit can pin), while `changed since trunk merge
 base, cannot tell this task's work from other work: <file>` is everything
 committed in that checkout since it left trunk, and the sentence names the
 worktree rather than the builder. A reader who cannot tell the two apart pays

@@ -777,7 +777,7 @@ function ungatedRowClause(row: UngatedUiRowPayload): string {
   const title = row.title ? `"${row.title}" ` : '';
   const since =
     row.from === 'dispatch'
-      ? 'changed since dispatch'
+      ? 'changed since dispatch commit'
       : row.from === 'trunk'
         ? 'changed since trunk merge base, cannot tell this task\u2019s work from other work'
         : 'changed';
