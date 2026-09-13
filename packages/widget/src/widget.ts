@@ -221,6 +221,8 @@ export class FeedbackWidgetEl extends HTMLElement {
   init(opts: WidgetOpts): void {
     if (this.initialized) return;
     this.initialized = true;
+    // First, so even the alert below knows where the screen is.
+    this.wireVisualViewport();
     // Loud, before anything else runs: no socket, no launcher, no identity —
     // just a visible box saying what is missing. See WidgetOpts.workspaceId
     // for why this is not a default.
@@ -251,7 +253,6 @@ export class FeedbackWidgetEl extends HTMLElement {
     this.pendingDockThread = deepLinkThread(location.search);
     this.linkedItems = readLinkedItems(document);
     this.wireHistoryListeners();
-    this.wireVisualViewport();
     this.renderShell();
     this.connect();
     this.startObserver();
@@ -329,7 +330,8 @@ export class FeedbackWidgetEl extends HTMLElement {
     const update = () => {
       const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap)}px`);
-      // The screen's right edge, for --cw-edge in styles.ts.
+      // The screen's edges, for --cw-edge in styles.ts.
+      this.style.setProperty('--cw-vv-left', `${vv.offsetLeft}px`);
       this.style.setProperty('--cw-vv-right', `${vv.offsetLeft + vv.width}px`);
     };
     this.vvHandler = update;
@@ -410,13 +412,16 @@ export class FeedbackWidgetEl extends HTMLElement {
    * In the light DOM and unstyled by the widget's own sheet on purpose: the
    * shell that would carry those styles is never rendered on this path, and a
    * developer who has just pasted a snippet needs to SEE the problem on the
-   * page rather than find it in a console they may not have open.
+   * page rather than find it in a console they may not have open. Placed
+   * from the screen's edges (`--cw-edge` in styles.ts, spelled out because
+   * that sheet is not here), so a page wider than a phone keeps it in view.
    */
   private renderMisconfigured(attribute: string): void {
     const box = document.createElement('div');
     box.setAttribute('role', 'alert');
     box.style.cssText =
-      'position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:320px;' +
+      'position:fixed;right:16px;bottom:calc(16px + var(--cw-vv-bottom,0px));' +
+      'margin-right:max(0px,100% - var(--cw-vv-right,100%));z-index:2147483647;max-width:320px;' +
       'padding:12px 14px;border:2px solid #b42318;border-radius:8px;background:#fff5f4;' +
       'color:#7a271a;font:13px/1.45 system-ui,sans-serif';
     box.textContent =
