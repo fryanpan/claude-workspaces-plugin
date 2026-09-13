@@ -254,6 +254,20 @@ describe('POST /workspaces/:ws/docs/:docId/move', () => {
     await ok(await move(docId, 'docs/gangway.md'));
   });
 
+  it('refuses a target when the meetings folder itself is a symlink out of the project', async () => {
+    rmSync(join(repo, 'docs', 'meetings'), { recursive: true });
+    symlinkSync(outside, join(repo, 'docs', 'meetings'));
+    await ok(
+      await send('PUT', '/api/mounts/meetings', { path: repo, meetingsPath: 'docs/meetings' }),
+    );
+    const docId = await heldDoc('quay-meeting', '# Quay meeting\n');
+    const res = await move(docId, 'docs/meetings/quay-meeting.md');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('outside-project-folders');
+    expect(existsSync(join(outside, 'quay-meeting.md'))).toBe(false);
+    await ok(await move(docId, 'docs/quay-meeting.md'));
+  });
+
   it('refuses a mockup', async () => {
     writeFileSync(join(outside, 'booking.html'), '<h1>Booking</h1>\n');
     const mock = await ok(
@@ -320,7 +334,7 @@ describe('POST /workspaces/:ws/docs/:docId/move', () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     const docId = await heldDoc('mooring', '# Mooring\n');
     const res = await move(docId, 'docs/mooring.md', {
-      origin: `http://localhost:${handle.port}`,
+      origin: `http://127.0.0.1:${handle.port}`,
       'sec-fetch-site': 'same-origin',
     });
     expect(res.status).toBe(403);

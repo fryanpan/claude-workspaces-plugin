@@ -118,15 +118,17 @@ function deepestExisting(abs: string): string | null {
  *
  * The lexical check has already passed. What is left is a symlink somewhere
  * on the way: the deepest directory that exists is resolved, and it must sit
- * inside the folder — or, when the folder itself does not exist yet, inside
- * the project root, so the directories this write creates are real ones.
+ * inside the project root — always, because the folder itself may be the
+ * symlink, and resolving a link against itself proves nothing — and inside
+ * the folder too once that folder exists, so a link from one folder into
+ * another part of the repo is refused as well.
  */
 function landsInside(root: string, folder: string, abs: string): boolean {
   const folderAbs = folder === '' ? root : join(root, folder);
   const existing = deepestExisting(dirname(abs));
-  if (existing === null) return false;
+  if (existing === null || !isWithinRoot(root, existing)) return false;
   const belowFolder = existing === folderAbs || existing.startsWith(`${folderAbs}/`);
-  return belowFolder ? isWithinRoot(folderAbs, existing) : isWithinRoot(root, existing);
+  return !belowFolder || isWithinRoot(folderAbs, existing);
 }
 
 /** Move a board doc into its project. See the module header. */
