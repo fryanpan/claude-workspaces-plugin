@@ -115,7 +115,7 @@ ${variant === 'wide' ? '<div id="wide"></div>' : ''}
 <header><h1 style="margin:0;font-size:20px">Saltmarsh settings</h1></header>
 <main><div class="row" id="r-tides">Tide alerts</div><div class="row">Riverbend moorings</div></main>
 ${variant === 'bar' ? `<nav id="tabs">${tabs}</nav>` : ''}
-<${TAG} doc-id="page-bar" workspace-id="w-demo" user="Test Reviewer" server-url="ws://127.0.0.1:1"></${TAG}>
+<${TAG} doc-id="page-bar" workspace-id="w-demo" user="Reviewer" server-url="ws://127.0.0.1:1"></${TAG}>
 <script>${bundle}</script>
 </body></html>`;
 }
