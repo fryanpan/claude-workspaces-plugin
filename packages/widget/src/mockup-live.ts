@@ -203,8 +203,9 @@ export function renderControl(state: Config, go: (v: number | null) => void): vo
   const box = (existing as HTMLElement | null) ?? document.createElement('div');
   if (!existing) {
     box.setAttribute(CONTROL_ATTR, '');
-    // The widget's own chrome, so a tap on a chevron in comment mode steps
-    // the round instead of anchoring a comment to the chevrons.
+    // The widget's own chrome, so a comment is never anchored to the
+    // chevrons. In comment mode the widget's light styles also let taps
+    // through them to the page underneath (`injectLightStyles`).
     box.setAttribute(WIDGET_OWN_ATTR, '');
     box.style.cssText = [
       'position:fixed',
