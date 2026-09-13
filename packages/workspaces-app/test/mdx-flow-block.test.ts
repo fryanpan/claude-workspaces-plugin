@@ -4,6 +4,7 @@ import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { summarizeMdx } from '../src/mdx-preview.ts';
+import { installSheets, styleOf } from './css-harness.ts';
 
 /**
  * An `.mdx` component in the doc editor: a quiet block with its name, title
@@ -45,6 +46,7 @@ function mount(md = POST): { handle: EditorHandle; ydoc: Y.Doc } {
   const ydoc = new Y.Doc();
   prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks(md, { mdx: true }));
   const parent = document.createElement('div');
+  parent.id = 'editor';
   document.body.appendChild(parent);
   const handle = createEditor({ parent, ydoc, awareness: new Awareness(ydoc), editable: true });
   open.push(() => handle.destroy());
@@ -73,13 +75,30 @@ describe('an .mdx block in the editor', () => {
       blocks().map((b) => [b.dataset.kind, b.querySelector('.mdx-view')?.textContent]),
     ).toEqual([
       ['esm', 'import LineChart, Callout'],
-      ['jsx', 'LineChartHarborlight ferry riders'],
+      ['jsx', 'Harborlight ferry riders'],
       ['expr', 'TODO: the October numbers'],
-      ['jsx', 'CalloutThe last sailing moved to 21:30.'],
+      ['jsx', 'The last sailing moved to 21:30.'],
     ]);
     const line = blocks()[1]?.querySelector('svg.mdx-preview polyline');
     expect(line?.getAttribute('points')?.split(' ')).toHaveLength(3);
     expect(blocks()[3]?.querySelector('svg')).toBeNull();
+  });
+
+  it('names a component only when it has nothing else to show', () => {
+    mount('<Divider />\n\nAfter the break.\n');
+    expect(blocks()[0]?.querySelector('.mdx-view')?.textContent).toBe('Divider');
+  });
+
+  it("sets a chart's title at the doc's subheading size", () => {
+    open.push(installSheets('styles.css', 'doc.css'));
+    mount(`### Riders by month\n\n${POST}`);
+    const h3 = styleOf(document.querySelector('.ProseMirror h3') as Element);
+    const title = styleOf(document.querySelector('.mdx-title') as Element);
+    expect([title.fontSize, title.fontWeight, title.fontFamily]).toEqual([
+      h3.fontSize,
+      h3.fontWeight,
+      h3.fontFamily,
+    ]);
   });
 
   it('opens the source on a tap and closes it on the next', () => {

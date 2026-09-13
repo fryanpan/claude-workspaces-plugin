@@ -1,7 +1,8 @@
 /**
- * What an `.mdx` block shows in place of its source: the component's name and
- * `title`, a plain line for a chart whose points are written out, a muted line
- * for a comment or the imports.
+ * What an `.mdx` block shows in place of its source: a component's `title` and
+ * words, a plain line for a chart whose points are written out, a muted line
+ * for a comment or the imports. A component's name shows only when it has
+ * nothing else to show.
  *
  * The source is somebody's document text, so nothing here runs it. Props are
  * read by a literal parser that knows numbers, strings, booleans, null, arrays
@@ -293,17 +294,22 @@ export function renderMdxSummary(host: HTMLElement, summary: MdxSummary): void {
   host.dataset.kind = summary.kind;
   const head = document.createElement('div');
   head.className = 'mdx-head';
-  const label = document.createElement('span');
-  label.className = summary.kind === 'jsx' ? 'mdx-name' : 'mdx-muted';
-  label.textContent = summary.label;
-  head.appendChild(label);
+  // A component's name is source vocabulary, not what the post says, so it
+  // shows only when the block would otherwise be empty.
+  const bare = !summary.title && !summary.points && !summary.children;
+  if (summary.kind !== 'jsx' || bare) {
+    const label = document.createElement('span');
+    label.className = summary.kind === 'jsx' ? 'mdx-name' : 'mdx-muted';
+    label.textContent = summary.label;
+    head.appendChild(label);
+  }
   if (summary.title) {
     const title = document.createElement('span');
     title.className = 'mdx-title';
     title.textContent = summary.title;
     head.appendChild(title);
   }
-  host.appendChild(head);
+  if (head.childElementCount > 0) host.appendChild(head);
   if (summary.points) host.appendChild(lineOf(summary.points));
   if (summary.children) {
     const kids = document.createElement('div');

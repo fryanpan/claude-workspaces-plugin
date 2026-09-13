@@ -934,8 +934,9 @@ body.has-set .doc-switcher-caret {
   height: auto;
 }
 /* An .mdx component, expression or import run (mdx-flow-block.ts): a quiet
-   block — name and title, a line for literal chart data — whose source opens
-   read-only on a tap. Comments and imports are one muted line. */
+   block — a chart's title and a line for its literal data, a component's
+   words — whose source opens read-only on a tap. Comments and imports are one
+   muted line, and so is the name of a component with nothing else to show. */
 #editor > .ProseMirror .mdx-block {
   margin: 0.8em 0;
   padding: 10px 14px;
@@ -977,12 +978,15 @@ body.has-set .doc-switcher-caret {
 #editor > .ProseMirror .mdx-block[data-kind="expr"] .mdx-muted {
   font-style: italic;
 }
+/* A chart's title reads as the doc's h3. */
 #editor > .ProseMirror .mdx-title {
   min-width: 0;
-  font-size: 0.95em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-family: var(--sans);
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--fg);
 }
 #editor > .ProseMirror .mdx-preview {
   display: block;
@@ -991,7 +995,7 @@ body.has-set .doc-switcher-caret {
   margin-top: 8px;
   color: var(--accent);
 }
-#editor > .ProseMirror .mdx-children {
+#editor > .ProseMirror .mdx-head + .mdx-children {
   margin-top: 4px;
 }
 #editor > .ProseMirror .mdx-source {
