@@ -44,9 +44,10 @@ function fakeServer() {
   meta.set('contentRevision', 1);
   const reads: string[] = [];
   const posts: string[] = [];
+  const board = { lead: 'harbor-agent' };
   const record = () => ({
     meta: { type: 'markdown', huddle: true, huddleKind: 'plan', ...meta.toJSON() },
-    leadAgentId: 'harbor-agent',
+    leadAgentId: board.lead,
     tasks: [],
   });
   vi.stubGlobal(
@@ -67,7 +68,7 @@ function fakeServer() {
       return new Response(JSON.stringify(record()), { status: 200 });
     }),
   );
-  return { ydoc, meta, reads, posts };
+  return { ydoc, meta, reads, posts, board };
 }
 
 /** Open the doc: router read, floats mount, first sync lands. */
@@ -168,6 +169,25 @@ describe('opening a doc', () => {
     planFloat()?.click();
     await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('requested'));
     expect(server.posts.some((u) => u.endsWith('/plan-request'))).toBe(true);
+  });
+  it('does not mount on an older read when the latest one fails', async () => {
+    const server = fakeServer();
+    // A read whose mount never came: a superseded navigation.
+    await fetchDocMeta(DOC);
+    // Nothing in the synced map moves, so only a fresh read can show this.
+    server.board.lead = 'saltmarsh-agent';
+    const fetchStub = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        vi.stubGlobal('fetch', fetchStub);
+        return new Response('down', { status: 503 });
+      }),
+    );
+    const { sync } = await openDoc(server);
+    sync();
+    // The floats asked the server rather than rendering the stale seed.
+    await vi.waitFor(() => expect(planFloat()?.textContent).toContain('saltmarsh-agent'));
   });
 });
 

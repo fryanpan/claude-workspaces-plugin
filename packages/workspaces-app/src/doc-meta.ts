@@ -1,6 +1,6 @@
 import type { HuddleKind } from '@claude-workspaces/core';
 import { docJsonUrl } from './doc-path.ts';
-import { rememberDocRecord } from './doc/doc-record.ts';
+import { rememberDocRecord, takeDocRecord } from './doc/doc-record.ts';
 import type { DocMeta } from './mount-context.ts';
 
 /**
@@ -27,6 +27,9 @@ export async function fetchDocMeta(docId: string): Promise<DocMeta> {
   };
   try {
     const url = docJsonUrl(docId);
+    // An older read's record that no mount took (a superseded navigation, a
+    // code doc) must not stand in for this one if this read fails.
+    takeDocRecord(url);
     const res = await fetch(url);
     if (!res.ok) return fallback;
     const data = (await res.json()) as {
