@@ -10,6 +10,11 @@
  * round chevrons sat on the first tab and, not being marked as the widget's,
  * took a comment themselves.
  *
+ * Then seen on a mock with a left rail and no bar: at 1180 the chevrons rest
+ * over the rail's last button, and marked as the widget's they swallowed a
+ * tap there in comment mode, so that button could not be commented on. In
+ * the mode they are looked through; out of it they step the rounds.
+ *
  * `page-bar-driver.ts` drives headless Chromium at 1180x820 with a mouse and
  * 430x932 with a finger; this file asserts on what it saw.
  *
@@ -87,10 +92,11 @@ describe.skipIf(CHROME === null)("a mock's own bottom bar in comment mode", () =
       });
     });
 
-    it(`a tap on the chevrons is not a comment at ${width}`, () => {
+    it(`a tap on the chevrons in comment mode does not step the round at ${width}`, () => {
       const tap = at(width).bar.taps.find((t) => t.name === 'chevron');
       expect(tap, 'CONTROL: the chevrons were drawn and tapped').toBeDefined();
-      expect([tap?.composer, tap?.mode]).toEqual([false, true]);
+      expect(tap?.mode).toBe(true);
+      expect(at(width).bar.went).toEqual([]);
     });
 
     it(`the controls follow the bar as it goes and comes back at ${width}`, () => {
@@ -101,8 +107,38 @@ describe.skipIf(CHROME === null)("a mock's own bottom bar in comment mode", () =
     });
   }
 
-  it('at 1180 a chevron tap in comment mode still steps back a round', () => {
-    expect(at(1180).bar.went).toEqual([1]);
+  it('at 1180 in comment mode a tap on the chevrons comments on the page under them', () => {
+    const tap = at(1180).bar.taps.find((t) => t.name === 'chevron');
+    expect(tap?.composer).toBe(true);
+  });
+
+  it("at 430 in comment mode the prompt lies over the chevrons, so a tap there is the prompt's", () => {
+    const { chevrons, banner, taps } = at(430).bar;
+    const [l, t, r, b] = chevrons as Box;
+    const [bl, bt, br, bb] = banner as Box;
+    expect(l >= bl && t >= bt && r <= br && b <= bb, 'CONTROL: the prompt covers them').toBe(true);
+    expect(taps.find((x) => x.name === 'chevron')?.composer).toBe(false);
+  });
+
+  it("at 1180 in comment mode a rail's last button under the chevrons takes the comment", () => {
+    const rail = at(1180).rail;
+    if (!rail) throw new Error('no rail reading');
+    expect(rail.talk, 'CONTROL: the button rests where it did on the mock').toEqual([
+      22, 748, 66, 792,
+    ]);
+    expect(rail.chevrons).toEqual([16, 756, 110, 804]);
+    expect(rail.covered, 'CONTROL: out of the mode the chevrons cover it').toBe(true);
+    expect([rail.tap.composer, rail.tap.about, rail.tap.mode]).toEqual([true, 'rail-talk', true]);
+  });
+
+  it('at 1180 out of comment mode a chevron tap still steps back a round', () => {
+    const rail = at(1180).rail;
+    if (!rail) throw new Error('no rail reading');
+    expect({ went: rail.went, mode: rail.mode, composer: rail.composer }).toEqual({
+      went: [1],
+      mode: false,
+      composer: false,
+    });
   });
 
   it('at 430 the prompt sits on the bar, edge to edge', () => {
