@@ -253,6 +253,8 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     put('t-space', posted[0], 'Room for the tide table here');
     put('t-chip', posted[1], 'Confirmed by whom?');
     put('t-icon', posted[2], 'What does this menu hold?');
+    // Saved before a press on an icon was lifted to its button: a shape.
+    put('t-shape', createAnchor(document.querySelector('.icon circle')), 'Is this the menu?');
     put('t-resolved', createAnchor(document.getElementById('b2-title')), 'Say it is on call');
     setStatus(doc, 't-resolved', 'resolved');
     // A second comment on the same title, with no tap to place it either.

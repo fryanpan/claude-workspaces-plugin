@@ -241,17 +241,21 @@ function pressIsOurs(ev: Event): boolean {
 function hitTest(ev: MouseEvent): HTMLElement | null {
   // Our own chrome (FAB, banner, composer, dock, pins) answers for itself.
   if (pressIsOurs(ev)) return null;
-  let el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
-  // A tap on an icon lands on a shape inside its <svg> — a <circle> with no
-  // id, class or words, which nothing can find again after a reload. The
-  // comment is about the control the icon draws, or else the icon.
-  if (el instanceof SVGElement)
-    el = (el.closest('a,button,[role=button]') ?? el.closest('svg')) as HTMLElement | null;
+  const el = document.elementFromPoint(ev.clientX, ev.clientY);
   if (!el) return null;
   // skip widget chrome
   if (el.closest(`[${IGNORE_ATTR}],${TAG}`)) return null;
-  return el;
+  return lift(el);
 }
+
+/**
+ * A press on an icon lands on a shape inside its <svg>, a <circle> with no
+ * id, class or words. The comment is about the button or link the icon
+ * draws, so that is what it anchors to. A shape in no control stays itself:
+ * a chart's bars and labels are each something to comment on.
+ */
+export const lift = (el: Element): HTMLElement =>
+  (el instanceof SVGElement && el.closest('a,button,[role=button]')) || (el as HTMLElement);
 
 /** The other half of `hitTest`'s question, asked of a mutation record rather
  *  than a pointer: writes the widget made itself must not re-enter the

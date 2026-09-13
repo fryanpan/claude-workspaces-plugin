@@ -122,7 +122,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
 
     it('stands no pin on another', () => {
       const shown = look(width, 'walkBuilt').pins.filter((p) => p.shown);
-      expect(shown.length, 'CONTROL: two share an element, five a heading').toBe(15);
+      expect(shown.length, 'CONTROL: two share an element, five a heading').toBe(16);
       for (const [i, a] of shown.entries()) {
         for (const b of shown.slice(i + 1)) {
           expect(overlap(drop(a), drop(b)), `${a.id} on ${b.id}`).toBe(0);
@@ -163,6 +163,14 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       expect(overlap(drop(pin(width, 'reloaded', 't-icon')), icon ?? [0, 0, 0, 0])).toBe(0);
     });
 
+    it('pins a thread saved on a shape inside an icon beside its button', () => {
+      const icon = look(width, 'reloaded').el['b4-icon'];
+      const p = pin(width, 'reloaded', 't-shape');
+      expect(p.shown).toBe(true);
+      expect(near(p, icon, 30)).toBe(true);
+      expect(overlap(drop(p), icon ?? [0, 0, 0, 0])).toBe(0);
+    });
+
     it('pins every thread after a reload, resolved ones included', () => {
       const shown = look(width, 'reloaded')
         .pins.filter((p) => p.shown)
@@ -180,6 +188,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
         't-icon',
         't-resolved',
         't-review',
+        't-shape',
         't-space',
         't-title',
       ]);
@@ -269,7 +278,7 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       // thread, one pin per pinned thread.
       expect(l.pins.map((p) => p.text)).toEqual(l.pins.map(() => ''));
       expect(pin(width, 'reloaded', 't-chip').paint).toEqual(open);
-      expect(l.pins.length).toBe(14);
+      expect(l.pins.length).toBe(15);
     });
   });
 });
