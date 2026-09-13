@@ -91,10 +91,11 @@ export function streamUrl(cfg: Pick<Config, 'docId' | 'workspaceId'>): string {
  * the panel row is right and only the page is wrong.
  */
 const WIDGET_OWN_ATTR = 'data-feedback-widget';
+const WIDGET_TAG = 'claude-feedback-widget';
 
 function isOurs(node: Node): boolean {
   if (!(node instanceof Element)) return false;
-  if (node.tagName === 'CLAUDE-FEEDBACK-WIDGET') return true;
+  if (node.tagName === WIDGET_TAG.toUpperCase()) return true;
   if (node.hasAttribute(WIDGET_OWN_ATTR)) return true;
   if (node.id === 'cfw-light-styles') return true;
   if (node.hasAttribute(CONTROL_ATTR)) return true;
@@ -202,10 +203,12 @@ export function renderControl(state: Config, go: (v: number | null) => void): vo
   const box = (existing as HTMLElement | null) ?? document.createElement('div');
   if (!existing) {
     box.setAttribute(CONTROL_ATTR, '');
+    // The widget's own chrome, so a tap on a chevron in comment mode steps
+    // the round instead of anchoring a comment to the chevrons.
+    box.setAttribute(WIDGET_OWN_ATTR, '');
     box.style.cssText = [
       'position:fixed',
       'left:16px',
-      'bottom:16px',
       'z-index:2147483000',
       'display:flex',
       'gap:2px',
@@ -254,6 +257,31 @@ export function renderControl(state: Config, go: (v: number | null) => void): vo
     }
     box.appendChild(b);
   }
+  liftControl();
+}
+
+/**
+ * Stand the chevrons on whatever the widget's own buttons stand on.
+ *
+ * They sit in the same bottom corner band as the FAB, so a mock with a fixed
+ * tab bar had them over its first tab. The widget already measures that bar,
+ * and the keyboard, into `--cw-vv-bottom` on its host element; the chevrons
+ * are not inside the host, so they read it from there rather than measuring
+ * the page a second time.
+ */
+function liftControl(): void {
+  const box = document.querySelector<HTMLElement>(`[${CONTROL_ATTR}]`);
+  const lift = document
+    .querySelector<HTMLElement>(WIDGET_TAG)
+    ?.style.getPropertyValue('--cw-vv-bottom');
+  if (box) box.style.bottom = `calc(16px + ${lift || '0px'})`;
+}
+
+/** Re-lift the chevrons each time the widget writes a new offset. */
+export function keepControlLifted(): void {
+  const host = document.querySelector(WIDGET_TAG);
+  if (host) new MutationObserver(liftControl).observe(host, { attributeFilter: ['style'] });
+  liftControl();
 }
 
 /**
@@ -324,6 +352,7 @@ export function startMockupLive(cfg: Config): void {
   };
 
   renderControl(state, load);
+  keepControlLifted();
 
   const es = new EventSource(streamUrl(state));
   es.addEventListener('mockup.updated', (ev) => {
