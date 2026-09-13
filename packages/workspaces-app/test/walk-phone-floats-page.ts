@@ -163,7 +163,7 @@ const REVIEW: ReviewItem = {
 let items: ReviewItem[] = [];
 
 /** The server's half: the secrets door answers the item, and the queue loses it. */
-window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = String(input);
   const m = /\/review-items\/([^/]+)\/secrets$/.exec(url);
   if (init?.method === 'POST' && m) {
@@ -171,7 +171,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     return new Response(JSON.stringify({ saved: FIELDS.map((f) => f.service) }), { status: 200 });
   }
   return new Response('{}', { status: 404 });
-};
+}) as typeof fetch;
 
 /** Build Home, seat the widget, and open the walkthrough on `first`. */
 async function paint(queue: ReviewItem[]) {
