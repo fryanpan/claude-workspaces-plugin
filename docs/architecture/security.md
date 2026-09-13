@@ -103,7 +103,7 @@ Finer control than the two levels is not built yet. When it is, it belongs in th
 
 ## Rules that guard the machine itself
 
-**A browser may never name a path on this machine.** Binding a file or folder, importing a task list, starting a diff review, deploying, refreshing the plugin, and reading or exercising the process's own Sentry state (`/api/sentry`, loopback only, never through the edge) all refuse every browser, signed in or not. They exist for the owner's agents, over `localhost`. The danger is a page on another local port riding the owner's session. The same routes are refused to a member of a shared board by the workspace gate as well, and that second refusal is the load-bearing one: the browser rule turns away pages, and a member could arrive from a client that is not a page.
+**A browser may never name a path on this machine.** Binding a file or folder, importing a task list, starting a diff review, deploying, refreshing the plugin, and reading or exercising the process's own Sentry state (`/api/sentry`, loopback only, never through the edge) all refuse every browser, signed in or not. They exist for the owner's agents on this machine, but only some of them check that the caller is on it. Deploying, the Sentry state, the mount table, the repo registry and an agent's token, watch list and event feed check the connection's own address, so only a program on this machine gets through. The rest — binding, importing, a diff review, refreshing the plugin — are `trusted-local` and check no address. The host gate decides who reaches them. By default it admits `localhost` from a loopback address, and the owner's own hostname once Cloudflare Access has verified the owner; refreshing the plugin also refuses anything that came through the tunnel. Set `CW_ACCESS_ONLY_BROWSER_HOSTS=0` and any client on the tailnet or the local network that uses one of this machine's names reaches them too. [routes.md](routes.md) names the gate on each. The danger is a page on another local port riding the owner's session. The same routes are refused to a member of a shared board by the workspace gate as well, and that second refusal is the load-bearing one: the browser rule turns away pages, and a member could arrive from a client that is not a page.
 
 **A value the reader hands over goes to the store and nowhere else.** A review item may ask for one to six named secrets, and the reader types them into the card. They are sent to one route — `POST /workspaces/:ws/tasks/:id/review-items/:id/secrets` — which is `trusted-local`: the host guard's member allowlist does not name it, so a visitor of any role, owner included, is refused in admission before the handler exists, and the handler rebuilds the owner-only refusal behind that. The board refuses to file this shape from a share visitor at all, on every door an item arrives through, and the widget's dock — which renders on somebody else's page — never shows an owner-only ask. The route writes and never reads: nothing in this server hands a stored value back, so an agent reads its own with its own Keychain access. The value reaches the store on **stdin**, never in an argument list, because `ps` shows every process's arguments to every user on the machine. Every value is checked against the store's rules before the first one is written, so a bad second value cannot leave a first one behind. What the item, the answer line and the activity feed record is the NAMES only.
 
@@ -132,7 +132,7 @@ Secrets are kept in the macOS Keychain or in files only the owner's account can 
 
 Everything an item asks for is namespaced. The Keychain has no folders, and this server reads its own configuration out of the same flat keyspace by service name, with a lookup that falls back to any account — so a name a filer chose could otherwise have named, and updated in place, one of the server's own entries. Every asked-for name is stored under a prefix of this feature's own, applied at the one place a name becomes a command argument (`packages/core/src/secret-name.ts`, used by the writer and by the read-back command an agent is handed). The card keeps showing the bare name.
 
-The server creates its own key files on first use and resets their permissions if they already exist. All signed tokens go through one module, so there is one place a signature is checked.
+The server creates its own key files on first use and resets their permissions if they already exist. Every token this server signs goes through one module, `auth/signed-token.ts`, so there is one place such a signature is checked. Two HMACs sit outside it because the format is someone else's. The meeting-bot webhook check (`recall-webhook-auth.ts`) verifies the vendor's Svix signature with the vendor's secret. Browser notifications (`push-crypto.ts`) use the encryption and signing the Web Push standards define. Neither mints a token for this server.
 
 Claude has two keys, and the process decides which one it may read. Prod's key (`claude-workspaces-summary-api-key`) is read only by the prod launchd service, which is recognised by the `XPC_SERVICE_NAME` that launchd sets to the job's label, so it needs no setting of its own. Every other process reads the eval key (`claude-workspaces-eval-api-key`): staging, dev servers, tests, CI, and the eval and cost scripts. Without an eval key, that process runs with Claude switched off and says so once at boot (`packages/server/src/claude-key-source.ts`).
 
@@ -155,6 +155,13 @@ row's own example address and fails when the guard disagrees with the row. So
 a route added under an already-allowed prefix cannot be filed as owner-only —
 it declares `share-scope`, or it declares `owner-in-handler` and names where
 its own visitor refusal lives.
+
+That check cannot tell `trusted-local` from `loopback-only`, because a share
+visitor reaches neither. A second test,
+`packages/server/test/route-table-loopback.test.ts`, covers that: it calls
+every row filed under either gate once from a loopback address and once from
+a non-loopback one, and fails when the route refuses a different caller than
+its row says. It skips on a machine with no non-loopback address to call from.
 
 Answer heading 1 of the security-review checklist from that table, and add the
 row in the same pull request as the route.

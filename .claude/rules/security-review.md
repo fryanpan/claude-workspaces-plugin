@@ -44,10 +44,10 @@ just a diff, and a hand-rolled HMAC outside that module needs a louder one.
 The signature check still runs before the replay guard, the tolerance window
 is unchanged, and every delivery id still passes through the guard.
 
-### 7. Deploy and refresh still loopback-only
+### 7. Deploy still loopback-only, refresh still off the edge
 `POST /api/deploy` still requires a loopback peer address and still refuses a
-request carrying `cf-ray`. `POST /api/plugin/refresh` still refuses `cf-ray`.
-Both still refuse share visitors.
+request carrying `cf-ray`. `POST /api/plugin/refresh` still refuses `cf-ray`;
+it checks no peer address, and never did. Both still refuse share visitors.
 
 ## Copy this into the PR body
 

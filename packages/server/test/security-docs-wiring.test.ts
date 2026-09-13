@@ -35,7 +35,7 @@ const CHECKLIST_HEADINGS = [
   'Share scope unchanged',
   'Tokens through one signing module',
   'Webhook replay protection intact',
-  'Deploy and refresh still loopback-only',
+  'Deploy still loopback-only, refresh still off the edge',
 ];
 
 describe('security docs are wired together', () => {
