@@ -154,7 +154,7 @@ describe('a spoken comment becoming a thread', () => {
   it('creates the thread on the first frame, anchored to its element, and tells the server', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', target: 1 }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
     expect(t.rec.calls).toEqual([
       {
         op: 'create',
@@ -182,7 +182,7 @@ describe('a spoken comment becoming a thread', () => {
     // A second comment written after it proves the first one's turn has come
     // and gone: its write was queued first.
     t.socket().recv(commentFrame({ key: 'v2', text: 'something else' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v2')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v2')?.posted).toBeTruthy());
     expect(t.rec.calls.map((c) => ('text' in c ? c.text : c.op))).toEqual(['something else']);
     t.socket().recv(commentFrame({ key: 'v1', text: 'now there are words' }));
     await vi.waitFor(() => expect(t.rec.calls).toHaveLength(2));
@@ -192,7 +192,7 @@ describe('a spoken comment becoming a thread', () => {
   it('edits the thread when the words grow', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', text: 'the goal bar' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
     t.socket().recv(commentFrame({ key: 'v1', text: 'the goal bar is too tall', final: true }));
     await vi.waitFor(() => expect(t.rec.calls).toHaveLength(2));
     expect(t.rec.calls[1]).toMatchObject({
@@ -205,19 +205,19 @@ describe('a spoken comment becoming a thread', () => {
   it('writes nothing again for a frame that changed nothing', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
     t.socket().recv(commentFrame({ key: 'v1', final: true }));
     // A second, distinct comment is the positive control that writes are
     // still flowing when the first one's frame is judged.
     t.socket().recv(commentFrame({ key: 'v2', text: 'another thing' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v2')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v2')?.posted).toBeTruthy());
     expect(t.rec.calls.map((c) => c.op)).toEqual(['create', 'create']);
   });
 
   it('moves the thread when the server names a different element', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', target: 0 }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
     t.socket().recv(commentFrame({ key: 'v1', target: 1 }));
     await vi.waitFor(() => expect(t.rec.calls).toHaveLength(2));
     expect(t.rec.calls[1]).toEqual({ op: 'reanchor', threadId: 't1', anchor: anchorFor(1) });
@@ -242,7 +242,7 @@ describe('a spoken comment becoming a thread', () => {
     const t = await recording();
     t.rec.refuseCreate = true;
     t.socket().recv(commentFrame({ key: 'v1' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.refused).toBe(true));
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.refused).toBe(true));
     expect(t.session.note).toBe('A comment could not be saved. Its words are kept.');
     expect(
       t
@@ -253,9 +253,9 @@ describe('a spoken comment becoming a thread', () => {
 
     t.rec.refuseCreate = false;
     t.session.retryRefused();
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
     expect(t.rec.calls.map((c) => c.op)).toEqual(['create', 'create']);
-    expect(t.session.comments.get('v1')?.refused).toBe(false);
+    expect(t.session.comments.get('1.v1')?.refused).toBe(false);
   });
 
   it('uses the host’s words for a refusal when it has some', async () => {
@@ -268,13 +268,13 @@ describe('a spoken comment becoming a thread', () => {
   it('marks a refused edit and does not keep writing to that comment', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', text: 'one' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
     t.rec.refuseEdit = true;
     t.socket().recv(commentFrame({ key: 'v1', text: 'one two' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.refused).toBe(true));
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.refused).toBe(true));
     t.socket().recv(commentFrame({ key: 'v1', text: 'one two three' }));
     t.socket().recv(commentFrame({ key: 'v2', text: 'CONTROL: a different comment' }));
-    await vi.waitFor(() => expect(t.session.comments.get('v2')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v2')?.posted).toBeTruthy());
     expect(t.rec.calls.map((c) => c.op)).toEqual(['create', 'edit', 'create']);
   });
 
@@ -290,15 +290,15 @@ describe('a spoken comment becoming a thread', () => {
   it('moves a growing comment through the server, and a settled one straight to its thread', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', target: null }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
-    t.session.move('v1', 1);
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
+    t.session.move('1.v1', 1);
     expect(t.socket().json().at(-1)).toEqual({ type: 'move', key: 'v1', target: 1 });
     await vi.waitFor(() => expect(t.rec.calls).toHaveLength(2));
     expect(t.rec.calls[1]).toEqual({ op: 'reanchor', threadId: 't1', anchor: anchorFor(1) });
 
     t.socket().recv(commentFrame({ key: 'v1', target: 1, final: true }));
     const before = t.socket().json().length;
-    t.session.move('v1', 0);
+    t.session.move('1.v1', 0);
     expect(t.socket().json().length, 'past the server’s reach').toBe(before);
     await vi.waitFor(() => expect(t.rec.calls).toHaveLength(3));
     expect(t.rec.calls[2]).toEqual({ op: 'reanchor', threadId: 't1', anchor: anchorFor(0) });
@@ -367,28 +367,77 @@ describe('stopping', () => {
     expect(t.sockets).toHaveLength(2);
     expect(t.session.state).toBe('connecting');
   });
+
+  it('gives the next recording’s first comment a thread of its own, though the server names it v1 again', async () => {
+    const t = await recording();
+    t.socket().recv(commentFrame({ key: 'v1', text: 'the goal bar is too tall', final: true }));
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
+    t.socket().recv({ type: 'stopped' });
+
+    await t.session.start();
+    t.socket().open();
+    t.socket().recv({ type: 'ready', segment: 2 });
+    t.socket().recv(commentFrame({ key: 'v1', text: 'the Save button hides' }));
+    await vi.waitFor(() => expect(t.session.comments.get('2.v1')?.posted).toBeTruthy());
+    expect(t.rec.calls.map((c) => c.op)).toEqual(['create', 'create']);
+    expect(t.session.comments.get('1.v1')?.text, 'the first comment keeps its words').toBe(
+      'the goal bar is too tall',
+    );
+    expect(t.socket().json().at(-1)).toEqual({ type: 'posted', key: 'v1', threadId: 't2' });
+  });
+
+  it('does not name a comment of the next recording when an old create answers late', async () => {
+    const t = await recording();
+    const gate = deferred();
+    t.rec.gate = gate.promise;
+    t.socket().recv(commentFrame({ key: 'v1' }));
+    t.socket().recv({ type: 'stopped' });
+    await t.session.start();
+    t.socket().open();
+    t.socket().recv({ type: 'ready', segment: 2 });
+    gate.resolve();
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
+    expect(
+      t
+        .socket()
+        .json()
+        .some((m) => m.type === 'posted'),
+      'the new recording’s v1 is not that thread',
+    ).toBe(false);
+    t.session.move('1.v1', 1);
+    expect(
+      t
+        .socket()
+        .json()
+        .some((m) => m.type === 'move'),
+      'nor is it moved through the new recording',
+    ).toBe(false);
+    await vi.waitFor(() =>
+      expect(t.rec.calls.at(-1)).toMatchObject({ op: 'reanchor', threadId: 't1' }),
+    );
+  });
 });
 
 describe('undo and redo', () => {
   it('resolves and reopens the comment’s thread', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', final: true }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
-    await t.session.setResolved('v1', true);
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
+    await t.session.setResolved('1.v1', true);
     expect(t.rec.calls.at(-1)).toEqual({ op: 'setResolved', threadId: 't1', resolved: true });
-    expect(t.session.comments.get('v1')?.resolved).toBe(true);
-    await t.session.setResolved('v1', false);
+    expect(t.session.comments.get('1.v1')?.resolved).toBe(true);
+    await t.session.setResolved('1.v1', false);
     expect(t.rec.calls.at(-1)).toEqual({ op: 'setResolved', threadId: 't1', resolved: false });
-    expect(t.session.comments.get('v1')?.resolved).toBe(false);
+    expect(t.session.comments.get('1.v1')?.resolved).toBe(false);
   });
 
   it('CONTROL: a refused undo leaves the comment as it was', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', final: true }));
-    await vi.waitFor(() => expect(t.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.session.comments.get('1.v1')?.posted).toBeTruthy());
     t.rec.refuseResolve = true;
-    await t.session.setResolved('v1', true);
+    await t.session.setResolved('1.v1', true);
     expect(t.rec.calls.at(-1)).toMatchObject({ op: 'setResolved' });
-    expect(t.session.comments.get('v1')?.resolved).toBeUndefined();
+    expect(t.session.comments.get('1.v1')?.resolved).toBeUndefined();
   });
 });

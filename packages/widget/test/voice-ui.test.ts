@@ -22,6 +22,8 @@ const CLIP = '/workspaces/w-1/docs/d-1/voice-feedback/seg-1.wav#t=12.4,31';
 function comment(over: Partial<VoiceComment> = {}): VoiceComment {
   return {
     key: 'v1',
+    wire: 'v1',
+    take: 1,
     text: 'The goal bar is too tall.',
     raw: 'um the goal bar is like too tall',
     clip: CLIP,

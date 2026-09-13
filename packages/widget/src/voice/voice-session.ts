@@ -29,7 +29,12 @@ import type { PostedComment, VoicePoster } from './voice-post.ts';
 export type SessionState = 'idle' | 'connecting' | 'recording' | 'stopping';
 
 export interface VoiceComment {
+  /** Unique for the page's life: the recording, then the server's name. */
   key: string;
+  /** The server's name for it, which starts again at `v1` every recording. */
+  wire: string;
+  /** Which recording said it. */
+  take: number;
   text: string;
   raw: string;
   clip: string;
@@ -104,6 +109,8 @@ export class VoiceSession {
     { text: string; raw: string; clip: string; target: number | null }
   >();
   private stopTimer: unknown = null;
+  /** Recordings started; the server's comment names repeat across them. */
+  private take = 0;
 
   constructor(private readonly deps: VoiceSessionDeps) {}
 
@@ -124,6 +131,7 @@ export class VoiceSession {
   async start(context?: AudioContext): Promise<void> {
     if (this.state !== 'idle') return;
     this.state = 'connecting';
+    this.take += 1;
     this.note = null;
     this.heard = '';
     this.pinned = undefined;
@@ -183,8 +191,9 @@ export class VoiceSession {
     const c = this.comments.get(key);
     if (!c) return;
     c.target = target;
-    // A settled comment is past the server's reach; its thread moves here.
-    if (!c.final) this.sendJson({ type: 'move', key, target });
+    // A settled comment, or one from an earlier recording, is past the
+    // server's reach; its thread moves here.
+    if (!c.final && c.take === this.take) this.sendJson({ type: 'move', key: c.wire, target });
     this.sync(c);
     this.change();
   }
@@ -260,9 +269,12 @@ export class VoiceSession {
   }
 
   private comment(f: VoiceCommentFrame): void {
-    const had = this.comments.get(f.key);
+    const key = `${this.take}.${f.key}`;
+    const had = this.comments.get(key);
     const c: VoiceComment = had ?? {
-      key: f.key,
+      key,
+      wire: f.key,
+      take: this.take,
       text: '',
       raw: '',
       clip: '',
@@ -300,7 +312,11 @@ export class VoiceSession {
       if (!posted) return this.refuse(c);
       c.posted = posted;
       this.sent.set(c.key, now);
-      this.sendJson({ type: 'posted', key: c.key, threadId: posted.threadId });
+      // A create that answers after its recording ended must not name a
+      // comment of the next one.
+      if (c.take === this.take) {
+        this.sendJson({ type: 'posted', key: c.wire, threadId: posted.threadId });
+      }
       this.change();
       return;
     }

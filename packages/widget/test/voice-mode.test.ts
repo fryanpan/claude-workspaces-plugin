@@ -171,12 +171,12 @@ describe('tapping the page while recording', () => {
     const t = setup();
     await recording(t);
     t.socket().recv(commentFrame({ key: 'v1', target: null }));
-    await vi.waitFor(() => expect(t.mode.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.mode.session.comments.get('1.v1')?.posted).toBeTruthy());
     expect(t.posted[0]?.url).toBe('http://host:8787/workspaces/w-1/docs/d-1/threads');
     expect(t.posted[0]?.body.anchor, 'about the page as a whole').toEqual({ kind: 'subject' });
 
     t.tap(t.mode.view.live.querySelector('.vmove') as HTMLElement);
-    expect(t.mode.view.picking, 'Move is inside the widget, so it reaches its button').toBe('v1');
+    expect(t.mode.view.picking, 'Move is inside the widget, so it reaches its button').toBe('1.v1');
     t.tap(document.getElementById('done') as HTMLElement);
     expect(t.socket().json().at(-1)).toEqual({
       type: 'move',
@@ -301,7 +301,7 @@ describe('a workspace that wants a signature', () => {
 
     t.server.refuse = false;
     slot.retryAfterSignIn?.();
-    await vi.waitFor(() => expect(t.mode.session.comments.get('v1')?.posted).toBeTruthy());
+    await vi.waitFor(() => expect(t.mode.session.comments.get('1.v1')?.posted).toBeTruthy());
     expect(t.posted.map((p) => p.body.text)).toEqual([
       'the goal bar is too tall',
       'the goal bar is too tall',
