@@ -38,6 +38,7 @@ import {
   tagAudioFrame,
 } from '@claude-workspaces/core';
 import {
+  type CaptureHealth,
   type MeetingCapture,
   type MeetingCaptureStart,
   type MeetingReopen,
@@ -55,6 +56,7 @@ export type StartOneCapture = (opts: {
   room?: RoomAudioProcessing;
   source?: MeetingStreamId;
   onLost?: (reason: TrackLossReason) => void;
+  context?: AudioContext;
 }) => Promise<MeetingCaptureStart>;
 
 /**
@@ -103,6 +105,10 @@ export type CaptureSetResult =
        * set it was rendered from can have been replaced underneath it.
        */
       reopen(stream: MeetingStreamId): Promise<MeetingReopen>;
+      /** The first capture's graph — the one the tap's context went to. */
+      health(): CaptureHealth | null;
+      /** Every capture's context, asked to run again. */
+      resumeAudio(): Promise<void>;
     }
   | {
       ok: false;
@@ -152,16 +158,30 @@ export async function openCaptureSet(opts: {
    */
   onStreamLost?: (stream: MeetingStreamId, reason: TrackLossReason) => void;
   startCapture?: StartOneCapture;
+  /** Made inside the tap; the first stream opened gets it. */
+  context?: AudioContext;
+  /**
+   * Each frame of the first stream that OPENED, untagged, before `onFrame`.
+   * The strip meters and counts these, so a second stream's audio cannot
+   * stand in for a first one delivering nothing — and a refused microphone
+   * hands the job to the Mac audio rather than to nobody.
+   */
+  onFirstStreamFrame?: (pcm: Int16Array) => void;
 }): Promise<CaptureSetResult> {
   const startOne = opts.startCapture ?? startMeetingCapture;
   const wanted = streamsForSource(opts.source);
   const tagged = wanted.length > 1;
   const captures: Array<{ stream: MeetingStreamId; capture: MeetingCapture }> = [];
   const refusals: CaptureRefusal[] = [];
+  /** The first stream that actually opened — the one metered and counted. */
+  let metered: MeetingStreamId | null = null;
 
-  for (const stream of wanted) {
+  for (const [i, stream] of wanted.entries()) {
     const started = await startOne({
+      // One context is one graph: the second stream builds its own.
+      ...(i === 0 && opts.context ? { context: opts.context } : {}),
       onFrame: (pcm) => {
+        if (stream === metered) opts.onFirstStreamFrame?.(pcm);
         // A tag only where there are two streams to tell apart. One stream
         // puts raw PCM on the wire, byte-for-byte what it always did, so an
         // older server reads this meeting exactly as it read the last one.
@@ -182,8 +202,10 @@ export async function openCaptureSet(opts: {
           : {}),
       source: stream,
     });
-    if (started.ok) captures.push({ stream, capture: started.capture });
-    else refusals.push({ stream, kind: started.kind, message: started.message });
+    if (started.ok) {
+      metered ??= stream;
+      captures.push({ stream, capture: started.capture });
+    } else refusals.push({ stream, kind: started.kind, message: started.message });
   }
 
   const running = captures.map((c) => c.stream);
@@ -215,6 +237,12 @@ export async function openCaptureSet(opts: {
       if (!entry)
         return { ok: false, message: `${streamWords(stream)} is not part of this recording.` };
       return entry.capture.reopen();
+    },
+    health() {
+      return captures[0]?.capture.health?.() ?? null;
+    },
+    async resumeAudio() {
+      await Promise.all(captures.map(({ capture }) => capture.resumeAudio?.()));
     },
     async setEchoCancellation(on: boolean) {
       await Promise.all(captures.map(({ capture }) => capture.setEchoCancellation(on)));

@@ -145,6 +145,16 @@ export interface MeetingRelayDeps {
     method: NotesMethod;
     by?: string;
   }) => boolean;
+  /**
+   * Where a meeting that went wrong is written down on the server.
+   *
+   * An engine's `error` used to reach only the browser, so a meeting that
+   * ended with no words left nothing in the log to say whether the engine
+   * refused, the browser sent no audio, or both. One line per fact, carrying
+   * ids, states and counts — never a key and never a word of transcript.
+   * Absent is `console.error`.
+   */
+  log?: (line: string) => void;
 }
 
 /**
@@ -233,6 +243,17 @@ interface Conn {
    * to clear.
    */
   cancelSilence: (() => void) | null;
+  /**
+   * Audio bytes this connection received for its meeting, counted off the
+   * wire whether or not the engine was ready for them. Logged when the
+   * meeting ends, because "the browser sent nothing" and "the engine heard
+   * nothing" leave the same empty transcript and only this tells them apart.
+   */
+  heardBytes: number;
+  /** This connection's meeting is a resume of one a dropped socket held. */
+  resumed: boolean;
+  /** A `no_audio` report was already logged for this connection. */
+  reportedNoAudio: boolean;
 }
 
 /**
@@ -264,6 +285,26 @@ function timingFor(
       sendMs: Date.now(),
     },
   };
+}
+
+/**
+ * An engine's error text, made fit for one log line.
+ *
+ * The vendor writes this text, so it is treated as untrusted: control
+ * characters and newlines become spaces (one fact, one line — nothing can
+ * forge a second `[meeting]` line), EVERYTHING from the first quote or
+ * bracket on is cut (where a vendor would echo a payload, and so where a
+ * word of transcript could be — cut rather than parsed, because an escaped
+ * quote inside a value is exactly what a parser here would get wrong), any
+ * long unbroken token is redacted (the shape of a key), and the rest is
+ * bounded. "soniox: invalid audio format" survives all of it.
+ */
+export function engineErrorForLog(text: string): string {
+  const flat = text.replace(/[\p{Cc}\u2028\u2029]+/gu, ' ');
+  const cut = flat.search(/["'`{[]/);
+  return (cut >= 0 ? `${flat.slice(0, cut)}…` : flat)
+    .replace(/[A-Za-z0-9_\-+/=.]{24,}/g, '[redacted]')
+    .slice(0, 200);
 }
 
 export class MeetingRelay {
@@ -329,7 +370,14 @@ export class MeetingRelay {
       ledger: null,
       pendingStop: null,
       cancelSilence: null,
+      heardBytes: 0,
+      resumed: false,
+      reportedNoAudio: false,
     });
+  }
+
+  private log(line: string): void {
+    (this.deps.log ?? console.error)(line);
   }
 
   /** A JSON text frame from the client. */
@@ -460,6 +508,18 @@ export class MeetingRelay {
       conn.meeting?.recordGap(msg.stream, msg.state, msg.reason);
       return;
     }
+    if (msg.type === 'no_audio') {
+      // The browser's own report that its capture produced nothing. Only the
+      // log hears it: the strip has already told the person. Once per
+      // connection, and only for a meeting this socket is running — a page
+      // that sent it in a loop must not be a way to fill the log.
+      if (conn.reportedNoAudio || (conn.state !== 'opening' && conn.state !== 'live')) return;
+      conn.reportedNoAudio = true;
+      this.log(
+        `[meeting] no audio from the mic doc=${ws.data.docId} meeting=${conn.meeting?.meetingId ?? 'none'} context=${msg.contextState} rate=${msg.sampleRate} blocks=${msg.blocks}`,
+      );
+      return;
+    }
     if (msg.type === 'name_speaker') {
       // Both the record and the notes pipeline learn the name; the strip
       // that sent it already knows. Nothing to answer.
@@ -474,6 +534,7 @@ export class MeetingRelay {
   onAudio(ws: MeetingClient, chunk: Uint8Array): void {
     const conn = this.conns.get(ws);
     if (!conn) return;
+    if (conn.state === 'opening' || conn.state === 'live') conn.heardBytes += chunk.byteLength;
     if (conn.state === 'opening') {
       // The client is allowed to talk before the handshake finishes, and the
       // words spoken in that window are as real as any other. Bounded so a
@@ -742,6 +803,9 @@ export class MeetingRelay {
       return;
     }
     conn.state = 'opening';
+    conn.heardBytes = 0;
+    conn.reportedNoAudio = false;
+    conn.resumed = resumed !== null;
     conn.meeting = meeting;
     conn.engineName = engine.name;
     conn.tagged = streams.length > 1;
@@ -884,6 +948,10 @@ export class MeetingRelay {
           notes?.onTurn({ ...turn, turn: turnId }, spokenAtOf(turn.audioEndMs));
         },
         onError: (message) => {
+          // Scrubbed first: the vendor wrote this text, not us.
+          this.log(
+            `[meeting] engine error doc=${docId} meeting=${meeting.meetingId} engine=${engine.name}: ${engineErrorForLog(message)}`,
+          );
           this.send(ws, { type: 'error', message });
         },
       });
@@ -906,6 +974,9 @@ export class MeetingRelay {
       conn.ledger = null;
       conn.pendingStop = null;
       this.clearSilence(conn);
+      this.log(
+        `[meeting] engine unavailable doc=${docId} meeting=${meeting.meetingId} engine=${engine.name}: ${engineErrorForLog(err instanceof Error ? err.message : String(err))}`,
+      );
       this.send(ws, {
         type: 'unavailable',
         reason: 'engine_unavailable',
@@ -1017,6 +1088,9 @@ export class MeetingRelay {
     conn.state = 'idle';
     if (!meeting) return;
     const record = meeting.stop(reason);
+    this.log(
+      `[meeting] ended doc=${meeting.docId} meeting=${record.meetingId} audioBytes=${conn.heardBytes} turns=${record.turns ?? 0}${conn.resumed ? ' resumed=true' : ''}`,
+    );
     if (reply) {
       this.send(ws, {
         type: 'stopped',
