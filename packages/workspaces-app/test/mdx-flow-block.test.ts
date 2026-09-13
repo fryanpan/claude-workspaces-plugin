@@ -126,6 +126,30 @@ describe('an .mdx block in the editor', () => {
     );
   });
 
+  it('refuses a delete that runs from the prose into part of a component, and takes the whole block', () => {
+    const { handle, ydoc } = mount();
+    const md = () => prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
+    const before = md();
+    handle.editor
+      .chain()
+      .setTextSelection({ from: posOf(handle, 'climbed'), to: posOf(handle, 'ferry riders') })
+      .deleteSelection()
+      .run();
+    expect(md()).toBe(before);
+
+    let chartEnd = -1;
+    handle.editor.state.doc.forEach((n, pos) => {
+      if (n.textContent.startsWith('<LineChart')) chartEnd = pos + n.nodeSize;
+    });
+    handle.editor
+      .chain()
+      .deleteRange({ from: posOf(handle, 'climbed'), to: chartEnd })
+      .run();
+    expect(md()).not.toContain('<LineChart');
+    expect(md()).toContain('Ridership \n\n{/* TODO');
+    expect(md()).toContain('{/* TODO: the October numbers */}');
+  });
+
   it('takes a comment on words in a component', () => {
     const { handle } = mount();
     const from = posOf(handle, 'Harborlight ferry riders');

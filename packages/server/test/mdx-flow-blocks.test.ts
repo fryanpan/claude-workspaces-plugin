@@ -17,7 +17,7 @@ import * as Y from 'yjs';
 import { DocStore } from '../src/doc-store.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
-import { pastWriteBack, waitForFileToBe } from './wait-for.ts';
+import { pastReanchor, pastWriteBack, waitFor, waitForFileToBe } from './wait-for.ts';
 
 const CHART = `<LineChart
   title="Harborlight ferry riders"
@@ -84,6 +84,40 @@ describe('.mdx components are blocks of their own source', () => {
     );
   }
 
+  /** Open a thread on the first `text` in the doc, as a reader's comment does. */
+  function commentOn(docId: string, threadId: string, text: string): void {
+    const doc = docStore.get(docId);
+    if (!doc) throw new Error('doc missing');
+    const found = prose.resolveTextRangeFromFind(doc.ydoc, { find: text });
+    if (!found.ok) throw new Error(`anchor: ${found.error}`);
+    createThread(doc.ydoc, {
+      threadId,
+      anchor: {
+        kind: 'text-range',
+        startRel: found.startRel,
+        endRel: found.endRel,
+        snippet: { text },
+      },
+      createdBy: { id: 'u-reader', name: 'Reader', kind: 'known', color: '#336699' },
+      firstComment: { id: `c-${threadId}`, text: 'Start the axis at zero?' },
+    });
+  }
+
+  /** The block and text a thread's anchor start resolves to now, or null. */
+  function anchorOf(docId: string, threadId: string): { block: Y.XmlElement; rest: string } | null {
+    const doc = docStore.get(docId);
+    const thread = (doc?.ydoc.getMap('threads') as Y.Map<Y.Map<unknown>>).get(threadId);
+    const anchor = thread?.get('anchor') as { startRel?: Uint8Array } | undefined;
+    if (!doc || !anchor?.startRel) return null;
+    const start = Y.createAbsolutePositionFromRelativePosition(
+      Y.decodeRelativePosition(anchor.startRel),
+      doc.ydoc,
+    );
+    const block = start?.type.parent as Y.XmlElement | null;
+    if (!start || !block || block._item?.deleted) return null;
+    return { block, rest: String(start.type).slice(start.index) };
+  }
+
   /** A file dated an hour ago, so any write moves its mtime. */
   function writeOld(name: string, text: string): string {
     const path = join(root, name);
@@ -124,6 +158,30 @@ describe('.mdx components are blocks of their own source', () => {
     expect((await docStore.attachFileAsync('post.mdx', path)).ok).toBe(true);
     expect(docStore.findAndReplace('post.mdx', { find: '21:30', replace: '22:00' }).ok).toBe(true);
     await waitForFileToBe(path, POST.replace('21:30', '22:00'));
+  });
+
+  it('a comment on a component read under the old grammar follows it into its block', async () => {
+    const path = writeOld('post.mdx', POST);
+    const doc = docStore.getOrCreate('post.mdx', { type: 'markdown', sourceUrl: path });
+    doc.ydoc.transact(() => {
+      prose.getProseFragment(doc.ydoc).push(prose.parseMarkdownBlocks(POST));
+    });
+    commentOn('post.mdx', 't-legacy', 'Harborlight ferry riders');
+    expect(anchorOf('post.mdx', 't-legacy')?.block.nodeName).toBe('paragraph');
+    writeFileSync(join(dataDir, 'post.mdx.ydoc'), Y.encodeStateAsUpdate(doc.ydoc));
+
+    expect((await docStore.attachFileAsync('post.mdx', path)).ok).toBe(true);
+    expect(blocksOf('post.mdx')).toContain(CHART);
+
+    const moved = await waitFor(
+      () => {
+        const at = anchorOf('post.mdx', 't-legacy');
+        return at?.block.getAttribute('language') === prose.MDX_FLOW_LANGUAGE && at;
+      },
+      { timeout: pastReanchor() * 20, describe: 'the thread anchored in the chart block' },
+    );
+    expect(moved.rest.startsWith('Harborlight ferry riders')).toBe(true);
+    expect(docStore.listThreads('post.mdx').map((t) => t.id)).toEqual(['t-legacy']);
   });
 
   it('a doc read before the MDX grammar becomes blocks on re-attach, and the file is not written', async () => {

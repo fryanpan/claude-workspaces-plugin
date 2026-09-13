@@ -86,8 +86,10 @@ export function mdxFlowNodeView(initial: PMNode, _editor: Editor): NodeView {
   };
 }
 
-/** Refuses a local change that falls inside an `mdx-flow` block's text. A
- *  change from the Yjs sync — the server, another reader — always lands. */
+/** Refuses a local change that touches an `mdx-flow` block's text without
+ *  taking the whole block: typing inside it, or a selection that runs from
+ *  the prose beside it into part of its source. Deleting the block whole still
+ *  lands, and so does a change from the Yjs sync — the server, another reader. */
 export function mdxReadOnly(): Plugin {
   return new Plugin({
     key: new PluginKey('mdxReadOnly'),
@@ -103,9 +105,10 @@ export function mdxReadOnly(): Plugin {
           const hi = Math.min(doc.content.size, to + 1);
           doc.nodesBetween(lo, hi, (n, pos) => {
             if (inside || !isMdxFlowNode(n)) return !inside;
-            // Strictly within the block's content: replacing or deleting the
-            // whole block is still allowed.
-            if (from > pos && to < pos + n.nodeSize) inside = true;
+            const end = pos + n.nodeSize;
+            const whole = from <= pos && to >= end;
+            const touches = from === to ? from > pos && from < end : from < end && to > pos;
+            if (touches && !whole) inside = true;
             return false;
           });
         });
