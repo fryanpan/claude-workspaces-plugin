@@ -17559,6 +17559,28 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "move_doc_to_project",
+      description: "Move a markdown doc into a folder of this board's project. The doc keeps its id, comments and history, and the Library then shows it as a project file. The old copy stays on disk. The target must be inside a mounted folder or the meetings folder. The server refuses mockups, a doc on another board, a file that exists, and a meeting that is recording.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board the doc is filed on."
+          },
+          docId: {
+            type: "string",
+            description: "The doc to move."
+          },
+          relPath: {
+            type: "string",
+            description: 'The new file, from the repo root, ending in .md, e.g. "docs/meetings/ferry-signage.md". No "..".'
+          }
+        },
+        required: ["workspaceId", "docId", "relPath"]
+      }
+    },
+    {
       name: "request_plugin_refresh",
       description: "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces: nothing running is interrupted, and each session picks the new bundle up at its next restart. `changed: false` with matching versions means the cache was already current.",
       inputSchema: {
@@ -19409,6 +19431,10 @@ async function handleWorkspaceTool(name, a, ctx) {
       const { workspaceId, docId, title } = a;
       return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/title`, { title }));
     }
+    case "move_doc_to_project": {
+      const { workspaceId, docId, relPath } = a;
+      return ok2(await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move`, { relPath }));
+    }
     case "request_plugin_refresh": {
       return ok2(await http("POST", "/api/plugin/refresh"));
     }
@@ -19767,7 +19793,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.227";
+var PLUGIN_VERSION = "0.1.228";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

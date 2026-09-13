@@ -122,3 +122,10 @@ One call covers the whole board, which is why you do not need `watch_doc` per do
 If a different agent holds the seat and is live, the call comes back `declined: "lead-held"` naming the incumbent, and you stay attached either way — nothing on the board is hidden from you, only the seat stays put. `takeover: true` evicts them silently and reroutes every lead-addressed delivery, so agree with them first.
 
 **Taking the seat includes setting up where the project keeps its docs.** A project's docs and meetings can live in its own folders — in the repo, beside the code — instead of the server's data dir, and the lead is the one who says so. Read `claude-workspaces:project-docs-layout` and do it from there: it carries the verbs, the order to call them in, and the two switches that are easy to confuse. When a board should not be mounted at all — no checkout, or a board that is purely a queue — say so on the board, so the next reader gets a decision rather than an omission.
+
+**Move old docs into those folders.** Docs made before the folders existed stay in the server's storage until you move them:
+
+1. Set the folders: `set_project_meetings` and `mount_folder`.
+2. Run `list_docs` on the board. The Library's "Where files live" section shows which docs are "Stored by Workspaces".
+3. For each doc that nobody is editing: `move_doc_to_project(workspaceId, docId, relPath)`, then `list_threads` to check that the thread count did not change. Do not move a meeting that is recording.
+4. Commit the moved files in a PR. Do not check out, stash or pull over a file while its doc is open.

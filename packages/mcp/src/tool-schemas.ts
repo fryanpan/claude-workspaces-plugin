@@ -2763,6 +2763,30 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'move_doc_to_project',
+      description:
+        "Move a markdown doc into a folder of this board's project. The doc keeps its id, comments and history, and the Library then shows it as a project file. The old copy stays on disk. The target must be inside a mounted folder or the meetings folder. The server refuses mockups, a doc on another board, a file that exists, and a meeting that is recording.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description: 'The board the doc is filed on.',
+          },
+          docId: {
+            type: 'string',
+            description: 'The doc to move.',
+          },
+          relPath: {
+            type: 'string',
+            description:
+              'The new file, from the repo root, ending in .md, e.g. "docs/meetings/ferry-signage.md". No "..".',
+          },
+        },
+        required: ['workspaceId', 'docId', 'relPath'],
+      },
+    },
+    {
       name: 'request_plugin_refresh',
       description:
         "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces: nothing running is interrupted, and each session picks the new bundle up at its next restart. `changed: false` with matching versions means the cache was already current.",
