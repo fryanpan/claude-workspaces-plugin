@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -310,7 +310,7 @@ at the offsets they held. The defect that made them is fixed in
 written.
 
 **A bound mockup is a live surface, and it keeps its rounds.** A mockup's doc
-holds no content of its own — its surface is somebody's HTML file — so the four
+holds no content of its own — its surface is somebody's HTML file — so the
 `mockup-*.ts` modules are what make that file behave like an attachment.
 `mockup-widget.ts` adds the comment widget on the way out and
 `mockup-live.ts` adds the script that makes the page update itself, both at
@@ -353,6 +353,17 @@ payload on a comment, so the dock reads the same synced threads the pins read
 and adds no fetch of its own. The Home-queue entry for such an item deep-links
 to `/workspaces/<ws>/mockups/<doc>?thread=<id>`, which is why a queue entry now
 carries the doc's `type`.
+
+An ask filed on a TICKET is docked on the mock it links, too. Those items live
+in `task.reviews`, not in the mock's threads, so the server resolves them
+instead: `mockup-linked-items.ts` (server, beside the other `mockup-*.ts`
+modules) takes the Home queue's own ticket rows (`taskReviewItems`), keeps the
+ones whose detail links this mock — or, for an ask that names no page, whose
+task links it — and writes them into the served page as a JSON data block. The
+widget reads that block once at load and answers such an item through the
+ticket's own route (`…/tasks/:id/review-items/:rid/answer`). Still no new fetch
+and no poll, and a share visitor is served no block: the dock shows a visitor
+only the mock's own thread asks.
 
 **The comment card stands where its comment will live.** In comment mode the
 composer is a card fixed to the right edge of the viewport at its element's

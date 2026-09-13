@@ -47,6 +47,7 @@ import {
   readMockupCapture,
   readMockupHtml,
 } from '../mockup-capture.ts';
+import { injectLinkedItems, linkedTaskItems } from '../mockup-linked-items.ts';
 import { injectMockupLive, parseVersionParam } from '../mockup-live.ts';
 import { listMockupVersions, readMockupVersion, recordMockupVersion } from '../mockup-versions.ts';
 import { injectWidget } from '../mockup-widget.ts';
@@ -139,8 +140,9 @@ export interface ShellStaticRequest {
   url: URL;
   pathname: string;
   /** The admitted visitor, or null on a local request. Read only to choose
-   *  a redirect target and to drop the "all workspaces" arrow — never to
-   *  decide access, which `request-admission.ts` has already done. */
+   *  a redirect target, to drop the "all workspaces" arrow, and to leave a
+   *  mock's ticket items out of its page — never to widen access, which
+   *  `request-admission.ts` has already decided. */
   visitor: ShareTarget | null;
 }
 
@@ -270,7 +272,12 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
    * does the capture answer, which is the case that used to be a 404 in front
    * of the reviewer. See mockup-capture.ts.
    */
-  const serveMockup = (docId: string, workspaceId: string, url: URL): Response => {
+  const serveMockup = (
+    docId: string,
+    workspaceId: string,
+    url: URL,
+    visitor: ShareTarget | null,
+  ): Response => {
     const notFound = () =>
       new Response(renderMockupNotFound(docId), {
         status: 404,
@@ -312,7 +319,19 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // the same route: a mockup is somebody's own file, and neither the review
     // scaffolding nor the box's monitoring config belongs in it on disk.
     const shownVersion = askedVersion ?? versions[versions.length - 1]?.v ?? null;
-    const withWidget = injectMockupLive(injectWidget(html, doc.meta.docId, workspaceId), {
+    // The ticket items this mock is about, for the dock. Never for a share
+    // visitor: the dock shows a visitor only the mock's own thread asks, and
+    // a ticket's items are not something a mock's share was a grant over.
+    const linked = visitor
+      ? []
+      : linkedTaskItems({
+          docId: doc.meta.docId,
+          tasks: taskStore.listTasks(workspaceId),
+          reviewsOf: (taskId) => taskStore.listReviewItems(taskId),
+          canonical: (id) => docStore.resolveDocId(id),
+        });
+    const withItems = injectLinkedItems(html, linked);
+    const withWidget = injectMockupLive(injectWidget(withItems, doc.meta.docId, workspaceId), {
       docId: doc.meta.docId,
       workspaceId,
       version: shownVersion,
@@ -494,7 +513,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       }
       if (!isValidDocId(id)) return j(400, { error: 'bad docId' });
       const canonical = docStore.get(id)?.docId ?? id;
-      if (kind === 'mockups') return serveMockup(canonical, wsSeg, url);
+      if (kind === 'mockups') return serveMockup(canonical, wsSeg, url, visitor);
       if (isMockupDoc(canonical)) {
         return redirectTo(
           `/workspaces/${encodeURIComponent(wsSeg)}/mockups/${encodeURIComponent(canonical)}`,

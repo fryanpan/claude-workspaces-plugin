@@ -18,7 +18,7 @@ import {
   validateStoredAuth,
 } from './widget-auth.ts';
 import { placeCards } from './widget-card.ts';
-import { deepLinkThread, renderDockInto } from './widget-dock.ts';
+import { type DockItem, deepLinkThread, readLinkedItems, renderDockInto } from './widget-dock.ts';
 import {
   IGNORE_ATTR,
   TAG,
@@ -194,6 +194,8 @@ export class FeedbackWidgetEl extends HTMLElement {
    * over the socket, so at init there is nothing yet to open.
    */
   pendingDockThread: string | null = null;
+  /** Ticket items that link this page, read once from the page at init. */
+  linkedItems: DockItem[] = [];
 
   constructor() {
     super();
@@ -247,6 +249,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       ...(opts.context?.view ? { view: opts.context.view } : {}),
     };
     this.pendingDockThread = deepLinkThread(location.search);
+    this.linkedItems = readLinkedItems(document);
     this.wireHistoryListeners();
     this.wireVisualViewport();
     this.renderShell();
