@@ -161,7 +161,10 @@ visitor reaches neither. A second test,
 `packages/server/test/route-table-loopback.test.ts`, covers that: it calls
 every row filed under either gate once from a loopback address and once from
 a non-loopback one, and fails when the route refuses a different caller than
-its row says. It skips on a machine with no non-loopback address to call from.
+its row says. That half skips on a machine with no non-loopback address to
+call from. It also calls every `loopback-only` row as the operator through the
+tunnel, which arrives from a loopback address, and fails unless the route
+refuses it for carrying `cf-ray`.
 
 Answer heading 1 of the security-review checklist from that table, and add the
 row in the same pull request as the route.

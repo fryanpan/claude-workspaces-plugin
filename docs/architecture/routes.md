@@ -9,8 +9,9 @@ file and that one disagree, and when a row’s declared gate disagrees with what
 `shareScopeAllows` actually decides. That check cannot tell `trusted-local`
 from `loopback-only`, so `packages/server/test/route-table-loopback.test.ts`
 dials every row filed under either from a loopback and a non-loopback address
-and fails when the route refuses a different caller than its row says. The gate
-vocabulary is [security.md](security.md).
+and fails when the route refuses a different caller than its row says. It also
+calls every `loopback-only` row through the tunnel and fails unless the route
+refuses it. The gate vocabulary is [security.md](security.md).
 
 | Pattern | Methods | Module | Gate | Reason |
 | --- | --- | --- | --- | --- |
