@@ -1,4 +1,5 @@
 import type { DocMeta, TaskReviewItem, User } from '@claude-workspaces/core';
+import { classifyActor } from '../actor-identity.ts';
 import type { AgentNoteRing } from '../agent-notes.ts';
 import type { ChatAudit } from '../chat-audit.ts';
 import type { DispatchRegistry } from '../dispatch-registry.ts';
@@ -186,4 +187,44 @@ export interface TaskRouteRequest {
   /** The owner gate: `null` for the board's owner, the 403 for anyone else.
    *  Read by the owner-only review item — see `handleTaskReviewItems`. */
   requireOwner: (workspaceId: string) => Response | null;
+}
+
+/**
+ * Read the board's dispatchable rows BEFORE a person's write, and hand back
+ * the call that says afterwards which rows that write FREED — see
+ * `personFreedWork`. Call the returned function only once the write succeeded.
+ *
+ * A person makes work dispatchable without transitioning the work in more
+ * ways than one, and every one of them is its own route: agreeing a goal band
+ * or closing a blocker (the transition is on the goal row or the blocker),
+ * removing an `after` edge, archiving a blocker, handing an unowned row to an
+ * agent, moving a backlog row into a band. None is a transition on the row
+ * that became ready, so without this each fell silent until the fifteen-minute
+ * idle window. One helper rather than a copy per route, because the diff it
+ * feeds is the board's own gate on both sides — a route only has to say where
+ * its write is.
+ *
+ * Only for a person; an agent's move returns a call that does nothing, and
+ * takes no reading at all. `classifyActor` resolves an undeclared author to
+ * `agent`, the safe direction here, where a misread would wake the lead on
+ * every builder's own edit. The mark is taken against the row's OWN board —
+ * a task or a goal row, which share one id space — because that is the board
+ * the release will be judged on.
+ */
+export function markPersonRelease(
+  ctx: Pick<TaskRoutesContext, 'taskStore' | 'readyNudger'>,
+  author: User,
+  rowId: string,
+): (except?: string) => void {
+  if (classifyActor(author) !== 'person') return () => {};
+  const workspaceId =
+    ctx.taskStore.getTask(rowId)?.workspaceId ?? ctx.taskStore.getGoalRow(rowId)?.workspaceId;
+  if (workspaceId === undefined) return () => {};
+  const before = ctx.readyNudger.markReady(workspaceId);
+  return (except) =>
+    ctx.readyNudger.personFreedWork({
+      workspaceId,
+      before,
+      ...(except !== undefined ? { except } : {}),
+    });
 }

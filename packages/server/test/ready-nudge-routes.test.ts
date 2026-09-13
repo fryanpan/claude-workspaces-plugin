@@ -563,12 +563,15 @@ describe('the board wakes its lead over the wire', () => {
           author: PERSON,
         }),
       );
-      // ...and a second, genuinely free row moves under the agreed one.
+      // ...and a second, genuinely free row moves under the agreed one. The
+      // AGENT places it: a person moving a backlog row into an agreed band is
+      // an immediate release wake (`markPersonRelease`), which would spend the
+      // arming this timed pass is here to read.
       const freeId = await addReadyRow(workspaceId, 'Cache the facet counts');
       await jj(
         await post(`/workspaces/${workspaceId}/tasks/${freeId}/goal`, {
           goal: G.agreed,
-          author: PERSON,
+          author: LEAD,
         }),
       );
       await settle();

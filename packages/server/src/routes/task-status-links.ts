@@ -15,7 +15,11 @@ import {
 } from '../share/ref-scope.ts';
 import { BAD_REF_ERROR } from '../task-create.ts';
 import { type TaskStatus, isValidRef, taskChip } from '../tasks.ts';
-import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
+import {
+  type TaskRouteRequest,
+  type TaskRoutesContext,
+  markPersonRelease,
+} from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
 export async function handleTaskStatusAndLinks(
@@ -43,28 +47,12 @@ export async function handleTaskStatusAndLinks(
     const to = body?.to as TaskStatus | undefined;
     if (!author || !to) return j(400, { error: 'author + to required' });
     // Read the board's dispatchable rows BEFORE the write, so the success arm
-    // can say which rows this move FREED — see `personFreedWork`. A person can
-    // make work dispatchable without transitioning the work: agreeing a goal
-    // band releases every row under it (the transition is on the GOAL row) and
-    // closing a blocker releases what waited on the `after` edge (it is on the
-    // BLOCKER). Neither is a transition on the row that became ready, so the
-    // row-watching wake below sees nothing and the board falls silent until
-    // the fifteen-minute window.
-    //
-    // Only for a person, and nothing at all on an agent's move. It is not
-    // free: the mark is a full `readyWorkSnapshot`, and a person's `todo` move
-    // now runs three of them (this one, `personQueuedTask`'s, and
-    // `personFreedWork`'s). This route is human-rate, so three reads of one
-    // board is the cheap side of the trade against a lead who is not told.
-    // The row's OWN workspace rather than the addressed one: the two agree
-    // today, and the mark has to be taken against the board the release will
-    // be judged on.
-    const releasingBoard =
-      classifyActor(author) === 'person'
-        ? (taskStore.getTask(taskId)?.workspaceId ?? taskStore.getGoalRow(taskId)?.workspaceId)
-        : undefined;
-    const readyBefore =
-      releasingBoard !== undefined ? ctx.readyNudger.markReady(releasingBoard) : undefined;
+    // can say which rows this move FREED — a goal band agreed, a blocker
+    // closed. See `markPersonRelease`. Not free for a person: the mark is a
+    // full `readyWorkSnapshot`, and a `todo` move runs three of them (this,
+    // `personQueuedTask`'s and `personFreedWork`'s). This route is human-rate,
+    // so that is the cheap side of the trade against a lead who is not told.
+    const released = markPersonRelease(ctx, author, taskId);
     const res = taskStore.transition(taskId, to, {
       actor: author,
       note: body?.note as string | undefined,
@@ -129,13 +117,7 @@ export async function handleTaskStatusAndLinks(
     // transition. `except` is the moved row itself: the line above already
     // announced it, and two frames about one move is the noise the arming
     // rules exist to prevent.
-    if (releasingBoard !== undefined && readyBefore !== undefined) {
-      ctx.readyNudger.personFreedWork({
-        workspaceId: releasingBoard,
-        before: readyBefore,
-        except: taskId,
-      });
-    }
+    released(taskId);
     // The success arm carries the NON-enforcing blockers as warnings, which
     // is the same report and the same cut.
     return j(200, {
@@ -373,6 +355,8 @@ export async function handleTaskStatusAndLinks(
     if (after !== undefined && after !== null && typeof after !== 'string') {
       return j(400, { error: 'after must be a task id or null' });
     }
+    // Moving a backlog row into an agreed band frees it — `markPersonRelease`.
+    const released = markPersonRelease(ctx, author, taskId);
     const res = taskStore.setTaskGoal(taskId, goal, {
       actor: author,
       position: typeof body?.position === 'number' ? Number(body.position) : undefined,
@@ -380,6 +364,7 @@ export async function handleTaskStatusAndLinks(
       batchId,
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
+    released();
     // A confirm-in-place (changed:false) mutates gated fields
     // (triagedAgainst, triagePendingTs) without emitting an event —
     // refresh the projection by hand, same as attachDoc.
