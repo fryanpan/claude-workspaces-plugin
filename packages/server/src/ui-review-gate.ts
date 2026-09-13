@@ -191,18 +191,33 @@ export interface UiGateRow {
    *  transition on the row. */
   dispatched: boolean;
   /**
-   * Every file the row's builder has changed since leaving the default
-   * branch, or `undefined` when nobody could answer — no registered
-   * dispatch, a worktree that is gone or is not a git repo, a git that
-   * failed. `undefined` and `[]` are NOT the same: the first is no evidence
-   * and the row goes unjudged, the second is a readable worktree that has
-   * changed nothing, which is evidence of no UI change.
+   * Every file the row's builder has changed, and which starting line that
+   * was measured from — or `undefined` when nobody could answer: no
+   * registered dispatch, a worktree that is gone or is not a git repo, a git
+   * that failed. `undefined` and `{ files: [] }` are NOT the same: the first
+   * is no evidence and the row goes unjudged, the second is a readable
+   * worktree that has changed nothing, which is evidence of no UI change.
    */
-  changedFiles?: readonly string[];
+  changedWork?: ChangedWork;
   /** Any review item on the row or its thread carries an answer. One is
    *  enough — the gate asks that somebody was asked and answered, not that
    *  every item on the row is closed. */
   answeredReviewItem: boolean;
+}
+
+/**
+ * What the builder changed, and the starting line it was measured from.
+ * Structurally what `changedFilesInWorktree` returns; declared here because
+ * this module is the one that decides from it and must not import the
+ * adapter that runs git.
+ */
+export interface ChangedWork {
+  files: readonly string[];
+  /** `dispatch` is the commit this dispatch's worktree sat on when it was
+   *  registered; `trunk` the default branch's merge base, which is what the
+   *  read falls back to and which cannot tell this task's work from the work
+   *  of whoever held the checkout before it. */
+  from: 'dispatch' | 'trunk';
 }
 
 /** A row that was built without its gate. */
@@ -211,6 +226,11 @@ export interface UngatedUiRow {
   title: string;
   /** The changed file that made it UI work — the finding's evidence. */
   file: string;
+  /** Which starting line that evidence was measured from. A finding off a
+   *  `trunk` read is the weaker claim and says so, because a reader who
+   *  cannot tell the two apart pays the investigation the gate exists to
+   *  save. */
+  from: 'dispatch' | 'trunk';
   /** The word in the row's own prose that agrees, when there is one. Absent
    *  on the rows the word list could never have caught, which is most of the
    *  reason the gate now reads files. */
@@ -221,20 +241,21 @@ export interface UngatedUiRow {
  * The rows in flight that an agent filed, whose builder has touched a screen,
  * and that nobody answered a review item on. Board order in, board order out.
  *
- * A row with no `changedFiles` is skipped in silence — see the header.
+ * A row with no `changedWork` is skipped in silence — see the header.
  */
 export function ungatedUiRows(rows: readonly UiGateRow[]): UngatedUiRow[] {
   const out: UngatedUiRow[] = [];
   for (const row of rows) {
     if (!row.filedByAgent || !row.dispatched || row.answeredReviewItem) continue;
-    if (row.changedFiles === undefined) continue;
-    const file = uiFileIn(row.changedFiles);
+    if (row.changedWork === undefined) continue;
+    const file = uiFileIn(row.changedWork.files);
     if (file === undefined) continue;
     const keyword = uiKeywordIn(`${row.title}\n${row.body ?? ''}`);
     out.push({
       id: row.id,
       title: row.title,
       file,
+      from: row.changedWork.from,
       ...(keyword !== undefined ? { keyword } : {}),
     });
   }
@@ -270,7 +291,7 @@ export interface UiGateReads {
    * shells out to git, so the gate asks it only of rows the two boolean
    * reads have already kept.
    */
-  changedFiles: (taskId: string) => readonly string[] | undefined;
+  changedWork: (taskId: string) => ChangedWork | undefined;
   /** Has any review item on this row, on either surface, been answered? */
   answeredReviewItem: (taskId: string) => boolean;
 }
@@ -285,7 +306,7 @@ export interface UiGateReads {
  * the transition it is registered against.
  *
  * The two expensive reads are asked LAST and only of a row the cheap ones
- * have not already cleared. `changedFiles` spawns a git process and
+ * have not already cleared. `changedWork` spawns a git process and
  * `answeredReviewItem` walks a doc's threads; doing either on every
  * in-progress row of every board on every stall tick, to learn something
  * about rows that were never candidates, is a cost with no reader.
@@ -303,15 +324,15 @@ export function collectUngatedUiRows(
       (task.createdBy === undefined && task.transitions[0]?.by?.kind === 'agent');
     const dispatched = task.transitions.some((t) => t.to === 'in-progress');
     const candidate = filedByAgent && dispatched;
-    const changedFiles = candidate ? reads.changedFiles(task.id) : undefined;
-    const touchesUi = changedFiles !== undefined && uiFileIn(changedFiles) !== undefined;
+    const changedWork = candidate ? reads.changedWork(task.id) : undefined;
+    const touchesUi = changedWork !== undefined && uiFileIn(changedWork.files) !== undefined;
     rows.push({
       id: task.id,
       title: task.title,
       ...(task.body !== undefined ? { body: task.body } : {}),
       filedByAgent,
       dispatched,
-      ...(changedFiles !== undefined ? { changedFiles } : {}),
+      ...(changedWork !== undefined ? { changedWork } : {}),
       answeredReviewItem: touchesUi ? reads.answeredReviewItem(task.id) : false,
     });
   }

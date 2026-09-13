@@ -261,6 +261,20 @@ function isAncestor(repo: string, a: string, b: string): boolean {
   return git(repo, ['merge-base', '--is-ancestor', a, b]).ok;
 }
 
+export interface WorktreeChanges {
+  /** Every path the worktree has changed since `from`. */
+  files: string[];
+  /**
+   * Which starting line that was measured from: `dispatch` is the commit
+   * recorded when this dispatch took the checkout, `trunk` the default
+   * branch's merge base. The fallback is not neutral — `trunk` is the read
+   * that hands one task the work of whoever held the worktree before it, so
+   * anything that judges a builder off this list must be able to say which
+   * of the two it got.
+   */
+  from: 'dispatch' | 'trunk';
+}
+
 /**
  * Every file a worktree has changed since it left the default branch —
  * committed and uncommitted alike, untracked files included.
@@ -291,29 +305,27 @@ function isAncestor(repo: string, a: string, b: string): boolean {
  *
  * `null` means the question could not be answered — not a repo, no default
  * branch, no merge base, a git that failed. It is deliberately a different
- * value from `[]` ("a readable worktree that has changed nothing"), because
+ * value from `{ files: [] }` ("a readable worktree that has changed nothing"), because
  * a caller that folded the two together would be asserting a fact about work
  * it could not see.
  */
-export function changedFilesInWorktree(repo: string, since?: string): string[] | null {
+export function changedFilesInWorktree(repo: string, since?: string): WorktreeChanges | null {
   const ref = defaultBaseRef(repo);
   if (ref === null) return null;
   const mb = git(repo, ['merge-base', 'HEAD', ref]);
   const mergeBase = mb.stdout.trim();
   if (!mb.ok || !isObjectId(mergeBase)) return null;
-  const pinned =
+  const usable =
     since !== undefined &&
     resolveCommit(repo, since) !== null &&
     isAncestor(repo, mergeBase, since) &&
-    isAncestor(repo, since, 'HEAD')
-      ? since
-      : mergeBase;
-  const diff = diffFiles(repo, pinned, null);
+    isAncestor(repo, since, 'HEAD');
+  const diff = diffFiles(repo, usable && since !== undefined ? since : mergeBase, null);
   if (!diff.ok) return null;
-  const paths: string[] = [];
+  const files: string[] = [];
   for (const file of diff.files) {
-    paths.push(file.relPath);
-    if (file.oldPath !== undefined && file.oldPath !== file.relPath) paths.push(file.oldPath);
+    files.push(file.relPath);
+    if (file.oldPath !== undefined && file.oldPath !== file.relPath) files.push(file.oldPath);
   }
-  return paths;
+  return { files, from: usable ? 'dispatch' : 'trunk' };
 }

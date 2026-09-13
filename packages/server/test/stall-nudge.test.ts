@@ -1367,6 +1367,7 @@ const UNGATED = {
   id: 't-9',
   title: 'Move the Plan button onto the ticket',
   file: 'packages/workspaces-app/src/board.css',
+  from: 'dispatch' as const,
   keyword: 'button',
 };
 
@@ -1400,6 +1401,7 @@ describe('a row built past the UI gate is the lead’s finding', () => {
       id: 't-10',
       title: 'Redo the review panel',
       file: 'packages/workspaces-app/src/doc.css',
+      from: 'dispatch' as const,
       keyword: 'panel',
     };
     world.boards = [board({ stalled: [], ungatedUi: [UNGATED, second] })];
