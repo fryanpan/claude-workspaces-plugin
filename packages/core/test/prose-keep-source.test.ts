@@ -6,6 +6,7 @@ import {
   parseMarkdownBlocks,
   serializeFragmentToMarkdown,
   serializeKeepingSource,
+  serializeKeepingSourceLayout,
 } from '../src/prose.ts';
 
 /**
@@ -74,6 +75,37 @@ describe('serializeKeepingSource', () => {
     const source = Array.from({ length: 2100 }, (_, i) => `Para ${i}\nwrapped.`).join('\n\n');
     const edited = source.replace('Para 1050\nwrapped.', 'Para 1050 edited.');
     expect(serializeKeepingSource(docOf(edited), source)).toBe(edited);
+  });
+
+  it('keeps every existing bullet of a list an item was appended to', () => {
+    const source = '# Notes\n\n* Existing note\n    * nested detail\n* Second note\n\nAfter.\n';
+    const live = docOf(source.replace('* Second note\n', '* Second note\n* Added idea\n'));
+    expect(serializeKeepingSource(live, source)).toBe(
+      source.replace('* Second note\n', '* Second note\n* Added idea\n'),
+    );
+  });
+
+  it('re-serializes only the bullet whose words changed', () => {
+    const source = '  * alpha\n      * deep\n  * beta\n\n  * gamma\n';
+    const live = docOf(source.replace('beta', 'beta two'));
+    const out = serializeKeepingSource(live, source);
+    expect(out).toBe(source.replace('beta', 'beta two'));
+  });
+
+  it('keeps an ordered list item by item when one is inserted', () => {
+    const source = '1. Call the harbor master\n   - about the slip\n2. Book the ferry\n';
+    const live = docOf(`${source}3. Tell Saltmarsh\n`);
+    expect(serializeKeepingSource(live, source)).toBe(`${source}3. Tell Saltmarsh\n`);
+  });
+
+  it('a layout from the last write-back gives the same bytes as the text itself', () => {
+    const live = docOf(SOURCE.replace('Para two.', 'Para two, edited.'));
+    const first = serializeKeepingSourceLayout(live, SOURCE);
+    const next = docOf(first.text.replace('Para one\nwrapped.', 'Para one\nwrapped.\n\nInserted.'));
+    expect(serializeKeepingSource(next, first)).toBe(serializeKeepingSource(next, first.text));
+    expect(serializeKeepingSource(next, first)).toBe(
+      first.text.replace('Para one\nwrapped.', 'Para one\nwrapped.\n\nInserted.'),
+    );
   });
 
   it('nests a list under an ordered item past the marker width', () => {

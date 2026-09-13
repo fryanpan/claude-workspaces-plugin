@@ -57,7 +57,8 @@ export {
 export type { TextSegment } from './prose-fragment.ts';
 export { detectLiteralMarkdown, literalMarkdownMessage } from './prose-integrity.ts';
 export type { LiteralMarkdownFinding, LiteralMarkdownKind } from './prose-integrity.ts';
-export { serializeKeepingSource } from './prose-keep-source.ts';
+export { serializeKeepingSource, serializeKeepingSourceLayout } from './prose-keep-source.ts';
+export type { SourceLayout } from './prose-keep-source.ts';
 export { nestBlocksOutcome, nestBlocksUnderLead } from './prose-nest.ts';
 export type { NestBlocksError, NestBlocksOptions, NestBlocksResult } from './prose-nest.ts';
 export {
