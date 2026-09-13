@@ -321,24 +321,24 @@ describe('the strip itself: one flex row, blinker · clock · flowing feed', () 
 });
 
 describe('motion', () => {
-  it('blinks the dot only while actually recording', () => {
+  it('never blinks the dot, and shows red only while actually recording', () => {
     const live = attach('meeting-strip', { attrs: { 'data-state': 'live' } });
-    expect(styleOf(attach('meeting-blinker', { parent: live })).animation).toContain(
-      'meeting-blink',
-    );
-    // Requesting/bot-not-live/settled-failure states hold it still — a
-    // blinking dot beside "the mic was refused" claims a recording that is
-    // not happening.
+    // Steady, not blinking (Bryan, 2026-09-13: "No blinking.").
+    expect(styleOf(attach('meeting-blinker', { parent: live })).animation).toBe('');
+    expect(styleOf(attach('meeting-blinker', { parent: live })).background).toBe(token('--red'));
+    // Settled-failure states show no red — a red dot beside "the mic was
+    // refused" claims a recording that is not happening.
     const dead = attach('meeting-strip', { attrs: { 'data-state': 'unavailable' } });
-    expect(styleOf(attach('meeting-blinker', { parent: dead })).animation).toBe('none');
+    expect(styleOf(attach('meeting-blinker', { parent: dead })).background).not.toBe(
+      token('--red'),
+    );
     // And idle, which the strip is now visible in: a recording that timed
     // itself out leaves its sentence there, and a live-red dot beside
     // "Recording stopped" claims the same thing the refused mic did.
     const over = attach('meeting-strip', { attrs: { 'data-state': 'idle' } });
     const overDot = styleOf(attach('meeting-blinker', { parent: over }));
-    expect(overDot.animation).toBe('none');
     expect(overDot.background).toBe(token('--border-strong'));
-    // Control: the live dot is neither still nor that colour.
+    // Control: the live dot is not that colour.
     expect(styleOf(attach('meeting-blinker', { parent: live })).background).not.toBe(
       token('--border-strong'),
     );
@@ -346,9 +346,7 @@ describe('motion', () => {
     // the MICROPHONE is idle for the whole of a bot meeting, and that strip is
     // live and must go on saying so.
     const bot = attach('meeting-strip is-bot is-live', { attrs: { 'data-state': 'idle' } });
-    expect(styleOf(attach('meeting-blinker', { parent: bot })).animation).toContain(
-      'meeting-blink',
-    );
+    expect(styleOf(attach('meeting-blinker', { parent: bot })).background).toBe(token('--red'));
   });
 
   it('flashes only the word the model rewrote', () => {

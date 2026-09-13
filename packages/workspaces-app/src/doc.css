@@ -1405,11 +1405,6 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   height: 10px;
   border-radius: var(--radius-pill);
   background: var(--red);
-  /* The level meter: meeting-strip.ts writes the mic's loudness (0..1) into
-     --mic-level per frame, so the dot sits small on silence and swells with a
-     voice. A transform, so the button never reflows. */
-  transform: scale(calc(0.6 + var(--mic-level, 0.4)));
-  transition: transform 90ms linear;
 }
 /* The chooser's door beside Record, for the doc where a tap records at once
    (nobody else on it): a chevron the height of the pill, no border of its
@@ -1498,25 +1493,17 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   height: 10px;
   border-radius: var(--radius-pill);
   background: var(--red);
-  animation: meeting-blink 1.2s ease-in-out infinite;
 }
-@keyframes meeting-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.25;
-  }
-}
-/* A strip that is not recording does not pulse: the bot dialling in or
+/* The dot is steady, never blinking: Bryan (2026-09-13) wants a calm page
+   that spends attention only where it pays, and a steady red dot says
+   "recording" clearly enough.
+   A strip that is not recording shows no red: the bot dialling in or
    waiting on the host is the orange of "in progress", and a settled failure
    is no light at all — a blinking dot beside "the mic was refused" claims a
    recording that is not happening. */
 .meeting-strip[data-state="requesting"] .meeting-blinker,
 .meeting-strip.is-bot:not(.is-live) .meeting-blinker {
   background: var(--orange);
-  animation: none;
 }
 .meeting-strip[data-state="unavailable"] .meeting-blinker,
 .meeting-strip[data-state="blocked"] .meeting-blinker,
@@ -1533,7 +1520,6 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   .meeting-strip[data-state="idle"]:not(.is-live)
   .meeting-blinker {
   background: var(--border-strong);
-  animation: none;
 }
 .meeting-elapsed {
   flex: none;
@@ -2468,16 +2454,9 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
      none of them has anywhere else to be said. Those states keep the bar.
      edit-viewport.ts refuses to yield a RECORDING strip to `hidden` because
      "a live mic with no indicator is not a thing to ship" — the indicator is
-     the blinking dot, which this rule moves rather than removes. */
+     the Record button's red dot, which stays on screen. */
   .meeting-strip:not(:has(.meeting-note)) {
     display: none;
-  }
-  /* The blink the strip's own `.meeting-blinker` was doing, on the control
-     that is still on screen. meeting-strip.ts unhides `.meeting-record-dot`
-     only while recording, so this is the live indicator and the one animated
-     thing in the top bar. */
-  .meeting-record.is-live .meeting-record-dot {
-    animation: meeting-blink 1.2s ease-in-out infinite;
   }
   /* The popovers become an edge-to-edge sheet under the bar. */
   .meeting-pop,

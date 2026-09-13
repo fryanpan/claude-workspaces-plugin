@@ -59,7 +59,8 @@ export {
 export type { TextSegment } from './prose-fragment.ts';
 export { detectLiteralMarkdown, literalMarkdownMessage } from './prose-integrity.ts';
 export type { LiteralMarkdownFinding, LiteralMarkdownKind } from './prose-integrity.ts';
-export { serializeKeepingSource } from './prose-keep-source.ts';
+export { serializeKeepingSource, serializeKeepingSourceLayout } from './prose-keep-source.ts';
+export type { SourceLayout } from './prose-keep-source.ts';
 export { isMdxPath, MDX_FLOW_LANGUAGE, mdxFlowEnd } from './prose-mdx.ts';
 export type { MarkdownParseOptions } from './prose-mdx.ts';
 export { nestBlocksOutcome, nestBlocksUnderLead } from './prose-nest.ts';

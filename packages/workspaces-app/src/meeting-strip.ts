@@ -461,13 +461,6 @@ function defaultInterval(fn: () => void, ms: number): () => void {
   return () => clearInterval(id);
 }
 
-/** RMS of a frame, 0..1, scaled so ordinary speech reads near the top. */
-export function frameLevel(pcm: Int16Array): number {
-  let sum = 0;
-  for (const v of pcm) sum += v * v;
-  return Math.min(1, (Math.sqrt(sum / Math.max(1, pcm.length)) / 32768) * 6);
-}
-
 /**
  * How long a meeting's socket may be open with no audio frame sent before the
  * strip says the microphone is delivering nothing. A working capture sends
@@ -1849,11 +1842,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // Every stream this source names, opened in order — one for a
       // microphone meeting, two for mic + Mac audio.
       source,
-      onFirstStreamFrame: (pcm) => {
-        // The Recording dot doubles as the level meter: it swells with the
-        // voice and sits small on silence, so a dead microphone is visible
-        // on the one indicator that is always on screen.
-        recordDot.style.setProperty('--mic-level', frameLevel(pcm).toFixed(2));
+      onFirstStreamFrame: () => {
+        // The Recording dot stays a steady red: Bryan asked for no pulsing
+        // (2026-09-13). A dead microphone is named by the no-audio line.
         if (!socketOpen) return;
         framesSent += 1;
         if (noAudio) {

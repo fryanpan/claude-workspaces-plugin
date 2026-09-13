@@ -63,6 +63,9 @@ that way and add new subsystem docs to the list here.
   append at EOF conflict every time.
 - **Edit Bryan's bound docs directly; don't default to `suggest: true`.**
   Concurrent editing is the norm; reserve suggestions for judgment calls.
+- **Calm by default** (Bryan, 2026-09-13): spend the reader's limited
+  attention only where it pays. No pulsing, no blinking, no badges; a steady
+  indicator (the red Recording dot) is clear enough.
 - **Verify UI at 1180x820 (iPad landscape — Bryan's main device) AND 430px**
   per [docs/product/design-mobile.md](docs/product/design-mobile.md). Tiers:
   mobile ≤1100, tablet/laptop 1101–1920 (iPad and MacBook alike — the scarce

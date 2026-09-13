@@ -22,63 +22,8 @@ import { join } from 'node:path';
 import { DocStore } from '../src/doc-store.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
+import { MD, MDX } from './keep-source-fixtures.ts';
 import { waitForFileToBe } from './wait-for.ts';
-
-const MDX = `---
-title: Reading the tide at Saltmarsh
----
-
-import { Callout } from '../components/Callout'
-import Chart from './chart.js'
-export const meta = { author: 'Harborlight Press' }
-
-# Reading the tide at Saltmarsh
-
-The harbor opens at dawn and closes at dusk.
-
-Boats with a <Badge tone="info">new</Badge> permit launch first,
-and the rest follow on the next slack water.
-
-<Callout type="warning">
-  Watch the tide tables before you launch.
-</Callout>
-
-- Two-space list
-  - nested two
-    - deeper two
-- sibling two
-
-* Four-space list
-    * nested four
-        * deeper four
-
-1. Ordered item
-   - nested under an ordered item
-2. Second ordered item
-
-<Chart data={meta.series} />
-`;
-
-const MD = `# Riverbend field notes
-
-The ferry runs hourly.
-
-A soft-wrapped paragraph that the author
-broke across three lines on purpose
-to keep diffs small.
-
-- Two-space list
-  - nested two
-    - deeper two
-
-* Four-space list
-    * nested four
-        * deeper four
-
-1. Ordered item
-   - nested under an ordered item
-2. Second ordered item
-`;
 
 describe('write-back keeps the bytes of blocks the edit did not touch', () => {
   let root: string;

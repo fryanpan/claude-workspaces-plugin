@@ -244,10 +244,10 @@ describe.skipIf(!CHROME)('the meeting page at 430, in a real browser', () => {
       expect(control.behind).toBeGreaterThan(0);
 
       // Done-when 2: no bar under the recording bar, and the indicator that is
-      // left blinks in the top right.
+      // left is the steady red dot in the top right (no blinking, 2026-09-13).
       expect(fixed.stripDisplay).toBe('none');
       expect(fixed.stripHeight).toBe(0);
-      expect(fixed.dotAnimation).toBe('meeting-blink');
+      expect(fixed.dotAnimation).toBe('none');
 
       // Done-when 3: one short line each, no subtitles.
       for (const h of fixed.floatHeights) expect(h).toBeLessThanOrEqual(48);
