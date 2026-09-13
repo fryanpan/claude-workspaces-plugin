@@ -78,7 +78,7 @@ function buildWidget(dir: string): string {
     entry,
     `import ${src('widget.ts')};\n` +
       `import { showThreadPopover } from ${src('widget-threads.ts')};\n` +
-      `(window as unknown as { __pop: unknown }).__pop = showThreadPopover;\n`,
+      '(window as unknown as { __pop: unknown }).__pop = showThreadPopover;\n',
   );
   const built = spawnSync('bun', ['build', entry, '--target=browser'], {
     encoding: 'utf8',
