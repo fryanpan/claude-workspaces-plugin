@@ -19,6 +19,7 @@ import {
 } from './widget-auth.ts';
 import { placeCards } from './widget-card.ts';
 import { type DockItem, deepLinkThread, readLinkedItems, renderDockInto } from './widget-dock.ts';
+import { pageBarHeight, watchPageBar } from './widget-page-bar.ts';
 import {
   IGNORE_ATTR,
   TAG,
@@ -174,6 +175,7 @@ export class FeedbackWidgetEl extends HTMLElement {
   private resizeHandler: (() => void) | null = null;
   private scrollHandler: (() => void) | null = null;
   private vvHandler: (() => void) | null = null;
+  private barStop: (() => void) | null = null;
   showResolved = false;
   /** The popup-token, when this embed offers auth and a person signed in. */
   authToken: string | null = null;
@@ -322,14 +324,16 @@ export class FeedbackWidgetEl extends HTMLElement {
   // Mobile Safari overlays the URL bar on top of `position: fixed` content
   // when the layout viewport is taller than the visual viewport. Without this
   // the FAB hides behind the URL bar on first paint until the user scrolls.
-  // The same fix handles iOS keyboard pop-up moving the visual viewport up.
+  // The same fix handles iOS keyboard pop-up moving the visual viewport up,
+  // and the page's own bottom bar, which the controls stand on rather than
+  // cover (`widget-page-bar.ts`).
   private wireVisualViewport(): void {
     if (this.vvHandler) return;
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
       const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap)}px`);
+      this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap) + pageBarHeight(vv)}px`);
       // The screen's edges, for --cw-edge in styles.ts.
       this.style.setProperty('--cw-vv-left', `${vv.offsetLeft}px`);
       this.style.setProperty('--cw-vv-right', `${vv.offsetLeft + vv.width}px`);
@@ -337,6 +341,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     this.vvHandler = update;
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
+    this.barStop = watchPageBar(update);
     update();
   }
 
@@ -390,6 +395,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       vv.removeEventListener('resize', this.vvHandler);
       vv.removeEventListener('scroll', this.vvHandler);
     }
+    this.barStop?.();
   }
 
   /**
