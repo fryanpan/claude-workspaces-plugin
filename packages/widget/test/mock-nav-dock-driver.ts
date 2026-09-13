@@ -59,7 +59,7 @@ const LINKED = [
         { id: 'o-no', label: 'No' },
       ],
     },
-    by: 'Cartographer',
+    by: 'Riverbend',
     ts: 1_700_000_000_000,
   },
 ];
@@ -71,7 +71,7 @@ function pageHtml(bundle: string): string {
 </head><body>
 <main><h1>Harborlight moorings</h1></main>
 <script type="application/json" data-cw-linked-items>${JSON.stringify(LINKED)}</script>
-<${TAG} doc-id="mock-nav-dock" workspace-id="w-demo" user="Reviewer" server-url="ws://127.0.0.1:1"></${TAG}>
+<${TAG} doc-id="mock-nav-dock" workspace-id="w-demo" user="Saltmarsh" server-url="ws://127.0.0.1:1"></${TAG}>
 <script>${bundle}</script>
 </body></html>`;
 }
