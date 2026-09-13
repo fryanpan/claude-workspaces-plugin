@@ -14191,7 +14191,8 @@ function stalledLine(p) {
   const ungated = p.ungatedUi ?? [];
   if (ungated.length > 0) {
     const noun = ungated.length === 1 ? "UI task is" : "UI tasks are";
-    parts.push(`${ungated.length} ${noun} being built past the review gate — an agent filed it, its builder ` + "has changed a file a person looks at, and nobody answered a review item on it — " + `${ungatedRowsClause(ungated)}. ` + "Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.");
+    const who = ungated.some((row) => row.from === "trunk") ? "its worktree" : "its builder";
+    parts.push(`${ungated.length} ${noun} being built past the review gate — an agent filed it, ${who} ` + "has changed a file a person looks at, and nobody answered a review item on it — " + `${ungatedRowsClause(ungated)}. ` + "Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.");
   }
   const checkIn = p.checkIn ?? [];
   if (checkIn.length > 0) {
@@ -14241,7 +14242,8 @@ function askedBackRowsClause(rows) {
 }
 function ungatedRowClause(row) {
   const title = row.title ? `"${row.title}" ` : "";
-  const file = row.file ? `, changed: ${row.file}` : "";
+  const since = row.from === "dispatch" ? "changed since dispatch commit" : row.from === "trunk" ? "changed since trunk merge base, cannot tell this task’s work from other work" : "changed";
+  const file = row.file ? `, ${since}: ${row.file}` : "";
   const word = row.keyword ? `, matched: ${row.keyword}` : "";
   return `${title}(${row.id}${file}${word})`;
 }
@@ -19793,7 +19795,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.228";
+var PLUGIN_VERSION = "0.1.229";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

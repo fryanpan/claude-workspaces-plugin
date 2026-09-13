@@ -743,6 +743,41 @@ describe('stalledLine names rows built past the UI gate as their own finding', (
   });
 });
 
+describe('a UI gate finding says which baseline its file was read from', () => {
+  const ungated = (row: typeof UNGATED_ROW & { from?: 'dispatch' | 'trunk' }) =>
+    stalledLine({ ...STALL, rows: [], stalledCount: 0, ungatedUi: [row] });
+
+  it('a file read from the dispatch’s own baseline is this builder’s work', () => {
+    const line = ungated({ ...UNGATED_ROW, from: 'dispatch' });
+    expect(line).toContain(
+      '(t-u1, changed since dispatch commit: packages/workspaces-app/src/board.css, matched: badge)',
+    );
+    expect(line).toContain('its builder has changed a file');
+  });
+
+  it('a file read from the trunk merge base says it cannot tell whose it is', () => {
+    const line = ungated({ ...UNGATED_ROW, from: 'trunk' });
+    expect(line).toContain(
+      '(t-u1, changed since trunk merge base, cannot tell this task’s work from other work: ' +
+        'packages/workspaces-app/src/board.css, matched: badge)',
+    );
+    expect(line).toContain('its worktree has changed a file');
+    expect(line).not.toContain('its builder');
+  });
+
+  it('the two readings are different lines', () => {
+    expect(ungated({ ...UNGATED_ROW, from: 'trunk' })).not.toBe(
+      ungated({ ...UNGATED_ROW, from: 'dispatch' }),
+    );
+  });
+
+  it('a frame from an older server names no baseline', () => {
+    const line = ungated(UNGATED_ROW);
+    expect(line).toContain('changed: packages/workspaces-app/src/board.css');
+    expect(line).not.toContain('since');
+  });
+});
+
 describe('stalledLine names held review items as their own finding', () => {
   it('says how many are held, which, by whom, and what the judge found', () => {
     const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, heldItems: [HELD_ROW] });

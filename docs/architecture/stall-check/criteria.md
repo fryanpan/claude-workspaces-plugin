@@ -177,6 +177,15 @@ with no baseline (a path git cannot answer for, a record persisted before the
 field existed) falls back to the merge base; the reader degrades, it never
 refuses.
 
+**A degraded read says it is one.** The read returns which base it used
+(`from: 'dispatch' | 'trunk'`), and the finding line carries it: `changed
+since dispatch commit: <file>` is this task's work (less any edits left
+uncommitted before the dispatch, which no commit can pin), while `changed since trunk merge
+base, cannot tell this task's work from other work: <file>` is everything
+committed in that checkout since it left trunk, and the sentence names the
+worktree rather than the builder. A reader who cannot tell the two apart pays
+the investigation the gate exists to save.
+
 **Two live dispatches in one checkout are ambiguous, and ambiguous evidence
 is no evidence.** The registry does not stop a lead putting two tasks in one
 worktree, and nothing in a diff says which task an edit was for — naming both
