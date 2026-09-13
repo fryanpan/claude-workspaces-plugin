@@ -162,20 +162,26 @@ export function serveStaticUnder(root: string, p: string, cacheControl?: string)
 /** The read errors that mean "nothing to serve here" rather than a fault. */
 const NOT_SERVABLE = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);
 
-export function serveStatic(p: string, cacheControl?: string): Response | null {
-  // A regular file only. An existence check let a directory through — a GET
-  // on `/widget/` read the widget root itself, threw EISDIR and answered 500.
-  // The stat and the read are two calls, so a path swapped between them is
-  // still possible; the catch turns that race into the same null rather than
-  // a throw. Anything else (EACCES, EIO) is a real fault and still throws.
-  let buf: Buffer;
+/**
+ * A regular file's bytes, or null. An existence check let a directory through
+ * — a GET on `/widget/` read the widget root itself, threw EISDIR and
+ * answered 500. The stat and the read are two calls, so a path swapped
+ * between them is still possible; the catch turns that race into the same
+ * null rather than a throw. Anything else (EACCES, EIO) is a real fault and
+ * still throws.
+ */
+function readRegularFile(p: string) {
   try {
-    if (!statSync(p).isFile()) return null;
-    buf = readFileSync(p);
+    return statSync(p).isFile() ? readFileSync(p) : null;
   } catch (err) {
     if (NOT_SERVABLE.has((err as NodeJS.ErrnoException).code ?? '')) return null;
     throw err;
   }
+}
+
+export function serveStatic(p: string, cacheControl?: string): Response | null {
+  const buf = readRegularFile(p);
+  if (!buf) return null;
   const ct = CT[extname(p).toLowerCase()] ?? 'application/octet-stream';
   return new Response(buf, {
     headers: {
