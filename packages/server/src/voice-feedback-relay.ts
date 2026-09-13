@@ -33,10 +33,10 @@ import {
   type TidyComment,
   type TidyComplete,
   type TidyInput,
+  apportionTick,
   buildTidyPrompt,
   normWord,
   parseTidyReply,
-  splitTick,
   tidyDollars,
   unusedWords,
 } from './voice-feedback-tidy.ts';
@@ -327,16 +327,20 @@ export class VoiceFeedbackRelay {
     s.ticks++;
     // No model, or no answer: the words still land, as said, where the
     // person last pointed. Losing them is the one outcome this must not have.
+    // A continued comment's text is rewritten whole, so the words join it.
+    const grows = s.open !== null && s.pinned === undefined;
     comments ??= [
       {
-        continues: s.open !== null && s.pinned === undefined,
-        text: words,
+        continues: grows,
+        text: grows && s.open ? `${s.open.text} ${words}` : words,
         target: s.open?.target ?? null,
       },
     ];
-    // Each comment gets its own stretch of the tick, so no two share a clip or words.
-    const parts = splitTick(words, comments, startMs, endMs);
-    comments.forEach((c, k) => {
+    // Each comment gets its own stretch of the tick, so no two share a clip or
+    // words, and no sentence of the next topic's rides on the one before it.
+    const apportioned = apportionTick(input, comments, startMs, endMs);
+    const parts = apportioned.parts;
+    apportioned.comments.forEach((c, k) => {
       const p = parts[k];
       if (p) this.place(s, c, p.words, p.startMs, p.endMs);
     });

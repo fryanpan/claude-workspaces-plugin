@@ -212,9 +212,11 @@ const FILLER = new Set(
 function keys(text: string): string[] {
   return text
     .split(/\s+/)
-    .map(normWord)
+    .map((w) => normWord(w).replace(/^'+|'+$/g, ''))
     .map((w) => (w.length < 3 || FILLER.has(w) ? '' : w.slice(0, 5)));
 }
+
+const keySet = (text: string): Set<string> => new Set(keys(text).filter(Boolean));
 
 export interface TickPart {
   words: string;
@@ -273,6 +275,96 @@ export function splitTick(
     const b = starts[k + 1] ?? list.length;
     return { words: list.slice(a, b).join(' '), startMs: at(a), endMs: at(b) };
   });
+}
+
+/**
+ * A tick's comments with no sentence said twice, and the stretch of the tick
+ * each is made of (`splitTick`).
+ *
+ * The model sometimes grows a comment with the next topic's sentence AND
+ * makes that topic its own comment — in a quarter of replayed staging
+ * recordings (`scripts/voice-replay-eval.ts`). Telling it not to was tried,
+ * and once returned no comment at all; a repeated sentence is cheaper than
+ * lost words, so the repeat is taken out here, where nothing can be lost:
+ *
+ * - a sentence goes only when every word of it is said by a later comment,
+ *   or names the element that comment is on ("Should say save changes." on
+ *   the Save button still says "button");
+ * - never a sentence the open comment already held, and never every sentence
+ *   of a comment;
+ * - and only when the tick's split then hands more of its words to the later
+ *   comments than to its own — the words the person said decide, not the
+ *   tidied text alone.
+ *
+ * The other way the model loses a topic is the opposite: it "continues" the
+ * open comment with a rewrite that keeps only the new sentence, which would
+ * overwrite what the comment said (one replayed recording in eight). A
+ * continuation that keeps under a third of the open comment's words is taken
+ * as the new comment it reads as, so the open one settles as it was.
+ */
+export function apportionTick(
+  input: TidyInput,
+  replied: readonly TidyComment[],
+  startMs: number,
+  endMs: number,
+): { comments: TidyComment[]; parts: TickPart[] } {
+  const said = (c: TidyComment): string => {
+    const t = c.target === null ? undefined : input.targets.find((x) => x.i === c.target);
+    return [c.text, t?.tag, t?.text, t?.label].filter(Boolean).join(' ');
+  };
+  const old = keySet(input.open?.text ?? '');
+  const first = replied[0];
+  const forgot =
+    first?.continues === true &&
+    [...keySet(first.text)].filter((w) => old.has(w)).length * 3 < old.size;
+  const comments =
+    forgot && first ? [{ ...first, continues: false }, ...replied.slice(1)] : replied;
+  const drops = comments.map((c, k) => {
+    const later = keySet(
+      comments
+        .slice(k + 1)
+        .map(said)
+        .join(' '),
+    );
+    const sentences = c.text.split(/(?<=[.!?]['"”’)]*)\s+/);
+    const repeat = sentences.map((s) => {
+      const ks = [...keySet(s)];
+      const held = c.continues && ks.filter((w) => old.has(w)).length * 2 >= ks.length;
+      return ks.length > 0 && !held && ks.every((w) => later.has(w));
+    });
+    return { sentences, repeat: repeat.every(Boolean) ? repeat.map(() => false) : repeat };
+  });
+  const build = () =>
+    comments.map((c, k) => {
+      const d = drops[k];
+      if (!d?.repeat.some(Boolean)) return c;
+      return { ...c, text: d.sentences.filter((_, j) => !d.repeat[j]).join(' ') };
+    });
+  let kept = build();
+  let parts = splitTick(input.words, kept, startMs, endMs);
+  let vetoed = false;
+  drops.forEach((d, k) => {
+    const own = keys(parts[k]?.words ?? '');
+    const after = keys(
+      parts
+        .slice(k + 1)
+        .map((p) => p.words)
+        .join(' '),
+    );
+    d.sentences.forEach((s, j) => {
+      if (!d.repeat[j]) return;
+      const ks = keySet(s);
+      const count = (list: string[]) => list.filter((w) => ks.has(w)).length;
+      if (count(after) > count(own)) return;
+      d.repeat[j] = false;
+      vetoed = true;
+    });
+  });
+  if (vetoed) {
+    kept = build();
+    parts = splitTick(input.words, kept, startMs, endMs);
+  }
+  return { comments: kept, parts };
 }
 
 /** A word as the used-words bookkeeping compares it. */
