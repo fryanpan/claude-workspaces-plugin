@@ -8,11 +8,11 @@
  *      window, which a resized real window cannot (Chrome floors near 500px).
  *      A unit test over the CDP params would pass against a script that
  *      launched nothing.
- *   3. Profile hygiene — the throwaway profile must not outlive the run, on
- *      any exit path. The naming rules are pure and unit-tested; that a
- *      SIGTERM mid-launch actually cleans up needs a real Chrome to kill.
+ *   3. Profile hygiene — the naming rules are pure and unit-tested here. That
+ *      every exit path (success, throw, timeout, SIGINT, SIGTERM, SIGKILL)
+ *      leaves no Chrome and no profile is `ui-shot-exits.test.ts`.
  */
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -276,8 +276,6 @@ const CHROME = ((): string | null => {
 })();
 const SCRIPT = resolve(process.cwd(), 'scripts/ui-shot.ts');
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 describe.skipIf(CHROME === null)('ui-shot against real headless Chrome', () => {
   let dir: string;
   /**
@@ -470,53 +468,6 @@ describe.skipIf(CHROME === null)('ui-shot against real headless Chrome', () => {
     // directory can still belong to a session that is still running.
     const stale = findStaleProfiles(tmpdir());
     if (stale.length > 0) console.warn(describeStaleProfiles(stale, tmpdir()));
-  }, 60_000);
-
-  it('a run killed mid-shot removes its profile and leaves no Chrome behind', async () => {
-    const runId = newRunId();
-    const url = `data:text/html,${encodeURIComponent('<title>hang</title>')}`;
-    // `--wait-for` a selector that never matches keeps the run inside its
-    // work, so SIGTERM lands mid-shot rather than after a tidy finish.
-    const child = spawn(
-      'bun',
-      [SCRIPT, '--url', url, '--wait-for', '#never-matches', '--timeout', '60000', '--eval', '1'],
-      { stdio: 'ignore', env: { ...process.env, [RUN_ID_ENV]: runId } },
-    );
-    try {
-      const deadline = Date.now() + 30_000;
-      let mine: string[] = [];
-      while (Date.now() < deadline) {
-        mine = profilesOfRun(readdirSync(tmpdir()), runId);
-        if (mine.length > 0) break;
-        await sleep(10);
-      }
-      // Non-vacuous by construction: if the profile were not named for the
-      // run, the emptiness check below would pass without proving anything.
-      expect(mine, 'the run must create a profile named for its run id').toHaveLength(1);
-
-      child.kill('SIGTERM');
-      await new Promise((r) => child.once('exit', r));
-      await sleep(500);
-      expect(profilesOfRun(readdirSync(tmpdir()), runId)).toEqual([]);
-
-      // And it stays gone. Killing Chrome is asynchronous, so a profile
-      // removed while Chrome is still starting up gets rebuilt a moment later.
-      await sleep(1000);
-      expect(profilesOfRun(readdirSync(tmpdir()), runId)).toEqual([]);
-
-      const orphans = spawnSync('/bin/ps', ['-Ao', 'command'], { encoding: 'utf8' })
-        .stdout.split('\n')
-        .filter((line) => line.includes(`user-data-dir=${join(tmpdir(), profilePrefix(runId))}`));
-      expect(orphans).toEqual([]);
-    } finally {
-      // SIGTERM, not SIGKILL: if an assertion above failed, the run still gets
-      // to clean up after itself rather than leaking onto a shared machine.
-      if (child.exitCode === null) {
-        child.kill('SIGTERM');
-        await new Promise((r) => child.once('exit', r));
-        await sleep(500);
-      }
-    }
   }, 60_000);
 
   it('exits 2 with usage on bad flags, without launching Chrome', () => {

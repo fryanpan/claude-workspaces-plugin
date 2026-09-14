@@ -18,6 +18,9 @@
  *     owns moments after `rmSync` takes the directory away.
  *   - the teardown is synchronous, because it also runs from the `exit`
  *     handler, and in that handler an awaited cleanup never happens at all.
+ *   - none of the above runs when the parent is SIGKILLed, so every launch
+ *     also gets a watchdog, and the first launch in a process reaps orphans
+ *     an earlier run left behind (`scripts/chrome-orphans.ts`).
  *
  * Never point any of this at a browser a person is using: `--headless=new`
  * with a throwaway `--user-data-dir` under the OS temp dir is a separate
@@ -27,6 +30,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { reapOrphanedChromes, startWatchdog, stopWatchdog } from './chrome-orphans.ts';
 import { profilePrefix } from './ui-shot-lib.ts';
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(() => r(), ms));
@@ -143,6 +147,7 @@ const KILL_WAIT_MS = 3000;
  * more and remove again if anything reappeared.
  */
 export function killAndRemove(proc: ChildProcess | undefined, profile: string): void {
+  stopWatchdog(proc);
   if (proc && proc.exitCode === null) proc.kill('SIGKILL');
   const pid = proc?.pid;
   if (pid !== undefined) {
@@ -171,6 +176,13 @@ export async function stopBrowser(proc: ChildProcess, profile: string): Promise<
   killAndRemove(proc, profile);
 }
 
+let reaped = false;
+function reapOnce(): void {
+  if (reaped) return;
+  reaped = true;
+  reapOrphanedChromes({ log: (msg) => console.error(msg) });
+}
+
 /**
  * Launch Chrome with `args` (build them with `chromeLaunchArgs`) and wait for
  * its CDP port.
@@ -182,6 +194,8 @@ export async function stopBrowser(proc: ChildProcess, profile: string): Promise<
  * `onSpawn` fires before the first `await`, so a signal during startup finds a
  * browser to clean up. Nothing here removes the profile on failure: the caller
  * has it registered and its cleanup is the one that waits for Chrome to die.
+ * A caller that never registers it — `onSpawn` left out by a script bun does
+ * not type-check — is covered by the watchdog once this process exits.
  *
  * A launch that never announces a port is killed and replaced ONCE, with a
  * fresh profile, and `onSpawn` fires again so the caller's cleanup follows
@@ -199,15 +213,17 @@ export async function launchChrome(
   args: (profile: string) => string[],
   timeoutMs: number,
   runId: string,
-  onSpawn: (b: Browser) => void,
+  onSpawn?: (b: Browser) => void,
   launches = 2,
 ): Promise<Browser> {
+  reapOnce();
   let stderr = '';
   for (let launch = 1; launch <= launches; launch++) {
     const profile = mkdtempSync(join(tmpdir(), profilePrefix(runId)));
     const proc = spawn(bin, args(profile), { stdio: ['ignore', 'ignore', 'pipe'] });
     const browser: Browser = { proc, profile, port: 0 };
-    onSpawn(browser);
+    startWatchdog(proc, profile);
+    onSpawn?.(browser);
     stderr = '';
     proc.stderr?.on('data', (d) => {
       stderr += String(d);
