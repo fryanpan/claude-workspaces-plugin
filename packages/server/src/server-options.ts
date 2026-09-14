@@ -1,3 +1,4 @@
+import type { AnswerCoverage } from './answer-coverage.ts';
 /**
  * Everything `createServer` can be handed, and what each option MEANS.
  *
@@ -335,6 +336,13 @@ export interface ServerOptions {
    * one (`haikuReviewJudge`); tests pass a stub.
    */
   reviewJudge?: ReviewJudge;
+  /**
+   * Whether an answer covered every question a review item asks. **No
+   * default**, for the same reason: omitted, every answer closes its item,
+   * as before the check existed. `bin.ts` constructs the real one
+   * (`haikuAnswerCoverage`); tests pass a stub.
+   */
+  answerCoverage?: AnswerCoverage;
   /**
    * The words this server's prompts run on, and the settings page's writes.
    *

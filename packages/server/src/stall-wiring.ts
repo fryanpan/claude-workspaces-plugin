@@ -1148,6 +1148,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         ...(answered?.links !== undefined ? { taskLinks: answered.links } : {}),
         ...(ev.headline !== undefined ? { headline: ev.headline } : {}),
         ...(ev.via !== undefined ? { via: ev.via } : {}),
+        ...(ev.openParts !== undefined ? { openParts: ev.openParts } : {}),
         actorId: ev.actor?.id,
       });
     }

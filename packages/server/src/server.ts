@@ -2172,6 +2172,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // answers 503 for both, but leaving the key out keeps "nothing wired one"
     // legible in a debugger.
     ...(opts.secretWriter ? { secretWriter: opts.secretWriter } : {}),
+    ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     taskStore,
     taskProjection,
     docStore,

@@ -730,6 +730,16 @@ note, as opposed to whether it reached the composer.
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
+`answer-coverage.ts` (server) and `answer-coverage-prompt.ts` (core) join
+the Board group beside the review judge, split the same way and moving no
+boundary. When a person types an answer to a review item that asks more than
+one question, one Haiku call asks whether the answer covers them all. An
+answer that leaves questions open is stored as a partial answer. The item
+stays on the queue with a note naming what is left, and the filer's
+`decision.answered` event lists it. The server module is the network call and
+the rules for when it runs; it fails open, so the answer closes the item. The
+core module is the prompt, the parser and the note, with no socket.
+
 `supervisor-health.ts` joins Ops and moves no boundary. It is the health
 check `scripts/serve.ts` runs against the server it supervises — one HTTP
 request to a route that already exists, a verdict, and a restart ledger that

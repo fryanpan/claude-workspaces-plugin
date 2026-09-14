@@ -138,6 +138,9 @@ export class ReviewItemStore {
       actor: { id: string; name: string; kind?: string };
       answeredWith?: string;
       via?: WriteVia;
+      /** The questions this answer left open. Non-empty on an unanswered
+       *  item records a partial answer and leaves the item open. */
+      openParts?: string[];
     },
   ): AnswerTaskReviewResult {
     const task = this.p.getTask(taskId);
@@ -179,14 +182,23 @@ export class ReviewItemStore {
     // USER CONTENT and this project does not hard-delete user content. The
     // superseded answer moves aside instead of being written over; nothing
     // else anywhere would have reported that it was gone.
-    if (item.answer) item.priorAnswers = [...(item.priorAnswers ?? []), item.answer];
-    item.answer = {
+    const record = {
       text,
       by: actor.name,
       ts,
       ...(opts.answeredWith !== undefined ? { answeredWith: opts.answeredWith } : {}),
       ...(opts.via ? { via: opts.via } : {}),
     };
+    // An answer that left questions open is recorded beside the item rather
+    // than on it: `answer` is what closes an item, and the rest is still the
+    // reader's to answer (see `answer-coverage.ts`).
+    const openParts = item.answer ? [] : (opts.openParts ?? []);
+    if (openParts.length > 0) {
+      item.partialAnswers = [...(item.partialAnswers ?? []), { ...record, open: openParts }];
+    } else {
+      if (item.answer) item.priorAnswers = [...(item.priorAnswers ?? []), item.answer];
+      item.answer = record;
+    }
     task.updatedAt = ts;
     this.p.save(task.workspaceId);
     this.p.emit({
@@ -198,6 +210,7 @@ export class ReviewItemStore {
       reviewItemId,
       headline: item.review.headline,
       ...(opts.via ? { via: opts.via } : {}),
+      ...(openParts.length > 0 ? { openParts } : {}),
       actor,
       links: task.links,
       ts,

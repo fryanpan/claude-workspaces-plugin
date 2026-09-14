@@ -262,6 +262,8 @@ export interface NudgeFrame {
   links?: readonly unknown[];
   /** What was asked — the answered item's headline. Answer nudges only. */
   headline?: string;
+  /** The item's questions the answer left open. Answer nudges only. */
+  openParts?: string[];
   /** The answer was sent from inside a mock page. Answer nudges only. */
   via?: 'mock-frame';
   ts: number;
@@ -472,6 +474,8 @@ export class ReadyWorkNudger {
     taskLinks?: readonly unknown[];
     /** The answered item's headline, off the event — what was asked. */
     headline?: string;
+    /** The questions a partial answer left open, off the event. */
+    openParts?: string[];
     /** Sent from inside a mock page — see `WriteVia` in core. */
     via?: 'mock-frame';
     actorId?: string;
@@ -501,6 +505,9 @@ export class ReadyWorkNudger {
       ...(input.taskTitle !== undefined ? { title: input.taskTitle } : {}),
       ...(input.taskLinks !== undefined ? { links: input.taskLinks } : {}),
       ...(input.headline !== undefined ? { headline: input.headline } : {}),
+      ...(input.openParts !== undefined && input.openParts.length > 0
+        ? { openParts: input.openParts }
+        : {}),
       ...(input.via !== undefined ? { via: input.via } : {}),
       ts,
     });
