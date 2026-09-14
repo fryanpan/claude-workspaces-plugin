@@ -146,8 +146,14 @@ function setAuth(el: FeedbackWidgetEl, token: string, user: User): void {
   // The post this sign-in was for. Rebuilt from the composer, so it goes
   // out under the identity the widget now holds, token and name both. A
   // second refusal re-arms it only after an await, so clearing here is safe.
-  el.retryAfterSignIn?.();
+  // It waits for the doc to sync: on the tailnet door the socket was refused
+  // without a token, so a page nobody has opened has no doc on the server
+  // yet and a post to it 404s. The token opens the socket now rather than
+  // at the end of its backoff, and that socket is what makes the doc.
+  const retry = el.retryAfterSignIn;
   el.retryAfterSignIn = null;
+  el.client?.reconnect();
+  if (retry) el.client ? el.client.onReady(retry) : retry();
 }
 
 /** Local only — the workspace session lives on, sign-out there revokes. */

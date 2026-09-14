@@ -204,6 +204,7 @@ function makeClient(url: string): FakeClient {
     close(): void {
       closed = true;
     },
+    reconnect(): void {},
     onReady(cb: () => void): void {
       if (ready) cb();
       else readyCbs.push(cb);

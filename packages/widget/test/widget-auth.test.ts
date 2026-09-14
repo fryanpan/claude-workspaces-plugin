@@ -1,4 +1,7 @@
+import * as encoding from 'lib0/encoding';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as syncProtocol from 'y-protocols/sync';
+import * as Y from 'yjs';
 import { SIGN_IN_NOTE } from '../src/widget-mic.ts';
 
 /**
@@ -24,6 +27,26 @@ let fetchCalls: FetchCall[];
 let fetchResponder: (url: string, init?: RequestInit) => Response;
 /** The subprotocols each socket the widget opened offered, in order. */
 let socketProtocols: Array<string | string[] | undefined>;
+/** Every socket the widget opened, in order. */
+let sockets: FakeSocket[];
+/**
+ * `answer`: each socket opens and the server's sync step 2 lands, as a doc
+ * the server holds answers. `drive`: nothing happens until the test fires it.
+ */
+let socketMode: 'answer' | 'drive';
+
+interface FakeSocket {
+  protocols: string | string[] | undefined;
+  fire(type: string, data?: ArrayBuffer): void;
+}
+
+/** The server's half of a sync: step 2 of an empty doc, as the socket delivers it. */
+function syncStep2(): ArrayBuffer {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, 0);
+  syncProtocol.writeSyncStep2(enc, new Y.Doc());
+  return encoding.toUint8Array(enc).slice().buffer;
+}
 
 function stubGlobals() {
   fetchCalls = [];
@@ -39,14 +62,32 @@ function stubGlobals() {
     return fetchResponder(String(url), init);
   }) as unknown as typeof fetch;
   socketProtocols = [];
-  class FakeWS {
+  sockets = [];
+  socketMode = 'answer';
+  class FakeWS implements FakeSocket {
     static OPEN = 1;
-    constructor(_url: string, protocols?: string | string[]) {
-      socketProtocols.push(protocols);
-    }
     readyState = 1;
     binaryType = 'arraybuffer';
-    addEventListener() {}
+    listeners = new Map<string, ((ev: { data?: ArrayBuffer }) => void)[]>();
+    constructor(
+      _url: string,
+      public protocols?: string | string[],
+    ) {
+      socketProtocols.push(protocols);
+      sockets.push(this);
+      if (socketMode === 'answer') {
+        queueMicrotask(() => {
+          this.fire('open');
+          this.fire('message', syncStep2());
+        });
+      }
+    }
+    fire(type: string, data?: ArrayBuffer) {
+      for (const cb of this.listeners.get(type) ?? []) cb({ data });
+    }
+    addEventListener(type: string, cb: (ev: { data?: ArrayBuffer }) => void) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), cb]);
+    }
     removeEventListener() {}
     send() {}
     close() {}
@@ -65,6 +106,15 @@ function serverOrigin(): string {
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+
+/** Arm feedback mode and click the page, the way a person opens the composer. */
+function openComposer(el: HTMLElement): HTMLElement {
+  const root = el.shadowRoot!;
+  document.elementFromPoint = () => document.getElementById('hello') as HTMLElement;
+  (root.querySelector('.fab') as HTMLButtonElement).click();
+  window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 10 }));
+  return root.querySelector('.composer') as HTMLElement;
+}
 
 function authHeaderOf(call: FetchCall): string | null {
   const headers = (call.init?.headers ?? {}) as Record<string, string>;
@@ -221,6 +271,52 @@ describe('a page on the tailnet widget door', () => {
     expect(el.shadowRoot!.querySelector('.auth-signin')).toBeTruthy();
     send(SIGN_IN, 'wt2.real-token');
     expect(localStorage.getItem('cfw:authToken')).toBe('wt2.real-token');
+  });
+
+  it('reconnects with the token at once, and posts the held draft once that socket has synced', async () => {
+    // On the door a socket without a token is refused, so a page nobody has
+    // opened has no doc on the server, and a post to it would 404. The held
+    // post has to wait for the socket the token opens.
+    const mod = await importWidget();
+    socketMode = 'drive';
+    let posts = 0;
+    fetchResponder = (url, init) => {
+      if (url.includes('/api/auth/session')) return doorRefusal();
+      if (url.includes('/threads')) {
+        posts += 1;
+        return authHeaderOf({ url, init }) ? new Response('{}') : doorRefusal();
+      }
+      return new Response('{}');
+    };
+    const popup = {} as Window;
+    (window as unknown as { open: unknown }).open = () => popup;
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-riverbend', docId: 'doc-door-new' });
+    await flush();
+    sockets[0]?.fire('close');
+    const composer = openComposer(el);
+    (composer.querySelector('textarea') as HTMLTextAreaElement).value = 'the header overlaps';
+    (composer.querySelector('.submit') as HTMLButtonElement).click();
+    await flush();
+    expect(posts, 'CONTROL: the post was refused without a token').toBe(1);
+    (composer.querySelector('.auth-signin') as HTMLButtonElement).click();
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: SIGN_IN,
+        source: popup,
+        data: { type: 'cw-widget-auth', token: 'wt2.real-token', user },
+      }),
+    );
+    await flush();
+    expect(socketProtocols.at(-1), 'a socket with the token, not at the end of a backoff').toBe(
+      'wt2.real-token',
+    );
+    expect(posts, 'nothing posted before the doc exists').toBe(1);
+    sockets.at(-1)?.fire('open');
+    sockets.at(-1)?.fire('message', syncStep2());
+    await flush();
+    expect(posts).toBe(2);
+    const retry = fetchCalls.filter((c) => c.url.includes('/threads'))[1] as FetchCall;
+    expect(authHeaderOf(retry)).toBe('Bearer wt2.real-token');
   });
 
   it('offers the held token as the socket subprotocol', async () => {
@@ -532,15 +628,6 @@ describe('a workspace that requires a signed-in writer', () => {
   const required = () => json({ signInToWrite: true, canWrite: false });
   const refuse = () => json({ error: 'sign_in_required', signInUrl: '/signin' }, 401);
 
-  /** Arm feedback mode and click the page, the way a person opens the composer. */
-  function openComposer(el: HTMLElement): HTMLElement {
-    const root = el.shadowRoot!;
-    document.elementFromPoint = () => document.getElementById('hello') as HTMLElement;
-    (root.querySelector('.fab') as HTMLButtonElement).click();
-    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 10 }));
-    return root.querySelector('.composer') as HTMLElement;
-  }
-
   it('asks once on load and offers sign-in without auth-offer', async () => {
     const mod = await importWidget();
     fetchResponder = (url) => (url.includes('/api/auth/session') ? required() : json({}));
@@ -688,14 +775,6 @@ describe('a workspace that requires a signed-in writer, asked by a browser that 
       status,
       headers: { 'content-type': 'application/json' },
     });
-
-  function openComposer(el: HTMLElement): HTMLElement {
-    const root = el.shadowRoot!;
-    document.elementFromPoint = () => document.getElementById('hello') as HTMLElement;
-    (root.querySelector('.fab') as HTMLButtonElement).click();
-    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 10 }));
-    return root.querySelector('.composer') as HTMLElement;
-  }
 
   async function mount(session: unknown, docId: string) {
     const mod = await importWidget();
