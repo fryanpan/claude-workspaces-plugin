@@ -182,9 +182,16 @@ export function reapOrphanedChromes(
   } = {},
 ): Orphan[] {
   if (process.platform === 'win32' || process.pid === 1) return [];
-  const listing = (opts.listProcesses ?? listProcesses)();
-  const orphans = findOrphans(listing, opts);
+  const list = opts.listProcesses ?? listProcesses;
+  const orphans = findOrphans(list(), opts);
+  const reaped: Orphan[] = [];
   for (const o of orphans) {
+    // Look again right before the kill: an orphan that exited since the first
+    // listing may have handed its pid to an unrelated process. The window left
+    // is one `ps` call wide rather than the whole loop.
+    const still = findOrphans(list(), opts).some((n) => n.pid === o.pid && n.profile === o.profile);
+    if (!still) continue;
+    reaped.push(o);
     try {
       process.kill(o.pid, 'SIGKILL');
     } catch {}
@@ -199,5 +206,5 @@ export function reapOrphanedChromes(
       `reaped orphaned headless Chrome pid ${o.pid} (${basename(o.profile)}, ${Math.floor(o.ageMs / 60_000)} min old)`,
     );
   }
-  return orphans;
+  return reaped;
 }

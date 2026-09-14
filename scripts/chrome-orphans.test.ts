@@ -229,6 +229,26 @@ describe.skipIf(process.platform === 'win32')('a launcher that never cleans up',
     expect(watchdogOf(b.proc)).toBeUndefined();
   }, 60_000);
 
+  it('the reaper spares a pid that stopped being an orphan after it was listed', async () => {
+    const dir = ownDir();
+    const bin = fakeChrome(dir);
+    const profile = mkdtempSync(join(dir, profilePrefix('respared')));
+    const proc = spawn(bin, ['--headless=new', `--user-data-dir=${profile}`], { stdio: 'ignore' });
+    children.push(proc);
+    await waitFor('the stand-in to start', () => existsSync(join(profile, 'DevToolsActivePort')));
+    const pid = proc.pid as number;
+    // The first listing names it an orphan; by the second look its pid belongs
+    // to something else, which is what pid reuse looks like from here.
+    const listings = [
+      `${pid} 1 10:00 /bin/sh ${bin} --headless=new --user-data-dir=${profile}`,
+      '',
+    ];
+    const reaped = reapOrphanedChromes({ root: dir, listProcesses: () => listings.shift() ?? '' });
+    expect(reaped).toEqual([]);
+    expect(isAlive(pid)).toBe(true);
+    expect(existsSync(profile)).toBe(true);
+  }, 60_000);
+
   it('the reaper kills an orphan and removes its profile', async () => {
     const dir = ownDir();
     const bin = fakeChrome(dir);
