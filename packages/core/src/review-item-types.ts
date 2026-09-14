@@ -355,6 +355,12 @@ export interface ReviewItemAnswer {
   via?: 'mock-frame';
 }
 
+/** An answer that left some of the item's questions open — see `partialAnswers`. */
+export interface ReviewPartialAnswer extends ReviewItemAnswer {
+  /** The questions still unanswered after this answer, in the item's words. */
+  open: string[];
+}
+
 export interface TaskReviewItem {
   /** Stable within the thing it hangs on. Minted by the writer. */
   id: string;
@@ -382,6 +388,12 @@ export interface TaskReviewItem {
    * none, like every other optional field on this row.
    */
   priorAnswers?: ReviewItemAnswer[];
+  /**
+   * Answers that covered only SOME of the questions the item asks, oldest
+   * first, each naming the questions it left open. The item stays open —
+   * `answer` is what closes one — so the rest stays on the reader's queue.
+   */
+  partialAnswers?: ReviewPartialAnswer[];
   /** "Tell me more", in order. Absent rather than empty while there are none. */
   infoRequests?: ReviewInfoRequest[];
   /** What the item said BEFORE each revision, oldest first. Absent while

@@ -27,6 +27,7 @@ import type {
   ReviewItemRevision,
   ReviewJudgeVerdictKind,
   ReviewOption,
+  ReviewPartialAnswer,
   ReviewPayload,
   ReviewShape,
   TaskReviewItem,
@@ -319,6 +320,17 @@ export function readTaskReviewItem(value: unknown): TaskReviewItem | undefined {
       if (read) prior.push(read);
     }
     if (prior.length > 0) out.priorAnswers = prior;
+  }
+
+  if (Array.isArray(value.partialAnswers)) {
+    const partial: ReviewPartialAnswer[] = [];
+    for (const raw of value.partialAnswers) {
+      const read = readAnswer(raw);
+      if (!read || !isPlainObject(raw) || !Array.isArray(raw.open)) continue;
+      const open = raw.open.filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+      if (open.length > 0) partial.push({ ...read, open });
+    }
+    if (partial.length > 0) out.partialAnswers = partial;
   }
 
   if (Array.isArray(value.infoRequests)) {
