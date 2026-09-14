@@ -109,7 +109,7 @@ Write each entry so a reader can check it alone:
 
 **The board closes the task for you.** When you report the last open line as `met`, the board moves the task to done. It also records which line closed the task. Do not call `task_transition` after that.
 
-**A line you report as `owner` goes to the person who owns the task.** They get two buttons on the task. Do not wait for a tool to answer. Take other work.
+**A line you report as `owner` goes to the person who owns the task.** The board files a review item for that line on their queue; Looks right meets it, and any other answer sends it back as not met with their words on the task. Do not file a second item for the same line. Do not wait for a tool to answer. Take other work.
 
 **You cannot move a task to done while a line is open.** The board refuses the transition, and it names the first open line. Report the line met with proof, or remove the line with `rewrite_task`. A task with no `doneWhen` entries moves to done as before.
 
