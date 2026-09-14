@@ -347,13 +347,11 @@ describe('describeEvent', () => {
       ts: NOW,
       taskId: 't-1',
       answer: 'Run it at 04:00.',
-      actor: { id: 'known-reader', name: 'Harborlight Reader', kind: 'known' },
+      actor: { id: 'known-reader', name: 'Reader', kind: 'known' },
     };
-    expect(describeEvent(row, titleOf)).toBe(
-      'Harborlight Reader answered “Fix ranking”: “Run it at 04:00.”',
-    );
+    expect(describeEvent(row, titleOf)).toBe('Reader answered “Fix ranking”: “Run it at 04:00.”');
     expect(describeEvent({ ...row, openParts: ['Who gets the alert?'] }, titleOf)).toBe(
-      'Harborlight Reader answered part of “Fix ranking”: “Run it at 04:00.” — still open: “Who gets the alert?”',
+      'Reader answered part of “Fix ranking”: “Run it at 04:00.” — still open: “Who gets the alert?”',
     );
   });
 
