@@ -170,12 +170,12 @@ export function tidyNotesSection(
           continue;
         }
       }
-      // AN EMPTY TOPIC HEADING OF THE NOTE-TAKER'S OWN GOES (2026-09-14). A
-      // tick opens a topic and writes its notes somewhere else, and the
-      // reader is left a heading over nothing — most of the headings on that
-      // day's doc. Authorship is what keeps this off a heading somebody has
-      // not finished typing: theirs carries no author. Nothing moves, because
-      // nothing is under it.
+      // AN EMPTY TOPIC HEADING OF THE NOTE-TAKER'S OWN GOES (2026-09-14), once
+      // the section has moved past it. A tick opens a topic and writes its
+      // notes somewhere else, and the reader is left a heading over nothing —
+      // most of the headings on that day's doc. Authorship is what keeps this
+      // off a heading somebody has not finished typing: theirs carries no
+      // author. Nothing moves, because nothing is under it.
       if (
         bulletAuthor !== undefined &&
         prose.readBlockAuthor(el) === bulletAuthor &&
@@ -222,9 +222,14 @@ export function tidyNotesSection(
 }
 
 /**
- * Whether the heading at `i` has nothing under it: only blank paragraphs
- * before the next heading at its level or above, or before the section ends.
- * A deeper heading under it is a sub-topic, which is something.
+ * Whether the heading at `i` has nothing under it and never will: only blank
+ * paragraphs before the next heading at its level or above. A deeper heading
+ * under it is a sub-topic, which is something.
+ *
+ * The LAST topic is not judged. A model opens a heading in one tick and fills
+ * it in the next often enough that the eval's judge window is built around it
+ * (`scripts/notes-eval.ts`), and a heading removed in between leaves that
+ * next tick's notes with no topic to go under.
  */
 function headsNothing(
   top: readonly Y.XmlElement[],
@@ -239,7 +244,7 @@ function headsNothing(
     if (el.nodeName === 'paragraph' && textOf(el).length === 0) continue;
     return false;
   }
-  return true;
+  return false;
 }
 
 /** How many children this list holds, elements and all. */

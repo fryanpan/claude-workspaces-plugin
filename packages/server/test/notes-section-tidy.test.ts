@@ -326,6 +326,7 @@ describe("a topic heading of the note-taker's own with nothing under it", () => 
   const openElsewhere = (input: Parameters<typeof addNotes>[0], tick: number) => {
     if (tick === 1) return addNotes(input, '### Ferry timetable\n\n- the harbour run moves');
     const ferry = input.outline.find((e) => e.text === 'Ferry timetable')?.id as string;
+    if (tick === 3) return addNotes(input, '### Crew rota\n\n- rota changes every Monday');
     return [
       { op: 'insert_at_end' as const, markdown: '### Slipway costs' },
       {
@@ -336,12 +337,25 @@ describe("a topic heading of the note-taker's own with nothing under it", () => 
     ];
   };
 
-  it('is removed in the tick that left it empty', async () => {
+  it('is removed once a later topic follows it', async () => {
+    const harness = createNotesTickHarness({ compose: openElsewhere });
+    await harness.speak('the harbour run moves');
+    await harness.speak('the last sailing is at seven');
+    const third = await harness.speak('the rota changes every Monday');
+    expect(third.headings).not.toContain('Slipway costs');
+    expect(third.headings).toContain('Crew rota');
+    expect(bullets(harness.ydoc)).toEqual([
+      'the harbour run moves',
+      'last sailing at seven',
+      'rota changes every Monday',
+    ]);
+  });
+
+  it('CONTROL: as the last topic it stays, so the next tick can fill it', async () => {
     const harness = createNotesTickHarness({ compose: openElsewhere });
     await harness.speak('the harbour run moves');
     const second = await harness.speak('the last sailing is at seven');
-    expect(second.headings).not.toContain('Slipway costs');
-    expect(bullets(harness.ydoc)).toEqual(['the harbour run moves', 'last sailing at seven']);
+    expect(second.headings).toContain('Slipway costs');
   });
 
   it('CONTROL: the same heading with a sub-topic under it stays', async () => {
