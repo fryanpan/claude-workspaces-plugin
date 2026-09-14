@@ -203,11 +203,44 @@ describe('a note the section already carries', () => {
     const outline = prose.readOutline(doc);
     const heading = outline.find((e) => e.text === 'Meeting notes')?.id;
     const res = dedupeNotesEdits(
-      [{ op: 'insert_at_end', markdown: 'Pontoon lights are out at Saltmarsh\nAgenda first' }],
+      [{ op: 'insert_at_end', markdown: 'Pontoon lights are out at Saltmarsh\n\nAgenda first' }],
       { notesHeadingId: heading, outline, speech: ['lights'], authorId: NOTES_AUTHOR_ID },
     );
     expect(res.alreadyWritten).toBe(1);
     expect(res.edits).toEqual([{ op: 'insert_at_end', markdown: 'Agenda first' }]);
+  });
+
+  it('inside a paragraph wrapped across lines, is kept with the rest of that paragraph', () => {
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(
+      prose.getProseFragment(doc),
+      '## Meeting notes\n\n- Pontoon lights are out at Saltmarsh\n',
+    );
+    prose.ensureBlockIds(doc);
+    const outline = prose.readOutline(doc);
+    const heading = outline.find((e) => e.text === 'Meeting notes')?.id;
+    const ctx = { notesHeadingId: heading, outline, speech: ['lights'], authorId: NOTES_AUTHOR_ID };
+    for (const markdown of [
+      'Pontoon lights are out at Saltmarsh\nuntil the new cable arrives',
+      'The shed is locked\nPontoon lights are out at Saltmarsh',
+      '- Pontoon lights are out at Saltmarsh\nuntil the new cable arrives',
+    ]) {
+      const edits = [{ op: 'insert_at_end' as const, markdown }];
+      expect(dedupeNotesEdits(edits, ctx).edits).toEqual(edits);
+    }
+    // CONTROL: a bullet followed by a sibling that has notes of its own is
+    // still a leaf, and still a repeat.
+    const res = dedupeNotesEdits(
+      [
+        {
+          op: 'insert_at_end',
+          markdown:
+            '- Pontoon lights are out at Saltmarsh\n- Shed\n  - Spare bulbs are in the shed',
+        },
+      ],
+      ctx,
+    );
+    expect(res.alreadyWritten).toBe(1);
   });
 
   it("a person's own bullet is never deleted by a move", () => {

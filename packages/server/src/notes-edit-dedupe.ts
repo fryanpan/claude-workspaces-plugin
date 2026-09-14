@@ -177,6 +177,14 @@ function hasWords(lines: readonly string[]): boolean {
   return lines.some((l) => /[\p{L}\p{N}]/u.test(l));
 }
 
+/** Whether the line after `i` carries on the same block: text at the margin
+ *  that is neither a bullet nor a fence. */
+function runsOn(lines: readonly string[], i: number): boolean {
+  const next = lines[i + 1];
+  if (next === undefined || next.trim() === '') return false;
+  return !BULLET.test(next) && !/^\s*(`{3,}|~{3,})/.test(next) && !/^\s/.test(next);
+}
+
 /** Whether the line at `i` has a more-indented line under it. */
 function hasChildren(lines: readonly string[], i: number, indent: number): boolean {
   for (let j = i + 1; j < lines.length; j++) {
@@ -251,8 +259,13 @@ export function dedupeNotesEdits(
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i] ?? '';
       // A bullet, or a note the model wrote as a bare line: both are notes.
-      const m = line.match(BULLET) ?? line.match(PLAIN_NOTE);
-      if (!m) {
+      const bullet = line.match(BULLET);
+      const m = bullet ?? line.match(PLAIN_NOTE);
+      // A line that is only PART of a block is not a note on its own: a
+      // paragraph wrapped across lines, or a bullet whose text runs on at the
+      // margin. Judging one line of it would drop that line and leave the rest
+      // as a different block, so the whole of it is kept as written.
+      if (!m || runsOn(lines, i) || (!bullet && (lines[i - 1] ?? '').trim() !== '')) {
         kept.push(line);
         continue;
       }
