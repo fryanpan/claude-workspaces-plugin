@@ -16,7 +16,8 @@ import type { PcmCaptureOpts, PcmCaptureStart } from './voice/voice-audio.ts';
  * The audio itself never enters the frame, so a mock's script cannot listen
  * to it. What a script can still do is ask for the microphone on this mock's
  * own voice socket: the host asks only while the page has a fresh user
- * activation (a tap in the mock is one), the browser shows that it is
+ * activation (a tap in the mock is one), and not at all on a browser that
+ * cannot confirm one (`tapConfirmed`); the browser shows that it is
  * recording, and the comments it makes are stamped as sent from inside the
  * mock like any other write from there.
  */
@@ -57,6 +58,15 @@ export interface HostMic {
    * sound of its own choosing in as the reader's voice.
    */
   passes(data: unknown): boolean;
+}
+
+/**
+ * Whether a tap is confirmed now. A browser that cannot say
+ * (`navigator.userActivation` missing) counts as no tap: the microphone waits
+ * for a tap it can confirm rather than opening for a script that never had one.
+ */
+export function tapConfirmed(nav: { userActivation?: { isActive: boolean } }): boolean {
+  return nav.userActivation?.isActive === true;
 }
 
 export function createHostMic(deps: HostMicDeps): HostMic {

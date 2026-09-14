@@ -21,7 +21,7 @@
  *    lets go of it over its voice socket; the audio goes from here to the
  *    server and never into the frame.
  */
-import { createHostMic } from './mock-host-mic.ts';
+import { createHostMic, tapConfirmed } from './mock-host-mic.ts';
 import { type RelayScope, relayHeaders, relayTarget } from './mock-relay-policy.ts';
 import type { PcmCaptureOpts, PcmCaptureStart } from './voice/voice-audio.ts';
 import { micRefusal, startPcmCapture } from './voice/voice-audio.ts';
@@ -202,6 +202,6 @@ hostMock({
   WebSocket: window.WebSocket,
   EventSource: window.EventSource,
   onMessage: (fn) => window.addEventListener('message', fn),
-  activated: () => navigator.userActivation?.isActive ?? true,
+  activated: () => tapConfirmed(navigator),
   startCapture: startPcmCapture,
 });

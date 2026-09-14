@@ -8,7 +8,7 @@
  * stand-in bridge socket for the frame's half.
  */
 import { describe, expect, it } from 'vitest';
-import { type MicReply, createHostMic } from '../src/mock-host-mic.ts';
+import { type MicReply, createHostMic, tapConfirmed } from '../src/mock-host-mic.ts';
 import type { PcmCaptureOpts, PcmCaptureStart } from '../src/voice/voice-audio.ts';
 import { hostCapture } from '../src/voice/voice-audio.ts';
 
@@ -78,6 +78,16 @@ describe('the host holds the mock page’s microphone', () => {
 
   it('asks for the microphone only while the page has a user activation', async () => {
     const h = harness({ activated: false });
+    h.mic.ask(true);
+    expect(h.captures).toHaveLength(0);
+    expect(h.replies).toEqual([{ t: 'mic', ok: false, message: 'blocked' }]);
+  });
+
+  it('counts a browser that cannot confirm a tap as no tap, and refuses the microphone', () => {
+    expect(tapConfirmed({})).toBe(false);
+    expect(tapConfirmed({ userActivation: { isActive: false } })).toBe(false);
+    expect(tapConfirmed({ userActivation: { isActive: true } })).toBe(true);
+    const h = harness({ activated: tapConfirmed({}) });
     h.mic.ask(true);
     expect(h.captures).toHaveLength(0);
     expect(h.replies).toEqual([{ t: 'mic', ok: false, message: 'blocked' }]);

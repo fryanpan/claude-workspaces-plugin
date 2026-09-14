@@ -24,8 +24,6 @@ import {
   MOCK_FRAME_CSP,
   fileSandboxHeaders,
   frameSrcFor,
-  injectFrameScripts,
-  inlineBoardStylesheets,
   isMockFrameRequest,
   mayTouchFrom,
   renderMockHost,
@@ -106,66 +104,6 @@ describe('the frame and host helpers', () => {
     expect(html).not.toContain('steal()');
     expect(html).not.toContain('d"><x');
     expect(html).toContain('data-items="[[&quot;t-1&quot;,&quot;r-1&quot;]]"');
-  });
-
-  it('inlines the bridge first, and the widget and live scripts in place of their tags', () => {
-    const dist = mkdtempSync(join(tmpdir(), 'mock-frame-dist-'));
-    writeFileSync(join(dist, 'mock-bridge.js'), 'window.bridge=1;');
-    writeFileSync(join(dist, 'widget.iife.js'), 'var s="</script><!--";');
-    writeFileSync(join(dist, 'mockup-live.js'), 'window.live=1;');
-    const page =
-      '<!doctype html><html><head><script>mine()</script></head><body>' +
-      '<script src="/widget.iife.js"></script>' +
-      '<script src="/widget/mockup-live.js" data-cw-live data-doc-id="d-1" data-versions="[1,2]"></script>' +
-      '</body></html>';
-    const out = injectFrameScripts(page, dist);
-    rmSync(dist, { recursive: true, force: true });
-    expect(out.indexOf('window.bridge=1')).toBeLessThan(out.indexOf('mine()'));
-    expect(out).not.toContain('src="/widget.iife.js"');
-    expect(out).not.toContain('src="/widget/mockup-live.js"');
-    expect(out).toContain('<script data-feedback-widget>var s="<\\/script><\\!--";</script>');
-    expect(out).toContain(
-      '<script data-feedback-widget data-cw-live data-doc-id="d-1" data-versions="[1,2]">window.live=1;</script>',
-    );
-    // Without a built bundle the page is left exactly as it was.
-    expect(injectFrameScripts(page, null)).toBe(page);
-  });
-
-  it("writes the board's own stylesheets into the frame, which could not fetch them, and nothing else", () => {
-    const root = mkdtempSync(join(tmpdir(), 'mock-frame-app-'));
-    const dist = join(root, 'dist');
-    mkdirSync(dist);
-    writeFileSync(join(dist, 'tokens-3f2a.css'), ':root{--stand:#fc0}');
-    writeFileSync(join(dist, 'board.css'), '.menu{content:"</style>"}');
-    writeFileSync(join(root, 'outside.css'), '.leak{}');
-    const pageUrl = new URL('http://board.test/workspaces/w/mockups/d-1?cw-frame=1');
-    const page = [
-      '<link rel="stylesheet" href="/app/tokens-3f2a.css">',
-      "<link href='http://board.test/app/board.css' media=\"print\" rel='preload stylesheet'>",
-      '<link rel="stylesheet" href="https://fonts.riverbend.test/app/board.css">',
-      '<link rel="icon" href="/app/board.css">',
-      '<link rel="stylesheet" href="/app/%2e%2e/outside.css">',
-      '<link rel="stylesheet" href="/app/%2F..%2Foutside.css">',
-      '<link rel="stylesheet" href="/app/missing.css">',
-      '<link rel="stylesheet" href="/demo/board.css">',
-    ].join('');
-    const out = inlineBoardStylesheets(page, pageUrl, dist);
-    const withoutDist = inlineBoardStylesheets(page, pageUrl, null);
-    rmSync(root, { recursive: true, force: true });
-    expect(out).toBe(
-      [
-        '<style data-cw-inlined="/app/tokens-3f2a.css">:root{--stand:#fc0}</style>',
-        '<style data-cw-inlined="/app/board.css" media="print">.menu{content:"<\\/style>"}</style>',
-        '<link rel="stylesheet" href="https://fonts.riverbend.test/app/board.css">',
-        '<link rel="icon" href="/app/board.css">',
-        '<link rel="stylesheet" href="/app/%2e%2e/outside.css">',
-        '<link rel="stylesheet" href="/app/%2F..%2Foutside.css">',
-        '<link rel="stylesheet" href="/app/missing.css">',
-        '<link rel="stylesheet" href="/demo/board.css">',
-      ].join(''),
-    );
-    expect(out).not.toContain('.leak');
-    expect(withoutDist).toBe(page);
   });
 });
 

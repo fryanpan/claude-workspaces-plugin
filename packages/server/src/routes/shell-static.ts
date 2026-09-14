@@ -52,7 +52,6 @@ import {
   MOCK_HOST_HEADERS,
   fileSandboxHeaders,
   injectFrameScripts,
-  inlineBoardStylesheets,
   isMockFrameRequest,
   renderMockHost,
   withHeaders,
@@ -389,10 +388,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       version: shownVersion,
       versions,
     });
-    const body = injectFrameScripts(
-      inlineBoardStylesheets(withWidget, url, markdownAppDist),
-      widgetDist,
-    );
+    const body = injectFrameScripts(withWidget, url, widgetDist, markdownAppDist);
     return new Response(body, {
       headers: {
         'content-type': 'text/html; charset=utf-8',

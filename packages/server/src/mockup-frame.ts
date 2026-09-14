@@ -43,9 +43,11 @@
  * cookie, its `<script src>` and `<img>` did not). Every cookie that gets a
  * browser past Cloudflare Access or a share session is Lax, so a frame that
  * loaded the widget by URL would get a sign-in redirect instead of a script.
- * The bridge, the widget and the live-update script are therefore written
- * into the frame's own bytes; the host, a normal top-level page, loads its
- * script by URL.
+ * So the frame fetches nothing from the board by itself: the bridge, the
+ * widget, the live-update script and any board script or stylesheet the mock
+ * names are written into the frame's own bytes (`injectFrameScripts`), and
+ * the rest — voice feedback's script, a round's page — comes through the
+ * host. The host, a normal top-level page, loads its script by URL.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
@@ -194,43 +196,6 @@ function readAsset(widgetDist: string | null, file: string): string | null {
 }
 
 const HEAD_OPEN = /<head\b[^>]*>/i;
-const WIDGET_TAG = '<script src="/widget.iife.js"></script>';
-const LIVE_TAG =
-  /<script src="\/widget\/mockup-live\.js"((?: data-[a-z-]+(?:="[^"]*")?)*)><\/script>/;
-
-/**
- * The frame's HTML: the bridge first in the head, and the widget and
- * live-update tags the server wrote replaced by their bytes. The inlined tags
- * carry `data-feedback-widget`, the marker a round swap keeps rather than
- * re-running (`packages/widget/src/mockup-live.ts`). A tag the mock wrote for
- * itself is left as it is. Without a built bundle the page goes out unchanged
- * apart from the policy header its caller sets, which still sandboxes it.
- */
-export function injectFrameScripts(html: string, widgetDist: string | null): string {
-  let out = html;
-  const bridge = readAsset(widgetDist, 'mock-bridge.js');
-  if (bridge !== null) {
-    const tag = `<script data-feedback-widget>${inlineSafe(bridge)}</script>`;
-    out = HEAD_OPEN.test(out) ? out.replace(HEAD_OPEN, (m) => `${m}${tag}`) : `${tag}${out}`;
-  }
-  const widget = readAsset(widgetDist, 'widget.iife.js');
-  if (widget !== null && out.includes(WIDGET_TAG)) {
-    out = out.replace(
-      WIDGET_TAG,
-      () => `<script data-feedback-widget>${inlineSafe(widget)}</script>`,
-    );
-  }
-  const live = readAsset(widgetDist, 'mockup-live.js');
-  if (live !== null) {
-    out = out.replace(
-      LIVE_TAG,
-      (_m, attrs: string) => `<script data-feedback-widget${attrs}>${inlineSafe(live)}</script>`,
-    );
-  }
-  return out;
-}
-
-const LINK_TAG = /<link\b[^>]*>/gi;
 
 /** One attribute's value off a tag, quoted either way or bare. */
 function attrOf(tag: string, name: string): string | null {
@@ -238,51 +203,137 @@ function attrOf(tag: string, name: string): string | null {
   return m ? (m[1] ?? m[2] ?? m[3] ?? '') : null;
 }
 
+/** The widget's bundles at the root, by the file each one serves. */
+const ROOT_WIDGET_FILES: Record<string, string> = {
+  '/widget.iife.js': 'widget.iife.js',
+  '/widget.js': 'widget.esm.js',
+  '/widget.esm.js': 'widget.esm.js',
+};
+
 /**
- * The board's own stylesheets a mock links, written into the frame.
- *
- * A mock of a change to an existing surface starts from that surface's markup
- * and stylesheets, so it links `/app/…css`. The frame's request for that file
- * carries no cookie (see "Why the frame's scripts are inlined" above), and
- * behind Access or a share session it comes back a sign-in page rather than
- * CSS: the mock renders unstyled. The server reads those files itself, from
- * the built app it already serves to anyone who can open the mock, and puts
- * them in the page. Only `/app/` stylesheets on this host: anything else a
- * mock links is left as it wrote it, and a path that climbs out of the built
- * app is not read.
+ * The built file a board address names, when it is one this server serves
+ * from a build and it is on the page's own host: `/app/…` from the app,
+ * `/widget/…` and the root widget bundles from the widget. `ext` is the one
+ * extension asked for. A path that decodes out of its build is not a file.
  */
-export function inlineBoardStylesheets(html: string, page: URL, appDist: string | null): string {
-  if (!appDist) return html;
-  return html.replace(LINK_TAG, (tag) => {
-    const rel = attrOf(tag, 'rel');
-    const href = attrOf(tag, 'href');
-    if (!rel || !href || !/(?:^|\s)stylesheet(?:\s|$)/i.test(rel)) return tag;
-    let u: URL;
-    try {
-      u = new URL(href, page);
-    } catch {
-      return tag;
-    }
-    if (u.host !== page.host || !u.pathname.startsWith('/app/') || !u.pathname.endsWith('.css')) {
-      return tag;
-    }
-    let file: string;
-    try {
-      file = join(appDist, decodeURIComponent(u.pathname.slice('/app/'.length)));
-    } catch {
-      return tag;
-    }
-    if (!isWithinRoot(appDist, file)) return tag;
-    let css: string;
-    try {
-      css = readFileSync(file, 'utf8');
-    } catch {
-      return tag;
-    }
-    const media = attrOf(tag, 'media');
-    return (
-      `<style data-cw-inlined="${escapeAttr(u.pathname)}"${media ? ` media="${escapeAttr(media)}"` : ''}>` +
-      `${css.replace(/<\/style/gi, '<\\/style')}</style>`
-    );
-  });
+function boardAssetOf(
+  href: string,
+  page: URL,
+  ext: '.js' | '.css',
+  roots: { app: string | null; widget: string | null },
+): { file: string; widget: boolean } | null {
+  let u: URL;
+  try {
+    u = new URL(href, page);
+  } catch {
+    return null;
+  }
+  if (u.host !== page.host || !u.pathname.endsWith(ext)) return null;
+  const root = ROOT_WIDGET_FILES[u.pathname];
+  if (root && roots.widget) return { file: join(roots.widget, root), widget: true };
+  const under = u.pathname.startsWith('/app/')
+    ? { dir: roots.app, rest: u.pathname.slice('/app/'.length), widget: false }
+    : u.pathname.startsWith('/widget/')
+      ? { dir: roots.widget, rest: u.pathname.slice('/widget/'.length), widget: true }
+      : null;
+  if (!under?.dir) return null;
+  let file: string;
+  try {
+    file = join(under.dir, decodeURIComponent(under.rest));
+  } catch {
+    return null;
+  }
+  return isWithinRoot(under.dir, file) ? { file, widget: under.widget } : null;
+}
+
+function readText(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A script element with its body, or a link tag, in one pass: a script's body
+ * is consumed whole, so a tag written inside a script's text is never read as
+ * one, and nothing written into the page is read again.
+ */
+const TAG = /<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>[\s\S]*?<\/script\s*>|<link\b[^>]*>/gi;
+const SRC_ATTR = /\ssrc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i;
+/** A module that loads others beside it by relative path: `import "./x.js"`, `import("./x.js")`. */
+const RELATIVE_IMPORT = /(?:\bfrom|\bimport)\s*\(?\s*["'`]\.\.?\//;
+
+/**
+ * The frame's HTML with nothing left for it to fetch from the board: the
+ * bridge first in the head, and every script and stylesheet the page names on
+ * this board written into the page itself.
+ *
+ * The frame's own requests carry no cookie (see "Why the frame's scripts are
+ * inlined" above), so behind Cloudflare Access or a share session each one
+ * comes back a sign-in redirect. A `<script src>` for the widget, a
+ * `/widget/…` script or an `/app/…` script on this host becomes the same
+ * element with its bytes in place of its `src`, keeping every other attribute
+ * (`type="module"` and the live script's `data-*` included). The widget's own
+ * get `data-feedback-widget`, the marker a round swap keeps rather than
+ * re-runs (`packages/widget/src/mockup-live.ts`). An `/app/` stylesheet link
+ * becomes a `<style>`, keeping its `media`.
+ *
+ * What stays a tag, and so fails behind a sign-in: anything on another host,
+ * a file that is not in the build, and an `/app/` module that imports files
+ * beside it by relative path — inlined, those imports would resolve against
+ * the mock's address instead. The board's split bundles are the only such
+ * files, and a mock has no use for them. Images and fonts are not touched.
+ * Without either build the page goes out as it came, still sandboxed by the
+ * policy header its caller sets.
+ */
+export function injectFrameScripts(
+  html: string,
+  page: URL,
+  widgetDist: string | null,
+  appDist: string | null,
+): string {
+  const roots = { app: appDist, widget: widgetDist };
+  let out = html;
+  const bridge = readAsset(widgetDist, 'mock-bridge.js');
+  if (bridge !== null) {
+    const tag = `<script data-feedback-widget>${inlineSafe(bridge)}</script>`;
+    out = HEAD_OPEN.test(out) ? out.replace(HEAD_OPEN, (m) => `${m}${tag}`) : `${tag}${out}`;
+  }
+  return out.replace(TAG, (tag, attrs: string | undefined) =>
+    attrs === undefined
+      ? inlineStylesheet(tag, page, appDist)
+      : inlineScript(tag, attrs, page, roots),
+  );
+}
+
+function inlineScript(
+  tag: string,
+  attrs: string,
+  page: URL,
+  roots: { app: string | null; widget: string | null },
+): string {
+  const src = attrOf(`${attrs}>`, 'src');
+  const asset = src === null ? null : boardAssetOf(src, page, '.js', roots);
+  const js = asset ? readText(asset.file) : null;
+  if (!asset || js === null) return tag;
+  if (!asset.widget && RELATIVE_IMPORT.test(js)) return tag;
+  const kept = attrs.replace(SRC_ATTR, '');
+  const mark =
+    asset.widget && !/\sdata-feedback-widget\b/i.test(kept) ? ' data-feedback-widget' : '';
+  return `<script${mark}${kept}>${inlineSafe(js)}</script>`;
+}
+
+function inlineStylesheet(tag: string, page: URL, appDist: string | null): string {
+  const rel = attrOf(tag, 'rel');
+  const href = attrOf(tag, 'href');
+  if (!rel || !href || !/(?:^|\s)stylesheet(?:\s|$)/i.test(rel)) return tag;
+  const asset = boardAssetOf(href, page, '.css', { app: appDist, widget: null });
+  const css = asset ? readText(asset.file) : null;
+  if (!asset || css === null) return tag;
+  const media = attrOf(tag, 'media');
+  return (
+    `<style data-cw-inlined="${escapeAttr(new URL(href, page).pathname)}"${media ? ` media="${escapeAttr(media)}"` : ''}>` +
+    `${css.replace(/<\/style/gi, '<\\/style')}</style>`
+  );
 }

@@ -345,9 +345,12 @@ is never served on the board's origin beside the reader's session.
 `mockup-frame.ts` (server, beside the other `mockup-*.ts` modules) makes
 `/workspaces/<ws>/mockups/<id>` answer a small host page. That page holds one
 frame of the same address plus `?cw-frame=1`, whose response is sandboxed by
-CSP, and it writes the bridge, the widget, `mockup-live.js` and any `/app/`
-stylesheet the mock links into the frame's bytes, because an opaque-origin
-frame's subresource requests carry no Lax cookie. Three new top-level modules in the widget package are
+CSP. The frame fetches nothing from the board by itself, because an
+opaque-origin frame's requests carry no Lax cookie and Access would redirect
+them: the server writes the bridge, the widget, `mockup-live.js` and any
+board script or stylesheet the mock names (`/widget/…`, `/app/…`) into the
+frame's bytes, and voice feedback's script and each round's page come through
+the host. Three new top-level modules in the widget package are
 the two ends of that line, and each is a separately built asset rather than
 part of `widget.iife.js`. `mock-bridge.ts` runs first in the frame and hands
 the widget's board-bound fetch, WebSocket and EventSource calls to the host.
