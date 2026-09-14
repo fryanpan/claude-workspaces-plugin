@@ -22,8 +22,8 @@
  * Google OAuth pair — synchronously, addressed by service, with an env
  * override so a test can supply one. This one WRITES a value a reader just
  * handed over, and every property that matters here is about the write: the
- * value on stdin, the double line the prompt needs, the read-back that turns
- * exit 0 into evidence. Its runner takes stdin, which `KeychainRunner`
+ * value on stdin, the one command line `security -i` reads it from, the
+ * read-back that turns exit 0 into evidence. Its runner takes stdin, which `KeychainRunner`
  * cannot express, so there is no interface to share — only the binary.
  *
  * THE VALUE NEVER ENTERS A MESSAGE. Not an error, not a log line, not a
@@ -34,7 +34,11 @@
  * given.
  */
 import { isSecretServiceName } from '@claude-workspaces/core';
-import { SECRET_ACCOUNT, storedSecretService } from '@claude-workspaces/core/secret-name';
+import {
+  SECRET_ACCOUNT,
+  SECRET_VALUE_MAX_CHARS,
+  storedSecretService,
+} from '@claude-workspaces/core/secret-name';
 
 /**
  * Where a stored secret lands, and the line an agent reads it back with.
@@ -49,6 +53,7 @@ import { SECRET_ACCOUNT, storedSecretService } from '@claude-workspaces/core/sec
 export {
   SECRET_ACCOUNT,
   SECRET_SERVICE_PREFIX,
+  SECRET_VALUE_MAX_CHARS,
   secretReadCommand,
   storedSecretService,
 } from '@claude-workspaces/core/secret-name';
@@ -59,13 +64,23 @@ export {
 const SECRET_COMMAND_TIMEOUT_MS = 10_000;
 
 /**
- * The longest value this will store.
+ * The longest line `security -i` reads as one command, measured.
  *
- * Generous for a key or a token and far under anything that would be a
- * pasted file. It bounds what one request can push through a spawned
- * process's stdin, which is the reason it is here rather than at the door.
+ * Interactive mode reads its commands from stdin a line at a time, and cuts a
+ * line at this many characters: measured on macOS 26.2 by storing values of
+ * one repeated letter under a throwaway name, a command line of 4,095
+ * characters stored whole, and every longer one stored exactly the part that
+ * fit — then ran the remainder as a command of its own ("unknown command").
+ * A cut line does not fail; it stores a shorter value.
  */
-export const SECRET_VALUE_MAX_CHARS = 4096;
+const SECURITY_INTERACTIVE_LINE_MAX = 4095;
+
+/**
+ * The longest command line this module will send: three quarters of the
+ * measured cap, so a later `security` with a slightly smaller buffer still
+ * refuses here rather than cutting there.
+ */
+export const SECRET_COMMAND_LINE_BUDGET = Math.floor((SECURITY_INTERACTIVE_LINE_MAX * 3) / 4);
 
 export interface SecretRunResult {
   code: number;
@@ -107,29 +122,23 @@ export type SecretWriter = (service: string, value: string) => Promise<SecretWri
 /**
  * Is this something the store can hold?
  *
- * NEWLINES ARE FINE NOW, AND THAT IS THE POINT. `security` reads the value
- * from a PROMPT, which is line-based: one line, then the same line again to
- * confirm. A raw multi-line value therefore cannot go down that path at all —
- * measured on macOS 26.2, where a three-line value printed "passwords don't
- * match" three times and exited 1 with nothing stored. Which meant a reader
- * pasting an SSH key or a service-account file was refused by this function,
- * and — worse, and what the UX walk found — a browser `input` had already
- * stripped the newlines before the value ever reached here, so a three-line
- * paste arrived as one joined line, passed this check, and was stored
- * silently wrong under the name the reader thought held their key.
- *
- * `encodeSecretValue` is the fix: every value goes to the prompt base64, so
- * every value is one line and the newlines survive. What this function still
- * refuses is a NUL and an empty string — a NUL survives the encoding, but it
- * cannot survive the shell pipeline an agent reads the value back through, so
- * storing one would be storing something nobody can use.
+ * NEWLINES ARE FINE, AND THAT IS THE POINT. A browser `input` strips the
+ * breaks from a pasted SSH key or service-account file, and `security` cannot
+ * take a raw multi-line value on any path — measured on macOS 26.2, where a
+ * three-line value through the old prompt printed "passwords don't match"
+ * three times and stored nothing. `encodeSecretValue` is the fix: every value
+ * goes to the store base64, so every value is one line and the newlines
+ * survive. What this function still refuses is a NUL and an empty string — a
+ * NUL survives the encoding, but it cannot survive the shell pipeline an agent
+ * reads the value back through, so storing one would be storing something
+ * nobody can use.
  */
 export function isStorableSecretValue(value: unknown): value is string {
   return typeof value === 'string' && value !== '' && !value.includes('\u0000');
 }
 
 /**
- * The value as it goes to the prompt, and comes back from it.
+ * The value as it goes to the store, and comes back from it.
  *
  * One format for every value — see `SECRET_STORED_ENCODING` in core for why
  * it is not conditional on the value having a newline in it, and for what is
@@ -137,6 +146,32 @@ export function isStorableSecretValue(value: unknown): value is string {
  */
 export function encodeSecretValue(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64');
+}
+
+/** Only the base64 alphabet may sit between the quotes of the command line:
+ *  no quote, no backslash, no space, no newline. `encodeSecretValue` never
+ *  produces anything else; this is what holds that true if it ever did. */
+const BASE64_ONLY = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** The one line `security -i` is handed. The value is the only thing in it
+ *  that came from a reader, and it arrives here already encoded. */
+function addCommandLine(storedService: string, encoded: string): string {
+  return `add-generic-password -U -a ${SECRET_ACCOUNT} -s ${storedService} -w "${encoded}"`;
+}
+
+/**
+ * Will this value go to the store whole?
+ *
+ * The door and the writer both ask, so a value the door accepts is never one
+ * the writer then refuses mid-loop. Two limits and both are real: the
+ * character count is the one a person is told, and the command line is the
+ * one `security` cuts — a value within the first can still break the second
+ * if its characters are wide, and it is refused rather than stored short.
+ */
+export function secretValueFits(service: string, value: string): boolean {
+  if (value.length > SECRET_VALUE_MAX_CHARS) return false;
+  const line = addCommandLine(storedSecretService(service), encodeSecretValue(value));
+  return line.length <= SECRET_COMMAND_LINE_BUDGET;
 }
 
 /** The default runner: spawn the binary, write stdin, read both pipes, and
@@ -163,13 +198,29 @@ async function spawnCommand(file: string, args: string[], stdin: string): Promis
 /**
  * Store one value under one name, and prove it landed.
  *
- * THE READ-BACK IS NOT BELT AND BRACES. `security add-generic-password` exits
- * 0 after storing an EMPTY password when its two prompted reads disagree —
- * measured on this machine — so the exit code alone is not evidence that the
- * value is in the store. Writing the value twice is what makes the reads
- * agree; reading it back and comparing is what makes "saved" a fact rather
- * than a hope. The value read back is compared and dropped; it reaches no
- * caller, no message and no log.
+ * THROUGH `security -i`, NOT THE PROMPT. `add-generic-password … -w` with no
+ * argument prompts for the value, and that prompt reads at most 128
+ * characters and exits 0 with the rest cut off — measured with 129, 144 and
+ * 200-character inputs, all stored as 128. Base64 makes any value over 96
+ * characters longer than that, so a real API key was stored truncated and
+ * reported as a failed save (2026-09-14). Interactive mode takes the whole
+ * command on stdin instead: `security`'s argument list is just `-i`, and the
+ * value is on one line of its standard input, which no other process on the
+ * machine can list. Its own cap is `SECURITY_INTERACTIVE_LINE_MAX`, and
+ * `secretValueFits` keeps every line well inside it.
+ *
+ * THE READ-BACK IS NOT BELT AND BRACES. The prompt path exited 0 having
+ * stored a cut value; a cut line in interactive mode stores a cut value too.
+ * The exit code alone is not evidence that the value is in the store, so the
+ * entry is read back and compared, and "saved" is a fact rather than a hope.
+ * The value read back is compared and dropped; it reaches no caller, no
+ * message and no log.
+ *
+ * A FAILED CHECK REMOVES THE ENTRY. `-U` has already replaced whatever was
+ * there, so what the store holds after a mismatch is not the reader's value
+ * under the reader's name — a cut key that an agent would read back and use.
+ * It is deleted, by name and with no value in the arguments, so the name holds
+ * nothing rather than something wrong.
  *
  * `-U` so a second hand-over replaces the first rather than failing on an
  * item that already exists: re-answering an ask is a thing people do, and a
@@ -181,27 +232,13 @@ export async function storeSecret(
   run: SecretRunner = spawnCommand,
 ): Promise<SecretWriteResult> {
   if (!isSecretServiceName(service)) return { ok: false, error: 'bad-service' };
-  if (typeof value === 'string' && value.length > SECRET_VALUE_MAX_CHARS) {
-    return { ok: false, error: 'value-too-long' };
-  }
   if (!isStorableSecretValue(value)) return { ok: false, error: 'bad-value' };
+  if (!secretValueFits(service, value)) return { ok: false, error: 'value-too-long' };
 
-  // `-w` LAST, with nothing after it: that is what makes `security` prompt,
-  // and prompting is what makes it read from stdin. Given an argument it
-  // would take the value on argv, which is the one thing this module exists
-  // to prevent — and a trailing keychain path would be eaten by the flag.
   const stored = storedSecretService(service);
-  // ENCODED, so the prompt sees one line whatever the reader pasted. A
-  // multi-line value sent raw does not half-work: it fails the confirm read
-  // and stores nothing.
   const encoded = encodeSecretValue(value);
-  const wrote = await run(
-    'security',
-    ['add-generic-password', '-U', '-a', SECRET_ACCOUNT, '-s', stored, '-w'],
-    // Twice: the prompt asks, then asks again to confirm. See the note above
-    // for what a single line does.
-    `${encoded}\n${encoded}\n`,
-  );
+  if (!BASE64_ONLY.test(encoded)) return { ok: false, error: 'bad-value' };
+  const wrote = await run('security', ['-i'], `${addCommandLine(stored, encoded)}\n`);
   if (wrote.code !== 0) return { ok: false, error: 'write-failed' };
 
   const readBack = await run(
@@ -213,6 +250,7 @@ export async function storeSecret(
   // the ENCODED form: byte-for-byte equality there is equality of the value,
   // and it keeps the decoded value from being materialised a second time.
   if (readBack.code !== 0 || readBack.stdout.replace(/\n$/, '') !== encoded) {
+    await run('security', ['delete-generic-password', '-a', SECRET_ACCOUNT, '-s', stored], '');
     return { ok: false, error: 'verify-failed' };
   }
   return { ok: true };
