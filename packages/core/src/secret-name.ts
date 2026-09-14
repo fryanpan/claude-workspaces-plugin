@@ -52,6 +52,20 @@ export function storedSecretService(service: string): string {
 }
 
 /**
+ * The longest value a secret field takes, in characters.
+ *
+ * Here rather than beside the writer because the card has to say it BEFORE a
+ * request is sent, and the board cannot import the server. The number itself
+ * is chosen from the store: `security -i` cuts a command line at 4,095
+ * characters and stores the part that fit, and the server's
+ * `secretValueFits` (`packages/server/src/secret-store.ts`) holds every line
+ * to three quarters of that. A value this long, of ASCII text, under the
+ * longest name an item may declare, stays inside it — `secret-store.test.ts`
+ * builds that line and checks. A real API key is around a hundred.
+ */
+export const SECRET_VALUE_MAX_CHARS = 2000;
+
+/**
  * The one line an agent runs to read a value back, once the answer says it
  * was saved.
  *
@@ -72,12 +86,12 @@ export function secretReadCommand(service: string): string {
 /**
  * Why the command ends in a decode.
  *
- * `security` takes a value from a PROMPT, which is line-based: one line, then
- * the same line again to confirm. A value carrying a newline cannot go down
- * that path at all — measured on macOS 26.2, where the three-line attempt
- * printed "passwords don't match" three times and exited 1 with nothing
- * stored. So a reader pasting an SSH key or a service-account file had a
- * value the store could not take.
+ * `security` takes its input a line at a time — first from a prompt, now as
+ * one command line of `security -i`. A value carrying a newline cannot go down
+ * either path whole: measured on macOS 26.2, the three-line attempt through
+ * the prompt printed "passwords don't match" three times and exited 1 with
+ * nothing stored. So a reader pasting an SSH key or a service-account file had
+ * a value the store could not take.
  *
  * Encoding is what makes it one line. Every value is base64 on the way in,
  * whether or not it has a newline in it — one format, so no reader has to
