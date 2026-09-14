@@ -5,6 +5,7 @@
  * done-when-owner-items.test.ts. All fixtures are synthetic.
  */
 import { describe, expect, it } from 'bun:test';
+import type { TaskReviewItem } from '@claude-workspaces/core';
 import type { DoneWhenLine } from '@claude-workspaces/core/done-when';
 import type { StoredReviewItem, Task } from '@claude-workspaces/core/task-wire';
 import {
@@ -12,13 +13,14 @@ import {
   OWNER_CHECK_MET,
   type OwnerItemDeps,
   applyOwnerAnswer,
+  gateOwnerItems,
   ownerCheckReview,
   refuseOwnerAnswer,
   syncOwnerItems,
 } from '../src/review-items/done-when-owner.ts';
 
 const PERSON = { id: 'known-reader', name: 'Reader', kind: 'known' };
-const AGENT = { id: 'agent-otter', name: 'Otter', kind: 'agent' };
+const AGENT = { id: 'agent-kiln-bot', name: 'Kiln Bot', kind: 'agent' };
 
 function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in-progress') {
   const task = {
@@ -76,15 +78,47 @@ function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in-progress') 
 describe('syncOwnerItems', () => {
   it('files one item per owner line and nothing for the others, however often it runs', () => {
     const { task, deps, calls } = fixture([
-      { id: 'd-1', text: 'reads well', verdict: 'owner', by: 'Otter' },
+      { id: 'd-1', text: 'reads well', verdict: 'owner', by: 'Kiln Bot' },
       { id: 'd-2', text: 'tests pass', verdict: 'met' },
       { id: 'd-3', text: 'unchecked' },
     ]);
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 1, withdrawn: 0, revised: 0 });
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 0, revised: 0 });
+    expect(syncOwnerItems('t-1', deps)).toEqual({
+      filed: 1,
+      withdrawn: 0,
+      revised: 0,
+      toJudge: ['r-1'],
+    });
+    // Nothing new on the second pass, and the gate has seen it, so nothing
+    // for the gate either.
+    const filed = task.reviews?.[0] as StoredReviewItem;
+    filed.judge = { at: 2, verdict: 'ok', reason: 'fine' };
+    expect(syncOwnerItems('t-1', deps)).toEqual({
+      filed: 0,
+      withdrawn: 0,
+      revised: 0,
+      toJudge: [],
+    });
     expect(calls.add).toBe(1);
     expect(task.reviews?.[0]?.doneWhenLineId).toBe('d-1');
-    expect(task.reviews?.[0]?.createdBy).toBe('Otter');
+    expect(task.reviews?.[0]?.createdBy).toBe('Kiln Bot');
+  });
+
+  it('hands the gate an open item that was never judged, though its words are unchanged', () => {
+    // Filed before owner checks were gated, or left by a crash between the
+    // write and the judgement: no later sync has new words to judge it for.
+    const { task, deps, calls } = fixture([{ id: 'd-1', text: 'reads well', verdict: 'owner' }]);
+    syncOwnerItems('t-1', deps);
+    expect(syncOwnerItems('t-1', deps)).toEqual({
+      filed: 0,
+      withdrawn: 0,
+      revised: 0,
+      toJudge: ['r-1'],
+    });
+    expect(calls.add).toBe(1);
+    expect(calls.revise).toEqual([]);
+    // The control: the same item once a verdict is recorded is left alone.
+    (task.reviews?.[0] as StoredReviewItem).judge = { at: 2, verdict: 'held', reason: 'x' };
+    expect(syncOwnerItems('t-1', deps).toJudge).toEqual([]);
   });
 
   it('files under its own name, never the stall escalation’s, when the line names nobody', () => {
@@ -98,11 +132,11 @@ describe('syncOwnerItems', () => {
     syncOwnerItems('t-1', deps);
     const line = task.doneWhen?.[0] as DoneWhenLine;
     line.verdict = 'not-met';
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 1, revised: 0 });
+    expect(syncOwnerItems('t-1', deps)).toMatchObject({ filed: 0, withdrawn: 1, revised: 0 });
     line.verdict = 'owner';
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 1, withdrawn: 0, revised: 0 });
+    expect(syncOwnerItems('t-1', deps)).toMatchObject({ filed: 1, withdrawn: 0, revised: 0 });
     task.doneWhen = [];
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 1, revised: 0 });
+    expect(syncOwnerItems('t-1', deps)).toMatchObject({ filed: 0, withdrawn: 1, revised: 0 });
     expect(calls.withdraw).toEqual(['r-1', 'r-2']);
   });
 
@@ -113,7 +147,12 @@ describe('syncOwnerItems', () => {
     const line = task.doneWhen?.[0] as DoneWhenLine;
     line.text = 'reads well at 430 wide';
     line.proof = [{ text: 'new shot', url: 'https://example.com/b.png' }];
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 0, revised: 1 });
+    expect(syncOwnerItems('t-1', deps)).toEqual({
+      filed: 0,
+      withdrawn: 0,
+      revised: 1,
+      toJudge: ['r-1'],
+    });
     expect(calls.revise).toEqual(['r-1']);
     expect(task.reviews?.[0]?.review.headline).toContain('reads well at 430 wide');
     expect(task.reviews?.[0]?.review.detail).toContain('new shot');
@@ -164,14 +203,100 @@ describe('the answer', () => {
 });
 
 describe('ownerCheckReview', () => {
-  it('is a decision whose options are the two the answer reads, with proof linked', () => {
-    const review = ownerCheckReview({ title: 'A task' } as Task, {
+  const task = { title: 'A task' } as Task;
+
+  it('is a decision whose options are the two the answer reads', () => {
+    const review = ownerCheckReview(task, {
       id: 'd-1',
       text: 'reads well',
       proof: [{ text: 'shot', url: 'https://example.com/a.png' }],
-    }) as { shape: string; options: Array<{ id: string }>; detail: string };
+    }) as { shape: string; options: Array<{ id: string }> };
     expect(review.shape).toBe('decision');
     expect(review.options.map((o) => o.id)).toEqual([OWNER_CHECK_MET, 'not-met']);
-    expect(review.detail).toContain('[shot](https://example.com/a.png)');
+  });
+
+  it('leads with a link to the proof, then says what to check and what each answer does', () => {
+    // A proof with no link first, so a template that took proof in order
+    // would lead with words the reader cannot open.
+    const { detail } = ownerCheckReview(task, {
+      id: 'd-1',
+      text: 'On the phone the app page shows the comment button.',
+      by: 'Kiln Bot',
+      proof: [
+        { text: 'ran the page suite' },
+        { text: 'phone screenshot', url: 'https://example.com/phone.png' },
+      ],
+    });
+    expect(
+      detail.startsWith(
+        'Open [phone screenshot](https://example.com/phone.png) and check: On the phone the app page shows the comment button.',
+      ),
+    ).toBe(true);
+    expect(detail).toContain('Looks right marks this line of “A task” met');
+    expect(detail).toContain('Not met sends it back to Kiln Bot');
+    expect(detail).toContain('Also attached: ran the page suite.');
+  });
+
+  it('says plainly when there is nothing to open', () => {
+    const { detail } = ownerCheckReview(task, { id: 'd-1', text: 'reads well' });
+    expect(detail.startsWith('Nothing is linked to open')).toBe(true);
+  });
+});
+
+describe('who an owner item is filed as', () => {
+  it('is the agent that marked the line, so a hold can reach it — never a person editing the words', () => {
+    const lines: DoneWhenLine[] = [
+      { id: 'd-1', text: 'reads well', verdict: 'owner', by: 'Kiln Bot' },
+    ];
+    const byAgent = fixture(lines.map((l) => ({ ...l })));
+    const seen: string[] = [];
+    const add = byAgent.deps.addReviewItem;
+    byAgent.deps.addReviewItem = (t, review, opts) => {
+      seen.push(opts.actor.id);
+      return add(t, review, opts);
+    };
+    syncOwnerItems('t-1', byAgent.deps, AGENT);
+    const byPerson = fixture(lines.map((l) => ({ ...l })));
+    const addP = byPerson.deps.addReviewItem;
+    byPerson.deps.addReviewItem = (t, review, opts) => {
+      seen.push(opts.actor.id);
+      return addP(t, review, opts);
+    };
+    syncOwnerItems('t-1', byPerson.deps, PERSON);
+    expect(seen).toEqual([AGENT.id, 'agent-workspaces-server']);
+  });
+});
+
+describe('gating an owner item that is already on the queue', () => {
+  function onQueue(judgeOn: boolean) {
+    const { task, deps } = fixture([{ id: 'd-1', text: 'reads well', verdict: 'owner' }]);
+    syncOwnerItems('t-1', deps, AGENT);
+    const announced: string[] = [];
+    const gate = {
+      getTask: () => task,
+      judgeReviewItem: async (_t: Task, item: TaskReviewItem) => {
+        // A gate that is on records a verdict; one that is off records nothing.
+        if (judgeOn) {
+          const raw = task.reviews?.[0] as StoredReviewItem;
+          raw.judge = { at: 3, verdict: 'ok', reason: 'fine' };
+          return { held: false, item: { ...item, judge: raw.judge } };
+        }
+        return { held: false, item };
+      },
+      announceTaskReview: (_t: Task, item: TaskReviewItem) => announced.push(item.id),
+    };
+    return { gate, announced };
+  }
+
+  it('does not announce it again on every sync while the gate is off', async () => {
+    const { gate, announced } = onQueue(false);
+    for (const _ of [1, 2, 3]) await gateOwnerItems('t-1', ['r-1'], AGENT, gate);
+    expect(announced).toEqual([]);
+  });
+
+  it('announces it once, when a verdict is first recorded', async () => {
+    const { gate, announced } = onQueue(true);
+    for (const _ of [1, 2]) await gateOwnerItems('t-1', ['r-1'], AGENT, gate);
+    expect(announced).toEqual(['r-1']);
   });
 });

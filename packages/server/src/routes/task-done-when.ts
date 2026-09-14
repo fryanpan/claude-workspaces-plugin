@@ -13,7 +13,12 @@
  */
 import { DONE_WHEN_VERDICTS } from '@claude-workspaces/core/done-when';
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { type DoneWhenReportInput, parseDoneWhenInput } from '../task-done-when.ts';
+import { type OwnerCheckHold, gateOwnerItems } from '../review-items/done-when-owner.ts';
+import {
+  type DoneWhenReportInput,
+  type DoneWhenResult,
+  parseDoneWhenInput,
+} from '../task-done-when.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /** Which HTTP status a refusal earns. `not-found` is the row; everything
@@ -32,6 +37,35 @@ export async function handleTaskDoneWhen(
 ): Promise<Response | undefined> {
   const { taskStore, taskProjection, j, safeJson } = ctx;
   const { req, scope, authorFor } = rq;
+
+  /**
+   * The answer every write gives: the list, whether it closed the ticket,
+   * and — AFTER the owner items it filed or revised have been through the
+   * quality gate — any the gate held, each with the call that lifts it. The
+   * gate runs before the reply for the reason the add route's does: a builder
+   * told "filed" must not be left waiting on a reader who cannot see it.
+   */
+  async function answered(
+    taskId: string,
+    res: DoneWhenResult & { ok: true },
+    author: { id: string; name: string; kind?: string },
+  ): Promise<Response> {
+    taskProjection.refreshTask(res.task);
+    const held: OwnerCheckHold[] = res.ownerItemsToJudge
+      ? await gateOwnerItems(taskId, res.ownerItemsToJudge, author, {
+          getTask: (id) => taskStore.getTask(id),
+          judgeReviewItem: ctx.judgeReviewItem,
+          announceTaskReview: ctx.announceTaskReview,
+        })
+      : [];
+    return j(200, {
+      taskId,
+      lines: res.lines,
+      closed: res.closed,
+      status: res.task.status,
+      ...(held.length > 0 ? { held } : {}),
+    });
+  }
 
   // The WHOLE list, every time: the panel's add, its in-place edit and its ×
   // all send the sequence they want. A line sent with an `id` the row already
@@ -53,8 +87,7 @@ export async function handleTaskDoneWhen(
     if (!parsed.ok) return j(400, { error: parsed.error, message: parsed.message });
     const res = taskStore.setDoneWhen(taskId, parsed.lines ?? [], { actor: author });
     if (!res.ok) return j(statusFor(res.error), res);
-    taskProjection.refreshTask(res.task);
-    return j(200, { taskId, lines: res.lines, closed: res.closed, status: res.task.status });
+    return answered(taskId, res, author);
   }
 
   // The builder's report. Partial by design — it names the lines it has
@@ -84,10 +117,12 @@ export async function handleTaskDoneWhen(
       // verb cannot disagree about what counts as an attachment.
       entries.push({ id, verdict, proof: raw?.proof as DoneWhenReportInput['proof'] });
     }
-    const res = taskStore.reportDoneWhen(taskId, entries, { actor: author });
+    // A proof's board path ("/workspaces/…?task=…") is made absolute against
+    // the base review links use, so the owner's item links somewhere they can open.
+    const baseUrl = ctx.externalBaseUrl?.();
+    const res = taskStore.reportDoneWhen(taskId, entries, { actor: author, baseUrl });
     if (!res.ok) return j(statusFor(res.error), res);
-    taskProjection.refreshTask(res.task);
-    return j(200, { taskId, lines: res.lines, closed: res.closed, status: res.task.status });
+    return answered(taskId, res, author);
   }
 
   // The owner's two buttons. Person-only, checked in the store against the
@@ -105,8 +140,7 @@ export async function handleTaskDoneWhen(
     }
     const res = taskStore.checkDoneWhen(taskId, lineId, verdict, { actor: author });
     if (!res.ok) return j(statusFor(res.error), res);
-    taskProjection.refreshTask(res.task);
-    return j(200, { taskId, lines: res.lines, closed: res.closed, status: res.task.status });
+    return answered(taskId, res, author);
   }
 
   return undefined;

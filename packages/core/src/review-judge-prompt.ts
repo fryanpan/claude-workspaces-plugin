@@ -17,7 +17,7 @@ import type { ReviewOption, ReviewSecretField } from './review-item.ts';
 
 /** Bumped when the frame around the criteria changes, so a stored verdict
  *  can be told from one made under an older ask. */
-export const REVIEW_JUDGE_PROMPT_VERSION = 8;
+export const REVIEW_JUDGE_PROMPT_VERSION = 9;
 
 /**
  * What a workspace judges its review items against until somebody edits it.
@@ -113,7 +113,23 @@ export interface ReviewJudgeItem {
    * 2026-09-12). The fields ARE the ask, so they belong in what is judged.
    */
   secrets?: readonly ReviewSecretField[];
+  /**
+   * The item hands the reader a done-when line the agent marked as theirs to
+   * judge, rather than asking a question the agent wrote.
+   *
+   * Set by the server off the stored item, never by the filer. It carries a
+   * rule no hand-written item needs: a check an agent could have made itself
+   * — a log, an error tracker, an API, a page it can load — is not the
+   * reader's to make. Two checks the owner was handed on 2026-09-14 were both
+   * of that kind (*"Why am I doing this? You should do it automatically as
+   * part of definition of done."*).
+   */
+  ownerCheck?: boolean;
 }
+
+/** How the judge starts a hold on an owner check an agent could make itself,
+ *  so the builder reads at once that the remedy is to check, not to reword. */
+export const OWNER_CHECK_SELF_PREFIX = 'An agent can check this itself:';
 
 export interface ReviewJudgeVerdict {
   ok: boolean;
@@ -251,6 +267,20 @@ export function buildReviewJudgePrompt(
       'NEVER ask for a value, an example of one, or any part of one, in "reason" or in "add" — the whole point of this shape is that nobody on this side ever sees one.',
     );
   }
+  if (item.ownerCheck) {
+    system.push(
+      '',
+      // The shape's own rule, and the reason the server files these through
+      // the gate at all: the words come from a template, so the judge is not
+      // here for the phrasing but for whether a person should be asked.
+      'This item hands the reader one done-when line of a task: the agent that did the work says only a person can judge it, and the reader’s Looks right marks it met. The card is a fixed template around the line, so judge the LINE and its link, not the template’s wording.',
+      // First, because it outranks every criterion: a perfectly worded check
+      // the agent could have made itself still wastes the reader's time.
+      `First decide whether an agent could check the line itself: the answer is in a log, an error tracker such as Sentry, an API or command output, a test run, a file, a list or table a tool returns, or a web page an agent can load in a headless browser. If it could, hold it whatever else is true, start the reason with "${OWNER_CHECK_SELF_PREFIX}" and name what the agent should read, and omit "add".`,
+      'Otherwise pass it when the line needs a person — how something looks or reads to them, or a device, account or place only they have, such as their own phone — and the line with its link tells the reader what they are looking for.',
+      'Hold it when the detail gives the reader nothing to open, or when the line does not say what the reader should see there.',
+    );
+  }
   if (item.priorAsks && item.priorAsks.length > 0) {
     system.push(
       '',
@@ -303,6 +333,18 @@ export function buildReviewJudgePrompt(
     }
   }
   lines.push('</item>');
+  if (item.ownerCheck) {
+    // Outside the fence: the server says what kind of item this is, not the
+    // filer. In the user turn as well as the system turn, because measured on
+    // replays of the 2026-09-14 checks the system rule alone got the verdict
+    // right and the REASON wrong — every hold named a criteria gap, none named
+    // what the agent should have read.
+    lines.push(
+      '<owner-check>',
+      `A done-when line handed to the reader. Answer first: could an agent check this line itself — is it a fact in a log, a tracker, an API, a file, or what a page, list or table contains? Whether something is present or absent there is a fact an agent reads, never a judgement, even when a link to it is attached. If so, hold it with a reason that starts "${OWNER_CHECK_SELF_PREFIX}". A line about how something looks, reads or feels to the reader, or about a device only they have, needs them: pass it.`,
+      '</owner-check>',
+    );
+  }
   if (item.priorHolds && item.priorHolds.length > 0) {
     // Outside the content fence, because this is the judge's own record and
     // not the filer's words. Flattened for the same reason they are.

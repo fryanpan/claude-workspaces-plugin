@@ -115,7 +115,13 @@ describe('an owner line is a review item on the queue', () => {
     // New proof on the same line: the one item now carries it.
     await post(`/workspaces/${ws}/tasks/${taskId}/done-when/report`, {
       author: AGENT,
-      lines: [{ id: lineId, verdict: 'owner', proof: [{ text: 'retaken at 430' }] }],
+      lines: [
+        {
+          id: lineId,
+          verdict: 'owner',
+          proof: [{ text: 'retaken at 430', url: 'https://example.com/430.png' }],
+        },
+      ],
     });
     const after = await ownerItemsOn(taskId);
     expect(after).toHaveLength(1);

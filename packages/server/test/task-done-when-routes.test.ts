@@ -41,6 +41,9 @@ interface DoneWhenBody {
   message?: string;
 }
 
+/** A proof link, which every line handed to the owner carries. */
+const SHOT = 'https://example.com/panel.png';
+
 describe('done-when lines on a task', () => {
   let handle: ServerHandle;
   let dataDir: string;
@@ -199,7 +202,7 @@ describe('done-when lines on a task', () => {
 
     await post(`/workspaces/${ws}/tasks/${task.id}/done-when/report`, {
       author: AGENT,
-      lines: [{ id: lineId, verdict: 'owner' }],
+      lines: [{ id: lineId, verdict: 'owner', proof: [{ text: 'the panel', url: SHOT }] }],
     });
     expect((await detail(task.id)).doneWhen?.[0]?.verdict).toBe('owner');
 
@@ -227,7 +230,7 @@ describe('done-when lines on a task', () => {
     const lineId = (await detail(task.id)).doneWhen?.[0]?.id as string;
     await post(`/workspaces/${ws}/tasks/${task.id}/done-when/report`, {
       author: AGENT,
-      lines: [{ id: lineId, verdict: 'owner' }],
+      lines: [{ id: lineId, verdict: 'owner', proof: [{ text: 'the panel', url: SHOT }] }],
     });
 
     // The check route already refuses this actor on this line. The report
