@@ -81,12 +81,14 @@ export class ReviewItemStore {
     if (!check.ok) {
       return { ok: false, error: 'bad-review', message: reviewPayloadMessage(check) };
     }
-    const payload = readReviewPayload(review);
+    const read = readReviewPayload(review);
     // Unreachable for anything the gate passed — kept because "the checker said
     // yes and the reader said no" must not become an undefined write.
-    if (!payload) {
+    if (!read) {
       return { ok: false, error: 'bad-review', message: reviewPayloadMessage(check) };
     }
+    // Partial answers are recorded by the answer route, never filed with the ask.
+    const { partialAnswers: _filed, ...payload } = read;
 
     const ts = this.p.now();
     const actor: TaskActor = {

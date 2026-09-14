@@ -224,6 +224,28 @@ describe('an answer that covers only some of an item’s questions', () => {
   });
 });
 
+describe('partial answers come only from answering', () => {
+  it('a filing body cannot plant them on a ticket item or a new task', async () => {
+    boot();
+    const planted = [{ text: 'planted', by: 'Reader', ts: 1, open: ['anything'] }];
+    const { ws, taskId, itemId } = await fileItem({ ...THREE_QUESTIONS, partialAnswers: planted });
+    const stored = handle?.tasks.listReviewItems(taskId).find((r) => r.id === itemId);
+    expect(stored?.review).toBeDefined();
+    expect(stored?.review.partialAnswers).toBeUndefined();
+
+    const { task } = await jj<{ task: { id: string } }>(
+      post(`/workspaces/${ws}/tasks`, {
+        title: 'Decide the export window',
+        author: FILER,
+        review: { ...THREE_QUESTIONS, partialAnswers: planted },
+      }),
+    );
+    const filed = handle?.tasks.listReviewItems(task.id) ?? [];
+    expect(filed.length).toBeGreaterThan(0);
+    for (const r of filed) expect(r.review.partialAnswers).toBeUndefined();
+  });
+});
+
 describe('answers the check leaves alone', () => {
   it('an item asking one thing is never checked', async () => {
     boot();
