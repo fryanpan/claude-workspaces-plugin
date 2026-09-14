@@ -127,11 +127,11 @@ export function takeNestedNotes(item: Y.XmlElement): NestedNotes {
   return { lists };
 }
 
-/** Every list item's own words anywhere under `els`. */
-function itemTexts(els: readonly Y.XmlElement[]): Set<string> {
-  const out = new Set<string>();
+/** Every list item anywhere under `els`, by its own words; the first wins. */
+function itemsByText(els: readonly Y.XmlElement[]): Map<string, Y.XmlElement> {
+  const out = new Map<string, Y.XmlElement>();
   const visit = (el: Y.XmlElement): void => {
-    if (el.nodeName === 'listItem') out.add(ownText(el));
+    if (el.nodeName === 'listItem' && !out.has(ownText(el))) out.set(ownText(el), el);
     for (const child of el.toArray()) if (child instanceof Y.XmlElement) visit(child);
   };
   for (const el of els) visit(el);
@@ -141,8 +141,11 @@ function itemTexts(els: readonly Y.XmlElement[]): Set<string> {
 /**
  * Put the notes `takeNestedNotes` saved under the first list item the
  * replacement wrote. A note the replacement already restates is not put back
- * a second time. When the replacement wrote no list item there is nowhere a
- * sub-list can live, and the notes go back as a list right after it.
+ * a second time: the saved item takes its restatement's place instead, so the
+ * block id, the author and whatever is keyed on them survive. When the
+ * restatement is the lead itself, or carries notes of its own, it stays and
+ * the saved copy goes. When the replacement wrote no list item there is
+ * nowhere a sub-list can live, and the notes go back as a list right after it.
  *
  * Call AFTER claiming the replacement for its author: claiming walks the
  * subtree, and these notes keep the authors they already had.
@@ -153,10 +156,23 @@ export function restoreNestedNotes(
   saved: NestedNotes,
 ): void {
   if (saved.lists.length === 0) return;
-  const restated = itemTexts(written);
+  const restated = itemsByText(written);
   const target = written.find((el) => el.nodeName === 'listItem');
   for (const list of saved.lists) {
-    const keep = list.items.filter((_, i) => !restated.has(list.texts[i] ?? ''));
+    const keep = list.items.filter((item, i) => {
+      const twin = restated.get(list.texts[i] ?? '');
+      if (twin === undefined) return true;
+      restated.delete(list.texts[i] ?? '');
+      const parent = twin.parent;
+      if (twin !== target && !written.includes(twin) && parent instanceof Y.XmlElement) {
+        if (!twin.toArray().some(isList)) {
+          const at = parent.toArray().indexOf(twin);
+          parent.delete(at, 1);
+          parent.insert(at, [item]);
+        }
+      }
+      return false;
+    });
     if (keep.length === 0) continue;
     if (target) {
       const existing = target

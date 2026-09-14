@@ -129,6 +129,39 @@ describe('a replace of a bullet with notes nested under it', () => {
     ]);
     expect(readOutline(doc).find((e) => e.id === child)?.text).toBe('Slipway items pile up');
   });
+
+  it('a nested note the replacement restates keeps its id, so a comment on it still lands', () => {
+    const doc = docOf('## Meeting notes\n');
+    apply(doc, [
+      {
+        op: 'insert_at_end',
+        markdown: '- Harbour queue\n  - Slipway items pile up\n  - Ferry items',
+      },
+    ]);
+    const slipway = idOf(doc, 'Slipway');
+    const ferry = idOf(doc, 'Ferry');
+    apply(doc, [
+      {
+        op: 'replace_block',
+        blockId: idOf(doc, 'Harbour queue'),
+        markdown: '- Harbour queue sizing\n  - Slipway items pile up',
+      },
+    ]);
+    const after = readOutline(doc);
+    expect(after.filter((e) => e.text === 'Slipway items pile up').map((e) => e.id)).toEqual([
+      slipway,
+    ]);
+    expect(after.find((e) => e.id === ferry)?.text).toBe('Ferry items');
+    expect(md(doc)).toBe(
+      [
+        '## Meeting notes',
+        '',
+        '- Harbour queue sizing',
+        '  - Slipway items pile up',
+        '  - Ferry items',
+      ].join('\n'),
+    );
+  });
 });
 
 describe("an insert beside the editor's trailing paragraph", () => {
