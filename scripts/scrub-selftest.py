@@ -19,7 +19,9 @@ Run: python3 scripts/scrub-selftest.py    (exit 0 = gate is alive)
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import socket
@@ -27,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -680,11 +683,41 @@ HAIKU_STUB_REPLIES = {
     "/wrong-shape": (200, json.dumps({"content": "a gateway wrote a string"})),
 }
 
+# Replies that carry `usage`, which is what makes a call cost money and so
+# what the spend ledger books. 12,000 in and 300 out is $0.012 + $0.0015.
+HAIKU_USAGE = {"input_tokens": 12_000, "output_tokens": 300}
+HAIKU_USAGE_USD = 0.0135
+HAIKU_STUB_REPLIES.update({
+    "/clean-usage": (200, json.dumps({
+        "content": [{"text": "NAMES: none\nVERDICT: CLEAN"}], "usage": HAIKU_USAGE,
+    })),
+    "/leaks-usage": (200, json.dumps({
+        "content": [{"text": "VERDICT: LEAKS_FOUND\nLEAKS:\n- example.md:1 — a real name"}],
+        "usage": HAIKU_USAGE,
+    })),
+    # Paid for, and then unusable: the two replies the ledger must still book.
+    "/no-verdict-usage": (200, json.dumps({
+        "content": [{"text": "NAMES: none"}], "usage": HAIKU_USAGE,
+    })),
+    "/wrong-shape-usage": (200, json.dumps({
+        "content": "a gateway wrote a string", "usage": HAIKU_USAGE,
+    })),
+})
+
 
 class HaikuStub(BaseHTTPRequestHandler):
-    """Answers whatever the path asks for, and reads nothing it is sent."""
+    """Answers whatever the path asks for, and reads nothing it is sent.
+
+    It counts the requests it answers, because "the cap made no API call" is
+    only provable at the place a call would land.
+    """
+
+    calls = 0
+    calls_lock = threading.Lock()
 
     def do_POST(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler's spelling)
+        with HaikuStub.calls_lock:
+            HaikuStub.calls += 1
         # Drained, never parsed, never logged: the request carries the
         # placeholder key in a header and there is no reason to look at it.
         self.rfile.read(int(self.headers.get("content-length") or 0))
@@ -698,6 +731,43 @@ class HaikuStub(BaseHTTPRequestHandler):
 
     def log_message(self, *args) -> None:
         pass
+
+
+def start_haiku_stub() -> tuple[ThreadingHTTPServer, str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), HaikuStub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def spawn_haiku(url: str, policy: str | None, *, ledger: str, with_key: bool = True,
+              argv: tuple[str, ...] = (), stdin: str = HAIKU_FAKE_DIFF,
+              cwd: str = HERE, **env_extra: str):
+    """`scrub-haiku.py` as a push runs it, pointed at a stub and a ledger.
+
+    `ledger` has no default on purpose. Every case names its own spend ledger,
+    so no case reads the real one — whose total would decide whether a case
+    even reaches the stub — and no case writes to it.
+    """
+    env = clean_git_env()
+    for key in ("SCRUB_SKIP", "SCRUB_SKIP_HAIKU",
+                "SCRUB_HAIKU_API_KEY", "ANTHROPIC_API_KEY",
+                "SCRUB_HAIKU_UNAVAILABLE", "SCRUB_HAIKU_DAILY_USD",
+                "SCRUB_HAIKU_BUDGET_BLOCK"):
+        env.pop(key, None)
+    # Nothing has ever stored a password under this service name, so the
+    # real entry is neither read nor reachable from any case here.
+    env["SCRUB_HAIKU_KEYCHAIN_SERVICE"] = "scrub-selftest-no-such-service"
+    env["SCRUB_HAIKU_API_URL"] = url
+    env["SCRUB_HAIKU_SPEND_LOG"] = ledger
+    if with_key:
+        env["SCRUB_HAIKU_API_KEY"] = HAIKU_PLACEHOLDER_KEY
+    if policy is not None:
+        env["SCRUB_HAIKU_UNAVAILABLE"] = policy
+    env.update(env_extra)
+    return subprocess.run(
+        [sys.executable, HAIKU, *argv], input=stdin,
+        capture_output=True, text=True, env=env, cwd=cwd,
+    )
 
 
 def check_haiku_unavailable() -> None:
@@ -721,9 +791,8 @@ def check_haiku_unavailable() -> None:
     that reaches a verdict through this same stub, every `0` below could be a
     `0` for some reason that has nothing to do with policy.
     """
-    server = ThreadingHTTPServer(("127.0.0.1", 0), HaikuStub)
-    stub = f"http://127.0.0.1:{server.server_address[1]}"
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    server, stub = start_haiku_stub()
+    ledgers = tempfile.TemporaryDirectory()
 
     # A loopback port with nothing behind it, for the network-failure case:
     # bind one, take its number, close it.
@@ -732,24 +801,19 @@ def check_haiku_unavailable() -> None:
     dead = f"http://127.0.0.1:{probe.getsockname()[1]}/clean"
     probe.close()
 
-    def run_haiku(url: str, policy: str | None, with_key: bool = True):
-        env = clean_git_env()
-        for key in ("SCRUB_SKIP", "SCRUB_SKIP_HAIKU",
-                    "SCRUB_HAIKU_API_KEY", "ANTHROPIC_API_KEY",
-                    "SCRUB_HAIKU_UNAVAILABLE"):
-            env.pop(key, None)
-        # Nothing has ever stored a password under this service name, so the
-        # real entry is neither read nor reachable from any case here.
-        env["SCRUB_HAIKU_KEYCHAIN_SERVICE"] = "scrub-selftest-no-such-service"
-        env["SCRUB_HAIKU_API_URL"] = url
-        if with_key:
-            env["SCRUB_HAIKU_API_KEY"] = HAIKU_PLACEHOLDER_KEY
-        if policy is not None:
-            env["SCRUB_HAIKU_UNAVAILABLE"] = policy
-        return subprocess.run(
-            [sys.executable, HAIKU], input=HAIKU_FAKE_DIFF,
-            capture_output=True, text=True, env=env, cwd=HERE,
-        )
+    # No stub reply in this function carries `usage`, so nothing is ever
+    # booked here and this path is never created: every case reads $0.
+    empty_ledger = os.path.join(ledgers.name, "spend.jsonl")
+    # Today's spend already past the default cap, and a ledger path that
+    # exists and cannot be read as a file — the two cases the cap added.
+    over_ledger = os.path.join(ledgers.name, "over.jsonl")
+    with open(over_ledger, "w") as f:
+        f.write(ledger_line(haiku.utc_today(), "harborlight-app", 5.0))
+    dir_ledger = os.path.join(ledgers.name, "a-directory")
+    os.mkdir(dir_ledger)
+
+    def run_haiku(url: str, policy: str | None, with_key: bool = True, ledger: str = empty_ledger):
+        return spawn_haiku(url, policy, with_key=with_key, ledger=ledger)
 
     try:
         r = run_haiku(f"{stub}/clean", "warn-all")
@@ -767,15 +831,26 @@ def check_haiku_unavailable() -> None:
             "exhausted": lambda policy: run_haiku(f"{stub}/exhausted", policy),
             "absent": lambda policy: run_haiku(f"{stub}/clean", policy, with_key=False),
             "unreachable": lambda policy: run_haiku(dead, policy),
+            # The two the spend cap added. Neither reaches the stub.
+            "budget": lambda policy: run_haiku(f"{stub}/clean", policy, ledger=over_ledger),
+            "ledger-unreadable": lambda policy: run_haiku(f"{stub}/clean", policy, ledger=dir_ledger),
         }
         wanted = {
-            "warn-all": {"exhausted": 0, "absent": 0, "unreachable": 0},
-            "block-all": {"exhausted": 1, "absent": 1, "unreachable": 1},
-            "block-except-exhausted": {"exhausted": 0, "absent": 1, "unreachable": 1},
+            "warn-all": {"exhausted": 0, "absent": 0, "unreachable": 0,
+                         "budget": 0, "ledger-unreadable": 0},
+            "block-all": {"exhausted": 1, "absent": 1, "unreachable": 1,
+                          "budget": 1, "ledger-unreadable": 1},
+            "block-except-exhausted": {"exhausted": 0, "absent": 1, "unreachable": 1,
+                                       "budget": 0, "ledger-unreadable": 1},
         }
         expect("haiku: the policy table has a row for every setting the matrix covers",
                0 if set(wanted) == set(haiku.POLICIES) else 1, 0,
                f"module {sorted(haiku.POLICIES)!r} vs test {sorted(wanted)!r}")
+        for policy, per_case in wanted.items():
+            got_cases = set(haiku.POLICIES.get(policy, {}))
+            expect(f"haiku: the {policy} row answers every case the matrix drives",
+                   0 if got_cases == set(per_case) else 1, 0,
+                   f"module {sorted(got_cases)!r} vs test {sorted(per_case)!r}")
 
         for policy, per_case in wanted.items():
             for case, want in per_case.items():
@@ -833,6 +908,7 @@ def check_haiku_unavailable() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        ledgers.cleanup()
 
     # The sorting itself, driven directly. The last pair is the control for
     # the rule the classifier is built on: two 400s, one a cap and one not.
@@ -891,14 +967,14 @@ def check_haiku_unavailable() -> None:
     down = haiku.Unavailable("unreachable", "stub: this piece timed out")
     try:
         haiku.split_patch = lambda patch, limit=None: ["found", "down"]
-        haiku._scan_piece = lambda piece: 1 if piece == "found" else down
+        haiku._scan_piece = lambda piece, *_: 1 if piece == "found" else down
         expect("haiku pieces: a leak one piece found outranks a piece that could not run",
                haiku.call_haiku("x"), 1)
         haiku.split_patch = lambda patch, limit=None: ["down", "found"]
         expect("haiku pieces: ...in either order",
                haiku.call_haiku("x"), 1)
         haiku.split_patch = lambda patch, limit=None: ["clean", "down"]
-        haiku._scan_piece = lambda piece: 0 if piece == "clean" else down
+        haiku._scan_piece = lambda piece, *_: 0 if piece == "clean" else down
         got = haiku.call_haiku("x")
         expect("haiku pieces: a clean piece beside one that could not run is unavailable, not clean",
                0 if isinstance(got, haiku.Unavailable) else 1, 0, f"got {got!r}")
@@ -910,6 +986,300 @@ def check_haiku_unavailable() -> None:
     detail = haiku.classify_http_error(400, HAIKU_EXHAUSTED_BODY).detail
     expect("haiku classify: the cap case keeps the date access returns",
            0 if "2099-01-01" in detail else 1, 0, f"got {detail!r}")
+
+
+def ledger_line(date: str, repo: str, usd: object) -> str:
+    """One spend-ledger entry in the shared format, as another repo writes it."""
+    return json.dumps({
+        "ts": f"{date}T12:00:00Z", "date": date, "repo": repo,
+        "range": "push 0123456789ab", "model": haiku.MODEL, "diff_chars": 1000,
+        "input_tokens": 1000, "output_tokens": 100, "estimated_usd": usd,
+        "verdict": "clean",
+    }) + "\n"
+
+
+def read_ledger(path: str) -> list:
+    """Every line as parsed JSON, or the raw line where it does not parse."""
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path) as f:
+        for line in f.read().splitlines():
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                out.append(line)
+    return out
+
+
+def check_haiku_spend() -> None:
+    """The key's daily spend cap, shared with every repo that scans with it.
+
+    The key has hit its provider limit once. Another repository's copy of this
+    scanner books every call to one ledger and stops calling at a daily cap;
+    this one did neither, so its pushes spent the key where that cap could not
+    see them. The format is a contract between the two copies, so the entry's
+    keys are asserted exactly, not approximately.
+
+    Each case counts the stub's requests before and after. "The cap made no
+    call" is a claim about the network, and the stub is the network here.
+    """
+    server, stub = start_haiku_stub()
+    tmp = tempfile.TemporaryDirectory()
+    today = haiku.utc_today()
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    def ledger(name: str, body: str | None = None) -> str:
+        path = os.path.join(tmp.name, name)
+        if body is not None:
+            with open(path, "w") as f:
+                f.write(body)
+        return path
+
+    def calls_during(fn):
+        before = HaikuStub.calls
+        result = fn()
+        return result, HaikuStub.calls - before
+
+    try:
+        # --- 2. One entry per call, in exactly the shared shape ---------------
+        # Run from a LINKED worktree of a fixture repo: `repo` is the
+        # repository's name, not the name of whichever folder a push ran in.
+        repo = os.path.join(tmp.name, "riverbend-ledger-repo")
+        side = os.path.join(tmp.name, "riverbend-side-tree")
+        clean = clean_git_env()
+
+        def g(*args: str, cwd: str = repo) -> None:
+            subprocess.run(["git", *IDENT, *args], cwd=cwd, check=True,
+                           capture_output=True, text=True, env=clean)
+
+        os.makedirs(repo)
+        g("init", "-q")
+        with open(os.path.join(repo, "notes.md"), "w") as f:
+            f.write("ferry timetable\n")
+        g("add", "-A")
+        g("commit", "-qm", "seed")
+        with open(os.path.join(repo, "notes.md"), "a") as f:
+            f.write("the late sailing moved\n")
+        g("commit", "-qam", "notes")
+        g("worktree", "add", "-q", side)
+
+        shape = ledger("shape.jsonl")
+        r = spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=shape, cwd=side)
+        r2 = spawn_haiku(f"{stub}/leaks-usage", "block-all", ledger=shape, cwd=side,
+                         argv=("--diff-range", "HEAD~1..HEAD"), stdin="")
+        entries = read_ledger(shape)
+        expect("haiku spend: each paid call appends exactly one entry",
+               0 if r.returncode == 0 and r2.returncode == 1 and len(entries) == 2
+               and all(isinstance(e, dict) for e in entries) else 1, 0,
+               f"exits {r.returncode}/{r2.returncode}, entries {entries!r}\n{r.stderr}\n{r2.stderr}")
+        if len(entries) == 2 and all(isinstance(e, dict) for e in entries):
+            first, second = entries
+            expect("haiku spend: an entry carries exactly the shared keys, in order",
+                   0 if list(first) == list(haiku.LEDGER_KEYS)
+                   and haiku.LEDGER_KEYS == ("ts", "date", "repo", "range", "model",
+                                             "diff_chars", "input_tokens", "output_tokens",
+                                             "estimated_usd", "verdict") else 1, 0,
+                   f"got {list(first)!r}")
+            try:
+                stamp = datetime.fromisoformat(first["ts"].replace("Z", "+00:00"))
+                stamp_ok = stamp.utcoffset() == timedelta(0) and stamp.strftime("%Y-%m-%d") == first["date"]
+            except (ValueError, AttributeError):
+                stamp_ok = False
+            expect("haiku spend: ts is ISO-8601 UTC and date is its UTC day, today",
+                   0 if stamp_ok and first["date"] == today else 1, 0,
+                   f"ts {first['ts']!r}, date {first['date']!r}, today {today!r}")
+            expect("haiku spend: repo is the repository's name, even from a linked worktree",
+                   0 if first["repo"] == "riverbend-ledger-repo" else 1, 0, f"got {first['repo']!r}")
+            expect("haiku spend: range names what was scanned",
+                   0 if first["range"] == "stdin" and second["range"] == "HEAD~1..HEAD" else 1, 0,
+                   f"got {first['range']!r}, {second['range']!r}")
+            expect("haiku spend: model, size and tokens come from the call and its usage",
+                   0 if first["model"] == haiku.MODEL
+                   and first["diff_chars"] == len(HAIKU_FAKE_DIFF)
+                   and first["input_tokens"] == HAIKU_USAGE["input_tokens"]
+                   and first["output_tokens"] == HAIKU_USAGE["output_tokens"] else 1, 0,
+                   f"got {first!r}")
+            expect("haiku spend: priced at $1/M input and $5/M output",
+                   0 if abs(first["estimated_usd"] - HAIKU_USAGE_USD) < 1e-9 else 1, 0,
+                   f"got {first['estimated_usd']!r}, wanted {HAIKU_USAGE_USD}")
+            expect("haiku spend: verdict is a short word for what the call found",
+                   0 if first["verdict"] == "clean" and second["verdict"] == "findings" else 1, 0,
+                   f"got {first['verdict']!r}, {second['verdict']!r}")
+
+        # --- 4. Booked before anything acts on the reply --------------------
+        for path, word, label in (("/no-verdict-usage", "no-verdict", "a reply with no verdict"),
+                                  ("/wrong-shape-usage", "wrong-shape", "a reply in the wrong shape")):
+            booked = ledger(f"{word}.jsonl")
+            r = spawn_haiku(f"{stub}{path}", "block-all", ledger=booked)
+            entries = read_ledger(booked)
+            expect(f"haiku spend: {label} still books its cost",
+                   0 if len(entries) == 1 and isinstance(entries[0], dict)
+                   and entries[0].get("verdict") == word else 1, 0,
+                   f"entries {entries!r}\n{r.stderr}")
+            expect(f"haiku spend: ...and is still not a clean verdict ({word})",
+                   0 if r.returncode == 1 and "could not run — unreachable" in r.stderr
+                   and "SCAN DID NOT RUN" in r.stderr else 1, 0,
+                   f"exit {r.returncode}\n{r.stderr}")
+
+        # A push read in pieces is one call per piece, CHUNK_JOBS at a time,
+        # and so one entry per piece — whole lines, none interleaved.
+        big = "".join(
+            f"diff --git a/table{n}.md b/table{n}.md\n--- a/table{n}.md\n+++ b/table{n}.md\n"
+            f"@@ -0,0 +1,700 @@\n"
+            + "".join(f"+ferry timetable row {n}.{i}, platform {i % 7}\n" for i in range(700))
+            for n in range(8)
+        )
+        pieces = len(haiku.split_patch(big))
+        many = ledger("pieces.jsonl")
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all",
+                                                    ledger=many, stdin=big))
+        entries = read_ledger(many)
+        expect("haiku spend: a push in pieces books one whole entry per piece",
+               0 if pieces >= CHUNK_FLOOR and r.returncode == 0 and calls == pieces
+               and len(entries) == pieces and all(isinstance(e, dict) for e in entries) else 1, 0,
+               f"{pieces} pieces, {calls} calls, {len(entries)} entries, exit {r.returncode}\n{r.stderr}")
+
+        # --- 5. The cap: today's total, every repo, checked before a call -----
+        banner = "SCAN DID NOT RUN — daily budget reached"
+        at_cap = ledger("at-cap.jsonl",
+                        ledger_line(today, "harborlight-app", 0.60)
+                        + ledger_line(today, "saltmarsh-tools", 0.40)
+                        + ledger_line(yesterday, "harborlight-app", 5.0))
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=at_cap))
+        expect("haiku spend: at the cap, summed across repos, no API call is made",
+               0 if calls == 0 else 1, 0, f"{calls} call(s)\n{r.stderr}")
+        expect("haiku spend: ...the push blocks under block-all",
+               r.returncode, 1, r.stderr)
+        expect("haiku spend: ...and the banner says so, with today's total and the cap",
+               0 if banner in r.stderr and "$1.0000" in r.stderr and "$1.00." in r.stderr
+               and haiku.BANNER_RULE in r.stderr else 1, 0, r.stderr)
+        expect("haiku spend: ...and books nothing, since nothing was spent",
+               0 if len(read_ledger(at_cap)) == 3 else 1, 0)
+
+        # The positive control for every zero above: one cent under, the call goes out.
+        under = ledger("under.jsonl",
+                       ledger_line(today, "harborlight-app", 0.60)
+                       + ledger_line(today, "saltmarsh-tools", 0.39)
+                       + ledger_line(yesterday, "harborlight-app", 5.0))
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=under))
+        expect("haiku spend: under the cap the call goes out and the push passes",
+               0 if calls == 1 and r.returncode == 0 and banner not in r.stderr else 1, 0,
+               f"{calls} call(s), exit {r.returncode}\n{r.stderr}")
+
+        stale = ledger("stale.jsonl", ledger_line(yesterday, "harborlight-app", 50.0))
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean", "block-all", ledger=stale))
+        expect("haiku spend: only today's (UTC) entries count toward the cap",
+               0 if calls == 1 and r.returncode == 0 else 1, 0, f"{calls} call(s)\n{r.stderr}")
+
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean", "block-all", ledger=at_cap,
+                                                    SCRUB_HAIKU_DAILY_USD="2.50"))
+        expect("haiku spend: SCRUB_HAIKU_DAILY_USD moves the cap",
+               0 if calls == 1 and r.returncode == 0 else 1, 0, f"{calls} call(s)\n{r.stderr}")
+
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean", "warn-all", ledger=at_cap,
+                                                    SCRUB_HAIKU_BUDGET_BLOCK="1"))
+        expect("haiku spend: SCRUB_HAIKU_BUDGET_BLOCK=1 blocks a cap hit even under warn-all",
+               0 if calls == 0 and r.returncode == 1 and "SCRUB_HAIKU_BUDGET_BLOCK=1" in r.stderr else 1,
+               0, f"{calls} call(s), exit {r.returncode}\n{r.stderr}")
+
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all",
+                                                    ledger=at_cap, stdin=big))
+        expect("haiku spend: a push in pieces makes no call for any piece once capped",
+               0 if calls == 0 and r.returncode == 1 else 1, 0, f"{calls} call(s)\n{r.stderr}")
+
+        # --- 6. Three outcomes, and only a missing file is $0 -----------------
+        got = haiku.spent_today(ledger("never-written.jsonl"), today)
+        expect("haiku spend: no ledger file is $0",
+               0 if got == haiku.Spend(0.0, {}, 0) else 1, 0, f"got {got!r}")
+
+        mixed = ledger("mixed.jsonl",
+                       ledger_line(today, "harborlight-app", 0.25)
+                       + "not json at all\n"
+                       + ledger_line(today, "saltmarsh-tools", 0.125)
+                       + json.dumps({"date": today}) + "\n"            # no amount
+                       + "[1, 2, 3]\n"                                  # not an object
+                       + ledger_line(today, "harborlight-app", -5.0)   # would cancel spend
+                       + ledger_line(today, "harborlight-app", True)   # a bool, not a number
+                       + "\n"
+                       + ledger_line(yesterday, "harborlight-app", 9.0)
+                       + ledger_line(today, "harborlight-app", 0.25))
+        got = haiku.spent_today(mixed, today)
+        expect("haiku spend: a readable ledger sums today, per repo, and counts what it skipped",
+               0 if abs(got.total - 0.625) < 1e-9 and got.malformed == 5
+               and got.by_repo == {"harborlight-app": 0.5, "saltmarsh-tools": 0.125} else 1, 0,
+               f"got {got!r}")
+
+        unreadable = []
+        a_dir = ledger("is-a-directory")
+        os.mkdir(a_dir)
+        unreadable.append(("a directory at the ledger path", a_dir))
+        if os.geteuid() != 0:  # root reads a mode-000 file, so the case would prove nothing
+            locked = ledger("locked.jsonl", ledger_line(today, "harborlight-app", 0.01))
+            os.chmod(locked, 0)
+            unreadable.append(("a mode-000 ledger", locked))
+        for label, path in unreadable:
+            try:
+                got = haiku.spent_today(path, today)
+                raised = False
+            except haiku.LedgerUnreadable:
+                raised = True
+            expect(f"haiku spend: {label} is an error, never $0",
+                   0 if raised else 1, 0, f"read as {got!r}" if not raised else "")
+            r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=path))
+            expect(f"haiku spend: {label} — no call, push blocked",
+                   0 if calls == 0 and r.returncode == 1 else 1, 0,
+                   f"{calls} call(s), exit {r.returncode}\n{r.stderr}")
+            expect(f"haiku spend: {label} — the banner says the budget check could not look",
+                   0 if "SCAN DID NOT RUN — the budget check could not look" in r.stderr
+                   and "could not run — ledger-unreadable" in r.stderr else 1, 0, r.stderr)
+
+        prior = os.environ.get("SCRUB_HAIKU_DAILY_USD")
+        try:
+            caps = {}
+            with contextlib.redirect_stderr(io.StringIO()):
+                for raw in ("0.5", "abc", "-1", "nan", "inf"):
+                    os.environ["SCRUB_HAIKU_DAILY_USD"] = raw
+                    caps[raw] = haiku.daily_cap()
+        finally:
+            if prior is None:
+                os.environ.pop("SCRUB_HAIKU_DAILY_USD", None)
+            else:
+                os.environ["SCRUB_HAIKU_DAILY_USD"] = prior
+        expect("haiku spend: a cap that is not a finite dollar amount applies the default, not no cap",
+               0 if caps == {"0.5": 0.5, "abc": 1.0, "-1": 1.0, "nan": 1.0, "inf": 1.0} else 1, 0,
+               f"got {caps!r}")
+
+        # --- 8. --spend-report ------------------------------------------------
+        report = ledger("report.jsonl",
+                        ledger_line(today, "harborlight-app", 0.25)
+                        + ledger_line(today, "saltmarsh-tools", 0.5)
+                        + ledger_line(yesterday, "riverbend-archive", 9.0))
+        r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=report,
+                                                    argv=("--spend-report",)))
+        expect("haiku spend: --spend-report exits 0 and makes no call",
+               0 if r.returncode == 0 and calls == 0 else 1, 0,
+               f"exit {r.returncode}, {calls} call(s)\n{r.stdout}\n{r.stderr}")
+        expect("haiku spend: ...printing today's total, the cap, and each repo's share of today",
+               0 if "$0.7500" in r.stdout and "$1.00" in r.stdout
+               and "harborlight-app" in r.stdout and "$0.2500" in r.stdout
+               and "saltmarsh-tools" in r.stdout and "$0.5000" in r.stdout
+               and "riverbend-archive" not in r.stdout else 1, 0, r.stdout)
+        expect("haiku spend: ...and books nothing",
+               0 if len(read_ledger(report)) == 3 else 1, 0)
+
+        r = spawn_haiku(f"{stub}/clean", "block-all", ledger=a_dir, argv=("--spend-report",))
+        expect("haiku spend: --spend-report on an unreadable ledger fails and says it could not look",
+               0 if r.returncode == 2 and "could not look" in r.stderr else 1, 0,
+               f"exit {r.returncode}\n{r.stdout}\n{r.stderr}")
+    finally:
+        server.shutdown()
+        server.server_close()
+        tmp.cleanup()
+
+
+# A push big enough to be read in pieces, or the pieces case proves nothing.
+CHUNK_FLOOR = 2
 
 
 def check_push_range(registry: str, denylist: str) -> None:
@@ -1534,6 +1904,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         check_maintainer_names(tmp)
     check_haiku_unavailable()
+    check_haiku_spend()
     with tempfile.TemporaryDirectory() as tmp:
         registry = os.path.join(tmp, "registry.yaml")
         denylist = os.path.join(tmp, "denylist.txt")

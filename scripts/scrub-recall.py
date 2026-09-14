@@ -34,6 +34,12 @@ blocked-out-of-runs, not a tick.
 Every run is a paid Haiku call. `--dry-run` prints what the full sweep would
 cost before you spend it, and the summary prints what it did spend.
 
+Every call is also booked to the key's shared daily spend ledger and stopped
+by its cap, exactly as a push's are (`scrub-haiku.py`, "The key's daily spend
+cap"). A sweep that crosses the cap reports its remaining runs `unavailable`;
+set SCRUB_HAIKU_DAILY_USD for the sweep's own shell if it is meant to spend
+more than the day's cap.
+
 The cases are `scrub-recall-cases.json`. Its content is fetched from git by
 sha at run time: the one real positive is named by sha and nothing else, so
 the name that commit published is not written down here, in that file, or in
@@ -222,9 +228,9 @@ def sweep(cases: List[Case], runs: int, jobs: int, on_run: Callable[[Run], None]
     requests = threading.BoundedSemaphore(jobs)
     real_scan = haiku._scan_piece
 
-    def bounded(piece: str) -> "int | haiku.Unavailable":
+    def bounded(piece: str, scan_range: str = "scrub-recall") -> "int | haiku.Unavailable":
         with requests:
-            return real_scan(piece)
+            return real_scan(piece, scan_range)
 
     haiku._scan_piece = bounded
     try:
