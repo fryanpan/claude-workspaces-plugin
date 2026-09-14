@@ -69,6 +69,7 @@ export interface NotesQualityBoard {
 /** What {@link fileOnMeetingDoc} reaches in the doc store. `DocStore` satisfies it. */
 export interface NotesQualityThreads {
   get(docId: string): unknown;
+  listThreads(docId: string): readonly unknown[];
   postComment(
     docId: string,
     threadId: null,
@@ -85,10 +86,11 @@ export interface NotesQualityThreads {
  * tell it from one an agent filed.
  *
  * SYNCHRONOUS ANSWER, because the stop's one log line is built right after
- * it. The two ways `postComment` declines a new thread are a doc it cannot
- * find and a missing anchor; the first is asked here first and the second
- * cannot happen, so `true` is what the post will do. A throw after that is
- * logged rather than lost.
+ * it — and read off the doc, not assumed. A new thread is written before
+ * `postComment` first awaits anything, so a thread that exists is on the doc
+ * by the time the call returns, and one that was never written (a missing
+ * doc, a throw, a decline) leaves the count where it was: `false`, which the
+ * line reports as not filed.
  */
 export function fileOnMeetingDoc(
   threads: NotesQualityThreads,
@@ -100,6 +102,7 @@ export function fileOnMeetingDoc(
   if (!payload || !threads.get(docId)) return false;
   // `kind: 'agent'` so the queue reads it as an ask waiting on a person.
   const author = { ...actor, kind: 'agent' } as unknown as User;
+  const before = threads.listThreads(docId).length;
   threads
     .postComment(
       docId,
@@ -113,7 +116,7 @@ export function fileOnMeetingDoc(
       },
     )
     .catch((err) => console.error(`[meeting-notes] quality item on ${docId} failed:`, err));
-  return true;
+  return threads.listThreads(docId).length > before;
 }
 
 /**

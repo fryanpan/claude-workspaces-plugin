@@ -180,6 +180,7 @@ describe('a bad meeting on a doc no row links', () => {
         posted.push({ docId, author, text, anchor, review: opts.review });
         return {};
       },
+      listThreads: (docId: string) => posted.filter((p) => p.docId === docId),
     };
   }
 
@@ -229,6 +230,26 @@ describe('a bad meeting on a doc no row links', () => {
     });
     expect(filing).toMatchObject({ filed: false, reason: 'refused' });
     expect(store.posted).toEqual([]);
+  });
+
+  it('reports a thread write that threw as not filed', () => {
+    const store = {
+      get: () => ({}),
+      listThreads: () => [],
+      postComment: async () => {
+        throw new Error('the harbour doc is read-only');
+      },
+    };
+    const b: NotesQualityBoard = {
+      ...board([]),
+      fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(store, docId, review, actor),
+    };
+    const filing = fileNotesQualityReview(b, ACTOR, {
+      workspaceId: 'w-1',
+      docId: 'd-harbour',
+      report: badReport(),
+    });
+    expect(filing).toMatchObject({ filed: false, reason: 'refused' });
   });
 
   it('still prefers a linked row over the doc', () => {
