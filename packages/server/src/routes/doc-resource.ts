@@ -17,6 +17,7 @@ import {
   researchPlaceholderMarkdown,
   researchSectionTitle,
 } from '../huddle.ts';
+import { boardLinkedItems } from '../mockup-linked-items.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { taskIdOfBodyDoc } from '../task-projection.ts';
 import { clipToWordBoundary } from '../task-title.ts';
@@ -117,11 +118,8 @@ export async function handleDocResourceCore(
     //
     // THE BOARD IS IN THE PATH NOW, so a doc filed on the board in the path
     // answers with that one. `workspaceOfDoc` answers with the FIRST board
-    // that links the doc, which was the only available answer while a doc had
-    // one address — but a doc filed on two boards has two addresses, and
-    // under that derivation reading it through board B handed the surface
-    // board A's id, pointing the voice dock at a board the reader did not
-    // ask for.
+    // that links the doc — but a doc filed on two boards has two addresses,
+    // and reading it through board B handed the surface board A's id.
     //
     // Still "the board this doc is FILED on", though — not "the board in the
     // path". A review MEMBER is reachable under the board holding its review
@@ -136,24 +134,24 @@ export async function handleDocResourceCore(
       : filedHere && scope
         ? scope.workspaceId
         : (taskStore.workspaceOfDoc(docId) ?? null);
-    // Where the review app's `←` should go: the board that links this
-    // doc, rather than the machine-wide landing page. OWNER ONLY for
-    // the same reason `hubWorkspaceId` is — a board id is an
-    // unguessable URL capability, and a share visitor must not learn
-    // one from a member doc. Resolved through the review when the
-    // doc is a member of a review, which is where `hubWorkspaceId`
-    // deliberately stops.
+    // Where the review app's `←` should go: the board that links this doc,
+    // not the machine-wide landing page. OWNER ONLY, as `hubWorkspaceId` is;
+    // resolved through the review for a review member, where
+    // `hubWorkspaceId` deliberately stops.
     const backTo = visitor ? null : backTargetFor(docId, doc.meta.workspaceId, scope?.workspaceId);
     // Who the Make Plan float names ("Ask <lead> to create a plan").
-    // Owner-only like the board id it comes from; a lead id is
-    // already a display name everywhere the board shows one.
     const lead = boardWs ? taskStore.getWorkspace(boardWs)?.leadAgentId : undefined;
+    // The open ticket items linking this doc, for its dock: off the board in
+    // the path, where the page posts its answer, and never for a visitor.
+    const itemsBoard = visitor ? undefined : (scope?.workspaceId ?? boardWs ?? undefined);
+    const linkedItems = itemsBoard ? boardLinkedItems(itemsBoard, docId, taskStore, docStore) : [];
     return j(200, {
       meta: metaFor({ ...doc.meta, lastActivityAt: docStore.activityAt(docId) }),
       ...(taskRefs.length > 0 ? { tasks: taskRefs } : {}),
       ...(boardWs ? { hubWorkspaceId: boardWs } : {}),
       ...(lead !== undefined ? { leadAgentId: lead } : {}),
       ...(backTo ? { backTo: { workspaceId: backTo.id, name: backTo.name } } : {}),
+      ...(linkedItems.length > 0 ? { linkedItems } : {}),
     });
   }
   if (rest === '' && req.method === 'DELETE') {

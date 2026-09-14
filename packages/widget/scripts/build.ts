@@ -56,10 +56,12 @@ const lib0Shims: BunPlugin = {
 const cssMinify: BunPlugin = {
   name: 'widget-css-minify',
   setup(build) {
-    // Every stylesheet module, not just the first one: `styles-dock.ts` is a
-    // second sheet and CSS the minifier never sees is CSS the gzip budget
-    // pays for in full.
-    build.onLoad({ filter: /widget[/\\]src[/\\]styles(-[a-z-]+)?\.ts$/ }, (args) => {
+    // Every stylesheet module, not just the first one: the dock's sheet lives
+    // in core (`review-dock-styles.ts`, shared with the doc page) and CSS the
+    // minifier never sees is CSS the gzip budget pays for in full.
+    const filter =
+      /(widget[/\\]src[/\\]styles(-[a-z-]+)?|core[/\\]src[/\\]review-dock-styles)\.ts$/;
+    build.onLoad({ filter }, (args) => {
       const src = readFileSync(args.path, 'utf8');
       let hit = false;
       const contents = src.replace(

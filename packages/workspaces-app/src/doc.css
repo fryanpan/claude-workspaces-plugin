@@ -85,6 +85,22 @@
   }
 }
 
+/* The linked-item dock (doc/linked-dock.ts) is a bar fixed under the page,
+   outside the doc. Its measured height is --doc-dock-h, and the page gives
+   that height back: the shell ends above the bar, so the doc's last line, the
+   edge strips and the Make Plan / Review floats all sit above it. The fixed
+   controls that ride --kb-bottom ride the bar too — the composer carries its
+   own lift (THE NEW-COMMENT COMPOSER, PLACED); the toast has no section here,
+   so its lift is below. The phone's comment sheet (z 950) opens over the bar
+   like the dock's own sheet, so it keeps no lift. Unset when nothing is docked, which is every page but one a ticket's
+   open ask links. */
+#shell {
+  height: calc(100dvh - var(--doc-dock-h, 0px));
+}
+#toast {
+  bottom: calc(var(--kb-bottom, 0px) + 24px + var(--safe-bottom) + var(--doc-dock-h, 0px));
+}
+
 /* ================= ATTACHMENT-SET SIDEBAR + DROPDOWN ================= */
 
 #set-pane {
@@ -2979,6 +2995,12 @@ button.lz-speaker:hover .lz-speaker-pill {
    sentence is scrolled to just above it (`keyboardClearDelta`), which is what
    makes the quote redundant rather than merely small. */
 
+/* The bottom sheet rides the linked-item dock as well as the keyboard, so a
+   docked ask never sits over the box being typed into. The margin placement
+   below sets `bottom: auto` and is unaffected. */
+#composer {
+  bottom: calc(var(--kb-bottom, 0px) + 12px + var(--safe-bottom) + var(--doc-dock-h, 0px));
+}
 #composer.composer--margin {
   right: auto;
   bottom: auto;

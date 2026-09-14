@@ -1,6 +1,7 @@
 /**
  * The two always-in-view floats a plan document carries: Approve (the plan
- * gate) and Review.
+ * gate) and Review — and the linked-item dock under the page, which reads the
+ * same record.
  *
  * One module because they are one row and one condition. Both mount only on
  * an ordinary markdown doc — never a diff member's companion view — both hang
@@ -16,6 +17,7 @@ import type { MountScope } from '../mount-scope.ts';
 import { mountPlanGate } from '../plan-gate.ts';
 import { mountReviewFloat } from '../review-float.ts';
 import { createDocRecordReader, takeDocRecord } from './doc-record.ts';
+import { type LinkedDockOptions, mountLinkedDock } from './linked-dock.ts';
 
 export interface DocFloatsOptions {
   docId: string;
@@ -34,6 +36,8 @@ export interface DocFloatsOptions {
   whenSynced?: (cb: () => void) => void;
   /** Injected so a test counts the doc-record reads without a server. */
   fetchJson?: (url: string) => Promise<unknown>;
+  /** The linked-item dock's answer request, injected by a test. */
+  postAnswer?: LinkedDockOptions['post'];
 }
 
 async function defaultFetchJson(url: string): Promise<unknown> {
@@ -107,4 +111,14 @@ export function mountDocFloats(opts: DocFloatsOptions): void {
     ...(watchLeadPresence ? { watchLeadPresence } : {}),
   });
   scope.onCleanup(() => reviewFloat.destroy());
+
+  // A ticket's ask that links this doc, in a bar under the page. Off the same
+  // record read, so it costs the open no request of its own.
+  mountLinkedDock({
+    record,
+    user,
+    canWrite,
+    scope,
+    ...(opts.postAnswer ? { post: opts.postAnswer } : {}),
+  });
 }
