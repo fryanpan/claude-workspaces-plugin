@@ -12,7 +12,7 @@
  * Fixtures are fictional — a lemonade stand's price board.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createThread } from '@claude-workspaces/core';
@@ -25,6 +25,7 @@ import {
   fileSandboxHeaders,
   frameSrcFor,
   injectFrameScripts,
+  inlineBoardStylesheets,
   isMockFrameRequest,
   mayTouchFrom,
   renderMockHost,
@@ -129,6 +130,43 @@ describe('the frame and host helpers', () => {
     // Without a built bundle the page is left exactly as it was.
     expect(injectFrameScripts(page, null)).toBe(page);
   });
+
+  it("writes the board's own stylesheets into the frame, which could not fetch them, and nothing else", () => {
+    const root = mkdtempSync(join(tmpdir(), 'mock-frame-app-'));
+    const dist = join(root, 'dist');
+    mkdirSync(dist);
+    writeFileSync(join(dist, 'tokens-3f2a.css'), ':root{--stand:#fc0}');
+    writeFileSync(join(dist, 'board.css'), '.menu{content:"</style>"}');
+    writeFileSync(join(root, 'outside.css'), '.leak{}');
+    const pageUrl = new URL('http://board.test/workspaces/w/mockups/d-1?cw-frame=1');
+    const page = [
+      '<link rel="stylesheet" href="/app/tokens-3f2a.css">',
+      "<link href='http://board.test/app/board.css' media=\"print\" rel='preload stylesheet'>",
+      '<link rel="stylesheet" href="https://fonts.riverbend.test/app/board.css">',
+      '<link rel="icon" href="/app/board.css">',
+      '<link rel="stylesheet" href="/app/%2e%2e/outside.css">',
+      '<link rel="stylesheet" href="/app/%2F..%2Foutside.css">',
+      '<link rel="stylesheet" href="/app/missing.css">',
+      '<link rel="stylesheet" href="/demo/board.css">',
+    ].join('');
+    const out = inlineBoardStylesheets(page, pageUrl, dist);
+    const withoutDist = inlineBoardStylesheets(page, pageUrl, null);
+    rmSync(root, { recursive: true, force: true });
+    expect(out).toBe(
+      [
+        '<style data-cw-inlined="/app/tokens-3f2a.css">:root{--stand:#fc0}</style>',
+        '<style data-cw-inlined="/app/board.css" media="print">.menu{content:"<\\/style>"}</style>',
+        '<link rel="stylesheet" href="https://fonts.riverbend.test/app/board.css">',
+        '<link rel="icon" href="/app/board.css">',
+        '<link rel="stylesheet" href="/app/%2e%2e/outside.css">',
+        '<link rel="stylesheet" href="/app/%2F..%2Foutside.css">',
+        '<link rel="stylesheet" href="/app/missing.css">',
+        '<link rel="stylesheet" href="/demo/board.css">',
+      ].join(''),
+    );
+    expect(out).not.toContain('.leak');
+    expect(withoutDist).toBe(page);
+  });
 });
 
 describe('serving a mock through its host, and stamping what the frame sends', () => {
@@ -175,7 +213,11 @@ describe('serving a mock through its host, and stamping what the frame sends', (
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'mockup-frame-'));
-    handle = createServer({ port: 0, dataDir });
+    // The built app, holding one stylesheet the mock links.
+    const appDist = join(dataDir, 'app-dist');
+    mkdirSync(appDist);
+    writeFileSync(join(appDist, 'stand.css'), 'h1{color:#fc0}');
+    handle = createServer({ port: 0, dataDir, markdownAppDistDir: appDist });
     base = `http://127.0.0.1:${handle.port}`;
     ws = (
       (await post('/workspaces', { name: 'Lemonade stand', author: AGENT })) as {
@@ -185,7 +227,8 @@ describe('serving a mock through its host, and stamping what the frame sends', (
     const file = join(dataDir, 'price-board.html');
     writeFileSync(
       file,
-      '<!doctype html><html><head><title>Price board</title></head><body><h1>Riverbend prices</h1></body></html>',
+      '<!doctype html><html><head><title>Price board</title><link rel="stylesheet" href="/app/stand.css"></head>' +
+        '<body><h1>Riverbend prices</h1></body></html>',
     );
     mock = (
       (await post(`/workspaces/${ws}/docs`, {
@@ -224,6 +267,9 @@ describe('serving a mock through its host, and stamping what the frame sends', (
     const frameHtml = await frame.text();
     expect(frameHtml).toContain('Riverbend prices');
     expect(frameHtml).toContain('claude-feedback-widget');
+    // The board stylesheet it links is in the page, since the frame's own
+    // request for it would carry no cookie.
+    expect(frameHtml).toContain('<style data-cw-inlined="/app/stand.css">h1{color:#fc0}</style>');
 
     // An unknown round is a 404 at the host too, not a frame of nothing.
     expect((await get(`/workspaces/${ws}/mockups/${mock}?v=99`)).status).toBe(404);

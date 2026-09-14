@@ -50,6 +50,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { WriteVia } from '@claude-workspaces/core';
+import { isWithinRoot } from './safe-path.ts';
 
 /** The query parameter that asks for the mock itself rather than its host. */
 export const MOCK_FRAME_PARAM = 'cw-frame';
@@ -227,4 +228,61 @@ export function injectFrameScripts(html: string, widgetDist: string | null): str
     );
   }
   return out;
+}
+
+const LINK_TAG = /<link\b[^>]*>/gi;
+
+/** One attribute's value off a tag, quoted either way or bare. */
+function attrOf(tag: string, name: string): string | null {
+  const m = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
+  return m ? (m[1] ?? m[2] ?? m[3] ?? '') : null;
+}
+
+/**
+ * The board's own stylesheets a mock links, written into the frame.
+ *
+ * A mock of a change to an existing surface starts from that surface's markup
+ * and stylesheets, so it links `/app/…css`. The frame's request for that file
+ * carries no cookie (see "Why the frame's scripts are inlined" above), and
+ * behind Access or a share session it comes back a sign-in page rather than
+ * CSS: the mock renders unstyled. The server reads those files itself, from
+ * the built app it already serves to anyone who can open the mock, and puts
+ * them in the page. Only `/app/` stylesheets on this host: anything else a
+ * mock links is left as it wrote it, and a path that climbs out of the built
+ * app is not read.
+ */
+export function inlineBoardStylesheets(html: string, page: URL, appDist: string | null): string {
+  if (!appDist) return html;
+  return html.replace(LINK_TAG, (tag) => {
+    const rel = attrOf(tag, 'rel');
+    const href = attrOf(tag, 'href');
+    if (!rel || !href || !/(?:^|\s)stylesheet(?:\s|$)/i.test(rel)) return tag;
+    let u: URL;
+    try {
+      u = new URL(href, page);
+    } catch {
+      return tag;
+    }
+    if (u.host !== page.host || !u.pathname.startsWith('/app/') || !u.pathname.endsWith('.css')) {
+      return tag;
+    }
+    let file: string;
+    try {
+      file = join(appDist, decodeURIComponent(u.pathname.slice('/app/'.length)));
+    } catch {
+      return tag;
+    }
+    if (!isWithinRoot(appDist, file)) return tag;
+    let css: string;
+    try {
+      css = readFileSync(file, 'utf8');
+    } catch {
+      return tag;
+    }
+    const media = attrOf(tag, 'media');
+    return (
+      `<style data-cw-inlined="${escapeAttr(u.pathname)}"${media ? ` media="${escapeAttr(media)}"` : ''}>` +
+      `${css.replace(/<\/style/gi, '<\\/style')}</style>`
+    );
+  });
 }
