@@ -120,6 +120,12 @@ export interface TaskRoutesContext {
   ) => string;
   /** Which boards hold a doc, answered off a prebuilt index. */
   boardsForDocIndexed: (index: Map<string, string[]>, meta: DocMeta) => Set<string>;
+  /**
+   * The base every link this server hands a reader is built on. Optional so a
+   * test context can leave it out; a done-when proof's board path is then
+   * refused rather than made absolute.
+   */
+  externalBaseUrl?: () => string;
   /** Put a filed or revised review item through the quality gate. */
   judgeReviewItem: (
     task: Task,

@@ -30,7 +30,7 @@ import {
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { cryptoId } from './task-fields.ts';
-import { isSafeHttpUrl } from './task-helpers.ts';
+import { readDoneWhenProof } from './task-helpers.ts';
 
 /** An actor as every task verb takes one. */
 export interface DoneWhenActor {
@@ -65,6 +65,7 @@ export type DoneWhenError =
   | 'unknown-line'
   | 'proof-required'
   | 'link-required'
+  | 'absolute-url-required'
   | 'not-a-person'
   | 'not-yours'
   | 'task-done'
@@ -156,27 +157,6 @@ export function parseDoneWhenInput(
     lines.push({ text, ...(id !== undefined ? { id } : {}) });
   }
   return { ok: true, lines };
-}
-
-/** Proof as it arrives on the wire → what is stored, or nothing. A proof
- *  entry with no readable `text` is dropped rather than refused: the verdict
- *  is the claim, and a malformed attachment must not lose it. */
-function readProof(raw: unknown): DoneWhenProof[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const out: DoneWhenProof[] = [];
-  for (const entry of raw) {
-    const source = typeof entry === 'string' ? { text: entry } : (entry as DoneWhenProof | null);
-    const text = typeof source?.text === 'string' ? source.text.trim() : '';
-    if (text === '') continue;
-    // The url becomes an href on the panel, so only http(s) is kept — the
-    // same guard a task's `url` ref passes, for the same reason. An unsafe
-    // scheme drops the LINK, not the proof: what the builder says it ran is
-    // still worth reading.
-    const given = typeof source?.url === 'string' ? source.url : '';
-    const url = given !== '' && isSafeHttpUrl(given) ? given : undefined;
-    out.push({ text, ...(url !== undefined ? { url } : {}) });
-  }
-  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -293,11 +273,15 @@ export class TaskDoneWhenStore {
    * the one rule this verb exists to enforce: a line asserted met with nothing
    * attached reads on the panel exactly like one somebody measured, and the
    * auto-close would then finish a ticket on an unproved claim.
+   *
+   * `baseUrl` is what a proof's board path ("/workspaces/…") is resolved
+   * against; without one such a path is refused, naming the line.
    */
   report(
     taskId: string,
     entries: readonly DoneWhenReportInput[],
     actor: DoneWhenActor,
+    baseUrl?: string,
   ): DoneWhenResult {
     const task = this.p.getTask(taskId);
     if (!task) return { ok: false, error: 'not-found', message: 'no task with that id' };
@@ -310,6 +294,7 @@ export class TaskDoneWhenStore {
       };
     }
     const byId = new Map(lines.map((l) => [l.id, l]));
+    const proofs = new Map<string, DoneWhenProof[] | undefined>();
     // Validate the WHOLE report before writing any of it: a half-applied
     // report leaves the panel showing verdicts from a call the caller was
     // told had failed.
@@ -353,7 +338,15 @@ export class TaskDoneWhenStore {
           message: `"${line.text}" is waiting on the owner — you marked it theirs, so their Looks right is what meets it`,
         };
       }
-      const proof = readProof(entry.proof);
+      const { proof, unresolved } = readDoneWhenProof(entry.proof, baseUrl);
+      if (unresolved !== undefined) {
+        return {
+          ok: false,
+          error: 'absolute-url-required',
+          message: `"${line.text}" has a proof url "${unresolved}" this server has no address to resolve — send an absolute http(s) url`,
+        };
+      }
+      proofs.set(entry.id, proof);
       // A line handed to the owner carries a link, because the link is what
       // the reader opens: the first owner items reached the queue with none,
       // and the owner's answer was "Where's the mock?" (2026-09-14). Read off
@@ -383,7 +376,7 @@ export class TaskDoneWhenStore {
     for (const entry of entries) {
       const line = byId.get(entry.id);
       if (!line) continue;
-      const proof = readProof(entry.proof);
+      const proof = proofs.get(entry.id);
       line.verdict = entry.verdict;
       if (proof !== undefined) line.proof = proof;
       line.by = actor.name;

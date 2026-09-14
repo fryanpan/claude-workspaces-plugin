@@ -117,7 +117,10 @@ export async function handleTaskDoneWhen(
       // verb cannot disagree about what counts as an attachment.
       entries.push({ id, verdict, proof: raw?.proof as DoneWhenReportInput['proof'] });
     }
-    const res = taskStore.reportDoneWhen(taskId, entries, { actor: author });
+    // A proof's board path ("/workspaces/…?task=…") is made absolute against
+    // the base review links use, so the owner's item links somewhere they can open.
+    const baseUrl = ctx.externalBaseUrl?.();
+    const res = taskStore.reportDoneWhen(taskId, entries, { actor: author, baseUrl });
     if (!res.ok) return j(statusFor(res.error), res);
     return answered(taskId, res, author);
   }

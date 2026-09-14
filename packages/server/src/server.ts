@@ -2193,6 +2193,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     heldFields,
     holdersClause,
     boardsForDocIndexed,
+    externalBaseUrl,
     judgeReviewItem,
     judgeTaskDecision,
     mergedHold,

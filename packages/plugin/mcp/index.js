@@ -16900,7 +16900,7 @@ var TOOL_LIST = {
           taskId: { type: "string" },
           lines: {
             type: "array",
-            description: "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. An `owner` line needs a `url`. Every entry is validated before anything is written, so a bad entry writes nothing.",
+            description: "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. A `url` is an absolute http(s) url, or a board path starting with one `/` (like `/workspaces/<id>?task=<id>`), which the board makes absolute on its own address; any other url is dropped. An `owner` line needs a `url`. Every entry is validated before anything is written, so a bad entry writes nothing.",
             items: { type: "object" }
           }
         },

@@ -13,8 +13,10 @@
  * `task-lifecycle.ts` reads the row discriminator with `isGoalRow`, and
  * `task-links.ts` validates and keys every `Ref` — three predicates that were
  * already pure, already exported, and already had no reader inside the store
- * class.
+ * class. The done-when proof reader sits beside `isSafeHttpUrl`, the guard it
+ * shares with a `url` ref.
  */
+import type { DoneWhenProof } from '@claude-workspaces/core/done-when';
 import type { TaskStatus } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import type { GoalRow, Ref, WorkspaceGoal } from './tasks.ts';
@@ -92,6 +94,35 @@ export function isSafeHttpUrl(value: string): boolean {
   // `URL.protocol` is already lowercased by the parser, so a mixed-case
   // scheme can't slip past this comparison.
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+}
+
+/**
+ * A done-when proof url as it is stored, or `'needs-base'`.
+ *
+ * An absolute http(s) url is kept. A board path — one leading "/", the shape
+ * an agent copies off the board, `/workspaces/<id>?task=<id>` — is resolved
+ * against `baseUrl`, the base the server builds every review link on, because
+ * a link the reader cannot open is the failure the owner check exists to end:
+ * it used to be dropped here without a word. With no base to resolve it
+ * against the answer is `'needs-base'`, so the caller refuses rather than
+ * drops. Anything else is dropped, as before.
+ */
+export function resolveProofUrl(
+  value: string,
+  baseUrl: string | undefined,
+): string | undefined | 'needs-base' {
+  if (isSafeHttpUrl(value)) return value;
+  if (value !== value.trim() || !value.startsWith('/')) return undefined;
+  if (baseUrl === undefined) return 'needs-base';
+  try {
+    const base = new URL(baseUrl);
+    const resolved = new URL(value, base);
+    // `//host/x` and `/\host` parse as ANOTHER origin, so only a path that
+    // lands on the base itself is kept.
+    return resolved.origin === base.origin ? resolved.href : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Structural validity of a caller-supplied Ref: known kind, every field a
@@ -178,4 +209,30 @@ export function initialTaskStatus(
  */
 export function isGoalRow(row: { kind?: 'task' | 'goal' }): row is GoalRow & { kind: 'goal' } {
   return row.kind === 'goal';
+}
+
+/** Proof as it arrives on the wire → what is stored, or nothing. A proof
+ *  entry with no readable `text` is dropped rather than refused: the verdict
+ *  is the claim, and a malformed attachment must not lose it. `unresolved` is
+ *  a board path that no base url could make absolute. */
+export function readDoneWhenProof(
+  raw: unknown,
+  baseUrl: string | undefined,
+): { proof?: DoneWhenProof[]; unresolved?: string } {
+  if (!Array.isArray(raw)) return {};
+  const out: DoneWhenProof[] = [];
+  for (const entry of raw) {
+    const source = typeof entry === 'string' ? { text: entry } : (entry as DoneWhenProof | null);
+    const text = typeof source?.text === 'string' ? source.text.trim() : '';
+    if (text === '') continue;
+    // The url becomes an href on the panel, so only http(s) is kept — the
+    // same guard a task's `url` ref passes, for the same reason. An unsafe
+    // scheme drops the LINK, not the proof: what the builder says it ran is
+    // still worth reading. A board path is made absolute (`resolveProofUrl`).
+    const given = typeof source?.url === 'string' ? source.url : '';
+    const url = given !== '' ? resolveProofUrl(given, baseUrl) : undefined;
+    if (url === 'needs-base') return { unresolved: given };
+    out.push({ text, ...(url !== undefined ? { url } : {}) });
+  }
+  return out.length > 0 ? { proof: out } : {};
 }

@@ -2535,13 +2535,15 @@ export class TaskStore {
     return this.withOwnerItems(this.doneWhen.setLines(taskId, lines, opts.actor), opts.actor);
   }
 
-  /** The builder's report — a verdict per line, with the proof behind it. */
+  /** The builder's report — a verdict per line, with the proof behind it.
+   *  `baseUrl` resolves a proof's board path ("/workspaces/…"). */
   reportDoneWhen(
     taskId: string,
     entries: readonly DoneWhenReportInput[],
-    opts: { actor: { id: string; name: string; kind?: string } },
+    opts: { actor: { id: string; name: string; kind?: string }; baseUrl?: string },
   ): DoneWhenResult {
-    return this.withOwnerItems(this.doneWhen.report(taskId, entries, opts.actor), opts.actor);
+    const res = this.doneWhen.report(taskId, entries, opts.actor, opts.baseUrl);
+    return this.withOwnerItems(res, opts.actor);
   }
 
   /** The owner's word on a line only a person can judge. */

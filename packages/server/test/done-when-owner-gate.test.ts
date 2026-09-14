@@ -34,7 +34,9 @@ let verdict: ReviewJudgeVerdict = { ok: true, reason: 'fine' };
 let judged: ReviewJudgeInput[] = [];
 const streams: Array<ReturnType<typeof listenFrames>> = [];
 
-function boot(extra: { heldReleaseMs?: number } = {}): void {
+type BootExtra = { heldReleaseMs?: number; publicBaseUrl?: string };
+
+function boot(extra: BootExtra = {}): void {
   handle = createServer({
     port: 0,
     dataDir,
@@ -63,7 +65,7 @@ const post = (path: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
-async function fresh(extra: { heldReleaseMs?: number } = {}): Promise<void> {
+async function fresh(extra: BootExtra = {}): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), 'owner-gate-'));
   verdict = { ok: true, reason: 'fine' };
   judged = [];
@@ -140,6 +142,23 @@ describe('a line handed to the owner carries a link', () => {
     const linked = await report(taskId, lineId, 'owner', [{ text: 'phone shot', url: SHOT }]);
     expect(linked.status).toBe(200);
     expect(await onQueue(taskId)).toHaveLength(1);
+  });
+
+  it("takes a board path as the link, made absolute on the server's public base", async () => {
+    await fresh({ publicBaseUrl: 'https://board.example.test' });
+    const { taskId, lineId } = await lineTask(
+      'Reader can find the export',
+      'the export button reads right',
+    );
+    const path = `/workspaces/${ws}?task=${taskId}`;
+    const { status, body } = await report(taskId, lineId, 'owner', [
+      { text: 'the task', url: path },
+    ]);
+    expect(status).toBe(200);
+    expect(body.error).toBeUndefined();
+    const url = `https://board.example.test${path}`;
+    expect((await detail(taskId)).doneWhen?.[0]?.proof?.[0]?.url).toBe(url);
+    expect(judged[0]?.item.detail?.startsWith(`Open [the task](${url})`)).toBe(true);
   });
 });
 
