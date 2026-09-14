@@ -29,10 +29,14 @@ import { minifyCss } from '../scripts/minify-css.ts';
 // audit: not-source — parser input, not the subject; every assertion is a
 // relation between the input and the transform's output
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
-/** Every sheet the build feeds the minifier — its filter is `styles*.ts`. */
-const SHEETS = ['styles.ts', 'styles-dock.ts'];
+/** Every sheet the build feeds the minifier — its filter is `styles*.ts`, plus
+ *  the dock's sheet in core. */
+const SHEETS = [
+  join(srcDir, 'styles.ts'),
+  join(srcDir, '..', '..', 'core', 'src', 'review-dock-styles.ts'),
+];
 const rawCss = SHEETS.map(
-  (f) => readFileSync(join(srcDir, f), 'utf8').match(/export const \w+ = `([\s\S]*?)`;/)?.[1],
+  (f) => readFileSync(f, 'utf8').match(/export const \w+ = `([\s\S]*?)`;/)?.[1],
 ).join('\n');
 
 describe('minifyCss', () => {
@@ -83,7 +87,7 @@ describe('minifyCss', () => {
       // case below to whatever still matched — and the build's own filter
       // would keep minifying a file these assertions no longer read.
       for (const f of SHEETS) {
-        const one = readFileSync(join(srcDir, f), 'utf8').match(/export const \w+ = `([\s\S]*?)`;/);
+        const one = readFileSync(f, 'utf8').match(/export const \w+ = `([\s\S]*?)`;/);
         expect(one?.[1], `no stylesheet literal in ${f}`).toBeTypeOf('string');
       }
     });

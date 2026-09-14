@@ -1,18 +1,18 @@
-import { STATUS_COLORS } from '@claude-workspaces/core';
+import { STATUS_COLORS } from './ui-shared.ts';
 
 /**
  * The review-item DOCK's shadow-DOM styles — the bar across the bottom of a
  * page carrying a standing ask, and the panel that opens from it.
  *
- * Its own module rather than another block in `styles.ts`, which was at the
- * 500-line bar: this is one self-contained surface, the only part of the
- * widget's chrome that is not the comment flow. It shares no selector with
- * anything in `styles.ts`, so appending it after that sheet costs no
- * cascade — which is what `widget.ts` does when it writes the <style>.
+ * In `core` beside `review-dock.ts` because two pages draw the dock: the
+ * widget appends this after its own sheet, and the doc page puts it in the
+ * shadow root it mounts the dock in. It shares no selector with the widget's
+ * `styles.ts`, so appending it costs no cascade.
  *
- * The build minifies BOTH sheets (`cssMinify` in `scripts/build.ts` matches
- * `src/styles*.ts`), so comments and indentation here cost the gzip budget
- * nothing.
+ * The widget build minifies this literal (`cssMinify` in
+ * `packages/widget/scripts/build.ts` matches this file by name), so comments
+ * and indentation here cost the widget's gzip budget nothing. One template
+ * literal per file: the minifier rewrites the first it finds.
  */
 export const dockStyles = `
 /* ── The review-item dock ─────────────────────────────────────────────

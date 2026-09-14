@@ -1,5 +1,5 @@
+import { dockStyles } from '@claude-workspaces/core/review-dock-styles';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { dockStyles } from '../src/styles-dock.ts';
 import { widgetStyles } from '../src/styles.ts';
 import { MIC_CSS } from '../src/widget-mic.ts';
 import { comment, setup } from './voice-ui-harness.ts';

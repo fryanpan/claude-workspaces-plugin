@@ -7,7 +7,7 @@ import {
   connect,
   resolveUser,
 } from '@claude-workspaces/core';
-import { dockStyles } from './styles-dock.ts';
+import { dockStyles } from '@claude-workspaces/core/review-dock-styles';
 import { widgetStyles } from './styles.ts';
 import {
   askIfSignInRequired,
