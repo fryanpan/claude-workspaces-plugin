@@ -363,7 +363,7 @@ describe('a page on the tailnet widget door', () => {
     ).toBe(true);
     expect(fetchCalls.some((c) => authHeaderOf(c))).toBe(false);
     expect(el.shadowRoot!.querySelector('.auth-signin')).toBeTruthy();
-    expect(el.shadowRoot!.querySelector('.me')?.textContent).not.toContain('Reviewer');
+    expect(el.shadowRoot!.querySelector('.me')?.textContent).not.toContain(user.name);
   });
 });
 
