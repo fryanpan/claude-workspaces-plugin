@@ -1132,6 +1132,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardsForDoc,
     backTargetFor,
     reviseCallFor: (address) => reviseCallFor(address),
+    releaseUnrevisedHold: (item) => releaseUnrevisedHold(item),
     ...(opts.readyNudgeIdleMs !== undefined ? { readyNudgeIdleMs: opts.readyNudgeIdleMs } : {}),
     ...(opts.stallNudgeQuietMs !== undefined ? { stallNudgeQuietMs: opts.stallNudgeQuietMs } : {}),
     ...(opts.checkInMs !== undefined ? { checkInMs: opts.checkInMs } : {}),
@@ -1144,6 +1145,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.stallEscalateMs !== undefined ? { stallEscalateMs: opts.stallEscalateMs } : {}),
     ...(spawnerAgentId !== undefined ? { spawnerAgentId } : {}),
     ...(opts.heldReviewItemMs !== undefined ? { heldReviewItemMs: opts.heldReviewItemMs } : {}),
+    ...(opts.heldReleaseMs !== undefined ? { heldReleaseMs: opts.heldReleaseMs } : {}),
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
       : {}),
@@ -1636,6 +1638,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     regateDecisionWords,
     heldFields,
     askBackOnItem,
+    releaseUnrevisedHold,
   } = createReviewGate({
     docStore,
     taskStore,
@@ -3164,6 +3167,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   readyNudger.start();
   stallNudger.start();
   taskScheduler.start(opts.schedulerTickMs ?? undefined);
+
+  // Done-when lines already marked for the owner before their review items
+  // existed get one each. Idempotent by construction — a line with an open
+  // item gets nothing — so every start runs it and a second start files none.
+  try {
+    const owner = taskStore.syncOwnerItemsEverywhere();
+    if (owner.filed + owner.withdrawn + owner.revised > 0) {
+      console.log(
+        `[tasks] owner done-when lines: filed ${owner.filed} review item(s), withdrew ${owner.withdrawn}, revised ${owner.revised}`,
+      );
+    }
+  } catch (err) {
+    console.error('[tasks] owner done-when review items failed:', err);
+  }
 
   // Rows still carrying the removed `parked` state come onto the new spelling
   // for it here — triage, plus a comment holding the date and the reason. See

@@ -364,6 +364,12 @@ export interface ServerOptions {
    */
   heldReviewItemMs?: number;
   /**
+   * How long a held review item may stand UNREVISED before it goes to the
+   * reader's queue as filed (default `REVIEW_GATE_RELEASE_MS`, one hour). A
+   * test seam: the release runs on the stall tick, and no test waits an hour.
+   */
+  heldReleaseMs?: number;
+  /**
    * How long a row must stay stalled before the wake says it AGAIN (default
    * `STALL_REPEAT_DEFAULT_MS`, four hours; `CW_STALL_REPEAT_HOURS` sets it on
    * the box).

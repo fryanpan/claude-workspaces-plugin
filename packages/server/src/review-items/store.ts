@@ -16,7 +16,6 @@
  */
 import {
   type ReviewItemRange,
-  type TaskReviewItem,
   type WriteVia,
   applyReviewRevision,
   checkReviewPayload,
@@ -28,7 +27,7 @@ import {
   withdrawReview,
   withoutHoldHistory,
 } from '@claude-workspaces/core';
-import type { TaskActor } from '@claude-workspaces/core/task-wire';
+import type { StoredReviewItem, TaskActor } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from '../actor-identity.ts';
 import { cryptoId } from '../task-fields.ts';
 import { TaskDecisionStore } from './decisions.ts';
@@ -73,7 +72,7 @@ export class ReviewItemStore {
   addReviewItem(
     taskId: string,
     review: unknown,
-    opts: { actor: { id: string; name: string; kind?: string } },
+    opts: { actor: { id: string; name: string; kind?: string }; doneWhenLineId?: string },
   ): AddReviewItemResult {
     const task = this.p.getTask(taskId);
     if (!task) return { ok: false, error: 'not-found' };
@@ -95,12 +94,13 @@ export class ReviewItemStore {
       name: opts.actor.name,
       kind: classifyActor(opts.actor),
     };
-    const item: TaskReviewItem = {
+    const item: StoredReviewItem = {
       id: cryptoId('r'),
       review: payload,
       createdAt: ts,
       // Display name, like every other projected `by` (§3.3 visitor contract).
       createdBy: actor.name,
+      ...(opts.doneWhenLineId !== undefined ? { doneWhenLineId: opts.doneWhenLineId } : {}),
     };
     task.reviews = [...(task.reviews ?? []), item];
     task.updatedAt = ts;

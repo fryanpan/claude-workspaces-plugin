@@ -16880,7 +16880,7 @@ var TOOL_LIST = {
     },
     {
       name: "report_done_when",
-      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge; they get two buttons on the task and you do not wait on a tool.",
+      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge: the board files a review item for that line on their queue, and their answer sets its verdict. Do not file your own item for the same line, and do not wait on a tool.",
       inputSchema: {
         type: "object",
         properties: {
@@ -19799,7 +19799,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.230";
+var PLUGIN_VERSION = "0.1.231";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

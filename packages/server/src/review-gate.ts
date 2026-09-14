@@ -36,6 +36,7 @@ import { linkHoldReason } from './review-items/link-check.ts';
 import { type PriorAskRow, priorAsksFor } from './review-items/prior-asks.ts';
 import type { ReviewJudge, ReviewJudgeVerdict } from './review-judge.ts';
 import type { SseBus } from './sse.ts';
+import type { HeldItemInput } from './stall-gate.ts';
 import { REVIEW_ITEM_HELD_EVENT, type ReviewItemHeldFrame } from './stall-nudge.ts';
 import type { TaskProjection } from './task-projection.ts';
 import {
@@ -61,6 +62,20 @@ import {
  * contradicted later.
  */
 export const REVIEW_GATE_MAX_HOLDS = 2;
+
+/**
+ * How long a hold may stand UNREVISED before the item reaches the reader's
+ * queue as filed.
+ *
+ * One hour (owner, 2026-09-14). The cap above ends a hold its filer keeps
+ * revising; nothing ended one its filer never came back to — an urgency
+ * question sat off the queue for two days, told to a filer that had moved
+ * on. A hold is a judge's opinion about words, and a question the reader
+ * never sees is worse than one they find a little rough. Revising inside the
+ * hour is still judged again, and a revision's verdict restarts the clock
+ * because it stamps a fresh `judge.at`.
+ */
+export const REVIEW_GATE_RELEASE_MS = 60 * 60_000;
 
 /**
  * WHERE a held item lives, and therefore how its filer addresses the fix.
@@ -329,7 +344,8 @@ export function createReviewGate(ctx: ReviewGateContext) {
       `It is on the ${address.kind === 'thread' ? 'thread' : 'ticket'}; revise it with ${reviseCallFor(address)}. ` +
       (last
         ? 'This is the last hold: the next revision goes to the reader either way.'
-        : 'Every revision is judged again, and the item reaches the queue when it passes.')
+        : 'Every revision is judged again, and the item reaches the queue when it passes.') +
+      ' Left unrevised for an hour, it goes to the reader as filed.'
     );
   }
 
@@ -487,10 +503,11 @@ export function createReviewGate(ctx: ReviewGateContext) {
     if (linkReason !== undefined) {
       verdict = { ok: false, reason: linkReason };
     } else {
-      // What the reader has already been asked on this row, down BOTH
-      // channels. Gathered at judging time rather than at filing time, so a
-      // revision is judged against the answers that exist now — including one
-      // given while the first version of this item sat held. Inside this
+      // What the reader still has open on this row, down BOTH channels —
+      // never an answered ask (see `prior-asks.ts`). Gathered at judging time
+      // rather than at filing time, so a revision is judged against what is
+      // open now: a question answered while this item sat held stops
+      // counting against it. Inside this
       // branch because a held link means no judge call, so no prompt to fill.
       const priorAsks = priorAsksFor(
         priorAskRowFor(target.address),
@@ -844,6 +861,72 @@ export function createReviewGate(ctx: ReviewGateContext) {
   }
 
   /**
+   * A hold nobody revised within `REVIEW_GATE_RELEASE_MS`, put on the
+   * reader's queue as filed — called from the stall tick, which already
+   * walks every held item on both surfaces once a minute.
+   *
+   * The verdict becomes `ok` with a reason that says what happened and quotes
+   * the standing concern, the way the two-hold cap does, and the item is
+   * announced exactly as a passed filing is. The filer stays the filer: the
+   * store stamps `filedBy` from the actor, so the actor is the filer as the
+   * held row recorded them, never the server.
+   *
+   * No judge call and no version guard: this runs synchronously between the
+   * read that listed the item and the write, so no revision can land in
+   * between, and a row answered or withdrawn since is refused by the store
+   * or no longer reads as held. Returns whether the item was released.
+   */
+  function releaseUnrevisedHold(item: HeldItemInput): boolean {
+    const filer = {
+      id: item.filerAgentId ?? '',
+      name: item.filedBy,
+      kind: 'agent',
+    };
+    const clause = judgeReasonClause(item.reason);
+    const released = (heldFor: string[] | undefined): ReviewItemJudgement => ({
+      at: Date.now(),
+      verdict: 'ok',
+      reason:
+        clause === ''
+          ? 'Released to the queue after an hour unrevised.'
+          : `Released to the queue after an hour unrevised; the gate's concern was — ${clause}.`,
+      ...(heldFor !== undefined && heldFor.length > 0 ? { heldFor } : {}),
+    });
+    const person = { ...filer, kind: 'known' as const, color: '' };
+    // A comment-borne item carries its thread address; a ticket item never
+    // does, even when the comment sits in the ticket's own body doc.
+    if (item.docId !== undefined && item.threadId !== undefined && item.commentId !== undefined) {
+      const stored = docStore
+        .getThread(item.docId, item.threadId)
+        ?.comments.find((c) => c.id === item.commentId)?.review;
+      if (!stored || !isReviewPayloadHeld(stored)) return false;
+      const res = docStore.judgeCommentReview(
+        item.docId,
+        item.threadId,
+        item.commentId,
+        released(stored.judge?.heldFor),
+      );
+      if (!res.ok) return false;
+      announceThreadReview(item.docId, item.threadId, res.review, person);
+      return true;
+    }
+    if (item.taskId === undefined) return false;
+    const task = taskStore.getTask(item.taskId);
+    if (!task) return false;
+    const current = taskStore.listReviewItems(task.id).find((r) => r.id === item.reviewItemId);
+    if (!current || !isReviewItemHeld(current)) return false;
+    const judgement = released(current.judge?.heldFor);
+    const res =
+      item.reviewItemId === LEGACY_REVIEW_ITEM_ID
+        ? taskStore.recordDecisionJudgement(task.id, judgement, { actor: filer })
+        : taskStore.recordReviewJudgement(task.id, item.reviewItemId, judgement, { actor: filer });
+    if (!res.ok) return false;
+    taskProjection.refreshTask(res.task);
+    announceTaskReview(res.task, res.item, person);
+    return true;
+  }
+
+  /**
    * A person's QUESTION typed where an answer goes, turned into the ask it
    * is: a thread on the task doc anchored to the item, recorded on the item
    * WITH that thread — which is what takes the item off the reader's queue
@@ -954,5 +1037,6 @@ export function createReviewGate(ctx: ReviewGateContext) {
     regateDecisionWords,
     heldFields,
     askBackOnItem,
+    releaseUnrevisedHold,
   };
 }
