@@ -304,4 +304,30 @@ describe('owner items the boot pass files or revises', () => {
     });
     expect(await onQueue(taskId)).toHaveLength(0);
   });
+
+  it('judge an open item that was never judged, though nothing about its line changed', async () => {
+    await fresh();
+    const { taskId, lineId } = await lineTask('Reader can see both alarms', 'both alarms list');
+    await report(taskId, lineId, 'owner', [{ text: 'table', url: SHOT }]);
+    expect(await onQueue(taskId)).toHaveLength(1);
+    // Back to an item filed before owner checks were gated, or one a crash
+    // left between its write and its judgement: on the queue with no verdict.
+    const live = handle?.tasks.getTask(taskId);
+    const item = live?.reviews?.[0];
+    if (!item) throw new Error('item missing');
+    item.judge = undefined;
+    handle?.tasks.appendNote(taskId, { kind: 'status', text: 'x', agent: 'test', ts: Date.now() });
+    await handle?.stop();
+
+    judged = [];
+    verdict = { ok: false, reason: 'An agent can list the alarms itself.' };
+    boot();
+    await waitFor(() => handle?.tasks.heldReviewItems(ws).length === 1 || undefined, {
+      timeout: 10_000,
+      interval: 25,
+      describe: 'the never-judged item judged and held at boot',
+    });
+    expect(judged).toHaveLength(1);
+    expect(await onQueue(taskId)).toHaveLength(0);
+  });
 });

@@ -143,8 +143,10 @@ export function linkedLineOf(task: Task, reviewItemId: string): DoneWhenLine | u
   return (task.doneWhen ?? []).find((l) => l.id === item.doneWhenLineId);
 }
 
-/** What one sync did. `toJudge` names the items whose words are new — filed
- *  or revised — which are the ones the quality gate has not seen. */
+/** What one sync did. `toJudge` names the items the quality gate has not
+ *  seen: filed or revised by this sync, or open with no verdict at all — an
+ *  item filed before owner checks were gated, or one a crash left between its
+ *  write and its judgement, which no later sync would otherwise reach. */
 export interface OwnerSyncResult {
   filed: number;
   withdrawn: number;
@@ -183,7 +185,9 @@ export function syncOwnerItems(
       // Same line, new words or new proof: the open item says what the line
       // says NOW, as a revision, so a question already asked on it stays.
       const { headline, detail } = ownerCheckReview(task, line);
-      if (item.review.headline !== headline || item.review.detail !== detail) {
+      if (item.review.headline === headline && item.review.detail === detail) {
+        if (item.judge === undefined) toJudge.push(item.id);
+      } else {
         const res = deps.reviseReviewItem(
           task.id,
           item.id,
@@ -286,7 +290,10 @@ export async function gateOwnerItems(
         heldReason: gate.reason ?? '',
         message: gate.message ?? '',
       });
-    } else if (unjudged || wasHeld) {
+    } else if (wasHeld || (unjudged && gate.item.judge !== undefined)) {
+      // Unjudged means first seen only once a verdict was recorded: with the
+      // gate off nothing is recorded, and an item every sync hands back would
+      // otherwise ping the reader's devices on every write.
       deps.announceTaskReview(task, gate.item, { ...author, color: '' });
     }
   }
