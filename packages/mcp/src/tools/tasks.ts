@@ -665,8 +665,16 @@ export async function handleTaskTool(
         'POST',
         `${board()}/tasks/${encodeURIComponent(taskId)}/done-when/report`,
         { lines, author: AUTHOR },
-      )) as { lines: unknown[]; closed: boolean; status: string };
-      return ok({ taskId, lines: res.lines, closed: res.closed, status: res.status });
+      )) as { lines: unknown[]; closed: boolean; status: string; held?: unknown[] };
+      // `held`: owner checks the quality gate kept off the reader's queue,
+      // each with the reason and the report that lifts it.
+      return ok({
+        taskId,
+        lines: res.lines,
+        closed: res.closed,
+        status: res.status,
+        ...(res.held !== undefined ? { held: res.held } : {}),
+      });
     }
     case 'set_task_goal': {
       const { taskId, goal, position, batchId } = a as {

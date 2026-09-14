@@ -16889,7 +16889,7 @@ var TOOL_LIST = {
     },
     {
       name: "report_done_when",
-      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge: the board files a review item for that line on their queue, and their answer sets its verdict. Do not file your own item for the same line, and do not wait on a tool.",
+      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16900,7 +16900,7 @@ var TOOL_LIST = {
           taskId: { type: "string" },
           lines: {
             type: "array",
-            description: "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. Every entry is validated before anything is written, so a bad entry writes nothing.",
+            description: "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. An `owner` line needs a `url`. Every entry is validated before anything is written, so a bad entry writes nothing.",
             items: { type: "object" }
           }
         },
@@ -18762,7 +18762,13 @@ async function handleTaskTool(name, a, ctx) {
         return err2("lines must name at least one done-when line to report");
       }
       const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/done-when/report`, { lines, author: AUTHOR });
-      return ok2({ taskId, lines: res.lines, closed: res.closed, status: res.status });
+      return ok2({
+        taskId,
+        lines: res.lines,
+        closed: res.closed,
+        status: res.status,
+        ...res.held !== undefined ? { held: res.held } : {}
+      });
     }
     case "set_task_goal": {
       const { taskId, goal, position, batchId } = a;
@@ -19808,7 +19814,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.232";
+var PLUGIN_VERSION = "0.1.233";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
