@@ -335,6 +335,13 @@ describe('reviewAnsweredLine', () => {
   it('falls back to the id when the server sent no title', () => {
     expect(reviewAnsweredLine({ taskId: 't-a1' })).toContain('t-a1');
   });
+
+  it('tells the lead which questions a partial answer left open', () => {
+    const line = reviewAnsweredLine({ taskId: 't-a1', openParts: ['Who gets the alert?'] });
+    expect(line).toContain('PARTIAL');
+    expect(line).toContain('"Who gets the alert?"');
+    expect(reviewAnsweredLine({ taskId: 't-a1' })).not.toContain('PARTIAL');
+  });
 });
 
 /**

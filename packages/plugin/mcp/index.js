@@ -13986,6 +13986,15 @@ function createCallToolHandler(deps) {
 }
 
 // packages/mcp/src/decision-line.ts
+function openPartsClause(openParts) {
+  if (!Array.isArray(openParts))
+    return "";
+  const parts = openParts.filter((p) => typeof p === "string" && p !== "");
+  if (parts.length === 0)
+    return "";
+  const quoted = parts.map((p) => `"${truncate2(p, 100)}"`).join("; ");
+  return ` — PARTIAL: still open on the reader's queue: ${quoted}. Act on what was answered; the item stays open for the rest, so do not re-ask it`;
+}
 function fromMockNote(via) {
   return via === "mock-frame" ? " (sent from inside the mock page)" : "";
 }
@@ -13996,7 +14005,7 @@ function decisionAnsweredLine(p) {
   const by = `${p.actor?.name ? ` by ${p.actor.name}` : ""}${fromMockNote(p.via)}`;
   const asked = p.headline ? ` to "${truncate2(p.headline, 100)}"` : "";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? " — walk its links as the propagation checklist" : "";
-  return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${walk}`;
+  return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${openPartsClause(p.openParts)}${walk}`;
 }
 
 // packages/mcp/src/nudge-line.ts
@@ -14103,7 +14112,7 @@ function reviewAnsweredLine(p) {
   const item = p.headline ? `your review item "${truncate3(p.headline, 100)}"` : "your review item";
   const subject = about ? `${item} on ${about}` : p.headline ? item : "a review item you raised";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? "; walk its links as the propagation checklist" : "";
-  return `[workspace.review_answered] ${subject} has an answer${fromMockNote(p.via)} — read it and act on it now${walk}.`;
+  return `[workspace.review_answered] ${subject} has an answer${fromMockNote(p.via)}${openPartsClause(p.openParts)} — read it and act on it now${walk}.`;
 }
 var STALL_ROWS_SHOWN = 5;
 function stalledRowClause(row) {
@@ -19799,7 +19808,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.231";
+var PLUGIN_VERSION = "0.1.232";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
