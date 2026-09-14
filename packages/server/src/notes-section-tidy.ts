@@ -1,7 +1,8 @@
 /**
- * The three shapes a notes section is left in that nobody wrote and nobody
+ * The four shapes a notes section is left in that nobody wrote and nobody
  * wants: an EMPTY PARAGRAPH under the heading, the SAME TOPIC HEADING TWICE
- * in a row, and an EMPTY BULLET the note-taker wrote.
+ * in a row, and an EMPTY BULLET or an EMPTY TOPIC HEADING the note-taker
+ * wrote.
  *
  * Both were on Bryan's 2026-09-11 doc. Under the `## Meeting notes` heading
  * sat two empty paragraphs, and a little further down `### Note-taker
@@ -71,6 +72,8 @@ export interface NotesSectionTidyResult {
   merged: number;
   /** The note-taker's own bullets with no words in them, removed. */
   bullets: number;
+  /** The note-taker's own topic headings with nothing under them, removed. */
+  emptied: number;
 }
 
 /** Any letter or digit — what tells a note from a list marker. */
@@ -78,7 +81,7 @@ const WORD = /[\p{L}\p{N}]/u;
 
 /** The answer for a section with nothing to repair, which is nearly all of
  *  them. */
-const NOTHING: NotesSectionTidyResult = { blanks: 0, merged: 0, bullets: 0 };
+const NOTHING: NotesSectionTidyResult = { blanks: 0, merged: 0, bullets: 0, emptied: 0 };
 
 /** A heading's level, or `undefined` for a block that is not one. */
 function levelOf(el: Y.XmlElement): number | undefined {
@@ -143,6 +146,7 @@ export function tidyNotesSection(
   let blanks = 0;
   let merged = 0;
   let bullets = 0;
+  let emptied = 0;
   // The last topic heading kept — its words and its level — so a repeat is
   // compared with the heading it would be folded into rather than with any
   // earlier one.
@@ -166,10 +170,22 @@ export function tidyNotesSection(
           continue;
         }
       }
-      // An empty heading is a heading, and this repair removes only empty
-      // PARAGRAPHS: a heading somebody has not finished typing is structure
-      // they put there, and deleting it moves their words under the topic
-      // above.
+      // AN EMPTY TOPIC HEADING OF THE NOTE-TAKER'S OWN GOES (2026-09-14). A
+      // tick opens a topic and writes its notes somewhere else, and the
+      // reader is left a heading over nothing — most of the headings on that
+      // day's doc. Authorship is what keeps this off a heading somebody has
+      // not finished typing: theirs carries no author. Nothing moves, because
+      // nothing is under it.
+      if (
+        bulletAuthor !== undefined &&
+        prose.readBlockAuthor(el) === bulletAuthor &&
+        headsNothing(top, i, level, openLevel) &&
+        !commentedHere()
+      ) {
+        drop.push(i);
+        emptied++;
+        continue;
+      }
       lastTopic = { key, level };
       continue;
     }
@@ -202,7 +218,28 @@ export function tidyNotesSection(
       prose.getProseFragment(ydoc).delete(drop[i] as number, 1);
     }
   }, 'agent');
-  return { blanks, merged, bullets };
+  return { blanks, merged, bullets, emptied };
+}
+
+/**
+ * Whether the heading at `i` has nothing under it: only blank paragraphs
+ * before the next heading at its level or above, or before the section ends.
+ * A deeper heading under it is a sub-topic, which is something.
+ */
+function headsNothing(
+  top: readonly Y.XmlElement[],
+  i: number,
+  level: number,
+  openLevel: number,
+): boolean {
+  for (let j = i + 1; j < top.length; j++) {
+    const el = top[j] as Y.XmlElement;
+    const next = levelOf(el);
+    if (next !== undefined) return next <= level || next <= openLevel;
+    if (el.nodeName === 'paragraph' && textOf(el).length === 0) continue;
+    return false;
+  }
+  return true;
 }
 
 /** How many children this list holds, elements and all. */

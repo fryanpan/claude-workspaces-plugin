@@ -211,6 +211,30 @@ describe('a revision may not throw away the note it replaces', () => {
     expect(text.some((t) => t.includes('Riverbend batch'))).toBe(true);
   });
 
+  test('a note another bullet already says is replaced, not kept beside its twin', () => {
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(
+      prose.getProseFragment(doc),
+      '## Meeting notes\n\n- the Harborlight crane inspection is a week late\n\n### Crane\n\n- the Harborlight crane inspection is a week late\n',
+    );
+    prose.ensureBlockIds(doc);
+    for (const el of prose.addressableBlocks(prose.getProseFragment(doc))) {
+      prose.claimSubtree(el, AUTHOR);
+    }
+    const outline = prose.readOutline(doc);
+    const headingId = outline[0]?.id as string;
+    const flat = outline.find((e) => e.kind === 'listItem')?.id as string;
+    const guarded = guardNotesEdits([{ op: 'replace_block', blockId: flat, markdown: OVERWRITE }], {
+      notesHeadingId: headingId,
+      outline,
+    });
+    expect(guarded.kept).toHaveLength(0);
+    apply(doc, guarded.edits);
+    const text = prose.readOutline(doc).map((e) => e.text);
+    expect(text.filter((t) => t.includes('crane inspection'))).toHaveLength(1);
+    expect(text.some((t) => t.includes('Riverbend batch'))).toBe(true);
+  });
+
   test('a real revision of the same note still replaces it in place', () => {
     // The mutation control for the rule itself: a guard that simply never
     // replaced anything would pass every test above and fail this one.
