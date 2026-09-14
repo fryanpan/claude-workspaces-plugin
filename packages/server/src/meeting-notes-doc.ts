@@ -751,8 +751,9 @@ export function applyNotesUpdate(
   // `null` above before the guard ever saw it.
   if (guarded.edits.length === 0 && guarded.refused.length > 0) return 'guard-refused';
   // A batch whose every note was already written wrote nothing and lost
-  // nothing: the words are in the doc, so the tick is not carried.
-  if (linked.edits.length === 0) {
+  // nothing: the words are in the doc, so the tick is not carried. Keyed on
+  // what DEDUPE left, so a batch another pass emptied still fails as before.
+  if (deduped.edits.length === 0) {
     if (deduped.alreadyWritten > 0) opts.onWordsLanded?.();
     return null;
   }
