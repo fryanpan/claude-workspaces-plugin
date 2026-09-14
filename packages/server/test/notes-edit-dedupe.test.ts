@@ -418,6 +418,19 @@ describe('a Decision label', () => {
     const snap = await script("let's group the small slipway jobs together from now on");
     expect(snap.notes).toContain('**Decision:** Group small slipway jobs together');
   });
+
+  it('is judged note by note: a decision beside it licenses only its own note', async () => {
+    const snap = await createNotesTickHarness({
+      compose: (input) =>
+        addNotes(
+          input,
+          '- **Decision:** Ferry leaves at seven\n- **Decision:** Group small slipway jobs together',
+        ),
+    }).speak('we decided the ferry leaves at seven; sometimes I group the small slipway jobs');
+    expect(snap.notes).toContain('**Decision:** Ferry leaves at seven');
+    expect(snap.notes).not.toContain('**Decision:** Group small');
+    expect(snap.notes).toContain('Group small slipway jobs together');
+  });
 });
 
 describe('a lead bullet rewritten by the note-taker', () => {

@@ -44,7 +44,7 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { sectionIds } from './notes-cleanup-scope.ts';
-import { contentWords, negates } from './notes-idea-coverage.ts';
+import { contentWords, negates, sentencesOf } from './notes-idea-coverage.ts';
 import { topicKey } from './notes-quality.ts';
 
 export interface NotesDedupeContext {
@@ -213,7 +213,21 @@ export function dedupeNotesEdits(
       : sectionIds(outline, headingId);
   // No speech is a caller that cannot say what the tick heard — a section
   // open, a cleanup — not a tick that heard no decision.
-  const decided = ctx.speech.length === 0 || ctx.speech.some((s) => DECISION_CUE.test(s));
+  const unheard = ctx.speech.length === 0;
+  // PER NOTE, NOT PER TICK: one "we decided" in a tick must not license a
+  // label on everything else said beside it. A label stands when a deciding
+  // clause shares the note's words — two of them, or all of a shorter note.
+  const decisions = ctx.speech
+    .flatMap((s) => sentencesOf(s).flatMap((c) => c.split(/;\s*/)))
+    .filter((c) => DECISION_CUE.test(c))
+    .map((c) => new Set(contentWords(c)));
+  const decided = (line: string): boolean => {
+    if (unheard) return true;
+    const words = contentWords(noteKey(line));
+    return decisions.some(
+      (d) => words.filter((w) => d.has(w)).length >= Math.min(2, Math.max(1, words.length)),
+    );
+  };
 
   /** The topic headings already in the section. */
   const topics: Array<{ id: string; level: number; text: string }> = [];
@@ -246,7 +260,7 @@ export function dedupeNotesEdits(
   /** A label the doc already carries was judged by the tick that wrote it: a
    *  regroup re-emitting an earlier decision keeps it. */
   const founded = (line: string, blockId?: string): boolean =>
-    decided ||
+    decided(line) ||
     outline.some(
       (e) =>
         DECISION_LABEL.test(e.text) &&
