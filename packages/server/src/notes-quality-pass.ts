@@ -28,6 +28,7 @@
 
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import { docLookupUrl } from './meeting-lookup.ts';
 import { listMeetings, readTranscript } from './meetings.ts';
 import type { NotesDocStore } from './notes-doc-access.ts';
 import {
@@ -294,9 +295,13 @@ export function passLine(
   const counts = notesQualityLogLine(report);
   if (report.flags.length === 0) return counts;
   const where = filing.filed
-    ? `filed on ${
-        workspaceId !== undefined ? filedItemLink(workspaceId, filing.taskId) : filing.taskId
-      }`
+    ? 'docId' in filing
+      ? `filed on the doc ${
+          workspaceId !== undefined ? docLookupUrl(workspaceId, filing.docId) : filing.docId
+        }`
+      : `filed on ${
+          workspaceId !== undefined ? filedItemLink(workspaceId, filing.taskId) : filing.taskId
+        }`
     : `NOT filed (${filing.reason}${
         'message' in filing && filing.message !== undefined ? `: ${filing.message}` : ''
       })`;
