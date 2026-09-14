@@ -3129,18 +3129,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore.closeSocketsForShareMembers(ended);
     sse.closeForShareMembers(ended);
   };
-  const shareSweep =
-    shares || widgetDoorHosts().length > 0
-      ? setInterval(() => {
-          try {
-            sweepDeadShares();
-          } catch {
-            // A sweep failure must never take the server down with it.
-          }
-        }, SHARE_SWEEP_MS)
-      : null;
+  // Armed whatever is configured: the widget door's hostname can be discovered
+  // after boot (`tailnetHostname` in public-host.ts re-asks Tailscale), and a door socket
+  // admitted then still needs this sweep. A pass with nothing open costs a
+  // walk over no sockets.
+  const shareSweep = setInterval(() => {
+    try {
+      sweepDeadShares();
+    } catch {
+      // A sweep failure must never take the server down with it.
+    }
+  }, SHARE_SWEEP_MS);
   // Never hold the process (or a test runner) open.
-  shareSweep?.unref?.();
+  shareSweep.unref?.();
 
   // Armed here rather than in bin.ts, because the wake is a property of a
   // running board and not of the production deployment — a staging server
@@ -3222,7 +3223,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sharingGate,
     webhookLog,
     stop: async () => {
-      if (shareSweep) clearInterval(shareSweep);
+      clearInterval(shareSweep);
       // Release before anything else can fail: a lock left behind by a clean
       // shutdown would make the next repair refuse for no reason. It is
       // reclaimed as stale on a crash either way, but only after a pid check
