@@ -13,7 +13,8 @@
  *
  *   - **A watchdog per launch.** A detached `/bin/sh` loop polls the parent's
  *     pid once a second; when the parent is gone it kills Chrome and removes
- *     the profile. Detached, so a signal to the parent's process group does not
+ *     the profile. If Chrome goes first, the parent is still there to clean up
+ *     and the watchdog just exits. Detached, so a signal to the parent's process group does not
  *     take it down with the parent. Its arguments travel in the environment, so
  *     nothing matching `--user-data-dir=` in `ps` is the watchdog. The owner's
  *     own cleanup stops it first, so a finished run leaves no shell behind.
@@ -23,7 +24,8 @@
  *     process's temp dir, has pid 1 as its parent, and is older than
  *     `ORPHAN_REAP_AGE_MS`. A live run's Chrome is parented to that run, never
  *     to pid 1, so no live run's browser can match; the age floor keeps the
- *     reaper from racing a watchdog that is mid-cleanup.
+ *     reaper from racing a watchdog that is mid-cleanup. A run with a
+ *     different `TMPDIR` never reaps another's orphans — the safe direction.
  *
  * Why not Chrome watching its parent itself: headless Chrome has no flag for
  * it on macOS, and a pipe-based check would need every launcher to hold the
@@ -46,7 +48,8 @@ export const ORPHAN_REAP_AGE_MS = 10 * 60 * 1000;
 const WATCHDOG_SCRIPT = `
 p="$CW_WATCH_PARENT"; c="$CW_WATCH_CHROME"; d="$CW_WATCH_PROFILE"
 case "$d" in */${PROFILE_PREFIX}*) ;; *) exit 0 ;; esac
-while kill -0 "$p" 2>/dev/null; do sleep 1; done
+while kill -0 "$p" 2>/dev/null && kill -0 "$c" 2>/dev/null; do sleep 1; done
+kill -0 "$p" 2>/dev/null && exit 0
 case "$(ps -o command= -p "$c" 2>/dev/null)" in
   *"--user-data-dir=$d"*) kill -9 "$c" 2>/dev/null ;;
 esac
@@ -83,9 +86,9 @@ export function startWatchdog(chrome: ChildProcess, profile: string): void {
   watchdogs.set(chrome.pid, dog);
 }
 
-/** The watchdog's pid for one Chrome, while it has one. */
-export function watchdogPid(chrome: ChildProcess): number | undefined {
-  return chrome.pid === undefined ? undefined : watchdogs.get(chrome.pid)?.pid;
+/** The watchdog for one Chrome, while it has one. */
+export function watchdogOf(chrome: ChildProcess): ChildProcess | undefined {
+  return chrome.pid === undefined ? undefined : watchdogs.get(chrome.pid);
 }
 
 /** Stop the watchdog for a Chrome its owner is cleaning up itself. */
@@ -94,7 +97,8 @@ export function stopWatchdog(chrome: ChildProcess | undefined): void {
   if (pid === undefined) return;
   const dog = watchdogs.get(pid);
   watchdogs.delete(pid);
-  if (dog?.pid === undefined) return;
+  // An exited watchdog's pid, and so its group id, may already be somebody else's.
+  if (dog?.pid === undefined || dog.exitCode !== null || dog.signalCode !== null) return;
   try {
     // Detached makes it a group leader: the group takes its `sleep` too.
     process.kill(-dog.pid, 'SIGKILL');

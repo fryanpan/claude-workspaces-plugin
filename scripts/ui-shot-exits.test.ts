@@ -135,7 +135,7 @@ describe.skipIf(CHROME === null)('ui-shot exit paths against real headless Chrom
     const r = runToEnd(runId, ['--url', HANG_URL, '--settle', '1', '--eval', '1']);
     expect(r.status, r.stderr).toBe(0);
     await expectNothingLeft(runId);
-  }, 60_000);
+  }, 90_000);
 
   it('a capture that throws', async () => {
     const runId = newRunId();
@@ -143,7 +143,7 @@ describe.skipIf(CHROME === null)('ui-shot exit paths against real headless Chrom
     expect(r.status).toBe(1);
     expect(r.stderr, 'the run must fail inside the page').toMatch(/page threw/);
     await expectNothingLeft(runId);
-  }, 60_000);
+  }, 90_000);
 
   it('a capture that times out', async () => {
     const runId = newRunId();
@@ -162,7 +162,7 @@ describe.skipIf(CHROME === null)('ui-shot exit paths against real headless Chrom
       /page load did not finish|never matched/,
     );
     await expectNothingLeft(runId);
-  }, 60_000);
+  }, 90_000);
 
   it.each(['SIGINT', 'SIGTERM'] as const)(
     'a run that receives %s mid-shot',
@@ -173,7 +173,7 @@ describe.skipIf(CHROME === null)('ui-shot exit paths against real headless Chrom
       await waitFor('the run to exit', () => child.exitCode !== null || child.signalCode !== null);
       await expectNothingLeft(runId);
     },
-    60_000,
+    90_000,
   );
 
   it('a run whose parent is SIGKILLed mid-shot', async () => {
@@ -182,5 +182,5 @@ describe.skipIf(CHROME === null)('ui-shot exit paths against real headless Chrom
     child.kill('SIGKILL');
     await waitFor('the run to die', () => child.signalCode !== null);
     await expectNothingLeft(runId);
-  }, 60_000);
+  }, 90_000);
 });

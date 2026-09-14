@@ -16,7 +16,9 @@ import {
   findOrphans,
   parseEtime,
   reapOrphanedChromes,
+  watchdogOf,
 } from './chrome-orphans.ts';
+import { killAndRemove, launchChrome } from './headless-chrome.ts';
 import { profilePrefix, resolveRunId } from './ui-shot-lib.ts';
 
 const HEADLESS_CHROME = resolve(process.cwd(), 'scripts/headless-chrome.ts');
@@ -198,6 +200,33 @@ describe.skipIf(process.platform === 'win32')('a launcher that never cleans up',
     expect(existsSync(profile)).toBe(true);
     process.kill(chromePid, 'SIGKILL');
     await waitFor('the control browser to die', () => !isAlive(chromePid));
+  }, 60_000);
+
+  it('an owner that cleans up itself leaves no watchdog running', async () => {
+    const bin = fakeChrome(ownDir());
+    const runId = `ownerclean${process.pid}`;
+    const b = await launchChrome(
+      bin,
+      (p) => ['--headless=new', `--user-data-dir=${p}`],
+      10_000,
+      runId,
+    );
+    const chromePid = b.proc.pid as number;
+    browserPids.push(chromePid);
+    const dog = watchdogOf(b.proc);
+    if (!dog?.pid) throw new Error('the launch started no watchdog');
+    // Positive control: the watchdog is running before the owner cleans up.
+    expect(isAlive(dog.pid)).toBe(true);
+
+    killAndRemove(b.proc, b.profile);
+    await waitFor('the watchdog to exit', () => dog.exitCode !== null || dog.signalCode !== null);
+    // Stopped by the owner, not left to notice Chrome's death on its next tick.
+    expect(dog.signalCode).toBe('SIGKILL');
+    expect(b.proc.exitCode !== null || b.proc.signalCode !== null || !isAlive(chromePid)).toBe(
+      true,
+    );
+    expect(existsSync(b.profile)).toBe(false);
+    expect(watchdogOf(b.proc)).toBeUndefined();
   }, 60_000);
 
   it('the reaper kills an orphan and removes its profile', async () => {
