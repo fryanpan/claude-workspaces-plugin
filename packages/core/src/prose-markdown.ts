@@ -21,6 +21,7 @@ import { footnoteEndAt } from './footnotes.ts';
 import { LCS_CELL_BUDGET, lcsKept } from './lcs.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
 import { BLOCK_IDENTITY_ATTRS } from './prose-identity.ts';
+import { MDX_FLOW_LANGUAGE, type MarkdownParseOptions, mdxFlowEnd } from './prose-mdx.ts';
 import { SUGGEST_INSERT_MARK } from './suggest.ts';
 
 /**
@@ -293,10 +294,11 @@ export function normalizeHeadingLevels(
 function markdownBlockKeys(
   markdown: string,
   key: (node: Y.XmlElement | Y.XmlText, i: number) => string,
+  opts: MarkdownParseOptions,
 ): string[] {
   const scratch = new Y.Doc();
   const fragment = getProseFragment(scratch);
-  fragment.push(parseMarkdownBlocks(markdown));
+  fragment.push(parseMarkdownBlocks(markdown, opts));
   return (fragment.toArray() as (Y.XmlElement | Y.XmlText)[]).map(key);
 }
 
@@ -312,7 +314,11 @@ function markdownBlockKeys(
  *
  * Returns true if the fragment changed.
  */
-export function applyMarkdownToFragment(fragment: Y.XmlFragment, markdown: string): boolean {
+export function applyMarkdownToFragment(
+  fragment: Y.XmlFragment,
+  markdown: string,
+  opts: MarkdownParseOptions = {},
+): boolean {
   const prev = fragment.toArray() as (Y.XmlElement | Y.XmlText)[];
   // serializeBlock returns null for a text-empty heading, an empty XmlText and
   // a src-less image. Those still have to be told apart, so the fallback key
@@ -321,6 +327,9 @@ export function applyMarkdownToFragment(fragment: Y.XmlFragment, markdown: strin
   // and keep the stale block (with its stale level).
   const key = (node: Y.XmlElement | Y.XmlText, i: number): string => {
     const s = serializeBlock(node);
+    // A one-line `{/* note */}` writes the same text as a paragraph or as an
+    // MDX block; the kind is in the key so a reparse turns one into the other.
+    if (s != null && node instanceof Y.XmlElement && isMdxFlow(node)) return `\0mdx\0${s}`;
     if (s != null) return s;
     if (!(node instanceof Y.XmlElement)) return `__empty_text_${i}__`;
     // Identity attributes are excluded: a block id is minted per element, so
@@ -342,13 +351,13 @@ export function applyMarkdownToFragment(fragment: Y.XmlFragment, markdown: strin
     if (!suggestedPrev[i]) acceptedIdx.push(i);
   }
   const prevKeys = acceptedIdx.map((i) => key(prev[i]!, i));
-  const nextKeys = markdownBlockKeys(markdown, key);
+  const nextKeys = markdownBlockKeys(markdown, key, opts);
   // Keyed separately from the blocks we insert: reading a prelim block's
   // content requires integrating it into a doc, and an integrated Yjs type
   // can't then be re-parented into the live fragment. (So the markdown is
   // parsed twice per call — cheap next to the Yjs work, and this runs at most
   // once per 500ms mtime poll.)
-  const next = parseMarkdownBlocks(markdown);
+  const next = parseMarkdownBlocks(markdown, opts);
 
   // Never wipe the doc to empty. Both call sites already guard on a zero-block
   // parse, but this is exported — make it safe by construction.
@@ -406,8 +415,11 @@ function acceptedInsertPos(fragment: Y.XmlFragment, j: number): number {
   return kids.length;
 }
 
-export function parseMarkdownBlocks(markdown: string): Y.XmlElement[] {
-  return parseMarkdownSource(markdown).blocks;
+export function parseMarkdownBlocks(
+  markdown: string,
+  opts: MarkdownParseOptions = {},
+): Y.XmlElement[] {
+  return parseMarkdownSource(markdown, opts).blocks;
 }
 
 /** A parse that also says where each top-level block began. */
@@ -426,7 +438,10 @@ export interface ParsedMarkdownSource {
  * start; the write-back uses these to reuse the author's bytes for a block an
  * edit did not touch (`prose-keep-source.ts`).
  */
-export function parseMarkdownSource(markdown: string): ParsedMarkdownSource {
+export function parseMarkdownSource(
+  markdown: string,
+  opts: MarkdownParseOptions = {},
+): ParsedMarkdownSource {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const out: Y.XmlElement[] = [];
   const starts: number[] = [];
@@ -649,6 +664,20 @@ export function parseMarkdownSource(markdown: string): ParsedMarkdownSource {
     }
     starts.push(i);
 
+    // An `.mdx` component, `{…}` expression or import/export run: one block
+    // holding its exact source lines (prose-mdx.ts).
+    const mdxEnd = opts.mdx ? mdxFlowEnd(lines, i) : null;
+    if (mdxEnd !== null) {
+      const cb = new Y.XmlElement('codeBlock');
+      cb.setAttribute('language', MDX_FLOW_LANGUAGE);
+      const t = new Y.XmlText();
+      t.insert(0, lines.slice(i, mdxEnd).join('\n'));
+      cb.insert(0, [t]);
+      out.push(cb);
+      i = mdxEnd;
+      continue;
+    }
+
     if (isHeading(line.trimStart())) {
       const m = line.trimStart().match(/^(#{1,6})\s+(.*)$/);
       const level = Math.min(6, Math.max(1, m?.[1]?.length ?? 1));
@@ -813,12 +842,12 @@ function mkTable(headerCells: string[], bodyRows: string[][]): Y.XmlElement {
  * preserve (blank-line runs, list indent style, ...). Sync arbitration
  * uses this to tell pure normalization drift apart from a real edit.
  */
-export function normalizeMarkdown(markdown: string): string {
+export function normalizeMarkdown(markdown: string, opts: MarkdownParseOptions = {}): string {
   const doc = new Y.Doc();
   try {
     const fragment = getProseFragment(doc);
     doc.transact(() => {
-      const blocks = parseMarkdownBlocks(markdown);
+      const blocks = parseMarkdownBlocks(markdown, opts);
       // Parse + push, NOT applyMarkdownToFragment: the fragment is empty so
       // the diff would insert everything anyway, and apply's block-keying
       // reads prelim types, which logs a Yjs warning per block — at hydrate
@@ -888,6 +917,10 @@ export function serializeFragmentParts(fragment: Y.XmlFragment): string[] {
   return parts;
 }
 
+function isMdxFlow(node: Y.XmlElement): boolean {
+  return node.nodeName === 'codeBlock' && node.getAttribute('language') === MDX_FLOW_LANGUAGE;
+}
+
 function isHorizontalRuleNode(n: unknown): boolean {
   return n instanceof Y.XmlElement && n.nodeName === 'horizontalRule';
 }
@@ -930,6 +963,8 @@ function serializeBlock(node: Y.XmlElement | Y.XmlText): string | null {
       if (lang === 'yaml-frontmatter') {
         return `---\n${textContent(node)}\n---`;
       }
+      // An MDX construct is its own source, fence-free.
+      if (lang === MDX_FLOW_LANGUAGE) return textContent(node);
       return `\`\`\`${lang}\n${textContent(node)}\n\`\`\``;
     }
     case 'horizontalRule':

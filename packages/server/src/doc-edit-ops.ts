@@ -93,9 +93,11 @@ export class DocEditOps {
     // comes from disk or a pinned commit, never from an agent payload.
     if (contentKind(doc.meta.type) !== 'prose') return { ok: false, error: 'unsupported' };
     if (!markdown.trim()) return { ok: false, error: 'empty' };
+    // An `.mdx` doc reads its components as blocks, as its bound file does.
+    const opts = { mdx: prose.isMdxPath(doc.meta.sourceUrl) };
     let blocks: Y.XmlElement[];
     try {
-      blocks = prose.parseMarkdownBlocks(markdown);
+      blocks = prose.parseMarkdownBlocks(markdown, opts);
     } catch {
       return { ok: false, error: 'parse-failed' };
     }
@@ -107,7 +109,7 @@ export class DocEditOps {
     // A doc-side edit origin (NOT 'file-watch'): the write-back observer must
     // see this and flush it to disk like any other agent edit.
     doc.ydoc.transact(() => {
-      prose.applyMarkdownToFragment(fragment, markdown);
+      prose.applyMarkdownToFragment(fragment, markdown, opts);
     }, 'agent-set-content');
     prose.normalizeHeadingLevels(doc.ydoc);
     return { ok: true };

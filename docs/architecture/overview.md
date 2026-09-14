@@ -888,6 +888,17 @@ one paragraph, and a note added to a list rewrites only that list item. A block
 counts as touched when its content changed, whoever changed it. Before it, the
 first edit re-serialized the whole file, which in an `.mdx` post joined the
 `import` lines onto one line.
+`prose-mdx.ts` is the other half of that fix, in the same tier. For a file
+ending `.mdx` it finds each JSX component, `{…}` expression and import run,
+and the parser stores it as a code block whose language is `mdx-flow` and
+whose text is the exact source lines. A component is then one block the
+writer serializes byte for byte, not a paragraph that an edit could reflow.
+The editor draws that block through two client modules beside
+`mermaid-code-block.ts`, and they do not move the picture either.
+`mdx-flow-block.ts` is the node view and the plugin that makes the block
+read-only. `mdx-preview.ts` reads a component's props with a literal parser,
+never by running them, and draws a chart's title and a line for its literal
+data.
 
 `prose-identity.ts`, `prose-outline.ts` and `prose-batch.ts` join that same
 document-model tier, and together they are how an agent addresses a block
