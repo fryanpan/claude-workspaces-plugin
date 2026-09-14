@@ -1140,6 +1140,39 @@ def check_haiku_spend() -> None:
                and len(entries) == pieces and all(isinstance(e, dict) for e in entries) else 1, 0,
                f"{pieces} pieces, {calls} calls, {len(entries)} entries, exit {r.returncode}\n{r.stderr}")
 
+        # The hook's own mode: `range` is the pushed tip, shortened.
+        tip = subprocess.run(["git", "rev-parse", "HEAD"], cwd=side, check=True,
+                             capture_output=True, text=True, env=clean).stdout.strip()
+        pushed = ledger("pushed.jsonl")
+        r = spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=pushed, cwd=side, stdin="",
+                        argv=("--push-tip", tip, "--remote", "origin"))
+        entries = read_ledger(pushed)
+        expect("haiku spend: a push is booked as `push <tip[:12]>`",
+               0 if r.returncode == 0 and len(entries) == 1 and isinstance(entries[0], dict)
+               and entries[0].get("range") == f"push {tip[:12]}" else 1, 0,
+               f"exit {r.returncode}, entries {entries!r}\n{r.stderr}")
+
+        # A reply with no `usage` names no cost, so nothing is booked for it.
+        unmetered = ledger("unmetered.jsonl")
+        r = spawn_haiku(f"{stub}/clean", "block-all", ledger=unmetered)
+        expect("haiku spend: a reply without usage books nothing and still passes",
+               0 if r.returncode == 0 and not os.path.exists(unmetered) else 1, 0, r.stderr)
+
+        # A ledger that reads as absent but cannot be written: the scan did
+        # run, so its verdict stands, and the lost entry is said out loud.
+        if os.geteuid() != 0:  # root writes into a mode-555 folder
+            sealed = ledger("sealed-folder")
+            os.mkdir(sealed)
+            os.chmod(sealed, 0o555)
+            try:
+                r = spawn_haiku(f"{stub}/clean-usage", "block-all",
+                                ledger=os.path.join(sealed, "spend.jsonl"))
+            finally:
+                os.chmod(sealed, 0o755)
+            expect("haiku spend: an unwritable ledger keeps a clean verdict and warns that the cap cannot count it",
+                   0 if r.returncode == 0 and "could not be written" in r.stderr else 1, 0,
+                   f"exit {r.returncode}\n{r.stderr}")
+
         # --- 5. The cap: today's total, every repo, checked before a call -----
         banner = "SCAN DID NOT RUN — daily budget reached"
         at_cap = ledger("at-cap.jsonl",
@@ -1182,6 +1215,13 @@ def check_haiku_spend() -> None:
         expect("haiku spend: SCRUB_HAIKU_BUDGET_BLOCK=1 blocks a cap hit even under warn-all",
                0 if calls == 0 and r.returncode == 1 and "SCRUB_HAIKU_BUDGET_BLOCK=1" in r.stderr else 1,
                0, f"{calls} call(s), exit {r.returncode}\n{r.stderr}")
+        r = spawn_haiku(f"{stub}/clean", "block-except-exhausted", ledger=at_cap,
+                        SCRUB_HAIKU_BUDGET_BLOCK="1")
+        expect("haiku spend: ...and under block-except-exhausted, which would otherwise warn",
+               r.returncode, 1, r.stderr)
+        r = spawn_haiku(f"{stub}/clean", "block-all", ledger=at_cap, SCRUB_HAIKU_BUDGET_BLOCK="0")
+        expect("haiku spend: SCRUB_HAIKU_BUDGET_BLOCK=0 never loosens the recorded policy",
+               r.returncode, 1, r.stderr)
 
         r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all",
                                                     ledger=at_cap, stdin=big))

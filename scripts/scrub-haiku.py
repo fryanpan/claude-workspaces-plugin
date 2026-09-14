@@ -908,8 +908,12 @@ def _scan_piece(diff_content: str, scan_range: str = "stdin") -> "int | Unavaila
 
     # Per piece, not once per push: the cap is on API calls, and a long scan
     # can cross it — or another repo's push can — between one piece and the
-    # next. Pieces already in flight together still overshoot by at most a
-    # batch; that is the price of not serialising them.
+    # next. It is a check, not a reservation: calls already in flight are not
+    # yet in the ledger, so the cap can be overshot by every call in flight
+    # when it is crossed — up to CHUNK_JOBS per concurrent scanning process,
+    # across repos. At a few cents a call that is cents past a dollar cap.
+    # Closing it needs a cross-process lock or a reservation entry, and both
+    # change the ledger contract every copy of this scanner shares.
     over = check_budget()
     if over is not None:
         return over

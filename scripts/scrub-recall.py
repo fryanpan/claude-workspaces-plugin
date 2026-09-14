@@ -201,7 +201,7 @@ def scan(case: Case) -> Run:
     # scanning it. Without this, a case past the ceiling measures content the
     # shipped gate never reads, and its recall is a number about a different
     # scanner.
-    result = haiku.call_haiku(case.patch[: haiku.MAX_DIFF_CHARS])
+    result = haiku.call_haiku(case.patch[: haiku.MAX_DIFF_CHARS], "scrub-recall")
     elapsed = time.monotonic() - t0
     if isinstance(result, haiku.Unavailable):
         return Run(case.id, case.label, "unavailable", f"{result.case}: {result.detail}", elapsed)
@@ -228,7 +228,7 @@ def sweep(cases: List[Case], runs: int, jobs: int, on_run: Callable[[Run], None]
     requests = threading.BoundedSemaphore(jobs)
     real_scan = haiku._scan_piece
 
-    def bounded(piece: str, scan_range: str = "scrub-recall") -> "int | haiku.Unavailable":
+    def bounded(piece: str, scan_range: str) -> "int | haiku.Unavailable":
         with requests:
             return real_scan(piece, scan_range)
 
