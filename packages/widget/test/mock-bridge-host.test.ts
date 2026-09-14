@@ -106,7 +106,7 @@ function build(opts: { activated?: boolean } = {}) {
     storage: () => ({
       getItem: (k: string) => (k === 'feedback-user-name' ? 'Riverbend Reviewer' : null),
     }),
-    fetch: hostFetch as unknown as typeof fetch,
+    fetch: hostFetch as unknown as HostEnv['fetch'],
     WebSocket: HostSocket as unknown as HostEnv['WebSocket'],
     EventSource: HostStream as unknown as HostEnv['EventSource'],
     onMessage: (fn) => {

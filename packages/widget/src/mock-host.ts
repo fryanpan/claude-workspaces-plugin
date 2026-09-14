@@ -42,7 +42,7 @@ export interface HostEnv {
   placeholder: HTMLIFrameElement | null;
   location: { host: string; protocol: string };
   storage: () => Pick<Storage, 'getItem'>;
-  fetch: typeof fetch;
+  fetch: (path: string, init: RequestInit) => Promise<Response>;
   WebSocket: new (url: string) => WebSocket;
   EventSource: new (url: string) => EventSource;
   onMessage: (fn: (ev: MessageEvent) => void) => void;
