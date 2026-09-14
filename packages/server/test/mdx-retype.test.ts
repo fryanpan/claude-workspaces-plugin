@@ -19,7 +19,7 @@ import * as Y from 'yjs';
 import { DocStore } from '../src/doc-store.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
-import { pastWriteBack, waitFor } from './wait-for.ts';
+import { pastReanchor, pastWriteBack, waitFor } from './wait-for.ts';
 
 const POST = `import { LineChart } from '../components/LineChart'
 import Chart from '../components/Chart'
@@ -129,6 +129,46 @@ describe('an .mdx doc read before the MDX grammar', () => {
     await sleep(pastWriteBack());
     expect(readFileSync(path, 'utf8')).toBe(disk);
     expect(statSync(path).mtimeMs).toBe(before);
+  });
+
+  it('a comment on a chart that was a paragraph follows it into its block', async () => {
+    const { path } = await legacyDoc('post');
+    const doc = docStore.get('post');
+    if (!doc) throw new Error('doc missing');
+    const found = prose.resolveTextRangeFromFind(doc.ydoc, { find: 'Saltmarsh crossings' });
+    if (!found.ok) throw new Error(`anchor: ${found.error}`);
+    createThread(doc.ydoc, {
+      threadId: 't-chart',
+      anchor: {
+        kind: 'text-range',
+        startRel: found.startRel,
+        endRel: found.endRel,
+        snippet: { text: 'Saltmarsh crossings' },
+      },
+      createdBy: { id: 'u-reader', name: 'Reader', kind: 'known', color: '#336699' },
+      firstComment: { id: 'c-chart', text: 'Start the axis at zero?' },
+    });
+    writeFileSync(join(dataDir, 'post.ydoc'), Y.encodeStateAsUpdate(doc.ydoc));
+
+    expect((await docStore.attachFileAsync('post', path)).ok).toBe(true);
+
+    await waitFor(
+      () => {
+        const thread = (doc.ydoc.getMap('threads') as Y.Map<Y.Map<unknown>>).get('t-chart');
+        const anchor = thread?.get('anchor') as { startRel?: Uint8Array } | undefined;
+        if (!anchor?.startRel) return false;
+        const at = Y.createAbsolutePositionFromRelativePosition(
+          Y.decodeRelativePosition(anchor.startRel),
+          doc.ydoc,
+        );
+        const block = at?.type.parent as Y.XmlElement | null;
+        return (
+          block?.getAttribute('language') === prose.MDX_FLOW_LANGUAGE &&
+          String(at?.type).slice(at?.index).startsWith('Saltmarsh crossings')
+        );
+      },
+      { timeout: pastReanchor() * 20, describe: 'the thread anchored in the chart block' },
+    );
   });
 
   it('a reparse of that doc keeps its pending suggestion', async () => {
