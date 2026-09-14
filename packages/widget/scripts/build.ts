@@ -148,6 +148,11 @@ await build('iife', 'mockup-live.js', 'mockup-live.ts');
 // Voice feedback: fetched by a mock page on the mic's first tap, so it rides on
 // no page that never records — and on none of the budgeted bundle's bytes.
 await build('iife', 'voice.js', 'voice/voice-entry.ts');
+// A served mock's sandbox (`server/src/mockup-frame.ts`): the bridge is written
+// into the frame's bytes, the host script is loaded by the page holding it.
+// Both only ever run on a mock, so neither is on the budgeted bundle.
+await build('iife', 'mock-bridge.js', 'mock-bridge.ts');
+await build('iife', 'mock-host.js', 'mock-host.ts');
 
 writeFileSync(join(dist, 'BUILD_INFO.txt'), `built ${new Date().toISOString()}\n`);
 

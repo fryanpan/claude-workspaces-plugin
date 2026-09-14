@@ -340,7 +340,7 @@ describe('the live loop', () => {
 
     // The newest round is fetched WITHOUT `?v=`: that address is the one that
     // keeps updating.
-    expect(fetched).toEqual(['/workspaces/w-1/mockups/d-1']);
+    expect(fetched).toEqual(['/workspaces/w-1/mockups/d-1?cw-frame=1']);
     expect(document.querySelector('#hero')?.textContent).toBe('Round two');
     // And now that a second round exists, the reader can get back to the one
     // he commented on.
@@ -353,12 +353,12 @@ describe('the live loop', () => {
     const back = document.querySelector('[data-cw-mock-versions] button') as HTMLButtonElement;
     back.click();
     await settle();
-    expect(fetched).toEqual(['/workspaces/w-1/mockups/d-1?v=2']);
+    expect(fetched).toEqual(['/workspaces/w-1/mockups/d-1?v=2&cw-frame=1']);
 
     // A round landing now must NOT move him: he is pinned to round 2.
     listeners['mockup.updated']?.({ data: JSON.stringify({ version: 4 }) });
     await settle();
-    expect(fetched).toEqual(['/workspaces/w-1/mockups/d-1?v=2']);
+    expect(fetched).toEqual(['/workspaces/w-1/mockups/d-1?v=2&cw-frame=1']);
   });
 
   it('leaves the page alone when the round will not load', async () => {

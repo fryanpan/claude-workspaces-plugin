@@ -93,8 +93,9 @@ describe('a bound mockup updates in place and keeps its rounds', () => {
     return (await res.json()) as { meta: { docId: string } };
   }
 
+  // The frame's address: the plain one answers the page holding the frame.
   const mockUrl = (docId: string, query = '') =>
-    `${base}/workspaces/${WS}/mockups/${encodeURIComponent(docId)}${query}`;
+    `${base}/workspaces/${WS}/mockups/${encodeURIComponent(docId)}${query ? `${query}&` : '?'}cw-frame=1`;
 
   it('an edit to the source file broadcasts mockup.updated and changes what the link serves', async () => {
     const docId = 'mock-live-1';

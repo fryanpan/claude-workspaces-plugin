@@ -61,10 +61,14 @@ function readConfig(script: HTMLScriptElement | null): Config | null {
 
 const enc = encodeURIComponent;
 
-/** This mockup's own address, optionally pinned to a round. */
+/**
+ * This mockup's own bytes, optionally pinned to a round. The FRAME's address:
+ * the plain one answers the page that holds the frame
+ * (`server/src/mockup-frame.ts`), and swapping that in would nest the host.
+ */
 export function mockupUrl(cfg: Pick<Config, 'docId' | 'workspaceId'>, v: number | null): string {
   const base = `/workspaces/${enc(cfg.workspaceId)}/mockups/${enc(cfg.docId)}`;
-  return v === null ? base : `${base}?v=${v}`;
+  return v === null ? `${base}?cw-frame=1` : `${base}?v=${v}&cw-frame=1`;
 }
 
 /** The doc's live event stream. */
@@ -376,7 +380,12 @@ const parsed = readConfig(script);
 if (parsed) {
   // The mic, in the history button's slot; voice feedback itself is fetched
   // from beside this script on its first tap (`voice-loader.ts`).
-  const voiceSrc = new URL('voice.js', script?.src || location.href).href;
+  // Inlined into a mock's frame, this script has no `src`; voice.js is then
+  // at the widget's own static root.
+  const voiceSrc = new URL(
+    script?.src ? 'voice.js' : '/widget/voice.js',
+    script?.src || location.href,
+  ).href;
   const start = (): void => {
     startMockupLive(parsed);
     mountVoiceLoader(document, voiceSrc);

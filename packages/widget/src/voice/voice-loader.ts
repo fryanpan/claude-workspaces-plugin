@@ -53,8 +53,7 @@ export function makeContext(): AudioContext | undefined {
   }
 }
 
-function loadChunk(src: string): Promise<VoiceChunk> {
-  if (window.cwVoice) return Promise.resolve(window.cwVoice);
+function appendScript(src: string): Promise<VoiceChunk> {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = src;
@@ -63,6 +62,21 @@ function loadChunk(src: string): Promise<VoiceChunk> {
     s.onerror = () => reject(new Error('voice.js'));
     document.head.append(s);
   });
+}
+
+/**
+ * Inside a served mock's sandboxed frame a `<script src>` goes out without the
+ * reader's session cookie (`server/src/mockup-frame.ts`), and behind a sign-in
+ * that loads a redirect rather than a script. `fetch` there goes through the
+ * page holding the frame, which has the cookie, so the bytes come that way and
+ * run from a blob.
+ */
+function loadChunk(src: string): Promise<VoiceChunk> {
+  if (window.cwVoice) return Promise.resolve(window.cwVoice);
+  if (window.parent === window) return appendScript(src);
+  return fetch(src)
+    .then((res) => (res.ok ? res.text() : Promise.reject(new Error('voice.js'))))
+    .then((js) => appendScript(URL.createObjectURL(new Blob([js], { type: 'text/javascript' }))));
 }
 
 /**

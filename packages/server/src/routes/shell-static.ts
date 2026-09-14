@@ -47,6 +47,15 @@ import {
   readMockupCapture,
   readMockupHtml,
 } from '../mockup-capture.ts';
+import {
+  MOCK_FRAME_CSP,
+  MOCK_HOST_HEADERS,
+  fileSandboxHeaders,
+  injectFrameScripts,
+  isMockFrameRequest,
+  renderMockHost,
+  withHeaders,
+} from '../mockup-frame.ts';
 import { injectLinkedItems, linkedTaskItems } from '../mockup-linked-items.ts';
 import { injectMockupLive, parseVersionParam } from '../mockup-live.ts';
 import { listMockupVersions, readMockupVersion, recordMockupVersion } from '../mockup-versions.ts';
@@ -288,7 +297,12 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     const source = doc.meta.sourceUrl;
     // A mockup bound to something that isn't HTML is served as-is, as before:
     // nothing is injected into it and nothing is captured from it.
-    if (!isHtmlMockupSource(source)) return serveStatic(source) ?? notFound();
+    // Sandboxed all the same: an SVG opened by its address is a document that
+    // runs its own script on this origin (`mockup-frame.ts`).
+    if (!isHtmlMockupSource(source)) {
+      const resp = serveStatic(source);
+      return resp ? withHeaders(resp, fileSandboxHeaders(source)) : notFound();
+    }
     // An explicit round. `?v=` is a query on the mockup's own address rather
     // than a second address, so nothing about which visitors may read a
     // mockup changes: whoever can open the page can open its history, and
@@ -330,6 +344,43 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           reviewsOf: (taskId) => taskStore.listReviewItems(taskId),
           canonical: (id) => docStore.resolveDocId(id),
         });
+    const roundHeaders = {
+      // Which copy answered. A page served from the capture is still the
+      // page — but "the source file is gone" is a fact somebody may want to
+      // act on, and it must not be inferred from the absence of an error.
+      'x-mockup-source': pinned !== null ? 'version' : live !== null ? 'live' : 'captured',
+      // Which round the bytes are. A reader pinned to an old one, and a
+      // test asserting an in-place swap landed, both need this without
+      // parsing the page.
+      ...(shownVersion !== null ? { 'x-mockup-version': String(shownVersion) } : {}),
+    };
+    // The address a person opens answers the page that HOLDS the mock, and
+    // the mock itself is `?cw-frame=1` inside it, sandboxed — see
+    // mockup-frame.ts for why and for how the widget still works. Sentry
+    // rides on the host: the frame cannot load the monitoring bundle by URL.
+    if (!isMockFrameRequest(url)) {
+      const host = injectSentryHead(
+        renderMockHost({
+          workspaceId,
+          docId: doc.meta.docId,
+          html,
+          url,
+          items: linked.map((i) => ({ taskId: i.taskId, reviewItemId: i.reviewItemId })),
+        }),
+        browserSentry,
+        'mockup',
+        readAppAssetManifest(markdownAppDist),
+      );
+      return new Response(host, {
+        headers: {
+          ...MOCK_HOST_HEADERS,
+          // A real page with Sentry injected, so it profiles too — see
+          // HTML_SHELL_HEADERS.
+          'document-policy': 'js-profiling',
+          ...roundHeaders,
+        },
+      });
+    }
     const withItems = injectLinkedItems(html, linked);
     const withWidget = injectMockupLive(injectWidget(withItems, doc.meta.docId, workspaceId), {
       docId: doc.meta.docId,
@@ -337,19 +388,12 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       version: shownVersion,
       versions,
     });
-    const body = injectSentryHead(
-      withWidget,
-      browserSentry,
-      'mockup',
-      readAppAssetManifest(markdownAppDist),
-    );
+    const body = injectFrameScripts(withWidget, widgetDist);
     return new Response(body, {
       headers: {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-cache',
-        // The mockup is a real page with Sentry injected, so it profiles
-        // too — see HTML_SHELL_HEADERS.
-        'document-policy': 'js-profiling',
+        'content-security-policy': MOCK_FRAME_CSP,
         // Content-derived like serveStatic's, and for the same reason: a
         // reload of an unchanged mock should cost a 304, and a deploy that
         // changed nothing should not throw the cache away. Hashed from the
@@ -359,14 +403,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
         // changed underneath it. (`serveShellHtml` no longer carries a tag at
         // all — it is `no-store`, so there is nothing stored to validate.)
         etag: `"${Bun.hash(body).toString(16)}"`,
-        // Which copy answered. A page served from the capture is still the
-        // page — but "the source file is gone" is a fact somebody may want to
-        // act on, and it must not be inferred from the absence of an error.
-        'x-mockup-source': pinned !== null ? 'version' : live !== null ? 'live' : 'captured',
-        // Which round the bytes are. A reader pinned to an old one, and a
-        // test asserting an in-place swap landed, both need this without
-        // parsing the page.
-        ...(shownVersion !== null ? { 'x-mockup-version': String(shownVersion) } : {}),
+        ...roundHeaders,
       },
     });
   };

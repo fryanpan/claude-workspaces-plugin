@@ -64,7 +64,7 @@ describe('mockup durability', () => {
       await bindOk({ docId: 'mock-vanishing', type: 'mockup', sourceUrl: src });
 
       // Positive control: with the file present, the live file is what serves.
-      const before = await fetch(`${base}/workspaces/${WS}/mockups/mock-vanishing`);
+      const before = await fetch(`${base}/workspaces/${WS}/mockups/mock-vanishing?cw-frame=1`);
       expect(before.status).toBe(200);
       expect(before.headers.get('x-mockup-source')).toBe('live');
       expect(await before.text()).toContain('Round one body');
@@ -74,7 +74,7 @@ describe('mockup durability', () => {
       rmSync(src);
       expect(existsSync(src)).toBe(false);
 
-      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-vanishing`);
+      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-vanishing?cw-frame=1`);
       expect(after.status).toBe(200);
       expect(after.headers.get('x-mockup-source')).toBe('captured');
       const html = await after.text();
@@ -95,11 +95,11 @@ describe('mockup durability', () => {
       // at round two — that is what the serve below represents.
       writeFileSync(src, '<!doctype html><html><body><h1>Round two</h1></body></html>');
       expect(
-        await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated`).then((r) => r.text()),
+        await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated?cw-frame=1`).then((r) => r.text()),
       ).toContain('Round two');
 
       rmSync(src);
-      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated`).then((r) =>
+      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated?cw-frame=1`).then((r) =>
         r.text(),
       );
       expect(after).toContain('Round two');
@@ -132,7 +132,7 @@ describe('mockup durability', () => {
         body: JSON.stringify({ docId: mintedId }),
       });
 
-      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-restart`);
+      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-restart?cw-frame=1`);
       expect(after.status).toBe(200);
       expect(after.headers.get('x-mockup-source')).toBe('captured');
       expect(await after.text()).toContain('Persisted mock body');
@@ -144,7 +144,7 @@ describe('mockup durability', () => {
       await bindOk({ docId: 'mock-restored', type: 'mockup', sourceUrl: src });
       rmSync(src);
       expect(
-        (await fetch(`${base}/workspaces/${WS}/mockups/mock-restored`)).headers.get(
+        (await fetch(`${base}/workspaces/${WS}/mockups/mock-restored?cw-frame=1`)).headers.get(
           'x-mockup-source',
         ),
       ).toBe('captured');
@@ -152,7 +152,7 @@ describe('mockup durability', () => {
       // Re-created — an agent rebuilding the mock, or a worktree coming back.
       // The capture is a fallback, never a cache that shadows the real file.
       writeFileSync(src, '<!doctype html><html><body><h1>Rebuilt body</h1></body></html>');
-      const back = await fetch(`${base}/workspaces/${WS}/mockups/mock-restored`);
+      const back = await fetch(`${base}/workspaces/${WS}/mockups/mock-restored?cw-frame=1`);
       expect(back.headers.get('x-mockup-source')).toBe('live');
       expect(await back.text()).toContain('Rebuilt body');
     });
@@ -166,10 +166,10 @@ describe('mockup durability', () => {
       // what is on disk — but it must not overwrite the only copy that will
       // survive the file's deletion.
       writeFileSync(src, '');
-      await fetch(`${base}/workspaces/${WS}/mockups/mock-truncated`);
+      await fetch(`${base}/workspaces/${WS}/mockups/mock-truncated?cw-frame=1`);
       rmSync(src);
 
-      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-truncated`);
+      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-truncated?cw-frame=1`);
       expect(after.headers.get('x-mockup-source')).toBe('captured');
       expect(await after.text()).toContain('Good body');
     });
@@ -188,7 +188,7 @@ describe('mockup durability', () => {
 
       rmSync(first);
       rmSync(second);
-      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-rebind-empty`);
+      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-rebind-empty?cw-frame=1`);
       expect(after.headers.get('x-mockup-source')).toBe('captured');
       expect(await after.text()).not.toContain('Superseded body');
     });
@@ -201,13 +201,13 @@ describe('mockup durability', () => {
       writeFileSync(shared, '<!doctype html><html><body><h1>Shared body</h1></body></html>');
       await bindOk({ docId: 'mock-etag-a', type: 'mockup', sourceUrl: shared });
       await bindOk({ docId: 'mock-etag-b', type: 'mockup', sourceUrl: shared });
-      const a = await fetch(`${base}/workspaces/${WS}/mockups/mock-etag-a`);
-      const b = await fetch(`${base}/workspaces/${WS}/mockups/mock-etag-b`);
+      const a = await fetch(`${base}/workspaces/${WS}/mockups/mock-etag-a?cw-frame=1`);
+      const b = await fetch(`${base}/workspaces/${WS}/mockups/mock-etag-b?cw-frame=1`);
       expect(a.headers.get('etag')).toBeTruthy();
       expect(a.headers.get('etag')).not.toBe(b.headers.get('etag'));
       // …and it is still stable for the same page, which is the half that
       // makes it worth sending at all.
-      const again = await fetch(`${base}/workspaces/${WS}/mockups/mock-etag-a`);
+      const again = await fetch(`${base}/workspaces/${WS}/mockups/mock-etag-a?cw-frame=1`);
       expect(again.headers.get('etag')).toBe(a.headers.get('etag'));
     });
 
@@ -228,7 +228,7 @@ describe('mockup durability', () => {
       try {
         // The live file still serves — a capture that cannot be refreshed is
         // not a reason to withhold the page.
-        const live = await fetch(`${base}/workspaces/${WS}/mockups/mock-atomic`);
+        const live = await fetch(`${base}/workspaces/${WS}/mockups/mock-atomic?cw-frame=1`);
         expect(live.headers.get('x-mockup-source')).toBe('live');
         expect(await live.text()).toContain('Never captured');
       } finally {
@@ -236,14 +236,14 @@ describe('mockup durability', () => {
       }
 
       rmSync(src);
-      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-atomic`);
+      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-atomic?cw-frame=1`);
       expect(after.headers.get('x-mockup-source')).toBe('captured');
       // Whole, and the previous good bytes — not empty, not partial.
       expect(await after.text()).toContain('Good capture');
     });
 
     it('an unbound docId is still a 404 — the fallback invents nothing', async () => {
-      const res = await fetch(`${base}/workspaces/${WS}/mockups/mock-never-bound`);
+      const res = await fetch(`${base}/workspaces/${WS}/mockups/mock-never-bound?cw-frame=1`);
       expect(res.status).toBe(404);
     });
   });
@@ -294,7 +294,7 @@ describe('mockup durability', () => {
       const failed = await bind({ docId: 'mock-no-residue', type: 'mockup', sourceUrl: missing });
       expect(failed.status).toBe(400);
       // The name is not taken, and no URL was minted that would 404 later.
-      expect((await fetch(`${base}/workspaces/${WS}/mockups/mock-no-residue`)).status).toBe(404);
+      expect((await fetch(`${base}/workspaces/${WS}/mockups/mock-no-residue?cw-frame=1`)).status).toBe(404);
       const listed = (await fetch(`${base}/workspaces/${WS}/docs`).then((r) => r.json())) as {
         docs?: { docId: string; title?: string }[];
       };
@@ -312,7 +312,7 @@ describe('mockup durability', () => {
       expect(res.status).toBe(400);
       // And the doc that was already working still works — a refused repoint
       // must not be a way to break a live link.
-      const still = await fetch(`${base}/workspaces/${WS}/mockups/mock-rebind-guard`);
+      const still = await fetch(`${base}/workspaces/${WS}/mockups/mock-rebind-guard?cw-frame=1`);
       expect(still.status).toBe(200);
       expect(await still.text()).toContain('Good mock body');
     });
@@ -353,7 +353,7 @@ describe('mockup durability', () => {
       writeFileSync(src, '<!doctype html><html><body><h1>Ordinary mock body</h1></body></html>');
       const created = await bindOk({ docId: 'mock-ordinary', type: 'mockup', sourceUrl: src });
       expect(created.meta.sourceUrl).toBe(src);
-      const res = await fetch(`${base}/workspaces/${WS}/mockups/mock-ordinary`);
+      const res = await fetch(`${base}/workspaces/${WS}/mockups/mock-ordinary?cw-frame=1`);
       expect(res.status).toBe(200);
       expect(await res.text()).toContain('Ordinary mock body');
     });

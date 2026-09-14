@@ -168,13 +168,17 @@ describe('the served shells carry the Sentry DSN and page type only when configu
     });
   }
 
-  it('the mockup keeps its own content and its widget embed alongside the tags', async () => {
-    const html = await (await fetch(`${baseA}/workspaces/${wsA}/mockups/a-mock`)).text();
-    // The tags are additive: the page under review is still the page under
-    // review, and the review scaffolding still gets injected.
-    expect(html).toContain('hi');
-    expect(html).toContain('claude-feedback-widget');
-    expect(html).toContain('<meta name="sentry-page-type" content="mockup" />');
+  it('the mockup keeps its own content and its widget embed in the frame the tags ride beside', async () => {
+    // The tags ride on the page that holds the mock's sandboxed frame
+    // (`mockup-frame.ts`): the frame could not load the monitoring bundle by
+    // address. The page under review is still the page under review, and the
+    // review scaffolding still gets injected into it.
+    const host = await (await fetch(`${baseA}/workspaces/${wsA}/mockups/a-mock`)).text();
+    expect(host).toContain('<meta name="sentry-page-type" content="mockup" />');
+    expect(host).toContain('data-cw-mock-frame');
+    const frame = await (await fetch(`${baseA}/workspaces/${wsA}/mockups/a-mock?cw-frame=1`)).text();
+    expect(frame).toContain('hi');
+    expect(frame).toContain('claude-feedback-widget');
   });
 
   it('an unreleased deploy names no release rather than guessing one', async () => {
