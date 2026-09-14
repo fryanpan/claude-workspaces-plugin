@@ -86,11 +86,22 @@ export interface IdentitySetupContext {
    *  allowlisted `x-forwarded-proto`. `isSecureRequest` reads it rather than
    *  the request URL, whose protocol is always plain http. */
   policyFor: (req: Request) => { requestOrigin: string };
+  /** Whether this email's role on this board lets them comment — the owner or
+   *  a member. A board token for anyone else is dead on arrival. */
+  mayCommentOnBoard: (workspaceId: string, email: string) => boolean;
 }
 
 /** Build the roster, the sign-in stores and the request predicates. */
 export function createIdentitySetup(ctx: IdentitySetupContext) {
-  const { dataDir, opts, cookieKey, setTaskStoreAgentRoster, requestAddress, policyFor } = ctx;
+  const {
+    dataDir,
+    opts,
+    cookieKey,
+    setTaskStoreAgentRoster,
+    requestAddress,
+    policyFor,
+    mayCommentOnBoard,
+  } = ctx;
   // --- Email-keyed identity ---------------------------------------------
   // The roster and the challenge store. Both are cheap to construct and
   // neither reads anything at boot beyond `identities.json`, so they exist
@@ -239,6 +250,10 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     const rec = identities.get(claims.identityId);
     if (!rec || rec.status !== 'active') return null;
     if (claims.issuedAt < rec.sessionsValidFrom) return null;
+    // And the holder must still have a role on the board that lets them
+    // comment. Minting checked it once; a member removed since then must not
+    // keep commenting for the rest of the day.
+    if (!rec.email || !mayCommentOnBoard(claims.workspaceId, rec.email)) return null;
     return { identity: rec, workspaceId: claims.workspaceId };
   };
 

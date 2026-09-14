@@ -199,6 +199,9 @@ export interface AuthShareRoutesContext {
   /** The tailnet widget door's hostnames — the pages a BOARD token may be
    *  minted for (middleware/widget-door.ts). */
   widgetDoorHosts: () => readonly string[];
+  /** Whether this email's role on this board lets them comment — the only
+   *  people a board token is minted for. */
+  mayCommentOnBoard: (workspaceId: string, email: string) => boolean;
   /** Whether the request really reached us over https. */
   isSecureRequest: (req: Request) => boolean;
   /** The origin policy for a request. */
@@ -256,6 +259,7 @@ export async function handleAuthShareRoutes(
     emailSessionKey,
     widgetTokenKey,
     widgetDoorHosts,
+    mayCommentOnBoard,
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
@@ -305,7 +309,15 @@ export async function handleAuthShareRoutes(
       const person = accessIdentityFor();
       if (!person) return j(401, { error: 'not_signed_in' });
       const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : '';
-      if (workspaceId === '' || !taskStore.getWorkspace(workspaceId)) {
+      if (workspaceId === '') return j(400, { error: 'unknown_workspace' });
+      // Access proves WHO, not what they may do here: its policy admits
+      // collaborators too. Only the board's owner, or someone whose role on
+      // it lets them comment, gets a token — and before the existence check,
+      // so a non-member cannot learn which board ids are real.
+      if (!person.email || !mayCommentOnBoard(workspaceId, person.email)) {
+        return j(403, { error: 'forbidden' });
+      }
+      if (!taskStore.getWorkspace(workspaceId)) {
         return j(400, { error: 'unknown_workspace' });
       }
       const token = mintBoardWidgetToken(

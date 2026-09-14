@@ -1697,6 +1697,18 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   };
   const widgetSignInOrigin = proxiedTrustedHosts[0] ? `https://${proxiedTrustedHosts[0]}` : null;
 
+  /**
+   * May this person hold a board widget token for this board? Its owner (the
+   * operator allowlist), or someone whose role on it lets them comment. Both
+   * `BoardRole`s comment today, so a membership row of either kind — on the
+   * collaboration hostname's shares or through a redeemed link — is the
+   * answer; a role that could not comment would be refused here. Asked when a
+   * token is minted and on every use (`boardWidgetGrantFor`), because a
+   * membership can end inside the token's 24 hours.
+   */
+  const mayCommentOnBoard = (workspaceId: string, email: string): boolean =>
+    collabMemberOf(workspaceId, email) || shareLinkMemberOf(workspaceId, email);
+
   const { policyFor, applyCors } = createOriginPolicy({
     opts,
     proxiedTrustedHosts,
@@ -1737,6 +1749,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // predicate here is only ever asked during a request.
     requestAddress: (req) => server.requestIP(req)?.address,
     policyFor,
+    mayCommentOnBoard,
   });
 
   /**
@@ -2139,6 +2152,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     emailSessionKey,
     widgetTokenKey,
     widgetDoorHosts,
+    mayCommentOnBoard,
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
