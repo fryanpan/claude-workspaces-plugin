@@ -18,6 +18,17 @@ export interface DecisionAnsweredPayload {
   /** What was asked — the item's headline, or the legacy decision's title.
    *  Absent from a server older than the field. */
   headline?: string;
+  /** Set when the answer was sent from inside a mock page. */
+  via?: string;
+}
+
+/**
+ * What a line says about a write relayed out of a served mock's sandboxed
+ * frame. The mock's own scripts can make those calls too, so the words may
+ * not be the reader's; the server records the mark and the line repeats it.
+ */
+export function fromMockNote(via: unknown): string {
+  return via === 'mock-frame' ? ' (sent from inside the mock page)' : '';
 }
 
 /** Mirrors mcp.ts's helper of the same name. Duplicated rather than shared
@@ -42,7 +53,7 @@ function truncate(s: string, n: number): string {
  * a label with no question is orphaned on a row that asked two things.
  */
 export function decisionAnsweredLine(p: DecisionAnsweredPayload): string {
-  const by = p.actor?.name ? ` by ${p.actor.name}` : '';
+  const by = `${p.actor?.name ? ` by ${p.actor.name}` : ''}${fromMockNote(p.via)}`;
   const asked = p.headline ? ` to "${truncate(p.headline, 100)}"` : '';
   const walk =
     Array.isArray(p.links) && p.links.length > 0

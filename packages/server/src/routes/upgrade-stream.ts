@@ -55,6 +55,7 @@ import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import { isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { signInRequiredBody } from '../middleware/write-gate.ts';
+import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
 import { redactBoardEventForVisitor } from '../share/redact-board-events.ts';
@@ -426,7 +427,14 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // open `/y/<any-new-id>?type=mockup` and make the server create a
         // doc and file it under the board workspace, with the read-only carry
         // only stopping the ydoc edits that came afterwards.
-        const readOnly = requireSignInToWrite && browserProvedNobody();
+        // A socket a mock's host opened for the frame (`mockup-frame.ts`) is
+        // read-only as well. The widget never writes to the ydoc — its
+        // comments go through the thread routes, which record that they came
+        // from inside the mock — and a mock's own script handed a writable
+        // socket could plant a thread with no such mark — or, naming an id
+        // nobody made, a doc.
+        const fromMockFrame = socketViaOf(url) !== undefined;
+        const readOnly = (requireSignInToWrite && browserProvedNobody()) || fromMockFrame;
         if (!docStore.get(docId)) {
           if (type === 'mockup') {
             // Nothing to read yet, so refusing here gates no read: the doc

@@ -7,6 +7,7 @@ import {
 } from '../meeting-home.ts';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import { fileSandboxHeaders } from '../mockup-frame.ts';
 import { isMountableRelPath } from '../mount-scan.ts';
 import type { MountStore } from '../mount-store.ts';
 
@@ -419,6 +420,10 @@ function serveMountedFile(ctx: MountRoutesContext, rq: MountRouteRequest): Respo
     etag: `"${found.file.size.toString(16)}-${Math.floor(found.file.mtimeMs).toString(16)}"`,
     'content-disposition': `${dispositionFor(ext)}; filename="${safeFilename(found.file.relPath)}"`,
     'x-content-type-options': 'nosniff',
+    // A browser that renders the file anyway (a download it opens, a type
+    // served inline) gets it without scripts and without this origin: an SVG
+    // or HTML file is somebody's markup, not the board's (`mockup-frame.ts`).
+    ...fileSandboxHeaders(found.file.relPath),
   };
   if (req.method === 'HEAD') {
     headers['content-length'] = String(found.file.size);

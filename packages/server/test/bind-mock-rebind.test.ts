@@ -55,8 +55,8 @@ describe('bind_mock rebind (POST /workspaces/<ws>/docs on an existing mockup doc
     // `mock-rebind-1` is the NAME; the server minted the id it lives at, and
     // the mockup URL below still addresses it by that name.
     const mintedId = created.meta.docId;
-    const servedFirst = await fetch(`${base}/workspaces/${WS}/mockups/${docId}`).then((r) =>
-      r.text(),
+    const servedFirst = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`).then(
+      (r) => r.text(),
     );
     expect(servedFirst).toContain('First mock body');
 
@@ -66,7 +66,7 @@ describe('bind_mock rebind (POST /workspaces/<ws>/docs on an existing mockup doc
     // …and it is the SAME doc: a repeated name resolves to the doc it already
     // names rather than minting a second one beside it.
     expect(rebound.meta.docId).toBe(mintedId);
-    const servedSecond = await fetch(`${base}/workspaces/${WS}/mockups/${docId}`);
+    const servedSecond = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`);
     expect(servedSecond.status).toBe(200);
     expect(await servedSecond.text()).toContain('Second mock body');
 
@@ -95,7 +95,7 @@ describe('bind_mock rebind (POST /workspaces/<ws>/docs on an existing mockup doc
     const retagged = await postDoc({ docId, type: 'mockup', setId: 'batch-2' });
     expect(retagged.meta.sourceUrl).toBe(file);
     expect(retagged.meta.docId).toBe(created.meta.docId);
-    const served = await fetch(`${base}/workspaces/${WS}/mockups/${docId}`);
+    const served = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`);
     expect(served.status).toBe(200);
     expect(await served.text()).toContain('Kept mock body');
   });

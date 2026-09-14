@@ -161,6 +161,8 @@ describe('mount routes', () => {
       expect(r.headers.get('content-type')).toBe('application/octet-stream');
       expect(r.headers.get('content-disposition')).toStartWith('attachment');
       expect(r.headers.get('x-content-type-options')).toBe('nosniff');
+      // And a browser that renders it anyway runs no script on the board's origin.
+      expect(r.headers.get('content-security-policy')).toBe('sandbox');
     });
 
     it('404s an address nobody minted, and a path under one', async () => {

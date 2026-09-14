@@ -142,7 +142,7 @@ describe('resources under the workspace path', () => {
     });
 
     it('serves its HTML at /workspaces/<id>/mockups/<docId>', async () => {
-      const r = await local(`/workspaces/${wsId}/mockups/mock-doc`);
+      const r = await local(`/workspaces/${wsId}/mockups/mock-doc?cw-frame=1`);
       expect(r.status).toBe(200);
       expect(await r.text()).toContain('hello mock');
     });

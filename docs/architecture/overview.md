@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -339,6 +339,30 @@ the next round replaces it. Same link, every round — which is what a rebind
 under an existing id has meant since it started destroying the page underneath
 the comments.
 
+**A served mock runs in a sandboxed frame, and speaks to the board through
+the page around it.** A mock's scripts are somebody else's code, so the mock
+is never served on the board's origin beside the reader's session.
+`mockup-frame.ts` (server, beside the other `mockup-*.ts` modules) makes
+`/workspaces/<ws>/mockups/<id>` answer a small host page. That page holds one
+frame of the same address plus `?cw-frame=1`, whose response is sandboxed by
+CSP. The frame fetches nothing from the board by itself, because an
+opaque-origin frame's requests carry no Lax cookie and Access would redirect
+them: the server writes the bridge, the widget, `mockup-live.js` and any
+board script or stylesheet the mock names (`/widget/…`, `/app/…`) into the
+frame's bytes, and voice feedback's script and each round's page come through
+the host. Three new top-level modules in the widget package are
+the two ends of that line, and each is a separately built asset rather than
+part of `widget.iife.js`. `mock-bridge.ts` runs first in the frame and hands
+the widget's board-bound fetch, WebSocket and EventSource calls to the host.
+`mock-host.ts` is the host page's script: it builds the frame, and it makes a
+call only when `mock-relay-policy.ts` (pure, tested alone) says it is this
+mock's own. It stamps every call it makes with `x-cw-via: mock-frame`, or
+`cw-via=mock-frame` on a socket. The stamp travels as `via` on the
+comment or answer it writes, and agents read it as "sent from inside the mock
+page". Nothing else changes in the data flow: the calls are the same routes
+and sockets, made from a different page. The rule and its limits are in
+[security.md](security.md).
+
 **A review item raised on a mockup is answerable on the mockup.** The ask used
 to live only on the ticket, so a reader opened the mock, looked at it, and
 then left for the Home queue to say what they thought. `widget-dock.ts` — a
@@ -410,7 +434,12 @@ comment and the settled cards, and `voice-mode.ts` glues them to the page
 (`board/board-feedback-mic.ts`); a mock page gets the mic from
 `mockup-live.js` and fetches the rest as the lazy chunk `voice.js` on the
 first tap (`voice/voice-loader.ts`), so none of it is in `widget.iife.js`,
-which mock pages load against a hard size budget. The DSP the meeting capture
+which mock pages load against a hard size budget. Inside a served mock's frame the browser
+refuses the microphone to an opaque origin, so there the host page holds it
+instead: `mock-host-mic.ts` (widget, a top-level module the host asset
+bundles) opens the capture when the frame asks over its voice socket, streams
+the audio into that socket itself, and never sends it into the frame;
+`hostCapture` in `voice/voice-audio.ts` is the frame's side of the request. The DSP the meeting capture
 already used moved to core's `pcm-audio.ts` so both captures share one
 resampler and one worklet; `meeting-audio.ts` re-exports it.
 

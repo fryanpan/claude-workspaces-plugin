@@ -42,6 +42,36 @@ export function micRefusal(err: unknown): string {
   return 'The microphone could not be opened.';
 }
 
+/** The voice socket inside a served mock's frame (`widget/src/mock-bridge.ts`). */
+interface HostMicSocket {
+  cwMic(on: boolean, heard?: () => void): Promise<{ ok: boolean; message?: string }>;
+}
+
+/**
+ * The microphone inside a served mock's frame, where the browser will not
+ * open one: the page around the mock holds it and streams it into `socket`
+ * itself (`widget/src/mock-host-mic.ts`). No audio arrives here. The first
+ * frame heard is passed on as an empty one, so the session's Stop still waits
+ * for words said before the engine was ready; the host drops it.
+ */
+export async function hostCapture(socket: unknown, opts: PcmCaptureOpts): Promise<PcmCaptureStart> {
+  void opts.context?.close().catch(() => {});
+  const host = socket as Partial<HostMicSocket> | null;
+  if (typeof host?.cwMic !== 'function') {
+    return { ok: false, message: micRefusal({ name: 'NotAllowedError' }) };
+  }
+  const got = await host.cwMic(true, () => opts.onFrame(new Int16Array(0)));
+  if (!got.ok) return { ok: false, message: got.message || micRefusal(null) };
+  return {
+    ok: true,
+    capture: {
+      stop() {
+        void host.cwMic?.(false);
+      },
+    },
+  };
+}
+
 export async function startPcmCapture(opts: PcmCaptureOpts): Promise<PcmCaptureStart> {
   // The tap made a context for this capture; a capture that never starts
   // closes it, or every refused tap leaks one toward the browser's limit.

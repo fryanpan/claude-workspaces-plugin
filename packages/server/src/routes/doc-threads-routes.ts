@@ -40,6 +40,7 @@ import {
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
+import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import {
@@ -186,6 +187,11 @@ export async function handleDocThreadRoutes(
     parseRevisedRange,
   } = ctx;
   const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, withTaskChips } = rq;
+  // Set only by a mock page's host, on the writes it relays out of the
+  // sandboxed frame. Recorded on what each write leaves behind so an agent
+  // can tell a comment typed in the board from one a mock page could have sent.
+  const via = writeViaOf(req);
+  const viaOpt = via ? { via } : {};
 
   /**
    * OWNER-ONLY ITEMS, on the doc surface. The flag is the ask's, not the
@@ -273,7 +279,7 @@ export async function handleDocThreadRoutes(
           // unconditional write here would let a reply folded on that
           // stale claim displace an answer somebody had meanwhile
           // given, and displace it into history where nobody looks.
-          { generate: !visitor, onlyIfUnanswered: true },
+          { generate: !visitor, onlyIfUnanswered: true, ...viaOpt },
         );
         if (res.ok) {
           t = res.thread;
@@ -294,6 +300,7 @@ export async function handleDocThreadRoutes(
         t = await docStore.postComment(docId, threadId, user, text, undefined, {
           // A share visitor must not be able to spend the API key.
           generate: !visitor,
+          ...viaOpt,
           ...(declared.review ? { review: declared.review } : {}),
         });
       }
@@ -353,6 +360,7 @@ export async function handleDocThreadRoutes(
       ) {
         const asked = await docStore.postComment(docId, threadId, user, text, undefined, {
           generate: !visitor,
+          ...viaOpt,
         });
         if (!asked) return j(404, { error: 'thread not found' });
         return j(200, { asked: true, thread: docStore.getThread(docId, asked.id) ?? asked });
@@ -364,7 +372,7 @@ export async function handleDocThreadRoutes(
         user,
         text,
         typeof body?.optionId === 'string' ? body.optionId : undefined,
-        { generate: !visitor },
+        { generate: !visitor, ...viaOpt },
       );
       if (!res.ok) {
         return j(res.error === 'no-doc' ? 404 : 400, { error: res.error });
@@ -404,6 +412,8 @@ export async function handleDocThreadRoutes(
       }
       const voice = voiceFromBody(body?.voice, docId);
       if (voice === false) return j(400, { error: 'voice must be { clip, raw } for this doc' });
+      const editing = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
+      if (!mayTouchFrom(via, editing)) return j(403, { error: 'mock_frame_edit_refused' });
       const res = docStore.editCommentText(docId, threadId, commentId, text, {
         actor: user,
         ...(voice ? { voice } : {}),
@@ -595,14 +605,14 @@ export async function handleDocThreadRoutes(
       if (isCategoryAuthor(author)) return refuseCategoryAuthor();
       // Resolve is a thread change, so it schedules a summary — and a
       // visitor must not be able to spend the API key by clicking it.
-      const t = docStore.resolve(docId, threadId, author, { generate: !visitor });
+      const t = docStore.resolve(docId, threadId, author, { generate: !visitor, ...viaOpt });
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/reopen' && req.method === 'POST') {
       const body = await safeJson(req);
       const author = authorFor(body?.author);
       if (isCategoryAuthor(author)) return refuseCategoryAuthor();
-      const t = docStore.reopen(docId, threadId, author, { generate: !visitor });
+      const t = docStore.reopen(docId, threadId, author, { generate: !visitor, ...viaOpt });
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/reanchor' && req.method === 'POST') {
@@ -613,6 +623,9 @@ export async function handleDocThreadRoutes(
       // malformed anchor on an EXISTING thread just as easily.
       const reanchorCheck = anchors.validateAnchor(anchor);
       if (!reanchorCheck.ok) return j(400, { error: reanchorCheck.error });
+      if (!mayTouchFrom(via, docStore.getThread(docId, threadId)?.comments[0])) {
+        return j(403, { error: 'mock_frame_edit_refused' });
+      }
       const t = docStore.reanchor(docId, threadId, anchor);
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
@@ -821,6 +834,7 @@ export async function handleDocThreadRoutes(
           generate: !visitor,
           ...(declared.review ? { review: declared.review } : {}),
           ...(voice ? { voice } : {}),
+          ...viaOpt,
         });
         if (created && itemAsk?.range) {
           const asked = taskStore.requestMoreInfoOnReview(

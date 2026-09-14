@@ -121,7 +121,7 @@ describe('server REST', () => {
     expect(created.meta.reviewUrl).toContain(`/mockups/${encodeURIComponent(mockId)}`);
 
     // GET the served URL — should be the HTML body the agent wrote.
-    const served = await fetch(`${base}/workspaces/${WS}/mockups/mock-served-1`);
+    const served = await fetch(`${base}/workspaces/${WS}/mockups/mock-served-1?cw-frame=1`);
     expect(served.status).toBe(200);
     expect(served.headers.get('content-type')).toContain('text/html');
     const body = await served.text();
@@ -130,7 +130,9 @@ describe('server REST', () => {
 
     // The `.html` twin is GONE with the cutover: `/mockup/<id>.html` was a
     // second spelling of one resource, and one resource has one address.
-    const servedSuffixed = await fetch(`${base}/workspaces/${WS}/mockups/mock-served-1.html`);
+    const servedSuffixed = await fetch(
+      `${base}/workspaces/${WS}/mockups/mock-served-1.html?cw-frame=1`,
+    );
     expect(servedSuffixed.status).toBe(404);
 
     // Unbound docId → 404.

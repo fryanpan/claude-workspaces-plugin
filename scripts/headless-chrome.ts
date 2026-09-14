@@ -40,7 +40,7 @@ export class Cdp {
     number,
     { resolve: (v: CdpResult) => void; reject: (e: Error) => void }
   >();
-  private listeners = new Map<string, Array<(params: CdpResult) => void>>();
+  private listeners = new Map<string, Array<(params: CdpResult, sessionId?: string) => void>>();
   private constructor(private ws: WebSocket) {
     ws.onmessage = (e) => {
       const m = JSON.parse(String(e.data));
@@ -51,7 +51,7 @@ export class Cdp {
         if (m.error) p.reject(new Error(`${m.error.message} (code ${m.error.code})`));
         else p.resolve(m.result);
       } else if (m.method) {
-        for (const fn of this.listeners.get(m.method) ?? []) fn(m.params);
+        for (const fn of this.listeners.get(m.method) ?? []) fn(m.params, m.sessionId);
       }
     };
   }
@@ -65,9 +65,14 @@ export class Cdp {
     return new Cdp(ws);
   }
 
-  send(method: string, params: Record<string, unknown> = {}): Promise<CdpResult> {
+  /** `sessionId` addresses a target attached with `flatten` — a child frame's. */
+  send(
+    method: string,
+    params: Record<string, unknown> = {},
+    sessionId?: string,
+  ): Promise<CdpResult> {
     const id = ++this.id;
-    this.ws.send(JSON.stringify({ id, method, params }));
+    this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
   }
 
@@ -81,7 +86,7 @@ export class Cdp {
 
   /** Subscribe for every occurrence. Used to COLLECT — page exceptions, error
    *  console entries — where `once` would see the first and miss the rest. */
-  on(method: string, fn: (params: CdpResult) => void): void {
+  on(method: string, fn: (params: CdpResult, sessionId?: string) => void): void {
     const list = this.listeners.get(method) ?? [];
     list.push(fn);
     this.listeners.set(method, list);

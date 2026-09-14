@@ -13,6 +13,7 @@ import { classifyActor } from '../actor-identity.ts';
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
+import { writeViaOf } from '../mockup-frame.ts';
 import {
   SECRET_ANSWER_DENIAL,
   SECRET_FILING_DENIAL,
@@ -192,9 +193,11 @@ export async function handleTaskReviewItems(
       }
       if (item) return askBackOnItem(task, item, text, author, Boolean(visitor));
     }
+    const via = writeViaOf(req);
     const res = taskStore.answerTaskReview(taskId, reviewItemId, text, {
       actor: author,
       ...(answeredWith !== undefined ? { answeredWith } : {}),
+      ...(via ? { via } : {}),
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
     taskProjection.refreshTask(res.task);

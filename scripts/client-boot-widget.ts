@@ -28,7 +28,10 @@ import { sleep, withTimeout } from './headless-chrome.ts';
 
 export const YJS_DUPLICATE = 'Yjs was already imported';
 
-/** The widget's socket state, painted into its shadow root: `status-open`. */
+/**
+ * The widget's socket state, painted into its shadow root: `status-open`. On a
+ * mock it is read inside the mock's frame (`FrameSessions`).
+ */
 export const WIDGET_UP_PROBE =
   "!!document.querySelector('claude-feedback-widget')?.shadowRoot?.querySelector('.status-open')";
 
@@ -74,10 +77,65 @@ export interface WidgetPageResult {
   widgetUp: boolean;
 }
 
+/**
+ * The page's child frames, each attached before its first script runs.
+ *
+ * A served mock is a host page holding a sandboxed frame, and the widget runs
+ * in the frame. The frame's opaque origin puts it in a process of its own, so
+ * the page's `Runtime.evaluate` cannot see it and neither can the page's
+ * console. Attaching paused and resuming once `Runtime` is on means Yjs's
+ * duplicate warning, said while its module evaluates, reaches `YjsWatch`
+ * like the page's own.
+ */
+export class FrameSessions {
+  private readonly sessions: string[] = [];
+
+  private constructor(private readonly cdp: Cdp) {
+    cdp.on('Target.attachedToTarget', (p) => {
+      const sessionId = p.sessionId as string;
+      if ((p.targetInfo as { type?: string } | undefined)?.type === 'iframe') {
+        this.sessions.push(sessionId);
+      }
+      void cdp
+        .send('Runtime.enable', {}, sessionId)
+        .then(() => cdp.send('Runtime.runIfWaitingForDebugger', {}, sessionId))
+        .catch(() => {});
+    });
+    cdp.on('Target.detachedFromTarget', (p) => {
+      const i = this.sessions.indexOf(p.sessionId as string);
+      if (i >= 0) this.sessions.splice(i, 1);
+    });
+  }
+
+  static async attach(cdp: Cdp): Promise<FrameSessions> {
+    const frames = new FrameSessions(cdp);
+    await cdp.send('Runtime.enable');
+    await cdp.send('Target.setAutoAttach', {
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+    });
+    return frames;
+  }
+
+  /** Whether `expression` is truthy in the page or in any frame attached now. */
+  async anywhere(expression: string): Promise<boolean> {
+    if (await this.cdp.evaluate(expression)) return true;
+    for (const sessionId of [...this.sessions]) {
+      const r = (await this.cdp
+        .send('Runtime.evaluate', { expression, returnByValue: true }, sessionId)
+        .catch(() => null)) as { result?: { value?: unknown } } | null;
+      if (r?.result?.value) return true;
+    }
+    return false;
+  }
+}
+
 /** Load one widget-carrying page and wait, by polling, for the widget. */
 export async function loadWidgetPage(
   cdp: Cdp,
   watch: YjsWatch,
+  frames: FrameSessions,
   name: string,
   url: string,
   o: { timeoutMs: number; loadTimeoutMs: number },
@@ -90,7 +148,7 @@ export async function loadWidgetPage(
   let widgetUp = false;
   const deadline = Date.now() + o.timeoutMs;
   while (Date.now() < deadline) {
-    if (await cdp.evaluate(WIDGET_UP_PROBE)) {
+    if (await frames.anywhere(WIDGET_UP_PROBE)) {
       widgetUp = true;
       break;
     }

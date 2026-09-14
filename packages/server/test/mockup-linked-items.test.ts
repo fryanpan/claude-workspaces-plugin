@@ -199,7 +199,7 @@ describe('serving a mock', () => {
       });
     }
     const local = (docId: string) =>
-      fetch(`${base}/workspaces/${ws}/mockups/${docId}`, {
+      fetch(`${base}/workspaces/${ws}/mockups/${docId}?cw-frame=1`, {
         headers: { host: `localhost:${handle.port}` },
       }).then((r) => r.text());
 
@@ -212,7 +212,7 @@ describe('serving a mock', () => {
     // A share visitor on the same board is served the same mock WITHOUT it:
     // the dock shows a visitor only the mock's own thread asks.
     const share = await mintAccessShare(base, access, ws);
-    const visitorRes = await fetch(`${base}/workspaces/${ws}/mockups/${linkedMock}`, {
+    const visitorRes = await fetch(`${base}/workspaces/${ws}/mockups/${linkedMock}?cw-frame=1`, {
       headers: { host: share.host, 'cf-access-jwt-assertion': share.jwt },
     });
     const visitorHtml = await visitorRes.text();

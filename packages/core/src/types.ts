@@ -551,11 +551,30 @@ export interface CommentEdit {
   reason?: string;
 }
 
+/**
+ * Where a write came from, when that is something an agent should weigh.
+ *
+ * `'mock-frame'`: sent from inside a served mock page. A mock's own scripts
+ * run in the same frame as the comment widget, so words carrying this mark may
+ * have been written by the mock rather than typed by the reader. The mock
+ * host sets it on every write it relays and the frame cannot reach the server
+ * any other way (`mockup-frame.ts`). Advisory: absent means "not relayed from
+ * a mock", never "proven to be a person".
+ */
+export type WriteVia = 'mock-frame';
+
+/** A stored `via`, read defensively: anything but a known mark is none. */
+export function readWriteVia(raw: unknown): WriteVia | undefined {
+  return raw === 'mock-frame' ? raw : undefined;
+}
+
 export interface Comment {
   id: string;
   author: User;
   text: string;
   ts: number;
+  /** Set when the comment was sent from inside a mock page — see `WriteVia`. */
+  via?: WriteVia;
   /**
    * Present on a comment that was SPOKEN: the stretch of the recording it came
    * from and the words as heard, before tidying (`voice-feedback.ts`).
@@ -593,6 +612,9 @@ export interface ThreadSummary {
 
 export interface Thread extends ThreadSummary {
   comments: Comment[];
+  /** Set when the thread's CURRENT status (a resolve or reopen) was sent from
+   *  inside a mock page — see `WriteVia`. Cleared by a status change that was not. */
+  statusVia?: WriteVia;
   /**
    * Model-generated topic/discussion lines, with the fingerprint of the thread
    * state they describe. Absent until the server has generated one, and
@@ -640,6 +662,9 @@ export interface ThreadWebhookPayload {
    *  `actor` must NOT fall back to a comment author: that fallback is how
    *  17 resolves in the field were attributed to the thread's creator. */
   actor?: User;
+  /** On a resolve/reopen sent from inside a mock page. A comment event carries
+   *  the mark on `comment.via` instead. */
+  via?: WriteVia;
   /** The review item this thread is a comment ON, when its anchor is a
    *  `review-item` anchor. Repeated here from `thread.anchor.reviewItemId` so
    *  a consumer that reads only the frame's own fields — the MCP channel

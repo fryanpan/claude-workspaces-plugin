@@ -288,6 +288,7 @@ function readAnswer(value: unknown): ReviewItemAnswer | undefined {
   if (typeof value.text !== 'string' || value.text.trim() === '') return undefined;
   const out: ReviewItemAnswer = { text: value.text, by: str(value.by, ''), ts: num(value.ts, 0) };
   if (typeof value.answeredWith === 'string') out.answeredWith = value.answeredWith;
+  if (value.via === 'mock-frame') out.via = value.via;
   return out;
 }
 

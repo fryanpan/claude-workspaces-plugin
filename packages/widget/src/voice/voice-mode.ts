@@ -3,7 +3,7 @@ import { hasContext } from '@claude-workspaces/core/anchor/context';
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
 import { SIGN_IN_NOTE, type WidgetMic } from '../widget-mic.ts';
 import type { FeedbackWidgetEl } from '../widget.ts';
-import { startPcmCapture } from './voice-audio.ts';
+import { hostCapture, startPcmCapture } from './voice-audio.ts';
 import { makeContext } from './voice-loader.ts';
 import { widgetPoster } from './voice-post.ts';
 import { type SocketLike, VoiceSession, type VoiceSessionDeps } from './voice-session.ts';
@@ -115,10 +115,18 @@ export function mountVoiceMode(
   const { button, readout } = mic;
   const idleIcon = button.innerHTML;
   const idleTip = button.dataset.tip ?? '';
+  // Inside a served mock's frame the microphone is the host page's, and it
+  // arrives through the socket this session opened (`hostCapture`).
+  let socket: SocketLike | null = null;
   const session = new VoiceSession({
     url,
-    openSocket: opts.openSocket ?? ((u) => new WebSocket(u) as unknown as SocketLike),
-    startCapture: opts.startCapture ?? startPcmCapture,
+    openSocket: (u) => {
+      socket = opts.openSocket ? opts.openSocket(u) : (new WebSocket(u) as unknown as SocketLike);
+      return socket;
+    },
+    startCapture:
+      opts.startCapture ??
+      ((o) => (socket && 'cwMic' in socket ? hostCapture(socket, o) : startPcmCapture(o))),
     poster: widgetPoster(widget),
     catalog,
     anchorFor,

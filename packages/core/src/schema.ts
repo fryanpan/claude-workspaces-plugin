@@ -1,15 +1,17 @@
 import * as Y from 'yjs';
 import { type ReviewPayload, readReviewPayload } from './review-item.ts';
 import { readStoredSummary } from './thread-summary.ts';
-import type {
-  Anchor,
-  Comment,
-  CommentEdit,
-  DocMeta,
-  StoredSummary,
-  Thread,
-  ThreadStatus,
-  User,
+import {
+  type Anchor,
+  type Comment,
+  type CommentEdit,
+  type DocMeta,
+  type StoredSummary,
+  type Thread,
+  type ThreadStatus,
+  type User,
+  type WriteVia,
+  readWriteVia,
 } from './types.ts';
 import { type VoiceNote, readVoiceNote } from './voice-feedback.ts';
 
@@ -204,11 +206,13 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
         const review = readReviewPayload(c.get('review'));
         const edits = readCommentEdits(c.get('edits'));
         const voice = readVoiceNote(c.get('voice'));
+        const via = readWriteVia(c.get('via'));
         comments.push({
           id,
           author,
           text,
           ts,
+          ...(via ? { via } : {}),
           ...(voice ? { voice } : {}),
           ...(review ? { review } : {}),
           ...(edits ? { edits } : {}),
@@ -217,6 +221,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
     }
   }
 
+  const statusVia = readWriteVia(threadMap.get('statusVia'));
   const lastActivity =
     comments.length > 0 ? (comments[comments.length - 1]?.ts ?? createdAt) : createdAt;
 
@@ -233,6 +238,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
     // and no peer's write is authoritative, so a partial or mistyped object
     // must not be able to reach `threadLines`.
     ...(summary ? { summary } : {}),
+    ...(statusVia ? { statusVia } : {}),
   };
 }
 
@@ -250,7 +256,13 @@ export interface CreateThreadArgs {
   threadId: string;
   anchor: Anchor;
   createdBy: User;
-  firstComment: { id: string; text: string; review?: ReviewPayload; voice?: VoiceNote };
+  firstComment: {
+    id: string;
+    text: string;
+    review?: ReviewPayload;
+    voice?: VoiceNote;
+    via?: WriteVia;
+  };
 }
 
 export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
@@ -267,6 +279,7 @@ export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
     firstCommentMap.set('ts', now);
     if (args.firstComment.review) firstCommentMap.set('review', args.firstComment.review);
     if (args.firstComment.voice) firstCommentMap.set('voice', args.firstComment.voice);
+    if (args.firstComment.via) firstCommentMap.set('via', args.firstComment.via);
     comments.push([firstCommentMap]);
 
     threadMap.set('anchor', args.anchor);
@@ -286,7 +299,7 @@ export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
 export function postReply(
   doc: Y.Doc,
   threadId: string,
-  reply: { id: string; author: User; text: string; review?: ReviewPayload },
+  reply: { id: string; author: User; text: string; review?: ReviewPayload; via?: WriteVia },
 ): Comment | null {
   const threads = getThreads(doc);
   const threadMap = threads.get(threadId);
@@ -301,6 +314,7 @@ export function postReply(
     cm.set('text', reply.text);
     cm.set('ts', now);
     if (reply.review) cm.set('review', reply.review);
+    if (reply.via) cm.set('via', reply.via);
     comments.push([cm]);
   });
   return {
@@ -309,6 +323,7 @@ export function postReply(
     text: reply.text,
     ts: now,
     ...(reply.review ? { review: reply.review } : {}),
+    ...(reply.via ? { via: reply.via } : {}),
   };
 }
 
@@ -421,11 +436,22 @@ export function setThreadSummary(
   return readThread(threadMap, threadId);
 }
 
-export function setStatus(doc: Y.Doc, threadId: string, status: ThreadStatus): Thread | null {
+export function setStatus(
+  doc: Y.Doc,
+  threadId: string,
+  status: ThreadStatus,
+  via?: WriteVia,
+): Thread | null {
   const threads = getThreads(doc);
   const threadMap = threads.get(threadId);
   if (!threadMap) return null;
-  doc.transact(() => threadMap.set('status', status));
+  doc.transact(() => {
+    threadMap.set('status', status);
+    // The mark describes the status standing NOW, so a later change that was
+    // not relayed from a mock takes it away rather than inheriting it.
+    if (via) threadMap.set('statusVia', via);
+    else if (threadMap.has('statusVia')) threadMap.delete('statusVia');
+  });
   return readThread(threadMap, threadId);
 }
 

@@ -167,7 +167,7 @@ describe('a bound mockup is served with the widget already in it', () => {
     });
     expect(res.ok, `${res.status} ${await res.clone().text()}`).toBe(true);
 
-    const served = await fetch(`${base}/workspaces/${WS}/mockups/mock-widget-1`);
+    const served = await fetch(`${base}/workspaces/${WS}/mockups/mock-widget-1?cw-frame=1`);
     expect(served.status).toBe(200);
     const html = await served.text();
     expect(html).toContain('Benchmark Run');
@@ -196,7 +196,9 @@ describe('a bound mockup is served with the widget already in it', () => {
     });
     expect(res.ok, `${res.status} ${await res.clone().text()}`).toBe(true);
 
-    const html = await (await fetch(`${base}/workspaces/${WS}/mockups/mock-widget-scope`)).text();
+    const html = await (
+      await fetch(`${base}/workspaces/${WS}/mockups/mock-widget-scope?cw-frame=1`)
+    ).text();
     const tags = [...html.matchAll(/<claude-feedback-widget\b([^>]*)>/g)].map((m) => m[1] ?? '');
     // Positive control: exactly one widget, and it is the one this server wrote.
     expect(tags).toHaveLength(1);
