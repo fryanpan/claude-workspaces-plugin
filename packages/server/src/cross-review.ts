@@ -235,6 +235,7 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
   };
 
   const offDoc = docStore.onReviewAnswered((event) => {
+    if (event.openParts !== undefined && event.openParts.length > 0) return;
     later(() => {
       const comment = docStore
         .listThreads(event.docId)

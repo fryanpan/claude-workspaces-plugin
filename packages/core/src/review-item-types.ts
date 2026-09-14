@@ -252,6 +252,13 @@ export interface ReviewPayload {
    * one-key bypass of the gate.
    */
   judge?: ReviewItemJudgement;
+  /**
+   * Answers that left some of a comment-borne item's questions open, oldest
+   * first — `TaskReviewItem.partialAnswers`, on the payload for the reason
+   * `revisions` is. The item stays unanswered while these stand. Never read
+   * off a caller's body: `reviewFromBody` drops it, like `judge`.
+   */
+  partialAnswers?: ReviewPartialAnswer[];
 }
 
 /** One undone answer: the stamps as they stood, plus who took them back and

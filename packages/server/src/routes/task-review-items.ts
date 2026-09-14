@@ -6,7 +6,7 @@ import {
   latestThreadedQuestion,
 } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
-import { coverageApplies, openPartsAfter } from '../answer-coverage.ts';
+import { ticketOpenParts } from '../answer-coverage.ts';
 /**
  * A ticket's review items — 0..n, several possibly open at once.
  *
@@ -201,21 +201,14 @@ export async function handleTaskReviewItems(
     // queue naming what is left — it used to close, and the rest waited on
     // the reader with nothing on their queue (2026-09-14). Not asked for the
     // ticket's own decision or an owner-line item, which each ask one thing.
-    let openParts: string[] = [];
-    {
-      const stored = taskStore.getTask(taskId)?.reviews?.find((r) => r.id === reviewItemId);
-      const find = () => taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId);
-      const item = find();
-      if (
-        stored !== undefined &&
-        item !== undefined &&
-        item.answer === undefined &&
-        stored.doneWhenLineId === undefined &&
-        coverageApplies(item.review, answeredWith)
-      ) {
-        openParts = await openPartsAfter(answerCoverage, item, text, find);
-      }
-    }
+    const openParts = await ticketOpenParts(
+      answerCoverage,
+      taskStore,
+      taskId,
+      reviewItemId,
+      text,
+      answeredWith,
+    );
     const res = taskStore.answerTaskReview(taskId, reviewItemId, text, {
       actor: author,
       ...(answeredWith !== undefined ? { answeredWith } : {}),

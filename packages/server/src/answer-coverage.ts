@@ -1,4 +1,10 @@
-import type { ReviewPayload, TaskReviewItem } from '@claude-workspaces/core';
+import {
+  type ReviewItemRevision,
+  type ReviewPartialAnswer,
+  type ReviewPayload,
+  type TaskReviewItem,
+  reviewAnswered,
+} from '@claude-workspaces/core';
 /**
  * Did an answer cover every question a review item asks? The network half,
  * and the rules for when it is asked at all.
@@ -133,7 +139,24 @@ export function coverageApplies(review: ReviewPayload, answeredWith: string | un
   return questionsAsked(review) >= 2;
 }
 
-type CoveredItem = Pick<TaskReviewItem, 'review' | 'partialAnswers' | 'revisions' | 'answer'>;
+/** What the check reads: a ticket item as it stands, or a comment's payload
+ *  through `payloadCovered`. `answer` is only read for whether it is set. */
+interface CoveredItem {
+  review: ReviewPayload;
+  partialAnswers?: ReviewPartialAnswer[];
+  revisions?: ReviewItemRevision[];
+  answer?: unknown;
+}
+
+/** A comment-borne item, whose history and answer stamps sit on the payload. */
+function payloadCovered(review: ReviewPayload): CoveredItem {
+  return {
+    review,
+    ...(review.partialAnswers ? { partialAnswers: review.partialAnswers } : {}),
+    ...(review.revisions ? { revisions: review.revisions } : {}),
+    ...(reviewAnswered(review) ? { answer: true } : {}),
+  };
+}
 
 /** What a verdict was reached against: the wording and the answers so far. */
 function coverageStamp(item: CoveredItem): string {
@@ -190,4 +213,55 @@ export async function openPartsAfter(
   if (now && coverageStamp(now) === before) return verdict?.open ?? [];
   if (!now || now.answer || retries <= 0) return [];
   return openPartsAfter(coverage, now, text, reread, retries - 1);
+}
+
+/**
+ * The questions an answer to a TICKET item leaves open. Not asked for the
+ * ticket's own decision (no stored item) or an item filed for a done-when
+ * owner line, which each ask one thing.
+ */
+export async function ticketOpenParts(
+  coverage: AnswerCoverage | undefined,
+  tasks: {
+    getTask(id: string): { reviews?: Array<{ id: string; doneWhenLineId?: string }> } | undefined;
+    listReviewItems(taskId: string): TaskReviewItem[];
+  },
+  taskId: string,
+  reviewItemId: string,
+  text: string,
+  answeredWith: string | undefined,
+): Promise<string[]> {
+  if (!coverage) return [];
+  const stored = tasks.getTask(taskId)?.reviews?.find((r) => r.id === reviewItemId);
+  const find = () => tasks.listReviewItems(taskId).find((r) => r.id === reviewItemId);
+  const item = find();
+  if (stored === undefined || item === undefined || item.answer !== undefined) return [];
+  if (stored.doneWhenLineId !== undefined || !coverageApplies(item.review, answeredWith)) return [];
+  return openPartsAfter(coverage, item, text, find);
+}
+
+/** The questions an answer to an item declared on a COMMENT leaves open. */
+export async function threadOpenParts(
+  coverage: AnswerCoverage | undefined,
+  threads: {
+    getThread(
+      docId: string,
+      threadId: string,
+    ): { comments: Array<{ id: string; review?: ReviewPayload }> } | null | undefined;
+  },
+  at: { docId: string; threadId: string; commentId: string },
+  text: string,
+  optionId: string | undefined,
+): Promise<string[]> {
+  if (!coverage) return [];
+  const find = () => {
+    const review = threads
+      .getThread(at.docId, at.threadId)
+      ?.comments.find((c) => c.id === at.commentId)?.review;
+    return review ? payloadCovered(review) : undefined;
+  };
+  const item = find();
+  if (item === undefined || item.answer !== undefined) return [];
+  if (!coverageApplies(item.review, optionId)) return [];
+  return openPartsAfter(coverage, item, text, find);
 }

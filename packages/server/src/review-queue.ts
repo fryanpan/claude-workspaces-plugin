@@ -413,6 +413,14 @@ export function reviewThreadItems(args: {
         // question since it was asked, and a revision is the asker getting
         // the question right rather than a new wait starting.
         const revised = reviewPayloadRevision(declaring.review);
+        // Answered on some of its questions: the card names the rest — the
+        // same note a ticket item's row carries (see `taskReviewItems`).
+        const noted = withPartialNote(
+          declaring.review,
+          declaring.review.partialAnswers,
+          declaring.review.revisions?.at(-1)?.at,
+        );
+        const range = revised?.revisedRange;
         items.push({
           kind,
           band: 'declared',
@@ -421,9 +429,11 @@ export function reviewThreadItems(args: {
           threadId: thread.id,
           commentId: declaring.id,
           reviewItemId: threadReviewItemId(docId, thread.id, declaring.id),
-          review: declaring.review,
+          review: noted.review,
           ...(revised ? { revisedAt: revised.at } : {}),
-          ...(revised?.revisedRange ? { revisedRange: revised.revisedRange } : {}),
+          ...(range
+            ? { revisedRange: { start: range.start + noted.shift, end: range.end + noted.shift } }
+            : {}),
           ...(taskId ? { taskId } : {}),
           title,
           // The headline IS the row title — an authored line rather than a

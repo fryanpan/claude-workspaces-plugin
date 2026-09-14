@@ -732,11 +732,15 @@ note, as opposed to whether it reached the composer.
 
 `answer-coverage.ts` (server) and `answer-coverage-prompt.ts` (core) join
 the Board group beside the review judge, split the same way and moving no
-boundary. When a person types an answer to a review item that asks more than
-one question, one Haiku call asks whether the answer covers them all. An
-answer that leaves questions open is stored as a partial answer. The item
-stays on the queue with a note naming what is left, and the filer's
-`decision.answered` event lists it. The server module is the network call and
+boundary. When a person types or speaks an answer to a review item that asks
+more than one question, one Haiku call asks whether the answer covers them
+all. That holds for every door an answer comes through: a ticket item's answer
+route, an item declared on a comment (its answer route, or a plain reply
+folded into an answer) and voice. An answer that leaves questions open is
+stored as a partial answer, on the ticket item or on the comment's payload.
+The item stays on the queue with a note naming what is left, and the filer's
+`decision.answered` event or `thread.replied` frame lists it, as does the
+lead's wake. The server module is the network call and
 the rules for when it runs; it fails open, so the answer closes the item. The
 core module is the prompt, the parser and the note, with no socket.
 

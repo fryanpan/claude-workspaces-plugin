@@ -36,8 +36,9 @@
  * only bin.ts constructs the real one, and only the DEDICATED keychain entry
  * counts as consent for server→Anthropic traffic.
  */
-import { isReviewItemOpen } from '@claude-workspaces/core';
+import { type ReviewPayload, isReviewItemOpen } from '@claude-workspaces/core';
 import type { EnvLike } from '@claude-workspaces/core/env-names';
+import { type AnswerCoverage, threadOpenParts, ticketOpenParts } from './answer-coverage.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { resolveKeyFrom } from './summarize.ts';
 import { resolveAssignee } from './task-owner.ts';
@@ -157,8 +158,14 @@ export interface VoiceDocStore {
     author: VoiceActor,
     text: string,
     optionId?: string,
-    opts?: { generate?: boolean },
+    opts?: { generate?: boolean; openParts?: string[] },
   ): Promise<{ ok: boolean }>;
+  /** Read to check a spoken answer against every question the item asks.
+   *  Absent: the answer closes the item, as it did before that check. */
+  getThread?(
+    docId: string,
+    threadId: string,
+  ): { comments: Array<{ id: string; review?: ReviewPayload }> } | null;
 }
 
 /**
@@ -221,6 +228,13 @@ const RETRY_WINDOW_MS = 90_000;
  */
 const NO_GENERATE = { generate: false } as const;
 
+/** An answer that left questions open says so: the speaker is the only
+ *  verifier, and "Answered" alone reads as closed. */
+function stillOpen(ack: string, openParts: string[]): string {
+  if (openParts.length === 0) return ack;
+  return `${ack} Still open: ${openParts.map((p) => `"${p}"`).join('; ')}.`;
+}
+
 function heard(transcript: string): string {
   const t =
     transcript.length > ACK_TRANSCRIPT_MAX
@@ -258,7 +272,8 @@ export class VoiceRouter {
   private instructions: (() => string) | undefined;
   /** Recent text writes, keyed by workspace + verb + target + exact words —
    *  see `once`. Pruned on every write, so it cannot grow without bound. */
-  private recentWrites = new Map<string, number>();
+  private recentWrites = new Map<string, { at: number; ack: string }>();
+  private answerCoverage: AnswerCoverage | undefined;
   /**
    * "Did you mean A or B?" — the two the router offered, per speaker, so the
    * NEXT utterance ("the second one", "the billing one") can answer. Consumed
@@ -276,6 +291,9 @@ export class VoiceRouter {
   constructor(opts: {
     tasks: TaskStore;
     complete?: VoiceComplete;
+    /** Whether a spoken answer covered every question an item asks. Absent:
+     *  every answer closes its item. See `answer-coverage.ts`. */
+    answerCoverage?: AnswerCoverage;
     docResource?: VoiceDocResourceReader;
     /** Absent on a server built without a doc store — the two text verbs then
      *  defer, exactly as they did before their executors existed. */
@@ -300,6 +318,7 @@ export class VoiceRouter {
     this.now = opts.now ?? Date.now;
     this.tasks = opts.tasks;
     this.complete = opts.complete;
+    this.answerCoverage = opts.answerCoverage;
     this.docResource = opts.docResource;
     this.docStore = opts.docStore;
     this.taskCommentDoc = opts.taskCommentDoc;
@@ -573,12 +592,29 @@ export class VoiceRouter {
             `answer-review|${target.taskId}|${target.reviewItemId}|${plan.actor.id}|${plan.optionId ?? ''}|${plan.text}`,
             ack,
             // The same store write the ticket's answer route makes, with the
-            // same provenance stamp for a picked option.
-            async () =>
-              this.tasks.answerTaskReview(target.taskId, target.reviewItemId, plan.text, {
-                actor: plan.actor,
-                ...(plan.optionId !== undefined ? { answeredWith: plan.optionId } : {}),
-              }).ok,
+            // same provenance stamp for a picked option, and the same check
+            // that an answer covered every question the item asks.
+            async () => {
+              const openParts = await ticketOpenParts(
+                this.answerCoverage,
+                this.tasks,
+                target.taskId,
+                target.reviewItemId,
+                plan.text,
+                plan.optionId,
+              );
+              const res = this.tasks.answerTaskReview(
+                target.taskId,
+                target.reviewItemId,
+                plan.text,
+                {
+                  actor: plan.actor,
+                  ...(plan.optionId !== undefined ? { answeredWith: plan.optionId } : {}),
+                  ...(openParts.length > 0 ? { openParts } : {}),
+                },
+              );
+              return res.ok && stillOpen(ack, openParts);
+            },
           );
         }
         if (!this.docStore) return { kind: 'defer' };
@@ -595,6 +631,15 @@ export class VoiceRouter {
               // that makes an answer an answer — the reply, the reopen, the
               // events a watching agent receives — is that function's, not
               // this one's.
+              const openParts = docStore.getThread
+                ? await threadOpenParts(
+                    this.answerCoverage,
+                    { getThread: (d, t) => docStore.getThread?.(d, t) ?? null },
+                    target,
+                    plan.text,
+                    plan.optionId,
+                  )
+                : [];
               const res = await docStore.answerReviewItem(
                 target.docId,
                 target.threadId,
@@ -602,9 +647,9 @@ export class VoiceRouter {
                 plan.actor,
                 plan.text,
                 plan.optionId,
-                NO_GENERATE,
+                { ...NO_GENERATE, ...(openParts.length > 0 ? { openParts } : {}) },
               );
-              return res.ok;
+              return res.ok && stillOpen(ack, openParts);
             }
             // No declaration to stamp — so the honest write is the one every
             // typed reply already makes: `postComment` onto that thread.
@@ -687,29 +732,34 @@ export class VoiceRouter {
     workspaceId: string,
     key: string,
     ack: string,
-    write: () => Promise<boolean>,
+    /** `false` when nothing was written; a string replaces `ack` when what
+     *  landed is only known after the write (an answer that left parts open). */
+    write: () => Promise<boolean | string>,
   ): Promise<ActionOutcome> {
     const full = `${workspaceId}\0${key}`;
     const now = Date.now();
-    for (const [k, at] of this.recentWrites)
-      if (now - at > RETRY_WINDOW_MS) this.recentWrites.delete(k);
+    for (const [k, w] of this.recentWrites)
+      if (now - w.at > RETRY_WINDOW_MS) this.recentWrites.delete(k);
     const seen = this.recentWrites.get(full);
-    if (seen !== undefined && now - seen <= RETRY_WINDOW_MS) {
+    if (seen !== undefined && now - seen.at <= RETRY_WINDOW_MS) {
       // The board already says it. Answer exactly as the first call did — a
       // different answer to the same sentence is what invites a third try.
-      return { kind: 'answered', result: { route: 'fast-path-action', ack } };
+      return { kind: 'answered', result: { route: 'fast-path-action', ack: seen.ack } };
     }
     // Reserved BEFORE the await, released if the write fails. Two requests in
     // flight at once — a double-tap on the mic, or a client retry that races
     // the first response rather than following it — both miss a ledger
     // written afterwards, which is the case a naive "record it when it lands"
     // ledger cannot see.
-    this.recentWrites.set(full, now);
-    if (!(await write())) {
+    this.recentWrites.set(full, { at: now, ack });
+    const wrote = await write();
+    if (wrote === false) {
       this.recentWrites.delete(full);
       return { kind: 'defer' };
     }
-    return { kind: 'answered', result: { route: 'fast-path-action', ack } };
+    const said = typeof wrote === 'string' ? wrote : ack;
+    this.recentWrites.set(full, { at: now, ack: said });
+    return { kind: 'answered', result: { route: 'fast-path-action', ack: said } };
   }
 
   /**

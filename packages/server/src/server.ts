@@ -1284,6 +1284,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // was injected; changes go to the attached agent (or the on-disk queue).
   const voiceRouter = new VoiceRouter({
     tasks: taskStore,
+    ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     // Read per utterance, so an edit on the settings page reaches the next
     // thing spoken without a restart.
     instructions: () => promptStore.read('voice-router'),
@@ -2097,6 +2098,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     webhooks,
     leadPresence,
     readyNudger,
+    ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     threadRequestDedup,
     summarizer,
     dataDir,

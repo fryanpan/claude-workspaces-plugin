@@ -10,6 +10,7 @@ import {
   coverageApplies,
   haikuAnswerCoverage,
   openPartsAfter,
+  threadOpenParts,
 } from '../src/answer-coverage.ts';
 
 const ITEM = {
@@ -130,5 +131,42 @@ describe('the open parts an answer leaves', () => {
     expect(await openPartsAfter(undefined, { review }, '04:00.')).toEqual([]);
     expect(await openPartsAfter(nothing, { review }, '04:00.')).toEqual([]);
     expect(await openPartsAfter(throws, { review }, '04:00.')).toEqual([]);
+  });
+});
+
+describe('an item declared on a comment', () => {
+  const REVIEW = { shape: 'review' as const, ...ITEM };
+  const at = { docId: 'd-1', threadId: 't-1', commentId: 'c-1' };
+  const threads = (review: Record<string, unknown>) => ({
+    getThread: () => ({ comments: [{ id: 'c-1', review: { ...REVIEW, ...review } }] }),
+  });
+  const named: AnswerCoverage = async () => ({ open: ['Include archived rows?'] });
+
+  it('is judged with the partial answers stored on its payload', async () => {
+    const seen: string[][] = [];
+    const check: AnswerCoverage = async (input) => {
+      seen.push(input.answers);
+      return { open: [] };
+    };
+    const partial = [{ text: '04:00.', by: 'Reader', ts: 5, open: ['Include archived rows?'] }];
+    await threadOpenParts(
+      check,
+      threads({ partialAnswers: partial }),
+      at,
+      'No archived rows.',
+      undefined,
+    );
+    expect(seen).toEqual([['04:00.', 'No archived rows.']]);
+  });
+
+  it('is not checked once answered, for a tapped option, or when the comment is gone', async () => {
+    expect(await threadOpenParts(named, threads({ answeredAt: 9 }), at, 'x', undefined)).toEqual(
+      [],
+    );
+    expect(await threadOpenParts(named, threads({}), at, 'x', 'o-1')).toEqual([]);
+    expect(await threadOpenParts(named, { getThread: () => null }, at, 'x', undefined)).toEqual([]);
+    expect(await threadOpenParts(named, threads({}), at, 'x', undefined)).toEqual([
+      'Include archived rows?',
+    ]);
   });
 });

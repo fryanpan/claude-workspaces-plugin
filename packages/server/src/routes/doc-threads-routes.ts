@@ -39,6 +39,7 @@ import {
 } from '@claude-workspaces/core';
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
+import { threadOpenParts } from '../answer-coverage.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
 import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
@@ -125,9 +126,12 @@ function reviewFromBody(
   // caller cannot address. Dropped silently: a payload carrying it is
   // almost certainly a peer echoing back an item it read, not an attack,
   // and refusing would bounce an otherwise honest ask.
+  // `partialAnswers` likewise: only the answer route records one.
   const raw =
-    typeof rawIn === 'object' && rawIn !== null && 'judge' in (rawIn as Record<string, unknown>)
-      ? (({ judge: _dropped, ...rest }) => rest)(rawIn as Record<string, unknown>)
+    typeof rawIn === 'object' && rawIn !== null && ('judge' in rawIn || 'partialAnswers' in rawIn)
+      ? (({ judge: _dropped, partialAnswers: _partial, ...rest }) => rest)(
+          rawIn as Record<string, unknown>,
+        )
       : rawIn;
   // A SECRET ITEM CANNOT BE FILED ON A COMMENT. The shape's whole contract is
   // that its answer goes through `routes/task-secrets.ts` — the one door that
@@ -173,6 +177,7 @@ export async function handleDocThreadRoutes(
     taskStore,
     taskProjection,
     readyNudger,
+    answerCoverage,
     threadRequestDedup,
     summarizer,
     j,
@@ -262,6 +267,15 @@ export async function handleDocThreadRoutes(
         // owner's machine acts on.
         const denied = ownerOnlyDenial(threadId, pending.id);
         if (denied) return denied;
+        // An item asking several things, answered on some: recorded as a
+        // partial answer, and the item stays open — see `threadOpenParts`.
+        const foldedOpen = await threadOpenParts(
+          answerCoverage,
+          docStore,
+          { docId, threadId, commentId: pending.id },
+          text,
+          folded.optionId,
+        );
         // The whole answer path, exactly as the explicit route uses
         // it — the stamps, the displaced-answer history, the reply,
         // the events. A second writer here is how the two spellings
@@ -279,7 +293,12 @@ export async function handleDocThreadRoutes(
           // unconditional write here would let a reply folded on that
           // stale claim displace an answer somebody had meanwhile
           // given, and displace it into history where nobody looks.
-          { generate: !visitor, onlyIfUnanswered: true, ...viaOpt },
+          {
+            generate: !visitor,
+            onlyIfUnanswered: true,
+            ...viaOpt,
+            ...(foldedOpen.length > 0 ? { openParts: foldedOpen } : {}),
+          },
         );
         if (res.ok) {
           t = res.thread;
@@ -289,7 +308,11 @@ export async function handleDocThreadRoutes(
           // the thing it was blocked on came back.
           const foldedHome = resolveWorkspaceForDoc(docId);
           if (foldedHome) {
-            readyNudger.reviewAnswered({ workspaceId: foldedHome, actorId: user.id });
+            readyNudger.reviewAnswered({
+              workspaceId: foldedHome,
+              actorId: user.id,
+              ...(foldedOpen.length > 0 ? { openParts: foldedOpen } : {}),
+            });
           }
         }
         // A refusal here is the loser of that race, never a reason to
@@ -365,14 +388,28 @@ export async function handleDocThreadRoutes(
         if (!asked) return j(404, { error: 'thread not found' });
         return j(200, { asked: true, thread: docStore.getThread(docId, asked.id) ?? asked });
       }
+      const optionId = typeof body?.optionId === 'string' ? body.optionId : undefined;
+      // Answered on some of its questions, not all: recorded as a partial
+      // answer, and the item stays on the reader's queue naming what is left.
+      const openParts = await threadOpenParts(
+        answerCoverage,
+        docStore,
+        { docId, threadId, commentId },
+        text,
+        optionId,
+      );
       const res = await docStore.answerReviewItem(
         docId,
         threadId,
         commentId,
         user,
         text,
-        typeof body?.optionId === 'string' ? body.optionId : undefined,
-        { generate: !visitor, ...viaOpt },
+        optionId,
+        {
+          generate: !visitor,
+          ...viaOpt,
+          ...(openParts.length > 0 ? { openParts } : {}),
+        },
       );
       if (!res.ok) {
         return j(res.error === 'no-doc' ? 404 : 400, { error: res.error });
@@ -384,9 +421,13 @@ export async function handleDocThreadRoutes(
       // one route that records such an answer.
       const answerHome = resolveWorkspaceForDoc(docId);
       if (answerHome) {
-        readyNudger.reviewAnswered({ workspaceId: answerHome, actorId: user.id });
+        readyNudger.reviewAnswered({
+          workspaceId: answerHome,
+          actorId: user.id,
+          ...(openParts.length > 0 ? { openParts } : {}),
+        });
       }
-      return j(200, { thread: res.thread });
+      return j(200, { thread: res.thread, ...(openParts.length > 0 ? { openParts } : {}) });
     }
     // Replacing the WORDS of a posted comment — the other verb that
     // did not exist. `/revise` corrects an ASK; this corrects what a

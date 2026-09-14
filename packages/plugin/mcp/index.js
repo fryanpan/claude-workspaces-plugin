@@ -14518,7 +14518,7 @@ async function emitChannelMessage(deps, event, rawPayload) {
   const action = event.startsWith("thread.") ? event.slice("thread.".length) : event;
   const header = snippet ? `on "${truncate5(snippet, 60)}"` : "";
   const onItem = reviewItemId ? ` on review item ${reviewItemId}${snippet ? ` "${truncate5(snippet, 60)}"` : ""} —` : "";
-  const body = text ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ""}${text}` : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
+  const body = text ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ""}${text}${openPartsClause(p.openParts)}` : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
   await deps.notify({
     method: "notifications/claude/channel",
     params: {

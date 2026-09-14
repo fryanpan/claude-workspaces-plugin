@@ -22,6 +22,7 @@ import type {
   User,
   suggestOps,
 } from '@claude-workspaces/core';
+import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
 import type { createLeadPresenceMonitor } from '../lead-presence.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -106,6 +107,9 @@ export interface DocRoutesContext {
   leadPresence: ReturnType<typeof createLeadPresenceMonitor>;
   /** Wakes the lead when a row it owns becomes ready. */
   readyNudger: ReadyWorkNudger;
+  /** Whether an answer covered every question an item asks. Absent: every
+   *  answer closes its item. See `answer-coverage.ts`. */
+  answerCoverage?: AnswerCoverage;
   /** Collapses concurrent identical thread requests onto one answer. */
   threadRequestDedup: ThreadRequestDedup<Thread | null>;
   /** The thread summarizer, or null when generation is not opted into. */
