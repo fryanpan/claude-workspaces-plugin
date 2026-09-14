@@ -392,17 +392,33 @@ export function sanitizeRunId(raw: string): string {
   return raw.replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
 }
 
+/**
+ * A value that stands for "nobody said", not for a label: a missing argument,
+ * or one that went through a template literal or `String()` on its way here.
+ * Two `cw-ui-shot-undefined-*` profiles were found beside orphaned Chromes —
+ * a script run by bun is not type-checked, and a call that left the run id out
+ * got the word as its label.
+ */
+function isMissingLabel(raw: unknown): boolean {
+  return typeof raw !== 'string' || raw.trim() === '' || /^(undefined|null)$/i.test(raw.trim());
+}
+
 /** The env's run id if it survives sanitizing, else one derived from the pid. */
 export function resolveRunId(
   env: Record<string, string | undefined> = process.env,
   pid: number = process.pid,
 ): string {
-  return sanitizeRunId(env[RUN_ID_ENV] ?? '') || `pid${pid}`;
+  const raw = env[RUN_ID_ENV];
+  const id = isMissingLabel(raw) ? '' : sanitizeRunId(raw ?? '');
+  return id || `pid${pid}`;
 }
 
-/** The `mkdtemp` prefix for one run: `cw-ui-shot-<runId>-`. */
-export function profilePrefix(runId: string): string {
-  return `${PROFILE_PREFIX}${runId}-`;
+/**
+ * The `mkdtemp` prefix for one run: `cw-ui-shot-<runId>-`. A missing run id
+ * gets the pid fallback here too, so every caller's profile names its run.
+ */
+export function profilePrefix(runId: string, pid: number = process.pid): string {
+  return `${PROFILE_PREFIX}${isMissingLabel(runId) ? `pid${pid}` : runId}-`;
 }
 
 /** The entries of `names` this run created — never anybody else's. */
