@@ -32,6 +32,7 @@ import {
   serializeBlockToMarkdown,
   serializeFragmentParts,
 } from './prose-markdown.ts';
+import type { MarkdownParseOptions } from './prose-mdx.ts';
 
 /**
  * A source text with its top-level blocks already located: `keys[k]` is block
@@ -53,19 +54,21 @@ export interface SourceLayout {
 export function serializeKeepingSource(
   fragment: Y.XmlFragment,
   source: string | SourceLayout | undefined,
+  opts: MarkdownParseOptions = {},
 ): string {
-  return serializeKeepingSourceLayout(fragment, source).text;
+  return serializeKeepingSourceLayout(fragment, source, opts).text;
 }
 
 /** `serializeKeepingSource`, returning the layout of the text it produced. */
 export function serializeKeepingSourceLayout(
   fragment: Y.XmlFragment,
   source: string | SourceLayout | undefined,
+  opts: MarkdownParseOptions = {},
 ): SourceLayout {
   const parts = serializeFragmentParts(fragment);
   const plain = parts.length > 0 ? `${parts.join('\n\n')}\n` : '';
   const fallback = (): SourceLayout => plainLayout(parts, plain);
-  const layout = typeof source === 'string' ? layoutOf(source) : source;
+  const layout = typeof source === 'string' ? layoutOf(source, opts) : source;
   if (!layout || parts.length === 0) return fallback();
   const { text, keys, from, to } = layout;
 
@@ -139,7 +142,7 @@ export function serializeKeepingSourceLayout(
   }
   out += prev === keys.length - 1 ? text.slice(to[prev]) : '\n';
 
-  if (normalizeMarkdown(out) !== plain) return fallback();
+  if (normalizeMarkdown(out, opts) !== plain) return fallback();
   return { text: out, keys: parts, from: outFrom, to: outTo };
 }
 
@@ -247,10 +250,10 @@ function splitItems(
 }
 
 /** Locate the top-level blocks of `text` with a fresh parse. */
-function layoutOf(text: string): SourceLayout | undefined {
+function layoutOf(text: string, opts: MarkdownParseOptions): SourceLayout | undefined {
   // CRLF would make the source's line offsets disagree with the parse's.
   if (text.length === 0 || text.includes('\r')) return undefined;
-  const { blocks, lines, starts } = parseMarkdownSource(text);
+  const { blocks, lines, starts } = parseMarkdownSource(text, opts);
   if (blocks.length === 0 || starts.length !== blocks.length) return undefined;
 
   const lineStart: number[] = [];

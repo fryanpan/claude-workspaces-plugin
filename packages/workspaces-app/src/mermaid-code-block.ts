@@ -1,5 +1,6 @@
 import type { NodeViewRendererProps } from '@tiptap/core';
 import CodeBlock from '@tiptap/extension-code-block';
+import { MDX_FLOW_LANGUAGE, mdxFlowNodeView, mdxReadOnly } from './mdx-flow-block.ts';
 
 /**
  * CodeBlock override that renders a Mermaid diagram above the source
@@ -56,8 +57,13 @@ function escapeHtml(s: string): string {
 }
 
 export const MermaidCodeBlock = CodeBlock.extend({
+  addProseMirrorPlugins() {
+    return [...(this.parent?.() ?? []), mdxReadOnly()];
+  },
   addNodeView() {
     return ({ node: initial, editor, getPos }: NodeViewRendererProps) => {
+      // An `.mdx` component has a view of its own (mdx-flow-block.ts).
+      if (initial.attrs.language === MDX_FLOW_LANGUAGE) return mdxFlowNodeView(initial, editor);
       let node = initial;
 
       const wrapper = document.createElement('div');
@@ -147,6 +153,7 @@ export const MermaidCodeBlock = CodeBlock.extend({
         contentDOM: code,
         update(newNode) {
           if (newNode.type !== node.type) return false;
+          if (newNode.attrs.language === MDX_FLOW_LANGUAGE) return false;
           node = newNode;
           // Keep the language class in sync if the block's language attr changed.
           const newLang = (newNode.attrs.language as string | null) ?? '';

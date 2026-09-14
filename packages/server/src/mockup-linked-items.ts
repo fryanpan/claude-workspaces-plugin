@@ -14,22 +14,13 @@
  * items and done tickets. Owner-only items are dropped here as well, for the
  * dock's own reason (see `dockItems` in the widget).
  */
-import {
-  type ReviewPayload,
-  type TaskReviewItem,
-  extractWorkspaceLinks,
-} from '@claude-workspaces/core';
+import { type TaskReviewItem, extractWorkspaceLinks } from '@claude-workspaces/core';
+import type { LinkedDockItem } from '@claude-workspaces/core/review-dock';
 import type { Ref, Task } from '@claude-workspaces/core/task-wire';
 import { taskReviewItems } from './review-queue.ts';
 
-/** One ticket item as the dock receives it. */
-export interface LinkedDockItem {
-  taskId: string;
-  reviewItemId: string;
-  review: ReviewPayload;
-  by: string;
-  ts: number;
-}
+/** One ticket item as the dock receives it — one wire shape for both pages. */
+export type { LinkedDockItem };
 
 /**
  * The docIds a ticket item points at. The item's own detail wins: an ask that
@@ -88,6 +79,28 @@ export function linkedTaskItems(args: {
     }
   }
   return out;
+}
+
+/**
+ * The open ticket items on one board's tasks that link `docId` — what the doc
+ * record's `linkedItems` carries for the doc page's dock. The stores are
+ * structural so this module keeps no import of either.
+ */
+export function boardLinkedItems(
+  workspaceId: string,
+  docId: string,
+  taskStore: {
+    listTasks(workspaceId: string): Array<Pick<Task, 'id' | 'title' | 'status' | 'links'>>;
+    listReviewItems(taskId: string): TaskReviewItem[];
+  },
+  docStore: { resolveDocId(docId: string): string },
+): LinkedDockItem[] {
+  return linkedTaskItems({
+    docId,
+    tasks: taskStore.listTasks(workspaceId),
+    reviewsOf: (taskId) => taskStore.listReviewItems(taskId),
+    canonical: (id) => docStore.resolveDocId(id),
+  });
 }
 
 /**

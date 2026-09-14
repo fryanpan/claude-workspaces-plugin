@@ -18,6 +18,8 @@
  *                        holds markdown syntax as literal characters.
  *   `prose-keep-source.ts` the write-back's serializer: the file's own bytes
  *                        for every block an edit did not touch.
+ *   `prose-mdx.ts`       where an `.mdx` component, expression or import run
+ *                        ends, so the parser holds each as one block.
  *
  * This file exports exactly what it exported when it was one 2,847-line
  * module, which is why the re-exports below are written out by name rather
@@ -59,6 +61,8 @@ export { detectLiteralMarkdown, literalMarkdownMessage } from './prose-integrity
 export type { LiteralMarkdownFinding, LiteralMarkdownKind } from './prose-integrity.ts';
 export { serializeKeepingSource, serializeKeepingSourceLayout } from './prose-keep-source.ts';
 export type { SourceLayout } from './prose-keep-source.ts';
+export { isMdxPath, MDX_FLOW_LANGUAGE, mdxFlowEnd } from './prose-mdx.ts';
+export type { MarkdownParseOptions } from './prose-mdx.ts';
 export { nestBlocksOutcome, nestBlocksUnderLead } from './prose-nest.ts';
 export type { NestBlocksError, NestBlocksOptions, NestBlocksResult } from './prose-nest.ts';
 export {

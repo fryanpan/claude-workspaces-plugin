@@ -29,6 +29,8 @@
     "./identity": "./src/identity.ts",
     "./note-suggestion": "./src/note-suggestion.ts",
     "./related-work": "./src/related-work.ts",
+    "./review-dock": "./src/review-dock.ts",
+    "./review-dock-styles": "./src/review-dock-styles.ts",
     "./review-item-id": "./src/review-item-id.ts",
     "./secret-name": "./src/secret-name.ts",
     "./schedule-missed": "./src/schedule-missed.ts",

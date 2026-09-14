@@ -364,9 +364,7 @@ and sockets, made from a different page. The rule and its limits are in
 to live only on the ticket, so a reader opened the mock, looked at it, and
 then left for the Home queue to say what they thought. `widget-dock.ts` — a
 new top-level module of the widget package, beside `widget-picker.ts` and
-`widget-threads.ts`, with its shadow-DOM rules in a second stylesheet module,
-`styles-dock.ts` (`styles.ts` was at the 500-line bar, and the build's CSS
-minifier now matches every `styles*.ts`) — draws the standing ask as a bar across the bottom of the
+`widget-threads.ts` — draws the standing ask as a bar across the bottom of the
 page it was raised on, opens it with every earlier ROUND still readable, and
 answers it through the route the doc page already answers through
 (`…/threads/:id/answer`). It joins no new data flow: a review item IS a
@@ -385,6 +383,22 @@ widget reads that block once at load and answers such an item through the
 ticket's own route (`…/tasks/:id/review-items/:rid/answer`). Still no new fetch
 and no poll, and a share visitor is served no block: the dock shows a visitor
 only the mock's own thread asks.
+
+**The doc page draws the same dock.** A bound doc that a ticket's open ask
+links shows that ask in the same bar, answered through the same ticket route.
+So the dock's rules, markup, sheet wiring and stylesheet moved to `core`:
+`review-dock.ts` (third tier, beside `review-item*.ts` — which asks dock, the
+bar and sheet as strings, and a wiring function over the element its caller
+made, so core still touches no `document`) and `review-dock-styles.ts` (the
+one CSS literal, which the widget build's minifier matches by name). The
+widget keeps `widget-dock.ts` for its own half. The doc page's half is
+`workspaces-app/src/doc/linked-dock.ts`, mounted by `doc-floats.ts` off the
+same doc-record read, in a shadow root so the sheet applies unchanged. The
+items ride the doc record the page already reads — `linkedItems` on
+`GET …/docs/<id>?format=json`, from `mockup-linked-items.ts`'s
+`boardLinkedItems`, left out for a share visitor and when empty — so this too
+adds no fetch. The bar's measured height is `--doc-dock-h`, which `doc.css`
+takes out of `#shell` and adds to the composer, toast and phone comment sheet.
 
 **The comment card stands where its comment will live.** In comment mode the
 composer is a card fixed to the right edge of the viewport at its element's
@@ -914,6 +928,17 @@ one paragraph, and a note added to a list rewrites only that list item. A block
 counts as touched when its content changed, whoever changed it. Before it, the
 first edit re-serialized the whole file, which in an `.mdx` post joined the
 `import` lines onto one line.
+`prose-mdx.ts` is the other half of that fix, in the same tier. For a file
+ending `.mdx` it finds each JSX component, `{…}` expression and import run,
+and the parser stores it as a code block whose language is `mdx-flow` and
+whose text is the exact source lines. A component is then one block the
+writer serializes byte for byte, not a paragraph that an edit could reflow.
+The editor draws that block through two client modules beside
+`mermaid-code-block.ts`, and they do not move the picture either.
+`mdx-flow-block.ts` is the node view and the plugin that makes the block
+read-only. `mdx-preview.ts` reads a component's props with a literal parser,
+never by running them, and draws a chart's title and a line for its literal
+data.
 
 `prose-identity.ts`, `prose-outline.ts` and `prose-batch.ts` join that same
 document-model tier, and together they are how an agent addresses a block
