@@ -7,6 +7,11 @@ import { assertBundleExcludes } from './bundle-guard.ts';
 import { minifyCss } from './minify-css.ts';
 import { assertShimCovers } from './shim-guard.ts';
 import { stripSecretShape } from './strip-secret-shape.ts';
+import {
+  assertReadsNoStrippedField,
+  readerCutFor,
+  stripUnreadFields,
+} from './strip-unread-fields.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(here, '..');
@@ -80,19 +85,26 @@ const cssMinify: BunPlugin = {
 };
 
 /**
- * The widget carries no SECRET shape, and this is where that is made true.
- * What comes out, why it is a deletion rather than a flag, and what it leaves
- * a widget holding a stored secret payload doing, are all in
- * `strip-secret-shape.ts`; the rewrite throws rather than shipping a reader
- * it could not find.
+ * The widget's copy of the thread reader, cut down to what the widget reads.
+ *
+ * It carries no SECRET shape, and this is where that is made true. What comes
+ * out, why it is a deletion rather than a flag, and what it leaves a widget
+ * holding a stored secret payload doing, are all in `strip-secret-shape.ts`.
+ * It also lifts no thread field the widget never reads (`strip-unread-fields.ts`).
+ * Both rewrites throw rather than ship a reader they could not find, and they
+ * share one hook because Bun loads a file through the first `onLoad` that
+ * matches it.
  */
-const secretShapeOff: BunPlugin = {
-  name: 'widget-no-secret-shape',
+const threadReaderCuts: BunPlugin = {
+  name: 'widget-thread-reader-cuts',
   setup(build) {
-    build.onLoad({ filter: /core[/\\]src[/\\]review-item-wire\.ts$/ }, (args) => ({
-      contents: stripSecretShape(readFileSync(args.path, 'utf8'), args.path),
-      loader: 'ts',
-    }));
+    build.onLoad({ filter: /core[/\\]src[/\\](review-item-wire|schema)\.ts$/ }, (args) => {
+      let contents = readFileSync(args.path, 'utf8');
+      if (/review-item-wire\.ts$/.test(args.path)) contents = stripSecretShape(contents, args.path);
+      const cut = readerCutFor(args.path);
+      if (cut) contents = stripUnreadFields(contents, cut, args.path);
+      return { contents, loader: 'ts' };
+    });
   },
 };
 
@@ -107,7 +119,7 @@ async function build(format: 'esm' | 'iife', name: string, entry: string) {
     format: format === 'iife' ? 'iife' : 'esm',
     minify: true,
     sourcemap: 'external',
-    plugins: [lib0Shims, cssMinify, secretShapeOff],
+    plugins: [lib0Shims, cssMinify, threadReaderCuts],
     naming: {
       entry: name,
     },
@@ -128,12 +140,19 @@ async function build(format: 'esm' | 'iife', name: string, entry: string) {
   return result;
 }
 
-/** Refuse a widget bundle holding a module it was measured without (`bundle-guard.ts`). */
+/**
+ * Refuse a widget bundle holding a module it was measured without
+ * (`bundle-guard.ts`), or reading a field its thread reader no longer lifts
+ * (`strip-unread-fields.ts`).
+ */
 async function guardWidget(result: Awaited<ReturnType<typeof build>>, name: string) {
   const map = result.outputs.find((o) => o.kind === 'sourcemap');
   if (!map) throw new Error(`widget-bundle-guard: ${name} was built without a source map.`);
   const { sources } = JSON.parse(await map.text()) as { sources?: string[] };
   assertBundleExcludes(sources ?? [], name);
+  const entry = result.outputs.find((o) => o.kind === 'entry-point');
+  if (!entry) throw new Error(`widget-unread-fields: ${name} has no entry output.`);
+  assertReadsNoStrippedField(readFileSync(entry.path, 'utf8'), name);
 }
 
 // The ES module is imported for its exports, so it is built from the module
