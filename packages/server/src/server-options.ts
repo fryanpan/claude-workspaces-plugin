@@ -528,6 +528,18 @@ export interface ServerOptions {
    */
   allowedOrigins?: string[];
   /**
+   * The TAILNET WIDGET DOOR's hostnames (middleware/widget-door.ts): under
+   * access-only, a page served on one of these names may load the widget and,
+   * with a board token, reach that one board's comment routes and socket.
+   *
+   * Unset — every deployment — derives it from this machine's MagicDNS name,
+   * the same discovery that already names the tailnet host elsewhere, so the
+   * door needs no configuration of its own. Tests name a fictional host. An
+   * empty list closes the door. Where the popup signs in is derived too: the
+   * first of `proxiedTrustedHosts`, over https.
+   */
+  widgetDoorHosts?: readonly string[];
+  /**
    * The external base URL this deployment is reached on, when something in
    * front terminates TLS (`tailscale serve` → this process on loopback).
    * Already normalized — bin.ts runs `normalizePublicBaseUrl` on

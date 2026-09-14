@@ -29,11 +29,12 @@ import {
   mintSession,
   verifySession as verifyEmailSession,
 } from '../auth/session.ts';
-import { mintWidgetToken } from '../auth/widget-token.ts';
+import { mintBoardWidgetToken, mintWidgetToken } from '../auth/widget-token.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { Identities, IdentityRecord } from '../identities.ts';
 import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
+import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { collabMembershipEnded } from '../share/collab-member-key.ts';
@@ -195,6 +196,9 @@ export interface AuthShareRoutesContext {
   emailSessionKey: () => string;
   /** The HMAC key behind widget popup tokens. */
   widgetTokenKey: () => string;
+  /** The tailnet widget door's hostnames — the pages a BOARD token may be
+   *  minted for (middleware/widget-door.ts). */
+  widgetDoorHosts: () => readonly string[];
   /** Whether the request really reached us over https. */
   isSecureRequest: (req: Request) => boolean;
   /** The origin policy for a request. */
@@ -249,6 +253,7 @@ export async function handleAuthShareRoutes(
     clientKeyFor,
     emailSessionKey,
     widgetTokenKey,
+    widgetDoorHosts,
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
@@ -278,10 +283,28 @@ export async function handleAuthShareRoutes(
     if (callerOrigin !== null && callerOrigin !== policyFor(req).requestOrigin) {
       return j(403, { error: 'same_origin_only' });
     }
-    const rec = sessionIdentityFor(req);
-    if (!rec) return j(401, { error: 'not_signed_in' });
     const body = await safeJson(req);
     const target = typeof body?.origin === 'string' ? body.origin : '';
+    // A page on the tailnet widget door gets a BOARD token instead: one board,
+    // 24 hours, and no session behind it — so the person may have proven
+    // themselves through Cloudflare Access alone, which is how the popup on
+    // the public host is reached at all. The allowlist is the door's own
+    // hostnames; the board must exist, because the token names it exactly.
+    if (target !== '' && isWidgetDoorOrigin(target, widgetDoorHosts())) {
+      const person = provenIdentityFor();
+      if (!person) return j(401, { error: 'not_signed_in' });
+      const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : '';
+      if (workspaceId === '' || !taskStore.getWorkspace(workspaceId)) {
+        return j(400, { error: 'unknown_workspace' });
+      }
+      const token = mintBoardWidgetToken(
+        { identityId: person.id, workspaceId, origin: target },
+        widgetTokenKey(),
+      );
+      return j(200, { ok: true, token, user: userForIdentity(person), origin: target });
+    }
+    const rec = sessionIdentityFor(req);
+    if (!rec) return j(401, { error: 'not_signed_in' });
     // The origin the popup will postMessage the token TO. Validated
     // against the same policy that governs which pages may write —
     // an origin that could not post a comment cannot receive a token

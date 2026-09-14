@@ -22,6 +22,8 @@ interface FetchCall {
 
 let fetchCalls: FetchCall[];
 let fetchResponder: (url: string, init?: RequestInit) => Response;
+/** The subprotocols each socket the widget opened offered, in order. */
+let socketProtocols: Array<string | string[] | undefined>;
 
 function stubGlobals() {
   fetchCalls = [];
@@ -36,8 +38,12 @@ function stubGlobals() {
     fetchCalls.push({ url: String(url), init });
     return fetchResponder(String(url), init);
   }) as unknown as typeof fetch;
+  socketProtocols = [];
   class FakeWS {
     static OPEN = 1;
+    constructor(_url: string, protocols?: string | string[]) {
+      socketProtocols.push(protocols);
+    }
     readyState = 1;
     binaryType = 'arraybuffer';
     addEventListener() {}
@@ -156,6 +162,73 @@ describe('the popup handshake', () => {
     // The offer collapses into the signed-in identity.
     expect(el.shadowRoot!.querySelector('.auth-signin')).toBeNull();
     expect(el.shadowRoot!.querySelector('.me')?.textContent).toContain('Reviewer');
+  });
+});
+
+describe('a page on the tailnet widget door', () => {
+  // The server this page's widget talks to is the tailnet hostname, and the
+  // popup cannot sign in there: it opens on the public host the door's 401
+  // names, and that host is then the ONLY origin a token is taken from.
+  const SIGN_IN = 'https://operator.example.com';
+  const user = { id: 'user-abc', name: 'Reviewer', kind: 'known', color: '#2e7dd7' };
+  const doorRefusal = () =>
+    new Response(
+      JSON.stringify({ error: 'sign_in_required', signInToWrite: true, signInOrigin: SIGN_IN }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    );
+
+  async function signInOnDoor() {
+    const mod = await importWidget();
+    fetchResponder = (url) =>
+      url.includes('/api/auth/session') ? doorRefusal() : new Response('{}');
+    const opened: string[] = [];
+    const popup = {} as Window;
+    (window as unknown as { open: unknown }).open = (url: string) => {
+      opened.push(String(url));
+      return popup;
+    };
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-riverbend', docId: 'doc-door' });
+    await flush();
+    (el.shadowRoot!.querySelector('.auth-signin') as HTMLButtonElement).click();
+    const send = (origin: string, token: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin,
+          source: popup,
+          data: { type: 'cw-widget-auth', token, user },
+        }),
+      );
+    return { el, opened, send };
+  }
+
+  it('opens the popup on the sign-in origin, naming this page and its board', async () => {
+    const { opened } = await signInOnDoor();
+    expect(opened.length).toBe(1);
+    const url = new URL(opened[0] as string);
+    expect(url.origin).toBe(SIGN_IN);
+    expect(url.pathname).toBe('/widget-auth');
+    expect(url.searchParams.get('origin')).toBe(location.origin);
+    expect(url.searchParams.get('workspace')).toBe('w-riverbend');
+  });
+
+  it('ignores a token message from any origin but the sign-in origin', async () => {
+    const { el, send } = await signInOnDoor();
+    // The widget's own server origin is no longer the sender it trusts.
+    send(serverOrigin(), 'wt2.from-the-server-origin');
+    send('https://evil.example.com', 'wt2.from-elsewhere');
+    send(`${SIGN_IN}:8443`, 'wt2.from-another-port');
+    expect(localStorage.getItem('cfw:authToken')).toBeNull();
+    expect(el.shadowRoot!.querySelector('.auth-signin')).toBeTruthy();
+    send(SIGN_IN, 'wt2.real-token');
+    expect(localStorage.getItem('cfw:authToken')).toBe('wt2.real-token');
+  });
+
+  it('offers the held token as the socket subprotocol', async () => {
+    localStorage.setItem('cfw:authToken', 'wt2.stored-token');
+    localStorage.setItem('cfw:authUser', JSON.stringify(user));
+    const mod = await importWidget();
+    mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-door-socket', authOffer: true });
+    expect(socketProtocols).toEqual(['wt2.stored-token']);
   });
 });
 

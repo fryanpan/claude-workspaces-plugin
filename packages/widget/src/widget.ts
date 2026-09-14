@@ -189,6 +189,7 @@ export class FeedbackWidgetEl extends HTMLElement {
   /** The identity the browser had before sign-in — restored on sign-out. */
   anonUser: User | null = null;
   authPopup: Window | null = null;
+  signInOrigin?: string;
   authMsgHandler: ((ev: MessageEvent) => void) | null = null;
   /**
    * The thread a `?thread=` deep link asked to be opened on, until the dock
@@ -449,7 +450,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       sourceUrl: location.href,
     });
     const url = `${this.opts.serverUrl}${this.docPath()}/y?${qs.toString()}`;
-    this.client = connect(url);
+    this.client = connect(url, () => this.authToken ?? undefined);
     this.client.onStatus((s) => {
       if (this.statusEl) {
         this.statusEl.textContent =

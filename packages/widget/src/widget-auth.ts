@@ -40,7 +40,7 @@ export function httpBase(el: FeedbackWidgetEl): string {
 
 /** The one origin the message listener will take a token from. */
 function serverOrigin(el: FeedbackWidgetEl): string {
-  return new URL(httpBase(el)).origin;
+  return el.signInOrigin || new URL(httpBase(el)).origin;
 }
 
 /**
@@ -67,7 +67,12 @@ export async function askIfSignInRequired(el: FeedbackWidgetEl): Promise<void> {
     const res = await fetch(`${httpBase(el)}/api/auth/session`);
     // The route is never gated and always 200s; anything else here is a
     // proxy page, which is not JSON and lands in the catch.
-    const body = (await res.json()) as { signInToWrite?: unknown; canWrite?: unknown };
+    const body = (await res.json()) as {
+      signInToWrite?: unknown;
+      canWrite?: unknown;
+      signInOrigin?: string;
+    };
+    el.signInOrigin = body.signInOrigin;
     if (body.signInToWrite === true && body.canWrite !== true) requireSignIn(el);
   } catch {}
 }
@@ -159,7 +164,7 @@ function clearAuth(el: FeedbackWidgetEl): void {
 }
 
 function startSignIn(el: FeedbackWidgetEl): void {
-  const url = `${httpBase(el)}/widget-auth?origin=${encodeURIComponent(location.origin)}`;
+  const url = `${serverOrigin(el)}/widget-auth?origin=${encodeURIComponent(location.origin)}&workspace=${encodeURIComponent(el.opts.workspaceId)}`;
   el.authPopup = window.open(url, 'cw-widget-auth', 'popup,width=420,height=560');
   if (!el.authMsgHandler) {
     el.authMsgHandler = (ev: MessageEvent) => {

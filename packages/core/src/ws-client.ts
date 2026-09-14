@@ -80,7 +80,7 @@ export interface FeedbackClient {
   onStatus(cb: (s: ConnectionStatus) => void): void;
 }
 
-export function connect(url: string): FeedbackClient {
+export function connect(url: string, protocol?: () => string | undefined): FeedbackClient {
   const ydoc = new Y.Doc();
   const awareness = new awarenessProtocol.Awareness(ydoc);
   let ws: WebSocket;
@@ -124,7 +124,7 @@ export function connect(url: string): FeedbackClient {
   function open() {
     if (closed) return;
     setStatus('connecting');
-    ws = new WebSocket(url);
+    ws = new WebSocket(url, protocol?.());
     ws.binaryType = 'arraybuffer';
     const thisWs = ws;
 

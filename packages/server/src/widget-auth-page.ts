@@ -9,6 +9,11 @@
  * the response echoes back, never `*`, so the browser refuses delivery to
  * anything but the embedding page the server approved.
  *
+ * A page on the tailnet widget door opens this on the PUBLIC host instead,
+ * where the person is proven by Cloudflare Access rather than a session
+ * cookie, and names its board so the token can be scoped to it
+ * (middleware/widget-door.ts).
+ *
  * Served with `X-Frame-Options: DENY` (see the route): inside an iframe the
  * handshake would run with no visible popup, which is exactly the silent
  * mint this flow must not allow.
@@ -36,7 +41,11 @@ export function widgetAuthPage(): string {
 (async () => {
   const status = document.getElementById('status');
   const say = (html) => { status.innerHTML = html; };
-  const origin = new URLSearchParams(location.search).get('origin') || '';
+  const params = new URLSearchParams(location.search);
+  const origin = params.get('origin') || '';
+  // The board a tailnet page's widget is on. Only a door origin's token
+  // carries it; the server ignores it for every other page.
+  const workspaceId = params.get('workspace') || '';
   if (!window.opener) {
     say('This page is opened by the feedback widget\\u2019s \\u201cSign in\\u201d button \\u2014 it does nothing on its own.');
     return;
@@ -45,7 +54,7 @@ export function widgetAuthPage(): string {
     const res = await fetch('/api/auth/widget-token', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ origin }),
+      body: JSON.stringify({ origin, workspaceId }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {

@@ -62,7 +62,7 @@ import {
 import { parkNoteText } from './park-note.ts';
 import { malformedPathSegment } from './path-params.ts';
 import { createPromptStore } from './prompt-store.ts';
-import { publicBaseUrl } from './public-host.ts';
+import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
 import type { NudgeTally } from './ready-nudge.ts';
 import { CalendarConnectionStore, CalendarSyncConsumer } from './recall-calendar.ts';
@@ -1681,10 +1681,26 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * request-admission.ts. Composed here because `createIdentitySetup` below
    * takes `policyFor` as an input.
    */
+  /**
+   * The tailnet widget door (middleware/widget-door.ts): its hostnames, and
+   * where a page on one sends the person to sign in. Both derived — the
+   * MagicDNS name is re-read through the same 60s cache every host decision
+   * uses, and the sign-in origin is the operator's own Access-fronted host.
+   * No Access host means no sign-in origin, which leaves the door refusing
+   * every token-bearing route rather than pointing the popup somewhere wrong.
+   */
+  const widgetDoorHosts = (): readonly string[] => {
+    if (opts.widgetDoorHosts) return opts.widgetDoorHosts;
+    const name = tailnetHostname();
+    return name ? [name] : [];
+  };
+  const widgetSignInOrigin = proxiedTrustedHosts[0] ? `https://${proxiedTrustedHosts[0]}` : null;
+
   const { policyFor, applyCors } = createOriginPolicy({
     opts,
     proxiedTrustedHosts,
     proxiedTrustedVerifier,
+    widgetDoorHosts,
   });
 
   // --- Email-keyed identity --- see identity-setup.ts. The roster, the
@@ -1706,6 +1722,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     widgetTokenKey,
     widgetBearerOf,
     widgetTokenIdentityFor,
+    boardWidgetGrantFor,
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,
@@ -1753,6 +1770,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     safeDecodeSegment,
     withReviewUrl,
     recallRelay,
+    widgetDoorHosts,
+    widgetSignInOrigin,
+    widgetBearerOf,
+    boardWidgetGrantFor,
+    docTypeOf: (docId) => docStore.peekMeta(docId)?.type,
     // Forward reference on purpose: `server` is bound below, and the peer
     // address is only ever asked during a request. Same shape, and the same
     // reason, as the identity setup's own `requestAddress` above.
@@ -2115,6 +2137,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     clientKeyFor,
     emailSessionKey,
     widgetTokenKey,
+    widgetDoorHosts,
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
@@ -2339,7 +2362,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // union is what makes that a compile error rather than a review note.
       const gate = await admit(req, { pathname });
       if (!gate.admitted) return gate.response;
-      const { visitor, visitorShareId, visitorMemberKey, metaFor, roleFor, requireOwner } = gate;
+      const {
+        visitor,
+        visitorShareId,
+        visitorMemberKey,
+        viaWidgetDoor,
+        metaFor,
+        roleFor,
+        requireOwner,
+      } = gate;
 
       // --- REST: email login ---
       // Reachability (the host gate, Access, a share session) and identity
@@ -2436,6 +2467,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         visitorShareId,
         visitorMemberKey,
         browserProvedNobody,
+        viaWidgetDoor,
       });
       if (streamed) {
         if (streamed.kind === 'upgraded') return undefined;

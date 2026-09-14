@@ -159,6 +159,9 @@ export interface UpgradeStreamRequest {
    *  Passed rather than hoisted: it closes over the request being decided,
    *  and the widget-token identity it reads is resolved per request. */
   browserProvedNobody: () => boolean;
+  /** Whether admission let this request in through the tailnet widget door,
+   *  which opens the doc socket read-only. */
+  viaWidgetDoor: boolean;
 }
 
 /**
@@ -248,6 +251,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     visitorShareId,
     visitorMemberKey,
     browserProvedNobody,
+    viaWidgetDoor,
   }: UpgradeStreamRequest): StreamOutcome => {
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and
@@ -434,12 +438,17 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // socket could plant a thread with no such mark — or, naming an id
         // nobody made, a doc.
         const fromMockFrame = socketViaOf(url) !== undefined;
-        const readOnly = (requireSignInToWrite && browserProvedNobody()) || fromMockFrame;
+        const mayCreate = !(requireSignInToWrite && browserProvedNobody()) && !fromMockFrame;
+        // A door socket is read-only too, but NOT refused creation: its
+        // token proved a person, and the widget's first socket on a new page
+        // is how that page's doc comes to exist. What it never gets is a
+        // writable doc afterwards — see `viaWidgetDoor` on the admission.
+        const readOnly = !mayCreate || viaWidgetDoor;
         if (!docStore.get(docId)) {
           if (type === 'mockup') {
             // Nothing to read yet, so refusing here gates no read: the doc
             // this socket would have created does not exist for anybody.
-            if (readOnly) return j(401, signInRequiredBody());
+            if (!mayCreate) return j(401, signInRequiredBody());
             docStore.getOrCreate(docId, { type, sourceUrl });
             // The widget is the third creation path (next to POST /workspaces/:workspaceId/docs
             // and the MCP tools that front it), so it files its doc too —
@@ -458,6 +467,10 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // (see yjs-protocol.ts). Decided once here, at the handshake, and
         // then carried for the life of the connection: the same shape the
         // share authorization uses two lines up.
+        // A door widget offers its token as the socket's one subprotocol, and
+        // the browser fails a handshake that does not echo it. Bun's upgrade
+        // echoes the offered protocol itself — measured: removing an explicit
+        // echo here left the 101's header intact (widget-door-http.test.ts).
         const upgraded = server.upgrade(req, {
           data: {
             docId,
