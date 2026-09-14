@@ -719,6 +719,13 @@ it is a REFUSAL the picture had no home for — a batch it empties is reported
 as `guard-refused` and is deliberately not retried, unlike the write failures
 beside it.
 
+`notes-edit-dedupe.ts` sits right after it in the same flow and the same
+tier: the guard's edits and the doc's outline in, the same edits out with a
+topic heading the section already has re-addressed to it, a note it already
+carries dropped or moved, and a `Decision:` label nobody spoke taken off. Pure
+like the guard, and named for the same reason — it is the answer to "what if
+the model writes it twice anyway", which no box above says.
+
 `notes-idea-coverage.ts` joins the DOMAIN tier below, not this one, and it
 changes no boundary: it is functions over values — sentences in, a verdict on
 whether the notes carry them out — plus a per-meeting ledger the notes session
@@ -956,7 +963,11 @@ which proposes whole blocks rather than a run of text: the target's words
 struck, the replacement offered as real blocks beside it under the same sid,
 so `suggest-ops.ts` resolves it with no new code and a replacement that is
 itself a heading, a list or a fence is accepted as one rather than as
-characters. `prose-nest.ts` is one of those edits given a
+characters. `prose-batch-structure.ts` holds what an applied edit must leave
+standing around itself: the notes nested under a bullet it replaces, the
+editor's trailing blank line kept at the end rather than stranded above an
+insert, and a block with no words, which applies directly whoever owns it.
+`prose-nest.ts` is one of those edits given a
 module of its own: `nest_blocks` MOVES existing list items under a lead bullet
 rather than restating them, which is what lets a note-taker regroup a topic
 without retyping a point or orphaning the comment threads anchored to it. Server-side they are reached through
