@@ -194,8 +194,9 @@ function reapOnce(): void {
  * `onSpawn` fires before the first `await`, so a signal during startup finds a
  * browser to clean up. Nothing here removes the profile on failure: the caller
  * has it registered and its cleanup is the one that waits for Chrome to die.
- * A caller that never registers it — `onSpawn` left out by a script bun does
- * not type-check — is covered by the watchdog once this process exits.
+ * A caller that leaves `onSpawn` out has nothing registered, so a failed
+ * launch is cleaned up HERE before the error is thrown; a successful one is
+ * the caller's to stop, and the watchdog's once this process exits.
  *
  * A launch that never announces a port is killed and replaced ONCE, with a
  * fresh profile, and `onSpawn` fires again so the caller's cleanup follows
@@ -217,13 +218,33 @@ export async function launchChrome(
   launches = 2,
 ): Promise<Browser> {
   reapOnce();
+  let live: Browser | undefined;
+  try {
+    return await launchLoop(bin, args, timeoutMs, runId, launches, (b) => {
+      live = b;
+      onSpawn?.(b);
+    });
+  } catch (e) {
+    if (!onSpawn && live) await stopBrowser(live.proc, live.profile);
+    throw e;
+  }
+}
+
+async function launchLoop(
+  bin: string,
+  args: (profile: string) => string[],
+  timeoutMs: number,
+  runId: string,
+  launches: number,
+  onSpawn: (b: Browser) => void,
+): Promise<Browser> {
   let stderr = '';
   for (let launch = 1; launch <= launches; launch++) {
     const profile = mkdtempSync(join(tmpdir(), profilePrefix(runId)));
     const proc = spawn(bin, args(profile), { stdio: ['ignore', 'ignore', 'pipe'] });
     const browser: Browser = { proc, profile, port: 0 };
     startWatchdog(proc, profile);
-    onSpawn?.(browser);
+    onSpawn(browser);
     stderr = '';
     proc.stderr?.on('data', (d) => {
       stderr += String(d);
