@@ -1166,6 +1166,13 @@ export interface DecisionAnsweredEvent {
   headline?: string;
   /** Set when the answer was sent from inside a mock page — see `WriteVia`. */
   via?: WriteVia;
+  /**
+   * The item's questions this answer did NOT cover, when it covered only
+   * some. The item stays open on the reader's queue; the filer acts on what
+   * was answered and leaves the rest to the reader. Absent on an answer that
+   * closed the item. See `answer-coverage.ts`.
+   */
+  openParts?: string[];
   actor: TaskActor;
   /** The decision task's links — a ready-made propagation checklist. */
   links: Ref[];
@@ -2716,6 +2723,7 @@ export class TaskStore {
       actor: { id: string; name: string; kind?: string };
       answeredWith?: string;
       via?: WriteVia;
+      openParts?: string[];
     },
   ): AnswerTaskReviewResult {
     const task = this.getTask(taskId);

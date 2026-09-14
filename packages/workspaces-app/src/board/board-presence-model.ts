@@ -335,6 +335,15 @@ export function describeEvent(ev: ActivityEvent, titleOf: (taskId: string) => st
         typeof ev.answer === 'string'
           ? ev.answer
           : (ev.answer as { text?: string } | undefined)?.text;
+      // A partial answer leaves the item open (`answer-coverage.ts`), so the
+      // trail says which part is still waiting rather than "answered".
+      const open = Array.isArray(ev.openParts)
+        ? ev.openParts.filter((q): q is string => typeof q === 'string' && q !== '')
+        : [];
+      if (open.length > 0) {
+        const still = open.map((q) => `“${q}”`).join('; ');
+        return `${actorName(ev)} answered part of ${title()}${answer ? `: “${answer}”` : ''} — still open: ${still}`;
+      }
       return `${actorName(ev)} answered ${title()}${answer ? `: “${answer}”` : ''}`;
     }
     case 'decision.answer_withdrawn': {

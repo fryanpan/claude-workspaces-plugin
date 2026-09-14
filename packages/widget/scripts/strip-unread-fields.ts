@@ -59,6 +59,8 @@ export const READER_CUTS: readonly ReaderCut[] = [
       "  if (typeof value.withdrawnReason === 'string') out.withdrawnReason = value.withdrawnReason;\n",
       '    const span = readSpan(raw.revisedRange);\n',
       '    if (span) rev.revisedRange = span;\n',
+      '  const payloadPartial = readPartialAnswers(value.partialAnswers);\n',
+      '  if (payloadPartial) out.partialAnswers = payloadPartial;\n',
     ],
     blocks: ['  if (Array.isArray(value.answerHistory)) {\n'],
   },
@@ -75,6 +77,7 @@ export const STRIPPED_FIELDS: readonly string[] = [
   'withdrawnReason',
   'revisedRange',
   'answerHistory',
+  'partialAnswers',
 ];
 
 /** The cut for a module path, or undefined when the file is not one of the readers. */

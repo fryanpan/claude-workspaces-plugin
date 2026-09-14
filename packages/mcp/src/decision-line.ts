@@ -20,6 +20,22 @@ export interface DecisionAnsweredPayload {
   headline?: string;
   /** Set when the answer was sent from inside a mock page. */
   via?: string;
+  /** The item's questions this answer left open. Absent when it closed. */
+  openParts?: unknown[];
+}
+
+/**
+ * What a line adds for an answer that covered only some of an item's
+ * questions: the ones still open, and that they are the reader's — the item
+ * stays on their queue, so the filer acts on what was answered and does not
+ * ask the rest again.
+ */
+export function openPartsClause(openParts: unknown): string {
+  if (!Array.isArray(openParts)) return '';
+  const parts = openParts.filter((p): p is string => typeof p === 'string' && p !== '');
+  if (parts.length === 0) return '';
+  const quoted = parts.map((p) => `"${truncate(p, 100)}"`).join('; ');
+  return ` — PARTIAL: still open on the reader's queue: ${quoted}. Act on what was answered; the item stays open for the rest, so do not re-ask it`;
 }
 
 /**
@@ -59,5 +75,5 @@ export function decisionAnsweredLine(p: DecisionAnsweredPayload): string {
     Array.isArray(p.links) && p.links.length > 0
       ? ' — walk its links as the propagation checklist'
       : '';
-  return `[decision.answered] ${p.taskId}${by}: "${truncate(p.answer ?? '', 120)}"${asked}${walk}`;
+  return `[decision.answered] ${p.taskId}${by}: "${truncate(p.answer ?? '', 120)}"${asked}${openPartsClause(p.openParts)}${walk}`;
 }

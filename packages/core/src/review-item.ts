@@ -69,6 +69,7 @@ export type {
   ReviewItemRevision,
   ReviewJudgeVerdictKind,
   ReviewOption,
+  ReviewPartialAnswer,
   ReviewPayload,
   ReviewSecretField,
   ReviewShape,

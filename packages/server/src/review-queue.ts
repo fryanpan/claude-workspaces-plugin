@@ -39,6 +39,7 @@ import {
   reviewWithdrawn,
   threadReviewItemId,
 } from '@claude-workspaces/core';
+import { withPartialNote } from '@claude-workspaces/core/answer-coverage-prompt';
 import { classifyActor } from './actor-identity.ts';
 import { asksPerson, extractAsk } from './ask-detection.ts';
 
@@ -412,6 +413,14 @@ export function reviewThreadItems(args: {
         // question since it was asked, and a revision is the asker getting
         // the question right rather than a new wait starting.
         const revised = reviewPayloadRevision(declaring.review);
+        // Answered on some of its questions: the card names the rest — the
+        // same note a ticket item's row carries (see `taskReviewItems`).
+        const noted = withPartialNote(
+          declaring.review,
+          declaring.review.partialAnswers,
+          declaring.review.revisions?.at(-1)?.at,
+        );
+        const range = revised?.revisedRange;
         items.push({
           kind,
           band: 'declared',
@@ -420,9 +429,11 @@ export function reviewThreadItems(args: {
           threadId: thread.id,
           commentId: declaring.id,
           reviewItemId: threadReviewItemId(docId, thread.id, declaring.id),
-          review: declaring.review,
+          review: noted.review,
           ...(revised ? { revisedAt: revised.at } : {}),
-          ...(revised?.revisedRange ? { revisedRange: revised.revisedRange } : {}),
+          ...(range
+            ? { revisedRange: { start: range.start + noted.shift, end: range.end + noted.shift } }
+            : {}),
           ...(taskId ? { taskId } : {}),
           title,
           // The headline IS the row title — an authored line rather than a
@@ -538,16 +549,23 @@ export function taskReviewItems(tasks: ReviewTaskRef[]): ReviewTaskItem[] {
       if (state === 'answered' || state === 'waiting') continue;
       const revision = state === 'revised' ? item.revisions?.at(-1) : undefined;
       const question = revision ? latestThreadedQuestion(item) : undefined;
+      // Answered on some of its questions, not all: the card says which are
+      // still open, above the item's own words, and the changed span of a
+      // revision moves down with them.
+      const noted = withPartialNote(item.review, item.partialAnswers, item.revisions?.at(-1)?.at);
+      const range = revision?.revisedRange;
       rows.push({
         kind: 'task-review',
         band: 'declared',
         taskId: task.id,
         reviewItemId: item.id,
-        review: item.review,
+        review: noted.review,
         state,
         ...(revision ? { revisedAt: revision.at } : {}),
         ...(question ? { question: question.text, threadId: question.threadId } : {}),
-        ...(revision?.revisedRange ? { revisedRange: revision.revisedRange } : {}),
+        ...(range
+          ? { revisedRange: { start: range.start + noted.shift, end: range.end + noted.shift } }
+          : {}),
         // Same normalization as thread rows — see `decodeEntities`.
         title: decodeEntities(task.title),
         // The headline IS the row title, exactly as on a declared thread row —

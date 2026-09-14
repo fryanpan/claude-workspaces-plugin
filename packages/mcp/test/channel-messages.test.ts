@@ -120,6 +120,19 @@ describe('a doc-shaped frame becomes one readable line', () => {
     expect(f.meta.review_item_id).toBe('ri-9');
   });
 
+  it('says which questions a partial answer on a thread left open', async () => {
+    const { frames, messages } = harness();
+    await messages.emitChannelMessage('thread.replied', {
+      docId: 'plan',
+      threadId: 't8',
+      comment: { author: { name: 'Reader' }, text: 'Run it at 04:00.' },
+      openParts: ['Who gets the failure alert?'],
+    });
+    expect(only(frames).content).toBe(
+      '[replied] Reader: Run it at 04:00. — PARTIAL: still open on the reader\'s queue: "Who gets the failure alert?". Act on what was answered; the item stays open for the rest, so do not re-ask it',
+    );
+  });
+
   it('reads the review item off the anchor on an older server', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {

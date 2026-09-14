@@ -461,7 +461,7 @@ export class LiveDocFanout {
     event: 'thread.created' | 'thread.replied' | 'thread.resolved' | 'thread.reopened',
     thread: Thread,
     comment?: { id: string; author: User; text: string; ts: number },
-    opts?: { generate?: boolean; via?: WriteVia },
+    opts?: { generate?: boolean; via?: WriteVia; openParts?: string[] },
     // Who performed a resolve/reopen. The comment param can't carry it —
     // there is no comment on a status change, and a frame without an actor
     // sent channel renderers to comments[0].author, i.e. the CREATOR.
@@ -489,6 +489,9 @@ export class LiveDocFanout {
       // owner's channel line can say which item to revise without walking
       // the thread's anchor.
       ...(thread.anchor.kind === 'review-item' ? { reviewItemId: thread.anchor.reviewItemId } : {}),
+      // A reply that answered some of an item's questions, not all: the ones
+      // still open, so the filer acts on the answered part and does not re-ask.
+      ...(opts?.openParts && opts.openParts.length > 0 ? { openParts: opts.openParts } : {}),
       seq: doc.seq,
     });
   }
