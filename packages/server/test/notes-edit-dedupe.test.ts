@@ -193,6 +193,23 @@ describe('a note the section already carries', () => {
     );
   });
 
+  it('re-sent as a bare line with no list marker, is still not written again', () => {
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(
+      prose.getProseFragment(doc),
+      '## Meeting notes\n\n- Pontoon lights are out at Saltmarsh\n',
+    );
+    prose.ensureBlockIds(doc);
+    const outline = prose.readOutline(doc);
+    const heading = outline.find((e) => e.text === 'Meeting notes')?.id;
+    const res = dedupeNotesEdits(
+      [{ op: 'insert_at_end', markdown: 'Pontoon lights are out at Saltmarsh\nAgenda first' }],
+      { notesHeadingId: heading, outline, speech: ['lights'], authorId: NOTES_AUTHOR_ID },
+    );
+    expect(res.alreadyWritten).toBe(1);
+    expect(res.edits).toEqual([{ op: 'insert_at_end', markdown: 'Agenda first' }]);
+  });
+
   it("a person's own bullet is never deleted by a move", () => {
     const doc = new Y.Doc();
     prose.applyMarkdownToFragment(

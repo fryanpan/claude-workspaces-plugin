@@ -116,7 +116,7 @@ export function tidyNotesSection(
   ydoc: Y.Doc,
   headingId: string,
   commented: ReadonlySet<string> | (() => ReadonlySet<string>) = new Set(),
-  opts: { blanks?: boolean; bulletsAuthoredBy?: string } = {},
+  opts: { blanks?: boolean; bulletsAuthoredBy?: string; lastTopic?: boolean } = {},
 ): NotesSectionTidyResult {
   // READ ONLY IF SOMETHING IS ABOUT TO BE DROPPED. Finding the comments means
   // walking the whole document's text, and this runs after every tick of
@@ -179,7 +179,7 @@ export function tidyNotesSection(
       if (
         bulletAuthor !== undefined &&
         prose.readBlockAuthor(el) === bulletAuthor &&
-        headsNothing(top, i, level, openLevel) &&
+        headsNothing(top, i, level, openLevel, opts.lastTopic === true) &&
         !commentedHere()
       ) {
         drop.push(i);
@@ -226,16 +226,18 @@ export function tidyNotesSection(
  * paragraphs before the next heading at its level or above. A deeper heading
  * under it is a sub-topic, which is something.
  *
- * The LAST topic is not judged. A model opens a heading in one tick and fills
- * it in the next often enough that the eval's judge window is built around it
- * (`scripts/notes-eval.ts`), and a heading removed in between leaves that
- * next tick's notes with no topic to go under.
+ * The LAST topic is not judged unless `lastTopic` says so. A model opens a
+ * heading in one tick and fills it in the next often enough that the eval's
+ * judge window is built around it (`scripts/notes-eval.ts`), and a heading
+ * removed in between leaves that next tick's notes with no topic to go under.
+ * At the meeting's stop there is no next tick, and the caller says so.
  */
 function headsNothing(
   top: readonly Y.XmlElement[],
   i: number,
   level: number,
   openLevel: number,
+  lastTopic: boolean,
 ): boolean {
   for (let j = i + 1; j < top.length; j++) {
     const el = top[j] as Y.XmlElement;
@@ -244,7 +246,7 @@ function headsNothing(
     if (el.nodeName === 'paragraph' && textOf(el).length === 0) continue;
     return false;
   }
-  return false;
+  return lastTopic;
 }
 
 /** How many children this list holds, elements and all. */

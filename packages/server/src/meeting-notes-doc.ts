@@ -1229,6 +1229,21 @@ export function withServerNotesSinks(
       return null;
     }
   };
+  const tidyLastTopic = (summary: { docId: string; meetingId: string }): void => {
+    try {
+      const doc = deps.docStore().get(summary.docId);
+      const ids = { docId: summary.docId, meetingId: summary.meetingId };
+      const section = heading.headingId(ids, readNotesOutline(deps.docStore(), summary.docId));
+      if (!doc || section === undefined) return;
+      tidyNotesSection(doc.ydoc, section, () => commentedBlockIds(doc.ydoc), {
+        blanks: false,
+        bulletsAuthoredBy: NOTES_AUTHOR_ID,
+        lastTopic: true,
+      });
+    } catch (err) {
+      console.error('[meeting-notes] last-topic tidy failed:', err);
+    }
+  };
   const captureIntents: MeetingNotesDeps['captureIntents'] =
     options.captureIntents ??
     (extractor && captureBoard
@@ -1317,6 +1332,11 @@ export function withServerNotesSinks(
       // Named from the whole meeting, in the background: the stop does not
       // wait on a model call, and the title lands when it lands.
       if (titler) void titler.onMeetingEnd(summary.docId);
+      // THE LAST TOPIC IS JUDGED NOW. Each tick leaves an empty heading at the
+      // section's end standing, in case the next tick fills it; at the stop
+      // there is no next tick. Before the quality pass, so it reads the notes
+      // the reader will.
+      tidyLastTopic(summary);
       // AND WHAT THE NOTES THEMSELVES CAME OUT LIKE. The line above says how
       // much of the meeting reached a compose, and a meeting once reported
       // every turn handled while its doc carried dozens of repeated lines,

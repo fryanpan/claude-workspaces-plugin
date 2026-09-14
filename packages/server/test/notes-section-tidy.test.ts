@@ -358,6 +358,15 @@ describe("a topic heading of the note-taker's own with nothing under it", () => 
     expect(second.headings).toContain('Slipway costs');
   });
 
+  it('as the last topic, is removed when the meeting stops and no tick can fill it', async () => {
+    const harness = createNotesTickHarness({ compose: openElsewhere });
+    await harness.speak('the harbour run moves');
+    await harness.speak('the last sailing is at seven');
+    await harness.end();
+    expect(harness.headings()).not.toContain('Slipway costs');
+    expect(bullets(harness.ydoc)).toEqual(['the harbour run moves', 'last sailing at seven']);
+  });
+
   it('CONTROL: the same heading with a sub-topic under it stays', async () => {
     const harness = createNotesTickHarness({
       compose: (input, tick) =>
