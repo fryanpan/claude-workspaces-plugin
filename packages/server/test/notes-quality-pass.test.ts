@@ -88,6 +88,15 @@ describe('reading the section this meeting wrote', () => {
     expect(second).not.toContain('Ferry timetable');
   });
 
+  it('writes a nested bullet once, so grouped notes are not read as repeats', () => {
+    const { store } = docStoreFrom(
+      '## Meeting notes\n\n- Slipway\n  - Cradle needs a winch\n  - Paint arrives Friday\n- Ferry fares rise\n',
+    );
+    const notes = readSectionMarkdown(store, 'd-harbour', headingIdAt(store, 0));
+    expect(notes.split('Cradle needs a winch').length - 1).toBe(1);
+    expect(notes.split('Paint arrives Friday').length - 1).toBe(1);
+  });
+
   it('is empty for a meeting that opened no section', () => {
     const { store } = docStoreFrom(TWO_MEETINGS);
     expect(readSectionMarkdown(store, 'd-harbour', undefined)).toBe('');
