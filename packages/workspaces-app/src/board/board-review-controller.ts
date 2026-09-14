@@ -531,9 +531,11 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
     if (values.length === 0) return false;
     const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
     if (!res.ok) {
-      // The message never names a value, and there is nothing of the reader's
-      // to preserve — see above.
-      showToast('Saving failed — nothing was recorded. Try again.');
+      // The server's own sentence when it wrote one: it names the FIELD that
+      // did not save — and, after a store failure mid-pair, the ones that did
+      // — built from the names the item declared and never from a value.
+      const said = typeof res.data?.message === 'string' ? res.data.message : '';
+      showToast(said || 'Saving failed — nothing was recorded. Try again.');
       return false;
     }
     if (confirm) showToast(`Saved: ${values.map((v) => v.service).join(', ')}`);

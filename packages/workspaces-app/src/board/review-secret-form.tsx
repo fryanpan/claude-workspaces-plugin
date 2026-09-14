@@ -18,6 +18,7 @@
  * all — see `ReviewSecretBlock` for where that absence is spelled out.
  */
 import type { ReviewSecretField } from '@claude-workspaces/core';
+import { SECRET_VALUE_MAX_CHARS } from '@claude-workspaces/core/secret-name';
 import { Fragment } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { SecretsGate } from './board-review-model.ts';
@@ -219,14 +220,18 @@ function SecretFieldsForm(props: {
   }, []);
   const [busy, setBusy] = useState(false);
   /**
-   * Which field the reader still has to fill, by service — the one line a
-   * half-filled Save answers with.
+   * Which field the reader has to go back to, by service, and why — the one
+   * line a Save the card refused answers with: still empty, or longer than
+   * the store takes.
    *
    * A NAME, not a count and not a list: the reader is being sent back to one
    * box, and the box is also focused. Held as state rather than written into
    * the DOM so a repaint cannot leave a stale complaint under a filled field.
+   * Never the value, and never its length.
    */
-  const [missing, setMissing] = useState<string | null>(null);
+  const [problem, setProblem] = useState<{ service: string; why: 'empty' | 'too-long' } | null>(
+    null,
+  );
   /**
    * Which values are showing. Empty by default — masked is the resting state
    * — and per field, because revealing one to check a paste should not put
@@ -256,13 +261,26 @@ function SecretFieldsForm(props: {
     // not it was filled, and Save read as a button that did nothing.
     const empty = values.find((v) => v.value === '');
     if (empty) {
-      setMissing(empty.service);
+      setProblem({ service: empty.service, why: 'empty' });
       inputs(form)
         .find((el) => el.value === '')
         ?.focus();
       return;
     }
-    setMissing(null);
+    // TOO LONG IS REFUSED HERE, BEFORE ANY REQUEST. The store once took the
+    // first 128 characters of a key and kept them under the key's name
+    // (2026-09-14); the server now refuses a value past the ceiling before it
+    // writes anything, and this says so on the card, next to the box to fix,
+    // rather than a round trip away in a toast.
+    const long = values.find((v) => v.value.length > SECRET_VALUE_MAX_CHARS);
+    if (long) {
+      setProblem({ service: long.service, why: 'too-long' });
+      inputs(form)
+        .find((el) => el.value.length > SECRET_VALUE_MAX_CHARS)
+        ?.focus();
+      return;
+    }
+    setProblem(null);
     setBusy(true);
     let saved = false;
     try {
@@ -300,18 +318,21 @@ function SecretFieldsForm(props: {
               )
             }
             onInput={() => {
-              if (missing === f.service) setMissing(null);
+              if (problem?.service === f.service) setProblem(null);
             }}
           />
         ))}
       </div>
       <div class="board-walk-cred-send-row">
-        {missing !== null ? (
+        {problem !== null ? (
           // `output`, not a span with a role: it IS the live region, so a
-          // reader on a screen reader is told which field is still empty
-          // without the markup having to claim it.
+          // reader on a screen reader is told which field to fix without the
+          // markup having to claim it.
           <output class="board-walk-cred-miss">
-            {fields.find((f) => f.service === missing)?.label ?? 'One field'} is still empty.
+            {fields.find((f) => f.service === problem.service)?.label ?? 'One field'}
+            {problem.why === 'empty'
+              ? ' is still empty.'
+              : ` is too long to save — at most ${SECRET_VALUE_MAX_CHARS} characters.`}
           </output>
         ) : null}
         <button type="submit" class="board-btn board-btn-ink board-walk-cred-send" disabled={busy}>
