@@ -72,14 +72,19 @@ describe('an .mdx block in the editor', () => {
   it('shows each component, comment and import run as its own quiet block', () => {
     mount();
     expect(
-      blocks().map((b) => [b.dataset.kind, b.querySelector('.mdx-view')?.textContent]),
+      blocks().map((b) => [
+        b.dataset.kind,
+        [...b.querySelectorAll('.mdx-view > :is(.mdx-head, .mdx-children)')]
+          .map((e) => e.textContent)
+          .join(''),
+      ]),
     ).toEqual([
       ['esm', 'import LineChart, Callout'],
       ['jsx', 'Harborlight ferry riders'],
       ['expr', 'TODO: the October numbers'],
       ['jsx', 'The last sailing moved to 21:30.'],
     ]);
-    const line = blocks()[1]?.querySelector('svg.mdx-preview polyline');
+    const line = blocks()[1]?.querySelector('svg.mdx-chart polyline');
     expect(line?.getAttribute('points')?.split(' ')).toHaveLength(3);
     expect(blocks()[3]?.querySelector('svg')).toBeNull();
   });
@@ -268,16 +273,16 @@ describe('an .mdx block in the editor', () => {
 
 describe('reading a component without running it', () => {
   it('draws only literal x/y data', () => {
-    expect(summarizeMdx('<Chart data={[{ x: 1, y: 2 }, { "x": 2, y: -3.5e1 }]} />').points).toEqual(
-      [
-        { x: 1, y: 2 },
-        { x: 2, y: -35 },
-      ],
-    );
-    expect(summarizeMdx('<Chart data={rows} />').points).toBeUndefined();
-    expect(
-      summarizeMdx('<Chart data={[{ x: 1, y: fetch("/x") }, { x: 2, y: 3 }]} />').points,
-    ).toBeUndefined();
+    const pointsOf = (src: string) => {
+      const chart = summarizeMdx(src).chart;
+      return chart?.type === 'line' ? chart.series[0]?.points : undefined;
+    };
+    expect(pointsOf('<Chart data={[{ x: 1, y: 2 }, { "x": 2, y: -3.5e1 }]} />')).toEqual([
+      { x: 1, y: 2 },
+      { x: 2, y: -35 },
+    ]);
+    expect(pointsOf('<Chart data={rows} />')).toBeUndefined();
+    expect(pointsOf('<Chart data={[{ x: 1, y: fetch("/x") }, { x: 2, y: 3 }]} />')).toBeUndefined();
     expect(summarizeMdx('<Chart data={[...rows]} title={`t`} />')).toEqual({
       kind: 'jsx',
       label: 'Chart',
@@ -289,14 +294,14 @@ describe('reading a component without running it', () => {
       `<LineChart\n  format={(v) => v + "}"}\n  series={[{ name: 'Riders', data: [{ x: 0, y: 1 }, { x: 1, y: 4 }] }]}\n  title="Riders"\n/>`,
     );
     expect(s.title).toBe('Riders');
-    expect(s.points).toHaveLength(2);
+    expect(s.chart?.type === 'line' && s.chart.series[0]?.points).toHaveLength(2);
   });
 
   it('keeps a __proto__ key as a plain key', () => {
     const s = summarizeMdx(
       '<Chart data={[{ "__proto__": { polluted: true }, x: 1, y: 1 }, { x: 2, y: 2 }]} />',
     );
-    expect(s.points).toHaveLength(2);
+    expect(s.chart?.type === 'line' && s.chart.series[0]?.points).toHaveLength(2);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 

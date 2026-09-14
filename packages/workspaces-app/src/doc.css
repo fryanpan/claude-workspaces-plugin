@@ -929,7 +929,7 @@ body.has-set .doc-switcher-caret {
   height: auto;
 }
 /* An .mdx component, expression or import run (mdx-flow-block.ts): a quiet
-   block — a chart's title and a line for its literal data, a component's
+   block — a chart's title and the chart its literal props draw, a component's
    words — whose source opens read-only on a tap. Comments and imports are one
    muted line, and so is the name of a component with nothing else to show. */
 #editor > .ProseMirror .mdx-block {
@@ -989,12 +989,71 @@ body.has-set .doc-switcher-caret {
     font-size: 1.05rem;
   }
 }
-#editor > .ProseMirror .mdx-preview {
+/* A chart drawn from literal props (mdx-chart.ts), one SVG unit per pixel. */
+#editor > .ProseMirror .mdx-chart {
   display: block;
-  width: 100%;
-  height: 72px;
+  max-width: 100%;
+  height: auto;
   margin-top: 8px;
-  color: var(--accent);
+  overflow: visible;
+}
+#editor > .ProseMirror .mdx-chart text {
+  font: 12px / 1 var(--sans);
+  fill: var(--fg-muted);
+}
+#editor > .ProseMirror .mdx-grid line {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+#editor > .ProseMirror .mdx-x-axis line,
+#editor > .ProseMirror .mdx-baseline {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+#editor > .ProseMirror .mdx-band rect {
+  fill: var(--accent-subtle);
+}
+#editor > .ProseMirror .mdx-chart .mdx-band-label,
+#editor > .ProseMirror .mdx-chart .mdx-axis-unit {
+  font-size: 11px;
+}
+/* A line may cross the band's label; a halo in the block's ground keeps it legible. */
+#editor > .ProseMirror .mdx-chart .mdx-band-label {
+  paint-order: stroke;
+  stroke: var(--bg-panel);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+#editor > .ProseMirror .mdx-hit {
+  fill: transparent;
+}
+#editor > .ProseMirror .mdx-chart .mdx-bar-label {
+  fill: var(--fg);
+}
+#editor > .ProseMirror .mdx-chart .mdx-bar-value.is-highlight {
+  fill: var(--fg);
+  font-weight: 600;
+}
+#editor > .ProseMirror .mdx-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font: 12px / 1.4 var(--sans);
+  color: var(--fg-muted);
+}
+#editor > .ProseMirror .mdx-legend-item {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+#editor > .ProseMirror .mdx-swatch {
+  width: 18px;
+  border-top: 2px solid;
+}
+#editor > .ProseMirror .mdx-swatch.is-dashed {
+  border-top-style: dashed;
 }
 #editor > .ProseMirror .mdx-head + .mdx-children {
   margin-top: 4px;

@@ -46,13 +46,28 @@ export function mdxFlowNodeView(initial: PMNode, _editor: Editor): NodeView {
   wrapper.appendChild(pre);
 
   let rendered = '';
+  let summary = summarizeMdx('');
+  let drawnAt = 0;
   const render = () => {
     if (node.textContent === rendered) return;
     rendered = node.textContent;
-    const summary = summarizeMdx(rendered);
+    summary = summarizeMdx(rendered);
     wrapper.dataset.kind = summary.kind;
-    renderMdxSummary(view, summary);
+    drawnAt = view.clientWidth;
+    renderMdxSummary(view, summary, drawnAt);
   };
+  // A chart is drawn one unit per pixel so its words stay readable on a
+  // phone, so it is redrawn when the column's width changes.
+  const resized =
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          const width = view.clientWidth;
+          if (!summary.chart || width === 0 || Math.abs(width - drawnAt) < 4) return;
+          drawnAt = width;
+          renderMdxSummary(view, summary, width);
+        });
+  resized?.observe(view);
   const setOpen = (open: boolean) => {
     wrapper.classList.toggle('is-open', open);
     view.setAttribute('aria-expanded', String(open));
@@ -97,6 +112,9 @@ export function mdxFlowNodeView(initial: PMNode, _editor: Editor): NodeView {
     },
     stopEvent(event) {
       return view.contains(event.target as Node);
+    },
+    destroy() {
+      resized?.disconnect();
     },
   };
 }

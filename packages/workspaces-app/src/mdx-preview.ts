@@ -1,6 +1,6 @@
 /**
  * What an `.mdx` block shows in place of its source: a component's `title` and
- * words, a plain line for a chart whose points are written out, a muted line
+ * words, the chart its literal props describe (`mdx-chart.ts`), a muted line
  * for a comment or the imports. A component's name shows only when it has
  * nothing else to show.
  *
@@ -10,6 +10,8 @@
  * call, a spread. Every string reaches the DOM through `textContent`.
  */
 
+import { type MdxChart, chartOf, drawChart, seriesColor } from './mdx-chart.ts';
+
 export type MdxKind = 'esm' | 'expr' | 'jsx';
 
 export interface MdxSummary {
@@ -18,8 +20,8 @@ export interface MdxSummary {
   label: string;
   /** A component's `title` prop, when it is a string literal. */
   title?: string;
-  /** Points to draw, when `data` (or a series' `data`) is a literal x/y list. */
-  points?: Array<{ x: number; y: number }>;
+  /** The chart its props describe, when they are literals of a chart's shape. */
+  chart?: MdxChart;
   /** A component's children as plain words, tags removed. */
   children?: string;
 }
@@ -47,8 +49,8 @@ export function summarizeMdx(source: string): MdxSummary {
   const props = readProps(text);
   const title = props.get('title');
   if (typeof title === 'string') summary.title = title;
-  const points = pointsOf(props.get('data')) ?? seriesPoints(props.get('series'));
-  if (points) summary.points = points;
+  const chart = chartOf(props);
+  if (chart) summary.chart = chart;
   const close = text.lastIndexOf(`</${name === 'Fragment' ? '' : name}>`);
   const openEnd = openTagEnd(text);
   if (close > 0 && openEnd > 0 && close > openEnd) {
@@ -65,29 +67,6 @@ export function summarizeMdx(source: string): MdxSummary {
 
 function isImportName(s: string): boolean {
   return /^[A-Za-z_$][\w$]*$/.test(s) && s !== 'as' && s !== 'type';
-}
-
-function pointsOf(value: unknown): Array<{ x: number; y: number }> | undefined {
-  if (!Array.isArray(value) || value.length < 2) return undefined;
-  const out: Array<{ x: number; y: number }> = [];
-  for (const p of value) {
-    if (!p || typeof p !== 'object' || Array.isArray(p)) return undefined;
-    const { x, y } = p as Record<string, unknown>;
-    if (typeof x !== 'number' || typeof y !== 'number') return undefined;
-    out.push({ x, y });
-  }
-  return out;
-}
-
-function seriesPoints(value: unknown): Array<{ x: number; y: number }> | undefined {
-  if (!Array.isArray(value)) return undefined;
-  for (const s of value) {
-    if (s && typeof s === 'object' && !Array.isArray(s)) {
-      const pts = pointsOf((s as Record<string, unknown>).data);
-      if (pts) return pts;
-    }
-  }
-  return undefined;
 }
 
 // ---- the opening tag's props ------------------------------------------------
@@ -263,12 +242,15 @@ class Reader {
         return out;
       }
       const ch = this.s[this.i];
-      const key =
+      // A bare key is a name or a number: `{ 1: "Jan" }` keys on "1".
+      const bare =
         ch === '"' || ch === "'"
-          ? this.string()
-          : /^[A-Za-z_$][\w$]*/.exec(this.s.slice(this.i))?.[0];
+          ? undefined
+          : /^(?:[A-Za-z_$][\w$]*|\d+(?:\.\d+)?)/.exec(this.s.slice(this.i))?.[0];
+      const key =
+        bare === undefined ? this.string() : /^\d/.test(bare) ? String(Number(bare)) : bare;
       if (key === undefined) return NOT_LITERAL;
-      if (ch !== '"' && ch !== "'") this.i += key.length;
+      if (bare !== undefined) this.i += bare.length;
       this.ws();
       if (this.s[this.i] !== ':') return NOT_LITERAL;
       this.i++;
@@ -284,19 +266,19 @@ class Reader {
 
 // ---- DOM --------------------------------------------------------------------
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const W = 600;
-const H = 72;
+/** Width a chart is drawn at when its block has not been laid out yet. */
+const DEFAULT_WIDTH = 640;
 
-/** Replace `host`'s children with the block's quiet view. */
-export function renderMdxSummary(host: HTMLElement, summary: MdxSummary): void {
+/** Replace `host`'s children with the block's quiet view, a chart drawn
+ *  `width` pixels wide (the host's own width when it has one). */
+export function renderMdxSummary(host: HTMLElement, summary: MdxSummary, width?: number): void {
   host.replaceChildren();
   host.dataset.kind = summary.kind;
   const head = document.createElement('div');
   head.className = 'mdx-head';
   // A component's name is source vocabulary, not what the post says, so it
   // shows only when the block would otherwise be empty.
-  const bare = !summary.title && !summary.points && !summary.children;
+  const bare = !summary.title && !summary.chart && !summary.children;
   if (summary.kind !== 'jsx' || bare) {
     const label = document.createElement('span');
     label.className = summary.kind === 'jsx' ? 'mdx-name' : 'mdx-muted';
@@ -310,7 +292,13 @@ export function renderMdxSummary(host: HTMLElement, summary: MdxSummary): void {
     head.appendChild(title);
   }
   if (head.childElementCount > 0) host.appendChild(head);
-  if (summary.points) host.appendChild(lineOf(summary.points));
+  const { chart } = summary;
+  if (chart) {
+    if (chart.type === 'line' && chart.series.some((s) => s.label)) {
+      host.appendChild(legendOf(chart.series));
+    }
+    host.appendChild(drawChart(chart, width || host.clientWidth || DEFAULT_WIDTH));
+  }
   if (summary.children) {
     const kids = document.createElement('div');
     kids.className = 'mdx-children';
@@ -319,33 +307,17 @@ export function renderMdxSummary(host: HTMLElement, summary: MdxSummary): void {
   }
 }
 
-function lineOf(points: Array<{ x: number; y: number }>): SVGSVGElement {
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
-  const x0 = Math.min(...xs);
-  const y0 = Math.min(...ys);
-  const dx = Math.max(...xs) - x0 || 1;
-  const dy = Math.max(...ys) - y0 || 1;
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('class', 'mdx-preview');
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.setAttribute('preserveAspectRatio', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-  const line = document.createElementNS(SVG_NS, 'polyline');
-  line.setAttribute(
-    'points',
-    points
-      .map(
-        (p) =>
-          `${(((p.x - x0) / dx) * (W - 8) + 4).toFixed(1)},${(H - 4 - ((p.y - y0) / dy) * (H - 8)).toFixed(1)}`,
-      )
-      .join(' '),
-  );
-  line.setAttribute('fill', 'none');
-  line.setAttribute('stroke', 'currentColor');
-  line.setAttribute('stroke-width', '2');
-  line.setAttribute('stroke-linejoin', 'round');
-  line.setAttribute('vector-effect', 'non-scaling-stroke');
-  svg.appendChild(line);
-  return svg;
+function legendOf(series: Array<{ label?: string; dashed: boolean }>): HTMLElement {
+  const legend = document.createElement('div');
+  legend.className = 'mdx-legend';
+  series.forEach((s, i) => {
+    const item = document.createElement('span');
+    item.className = 'mdx-legend-item';
+    const swatch = document.createElement('span');
+    swatch.className = s.dashed ? 'mdx-swatch is-dashed' : 'mdx-swatch';
+    swatch.style.borderTopColor = seriesColor(i);
+    item.append(swatch, s.label ?? `Series ${i + 1}`);
+    legend.appendChild(item);
+  });
+  return legend;
 }
