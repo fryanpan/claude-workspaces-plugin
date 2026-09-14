@@ -42,7 +42,7 @@ import {
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 
 /** The reader's display name on the board. Fictional. */
-export const READER = 'Riverbend Reviewer';
+export const READER = 'Sample Reader';
 
 /** The eight kinds of write, each leaving a thread whose text is `<run>:<kind>`. */
 export const KINDS = [

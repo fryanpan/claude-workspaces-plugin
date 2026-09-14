@@ -104,7 +104,7 @@ function build(opts: { activated?: boolean } = {}) {
     placeholder,
     location: { host: 'harborlight.test', protocol: 'http:' },
     storage: () => ({
-      getItem: (k: string) => (k === 'feedback-user-name' ? 'Riverbend Reviewer' : null),
+      getItem: (k: string) => (k === 'feedback-user-name' ? 'Sample Reader' : null),
     }),
     fetch: hostFetch as unknown as HostEnv['fetch'],
     WebSocket: HostSocket as unknown as HostEnv['WebSocket'],
@@ -164,7 +164,7 @@ afterEach(() => {
 describe('the frame is made by the host', () => {
   it("loads the server's frame address, named with the reader's stored name, which the frame then reads", () => {
     expect(h.frame?.getAttribute('src')).toBe('?v=2&cw-frame=1');
-    expect(h.w.localStorage.getItem('feedback-user-name')).toBe('Riverbend Reviewer');
+    expect(h.w.localStorage.getItem('feedback-user-name')).toBe('Sample Reader');
     expect(h.w.name).toBe('');
     h.w.localStorage.setItem('cfw:showResolved', '1');
     expect([h.w.localStorage.length, h.w.localStorage.key(1)]).toEqual([2, 'cfw:showResolved']);

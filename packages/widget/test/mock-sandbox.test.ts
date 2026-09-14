@@ -70,6 +70,6 @@ describe.skipIf(CHROME === null)("a served mock's script, writing to another doc
   });
 
   it("hands the frame the reader's stored name, so a known reader is not asked again", () => {
-    expect(reading.report.name).toBe('Riverbend Reviewer');
+    expect(reading.report.name).toBe('Sample Reader');
   });
 });
