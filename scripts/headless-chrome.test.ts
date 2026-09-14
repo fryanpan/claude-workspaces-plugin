@@ -126,8 +126,6 @@ describe('launchChrome', () => {
     async (_, how, err) => {
       const chrome = fakeChrome(how);
       const runId = `noregister${process.pid}${'exitCode' in how ? 'x' : 's'}`;
-      for (const name of profilesOfRun(readdirSync(tmpdir()), runId))
-        dirs.push(join(tmpdir(), name));
       await expect(launchChrome(chrome.bin, args, PER_LAUNCH_MS, runId)).rejects.toThrow(err);
       // Registered for afterEach before asserting, so a failure here leaks nothing.
       const left = profilesOfRun(readdirSync(tmpdir()), runId);
