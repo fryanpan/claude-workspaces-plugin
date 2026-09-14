@@ -216,6 +216,50 @@ describe('a note the section already carries', () => {
     expect(res.edits).toEqual([]);
     expect(res.alreadyWritten).toBe(1);
   });
+
+  it('said again by a later recording continuing the section, is that meeting’s own note', () => {
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(
+      prose.getProseFragment(doc),
+      '## Meeting notes\n\n- Pontoon lights are out at Saltmarsh\n',
+    );
+    prose.ensureBlockIds(doc);
+    const outline = prose.readOutline(doc);
+    const heading = outline.find((e) => e.text === 'Meeting notes')?.id;
+    const earlier = outline.find((e) => e.kind === 'listItem')?.id as string;
+    const edits = [
+      { op: 'insert_at_end' as const, markdown: '- Pontoon lights are out at Saltmarsh' },
+    ];
+    const ctx = { notesHeadingId: heading, outline, speech: ['lights'], authorId: NOTES_AUTHOR_ID };
+    expect(dedupeNotesEdits(edits, { ...ctx, prior: new Set([earlier]) }).edits).toEqual(edits);
+    // CONTROL: the same note written earlier by THIS meeting is a repeat.
+    expect(dedupeNotesEdits(edits, ctx).alreadyWritten).toBe(1);
+  });
+});
+
+describe('a fenced code block inside a note', () => {
+  it('is carried whole: a heading-like or bullet-like line in it is neither', () => {
+    const doc = new Y.Doc();
+    prose.applyMarkdownToFragment(
+      prose.getProseFragment(doc),
+      '## Meeting notes\n\n### Crew rota\n\n- Rota changes every Monday\n',
+    );
+    prose.ensureBlockIds(doc);
+    const outline = prose.readOutline(doc);
+    const heading = outline.find((e) => e.text === 'Meeting notes')?.id;
+    // A new topic opens, so the edit is rebuilt rather than passed through —
+    // the path that would split the fence at `### Crew rota`.
+    const markdown =
+      '### Slipway script\n\n- Winch check runs nightly\n\n```sh\n### Crew rota\n- Rota changes every Monday\n```';
+    const res = dedupeNotesEdits([{ op: 'insert_at_end', markdown }], {
+      notesHeadingId: heading,
+      outline,
+      speech: ['the winch check'],
+      authorId: NOTES_AUTHOR_ID,
+    });
+    expect(res.edits).toEqual([{ op: 'insert_at_end', markdown }]);
+    expect(res.alreadyWritten).toBe(0);
+  });
 });
 
 describe('a replace the guard turns into an add', () => {

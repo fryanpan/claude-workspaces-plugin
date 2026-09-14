@@ -702,6 +702,7 @@ export function applyNotesUpdate(
     speech: update.tick.turns.map((t) => t.text),
     authorId: NOTES_AUTHOR_ID,
     commented: () => commentedBlockIds(doc.ydoc),
+    prior: heading.priorIn({ docId: update.docId, meetingId: update.meetingId }),
   });
   for (const why of deduped.notes) noteGuardKept(update.docId, update.meetingId, why);
   // THE SECOND DETERMINISTIC REFUSAL ON THIS PATH, and it runs after the

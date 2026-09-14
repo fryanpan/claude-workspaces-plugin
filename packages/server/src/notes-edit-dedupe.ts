@@ -58,6 +58,13 @@ export interface NotesDedupeContext {
   authorId: string;
   /** Blocks somebody has commented on — never deleted by a move. */
   commented?: () => ReadonlySet<string>;
+  /**
+   * What the section already held when this meeting took it over — the last
+   * recording's minutes. A note there is not this meeting's to repeat: the
+   * same words said in two meetings are two notes. Topic headings there are
+   * still reused, because a note added under one changes nothing it holds.
+   */
+  prior?: ReadonlySet<string>;
 }
 
 export interface NotesDedupeResult {
@@ -143,9 +150,22 @@ interface Segment {
   lines: string[];
 }
 
+/** A fenced code block is carried as ONE line with its newlines inside: a
+ *  `# comment` in it is no heading and a `- item` in it is no note, and a
+ *  string starting with a fence matches neither pattern. */
 function segmentsOf(markdown: string): Segment[] {
   const out: Segment[] = [{ lines: [] }];
-  for (const line of markdown.split('\n')) {
+  const raw = markdown.split('\n');
+  for (let i = 0; i < raw.length; i++) {
+    const line = raw[i] ?? '';
+    const fence = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
+    if (fence !== undefined) {
+      let end = i + 1;
+      while (end < raw.length && !(raw[end] ?? '').trim().startsWith(fence)) end++;
+      (out[out.length - 1] as Segment).lines.push(raw.slice(i, end + 1).join('\n'));
+      i = end;
+      continue;
+    }
     const m = line.match(HEADING);
     if (m) out.push({ heading: { level: (m[1] ?? '#').length, text: m[2] ?? '' }, lines: [] });
     else (out[out.length - 1] as Segment).lines.push(line);
@@ -198,7 +218,9 @@ export function dedupeNotesEdits(
   /** The section's notes as they stand, with what a move needs to know. */
   const existing = outline
     .map((e, i) => ({ e, next: outline[i + 1] }))
-    .filter(({ e }) => e.kind === 'listItem' && section.blocks.has(e.id))
+    .filter(
+      ({ e }) => e.kind === 'listItem' && section.blocks.has(e.id) && ctx.prior?.has(e.id) !== true,
+    )
     .map(({ e, next }) => ({
       entry: e,
       leaf: !(next?.kind === 'listItem' && (next.depth ?? 0) > (e.depth ?? 0)),
