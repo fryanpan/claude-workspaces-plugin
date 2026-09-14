@@ -1132,6 +1132,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardsForDoc,
     backTargetFor,
     reviseCallFor: (address) => reviseCallFor(address),
+    releaseUnrevisedHold: (item) => releaseUnrevisedHold(item),
     ...(opts.readyNudgeIdleMs !== undefined ? { readyNudgeIdleMs: opts.readyNudgeIdleMs } : {}),
     ...(opts.stallNudgeQuietMs !== undefined ? { stallNudgeQuietMs: opts.stallNudgeQuietMs } : {}),
     ...(opts.checkInMs !== undefined ? { checkInMs: opts.checkInMs } : {}),
@@ -1144,6 +1145,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.stallEscalateMs !== undefined ? { stallEscalateMs: opts.stallEscalateMs } : {}),
     ...(spawnerAgentId !== undefined ? { spawnerAgentId } : {}),
     ...(opts.heldReviewItemMs !== undefined ? { heldReviewItemMs: opts.heldReviewItemMs } : {}),
+    ...(opts.heldReleaseMs !== undefined ? { heldReleaseMs: opts.heldReleaseMs } : {}),
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
       : {}),
@@ -1636,6 +1638,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     regateDecisionWords,
     heldFields,
     askBackOnItem,
+    releaseUnrevisedHold,
   } = createReviewGate({
     docStore,
     taskStore,

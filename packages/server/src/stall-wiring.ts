@@ -56,7 +56,7 @@ import {
   type ReadyWorkSnapshot,
   isBoardActivity,
 } from './ready-nudge.ts';
-import type { ReviewGateAddress } from './review-gate.ts';
+import { REVIEW_GATE_RELEASE_MS, type ReviewGateAddress } from './review-gate.ts';
 import { isReviewItemOnQueue, pendingQuestionOf } from './review-items/queries.ts';
 import type { SseBus } from './sse.ts';
 import { STALL_ESCALATION_ACTOR, StallEscalations } from './stall-escalation.ts';
@@ -172,6 +172,11 @@ export interface StallWiringContext {
    *  the one the filer was told to call. Same reason it is a function: the
    *  gate is built below this wiring. */
   reviseCallFor: (address: ReviewGateAddress) => string;
+  /** Put a hold nobody revised on the reader's queue as filed — the gate's
+   *  own write and announce, so a released item reaches the queue exactly as
+   *  a passed one does. A function for the same reason as `reviseCallFor`.
+   *  Returns whether it released the item. */
+  releaseUnrevisedHold: (item: HeldItemInput) => boolean;
 
   /** Idle time before the ready-work wake fires (ms). */
   readyNudgeIdleMs?: number;
@@ -187,6 +192,9 @@ export interface StallWiringContext {
   stallNudgeRepeatMs?: number;
   /** How long a held review item may stand before it is a finding (ms). */
   heldReviewItemMs?: number;
+  /** How long a hold may stand unrevised before the item goes to the reader
+   *  as filed (ms). Default `REVIEW_GATE_RELEASE_MS`, one hour. */
+  heldReleaseMs?: number;
   /** How long a board must be without any live session — no stream, no
    *  heartbeat, no agent write — before it files past its lead (ms). */
   stallEscalateMs?: number;
@@ -756,6 +764,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     });
   };
   const heldReviewItemMs = ctx.heldReviewItemMs ?? HELD_ITEM_DEFAULT_MS;
+  const heldReleaseMs = ctx.heldReleaseMs ?? REVIEW_GATE_RELEASE_MS;
   /**
    * Every COMMENT-borne review item the gate is holding on a board, in the
    * shape the stall monitor reads.
@@ -906,6 +915,12 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     //
     // BOTH surfaces, one list. A hold the lead never hears about is the same
     // silence whichever verb filed it.
+    //
+    // A hold that has stood unrevised past the release window is not a
+    // finding at all: it goes to the reader as filed, on this tick, and
+    // drops out of the list. This loop is where it happens because it is
+    // already the one walk over every hold on both surfaces, once a minute.
+    const now = Date.now();
     const held = overdueHeldItems(
       [
         // The ticket-borne holds, each carrying the call that ends it —
@@ -923,8 +938,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
           ),
         })),
         ...heldThreadReviewItems(workspace),
-      ],
-      Date.now(),
+      ].filter((item) => !(now - item.heldAt > heldReleaseMs && ctx.releaseUnrevisedHold(item))),
+      now,
       heldReviewItemMs,
     );
     // Items a person asked a question on and the filer has not revised: off
