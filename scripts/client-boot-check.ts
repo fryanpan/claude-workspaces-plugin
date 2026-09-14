@@ -75,7 +75,12 @@ import {
   type Transfer,
   describeTransport,
 } from './client-boot-transport.ts';
-import { YjsWatch, loadWidgetPage, widgetPageFailures } from './client-boot-widget.ts';
+import {
+  FrameSessions,
+  YjsWatch,
+  loadWidgetPage,
+  widgetPageFailures,
+} from './client-boot-widget.ts';
 import {
   type Browser,
   Cdp,
@@ -294,6 +299,7 @@ async function widgetPagesVerdict(
   o: Options,
 ): Promise<number> {
   const failures: string[] = [];
+  const frames = await FrameSessions.attach(cdp);
   const docDuplicates = watch.count(DOC_PAGE);
   if (docDuplicates > 0) {
     failures.push(`❌ ${DOC_PAGE}: Yjs was imported ${docDuplicates + 1} times.`);
@@ -302,7 +308,7 @@ async function widgetPagesVerdict(
     ['the board', `/workspaces/${seeded.boardId}/home`],
     ['a mockup', seeded.mockupPath],
   ] as const) {
-    const r = await loadWidgetPage(cdp, watch, name, `${base}${path}`, o);
+    const r = await loadWidgetPage(cdp, watch, frames, name, `${base}${path}`, o);
     const lines = widgetPageFailures(r);
     if (lines.length === 0) {
       console.log(`✅ ${name}: one copy of Yjs, and the comment widget's socket opened.`);

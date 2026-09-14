@@ -23,6 +23,7 @@
  */
 import { createHostMic } from './mock-host-mic.ts';
 import { type RelayScope, relayHeaders, relayTarget } from './mock-relay-policy.ts';
+import type { PcmCaptureOpts, PcmCaptureStart } from './voice/voice-audio.ts';
 import { micRefusal, startPcmCapture } from './voice/voice-audio.ts';
 
 /** The keys the frame's widget reads its identity from (`core/src/identity.ts`). */
@@ -35,9 +36,22 @@ const SEEDED_KEYS = [
 
 const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffer;
 
-(() => {
-  const script = document.currentScript as HTMLScriptElement | null;
-  const placeholder = document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]');
+/** What the host reaches for on the page: the window's own, handed in so a test can stand in. */
+export interface HostEnv {
+  script: HTMLScriptElement | null;
+  placeholder: HTMLIFrameElement | null;
+  location: { host: string; protocol: string };
+  storage: () => Pick<Storage, 'getItem'>;
+  fetch: typeof fetch;
+  WebSocket: new (url: string) => WebSocket;
+  EventSource: new (url: string) => EventSource;
+  onMessage: (fn: (ev: MessageEvent) => void) => void;
+  activated: () => boolean;
+  startCapture: (opts: PcmCaptureOpts) => Promise<PcmCaptureStart>;
+}
+
+export function hostMock(env: HostEnv): void {
+  const { script, placeholder, location } = env;
   if (!script || !placeholder) return;
   let items: [string, string][] = [];
   try {
@@ -53,7 +67,7 @@ const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffe
   const seed: Record<string, string> = {};
   for (const k of SEEDED_KEYS) {
     try {
-      const v = localStorage.getItem(k);
+      const v = env.storage().getItem(k);
       if (v !== null) seed[k] = v;
     } catch {}
   }
@@ -67,7 +81,7 @@ const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffe
 
   const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 
-  window.addEventListener('message', (ev) => {
+  env.onMessage((ev) => {
     if (ev.source !== frame.contentWindow) return;
     const m = ev.data as {
       cw?: string;
@@ -91,12 +105,13 @@ const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffe
         });
         return;
       }
-      fetch(u.pathname + u.search, {
-        method,
-        headers: relayHeaders(Array.isArray(m.headers) ? m.headers : []),
-        body: method === 'GET' || method === 'HEAD' ? undefined : (m.body ?? undefined),
-        credentials: 'same-origin',
-      })
+      env
+        .fetch(u.pathname + u.search, {
+          method,
+          headers: relayHeaders(Array.isArray(m.headers) ? m.headers : []),
+          body: method === 'GET' || method === 'HEAD' ? undefined : (m.body ?? undefined),
+          credentials: 'same-origin',
+        })
         .then(async (r) => {
           const body = await r.arrayBuffer();
           port.postMessage({ status: r.status, headers: [...r.headers], body }, [body]);
@@ -111,15 +126,15 @@ const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffe
         port.postMessage({ t: 'close', code: 1008, reason: 'mock_relay_refused' });
         return;
       }
-      const sock = new WebSocket(`${wsBase}${u.pathname}${u.search}`);
+      const sock = new env.WebSocket(`${wsBase}${u.pathname}${u.search}`);
       sock.binaryType = 'arraybuffer';
       // Only the voice socket carries a microphone (`mock-host-mic.ts`).
       const mic = u.pathname.endsWith('/voice')
         ? createHostMic({
             send: (pcm) => sock.readyState === 1 && sock.send(pcm),
             reply: (msg) => port.postMessage(msg),
-            startCapture: startPcmCapture,
-            activated: () => navigator.userActivation?.isActive ?? true,
+            startCapture: env.startCapture,
+            activated: env.activated,
             refusal: micRefusal({ name: 'NotAllowedError' }),
           })
         : null;
@@ -157,7 +172,7 @@ const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffe
         port.postMessage({ t: 'error' });
         return;
       }
-      const es = new EventSource(u.pathname + u.search);
+      const es = new env.EventSource(u.pathname + u.search);
       const forward = (x: MessageEvent) =>
         port.postMessage({ t: 'ev', type: x.type, data: x.data, lastEventId: x.lastEventId });
       const heard = new Set<string>();
@@ -176,4 +191,17 @@ const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffe
       };
     }
   });
-})();
+}
+
+hostMock({
+  script: document.currentScript as HTMLScriptElement | null,
+  placeholder: document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]'),
+  location: window.location,
+  storage: () => window.localStorage,
+  fetch: (input, init) => window.fetch(input, init),
+  WebSocket: window.WebSocket,
+  EventSource: window.EventSource,
+  onMessage: (fn) => window.addEventListener('message', fn),
+  activated: () => navigator.userActivation?.isActive ?? true,
+  startCapture: startPcmCapture,
+});

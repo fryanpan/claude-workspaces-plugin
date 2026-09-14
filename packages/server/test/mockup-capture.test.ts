@@ -95,12 +95,14 @@ describe('mockup durability', () => {
       // at round two — that is what the serve below represents.
       writeFileSync(src, '<!doctype html><html><body><h1>Round two</h1></body></html>');
       expect(
-        await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated?cw-frame=1`).then((r) => r.text()),
+        await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated?cw-frame=1`).then((r) =>
+          r.text(),
+        ),
       ).toContain('Round two');
 
       rmSync(src);
-      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated?cw-frame=1`).then((r) =>
-        r.text(),
+      const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-iterated?cw-frame=1`).then(
+        (r) => r.text(),
       );
       expect(after).toContain('Round two');
       // A capture frozen at bind time would serve this, silently, to somebody
@@ -294,7 +296,9 @@ describe('mockup durability', () => {
       const failed = await bind({ docId: 'mock-no-residue', type: 'mockup', sourceUrl: missing });
       expect(failed.status).toBe(400);
       // The name is not taken, and no URL was minted that would 404 later.
-      expect((await fetch(`${base}/workspaces/${WS}/mockups/mock-no-residue?cw-frame=1`)).status).toBe(404);
+      expect(
+        (await fetch(`${base}/workspaces/${WS}/mockups/mock-no-residue?cw-frame=1`)).status,
+      ).toBe(404);
       const listed = (await fetch(`${base}/workspaces/${WS}/docs`).then((r) => r.json())) as {
         docs?: { docId: string; title?: string }[];
       };

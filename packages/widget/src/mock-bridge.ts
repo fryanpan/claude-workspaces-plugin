@@ -24,10 +24,12 @@
  *   the host page instead.
  *
  * Plain script, no imports: it is written into the frame's own bytes, and runs
- * before anything the mock declares.
+ * before anything the mock declares. The work is `installBridge`, handed the
+ * frame's window so a test can hand it a stand-in.
  */
 
-(() => {
+export function installBridge(window: Window & typeof globalThis): void {
+  const { location, document, EventTarget } = window;
   const here = new URL(location.href);
   if (window.parent === window) {
     if (here.searchParams.get('cw-frame') === '1') {
@@ -278,4 +280,6 @@
     },
     true,
   );
-})();
+}
+
+installBridge(window);

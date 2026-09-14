@@ -55,8 +55,8 @@ describe('bind_mock rebind (POST /workspaces/<ws>/docs on an existing mockup doc
     // `mock-rebind-1` is the NAME; the server minted the id it lives at, and
     // the mockup URL below still addresses it by that name.
     const mintedId = created.meta.docId;
-    const servedFirst = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`).then((r) =>
-      r.text(),
+    const servedFirst = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`).then(
+      (r) => r.text(),
     );
     expect(servedFirst).toContain('First mock body');
 

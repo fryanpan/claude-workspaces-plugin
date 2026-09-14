@@ -130,7 +130,9 @@ describe('server REST', () => {
 
     // The `.html` twin is GONE with the cutover: `/mockup/<id>.html` was a
     // second spelling of one resource, and one resource has one address.
-    const servedSuffixed = await fetch(`${base}/workspaces/${WS}/mockups/mock-served-1.html?cw-frame=1`);
+    const servedSuffixed = await fetch(
+      `${base}/workspaces/${WS}/mockups/mock-served-1.html?cw-frame=1`,
+    );
     expect(servedSuffixed.status).toBe(404);
 
     // Unbound docId → 404.

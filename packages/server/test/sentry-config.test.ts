@@ -176,7 +176,9 @@ describe('the served shells carry the Sentry DSN and page type only when configu
     const host = await (await fetch(`${baseA}/workspaces/${wsA}/mockups/a-mock`)).text();
     expect(host).toContain('<meta name="sentry-page-type" content="mockup" />');
     expect(host).toContain('data-cw-mock-frame');
-    const frame = await (await fetch(`${baseA}/workspaces/${wsA}/mockups/a-mock?cw-frame=1`)).text();
+    const frame = await (
+      await fetch(`${baseA}/workspaces/${wsA}/mockups/a-mock?cw-frame=1`)
+    ).text();
     expect(frame).toContain('hi');
     expect(frame).toContain('claude-feedback-widget');
   });
