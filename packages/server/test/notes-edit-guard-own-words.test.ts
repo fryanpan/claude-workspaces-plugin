@@ -139,4 +139,11 @@ describe('a replace the speaker said as a correction', () => {
     ]);
     expect(after).toContain(HOURS);
   });
+
+  test('keeps both when the replace shares one word of the note and the speech takes that back', () => {
+    const after = replace(meeting(), HOURS, '- Hull crew goes home early instead', [
+      'The hull crew goes home early instead.',
+    ]);
+    expect(after).toContain(HOURS);
+  });
 });
