@@ -3,6 +3,7 @@ import type {
   ReviewItemRange,
   ReviewPayload,
   TaskReviewItem,
+  WriteVia,
 } from '@claude-workspaces/core';
 import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-estimate-prompt';
 import type {
@@ -1157,6 +1158,8 @@ export interface DecisionAnsweredEvent {
    * out. A bare option label is not a decision.
    */
   headline?: string;
+  /** Set when the answer was sent from inside a mock page — see `WriteVia`. */
+  via?: WriteVia;
   actor: TaskActor;
   /** The decision task's links — a ready-made propagation checklist. */
   links: Ref[];
@@ -2667,7 +2670,11 @@ export class TaskStore {
     taskId: string,
     reviewItemId: string,
     text: string,
-    opts: { actor: { id: string; name: string; kind?: string }; answeredWith?: string },
+    opts: {
+      actor: { id: string; name: string; kind?: string };
+      answeredWith?: string;
+      via?: WriteVia;
+    },
   ): AnswerTaskReviewResult {
     return this.reviewItems.answerTaskReview(taskId, reviewItemId, text, opts);
   }

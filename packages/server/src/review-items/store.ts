@@ -17,6 +17,7 @@
 import {
   type ReviewItemRange,
   type TaskReviewItem,
+  type WriteVia,
   applyReviewRevision,
   checkReviewPayload,
   latestThreadedQuestion,
@@ -133,7 +134,11 @@ export class ReviewItemStore {
     taskId: string,
     reviewItemId: string,
     text: string,
-    opts: { actor: { id: string; name: string; kind?: string }; answeredWith?: string },
+    opts: {
+      actor: { id: string; name: string; kind?: string };
+      answeredWith?: string;
+      via?: WriteVia;
+    },
   ): AnswerTaskReviewResult {
     const task = this.p.getTask(taskId);
     if (!task) return { ok: false, error: 'not-found' };
@@ -180,6 +185,7 @@ export class ReviewItemStore {
       by: actor.name,
       ts,
       ...(opts.answeredWith !== undefined ? { answeredWith: opts.answeredWith } : {}),
+      ...(opts.via ? { via: opts.via } : {}),
     };
     task.updatedAt = ts;
     this.p.save(task.workspaceId);
@@ -191,6 +197,7 @@ export class ReviewItemStore {
       ...(opts.answeredWith !== undefined ? { optionId: opts.answeredWith } : {}),
       reviewItemId,
       headline: item.review.headline,
+      ...(opts.via ? { via: opts.via } : {}),
       actor,
       links: task.links,
       ts,

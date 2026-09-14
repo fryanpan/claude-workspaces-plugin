@@ -13986,11 +13986,14 @@ function createCallToolHandler(deps) {
 }
 
 // packages/mcp/src/decision-line.ts
+function fromMockNote(via) {
+  return via === "mock-frame" ? " (sent from inside the mock page)" : "";
+}
 function truncate2(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 function decisionAnsweredLine(p) {
-  const by = p.actor?.name ? ` by ${p.actor.name}` : "";
+  const by = `${p.actor?.name ? ` by ${p.actor.name}` : ""}${fromMockNote(p.via)}`;
   const asked = p.headline ? ` to "${truncate2(p.headline, 100)}"` : "";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? " — walk its links as the propagation checklist" : "";
   return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${walk}`;
@@ -14100,7 +14103,7 @@ function reviewAnsweredLine(p) {
   const item = p.headline ? `your review item "${truncate3(p.headline, 100)}"` : "your review item";
   const subject = about ? `${item} on ${about}` : p.headline ? item : "a review item you raised";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? "; walk its links as the propagation checklist" : "";
-  return `[workspace.review_answered] ${subject} has an answer — read it and act on it now${walk}.`;
+  return `[workspace.review_answered] ${subject} has an answer${fromMockNote(p.via)} — read it and act on it now${walk}.`;
 }
 var STALL_ROWS_SHOWN = 5;
 function stalledRowClause(row) {
@@ -14501,11 +14504,12 @@ async function emitChannelMessage(deps, event, rawPayload) {
   const statusChange = event === "thread.resolved" || event === "thread.reopened";
   const author = statusChange ? p.actor?.name ?? "" : p.comment?.author?.name ?? p.thread?.comments?.[0]?.author?.name ?? "";
   const text = statusChange ? "" : p.comment?.text ?? p.thread?.comments?.at(-1)?.text ?? "";
+  const fromMock = fromMockNote(statusChange ? p.via : (p.comment ?? p.thread?.comments?.at(-1))?.via);
   const sentAt = new Date(p.comment?.ts ?? nowMs(deps)).toISOString();
   const action = event.startsWith("thread.") ? event.slice("thread.".length) : event;
   const header = snippet ? `on "${truncate5(snippet, 60)}"` : "";
   const onItem = reviewItemId ? ` on review item ${reviewItemId}${snippet ? ` "${truncate5(snippet, 60)}"` : ""} —` : "";
-  const body = text ? `[${action}]${onItem} ${author ? `${author}: ` : ""}${text}` : `[${action}]${onItem}${author ? ` by ${author} —` : ""} thread ${threadId} ${header}`.trim();
+  const body = text ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ""}${text}` : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
   await deps.notify({
     method: "notifications/claude/channel",
     params: {
@@ -19795,7 +19799,7 @@ var STATUS_TEXT_MAX = 4000;
 function suggestionAuthor() {
   return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
 }
-var PLUGIN_VERSION = "0.1.229";
+var PLUGIN_VERSION = "0.1.230";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

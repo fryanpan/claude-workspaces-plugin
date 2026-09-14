@@ -30,6 +30,7 @@ import {
   type Thread,
   type User,
   type WebhookPayload,
+  type WriteVia,
   attachmentIdOf,
   contentKind,
   prose,
@@ -436,7 +437,7 @@ export class LiveDocFanout {
     event: 'thread.created' | 'thread.replied' | 'thread.resolved' | 'thread.reopened',
     thread: Thread,
     comment?: { id: string; author: User; text: string; ts: number },
-    opts?: { generate?: boolean },
+    opts?: { generate?: boolean; via?: WriteVia },
     // Who performed a resolve/reopen. The comment param can't carry it —
     // there is no comment on a status change, and a frame without an actor
     // sent channel renderers to comments[0].author, i.e. the CREATOR.
@@ -457,6 +458,9 @@ export class LiveDocFanout {
       doc: decorate(doc.meta),
       comment,
       ...(actor ? { actor } : {}),
+      // A status change relayed from inside a mock page. A comment event's mark
+      // rides on the comment itself.
+      ...(actor && opts?.via ? { via: opts.via } : {}),
       // A comment ON a review item names the item at the top level, so the
       // owner's channel line can say which item to revise without walking
       // the thread's anchor.

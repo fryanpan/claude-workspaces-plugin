@@ -351,6 +351,8 @@ export interface ReviewItemAnswer {
   /** WHICH option the words came from, when one was tapped. Provenance, never
    *  the answer itself, which is why a typed answer carries none. */
   answeredWith?: string;
+  /** Set when the answer was sent from inside a mock page — see `WriteVia`. */
+  via?: 'mock-frame';
 }
 
 export interface TaskReviewItem {

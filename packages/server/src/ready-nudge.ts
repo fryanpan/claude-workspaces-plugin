@@ -262,6 +262,8 @@ export interface NudgeFrame {
   links?: readonly unknown[];
   /** What was asked — the answered item's headline. Answer nudges only. */
   headline?: string;
+  /** The answer was sent from inside a mock page. Answer nudges only. */
+  via?: 'mock-frame';
   ts: number;
 }
 
@@ -470,6 +472,8 @@ export class ReadyWorkNudger {
     taskLinks?: readonly unknown[];
     /** The answered item's headline, off the event — what was asked. */
     headline?: string;
+    /** Sent from inside a mock page — see `WriteVia` in core. */
+    via?: 'mock-frame';
     actorId?: string;
   }): void {
     const ts = this.now();
@@ -497,6 +501,7 @@ export class ReadyWorkNudger {
       ...(input.taskTitle !== undefined ? { title: input.taskTitle } : {}),
       ...(input.taskLinks !== undefined ? { links: input.taskLinks } : {}),
       ...(input.headline !== undefined ? { headline: input.headline } : {}),
+      ...(input.via !== undefined ? { via: input.via } : {}),
       ts,
     });
   }

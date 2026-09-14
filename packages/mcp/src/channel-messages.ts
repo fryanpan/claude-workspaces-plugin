@@ -13,7 +13,7 @@
  * `workspace.`, `agent.`, `voice.`) go to `emitBoardChannelMessage`; everything
  * else keeps the doc-shaped path.
  */
-import { decisionAnsweredLine } from './decision-line.ts';
+import { decisionAnsweredLine, fromMockNote } from './decision-line.ts';
 import {
   type HeldRowPayload,
   type StalledRowPayload,
@@ -84,9 +84,12 @@ export interface ChannelPayload {
       original?: { snippet?: { text?: string } };
     };
     status?: string;
-    comments?: Array<{ author?: { name?: string }; text?: string; ts?: number }>;
+    comments?: Array<{ author?: { name?: string }; text?: string; ts?: number; via?: string }>;
   };
-  comment?: { author?: { name?: string }; text?: string; ts?: number };
+  comment?: { author?: { name?: string }; text?: string; ts?: number; via?: string };
+  /** A resolve/reopen relayed from inside a mock page. A comment event's mark
+   *  is on the comment. */
+  via?: string;
   /** Who performed a resolve/reopen — the frame's own attribution, present
    *  on servers that stamp it. Comment events carry `comment.author`. */
   actor?: { name?: string };
@@ -444,6 +447,11 @@ async function emitChannelMessage(
     ? (p.actor?.name ?? '')
     : (p.comment?.author?.name ?? p.thread?.comments?.[0]?.author?.name ?? '');
   const text = statusChange ? '' : (p.comment?.text ?? p.thread?.comments?.at(-1)?.text ?? '');
+  // Sent from inside a served mock: the mock's own script could have written
+  // it, so the line says so rather than presenting it as the reader's words.
+  const fromMock = fromMockNote(
+    statusChange ? p.via : (p.comment ?? p.thread?.comments?.at(-1))?.via,
+  );
   const sentAt = new Date(p.comment?.ts ?? nowMs(deps)).toISOString();
 
   // Human-readable body — what the agent reads in their context.
@@ -453,8 +461,8 @@ async function emitChannelMessage(
     ? ` on review item ${reviewItemId}${snippet ? ` "${truncate(snippet, 60)}"` : ''} —`
     : '';
   const body = text
-    ? `[${action}]${onItem} ${author ? `${author}: ` : ''}${text}`
-    : `[${action}]${onItem}${author ? ` by ${author} —` : ''} thread ${threadId} ${header}`.trim();
+    ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ''}${text}`
+    : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
 
   await deps.notify({
     method: 'notifications/claude/channel',

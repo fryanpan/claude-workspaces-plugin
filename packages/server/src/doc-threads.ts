@@ -6,6 +6,7 @@ import {
   type Thread,
   type User,
   type VoiceNote,
+  type WriteVia,
   applyReviewRevision,
   contentKind,
   createThread,
@@ -91,7 +92,7 @@ export interface DocThreadPersistence {
     event: 'thread.created' | 'thread.replied' | 'thread.resolved' | 'thread.reopened',
     thread: Thread,
     comment?: { id: string; author: User; text: string; ts: number },
-    opts?: { generate?: boolean },
+    opts?: { generate?: boolean; via?: WriteVia },
     actor?: User,
   ): void;
   recordActivity(
@@ -137,6 +138,8 @@ export class DocThreads {
       review?: ReviewPayload;
       /** A spoken comment's clip and raw words — see `VoiceNote`. */
       voice?: VoiceNote;
+      /** Sent from inside a mock page — see `WriteVia`. */
+      via?: WriteVia;
     },
   ): Promise<Thread | null> {
     const doc = this.p.doc(docId);
@@ -153,6 +156,7 @@ export class DocThreads {
           text,
           ...(opts?.review ? { review: opts.review } : {}),
           ...(opts?.voice ? { voice: opts.voice } : {}),
+          ...(opts?.via ? { via: opts.via } : {}),
         },
       });
       this.p.fireThreadEvent(doc, 'thread.created', t, undefined, opts);
@@ -171,6 +175,7 @@ export class DocThreads {
       author,
       text,
       ...(opts?.review ? { review: opts.review } : {}),
+      ...(opts?.via ? { via: opts.via } : {}),
     });
     if (!comment) return null;
     // A PERSON replying to a resolved thread is continuing the conversation,
@@ -186,7 +191,7 @@ export class DocThreads {
     const replied = this.getThread(docId, threadId);
     const reopened =
       replied?.status === 'resolved' && classifyActor(author) === 'person'
-        ? schemaSetStatus(doc.ydoc, threadId, 'open')
+        ? schemaSetStatus(doc.ydoc, threadId, 'open', opts?.via)
         : null;
     const thread = reopened ?? replied;
     if (thread) this.p.fireThreadEvent(doc, 'thread.replied', thread, comment, opts);
@@ -247,7 +252,7 @@ export class DocThreads {
     author: User,
     text: string,
     optionId?: string,
-    opts?: { generate?: boolean; onlyIfUnanswered?: boolean },
+    opts?: { generate?: boolean; onlyIfUnanswered?: boolean; via?: WriteVia },
   ): Promise<{ ok: true; thread: Thread } | { ok: false; error: string }> {
     const doc = this.p.doc(docId);
     if (!doc) return { ok: false, error: 'no-doc' };
@@ -752,11 +757,11 @@ export class DocThreads {
     docId: string,
     threadId: string,
     author?: User,
-    opts?: { generate?: boolean },
+    opts?: { generate?: boolean; via?: WriteVia },
   ): Thread | null {
     const doc = this.p.doc(docId);
     if (!doc) return null;
-    const t = schemaSetStatus(doc.ydoc, threadId, 'resolved');
+    const t = schemaSetStatus(doc.ydoc, threadId, 'resolved', opts?.via);
     if (t) {
       // The frame names WHO resolved. Without it, 17 resolves in the field
       // were each attributed to the thread's creator by the channel
@@ -781,11 +786,11 @@ export class DocThreads {
     docId: string,
     threadId: string,
     author?: User,
-    opts?: { generate?: boolean },
+    opts?: { generate?: boolean; via?: WriteVia },
   ): Thread | null {
     const doc = this.p.doc(docId);
     if (!doc) return null;
-    const t = schemaSetStatus(doc.ydoc, threadId, 'open');
+    const t = schemaSetStatus(doc.ydoc, threadId, 'open', opts?.via);
     if (t) {
       // See resolve above — the reopen frame names who reopened.
       this.p.fireThreadEvent(

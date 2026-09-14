@@ -22,6 +22,7 @@ import {
   type User,
   type VoiceNote,
   type WebhookPayload,
+  type WriteVia,
   contentKind,
   initDocMeta,
   listThreads,
@@ -2520,6 +2521,8 @@ export class DocStore {
        * layer where the payload has to be accepted, not the routes above it.
        */
       review?: ReviewPayload;
+      /** Sent from inside a mock page — see `WriteVia`. */
+      via?: WriteVia;
     },
   ): Promise<Thread | null> {
     const thread = await this.docThreads.postComment(docId, threadId, author, text, anchor, opts);
@@ -2561,7 +2564,7 @@ export class DocStore {
     author: User,
     text: string,
     optionId?: string,
-    opts?: { generate?: boolean; onlyIfUnanswered?: boolean },
+    opts?: { generate?: boolean; onlyIfUnanswered?: boolean; via?: WriteVia },
   ): Promise<{ ok: true; thread: Thread } | { ok: false; error: string }> {
     const res = await this.docThreads.answerReviewItem(
       docId,
@@ -2678,7 +2681,7 @@ export class DocStore {
     docId: string,
     threadId: string,
     author?: User,
-    opts?: { generate?: boolean },
+    opts?: { generate?: boolean; via?: WriteVia },
   ): Thread | null {
     return this.docThreads.resolve(docId, threadId, author, opts);
   }
@@ -2687,7 +2690,7 @@ export class DocStore {
     docId: string,
     threadId: string,
     author?: User,
-    opts?: { generate?: boolean },
+    opts?: { generate?: boolean; via?: WriteVia },
   ): Thread | null {
     return this.docThreads.reopen(docId, threadId, author, opts);
   }

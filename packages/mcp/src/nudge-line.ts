@@ -19,6 +19,7 @@
  * same reason `voice-line.ts` is: the wording is a
  * decision, and inline in a 3,000-line switch it cannot be asserted.
  */
+import { fromMockNote } from './decision-line.ts';
 
 /**
  * The board's parallelism cap as a wake carries it: the number and, once
@@ -75,6 +76,8 @@ export interface NudgePayload {
   /** What was asked — the answered item's headline. Answer frames only, and
    *  absent from a server older than the field. */
   headline?: string;
+  /** The answer was sent from inside a mock page. Answer frames only. */
+  via?: string;
   /** How many rows were ready when the wake fired. Idle nudges only. */
   readyCount?: number;
   /**
@@ -461,7 +464,7 @@ export function reviewAnsweredLine(p: NudgePayload): string {
     Array.isArray(p.links) && p.links.length > 0
       ? '; walk its links as the propagation checklist'
       : '';
-  return `[workspace.review_answered] ${subject} has an answer — read it and act on it now${walk}.`;
+  return `[workspace.review_answered] ${subject} has an answer${fromMockNote(p.via)} — read it and act on it now${walk}.`;
 }
 
 /** How many rows the line names before it starts counting instead. Five is
