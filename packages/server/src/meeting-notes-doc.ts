@@ -686,7 +686,11 @@ export function applyNotesUpdate(
     full,
     docStore,
   );
-  const guarded = guardNotesEdits(update.edits, { notesHeadingId, outline: full });
+  const guarded = guardNotesEdits(update.edits, {
+    notesHeadingId,
+    outline: full,
+    speech: update.tick.turns.map((t) => t.text),
+  });
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);
   }
