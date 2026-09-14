@@ -97,8 +97,16 @@ function requireSignIn(el: FeedbackWidgetEl): void {
 
 export function loadStoredAuth(el: FeedbackWidgetEl): void {
   try {
-    el.authToken = localStorage.getItem(AUTH_TOKEN_KEY);
-    const raw = localStorage.getItem(AUTH_USER_KEY);
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    // A board token (`wt2`) names one board, base64url, in its fifth segment.
+    // One a page of this origin minted for ANOTHER board is refused on every
+    // call this widget makes, so it is not this widget's to hold.
+    const board = btoa(el.opts.workspaceId)
+      .replace(/=+$/, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
+    el.authToken = token?.startsWith('wt2.') && token.split('.')[4] !== board ? null : token;
+    const raw = el.authToken && localStorage.getItem(AUTH_USER_KEY);
     el.authUser = raw ? (JSON.parse(raw) as User) : null;
   } catch {
     el.authToken = null;

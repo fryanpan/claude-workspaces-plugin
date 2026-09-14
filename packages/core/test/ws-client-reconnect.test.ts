@@ -46,11 +46,11 @@ afterEach(() => {
 
 describe('connect().reconnect()', () => {
   it('opens one socket at once after a refusal, with the protocol as it is now', () => {
-    let token: string | undefined;
-    const client = connect('ws://localhost:0/y/test', () => token);
+    const auth: { token?: string } = {};
+    const client = connect('ws://localhost:0/y/test', () => auth.token);
     opened[0]?.fire('close');
     expect(client.status).toBe('closed');
-    token = 'wt2.token';
+    auth.token = 'wt2.token';
     client.reconnect();
     expect(opened).toHaveLength(2);
     expect(opened[1]?.protocol).toBe('wt2.token');

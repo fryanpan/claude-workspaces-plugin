@@ -36,7 +36,7 @@ let sockets: FakeSocket[];
 let socketMode: 'answer' | 'drive';
 
 interface FakeSocket {
-  protocols: string | string[] | undefined;
+  protocols?: string | string[];
   fire(type: string, data?: ArrayBuffer): void;
 }
 
@@ -319,12 +319,51 @@ describe('a page on the tailnet widget door', () => {
     expect(authHeaderOf(retry)).toBe('Bearer wt2.real-token');
   });
 
+  /** A board token's shape: its fifth segment is the board, base64url. */
+  const boardToken = (board: string) =>
+    `wt2.user-abc.1.2.${btoa(board).replace(/=+$/, '')}.${btoa(location.origin).replace(/=+$/, '')}.sig`;
+
   it('offers the held token as the socket subprotocol', async () => {
-    localStorage.setItem('cfw:authToken', 'wt2.stored-token');
+    localStorage.setItem('cfw:authToken', boardToken('w-1'));
     localStorage.setItem('cfw:authUser', JSON.stringify(user));
     const mod = await importWidget();
     mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-door-socket', authOffer: true });
-    expect(socketProtocols).toEqual(['wt2.stored-token']);
+    expect(socketProtocols).toEqual([boardToken('w-1')]);
+  });
+
+  it('never offers a session token on the socket, so a localhost embed opens as it did', async () => {
+    localStorage.setItem('cfw:authToken', 'wt1.stored-token');
+    localStorage.setItem('cfw:authUser', JSON.stringify(user));
+    const mod = await importWidget();
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-local', authOffer: true });
+    expect(
+      el.shadowRoot!.querySelector('.auth-signout'),
+      'CONTROL: the token is held',
+    ).toBeTruthy();
+    expect(socketProtocols).toEqual([undefined]);
+  });
+
+  it("does not hold another board's token that a page on this origin stored", async () => {
+    localStorage.setItem('cfw:authToken', boardToken('w-saltmarsh'));
+    localStorage.setItem('cfw:authUser', JSON.stringify(user));
+    const mod = await importWidget();
+    // The door's refusal is what makes the widget adopt a stored token, and a
+    // live-looking probe answer is what would keep it.
+    fetchResponder = (url) =>
+      url.includes('/api/auth/session')
+        ? doorRefusal()
+        : new Response(JSON.stringify({ authenticated: true, user }), {
+            headers: { 'content-type': 'application/json' },
+          });
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-riverbend', docId: 'doc-door-other' });
+    await flush();
+    expect(
+      fetchCalls.some((c) => c.url.includes('/api/auth/session')),
+      'CONTROL: asked',
+    ).toBe(true);
+    expect(fetchCalls.some((c) => authHeaderOf(c))).toBe(false);
+    expect(el.shadowRoot!.querySelector('.auth-signin')).toBeTruthy();
+    expect(el.shadowRoot!.querySelector('.me')?.textContent).not.toContain('Reviewer');
   });
 });
 
