@@ -220,6 +220,8 @@ export interface AuthShareRouteRequest {
    *  then the session cookie. The same resolution the write gate uses, so
    *  the me-menu and the gate cannot disagree about who is signed in. */
   provenIdentityFor: () => IdentityRecord | null;
+  /** The identity Cloudflare Access proved, never a session cookie's. */
+  accessIdentityFor: () => IdentityRecord | null;
 }
 
 /**
@@ -258,7 +260,14 @@ export async function handleAuthShareRoutes(
     policyFor,
     sessionIdentityFor,
   } = ctx;
-  const { req, pathname, widgetIdentity, browserProvedNobody, provenIdentityFor } = rq;
+  const {
+    req,
+    pathname,
+    widgetIdentity,
+    browserProvedNobody,
+    provenIdentityFor,
+    accessIdentityFor,
+  } = rq;
 
   // --- The widget popup-token handshake ---
   // The popup page itself. The handshake is popup-only: framed, it
@@ -286,12 +295,14 @@ export async function handleAuthShareRoutes(
     const body = await safeJson(req);
     const target = typeof body?.origin === 'string' ? body.origin : '';
     // A page on the tailnet widget door gets a BOARD token instead: one board,
-    // 24 hours, and no session behind it — so the person may have proven
-    // themselves through Cloudflare Access alone, which is how the popup on
-    // the public host is reached at all. The allowlist is the door's own
-    // hostnames; the board must exist, because the token names it exactly.
+    // 24 hours, and no session behind it. Only Cloudflare Access may prove the
+    // person — it is how the popup on the public host is reached at all — and
+    // never a session cookie: a board token outlives a logout, so minting one
+    // from a cookie would undo the rule below that a token dies with its
+    // session. The allowlist is the door's own hostnames; the board must
+    // exist, because the token names it exactly.
     if (target !== '' && isWidgetDoorOrigin(target, widgetDoorHosts())) {
-      const person = provenIdentityFor();
+      const person = accessIdentityFor();
       if (!person) return j(401, { error: 'not_signed_in' });
       const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : '';
       if (workspaceId === '' || !taskStore.getWorkspace(workspaceId)) {

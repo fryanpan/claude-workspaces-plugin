@@ -159,9 +159,10 @@ export interface UpgradeStreamRequest {
    *  Passed rather than hoisted: it closes over the request being decided,
    *  and the widget-token identity it reads is resolved per request. */
   browserProvedNobody: () => boolean;
-  /** Whether admission let this request in through the tailnet widget door,
-   *  which opens the doc socket read-only. */
-  viaWidgetDoor: boolean;
+  /** The board token and origin admission let this request in through the
+   *  tailnet widget door with, or null. A door socket opens read-only and
+   *  carries the pair, so the sweep can hang up once the token is dead. */
+  widgetDoorGrant: { token: string; origin: string } | null;
 }
 
 /**
@@ -251,7 +252,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     visitorShareId,
     visitorMemberKey,
     browserProvedNobody,
-    viaWidgetDoor,
+    widgetDoorGrant,
   }: UpgradeStreamRequest): StreamOutcome => {
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and
@@ -442,8 +443,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // A door socket is read-only too, but NOT refused creation: its
         // token proved a person, and the widget's first socket on a new page
         // is how that page's doc comes to exist. What it never gets is a
-        // writable doc afterwards — see `viaWidgetDoor` on the admission.
-        const readOnly = !mayCreate || viaWidgetDoor;
+        // writable doc afterwards — see `widgetDoorGrant` on the admission.
+        const readOnly = !mayCreate || widgetDoorGrant !== null;
         if (!docStore.get(docId)) {
           if (type === 'mockup') {
             // Nothing to read yet, so refusing here gates no read: the doc
@@ -477,6 +478,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(visitorShareId ? { shareId: visitorShareId } : {}),
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),
             ...(readOnly ? { readOnly: true } : {}),
+            ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });

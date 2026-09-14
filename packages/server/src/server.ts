@@ -267,8 +267,9 @@ export interface ServerHandle {
    *  (dispatch-registry.ts). Exposed for the same reason `agentWatches` is. */
   dispatches: DispatchRegistry;
   shares: Shares | null;
-  /** Hang up every websocket and SSE stream whose share is no longer live.
-   *  Runs on a 60s interval; exposed so tests exercise the real sweep. */
+  /** Hang up every websocket and SSE stream whose share is no longer live,
+   *  and every widget door socket whose board token is dead. Runs on a 60s
+   *  interval; exposed so tests exercise the real sweep. */
   sweepDeadShares: () => void;
   /**
    * The startup pass that moves rows off the removed `parked` state onto
@@ -2366,7 +2367,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         visitor,
         visitorShareId,
         visitorMemberKey,
-        viaWidgetDoor,
+        widgetDoorGrant,
         metaFor,
         roleFor,
         requireOwner,
@@ -2393,6 +2394,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const {
         widgetIdentity,
         provenIdentityFor,
+        accessIdentityFor,
         authorFor,
         refuseCategoryAuthor,
         withTaskChips,
@@ -2431,6 +2433,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           widgetIdentity,
           browserProvedNobody,
           provenIdentityFor,
+          accessIdentityFor,
         });
         if (handled) return handled;
       }
@@ -2467,7 +2470,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         visitorShareId,
         visitorMemberKey,
         browserProvedNobody,
-        viaWidgetDoor,
+        widgetDoorGrant,
       });
       if (streamed) {
         if (streamed.kind === 'upgraded') return undefined;
@@ -3106,6 +3109,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Exactly what the interval does, named so tests drive the real thing
    *  rather than a re-implementation of it. */
   const sweepDeadShares = (): void => {
+    // A tailnet widget door socket is authorized once at its upgrade too, by
+    // a board token that expires and that the roster can revoke — and no
+    // share is needed for the door, so this half runs without one.
+    docStore.closeSocketsForDeadWidgetGrants(
+      (token, origin) => boardWidgetGrantFor(token, origin) !== null,
+    );
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
     docStore.closeSocketsForDeadShares(isLive);
@@ -3120,15 +3129,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore.closeSocketsForShareMembers(ended);
     sse.closeForShareMembers(ended);
   };
-  const shareSweep = shares
-    ? setInterval(() => {
-        try {
-          sweepDeadShares();
-        } catch {
-          // A sweep failure must never take the server down with it.
-        }
-      }, SHARE_SWEEP_MS)
-    : null;
+  const shareSweep =
+    shares || widgetDoorHosts().length > 0
+      ? setInterval(() => {
+          try {
+            sweepDeadShares();
+          } catch {
+            // A sweep failure must never take the server down with it.
+          }
+        }, SHARE_SWEEP_MS)
+      : null;
   // Never hold the process (or a test runner) open.
   shareSweep?.unref?.();
 

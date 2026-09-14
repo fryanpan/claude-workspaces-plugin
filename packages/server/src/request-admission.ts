@@ -279,12 +279,14 @@ export type Admission =
       /** The email Cloudflare Access verified for this request, if any. */
       accessEmail: string | null;
       /**
-       * True when this request came through the tailnet widget door. Read by
-       * the doc socket's upgrade, which opens a door socket READ-ONLY: the
-       * widget never writes the doc over it (its comments are REST posts),
-       * so a token lifted from a page's storage gets no editing socket.
+       * The board token and page origin a request came through the tailnet
+       * widget door with, or null for every other request. Read by the doc
+       * socket's upgrade, which opens a door socket READ-ONLY — the widget
+       * never writes the doc over it (its comments are REST posts), so a token
+       * lifted from a page's storage gets no editing socket — and stamps the
+       * pair on it, so the sweep can hang up once the token stops verifying.
        */
-      viaWidgetDoor: boolean;
+      widgetDoorGrant: { token: string; origin: string } | null;
       /** Doc metadata as this caller may see it. */
       metaFor: MetaForVisitor;
       /**
@@ -376,7 +378,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      */
     let accessEmail: string | null = null;
     /** Set by the widget-door branch below; see the admitted field. */
-    let viaWidgetDoor = false;
+    let widgetDoorGrant: { token: string; origin: string } | null = null;
 
     // --- Cloudflare Access gate ---
     // When cfAccess is configured (server is reachable via a public
@@ -672,8 +674,9 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // the same answer — the widget's cue to offer sign-in, and where —
         // because telling them apart would hand a caller a decision tree.
         const raw = widgetBearerOf(req);
-        const grant = raw ? boardWidgetGrantFor(raw, req.headers.get('origin')) : null;
-        if (!grant) return j(401, widgetDoorSignInBody(widgetSignInOrigin));
+        const origin = req.headers.get('origin');
+        const grant = raw && origin ? boardWidgetGrantFor(raw, origin) : null;
+        if (!grant || !raw || !origin) return j(401, widgetDoorSignInBody(widgetSignInOrigin));
         if (route.kind === 'doc') {
           // One board: exactly the one the token names. The workspace scope
           // middleware then refuses a doc that board does not hold.
@@ -689,7 +692,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
             return j(403, { error: 'out_of_widget_scope' });
           }
         }
-        viaWidgetDoor = true;
+        widgetDoorGrant = { token: raw, origin };
       } else if (decision.kind === 'proxied-local') {
         // The operator's own hostname through the tunnel: an Access
         // application in front of it, and the WHOLE product behind it.
@@ -792,7 +795,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       visitorShareId,
       visitorMemberKey,
       accessEmail,
-      viaWidgetDoor,
+      widgetDoorGrant,
       metaFor,
       roleFor,
       requireOwner,

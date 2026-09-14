@@ -432,6 +432,30 @@ export class LiveDocFanout {
     return Array.from(dead);
   }
 
+  /**
+   * Close every tailnet widget door socket whose board token no longer
+   * verifies — expired, its identity archived, or its watermark moved. The
+   * door checks the token once, at the upgrade, exactly as a share is checked;
+   * this is that problem's sweep for the one door no share admits. Only doc
+   * sockets carry the grant, so `conns` is the whole set.
+   */
+  closeSocketsForDeadWidgetGrants(isLive: (token: string, origin: string) => boolean): number {
+    let closed = 0;
+    for (const doc of this.host.residentDocs()) {
+      for (const ws of doc.conns) {
+        const grant = ws.data?.widgetDoorGrant;
+        if (!grant || isLive(grant.token, grant.origin)) continue;
+        try {
+          ws.close(1008, 'widget token ended');
+        } catch {
+          // Already gone — the close handler does the bookkeeping.
+        }
+        closed += 1;
+      }
+    }
+    return closed;
+  }
+
   fireEvent(
     doc: LiveDoc,
     event: 'thread.created' | 'thread.replied' | 'thread.resolved' | 'thread.reopened',
