@@ -20,7 +20,7 @@ import {
 } from '../src/review-items/done-when-owner.ts';
 
 const PERSON = { id: 'known-reader', name: 'Reader', kind: 'known' };
-const AGENT = { id: 'agent-otter', name: 'Otter', kind: 'agent' };
+const AGENT = { id: 'agent-kiln-bot', name: 'Kiln Bot', kind: 'agent' };
 
 function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in-progress') {
   const task = {
@@ -78,7 +78,7 @@ function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in-progress') 
 describe('syncOwnerItems', () => {
   it('files one item per owner line and nothing for the others, however often it runs', () => {
     const { task, deps, calls } = fixture([
-      { id: 'd-1', text: 'reads well', verdict: 'owner', by: 'Otter' },
+      { id: 'd-1', text: 'reads well', verdict: 'owner', by: 'Kiln Bot' },
       { id: 'd-2', text: 'tests pass', verdict: 'met' },
       { id: 'd-3', text: 'unchecked' },
     ]);
@@ -100,7 +100,7 @@ describe('syncOwnerItems', () => {
     });
     expect(calls.add).toBe(1);
     expect(task.reviews?.[0]?.doneWhenLineId).toBe('d-1');
-    expect(task.reviews?.[0]?.createdBy).toBe('Otter');
+    expect(task.reviews?.[0]?.createdBy).toBe('Kiln Bot');
   });
 
   it('hands the gate an open item that was never judged, though its words are unchanged', () => {
@@ -221,7 +221,7 @@ describe('ownerCheckReview', () => {
     const { detail } = ownerCheckReview(task, {
       id: 'd-1',
       text: 'On the phone the app page shows the comment button.',
-      by: 'Otter',
+      by: 'Kiln Bot',
       proof: [
         { text: 'ran the page suite' },
         { text: 'phone screenshot', url: 'https://example.com/phone.png' },
@@ -233,7 +233,7 @@ describe('ownerCheckReview', () => {
       ),
     ).toBe(true);
     expect(detail).toContain('Looks right marks this line of “A task” met');
-    expect(detail).toContain('Not met sends it back to Otter');
+    expect(detail).toContain('Not met sends it back to Kiln Bot');
     expect(detail).toContain('Also attached: ran the page suite.');
   });
 
@@ -246,7 +246,7 @@ describe('ownerCheckReview', () => {
 describe('who an owner item is filed as', () => {
   it('is the agent that marked the line, so a hold can reach it — never a person editing the words', () => {
     const lines: DoneWhenLine[] = [
-      { id: 'd-1', text: 'reads well', verdict: 'owner', by: 'Otter' },
+      { id: 'd-1', text: 'reads well', verdict: 'owner', by: 'Kiln Bot' },
     ];
     const byAgent = fixture(lines.map((l) => ({ ...l })));
     const seen: string[] = [];

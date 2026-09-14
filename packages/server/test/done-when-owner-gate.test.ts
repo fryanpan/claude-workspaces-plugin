@@ -307,7 +307,10 @@ describe('owner items the boot pass files or revises', () => {
 
   it('judge an open item that was never judged, though nothing about its line changed', async () => {
     await fresh();
-    const { taskId, lineId } = await lineTask('Reader can see both alarms', 'both alarms list');
+    const { taskId, lineId } = await lineTask(
+      'Both alarms show on the watch table',
+      'both alarms list',
+    );
     await report(taskId, lineId, 'owner', [{ text: 'table', url: SHOT }]);
     expect(await onQueue(taskId)).toHaveLength(1);
     // Back to an item filed before owner checks were gated, or one a crash
