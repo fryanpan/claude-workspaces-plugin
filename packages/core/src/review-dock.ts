@@ -237,9 +237,53 @@ export function dockSheetHtml(item: DockItem): string {
     </div>`;
 }
 
+const INLINE_LINK = /\[([^\]\n]+)\]\(([^()\s]+)\)/g;
+
 /**
- * Make an open sheet work: close on the scrim or ×, answer on an option or the
- * send button, and say so when the answer was refused.
+ * Where an inline link in an ask may go, or null for one the dock leaves as
+ * text: a same-origin path or query, or an http(s) URL. Anything carrying
+ * another scheme (`javascript:`, `data:`), a protocol-relative `//host`, or a
+ * control character a browser would strip before reading the scheme is none.
+ */
+export function dockLinkHref(url: string): string | null {
+  if ([...url].some((c) => c < ' ' || c === '\u007f')) return null;
+  if (/^https?:\/\/[^/]/i.test(url)) return url;
+  if (/^[/?#]/.test(url) && !url.startsWith('//')) return url;
+  return null;
+}
+
+/**
+ * Turn `[text](url)` in an element's text into links — text nodes and anchors,
+ * never markup, so nothing in an ask's words is parsed as HTML. A board link
+ * opens at the top level (the widget's page may be framed); an outside one in
+ * a new tab.
+ */
+function linkInto(el: Element): void {
+  const text = el.textContent ?? '';
+  const doc = el.ownerDocument;
+  const parts: Node[] = [];
+  let at = 0;
+  for (const m of text.matchAll(INLINE_LINK)) {
+    const href = dockLinkHref(m[2] ?? '');
+    if (!href) continue;
+    parts.push(doc.createTextNode(text.slice(at, m.index)));
+    const a = doc.createElement('a');
+    a.textContent = m[1] ?? '';
+    a.href = href;
+    a.target = href.startsWith('http') ? '_blank' : '_top';
+    if (a.target === '_blank') a.rel = 'noopener noreferrer';
+    parts.push(a);
+    at = (m.index ?? 0) + m[0].length;
+  }
+  if (!parts.length) return;
+  parts.push(doc.createTextNode(text.slice(at)));
+  el.replaceChildren(...parts);
+}
+
+/**
+ * Make an open sheet work: render the ask's inline links, close on the scrim
+ * or ×, answer on an option or the send button, and say so when the answer
+ * was refused.
  *
  * `send` makes the page's own request and says whether it landed; the sheet
  * closes and `onAnswered` runs only then, so a refused answer leaves the
@@ -249,6 +293,7 @@ export function wireDockSheet(
   scrim: HTMLElement,
   opts: { send: (text: string, optionId?: string) => Promise<boolean>; onAnswered: () => void },
 ): void {
+  for (const body of Array.from(scrim.querySelectorAll('.cw-round-body'))) linkInto(body);
   const close = (): void => scrim.remove();
   scrim.addEventListener('click', (ev) => {
     if (ev.target === scrim) close();

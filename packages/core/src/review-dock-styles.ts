@@ -113,6 +113,7 @@ export const dockStyles = `
 .cw-round-head { font-size: 11px; color: #6e7781; display: flex; gap: 8px; }
 .cw-round-headline { font-weight: 600; margin-top: 2px; }
 .cw-round-body { margin: 4px 0 0; white-space: pre-wrap; }
+.cw-round-body a { color: #0969da; text-decoration: underline; }
 .cw-rounds-earlier {
   border-left: 2px solid #eaeef2;
   padding-left: 10px;

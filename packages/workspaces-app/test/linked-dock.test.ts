@@ -121,6 +121,42 @@ describe('the doc dock', () => {
     expect(dockHeight()).toBe('');
   });
 
+  it("makes the ask's inline links tappable, and leaves any other scheme as text", async () => {
+    const detail =
+      'Compare the [tide notes](/workspaces/w-harbor/docs/d-tide) with the ' +
+      '[harbour table](https://example.org/tides), not [this](javascript:alert) ' +
+      'or [that](//example.net/x).';
+    mount({ meta: {}, linkedItems: [{ ...LINKED, review: { ...ASK, detail } }] });
+    await vi.waitFor(() => expect(bar()).not.toBeNull());
+    bar()?.click();
+    const body = shadow()?.querySelector<HTMLElement>('.cw-round-body');
+    const links = Array.from(body?.querySelectorAll('a') ?? []).map((a) => ({
+      text: a.textContent,
+      href: a.getAttribute('href'),
+      target: a.getAttribute('target'),
+      rel: a.getAttribute('rel'),
+    }));
+    expect(links).toEqual([
+      {
+        text: 'tide notes',
+        href: '/workspaces/w-harbor/docs/d-tide',
+        target: '_top',
+        rel: null,
+      },
+      {
+        text: 'harbour table',
+        href: 'https://example.org/tides',
+        target: '_blank',
+        rel: 'noopener noreferrer',
+      },
+    ]);
+    // The refused two read exactly as written, and the link words read as prose.
+    expect(body?.textContent).toBe(
+      'Compare the tide notes with the harbour table, not [this](javascript:alert) ' +
+        'or [that](//example.net/x).',
+    );
+  });
+
   it('keeps the bar and the sheet, and says so, when the server refuses the answer', async () => {
     const { posts } = mount({ meta: {}, linkedItems: [LINKED] }, { answerOk: false });
     await vi.waitFor(() => expect(bar()).not.toBeNull());
